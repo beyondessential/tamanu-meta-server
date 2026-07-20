@@ -230,3 +230,113 @@ async fn self_alert_issues_are_excluded_from_the_fleet_listing() {
 	})
 	.await
 }
+
+// --- Fleet-wide check-liveness self-alert (STALE_CHECKS_REF) ---
+
+async fn insert_server(conn: &mut diesel_async::AsyncPgConnection) -> uuid::Uuid {
+	#[derive(diesel::QueryableByName)]
+	struct RowId {
+		#[diesel(sql_type = diesel::sql_types::Uuid)]
+		id: uuid::Uuid,
+	}
+	let row: RowId =
+		diesel::sql_query("INSERT INTO servers (host) VALUES ('http://sc.invalid/') RETURNING id")
+			.get_result(conn)
+			.await
+			.expect("insert server");
+	row.id
+}
+
+/// File a check (registering its catalog row) and backdate its catalog
+/// `last_seen` to `hours_ago`, simulating a check that went quiet.
+async fn quiet_check(conn: &mut diesel_async::AsyncPgConnection, check: &str, hours_ago: i64) {
+	let server_id = insert_server(conn).await;
+	database::issues::file_check(
+		conn,
+		database::issues::CheckFiling {
+			source: "alertd",
+			scope: database::issues::FilingScope::Server {
+				server_id,
+				device_id: None,
+			},
+			check,
+			observed: CheckResult::Passed,
+			title: None,
+			message: "sc filing",
+			detail: None,
+			default_ceiling: CheckResult::Warning,
+			default_escalates: false,
+			documentation: None,
+		},
+	)
+	.await
+	.expect("file");
+	diesel::sql_query(format!(
+		"UPDATE check_policies SET last_seen = now() - interval '{hours_ago} hours' \
+		 WHERE source = 'alertd' AND check_name = $1"
+	))
+	.bind::<diesel::sql_types::Text, _>(check)
+	.execute(conn)
+	.await
+	.expect("backdate last_seen");
+}
+
+async fn stale_alert_active(conn: &mut diesel_async::AsyncPgConnection) -> bool {
+	self_alerts::current(conn, self_alerts::STALE_CHECKS_REF)
+		.await
+		.expect("current")
+		.map(|i| i.active)
+		.unwrap_or(false)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stale_check_raises_the_liveness_alert() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		quiet_check(&mut conn, "gone", 24 * 31).await;
+		self_alerts::sweep_stale_healthchecks(&mut conn)
+			.await
+			.expect("sweep");
+		assert!(
+			stale_alert_active(&mut conn).await,
+			"a check unreported for 31 days raises the liveness alert",
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn recently_seen_check_raises_nothing() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		quiet_check(&mut conn, "fresh", 24).await;
+		self_alerts::sweep_stale_healthchecks(&mut conn)
+			.await
+			.expect("sweep");
+		assert!(
+			!stale_alert_active(&mut conn).await,
+			"a check seen a day ago does not raise the liveness alert",
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn decommissioned_stale_check_is_ignored() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		quiet_check(&mut conn, "retired", 24 * 40).await;
+		diesel::sql_query(
+			"UPDATE check_policies SET decommissioned_at = now() \
+			 WHERE source = 'alertd' AND check_name = 'retired'",
+		)
+		.execute(&mut conn)
+		.await
+		.expect("decommission");
+		self_alerts::sweep_stale_healthchecks(&mut conn)
+			.await
+			.expect("sweep");
+		assert!(
+			!stale_alert_active(&mut conn).await,
+			"a decommissioned check never raises the liveness alert",
+		);
+	})
+	.await
+}

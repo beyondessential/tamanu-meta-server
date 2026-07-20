@@ -26,6 +26,13 @@ use serde_json::Value as JsonValue;
 use std::collections::{BTreeMap, HashMap};
 use uuid::Uuid;
 
+/// A catalogued check unreported anywhere in the fleet for this long is
+/// surfaced to operators as a candidate for decommissioning.
+pub const GONE_QUIET_HOURS: i64 = 24 * 7;
+/// A catalogued check unreported anywhere in the fleet for this long
+/// raises a canopy-wide warning.
+pub const STALE_ALERT_HOURS: i64 = 24 * 30;
+
 /// The policy for one (source, check). An entry is created automatically
 /// the first time a source reports a check with this name, at the default
 /// ceiling; operators then review and adjust how that check's results are
@@ -143,6 +150,23 @@ impl CheckPolicy {
 		.await?;
 
 		Ok(reanimated)
+	}
+
+	/// Live (not decommissioned) catalogued checks whose most recent
+	/// fleet-wide report is older than `cutoff`. Ordered by source then
+	/// name. Drives the operator "gone quiet" list and the stale-check
+	/// self-alert.
+	pub async fn gone_quiet(db: &mut AsyncPgConnection, cutoff: Timestamp) -> Result<Vec<Self>> {
+		use crate::schema::check_policies::dsl;
+		dsl::check_policies
+			.select(Self::as_select())
+			.filter(dsl::decommissioned_at.is_null())
+			.filter(dsl::last_seen.is_not_null())
+			.filter(dsl::last_seen.lt(jiff_diesel::Timestamp::from(cutoff)))
+			.order((dsl::source, dsl::check_name))
+			.load(db)
+			.await
+			.map_err(AppError::from)
 	}
 
 	/// Insert a row for `(source, check_name)` with default values

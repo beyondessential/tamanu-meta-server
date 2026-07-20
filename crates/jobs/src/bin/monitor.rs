@@ -179,6 +179,13 @@ pub fn spawn() -> JoinHandle<()> {
 				Err(err) => error!("check liveness reconcile failed: {err}"),
 			}
 
+			// Canopy-wide warning for checks gone quiet across the whole
+			// fleet. Runs after liveness so it reads fresh last_seen.
+			match database::self_alerts::sweep_stale_healthchecks(&mut db).await {
+				Ok(_) => {}
+				Err(err) => error!("stale-healthcheck self-alert sweep failed: {err}"),
+			}
+
 			// Incidents whose linger window has expired: the last effective
 			// failure left, nothing came back, close them and ship the
 			// pending Slack cancel-or-resolve.
