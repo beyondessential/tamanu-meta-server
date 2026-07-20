@@ -2670,6 +2670,7 @@
           "healthchecks"
         ],
         "summary": "Set a source's reachability mode.",
+        "description": "Governs how the source's silence bears on its servers' reachability:\n`on` warns, `quiet` never warns but still counts toward unreachable,\n`off` is excluded. The reserved `canopy`/`manual` names are rejected.",
         "operationId": "healthcheck_set_source_reachability",
         "requestBody": {
           "content": {

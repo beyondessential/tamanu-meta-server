@@ -1336,7 +1336,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Set a source's reachability mode. */
+        /**
+         * Set a source's reachability mode.
+         * @description Governs how the source's silence bears on its servers' reachability:
+         *     `on` warns, `quiet` never warns but still counts toward unreachable,
+         *     `off` is excluded. The reserved `canopy`/`manual` names are rejected.
+         */
         post: operations["healthcheck_set_source_reachability"];
         delete?: never;
         options?: never;

@@ -236,6 +236,10 @@ pub struct SetSourceReachabilityArgs {
 }
 
 /// Set a source's reachability mode.
+///
+/// Governs how the source's silence bears on its servers' reachability:
+/// `on` warns, `quiet` never warns but still counts toward unreachable,
+/// `off` is excluded. The reserved `canopy`/`manual` names are rejected.
 #[utoipa::path(
 	post,
 	path = "/set_source_reachability",
