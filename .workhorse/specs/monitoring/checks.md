@@ -21,8 +21,18 @@ Canopy-wide checks are Canopy monitoring its own operation (see [SELF](../privat
 A source is a named reporter of checks, identified by a short string.
 Multiple sources may report on the same server, each concerned with part of the system, and each source's reports are independent: a report from one source says nothing about another source's checks.
 
-Two source names are reserved for Canopy itself: `canopy` for conditions Canopy determines on its own (staleness, reachability, backup health, key expiry, self-monitoring), and `manual` for conditions raised by operators.
+Two source names are reserved for Canopy itself: `canopy` for conditions Canopy determines on its own (reachability, backup health, key expiry, self-monitoring), and `manual` for conditions raised by operators.
 Reports arriving over the device API cannot use the reserved names.
+
+### Reachability mode
+
+Each source other than the reserved names carries an operator-set reachability mode, governing how the source's silence bears on its servers' reachability (see "Reachability"):
+
+- `on` — a stale source warns, and all of a server's sources stale is unreachable;
+- `quiet` — a stale source raises no warning, but still counts toward unreachable;
+- `off` — the source is excluded from reachability entirely.
+
+New sources default to `on`. The mode is global to the source, edited by operators alongside the check catalog.
 
 ## Results
 
@@ -102,23 +112,29 @@ A source's report for a server carries that source's complete current set of che
 Canopy trusts the reporter: a check the source previously reported but omits from its current report has recovered, and its state records that.
 Omission by one source never affects another source's checks.
 
-## Source staleness
+## Reachability
 
-A source that has reported on a server is expected to keep reporting, unless all of its checks have been decommissioned.
-When a source's most recent report for a server is older than the server's down threshold, Canopy raises a staleness check for that (server, source) under the `canopy` source, and clears it when the source reports again.
-A server all of whose sources are stale is presented as unreachable.
+Canopy tracks, for each server, the sources expected to report — those that have reported, are not in reachability mode `off`, and whose checks are not all decommissioned — and when each last reported.
+It keeps one `reachability` check per server, under the `canopy` source, reflecting how many expected sources are currently reporting within the server's down threshold:
+
+- **passed** when every expected source is fresh;
+- **warning** when a source in mode `on` is stale but not every expected source is; the stale sources are named in the check's detail, so an operator sees which reporter went quiet. A `quiet` source going stale never raises this warning;
+- **failed** when every expected source is stale — nothing is reaching Canopy — and the server is presented as unreachable. `quiet` and `on` sources count alike here.
+
+A stale source degrades the server rather than silently dropping its checks, so a reporter going quiet is never mistaken for health.
+There is no per-source staleness check; the one reachability check carries the full picture.
 
 ## Liveness and decommissioning
 
-Source staleness is a per-server signal about a reporter that has gone quiet; check liveness is a fleet-wide signal about a (source, check) that has gone away everywhere.
+Reachability is a per-server signal about reporters that have gone quiet; check liveness is a fleet-wide signal about a (source, check) that has gone away everywhere.
 For each catalogued (source, check) Canopy tracks when it was most recently reported on any server.
 
 A (source, check) not reported anywhere for seven days is surfaced to operators as a candidate for decommissioning.
 A (source, check) not reported anywhere for thirty days raises a Canopy-wide warning (see [SELF](../private-server/self-alerts.md)).
 
 Decommissioning is an operator action, never automatic: the candidate list and the Canopy-wide warning surface what has gone away, and an operator decides.
-A decommissioned (source, check) is retired fleet-wide: its state on every server is resolved, recording decommissioning as the reason, and it then contributes to nothing — not health, not incidents, not source staleness.
-A source all of whose checks are decommissioned is no longer expected to report, so its staleness clears.
+A decommissioned (source, check) is retired fleet-wide: its state on every server is resolved, recording decommissioning as the reason, and it then contributes to nothing — not health, not incidents, not reachability.
+A source all of whose checks are decommissioned is no longer an expected source, so it drops out of the reachability signal.
 
 If a decommissioned check is reported again it is treated as newly registered — pending operator review, at the warning ceiling — so a resurrected check never silently resumes a retired policy.
 

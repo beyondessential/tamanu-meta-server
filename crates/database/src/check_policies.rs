@@ -209,29 +209,9 @@ impl CheckPolicy {
 			crate::issues::Issue::resolve(db, id, by, ResolvedReason::Decommissioned).await?;
 		}
 
-		// A source with no live checks left is no longer expected to report;
-		// clear any per-server staleness it still carries (source_freshness
-		// now excludes it, so nothing re-files these).
-		let live: i64 = cp::check_policies
-			.filter(cp::source.eq(source))
-			.filter(cp::decommissioned_at.is_null())
-			.count()
-			.get_result(db)
-			.await?;
-		if live == 0 {
-			let stale_ref = format!("{}{}", crate::statuses::STALE_REF_PREFIX, source);
-			let stale_ids: Vec<Uuid> = iss::issues
-				.select(iss::id)
-				.filter(iss::source.eq(crate::statuses::CANOPY_SOURCE))
-				.filter(iss::check_name.eq(&stale_ref))
-				.filter(iss::server_id.is_not_null())
-				.filter(iss::resolved_at.is_null())
-				.load(db)
-				.await?;
-			for id in stale_ids {
-				crate::issues::Issue::resolve(db, id, by, ResolvedReason::Decommissioned).await?;
-			}
-		}
+		// A source whose checks are all decommissioned drops out of
+		// source_freshness, so it stops counting toward reachability with no
+		// further action here.
 		Ok(())
 	}
 

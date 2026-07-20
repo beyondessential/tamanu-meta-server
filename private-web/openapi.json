@@ -2664,6 +2664,116 @@
         ]
       }
     },
+    "/api/healthchecks/set_source_reachability": {
+      "post": {
+        "tags": [
+          "healthchecks"
+        ],
+        "summary": "Set a source's reachability mode.",
+        "description": "Governs how the source's silence bears on its servers' reachability:\n`on` warns, `quiet` never warns but still counts toward unreachable,\n`off` is excluded. The reserved `canopy`/`manual` names are rejected.",
+        "operationId": "healthcheck_set_source_reachability",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSourceReachabilityArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Reachability mode set."
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/healthchecks/sources": {
+      "post": {
+        "tags": [
+          "healthchecks"
+        ],
+        "summary": "List the reporting sources and their reachability policy.",
+        "description": "Every non-reserved source that has catalogued checks, with its\nreachability mode (defaulting to `on`) and most recent fleet-wide\nreport. The reserved `canopy`/`manual` sources are excluded.",
+        "operationId": "healthcheck_sources",
+        "responses": {
+          "200": {
+            "description": "Sources ordered by name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SourceData"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/healthchecks/tag_keys": {
       "post": {
         "tags": [
@@ -10118,6 +10228,15 @@
           }
         }
       },
+      "ReachabilityMode": {
+        "type": "string",
+        "description": "How a source's silence bears on its servers' reachability.\n\nStored as text in Postgres, validated as this enum at the edges.",
+        "enum": [
+          "on",
+          "quiet",
+          "off"
+        ]
+      },
       "RecentRun": {
         "type": "object",
         "description": "One row of the recent-runs view: either a device-reported [`BackupRun`] or a\nrun inferred from a [`BackupCredentialIssuance`] that never matched a report.\nDuration, when present, is Canopy-measured wall-clock — the interval from the\nrun's first credential issuance (its start) to its report (its end) — not a\nclient-reported figure.",
@@ -12188,6 +12307,24 @@
           }
         }
       },
+      "SetSourceReachabilityArgs": {
+        "type": "object",
+        "description": "Request body for setting a source's reachability mode.",
+        "required": [
+          "source",
+          "reachability"
+        ],
+        "properties": {
+          "reachability": {
+            "$ref": "#/components/schemas/ReachabilityMode",
+            "description": "The reachability mode to apply: `on`, `quiet`, or `off`."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source to configure. The reserved `canopy`/`manual` names are\nrejected."
+          }
+        }
+      },
       "SetTypeDefaultArgs": {
         "type": "object",
         "description": "Request to set the canopy-wide default schedule and retention for a\nbackup type.",
@@ -12320,6 +12457,32 @@
             "type": "string",
             "format": "date-time",
             "description": "Time until which the issue should be snoozed."
+          }
+        }
+      },
+      "SourceData": {
+        "type": "object",
+        "description": "One reporting source with its reachability policy and fleet-wide\nlast-seen.",
+        "required": [
+          "source",
+          "reachability"
+        ],
+        "properties": {
+          "last_seen": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When any of this source's checks was most recently reported anywhere\nin the fleet. `null` until liveness has been reconciled."
+          },
+          "reachability": {
+            "$ref": "#/components/schemas/ReachabilityMode",
+            "description": "How this source's silence bears on its servers' reachability: `on`\n(a stale source warns, all-stale is unreachable), `quiet` (never\nwarns, still counts toward unreachable), or `off` (excluded)."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source name, as reported by devices."
           }
         }
       },

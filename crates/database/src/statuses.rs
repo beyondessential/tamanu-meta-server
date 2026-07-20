@@ -30,34 +30,18 @@ pub const CANOPY_SOURCE: &str = "canopy";
 /// same issue row.
 pub const REACHABILITY_REF: &str = "reachability";
 
-/// Ref prefix for the per-(server, source) staleness checks canopy files
-/// when a reporting source stops reporting: `stale/<source>`, e.g.
-/// `stale/alertd`. A contract with stored silences and policy rows.
-pub const STALE_REF_PREFIX: &str = "stale/";
-
 pub const REACHABILITY_DOC: &str = "## Description
 
-Nothing is reaching canopy about this server: no source has reported and no ping has succeeded within the server's down threshold. This is the all-sources-stale signal — the server is presented as unreachable.
+Tracks whether the sources canopy expects to report on this server are actually reporting. A source going quiet degrades the server rather than silently dropping its checks, so a dead reporter is never mistaken for health.
 
 ## Results
 
-- **fail** — no status from any source within the threshold (or ever); recovers as soon as anything reports.
+- **warn** — a source in reachability mode `on` has gone quiet past the server's down threshold while others still report; the quiet sources are listed in the detail.
+- **fail** — every expected source is stale, or the server has never reported: nothing is reaching canopy, and the server is unreachable.
 
 ## Solve
 
-Check whether the server itself is down, its network/VPN path to canopy, and whether its reporting agents are running. The per-source `stale/<source>` checks narrow down which reporter went quiet first.";
-
-pub const STALE_DOC: &str = "## Description
-
-A source that has been reporting on this server has gone quiet: its most recent report is older than the server's down threshold, while other paths may still reach canopy.
-
-## Results
-
-- **warn** — the source's last report crossed the threshold; recovers when it reports again.
-
-## Solve
-
-Check that the reporting agent for this source is running on the server and can reach canopy. If the source was deliberately decommissioned, silence this check for the server.";
+Check whether the server is down, its network/VPN path to canopy, and whether its reporting agents are running. A source that was deliberately retired should be set to `quiet` or `off` in the source list.";
 
 fn server_label(s: &Server) -> String {
 	s.name
@@ -249,26 +233,22 @@ impl Status {
 		Ok(())
 	}
 
-	/// Sweep every monitored server (`is_monitored = true`) for staleness
-	/// against its per-server `alert_when_down_for` threshold, on two
-	/// levels:
-	///
-	/// - **Reachability**: the server's most recent status row, from any
-	///   source. Every source's report (and every pingtask probe) lands a
-	///   status row, so this goes stale exactly when *all* of the server's
-	///   sources are stale — the server is unreachable. Filed (or closed)
-	///   as a canopy-sourced check keyed by [`REACHABILITY_REF`]. This arm
-	///   also covers servers that have never reported at all, and legacy
-	///   foreign servers without a registered device that only the
-	///   pingtask reaches.
-	/// - **Per-source staleness**: a source that has reported checks on a
-	///   server is expected to keep reporting. When its most recent report
-	///   is older than the threshold, file a `stale/<source>` check (see
-	///   [`STALE_REF_PREFIX`]) — catching one reporter going quiet while
-	///   others keep the server reachable.
+	/// File (or update) each monitored server's single `reachability` check
+	/// from the freshness of the sources it is expected to report, against
+	/// its per-server `alert_when_down_for` threshold. Passed when every
+	/// expected source is fresh; warning when an `on`-mode source has gone
+	/// quiet while others still report (the quiet sources are named in the
+	/// detail); failed when every expected source is stale, or the server
+	/// has never reported — unreachable. Each source's reachability mode
+	/// (`on`/`quiet`/`off`) governs whether its silence warns, only counts
+	/// toward unreachable, or is ignored. Servers with no counted source
+	/// fall back to whether anything at all has reached canopy.
 	///
 	/// Returns the number of events filed in this pass.
 	pub async fn sweep_staleness(db: &mut AsyncPgConnection) -> Result<usize> {
+		use commons_types::source::ReachabilityMode;
+		use std::collections::HashMap;
+
 		let servers = Server::get_all(db, 0, None).await?;
 		let monitored: Vec<&Server> = servers
 			.iter()
@@ -277,16 +257,27 @@ impl Status {
 		if monitored.is_empty() {
 			return Ok(0);
 		}
-
 		let server_ids: Vec<Uuid> = monitored.iter().map(|s| s.id).collect();
+
+		// Per-source freshness (already excludes canopy/manual and
+		// decommissioned checks), grouped by server, plus each source's
+		// reachability mode.
+		let freshness = Issue::source_freshness(db, &server_ids).await?;
+		let modes = crate::source_policies::SourcePolicy::modes(db).await?;
+		let mut by_server: HashMap<Uuid, Vec<(String, Timestamp)>> = HashMap::new();
+		for (sid, source, last_seen) in freshness {
+			by_server.entry(sid).or_default().push((source, last_seen));
+		}
+
+		// Backstop for servers with no counted source (never reported, or
+		// only reached by pingtask): the latest status row, any source.
 		let statuses = Self::latest_for_servers(db, &server_ids).await?;
-		let status_map: std::collections::HashMap<Uuid, Status> =
+		let status_map: HashMap<Uuid, Status> =
 			statuses.into_iter().map(|s| (s.server_id, s)).collect();
+
 		let existing_issues =
 			Issue::list_by_source_ref(db, CANOPY_SOURCE, REACHABILITY_REF, &server_ids).await?;
-		// `list_by_source_ref` is filtered by `server_ids`, so every row is
-		// server-scoped (`server_id` is `Some`); drop any defensively.
-		let issue_map: std::collections::HashMap<Uuid, &Issue> = existing_issues
+		let issue_map: HashMap<Uuid, &Issue> = existing_issues
 			.iter()
 			.filter_map(|i| i.server_id.map(|sid| (sid, i)))
 			.collect();
@@ -295,41 +286,110 @@ impl Status {
 		let mut filed = 0usize;
 		for server in &monitored {
 			let threshold = server.alert_when_down_for.0;
-			// No status ever recorded ⇒ `None`, which always trips the
-			// threshold below.
-			let elapsed: Option<SignedDuration> = status_map
-				.get(&server.id)
-				.map(|s| now.duration_since(s.created_at).abs());
-			let down = match elapsed {
-				Some(e) => e >= threshold,
-				None => true,
-			};
-			let existing = issue_map.get(&server.id).copied();
+			let label = server_label(server);
 
-			let (observed, message) = match (down, existing) {
-				(false, None) => continue,
-				(false, Some(issue)) if !issue.active => continue,
-				(false, Some(_)) => (
-					CheckResult::Passed,
-					format!("Server {} is reachable again", server_label(server)),
-				),
-				(true, _) => (
-					CheckResult::Failed,
-					match elapsed {
+			// Sources reporting on this server that aren't switched off for
+			// reachability, with how long each has been silent.
+			let expected: Vec<(&str, SignedDuration, ReachabilityMode)> = by_server
+				.get(&server.id)
+				.into_iter()
+				.flatten()
+				.map(|(source, last_seen)| {
+					let mode = modes.get(source).copied().unwrap_or_default();
+					(source.as_str(), now.duration_since(*last_seen).abs(), mode)
+				})
+				.filter(|(_, _, mode)| *mode != ReachabilityMode::Off)
+				.collect();
+
+			let (observed, message, detail) = if expected.is_empty() {
+				let elapsed = status_map
+					.get(&server.id)
+					.map(|s| now.duration_since(s.created_at).abs());
+				let down = elapsed.map(|e| e >= threshold).unwrap_or(true);
+				if down {
+					let message = match elapsed {
 						Some(e) => format!(
-							"Server {} has not reported for {} (threshold {})",
-							server_label(server),
+							"Server {label} has not reported for {} (threshold {})",
 							format_secs(e.as_secs()),
 							format_secs(threshold.as_secs()),
 						),
 						None => format!(
-							"Server {} has never reported (threshold {})",
-							server_label(server),
+							"Server {label} has never reported (threshold {})",
 							format_secs(threshold.as_secs()),
 						),
-					},
-				),
+					};
+					(
+						CheckResult::Failed,
+						message,
+						serde_json::json!({
+							"elapsed_secs": elapsed.map(|e| e.as_secs()),
+							"threshold_secs": threshold.as_secs(),
+						}),
+					)
+				} else {
+					(
+						CheckResult::Passed,
+						format!("Server {label} is reachable"),
+						serde_json::json!({ "threshold_secs": threshold.as_secs() }),
+					)
+				}
+			} else {
+				let stale: Vec<&(&str, SignedDuration, ReachabilityMode)> = expected
+					.iter()
+					.filter(|(_, e, _)| *e >= threshold)
+					.collect();
+				let stale_names = stale
+					.iter()
+					.map(|(s, _, _)| *s)
+					.collect::<Vec<_>>()
+					.join(", ");
+				let stale_detail = stale
+					.iter()
+					.map(
+						|(source, e, _)| serde_json::json!({ "source": source, "stale_secs": e.as_secs() }),
+					)
+					.collect::<Vec<_>>();
+				let detail = serde_json::json!({
+					"stale_sources": stale_detail,
+					"threshold_secs": threshold.as_secs(),
+				});
+				if stale.len() == expected.len() {
+					(
+						CheckResult::Failed,
+						format!(
+							"Server {label} is unreachable: every source is stale ({stale_names})"
+						),
+						detail,
+					)
+				} else if stale
+					.iter()
+					.any(|(_, _, mode)| *mode == ReachabilityMode::On)
+				{
+					(
+						CheckResult::Warning,
+						format!("Source(s) on server {label} have gone quiet: {stale_names}"),
+						detail,
+					)
+				} else {
+					// Some stale, but every stale source is quiet: no warning.
+					(
+						CheckResult::Passed,
+						format!("Server {label} is reachable"),
+						serde_json::json!({ "threshold_secs": threshold.as_secs() }),
+					)
+				}
 			};
+
+			// Don't churn a passing reachability when there's nothing open to
+			// close.
+			if observed == CheckResult::Passed {
+				match issue_map.get(&server.id) {
+					None => continue,
+					Some(issue) if !issue.active => continue,
+					Some(_) => {}
+				}
+			}
+
 			crate::issues::file_check(
 				db,
 				crate::issues::CheckFiling {
@@ -340,12 +400,9 @@ impl Status {
 					},
 					check: REACHABILITY_REF,
 					observed,
-					title: Some("Server unreachable"),
+					title: Some("Server reachability"),
 					message: &message,
-					detail: Some(serde_json::json!({
-						"elapsed_secs": elapsed.map(|e| e.as_secs()),
-						"threshold_secs": threshold.as_secs(),
-					})),
+					detail: Some(detail),
 					default_ceiling: CheckResult::Failed,
 					default_escalates: false,
 					documentation: Some(REACHABILITY_DOC),
@@ -355,102 +412,6 @@ impl Status {
 			filed += 1;
 		}
 
-		filed += Self::sweep_source_staleness(db, &monitored, now).await?;
-		Ok(filed)
-	}
-
-	/// The per-source arm of [`Self::sweep_staleness`]: file (or close) a
-	/// `stale/<source>` check for each (monitored server, reporting source)
-	/// whose most recent report has crossed the server's threshold.
-	///
-	/// Freshness comes from check state, not the statuses history: every
-	/// report re-stamps `last_seen` on the state rows of the checks it
-	/// mentions, so [`Issue::source_freshness`] is both the set of sources
-	/// expected to report and when each last did. Registered at a warning
-	/// ceiling — one quiet reporter degrades a server, full unreachability
-	/// is the reachability arm's failure.
-	async fn sweep_source_staleness(
-		db: &mut AsyncPgConnection,
-		monitored: &[&Server],
-		now: Timestamp,
-	) -> Result<usize> {
-		let server_map: std::collections::HashMap<Uuid, &Server> =
-			monitored.iter().map(|s| (s.id, *s)).collect();
-		let server_ids: Vec<Uuid> = monitored.iter().map(|s| s.id).collect();
-		let freshness = Issue::source_freshness(db, &server_ids).await?;
-		if freshness.is_empty() {
-			return Ok(0);
-		}
-
-		let refs: Vec<String> = freshness
-			.iter()
-			.map(|(_, source, _)| format!("{STALE_REF_PREFIX}{source}"))
-			.collect::<std::collections::BTreeSet<_>>()
-			.into_iter()
-			.collect();
-		let existing = Issue::list_by_source_refs(db, CANOPY_SOURCE, &refs, &server_ids).await?;
-		let existing_map: std::collections::HashMap<(Uuid, &str), &Issue> = existing
-			.iter()
-			.filter_map(|i| i.server_id.map(|sid| ((sid, i.r#ref.as_str()), i)))
-			.collect();
-
-		let mut filed = 0usize;
-		for (server_id, source, last_seen) in &freshness {
-			let Some(server) = server_map.get(server_id) else {
-				continue;
-			};
-			let threshold = server.alert_when_down_for.0;
-			let elapsed = now.duration_since(*last_seen).abs();
-			let stale = elapsed >= threshold;
-			let check = format!("{STALE_REF_PREFIX}{source}");
-			let existing = existing_map.get(&(*server_id, check.as_str())).copied();
-
-			let (observed, message) = match (stale, existing) {
-				(false, None) => continue,
-				(false, Some(issue)) if !issue.active => continue,
-				(false, Some(_)) => (
-					CheckResult::Passed,
-					format!(
-						"Source {source} on server {} is reporting again",
-						server_label(server),
-					),
-				),
-				(true, _) => (
-					CheckResult::Failed,
-					format!(
-						"Source {source} on server {} has not reported for {} (threshold {})",
-						server_label(server),
-						format_secs(elapsed.as_secs()),
-						format_secs(threshold.as_secs()),
-					),
-				),
-			};
-			crate::issues::file_check(
-				db,
-				crate::issues::CheckFiling {
-					source: CANOPY_SOURCE,
-					scope: crate::issues::FilingScope::Server {
-						server_id: *server_id,
-						device_id: None,
-					},
-					check: &check,
-					observed,
-					title: Some("Source stopped reporting"),
-					message: &message,
-					detail: Some(serde_json::json!({
-						"source": source,
-						"last_reported": last_seen.to_string(),
-						"elapsed_secs": elapsed.as_secs(),
-						"threshold_secs": threshold.as_secs(),
-					})),
-					default_ceiling: CheckResult::Warning,
-					default_escalates: false,
-					documentation: Some(STALE_DOC),
-				},
-			)
-			.await?;
-			filed += 1;
-		}
 		Ok(filed)
 	}
 

@@ -16,6 +16,8 @@ import {
 	TableContainer,
 	TableHead,
 	TableRow,
+	ToggleButton,
+	ToggleButtonGroup,
 	Typography,
 } from "@mui/material";
 import { useMemo, useState } from "react";
@@ -30,6 +32,8 @@ import {
 	healthcheckSettingsPath,
 	type Ceiling,
 	type CheckPolicyData,
+	type ReachabilityMode,
+	type SourceData,
 } from "../types";
 
 /** A catalogued check unreported anywhere for this long is a
@@ -77,6 +81,8 @@ export default function Healthchecks() {
 					marked pending review.
 				</Typography>
 			</Box>
+
+			<SourcesSection isAdmin={isAdmin} />
 
 			<Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
 				{pendingCount > 0 ? (
@@ -160,6 +166,122 @@ export default function Healthchecks() {
 				</Paper>
 			)}
 		</Stack>
+	);
+}
+
+const REACHABILITY_MODES: ReachabilityMode[] = ["on", "quiet", "off"];
+
+function SourcesSection({ isAdmin }: { isAdmin: boolean }) {
+	const sources = useApi("healthchecks", "sources");
+	const rows = sources.status === "ok" ? sources.data : [];
+	// Nothing to show until at least one source has reported.
+	if (sources.status === "ok" && rows.length === 0) return null;
+
+	return (
+		<Box>
+			<Typography variant="subtitle2" component="h3" gutterBottom>
+				Sources
+			</Typography>
+			<Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+				Reporters canopy expects to hear from. Reachability controls how a
+				source going quiet affects its servers: <strong>on</strong> warns,{" "}
+				<strong>quiet</strong> never warns but still marks a server unreachable
+				when it's the only source left, <strong>off</strong> ignores it.
+			</Typography>
+			{sources.status === "loading" || sources.status === "idle" ? (
+				<LinearProgress />
+			) : sources.status === "error" ? (
+				<Alert severity="error">{sources.error.message}</Alert>
+			) : (
+				<Paper variant="outlined">
+					<TableContainer>
+						<Table size="small">
+							<TableHead>
+								<TableRow>
+									<TableCell>Source</TableCell>
+									<TableCell>Last seen</TableCell>
+									<TableCell>Reachability</TableCell>
+								</TableRow>
+							</TableHead>
+							<TableBody>
+								{rows.map((row) => (
+									<SourceRow
+										key={row.source}
+										row={row}
+										canEdit={isAdmin}
+										onChanged={() => sources.reload()}
+									/>
+								))}
+							</TableBody>
+						</Table>
+					</TableContainer>
+				</Paper>
+			)}
+		</Box>
+	);
+}
+
+function SourceRow({
+	row,
+	canEdit,
+	onChanged,
+}: {
+	row: SourceData;
+	canEdit: boolean;
+	onChanged: () => void;
+}) {
+	const setMode = useApiAction("healthchecks", "set_source_reachability");
+	const [local, setLocal] = useState<ReachabilityMode>(row.reachability);
+
+	const change = async (mode: ReachabilityMode | null) => {
+		if (!mode || mode === local) return;
+		const prev = local;
+		setLocal(mode);
+		try {
+			await setMode.call({ source: row.source, reachability: mode });
+			onChanged();
+		} catch {
+			setLocal(prev);
+		}
+	};
+
+	return (
+		<TableRow hover>
+			<TableCell sx={{ fontFamily: "monospace" }}>{row.source}</TableCell>
+			<TableCell>
+				{row.last_seen ? (
+					<TimeAgo timestamp={row.last_seen} />
+				) : (
+					<Typography variant="caption" color="text.secondary">
+						never
+					</Typography>
+				)}
+			</TableCell>
+			<TableCell>
+				{canEdit ? (
+					<ToggleButtonGroup
+						size="small"
+						exclusive
+						value={local}
+						onChange={(_, v) => change(v as ReachabilityMode | null)}
+						disabled={setMode.pending}
+					>
+						{REACHABILITY_MODES.map((mode) => (
+							<ToggleButton key={mode} value={mode}>
+								{mode}
+							</ToggleButton>
+						))}
+					</ToggleButtonGroup>
+				) : (
+					<Chip size="small" label={local} />
+				)}
+				{setMode.error && (
+					<Typography variant="caption" color="error" sx={{ display: "block" }}>
+						{formatError(setMode.error)}
+					</Typography>
+				)}
+			</TableCell>
+		</TableRow>
 	);
 }
 

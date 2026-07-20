@@ -546,6 +546,15 @@ diesel::table! {
 }
 
 diesel::table! {
+	source_policies (source) {
+		source -> Text,
+		reachability -> Text,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	statuses (id, created_at) {
 		id -> Uuid,
 		created_at -> Timestamptz,

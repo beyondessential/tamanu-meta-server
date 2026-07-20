@@ -1327,6 +1327,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/healthchecks/set_source_reachability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set a source's reachability mode.
+         * @description Governs how the source's silence bears on its servers' reachability:
+         *     `on` warns, `quiet` never warns but still counts toward unreachable,
+         *     `off` is excluded. The reserved `canopy`/`manual` names are rejected.
+         */
+        post: operations["healthcheck_set_source_reachability"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/healthchecks/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List the reporting sources and their reachability policy.
+         * @description Every non-reserved source that has catalogued checks, with its
+         *     reachability mode (defaulting to `on`) and most recent fleet-wide
+         *     report. The reserved `canopy`/`manual` sources are excluded.
+         */
+        post: operations["healthcheck_sources"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/healthchecks/tag_keys": {
         parameters: {
             query?: never;
@@ -5673,6 +5717,13 @@ export interface components {
             passphrase: string;
         };
         /**
+         * @description How a source's silence bears on its servers' reachability.
+         *
+         *     Stored as text in Postgres, validated as this enum at the edges.
+         * @enum {string}
+         */
+        ReachabilityMode: "on" | "quiet" | "off";
+        /**
          * @description One row of the recent-runs view: either a device-reported [`BackupRun`] or a
          *     run inferred from a [`BackupCredentialIssuance`] that never matched a report.
          *     Duration, when present, is Canopy-measured wall-clock — the interval from the
@@ -6959,6 +7010,16 @@ export interface components {
             /** @description Backup type this schedule and retention apply to. */
             type: string;
         };
+        /** @description Request body for setting a source's reachability mode. */
+        SetSourceReachabilityArgs: {
+            /** @description The reachability mode to apply: `on`, `quiet`, or `off`. */
+            reachability: components["schemas"]["ReachabilityMode"];
+            /**
+             * @description The source to configure. The reserved `canopy`/`manual` names are
+             *     rejected.
+             */
+            source: string;
+        };
         /**
          * @description Request to set the canopy-wide default schedule and retention for a
          *     backup type.
@@ -7052,6 +7113,26 @@ export interface components {
              * @description Time until which the issue should be snoozed.
              */
             until: string;
+        };
+        /**
+         * @description One reporting source with its reachability policy and fleet-wide
+         *     last-seen.
+         */
+        SourceData: {
+            /**
+             * Format: date-time
+             * @description When any of this source's checks was most recently reported anywhere
+             *     in the fleet. `null` until liveness has been reconciled.
+             */
+            last_seen?: string | null;
+            /**
+             * @description How this source's silence bears on its servers' reachability: `on`
+             *     (a stale source warns, all-stale is unreachable), `quiet` (never
+             *     warns, still counts toward unreachable), or `off` (excluded).
+             */
+            reachability: components["schemas"]["ReachabilityMode"];
+            /** @description The source name, as reported by devices. */
+            source: string;
         };
         /** @description One entry in the shared history of queries run in the SQL playground. */
         SqlHistoryEntry: {
@@ -9441,6 +9522,88 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthcheckSampleResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    healthcheck_set_source_reachability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetSourceReachabilityArgs"];
+            };
+        };
+        responses: {
+            /** @description Reachability mode set. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    healthcheck_sources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sources ordered by name. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourceData"][];
                 };
             };
             401: {
