@@ -1,7 +1,9 @@
+use commons_types::source::ReachabilityMode;
 use commons_types::status::CheckResult;
 use database::{
 	issues::Issue,
-	statuses::{CANOPY_SOURCE, REACHABILITY_REF, STALE_REF_PREFIX, Status},
+	source_policies::SourcePolicy,
+	statuses::{CANOPY_SOURCE, REACHABILITY_REF, Status},
 };
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::RunQueryDsl;
@@ -98,23 +100,6 @@ async fn insert_check_state(
 	.execute(conn)
 	.await
 	.expect("insert check state");
-}
-
-async fn stale_issue_for(
-	conn: &mut diesel_async::AsyncPgConnection,
-	server_id: Uuid,
-	source: &str,
-) -> Option<Issue> {
-	Issue::list_by_source_ref(
-		conn,
-		CANOPY_SOURCE,
-		&format!("{STALE_REF_PREFIX}{source}"),
-		&[server_id],
-	)
-	.await
-	.expect("list stale issues")
-	.into_iter()
-	.next()
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -260,89 +245,124 @@ async fn check_constraint_forbids_non_positive_duration() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn sweep_files_stale_source_at_warning() {
+async fn sweep_warns_when_an_on_source_is_stale() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		// The server itself is reachable (fresh status row), but alertd's
-		// check state was last stamped 15 minutes ago against a 10-min
-		// threshold → the source has gone quiet.
+		// Reachable via a fresh source, but another `on` source has gone
+		// quiet (15m > 10m threshold) → reachability warns, naming it.
 		let id = insert_server(&mut conn, "http://quiet-source.invalid/", 600).await;
-		insert_status_at(&mut conn, id, 0).await;
 		insert_check_state(&mut conn, id, "alertd", "db", 15).await;
+		insert_check_state(&mut conn, id, "otheragent", "ping", 2).await;
 
 		let filed = Status::sweep_staleness(&mut conn).await.expect("sweep");
 		assert_eq!(filed, 1);
-		assert!(
-			issue_for(&mut conn, id).await.is_none(),
-			"reachability must not fire while a fresh status row exists"
-		);
-		let stale = stale_issue_for(&mut conn, id, "alertd")
-			.await
-			.expect("stale issue exists");
-		assert!(stale.active);
-		assert_eq!(
-			stale.observed_result,
-			Some(commons_types::status::CheckResult::Failed)
-		);
-		assert_eq!(
-			stale.effective_result,
-			Some(commons_types::status::CheckResult::Warning),
-			"stale/<source> registers at a warning ceiling"
-		);
-		assert!(stale.message.contains("has not reported for"));
+		let issue = issue_for(&mut conn, id).await.expect("reachability issue");
+		assert!(issue.active);
+		assert_eq!(issue.observed_result, Some(CheckResult::Warning));
+		assert!(issue.message.contains("alertd"));
 	})
 	.await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn sweep_skips_fresh_source() {
+async fn sweep_passes_when_all_sources_fresh() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let id = insert_server(&mut conn, "http://fresh-source.invalid/", 600).await;
-		insert_status_at(&mut conn, id, 0).await;
-		insert_check_state(&mut conn, id, "alertd", "db", 5).await;
+		let id = insert_server(&mut conn, "http://fresh-sources.invalid/", 600).await;
+		insert_check_state(&mut conn, id, "alertd", "db", 2).await;
+		insert_check_state(&mut conn, id, "otheragent", "ping", 3).await;
 
 		let filed = Status::sweep_staleness(&mut conn).await.expect("sweep");
 		assert_eq!(filed, 0);
-		assert!(stale_issue_for(&mut conn, id, "alertd").await.is_none());
+		assert!(issue_for(&mut conn, id).await.is_none());
 	})
 	.await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn sweep_flags_only_the_stale_source() {
+async fn sweep_fails_when_every_source_is_stale() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let id = insert_server(&mut conn, "http://mixed-sources.invalid/", 600).await;
-		insert_status_at(&mut conn, id, 0).await;
-		insert_check_state(&mut conn, id, "alertd", "db", 45).await;
-		insert_check_state(&mut conn, id, "tamanu", "tasks", 2).await;
+		let id = insert_server(&mut conn, "http://all-stale.invalid/", 600).await;
+		insert_check_state(&mut conn, id, "alertd", "db", 20).await;
+		insert_check_state(&mut conn, id, "otheragent", "ping", 30).await;
 
 		let filed = Status::sweep_staleness(&mut conn).await.expect("sweep");
 		assert_eq!(filed, 1);
-		assert!(
-			stale_issue_for(&mut conn, id, "alertd")
-				.await
-				.unwrap()
-				.active
-		);
-		assert!(stale_issue_for(&mut conn, id, "tamanu").await.is_none());
+		let issue = issue_for(&mut conn, id).await.expect("reachability issue");
+		assert!(issue.active);
+		assert_eq!(issue.observed_result, Some(CheckResult::Failed));
 	})
 	.await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn sweep_closes_stale_source_when_it_reports_again() {
+async fn sweep_quiet_source_stale_does_not_warn() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let id = insert_server(&mut conn, "http://returning-source.invalid/", 600).await;
+		let id = insert_server(&mut conn, "http://quiet-mode.invalid/", 600).await;
+		insert_check_state(&mut conn, id, "alertd", "db", 2).await; // fresh, on
+		insert_check_state(&mut conn, id, "legacyagent", "beat", 30).await; // stale
+		SourcePolicy::set_reachability(&mut conn, "legacyagent", ReachabilityMode::Quiet)
+			.await
+			.expect("set quiet");
+
+		let filed = Status::sweep_staleness(&mut conn).await.expect("sweep");
+		assert_eq!(filed, 0);
+		assert!(
+			issue_for(&mut conn, id).await.is_none(),
+			"a quiet source going stale raises no warning while another source is fresh"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sweep_quiet_only_server_still_unreachable() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let id = insert_server(&mut conn, "http://quiet-only.invalid/", 600).await;
+		insert_check_state(&mut conn, id, "legacyagent", "beat", 30).await; // stale
+		SourcePolicy::set_reachability(&mut conn, "legacyagent", ReachabilityMode::Quiet)
+			.await
+			.expect("set quiet");
+
+		let filed = Status::sweep_staleness(&mut conn).await.expect("sweep");
+		assert_eq!(filed, 1);
+		let issue = issue_for(&mut conn, id).await.expect("reachability issue");
+		assert_eq!(
+			issue.observed_result,
+			Some(CheckResult::Failed),
+			"a quiet source still counts toward unreachable when it's the only one"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sweep_off_source_is_excluded() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		// An `off` source is ignored entirely; with a fresh status row and no
+		// other counted source, reachability passes.
+		let id = insert_server(&mut conn, "http://off-mode.invalid/", 600).await;
 		insert_status_at(&mut conn, id, 0).await;
-		insert_check_state(&mut conn, id, "alertd", "db", 45).await;
+		insert_check_state(&mut conn, id, "offagent", "x", 30).await;
+		SourcePolicy::set_reachability(&mut conn, "offagent", ReachabilityMode::Off)
+			.await
+			.expect("set off");
+
+		let filed = Status::sweep_staleness(&mut conn).await.expect("sweep");
+		assert_eq!(filed, 0);
+		assert!(issue_for(&mut conn, id).await.is_none());
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sweep_clears_reachability_when_source_reports_again() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let id = insert_server(&mut conn, "http://returning.invalid/", 600).await;
+		insert_check_state(&mut conn, id, "alertd", "db", 20).await;
+		insert_check_state(&mut conn, id, "otheragent", "ping", 2).await;
 		Status::sweep_staleness(&mut conn)
 			.await
 			.expect("first sweep");
-		assert!(
-			stale_issue_for(&mut conn, id, "alertd")
-				.await
-				.unwrap()
-				.active
-		);
+		assert!(issue_for(&mut conn, id).await.unwrap().active);
 
 		// The source reports again: ingestion re-stamps its check state.
 		sql_query("UPDATE issues SET last_seen = NOW() WHERE server_id = $1 AND source = 'alertd'")
@@ -353,24 +373,7 @@ async fn sweep_closes_stale_source_when_it_reports_again() {
 		Status::sweep_staleness(&mut conn)
 			.await
 			.expect("second sweep");
-		let stale = stale_issue_for(&mut conn, id, "alertd").await.unwrap();
-		assert!(!stale.active);
-		assert!(stale.message.contains("is reporting again"));
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn sweep_skips_unmonitored_server_sources() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let id =
-			insert_server_full(&mut conn, "http://quiet-unmonitored.invalid/", 600, false).await;
-		insert_status_at(&mut conn, id, 0).await;
-		insert_check_state(&mut conn, id, "alertd", "db", 120).await;
-
-		let filed = Status::sweep_staleness(&mut conn).await.expect("sweep");
-		assert_eq!(filed, 0);
-		assert!(stale_issue_for(&mut conn, id, "alertd").await.is_none());
+		assert!(!issue_for(&mut conn, id).await.unwrap().active);
 	})
 	.await
 }

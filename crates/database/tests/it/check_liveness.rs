@@ -5,7 +5,6 @@
 use commons_types::status::{CheckResult, HealthState};
 use database::check_policies::CheckPolicy;
 use database::issues::{CheckFiling, FilingScope, Issue, file_check, health_from_check_state};
-use database::statuses::CANOPY_SOURCE;
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
@@ -273,48 +272,6 @@ async fn decommission_resolves_states_and_marks_catalog() {
 		assert!(
 			state.resolved_at.is_some(),
 			"decommissioning resolves the check's states",
-		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn decommission_clears_stale_when_source_fully_retired() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let server_id = insert_server(&mut conn).await;
-		// The source's only check, plus a live per-server staleness issue.
-		file_check(
-			&mut conn,
-			filing_result(server_id, "alertd", "x", CheckResult::Passed),
-		)
-		.await
-		.expect("file");
-		file_check(
-			&mut conn,
-			filing_result(
-				server_id,
-				CANOPY_SOURCE,
-				"stale/alertd",
-				CheckResult::Failed,
-			),
-		)
-		.await
-		.expect("file stale");
-
-		CheckPolicy::decommission(&mut conn, "alertd", "x", "op")
-			.await
-			.expect("decommission");
-
-		let stale =
-			Issue::list_by_source_ref(&mut conn, CANOPY_SOURCE, "stale/alertd", &[server_id])
-				.await
-				.expect("stale")
-				.into_iter()
-				.next()
-				.expect("stale row");
-		assert!(
-			stale.resolved_at.is_some(),
-			"retiring a source's last check clears its staleness",
 		);
 	})
 	.await
