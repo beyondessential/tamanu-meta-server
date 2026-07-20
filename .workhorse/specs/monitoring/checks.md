@@ -24,15 +24,23 @@ Multiple sources may report on the same server, each concerned with part of the 
 Two source names are reserved for Canopy itself: `canopy` for conditions Canopy determines on its own (reachability, backup health, key expiry, self-monitoring), and `manual` for conditions raised by operators.
 Reports arriving over the device API cannot use the reserved names.
 
-### Reachability mode
+### Source policy
 
-Each source other than the reserved names carries an operator-set reachability mode, governing how the source's silence bears on its servers' reachability (see "Reachability"):
+Each source other than the reserved names carries two operator-set modes, global to the source and edited alongside the check catalog.
+
+Its **reachability mode** governs how the source's silence bears on its servers' reachability (see "Reachability"):
 
 - `on` — a stale source warns, and all of a server's sources stale is unreachable;
 - `quiet` — a stale source raises no warning, but still counts toward unreachable;
 - `off` — the source is excluded from reachability entirely.
 
-New sources default to `on`. The mode is global to the source, edited by operators alongside the check catalog.
+Its **ingest mode** governs whether the device API accepts the source's reports (see [STA](../public-server/statuses.md)):
+
+- `allow` — reports are ingested normally;
+- `ignore` — reports are accepted, but the source's data is discarded before ingestion;
+- `deny` — the device API rejects the push.
+
+New sources default to `on` and `allow`. A source that isn't ingested (`ignore` or `deny`) is excluded from reachability regardless of its reachability mode — there is no fresh data to judge it by.
 
 ## Results
 
