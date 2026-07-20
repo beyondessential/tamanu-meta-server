@@ -8,6 +8,7 @@ use commons_servers::tailscale_auth::TailscaleUser;
 use commons_types::{
 	server::{
 		cards::{FacilityServerStatus, ServerGroupCard},
+		kind::ServerKind,
 		rank::ServerRank,
 	},
 	status::{CheckResult, OperatorPresence, ShortStatus},
@@ -93,7 +94,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(server_grouped_ids))
 		.routes(routes!(group_details))
 		.routes(routes!(snapshot))
-		.routes(routes!(check_attention))
+		.routes(routes!(check_detail))
 }
 
 /// Get a fleet-wide summary of software versions running in production.
@@ -276,10 +277,10 @@ pub async fn group_details(
 	}))
 }
 
-/// One server whose latest status reports [`CheckAttentionData::check`],
-/// for [`check_attention`].
+/// One server whose latest status reports [`CheckDetailData::check`],
+/// for [`check_detail`].
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct CheckAttentionServerData {
+pub struct CheckDetailServerData {
 	/// The server's id — the UI links to `/servers/{server_id}`.
 	pub server_id: Uuid,
 	/// The server's display name; empty string when the server has none.
@@ -289,6 +290,10 @@ pub struct CheckAttentionServerData {
 	pub group_id: Option<Uuid>,
 	/// The server's group name, if it belongs to one.
 	pub group_name: Option<String>,
+	/// The server's rank, for the standard rank-bucket grouping.
+	pub rank: Option<ServerRank>,
+	/// The server's kind, for the standard within-rank ordering.
+	pub kind: ServerKind,
 	/// The check's observed result on its latest report. The UI shows
 	/// warning/failed/broken servers by default and puts passed/skipped
 	/// ones behind a "show healthy" toggle.
@@ -301,11 +306,56 @@ pub struct CheckAttentionServerData {
 	pub failing_since: Option<Timestamp>,
 	/// When the check state last updated (the check's latest report).
 	pub status_created_at: Timestamp,
+	/// The state's stability record (observation counters, transition
+	/// ring, hour-of-week duty profile, derived flap statistics). `None`
+	/// for states that predate stability recording.
+	pub stability: Option<database::stability::StabilityData>,
 }
 
-/// Request body for [`check_attention`].
+/// A group-scoped state of this check — a condition Canopy determines
+/// about the group's control plane (backup health and the like) — for
+/// the group's section of the check detail list.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CheckDetailGroupData {
+	/// The group's id — the UI links to `/groups/{group_id}`.
+	pub group_id: Uuid,
+	/// The group's display name.
+	pub group_name: String,
+	/// Rank bucket for display: the highest rank held by any member
+	/// server, mirroring the status page's group bucketing.
+	pub rank: Option<ServerRank>,
+	/// The check's observed result on its latest filing.
+	pub result: CheckResult,
+	/// The check's own fields from its latest filing, verbatim.
+	pub data: serde_json::Value,
+	/// When the current degradation streak began; `None` while healthy.
+	pub failing_since: Option<Timestamp>,
+	/// When the check state last updated.
+	pub status_created_at: Timestamp,
+	/// The state's stability record; `None` for states that predate
+	/// stability recording.
+	pub stability: Option<database::stability::StabilityData>,
+}
+
+/// The canopy-wide state of this check (self-monitoring), if any.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CheckDetailCanopyData {
+	/// The check's observed result on its latest filing.
+	pub result: CheckResult,
+	/// The check's own fields from its latest filing, verbatim.
+	pub data: serde_json::Value,
+	/// When the current degradation streak began; `None` while healthy.
+	pub failing_since: Option<Timestamp>,
+	/// When the check state last updated.
+	pub status_created_at: Timestamp,
+	/// The state's stability record; `None` for states that predate
+	/// stability recording.
+	pub stability: Option<database::stability::StabilityData>,
+}
+
+/// Request body for [`check_detail`].
 #[derive(Debug, Deserialize, ToSchema)]
-pub struct CheckAttentionArgs {
+pub struct CheckDetailArgs {
 	/// The source that reports the check. A check's identity is the
 	/// (source, check) pair — a same-named check from another source is
 	/// a different check.
@@ -315,11 +365,11 @@ pub struct CheckAttentionArgs {
 	pub check: String,
 }
 
-/// Response for [`check_attention`]: the queried check's catalog policy
+/// Response for [`check_detail`]: the queried check's catalog policy
 /// (if it has one yet) and every live server whose latest status reports
 /// it, failing or healthy.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct CheckAttentionData {
+pub struct CheckDetailData {
 	/// The source that was queried, echoed back with `check` so the page
 	/// can render its heading without re-decoding the request.
 	pub source: String,
@@ -339,10 +389,15 @@ pub struct CheckAttentionData {
 	/// warning, broken, passed, skipped (most urgent first), then by
 	/// group name then server name. The client filters out the
 	/// passed/skipped tail unless the "show healthy" toggle is on.
-	pub servers: Vec<CheckAttentionServerData>,
+	pub servers: Vec<CheckDetailServerData>,
+	/// Group-scoped states of this check, ordered by group name. The
+	/// client files each under its group in the list.
+	pub groups: Vec<CheckDetailGroupData>,
+	/// The canopy-wide state of this check, if canopy has ever filed one.
+	pub canopy: Option<CheckDetailCanopyData>,
 }
 
-/// Rank used to order [`CheckAttentionServerData::result`] most-urgent
+/// Rank used to order [`CheckDetailServerData::result`] most-urgent
 /// first: failed, then warning, then broken, with the healthy tail
 /// (passed, then skipped) last. Mirrors the private-web
 /// `CHECK_RESULT_ORDER` display order.
@@ -368,24 +423,24 @@ fn check_result_rank(result: CheckResult) -> u8 {
 /// fleet-wide incident.
 #[utoipa::path(
 	post,
-	path = "/check_attention",
-	operation_id = "status_check_attention",
+	path = "/check_detail",
+	operation_id = "status_check_detail",
 	tag = "statuses",
-	request_body = CheckAttentionArgs,
+	request_body = CheckDetailArgs,
 	responses(
-		(status = 200, description = "The check's catalog policy and the servers currently reporting it.", body = CheckAttentionData),
+		(status = 200, description = "The check's catalog policy and the servers currently reporting it.", body = CheckDetailData),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
-pub async fn check_attention(
+pub async fn check_detail(
 	State(state): State<AppState>,
-	Json(args): Json<CheckAttentionArgs>,
-) -> Result<Json<CheckAttentionData>> {
+	Json(args): Json<CheckDetailArgs>,
+) -> Result<Json<CheckDetailData>> {
 	let mut conn = state.db_read.get().await?;
 	let states = Issue::check_state_for_check(&mut conn, &args.source, &args.check).await?;
 
 	// Live servers only: archived servers and canopy's own row never
-	// appear on the attention list.
+	// appear on the check detail page.
 	let server_ids: Vec<Uuid> = states
 		.iter()
 		.filter_map(|st| st.server_id)
@@ -399,9 +454,12 @@ pub async fn check_attention(
 			.filter(|s| s.deleted_at.is_none() && s.id != Uuid::nil())
 			.map(|s| (s.id, s))
 			.collect();
+	// Group names (and, for group-scoped states, rank buckets) cover both
+	// the member servers' groups and the groups with their own state.
 	let group_ids: Vec<Uuid> = live
 		.values()
 		.filter_map(|s| s.group_id)
+		.chain(states.iter().filter_map(|st| st.server_group_id))
 		.collect::<BTreeSet<_>>()
 		.into_iter()
 		.collect();
@@ -410,47 +468,98 @@ pub async fn check_attention(
 		.into_iter()
 		.map(|g| (g.id, g.name))
 		.collect();
-
-	let mut servers: Vec<CheckAttentionServerData> = states
+	let scoped_group_ids: Vec<Uuid> = states
+		.iter()
+		.filter_map(|st| st.server_group_id)
+		.collect::<BTreeSet<_>>()
 		.into_iter()
-		.filter_map(|st| {
-			let server = st.server_id.and_then(|sid| live.get(&sid))?;
-			let result = st.observed_result?;
-			let group_name = server.group_id.and_then(|g| group_names.get(&g).cloned());
-			// failing_since is the current degradation streak; recovered
-			// rows have none. first_seen is the fallback for rows stamped
-			// before degraded_since existed.
-			let failing_since = st
-				.active
-				.then_some(st.degraded_since.unwrap_or(st.first_seen));
-			Some(CheckAttentionServerData {
-				server_id: server.id,
-				server_name: server.name.clone().unwrap_or_default(),
-				group_id: server.group_id,
-				group_name,
-				result,
-				data: st.detail.unwrap_or_else(|| serde_json::json!({})),
-				failing_since,
-				status_created_at: st.last_seen,
-			})
-		})
 		.collect();
+	let group_ranks = ServerGroup::highest_member_ranks(&mut conn, &scoped_group_ids).await?;
+
+	let issue_ids: Vec<Uuid> = states.iter().map(|st| st.id).collect();
+	let stability =
+		database::stability::CheckStability::for_issue_ids(&mut conn, &issue_ids).await?;
+	let now = jiff::Timestamp::now();
+
+	// failing_since is the current degradation streak; recovered rows have
+	// none. first_seen is the fallback for rows stamped before
+	// degraded_since existed.
+	let failing_since = |st: &Issue| {
+		st.active
+			.then_some(st.degraded_since.unwrap_or(st.first_seen))
+	};
+
+	let mut servers: Vec<CheckDetailServerData> = Vec::new();
+	let mut groups: Vec<CheckDetailGroupData> = Vec::new();
+	let mut canopy: Option<CheckDetailCanopyData> = None;
+	for st in states {
+		let Some(result) = st.observed_result else {
+			continue;
+		};
+		let row_stability = stability
+			.get(&st.id)
+			.map(|row| database::stability::StabilityData::from_row(row, now));
+		match (st.server_id, st.server_group_id) {
+			(Some(sid), _) => {
+				let Some(server) = live.get(&sid) else {
+					continue;
+				};
+				servers.push(CheckDetailServerData {
+					server_id: server.id,
+					server_name: server.name.clone().unwrap_or_default(),
+					group_id: server.group_id,
+					group_name: server.group_id.and_then(|g| group_names.get(&g).cloned()),
+					rank: server.rank,
+					kind: server.kind,
+					result,
+					data: st.detail.clone().unwrap_or_else(|| serde_json::json!({})),
+					failing_since: failing_since(&st),
+					status_created_at: st.last_seen,
+					stability: row_stability,
+				});
+			}
+			(None, Some(gid)) => {
+				groups.push(CheckDetailGroupData {
+					group_id: gid,
+					group_name: group_names.get(&gid).cloned().unwrap_or_default(),
+					rank: group_ranks.get(&gid).copied(),
+					result,
+					data: st.detail.clone().unwrap_or_else(|| serde_json::json!({})),
+					failing_since: failing_since(&st),
+					status_created_at: st.last_seen,
+					stability: row_stability,
+				});
+			}
+			(None, None) => {
+				canopy = Some(CheckDetailCanopyData {
+					result,
+					data: st.detail.clone().unwrap_or_else(|| serde_json::json!({})),
+					failing_since: failing_since(&st),
+					status_created_at: st.last_seen,
+					stability: row_stability,
+				});
+			}
+		}
+	}
 	servers.sort_by(|a, b| {
 		check_result_rank(a.result)
 			.cmp(&check_result_rank(b.result))
 			.then_with(|| a.group_name.cmp(&b.group_name))
 			.then_with(|| a.server_name.cmp(&b.server_name))
 	});
+	groups.sort_by(|a, b| a.group_name.cmp(&b.group_name));
 
 	let policy = CheckPolicy::get(&mut conn, &args.source, &args.check).await?;
 
-	Ok(Json(CheckAttentionData {
+	Ok(Json(CheckDetailData {
 		source: args.source,
 		check: args.check,
 		ceiling: policy.as_ref().map(|p| p.ceiling),
 		escalates: policy.as_ref().is_some_and(|p| p.escalates),
 		documentation: policy.and_then(|p| p.documentation),
 		servers,
+		groups,
+		canopy,
 	}))
 }
 

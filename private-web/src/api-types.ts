@@ -2865,7 +2865,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/statuses/check_attention": {
+    "/api/statuses/check_detail": {
         parameters: {
             query?: never;
             header?: never;
@@ -2885,7 +2885,7 @@ export interface paths {
          *     a way to correlate servers sharing the same issue during a
          *     fleet-wide incident.
          */
-        post: operations["status_check_attention"];
+        post: operations["status_check_detail"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3657,8 +3657,8 @@ export interface components {
             /** @description Label value. */
             value: string;
         };
-        /** @description Request body for [`check_attention`]. */
-        CheckAttentionArgs: {
+        /** @description Request body for [`check_detail`]. */
+        CheckDetailArgs: {
             /**
              * @description The healthcheck name to look up, exactly as reported by devices in
              *     `health[].check` (an arbitrary, device/plugin-defined string).
@@ -3671,12 +3671,31 @@ export interface components {
              */
             source: string;
         };
+        /** @description The canopy-wide state of this check (self-monitoring), if any. */
+        CheckDetailCanopyData: {
+            /** @description The check's own fields from its latest filing, verbatim. */
+            data: unknown;
+            /**
+             * Format: date-time
+             * @description When the current degradation streak began; `None` while healthy.
+             */
+            failing_since?: string | null;
+            /** @description The check's observed result on its latest filing. */
+            result: components["schemas"]["CheckResult"];
+            stability?: null | components["schemas"]["StabilityData"];
+            /**
+             * Format: date-time
+             * @description When the check state last updated.
+             */
+            status_created_at: string;
+        };
         /**
-         * @description Response for [`check_attention`]: the queried check's catalog policy
+         * @description Response for [`check_detail`]: the queried check's catalog policy
          *     (if it has one yet) and every live server whose latest status reports
          *     it, failing or healthy.
          */
-        CheckAttentionData: {
+        CheckDetailData: {
+            canopy?: null | components["schemas"]["CheckDetailCanopyData"];
             /**
              * @description The configured policy ceiling for this (source, check), or `None`
              *     if the source has never reported it (so it has no catalog row).
@@ -3692,13 +3711,18 @@ export interface components {
             /** @description Whether this check's policy escalates its effective failures. */
             escalates: boolean;
             /**
+             * @description Group-scoped states of this check, ordered by group name. The
+             *     client files each under its group in the list.
+             */
+            groups: components["schemas"]["CheckDetailGroupData"][];
+            /**
              * @description Every live server whose latest state from this source reports
              *     this check, at any result, ordered as a TODO list: failed,
              *     warning, broken, passed, skipped (most urgent first), then by
              *     group name then server name. The client filters out the
              *     passed/skipped tail unless the "show healthy" toggle is on.
              */
-            servers: components["schemas"]["CheckAttentionServerData"][];
+            servers: components["schemas"]["CheckDetailServerData"][];
             /**
              * @description The source that was queried, echoed back with `check` so the page
              *     can render its heading without re-decoding the request.
@@ -3706,10 +3730,40 @@ export interface components {
             source: string;
         };
         /**
-         * @description One server whose latest status reports [`CheckAttentionData::check`],
-         *     for [`check_attention`].
+         * @description A group-scoped state of this check — a condition Canopy determines
+         *     about the group's control plane (backup health and the like) — for
+         *     the group's section of the check detail list.
          */
-        CheckAttentionServerData: {
+        CheckDetailGroupData: {
+            /** @description The check's own fields from its latest filing, verbatim. */
+            data: unknown;
+            /**
+             * Format: date-time
+             * @description When the current degradation streak began; `None` while healthy.
+             */
+            failing_since?: string | null;
+            /**
+             * Format: uuid
+             * @description The group's id — the UI links to `/groups/{group_id}`.
+             */
+            group_id: string;
+            /** @description The group's display name. */
+            group_name: string;
+            rank?: null | components["schemas"]["ServerRank"];
+            /** @description The check's observed result on its latest filing. */
+            result: components["schemas"]["CheckResult"];
+            stability?: null | components["schemas"]["StabilityData"];
+            /**
+             * Format: date-time
+             * @description When the check state last updated.
+             */
+            status_created_at: string;
+        };
+        /**
+         * @description One server whose latest status reports [`CheckDetailData::check`],
+         *     for [`check_detail`].
+         */
+        CheckDetailServerData: {
             /**
              * @description The check's own fields from its latest report, verbatim, so the
              *     row can expand to the same per-check detail the server page shows.
@@ -3729,6 +3783,9 @@ export interface components {
             group_id?: string | null;
             /** @description The server's group name, if it belongs to one. */
             group_name?: string | null;
+            /** @description The server's kind, for the standard within-rank ordering. */
+            kind: components["schemas"]["ServerKind"];
+            rank?: null | components["schemas"]["ServerRank"];
             /**
              * @description The check's observed result on its latest report. The UI shows
              *     warning/failed/broken servers by default and puts passed/skipped
@@ -3742,6 +3799,7 @@ export interface components {
             server_id: string;
             /** @description The server's display name; empty string when the server has none. */
             server_name: string;
+            stability?: null | components["schemas"]["StabilityData"];
             /**
              * Format: date-time
              * @description When the check state last updated (the check's latest report).
@@ -4114,6 +4172,19 @@ export interface components {
              *     connected with yet.
              */
             query: string;
+        };
+        /** @description One hour-of-week bucket of the degradation profile. */
+        DutyBucket: {
+            /**
+             * Format: int64
+             * @description How many of them were degraded.
+             */
+            degraded: number;
+            /**
+             * Format: int64
+             * @description Observations landing in this hour-of-week.
+             */
+            observations: number;
         };
         /**
          * @description A server's enrollment state: whether a device has registered, and
@@ -6987,6 +7058,71 @@ export interface components {
             rows: unknown[][];
         };
         /**
+         * @description A state's full stability record on the wire: the stored counters, ring,
+         *     and profile, plus the derived statistics. Shared by the private API and
+         *     the MCP interface.
+         */
+        StabilityData: {
+            /**
+             * Format: int64
+             * @description How many of them were degraded (observed warning/failed/broken).
+             */
+            degraded_observations: number;
+            /**
+             * @description Hour-of-week degradation profile: 168 buckets, UTC, Monday 00:00
+             *     first, each with how many observations landed there and how many
+             *     were degraded. Recent-leaning: bucket counters halve at a cap.
+             */
+            duty_cycle: components["schemas"]["DutyBucket"][];
+            /**
+             * Format: date-time
+             * @description When the state was last observed (skipped observations excluded).
+             */
+            last_observed_at?: string | null;
+            /** @description Whether the last observation was degraded. */
+            last_observed_degraded?: boolean | null;
+            /**
+             * Format: int64
+             * @description Total observations recorded for this state.
+             */
+            observations: number;
+            /** @description Statistics derived from the transition ring. */
+            stats: components["schemas"]["StabilityStats"];
+            /** @description The remembered healthy↔degraded transitions, oldest first. */
+            transitions: components["schemas"]["Transition"][];
+        };
+        /** @description Flap statistics derived from a transition ring. */
+        StabilityStats: {
+            /**
+             * Format: int32
+             * @description State changes recorded in the last 24 hours.
+             */
+            flips_24h: number;
+            /**
+             * Format: int32
+             * @description State changes recorded in the last 7 days.
+             */
+            flips_7d: number;
+            /**
+             * Format: date-time
+             * @description The oldest remembered transition: the flip counts only see back to
+             *     here, so on a heavily flapping state they are lower bounds.
+             */
+            ring_covers_from?: string | null;
+            /**
+             * Format: int64
+             * @description Median length of the completed degraded runs the ring remembers,
+             *     in seconds.
+             */
+            typical_degraded_run_secs?: number | null;
+            /**
+             * Format: int64
+             * @description Median length of the completed healthy gaps between remembered
+             *     degraded runs, in seconds.
+             */
+            typical_healthy_gap_secs?: number | null;
+        };
+        /**
          * @description A single status push from a server, as of a point in time, with derived
          *     health and version information.
          */
@@ -7163,6 +7299,19 @@ export interface components {
             tags: string[];
             /** @description The tailnet (Tailscale network) this node belongs to. */
             tailnet: string;
+        };
+        /**
+         * @description One healthy↔degraded transition: the state became (or was first
+         *     observed) `degraded`/healthy at `at`.
+         */
+        Transition: {
+            /**
+             * Format: date-time
+             * @description When the state changed.
+             */
+            at: string;
+            /** @description Whether it became degraded (true) or healthy (false). */
+            degraded: boolean;
         };
         /** @description Identifies a device and the role to trust it at. */
         TrustArgs: {
@@ -11215,7 +11364,7 @@ export interface operations {
             };
         };
     };
-    status_check_attention: {
+    status_check_detail: {
         parameters: {
             query?: never;
             header?: never;
@@ -11224,7 +11373,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CheckAttentionArgs"];
+                "application/json": components["schemas"]["CheckDetailArgs"];
             };
         };
         responses: {
@@ -11234,7 +11383,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CheckAttentionData"];
+                    "application/json": components["schemas"]["CheckDetailData"];
                 };
             };
             500: {

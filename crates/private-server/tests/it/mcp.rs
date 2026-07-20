@@ -775,3 +775,118 @@ async fn backup_defaults_lists_seeded_org_default() {
 	})
 	.await
 }
+
+/// File one observation of (source=test, check=wobbly) on a server, with
+/// the given observed result, through the real filing path so the
+/// stability record updates like production.
+async fn observe_wobbly(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	server_id: uuid::Uuid,
+	observed: commons_types::status::CheckResult,
+) {
+	use commons_types::status::CheckResult;
+	let active = matches!(
+		observed,
+		CheckResult::Failed | CheckResult::Warning | CheckResult::Broken
+	);
+	let stamp = database::issues::CheckStateStamp {
+		check: "wobbly".into(),
+		observed,
+		effective: observed,
+		escalates: false,
+		detail: None,
+	};
+	database::issues::NewEvent {
+		source: "test".into(),
+		r#ref: "wobbly".into(),
+		description: None,
+		message: "obs".into(),
+		active: Some(active),
+		occurred_at: None,
+	}
+	.save_with_state(conn, server_id, None, Some(&stamp))
+	.await
+	.expect("file observation");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn check_stability_returns_full_records_for_pairs() {
+	use commons_types::status::CheckResult;
+	commons_tests::server::run(async |mut conn, _public, private| {
+		seed(&mut conn).await;
+		let grouped: uuid::Uuid = SRV_GROUPED.parse().unwrap();
+
+		// A flap: red, green, red — three observations, three ring entries.
+		observe_wobbly(&mut conn, grouped, CheckResult::Failed).await;
+		observe_wobbly(&mut conn, grouped, CheckResult::Passed).await;
+		observe_wobbly(&mut conn, grouped, CheckResult::Failed).await;
+
+		let out = call_tool!(
+			private,
+			"get_check_stability",
+			serde_json::json!({
+				"checks": [{ "source": "test", "check_name": "wobbly" }],
+			})
+		);
+		let rows = out["rows"].as_array().expect("rows array");
+		assert_eq!(rows.len(), 1, "one matching state: {rows:?}");
+		let row = &rows[0];
+		assert_eq!(row["server_id"], serde_json::json!(SRV_GROUPED));
+		assert_eq!(row["server_name"], serde_json::json!("Prod Central"));
+		assert_eq!(row["source"], serde_json::json!("test"));
+		assert_eq!(row["check_name"], serde_json::json!("wobbly"));
+		assert_eq!(row["observed_result"], serde_json::json!("failed"));
+		let stability = &row["stability"];
+		assert_eq!(stability["observations"], serde_json::json!(3));
+		assert_eq!(stability["degraded_observations"], serde_json::json!(2));
+		assert_eq!(
+			stability["transitions"].as_array().map(|t| t.len()),
+			Some(3),
+			"red, green, red: {stability}"
+		);
+		assert_eq!(
+			stability["duty_cycle"].as_array().map(|d| d.len()),
+			Some(168)
+		);
+		assert_eq!(stability["stats"]["flips_24h"], serde_json::json!(3));
+
+		// Narrowing to a server with no such state returns nothing.
+		let out = call_tool!(
+			private,
+			"get_check_stability",
+			serde_json::json!({
+				"checks": [{ "source": "test", "check_name": "wobbly" }],
+				"server_id": SRV_UNGROUPED,
+			})
+		);
+		assert_eq!(out["rows"].as_array().map(|r| r.len()), Some(0));
+
+		// Narrowing to the group finds it again.
+		let out = call_tool!(
+			private,
+			"get_check_stability",
+			serde_json::json!({
+				"checks": [{ "source": "test", "check_name": "wobbly" }],
+				"group_id": GROUP,
+			})
+		);
+		assert_eq!(out["rows"].as_array().map(|r| r.len()), Some(1));
+
+		// An empty checks list is an invalid-params error, not a result.
+		let resp = private
+			.post("/api/mcp")
+			.add_header("accept", ACCEPT)
+			.add_header("mcp-protocol-version", PROTO)
+			.json(&serde_json::json!({
+				"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+				"params": { "name": "get_check_stability", "arguments": { "checks": [] } }
+			}))
+			.await;
+		let env = parse_envelope(&resp.text());
+		assert!(
+			env.get("error").is_some(),
+			"empty checks should be an rpc error: {env}"
+		);
+	})
+	.await
+}

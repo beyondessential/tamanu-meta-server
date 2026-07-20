@@ -298,7 +298,7 @@ async fn stamp_check_state(
 	} else {
 		prior_last_degraded.map(jiff_diesel::Timestamp::from)
 	};
-	diesel::update(issues::table.filter(issues::id.eq(issue_id)))
+	let issue = diesel::update(issues::table.filter(issues::id.eq(issue_id)))
 		.set((
 			issues::check_name.eq(&stamp.check),
 			issues::observed_result.eq(stamp.observed.to_string()),
@@ -311,7 +311,11 @@ async fn stamp_check_state(
 		.returning(Issue::as_select())
 		.get_result(conn)
 		.await
-		.map_err(AppError::from)
+		.map_err(AppError::from)?;
+	// Every stamped filing also feeds the state's stability record (from
+	// the observed result, so policy never feeds back into it).
+	crate::stability::record_observation(conn, issue_id, stamp.observed, at).await?;
+	Ok(issue)
 }
 
 impl NewEvent {
@@ -1042,11 +1046,11 @@ pub async fn health_from_check_state(
 }
 
 impl Issue {
-	/// Server-scoped check state for one (source, check). The per-check
-	/// attention page's data source: rows carry the observed/effective
-	/// results, the check's detail, and the degraded-streak timestamps.
-	/// A check's identity is the pair — a same-named check from another
-	/// source is a different check.
+	/// Check state for one (source, check), across every scope — server,
+	/// group, and canopy-wide. The check detail page's data source: rows
+	/// carry the observed/effective results, the check's detail, and the
+	/// degraded-streak timestamps. A check's identity is the pair — a
+	/// same-named check from another source is a different check.
 	pub async fn check_state_for_check(
 		conn: &mut AsyncPgConnection,
 		source: &str,
@@ -1058,7 +1062,6 @@ impl Issue {
 			.select(Issue::as_select())
 			.filter(dsl::source.eq(source))
 			.filter(dsl::check_name.eq(check_name))
-			.filter(dsl::server_id.is_not_null())
 			.filter(dsl::observed_result.is_not_null())
 			.load(conn)
 			.await

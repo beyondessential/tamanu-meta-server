@@ -89,9 +89,13 @@ export type ServerGroupCard = Solidify<Schemas["ServerGroupCard"]>;
 export type ServerGroup = Solidify<Schemas["ServerGroup"]>;
 export type GroupDetail = Solidify<Schemas["GroupDetail"]>;
 export type SummaryData = Solidify<Schemas["SummaryData"]>;
-export type CheckAttentionData = Solidify<Schemas["CheckAttentionData"]>;
-export type CheckAttentionServerData = Solidify<
-	Schemas["CheckAttentionServerData"]
+export type CheckDetailData = Solidify<Schemas["CheckDetailData"]>;
+export type CheckDetailServerData = Solidify<
+	Schemas["CheckDetailServerData"]
+>;
+export type CheckDetailGroupData = Solidify<Schemas["CheckDetailGroupData"]>;
+export type CheckDetailCanopyData = Solidify<
+	Schemas["CheckDetailCanopyData"]
 >;
 export type TagMap = Solidify<Schemas["TagMap"]>;
 
@@ -119,6 +123,7 @@ export type DeviceInfo = Solidify<Schemas["DeviceInfo"]>;
 export type TailnetLiveInfo = Solidify<Schemas["TailnetLiveInfo"]>;
 
 export type CheckPolicyData = Solidify<Schemas["CheckPolicyData"]>;
+export type StabilityData = Solidify<Schemas["StabilityData"]>;
 export type HealthcheckSample = Solidify<Schemas["HealthcheckSample"]>;
 export type HealthcheckSampleResponse = Solidify<Schemas["HealthcheckSampleResponse"]>;
 

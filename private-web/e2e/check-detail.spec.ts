@@ -2,12 +2,14 @@ import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
 	seedCheckPolicy,
+	seedCheckStability,
+	seedIssue,
 	seedServer,
 	seedServerGroup,
 	seedStatus,
 } from "./seed";
 
-test.describe("healthcheck attention page", () => {
+test.describe("check detail page", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
 	});
@@ -17,12 +19,12 @@ test.describe("healthcheck attention page", () => {
 	}) => {
 		await page.goto("/healthchecks/alertd/postgres");
 		await expect(
-			page.getByText("No servers currently flag"),
+			page.getByText("Nothing currently flags"),
 		).toBeVisible();
 		await expect(page.getByRole("heading", { name: "postgres" })).toBeVisible();
 	});
 
-	test("lists servers flagging the check, ordered failed before warning, with server and group links", async ({
+	test("lists servers flagging the check under their group heading, with server and group links", async ({
 		page,
 		sql,
 	}) => {
@@ -77,20 +79,21 @@ test.describe("healthcheck attention page", () => {
 		await expect(page.getByText("Pacific Central")).toHaveCount(0);
 		await expect(page.getByText("Navua Facility")).toHaveCount(0);
 
-		// Each row carries two links: the group's display name to the
-		// group page, the server's display name to the server page.
+		// The group renders once, as the section heading linking to the
+		// group page; server rows link to their server pages.
 		await expect(failingLink).toHaveAttribute(
 			"href",
 			`/servers/${failing.id}`,
 		);
 		await expect(page.locator(`a[href="/groups/${group.id}"]`)).toHaveCount(
-			2,
+			1,
 		);
 		await expect(
-			page.locator(`a[href="/groups/${group.id}"]`).first(),
+			page.locator(`a[href="/groups/${group.id}"]`),
 		).toHaveText("Coral Coast");
 
-		// Failed sorts above warning.
+		// Standard list ordering within the group: kind then name
+		// (Korolevu before Sigatoka).
 		const failingY = (await failingLink.boundingBox())!.y;
 		const warningY = (await warningLink.boundingBox())!.y;
 		expect(failingY).toBeLessThan(warningY);
@@ -135,12 +138,14 @@ test.describe("healthcheck attention page", () => {
 			page.getByRole("link", { name: "Goroka Facility" }),
 		).toBeVisible();
 		await expect(page.getByText("passed", { exact: true })).toBeVisible();
-		// The failing server stays listed, above the healthy one.
+		// Both are listed in the standard name order (Goroka before
+		// Mendi) — position no longer encodes urgency, the result chip
+		// does.
 		const failingLink = page.getByRole("link", { name: "Mendi Facility" });
 		const healthyLink = page.getByRole("link", { name: "Goroka Facility" });
 		const failingY = (await failingLink.boundingBox())!.y;
 		const healthyY = (await healthyLink.boundingBox())!.y;
-		expect(failingY).toBeLessThan(healthyY);
+		expect(healthyY).toBeLessThan(failingY);
 	});
 
 	test("a row expands to the check's full data, like the server detail table", async ({
@@ -196,6 +201,47 @@ test.describe("healthcheck attention page", () => {
 		).toBeVisible();
 	});
 
+	test("group and canopy states file under their own sections", async ({
+		page,
+		sql,
+	}) => {
+		// The group's rank bucket comes from its highest-ranked member.
+		const group = await seedServerGroup(sql, { name: "Backup Coast" });
+		await seedServer(sql, {
+			name: "Anchor Central",
+			kind: "central",
+			rank: "production",
+			groupId: group.id,
+		});
+		// A group-scoped canopy check (control-plane condition)...
+		await seedIssue(sql, {
+			serverGroupId: group.id,
+			source: "canopy",
+			ref: "backup-maintenance",
+			message: "maintenance failing",
+		});
+		// ...and canopy's own state for the same check.
+		await seedIssue(sql, {
+			source: "canopy",
+			ref: "backup-maintenance",
+			message: "self-monitoring",
+		});
+
+		await page.goto("/healthchecks/canopy/backup-maintenance");
+
+		// The group's state sits under the production rank heading, in the
+		// group's section, labelled as the whole group.
+		await expect(page.getByText("production", { exact: true })).toBeVisible();
+		await expect(
+			page.locator(`a[href="/groups/${group.id}"]`),
+		).toHaveText("Backup Coast");
+		await expect(page.getByText("whole group", { exact: true })).toBeVisible();
+
+		// Canopy's own state gets the trailing section.
+		await expect(page.getByText("canopy", { exact: true })).toBeVisible();
+		await expect(page.getByText("Canopy (self-monitoring)")).toBeVisible();
+	});
+
 	test("shows since when the check has been failing, from the active issue", async ({
 		page,
 		sql,
@@ -240,7 +286,7 @@ test.describe("healthcheck attention page", () => {
 		// The state-backed row shows a relative failing-since; the row
 		// without an active streak shows the em-dash placeholder.
 		await expect(page.getByText("3h ago")).toBeVisible();
-		await expect(page.getByText("—")).toBeVisible();
+		await expect(page.getByText("—", { exact: true })).toBeVisible();
 	});
 
 	test("shows the catalog ceiling when one is configured", async ({
@@ -361,5 +407,155 @@ test.describe("healthcheck attention page", () => {
 		await expect(checkLink).toBeVisible();
 		await checkLink.click();
 		await expect(page).toHaveURL(/\/healthchecks\/alertd\/postgres$/);
+	});
+});
+
+test.describe("stability record", () => {
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("shows the flap summary and the duty-cycle heatmap", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "Flap Coast" });
+		const server = await seedServer(sql, {
+			name: "Wobbly Facility",
+			groupId: group.id,
+		});
+		await seedStatus(sql, {
+			serverId: server.id,
+			health: [{ check: "postgres", result: "failed" }],
+		});
+		const minsAgo = (m: number) =>
+			new Date(Date.now() - m * 60_000).toISOString();
+		await seedCheckStability(sql, {
+			serverId: server.id,
+			check: "postgres",
+			observations: 20,
+			degradedObservations: 12,
+			transitions: [
+				{ at: minsAgo(200), degraded: true },
+				{ at: minsAgo(150), degraded: false },
+				{ at: minsAgo(90), degraded: true },
+				{ at: minsAgo(30), degraded: false },
+			],
+			dutyBuckets: { 0: [10, 8], 1: [10, 1] },
+		});
+
+		await page.goto("/healthchecks/alertd/postgres");
+		const row = page.getByRole("row", { name: /wobbly facility/i });
+		await expect(row.getByText("4 flips/24h")).toBeVisible();
+
+		await row.getByRole("button", { name: /expand/i }).click();
+		// Scoped to the expanded row's panel — the fleet stability section
+		// above the table shows the same numbers with its own heatmap.
+		const panel = page.locator("table");
+		await expect(
+			panel.getByText(/observed 20 times \(12 degraded\)/i),
+		).toBeVisible();
+		await expect(
+			panel.getByText(/4 state changes in 24 h, 4 in 7 days/i),
+		).toBeVisible();
+		await expect(panel.getByTestId("duty-cell")).toHaveCount(168);
+		// The two seeded buckets carry their degraded fractions.
+		await expect(
+			panel.locator('[data-testid="duty-cell"][data-fraction="0.8"]'),
+		).toHaveCount(1);
+		await expect(
+			panel.locator('[data-testid="duty-cell"][data-fraction="0.1"]'),
+		).toHaveCount(1);
+	});
+
+	test("a state without a record reads as unknown", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "Quiet Coast" });
+		const server = await seedServer(sql, {
+			name: "Quiet Facility",
+			groupId: group.id,
+		});
+		await seedStatus(sql, {
+			serverId: server.id,
+			health: [{ check: "postgres", result: "failed" }],
+		});
+
+		await page.goto("/healthchecks/alertd/postgres");
+		const row = page.getByRole("row", { name: /quiet facility/i });
+		await expect(row.getByText("no record")).toBeVisible();
+	});
+});
+
+test.describe("fleet stability", () => {
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("rolls every server's record into one heatmap", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "Rollup Coast" });
+		const a = await seedServer(sql, { name: "Server A", groupId: group.id });
+		const b = await seedServer(sql, { name: "Server B", groupId: group.id });
+		await seedStatus(sql, {
+			serverId: a.id,
+			health: [{ check: "postgres", result: "failed" }],
+		});
+		await seedStatus(sql, {
+			serverId: b.id,
+			health: [{ check: "postgres", result: "passed" }],
+		});
+		const minsAgo = (m: number) =>
+			new Date(Date.now() - m * 60_000).toISOString();
+		await seedCheckStability(sql, {
+			serverId: a.id,
+			check: "postgres",
+			observations: 10,
+			degradedObservations: 6,
+			transitions: [
+				{ at: minsAgo(90), degraded: true },
+				{ at: minsAgo(30), degraded: false },
+			],
+			dutyBuckets: { 5: [10, 6] },
+		});
+		await seedCheckStability(sql, {
+			serverId: b.id,
+			check: "postgres",
+			observations: 10,
+			degradedObservations: 0,
+			transitions: [],
+			dutyBuckets: { 5: [10, 0] },
+		});
+
+		await page.goto("/healthchecks/alertd/postgres");
+		await expect(
+			page.getByRole("heading", { name: "Fleet stability" }),
+		).toBeVisible();
+		// Both servers contribute: the shared bucket blends to 6/20.
+		await expect(
+			page.getByText(/across 2 servers with a record/i),
+		).toBeVisible();
+		await expect(
+			page.getByText(/2 state changes in 24 h, 2 in 7 days, on 1 target/i),
+		).toBeVisible();
+		const fleet = page
+			.getByRole("heading", { name: "Fleet stability" })
+			.locator("..");
+		await expect(
+			fleet.locator('[data-testid="duty-cell"][data-fraction="0.3"]'),
+		).toHaveCount(1);
+
+		// The group heading carries its own aggregate — here identical to
+		// the fleet's, since the fleet is one group — and expands to the
+		// group-scoped rollup (a second heatmap).
+		await expect(
+			page.getByText("2 flips/24h across 2 servers"),
+		).toBeVisible();
+		await expect(page.getByTestId("duty-cell")).toHaveCount(168);
+		await page.getByRole("button", { name: "Expand group" }).click();
+		await expect(page.getByTestId("duty-cell")).toHaveCount(336);
+		await expect(
+			page.getByText(/across 2 servers with a record/i),
+		).toHaveCount(2);
 	});
 });

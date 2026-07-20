@@ -28,6 +28,7 @@ pub mod servers;
 pub mod silenced_refs;
 pub mod slack_outbox;
 pub mod sql_playground_history;
+pub mod stability;
 pub mod statuses;
 pub mod tags;
 pub mod tailscale_users;

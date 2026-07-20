@@ -279,6 +279,48 @@ export async function seedStatus(
 	return { id, createdAt: String(rows[0]!.created_at) };
 }
 
+/** Stability record for a check state previously seeded via `seedStatus`
+ * (or `seedIssue`), keyed by the (server, source, ref) it created.
+ * `transitions` is the healthy↔degraded ring, oldest first; `dutyBuckets`
+ * maps hour-of-week bucket indexes (UTC, Monday 00:00 = 0) to
+ * [observations, degraded] pairs, all other buckets zero. */
+export async function seedCheckStability(
+	sql: Sql,
+	opts: {
+		serverId: string;
+		source?: string;
+		check: string;
+		observations?: number;
+		degradedObservations?: number;
+		transitions?: Array<{ at: string; degraded: boolean }>;
+		dutyBuckets?: Record<number, [number, number]>;
+	},
+): Promise<void> {
+	const transitions = opts.transitions ?? [];
+	const duty: [number, number][] = Array.from({ length: 168 }, (_, i) => {
+		const bucket = opts.dutyBuckets?.[i];
+		return bucket ? [bucket[0], bucket[1]] : [0, 0];
+	});
+	const last = transitions[transitions.length - 1];
+	await sql.query(
+		`INSERT INTO check_stability
+		 (issue_id, observations, degraded_observations, last_observed_at, last_observed_degraded, transitions, duty_cycle)
+		 SELECT id, $4, $5, $6::timestamptz, $7, $8::jsonb, $9::jsonb
+		 FROM issues WHERE server_id = $1 AND source = $2 AND ref = $3`,
+		[
+			opts.serverId,
+			opts.source ?? "alertd",
+			`health/${opts.check}`,
+			opts.observations ?? transitions.length,
+			opts.degradedObservations ?? transitions.filter((t) => t.degraded).length,
+			last?.at ?? null,
+			last?.degraded ?? null,
+			JSON.stringify(transitions),
+			JSON.stringify(duty),
+		],
+	);
+}
+
 export interface SeededCheckPolicy {
 	source: string;
 	checkName: string;
