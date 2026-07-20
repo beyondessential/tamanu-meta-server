@@ -422,3 +422,61 @@ pub enum HealthState {
 	/// At least one health check failed. Considered an incident.
 	Unhealthy,
 }
+
+impl HealthState {
+	/// Roll a set of effective check results into a server health state:
+	/// any failure ⇒ unhealthy; otherwise any warning or brokenness ⇒
+	/// warning; otherwise healthy. Passed and skipped results don't count.
+	/// The single source of truth for every health rollup — callers filter
+	/// out silenced/resolved/decommissioned checks first, then pass the
+	/// surviving effective results.
+	pub fn from_results(results: impl IntoIterator<Item = CheckResult>) -> Self {
+		let mut state = HealthState::Healthy;
+		for result in results {
+			match result {
+				CheckResult::Failed => return HealthState::Unhealthy,
+				CheckResult::Warning | CheckResult::Broken => state = HealthState::Warning,
+				CheckResult::Passed | CheckResult::Skipped => {}
+			}
+		}
+		state
+	}
+}
+
+#[cfg(test)]
+mod health_state_tests {
+	use super::{CheckResult, HealthState};
+
+	#[test]
+	fn any_failure_is_unhealthy() {
+		assert_eq!(
+			HealthState::from_results([
+				CheckResult::Passed,
+				CheckResult::Warning,
+				CheckResult::Failed,
+			]),
+			HealthState::Unhealthy,
+		);
+	}
+
+	#[test]
+	fn warning_or_broken_without_failure_is_warning() {
+		assert_eq!(
+			HealthState::from_results([CheckResult::Passed, CheckResult::Broken]),
+			HealthState::Warning,
+		);
+		assert_eq!(
+			HealthState::from_results([CheckResult::Warning, CheckResult::Passed]),
+			HealthState::Warning,
+		);
+	}
+
+	#[test]
+	fn only_passed_and_skipped_is_healthy() {
+		assert_eq!(
+			HealthState::from_results([CheckResult::Passed, CheckResult::Skipped]),
+			HealthState::Healthy,
+		);
+		assert_eq!(HealthState::from_results([]), HealthState::Healthy);
+	}
+}

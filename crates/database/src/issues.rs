@@ -976,9 +976,8 @@ pub async fn health_from_check_state(
 	use commons_types::status::HealthState;
 	use std::collections::{HashMap, HashSet};
 
-	let mut out: HashMap<Uuid, HealthState> = HashMap::new();
 	if servers.is_empty() {
-		return Ok(out);
+		return Ok(HashMap::new());
 	}
 	let server_ids: Vec<Uuid> = servers.iter().map(|(id, _)| *id).collect();
 	let group_of: HashMap<Uuid, Option<Uuid>> = servers.iter().copied().collect();
@@ -1040,6 +1039,9 @@ pub async fn health_from_check_state(
 		}
 	}
 
+	// Collect each server's surviving effective results, then roll up
+	// through the one shared classifier — the same rules everywhere.
+	let mut contributing: HashMap<Uuid, Vec<CheckResult>> = HashMap::new();
 	for (server_id, source, check_name, effective) in rows {
 		let Some(server_id) = server_id else {
 			continue;
@@ -1059,18 +1061,19 @@ pub async fn health_from_check_state(
 		{
 			continue;
 		}
-		let contribution = match effective.as_deref().and_then(|e| e.parse().ok()) {
-			Some(CheckResult::Failed) => HealthState::Unhealthy,
-			Some(CheckResult::Warning | CheckResult::Broken) => HealthState::Warning,
-			_ => continue,
+		let Some(result) = effective
+			.as_deref()
+			.and_then(|e| e.parse::<CheckResult>().ok())
+		else {
+			continue;
 		};
-		let entry = out.entry(server_id).or_insert(HealthState::Healthy);
-		if contribution == HealthState::Unhealthy || *entry == HealthState::Healthy {
-			*entry = contribution;
-		}
+		contributing.entry(server_id).or_default().push(result);
 	}
 
-	Ok(out)
+	Ok(contributing
+		.into_iter()
+		.map(|(server_id, results)| (server_id, HealthState::from_results(results)))
+		.collect())
 }
 
 impl Issue {
