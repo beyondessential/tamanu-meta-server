@@ -220,7 +220,7 @@ export default function App() {
 						<Route path="recovery" element={<RecoveryVault />} />
 						<Route path="healthchecks" element={<Healthchecks />} />
 						<Route
-							path="healthchecks/:checkName"
+							path="healthchecks/:source/:checkName"
 							element={<HealthcheckSettings />}
 						/>
 						<Route path="restore-consumers" element={<RestoreConsumers />} />

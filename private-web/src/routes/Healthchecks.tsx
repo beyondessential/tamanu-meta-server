@@ -25,7 +25,12 @@ import CheckResultChip from "../components/CheckResultChip";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
-import { CEILINGS, type Ceiling, type CheckPolicyData } from "../types";
+import {
+	CEILINGS,
+	healthcheckSettingsPath,
+	type Ceiling,
+	type CheckPolicyData,
+} from "../types";
 
 export default function Healthchecks() {
 	usePageTitle("Healthchecks");
@@ -157,13 +162,15 @@ function HealthcheckRow({
 		<TableRow hover>
 			<TableCell sx={{ fontFamily: "monospace" }}>{row.source}</TableCell>
 			<TableCell sx={{ fontFamily: "monospace" }}>
-				<RouterLink to={`/settings/healthchecks/${row.check_name}`}>{row.check_name}</RouterLink>
+				<RouterLink to={healthcheckSettingsPath(row.source, row.check_name)}>
+					{row.check_name}
+				</RouterLink>
 			</TableCell>
 			<TableCell>
 				{hasRules ? (
 					<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 						<Typography variant="body2">
-							<RouterLink to={`/settings/healthchecks/${row.check_name}`}>
+							<RouterLink to={healthcheckSettingsPath(row.source, row.check_name)}>
 								Custom rules ({row.rule_count})
 							</RouterLink>
 						</Typography>
@@ -221,7 +228,7 @@ function HealthcheckRow({
 						)}
 						<Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
 							·{" "}
-							<RouterLink to={`/settings/healthchecks/${row.check_name}`}>
+							<RouterLink to={healthcheckSettingsPath(row.source, row.check_name)}>
 								Add custom rules
 							</RouterLink>
 						</Typography>

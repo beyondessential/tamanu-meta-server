@@ -340,6 +340,15 @@ export function healthcheckPath(source: string, check: string): string {
 	return `/healthchecks/${encodeURIComponent(source)}/${encodeURIComponent(check)}`;
 }
 
+/// Route to the policy editor for `check`. Like [`healthcheckPath`], a
+/// check's identity is the (source, check) pair — the editor is scoped to
+/// one such pair, so every link builder must carry the source and go
+/// through this instead of interpolating the (arbitrary, not necessarily
+/// URL-safe) name directly.
+export function healthcheckSettingsPath(source: string, check: string): string {
+	return `/settings/healthchecks/${encodeURIComponent(source)}/${encodeURIComponent(check)}`;
+}
+
 /// The check name embedded in a health issue's `ref` (`health/<check>`,
 /// filed under whichever source reports the check), or `null` for
 /// issues whose ref isn't a healthcheck (backups, manual, canopy
