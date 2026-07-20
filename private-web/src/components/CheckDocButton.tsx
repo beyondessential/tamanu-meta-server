@@ -11,6 +11,7 @@ import {
 import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi } from "../api";
+import { healthcheckSettingsPath } from "../types";
 import Markdown from "./Markdown";
 
 /** `?` affordance shown next to a check name wherever its state is
@@ -94,7 +95,7 @@ function DocContent({ source, check }: { source: string; check: string }) {
 			<Typography variant="caption" sx={{ display: "block", mt: 1 }}>
 				<MuiLink
 					component={RouterLink}
-					to={`/settings/healthchecks/${encodeURIComponent(check)}`}
+					to={healthcheckSettingsPath(source, check)}
 				>
 					{documentation ? "Edit documentation" : "Write it"}
 				</MuiLink>

@@ -340,7 +340,7 @@ test.describe("check detail page", () => {
 	}) => {
 		await seedCheckPolicy(sql, { checkName: "disk_space" });
 
-		await page.goto("/settings/healthchecks/disk_space");
+		await page.goto("/settings/healthchecks/alertd/disk_space");
 		await expect(
 			page.getByText("Nobody has documented this check yet", { exact: false }),
 		).toBeVisible();

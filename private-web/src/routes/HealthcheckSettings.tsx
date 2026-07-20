@@ -189,13 +189,20 @@ function valueToInputText(value: unknown): string {
 // ── Page ──────────────────────────────────────────────────────────────────
 
 export default function HealthcheckSettings() {
-	const { checkName } = useParams<{ checkName: string }>();
+	const { source, checkName } = useParams<{ source: string; checkName: string }>();
 	usePageTitle(checkName ?? "Healthcheck");
 	const isAdmin = useIsAdmin() === true;
 	const list = useApi("healthchecks", "list");
 
-	const rows: CheckPolicyData[] =
-		list.status === "ok" ? list.data.filter((r) => r.check_name === checkName) : [];
+	// A check's identity is the (source, check) pair, so the editor targets
+	// exactly one catalog entry — never an aggregate across same-named checks
+	// from different sources, which are unrelated checks.
+	const row: CheckPolicyData | null =
+		list.status === "ok"
+			? (list.data.find(
+					(r) => r.source === source && r.check_name === checkName,
+				) ?? null)
+			: null;
 
 	return (
 		<Stack spacing={2}>
@@ -206,42 +213,38 @@ export default function HealthcheckSettings() {
 				<Typography variant="h6" component="h2" sx={{ fontFamily: "monospace" }}>
 					{checkName}
 				</Typography>
+				<Typography
+					variant="body2"
+					color="text.secondary"
+					sx={{ fontFamily: "monospace" }}
+				>
+					source: {source}
+				</Typography>
 			</Box>
 
 			{list.status === "loading" || list.status === "idle" ? (
 				<LinearProgress />
 			) : list.status === "error" ? (
 				<Alert severity="error">{list.error.message}</Alert>
-			) : rows.length === 0 ? (
+			) : row === null ? (
 				<Alert severity="warning">
-					No healthcheck named <code>{checkName}</code> in the catalog yet — it'll
-					appear here once a server reports it.
+					No healthcheck <code>{checkName}</code> reported by{" "}
+					<code>{source}</code> in the catalog yet — it'll appear here once that
+					source reports it.
 				</Alert>
 			) : (
-				rows.map((row) => (
-					<Stack key={row.source} spacing={2}>
-						{rows.length > 1 && (
-							<Typography variant="subtitle2" sx={{ fontFamily: "monospace" }}>
-								source: {row.source}
-							</Typography>
-						)}
-						<Typography variant="body2">
-							<RouterLink to={healthcheckPath(row.source, row.check_name)}>
-								See servers currently flagging this check
-								{rows.length > 1 && ` (as reported by ${row.source})`}
-							</RouterLink>
-						</Typography>
-						<RowMetadata row={row} />
-						<CeilingCard row={row} canEdit={isAdmin} onChanged={list.reload} />
-						<DocumentationCard
-							row={row}
-							canEdit={isAdmin}
-							onChanged={list.reload}
-						/>
-						<NotesCard row={row} canEdit={isAdmin} onChanged={list.reload} />
-						<RulesCard row={row} canEdit={isAdmin} onChanged={list.reload} />
-					</Stack>
-				))
+				<Stack spacing={2}>
+					<Typography variant="body2">
+						<RouterLink to={healthcheckPath(row.source, row.check_name)}>
+							See servers currently flagging this check
+						</RouterLink>
+					</Typography>
+					<RowMetadata row={row} />
+					<CeilingCard row={row} canEdit={isAdmin} onChanged={list.reload} />
+					<DocumentationCard row={row} canEdit={isAdmin} onChanged={list.reload} />
+					<NotesCard row={row} canEdit={isAdmin} onChanged={list.reload} />
+					<RulesCard row={row} canEdit={isAdmin} onChanged={list.reload} />
+				</Stack>
 			)}
 		</Stack>
 	);

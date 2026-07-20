@@ -37,6 +37,7 @@ import { useReloadInterval } from "../hooks/useReloadInterval";
 import {
 	SERVER_RANK_ORDER,
 	compareServersByRankThenKind,
+	healthcheckSettingsPath,
 	type CheckDetailData,
 	type CheckDetailGroupData,
 	type CheckDetailServerData,
@@ -98,7 +99,7 @@ export default function CheckDetail() {
 				<Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
 					<MuiLink
 						component={RouterLink}
-						to={`/settings/healthchecks/${encodeURIComponent(check ?? "")}`}
+						to={healthcheckSettingsPath(source ?? "", check ?? "")}
 					>
 						Configure ceiling / rules / documentation
 					</MuiLink>
