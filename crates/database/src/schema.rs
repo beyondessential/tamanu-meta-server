@@ -182,6 +182,9 @@ diesel::table! {
 		reviewed_by -> Nullable<Text>,
 		updated_at -> Timestamptz,
 		documentation -> Nullable<Text>,
+		last_seen -> Nullable<Timestamptz>,
+		decommissioned_at -> Nullable<Timestamptz>,
+		decommissioned_by -> Nullable<Text>,
 	}
 }
 

@@ -77,6 +77,18 @@ pub struct CheckPolicy {
 	/// each result means, and hints for solving a failure; canopy
 	/// attaches no meaning to its structure.
 	pub documentation: Option<String>,
+	/// When this check was most recently reported on any server across the
+	/// fleet. Reconciled periodically from check state, not stamped on
+	/// ingestion. `None` until the first reconcile after the check appears.
+	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
+	pub last_seen: Option<Timestamp>,
+	/// When an operator decommissioned this check. A decommissioned check
+	/// contributes to nothing — health, incidents, or source staleness —
+	/// until it is reported again. `None` while live.
+	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
+	pub decommissioned_at: Option<Timestamp>,
+	/// The operator who decommissioned this check. `None` while live.
+	pub decommissioned_by: Option<String>,
 }
 
 /// The outcome of applying a check's policy to an observed result.
