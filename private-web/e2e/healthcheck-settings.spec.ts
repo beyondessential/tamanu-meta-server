@@ -45,7 +45,7 @@ test.describe("healthcheck settings page", () => {
 		await seedCheckPolicy(sql, {
 			checkName: "version",
 			source: "bestool",
-			ceiling: "critical",
+			ceiling: "failed",
 		});
 
 		// The alertd page shows only alertd's entry (its warning ceiling),
@@ -78,8 +78,9 @@ test.describe("healthcheck settings page", () => {
 		await page.goto("/settings/healthchecks/alertd/caddy_version");
 
 		// The escalate toggle is an interactive, enabled switch for admins
-		// (non-admins get a read-only chip instead).
-		const escalate = page.getByRole("checkbox", { name: /Escalates/ });
+		// (non-admins get a read-only chip instead). MUI's Switch is exposed
+		// with role "switch".
+		const escalate = page.getByRole("switch", { name: /Escalates/ });
 		await expect(escalate).toBeEnabled();
 
 		// The documentation editor's entry button is present.
