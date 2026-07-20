@@ -8,9 +8,11 @@ use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
+use commons_types::source::ReachabilityMode;
 use commons_types::status::CheckResult;
 use database::check_policies::{CheckPolicy, IfLadder};
 use database::servers::Server;
+use database::source_policies::SourcePolicy;
 use database::statuses::Status;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -23,6 +25,8 @@ use crate::state::AppState;
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(list))
+		.routes(routes!(sources))
+		.routes(routes!(set_source_reachability))
 		.routes(routes!(update))
 		.routes(routes!(decommission))
 		.routes(routes!(update_rules))
@@ -170,6 +174,97 @@ pub async fn list(
 	let mut conn = state.db.get().await?;
 	let rows = CheckPolicy::list(&mut conn).await?;
 	Ok(Json(rows.into_iter().map(Into::into).collect()))
+}
+
+/// One reporting source with its reachability policy and fleet-wide
+/// last-seen.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SourceData {
+	/// The source name, as reported by devices.
+	pub source: String,
+	/// How this source's silence bears on its servers' reachability: `on`
+	/// (a stale source warns, all-stale is unreachable), `quiet` (never
+	/// warns, still counts toward unreachable), or `off` (excluded).
+	#[schema(value_type = String)]
+	pub reachability: ReachabilityMode,
+	/// When any of this source's checks was most recently reported anywhere
+	/// in the fleet. `null` until liveness has been reconciled.
+	pub last_seen: Option<Timestamp>,
+}
+
+/// List the reporting sources and their reachability policy.
+///
+/// Every non-reserved source that has catalogued checks, with its
+/// reachability mode (defaulting to `on`) and most recent fleet-wide
+/// report. The reserved `canopy`/`manual` sources are excluded.
+#[utoipa::path(
+	post,
+	path = "/sources",
+	operation_id = "healthcheck_sources",
+	tag = "healthchecks",
+	security(("tailscale-admin" = [])),
+	responses(
+		(status = 200, description = "Sources ordered by name.", body = Vec<SourceData>),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn sources(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+) -> Result<Json<Vec<SourceData>>> {
+	let mut conn = state.db.get().await?;
+	let rows = SourcePolicy::list_sources(&mut conn).await?;
+	Ok(Json(
+		rows.into_iter()
+			.map(|s| SourceData {
+				source: s.source,
+				reachability: s.reachability,
+				last_seen: s.last_seen,
+			})
+			.collect(),
+	))
+}
+
+/// Request body for setting a source's reachability mode.
+#[derive(Deserialize, ToSchema)]
+pub struct SetSourceReachabilityArgs {
+	/// The source to configure. The reserved `canopy`/`manual` names are
+	/// rejected.
+	pub source: String,
+	/// The reachability mode to apply: `on`, `quiet`, or `off`.
+	#[schema(value_type = String)]
+	pub reachability: ReachabilityMode,
+}
+
+/// Set a source's reachability mode.
+#[utoipa::path(
+	post,
+	path = "/set_source_reachability",
+	operation_id = "healthcheck_set_source_reachability",
+	tag = "healthchecks",
+	security(("tailscale-admin" = [])),
+	request_body = SetSourceReachabilityArgs,
+	responses(
+		(status = 200, description = "Reachability mode set."),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn set_source_reachability(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<SetSourceReachabilityArgs>,
+) -> Result<Json<()>> {
+	if args.source == "canopy" || args.source == "manual" {
+		return Err(AppError::BadRequest(
+			"the reserved canopy/manual sources have no reachability policy".into(),
+		));
+	}
+	let mut conn = state.db.get().await?;
+	SourcePolicy::set_reachability(&mut conn, &args.source, args.reachability).await?;
+	Ok(Json(()))
 }
 
 /// Request body for updating a check's base policy.
