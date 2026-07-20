@@ -185,7 +185,6 @@ pub struct SourceData {
 	/// How this source's silence bears on its servers' reachability: `on`
 	/// (a stale source warns, all-stale is unreachable), `quiet` (never
 	/// warns, still counts toward unreachable), or `off` (excluded).
-	#[schema(value_type = String)]
 	pub reachability: ReachabilityMode,
 	/// When any of this source's checks was most recently reported anywhere
 	/// in the fleet. `null` until liveness has been reconciled.
@@ -233,7 +232,6 @@ pub struct SetSourceReachabilityArgs {
 	/// rejected.
 	pub source: String,
 	/// The reachability mode to apply: `on`, `quiet`, or `off`.
-	#[schema(value_type = String)]
 	pub reachability: ReachabilityMode,
 }
 

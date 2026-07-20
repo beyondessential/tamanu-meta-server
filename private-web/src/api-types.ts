@@ -5712,6 +5712,13 @@ export interface components {
             passphrase: string;
         };
         /**
+         * @description How a source's silence bears on its servers' reachability.
+         *
+         *     Stored as text in Postgres, validated as this enum at the edges.
+         * @enum {string}
+         */
+        ReachabilityMode: "on" | "quiet" | "off";
+        /**
          * @description One row of the recent-runs view: either a device-reported [`BackupRun`] or a
          *     run inferred from a [`BackupCredentialIssuance`] that never matched a report.
          *     Duration, when present, is Canopy-measured wall-clock — the interval from the
@@ -7001,7 +7008,7 @@ export interface components {
         /** @description Request body for setting a source's reachability mode. */
         SetSourceReachabilityArgs: {
             /** @description The reachability mode to apply: `on`, `quiet`, or `off`. */
-            reachability: string;
+            reachability: components["schemas"]["ReachabilityMode"];
             /**
              * @description The source to configure. The reserved `canopy`/`manual` names are
              *     rejected.
@@ -7118,7 +7125,7 @@ export interface components {
              *     (a stale source warns, all-stale is unreachable), `quiet` (never
              *     warns, still counts toward unreachable), or `off` (excluded).
              */
-            reachability: string;
+            reachability: components["schemas"]["ReachabilityMode"];
             /** @description The source name, as reported by devices. */
             source: string;
         };
