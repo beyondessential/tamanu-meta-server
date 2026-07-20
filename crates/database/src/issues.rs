@@ -972,7 +972,7 @@ pub async fn health_from_check_state(
 	conn: &mut AsyncPgConnection,
 	servers: &[(Uuid, Option<Uuid>)],
 ) -> Result<std::collections::HashMap<Uuid, commons_types::status::HealthState>> {
-	use crate::schema::{issues, scoped_check_policies};
+	use crate::schema::{check_policies, issues, scoped_check_policies};
 	use commons_types::status::HealthState;
 	use std::collections::{HashMap, HashSet};
 
@@ -993,8 +993,25 @@ pub async fn health_from_check_state(
 		.filter(issues::server_id.eq_any(&server_ids))
 		.filter(issues::check_name.is_not_null())
 		.filter(issues::effective_result.is_not_null())
+		// Only states currently contributing count: an operator-resolved
+		// or inactive state has stopped dragging the server down, even if
+		// its last effective result was a failure (a source that went
+		// stale mid-failure never re-graded it down).
+		.filter(issues::active.eq(true))
+		.filter(issues::resolved_at.is_null())
 		.load(conn)
 		.await?;
+
+	// Decommissioned checks contribute to nothing. Keyed fleet-wide by
+	// (source, check) in the catalog, so a check retired anywhere is
+	// skipped everywhere.
+	let decommissioned: HashSet<(String, String)> = check_policies::table
+		.select((check_policies::source, check_policies::check_name))
+		.filter(check_policies::decommissioned_at.is_not_null())
+		.load::<(String, String)>(conn)
+		.await?
+		.into_iter()
+		.collect();
 
 	let group_ids: Vec<Uuid> = group_of.values().filter_map(|g| *g).collect();
 	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
@@ -1031,6 +1048,9 @@ pub async fn health_from_check_state(
 			continue;
 		};
 		let key = (server_id, source, check_name);
+		if decommissioned.contains(&(key.1.clone(), key.2.clone())) {
+			continue;
+		}
 		if server_silences.contains(&key) {
 			continue;
 		}
