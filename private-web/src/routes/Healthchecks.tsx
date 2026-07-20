@@ -32,20 +32,36 @@ import {
 	type CheckPolicyData,
 } from "../types";
 
+/** A catalogued check unreported anywhere for this long is a
+ * decommissioning candidate — mirrors the backend's 7-day window. */
+const GONE_QUIET_MS = 7 * 24 * 60 * 60 * 1000;
+
+function isGoneQuiet(row: CheckPolicyData): boolean {
+	if (row.decommissioned_at || !row.last_seen) return false;
+	return Date.now() - new Date(row.last_seen).getTime() > GONE_QUIET_MS;
+}
+
 export default function Healthchecks() {
 	usePageTitle("Healthchecks");
 	const isAdmin = useIsAdmin() === true;
 	const list = useApi("healthchecks", "list");
 	const [onlyPending, setOnlyPending] = useState(false);
+	const [onlyGoneQuiet, setOnlyGoneQuiet] = useState(false);
 
 	const rows: CheckPolicyData[] = list.status === "ok" ? list.data : [];
 	const pendingCount = useMemo(
 		() => rows.filter((r) => r.pending_review).length,
 		[rows],
 	);
+	const goneQuietCount = useMemo(() => rows.filter(isGoneQuiet).length, [rows]);
 	const visible = useMemo(
-		() => (onlyPending ? rows.filter((r) => r.pending_review) : rows),
-		[rows, onlyPending],
+		() =>
+			rows.filter(
+				(r) =>
+					(!onlyPending || r.pending_review) &&
+					(!onlyGoneQuiet || isGoneQuiet(r)),
+			),
+		[rows, onlyPending, onlyGoneQuiet],
 	);
 
 	return (
@@ -72,6 +88,15 @@ export default function Healthchecks() {
 				) : (
 					<Chip label="all reviewed" color="success" size="small" variant="outlined" />
 				)}
+				{goneQuietCount > 0 && (
+					<Chip
+						label={`${goneQuietCount} gone quiet`}
+						color="warning"
+						size="small"
+						variant="outlined"
+						title="Checks not reported anywhere in the fleet for 7+ days — candidates for decommissioning"
+					/>
+				)}
 				<FormControlLabel
 					control={
 						<Switch
@@ -82,6 +107,16 @@ export default function Healthchecks() {
 					}
 					label="Show only pending review"
 				/>
+				<FormControlLabel
+					control={
+						<Switch
+							size="small"
+							checked={onlyGoneQuiet}
+							onChange={(e) => setOnlyGoneQuiet(e.target.checked)}
+						/>
+					}
+					label="Show only gone quiet"
+				/>
 			</Stack>
 
 			{list.status === "loading" || list.status === "idle" ? (
@@ -90,9 +125,11 @@ export default function Healthchecks() {
 				<Alert severity="error">{list.error.message}</Alert>
 			) : visible.length === 0 ? (
 				<Alert severity="info">
-					{onlyPending
-						? "No checks pending review."
-						: "No healthchecks reported yet."}
+					{onlyGoneQuiet
+						? "No checks have gone quiet."
+						: onlyPending
+							? "No checks pending review."
+							: "No healthchecks reported yet."}
 				</Alert>
 			) : (
 				<Paper variant="outlined">
@@ -104,6 +141,7 @@ export default function Healthchecks() {
 									<TableCell>Check name</TableCell>
 									<TableCell>Ceiling</TableCell>
 									<TableCell>First seen</TableCell>
+									<TableCell>Last seen</TableCell>
 									<TableCell>Reviewed</TableCell>
 								</TableRow>
 							</TableHead>
@@ -135,8 +173,32 @@ function HealthcheckRow({
 	onChanged: () => void;
 }) {
 	const update = useApiAction("healthchecks", "update");
+	const decommission = useApiAction("healthchecks", "decommission");
 	const [localCeiling, setLocalCeiling] = useState<Ceiling>(row.ceiling as Ceiling);
 	const [localEscalates, setLocalEscalates] = useState(row.escalates);
+
+	const goneQuiet = isGoneQuiet(row);
+	const decommissioned = row.decommissioned_at != null;
+
+	const doDecommission = async () => {
+		if (
+			!window.confirm(
+				`Decommission ${row.source}/${row.check_name}? Its states across all ` +
+					`servers will be resolved and it will stop counting toward health ` +
+					`and staleness. It returns pending review if reported again.`,
+			)
+		)
+			return;
+		try {
+			await decommission.call({
+				source: row.source,
+				check_name: row.check_name,
+			});
+			onChanged();
+		} catch {
+			// Error is surfaced in the row below.
+		}
+	};
 
 	const save = async () => {
 		try {
@@ -242,6 +304,49 @@ function HealthcheckRow({
 			</TableCell>
 			<TableCell>
 				<TimeAgo timestamp={row.first_seen} />
+			</TableCell>
+			<TableCell>
+				{decommissioned ? (
+					<Chip
+						label="decommissioned"
+						size="small"
+						variant="outlined"
+						title={
+							row.decommissioned_at
+								? `Decommissioned ${new Date(row.decommissioned_at).toLocaleString()}`
+								: undefined
+						}
+					/>
+				) : (
+					<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+						{row.last_seen ? (
+							<TimeAgo timestamp={row.last_seen} />
+						) : (
+							<Typography variant="caption" color="text.secondary">
+								never
+							</Typography>
+						)}
+						{goneQuiet && (
+							<Chip label="gone quiet" color="warning" size="small" />
+						)}
+						{canEdit && goneQuiet && (
+							<Button
+								size="small"
+								color="warning"
+								variant="outlined"
+								onClick={doDecommission}
+								disabled={decommission.pending}
+							>
+								Decommission
+							</Button>
+						)}
+					</Stack>
+				)}
+				{decommission.error && (
+					<Typography variant="caption" color="error" sx={{ display: "block" }}>
+						{formatError(decommission.error)}
+					</Typography>
+				)}
 			</TableCell>
 			<TableCell>
 				{row.pending_review ? (

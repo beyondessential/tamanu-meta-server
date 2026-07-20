@@ -338,14 +338,19 @@ export async function seedCheckPolicy(
 		escalates?: boolean;
 		notes?: string | null;
 		documentation?: string | null;
+		/** Fleet-wide last-seen, as the liveness reconciler would set it.
+		 * Backdate it past 7 days to make the check a decommissioning
+		 * candidate ("gone quiet"). */
+		lastSeen?: string | null;
+		decommissionedAt?: string | null;
 	},
 ): Promise<SeededCheckPolicy> {
 	const source = opts.source ?? "alertd";
 	await sql.query(
-		`INSERT INTO check_policies (source, check_name, ceiling, escalates, notes, documentation)
-		 VALUES ($1, $2, $3, $4, $5, $6)
+		`INSERT INTO check_policies (source, check_name, ceiling, escalates, notes, documentation, last_seen, decommissioned_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		 ON CONFLICT (source, check_name)
-		 DO UPDATE SET ceiling = EXCLUDED.ceiling, escalates = EXCLUDED.escalates, notes = EXCLUDED.notes, documentation = EXCLUDED.documentation`,
+		 DO UPDATE SET ceiling = EXCLUDED.ceiling, escalates = EXCLUDED.escalates, notes = EXCLUDED.notes, documentation = EXCLUDED.documentation, last_seen = EXCLUDED.last_seen, decommissioned_at = EXCLUDED.decommissioned_at`,
 		[
 			source,
 			opts.checkName,
@@ -353,6 +358,8 @@ export async function seedCheckPolicy(
 			opts.escalates ?? false,
 			opts.notes ?? null,
 			opts.documentation ?? null,
+			opts.lastSeen ?? null,
+			opts.decommissionedAt ?? null,
 		],
 	);
 	return { source, checkName: opts.checkName };
