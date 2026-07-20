@@ -6,11 +6,13 @@
 mod backfill_registered_at_migration;
 mod backup_detection;
 mod backups;
+mod check_liveness;
 mod check_policies;
 mod check_policy_rules;
 mod check_severity_map;
 mod check_stability;
 mod event_validation;
+mod health_rollup;
 mod incident_close_result;
 mod incident_get_with_issues;
 mod incident_linger;

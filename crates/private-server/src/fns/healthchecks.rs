@@ -24,6 +24,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(list))
 		.routes(routes!(update))
+		.routes(routes!(decommission))
 		.routes(routes!(update_rules))
 		.routes(routes!(update_documentation))
 		.routes(routes!(sample))
@@ -69,6 +70,15 @@ pub struct CheckPolicyData {
 	pub documentation: Option<String>,
 	/// `true` if no operator has reviewed this policy yet.
 	pub pending_review: bool,
+	/// When this check was most recently reported on any server across the
+	/// fleet. `null` until liveness has been reconciled since it first
+	/// appeared. A check quiet for long enough is a decommissioning
+	/// candidate.
+	pub last_seen: Option<Timestamp>,
+	/// When this check was decommissioned, if it has been. A decommissioned
+	/// check contributes to nothing until it is reported again. `null` while
+	/// live.
+	pub decommissioned_at: Option<Timestamp>,
 	/// Conditional rules that can grade a report to a different result
 	/// than the ceiling would — in any direction — depending on the
 	/// check's own fields, the surrounding status report, or the
@@ -127,6 +137,8 @@ impl From<CheckPolicy> for CheckPolicyData {
 			updated_at: h.updated_at,
 			documentation: h.documentation,
 			pending_review,
+			last_seen: h.last_seen,
+			decommissioned_at: h.decommissioned_at,
 			rules: h.rules,
 			rule_count,
 		}
@@ -229,6 +241,46 @@ pub async fn update(
 	)
 	.await?;
 	Ok(Json(row.into()))
+}
+
+/// Request body for decommissioning a check.
+#[derive(Deserialize, ToSchema)]
+pub struct DecommissionArgs {
+	/// The source whose check to decommission.
+	pub source: String,
+	/// The healthcheck name to decommission; must already exist in the
+	/// catalog.
+	pub check_name: String,
+}
+
+/// Decommission a check fleet-wide.
+///
+/// Retires the (source, check): its state on every server is resolved and
+/// it stops counting toward health, incidents, and source staleness. When
+/// the source has no live checks left, its per-server staleness clears
+/// too. If the check is ever reported again it returns pending review at
+/// the warning ceiling.
+#[utoipa::path(
+	post,
+	path = "/decommission",
+	operation_id = "healthcheck_decommission",
+	tag = "healthchecks",
+	security(("tailscale-admin" = [])),
+	request_body = DecommissionArgs,
+	responses(
+		(status = 200, description = "Check decommissioned."),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn decommission(
+	State(state): State<AppState>,
+	admin: TailscaleAdmin,
+	Json(args): Json<DecommissionArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	CheckPolicy::decommission(&mut conn, &args.source, &args.check_name, &admin.0.login).await?;
+	Ok(Json(()))
 }
 
 /// Request body for replacing a check's documentation.

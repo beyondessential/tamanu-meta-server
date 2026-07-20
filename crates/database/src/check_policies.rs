@@ -26,6 +26,13 @@ use serde_json::Value as JsonValue;
 use std::collections::{BTreeMap, HashMap};
 use uuid::Uuid;
 
+/// A catalogued check unreported anywhere in the fleet for this long is
+/// surfaced to operators as a candidate for decommissioning.
+pub const GONE_QUIET_HOURS: i64 = 24 * 7;
+/// A catalogued check unreported anywhere in the fleet for this long
+/// raises a canopy-wide warning.
+pub const STALE_ALERT_HOURS: i64 = 24 * 30;
+
 /// The policy for one (source, check). An entry is created automatically
 /// the first time a source reports a check with this name, at the default
 /// ceiling; operators then review and adjust how that check's results are
@@ -77,6 +84,18 @@ pub struct CheckPolicy {
 	/// each result means, and hints for solving a failure; canopy
 	/// attaches no meaning to its structure.
 	pub documentation: Option<String>,
+	/// When this check was most recently reported on any server across the
+	/// fleet. Reconciled periodically from check state, not stamped on
+	/// ingestion. `None` until the first reconcile after the check appears.
+	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
+	pub last_seen: Option<Timestamp>,
+	/// When an operator decommissioned this check. A decommissioned check
+	/// contributes to nothing — health, incidents, or source staleness —
+	/// until it is reported again. `None` while live.
+	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
+	pub decommissioned_at: Option<Timestamp>,
+	/// The operator who decommissioned this check. `None` while live.
+	pub decommissioned_by: Option<String>,
 }
 
 /// The outcome of applying a check's policy to an observed result.
@@ -90,6 +109,132 @@ pub struct GradedResult {
 }
 
 impl CheckPolicy {
+	/// Reconcile fleet-wide check liveness. Refreshes every catalogued
+	/// `(source, check)`'s `last_seen` to the most recent report of that
+	/// check on any server (synthetic `canopy`/`manual` sources excluded),
+	/// and re-animates any decommissioned check that has been reported
+	/// since it was retired: cleared back to the newly-registered state
+	/// (warning ceiling, pending review) so a resurrected check never
+	/// silently resumes a retired policy. Runs periodically off the hot
+	/// ingestion path — a few minutes of lag is fine. Returns the number of
+	/// checks re-animated.
+	pub async fn reconcile_liveness(db: &mut AsyncPgConnection) -> Result<usize> {
+		use diesel::sql_query;
+
+		// Refresh last_seen from current check state: one row per
+		// (server, source, check) carries that check's most recent report
+		// time, so the fleet-wide max per (source, check) is its liveness.
+		let refresh = format!(
+			"UPDATE check_policies cp SET last_seen = f.max_seen FROM (\
+			 SELECT source, check_name, max(last_seen) AS max_seen FROM issues \
+			 WHERE server_id IS NOT NULL AND check_name IS NOT NULL \
+			 AND source NOT IN ('{canopy}', '{manual}') \
+			 GROUP BY source, check_name) f \
+			 WHERE cp.source = f.source AND cp.check_name = f.check_name \
+			 AND (cp.last_seen IS NULL OR cp.last_seen < f.max_seen)",
+			canopy = crate::statuses::CANOPY_SOURCE,
+			manual = crate::issues::MANUAL_SOURCE,
+		);
+		sql_query(refresh).execute(db).await?;
+
+		// Re-animate any decommissioned check that has reported since it was
+		// retired: reset to the newly-registered state (warning ceiling,
+		// pending review, no rules) so its policy is re-vetted.
+		let reanimated = sql_query(
+			"UPDATE check_policies SET decommissioned_at = NULL, decommissioned_by = NULL, \
+			 ceiling = 'warning', rules = NULL, reviewed_at = NULL, reviewed_by = NULL \
+			 WHERE decommissioned_at IS NOT NULL AND last_seen IS NOT NULL \
+			 AND last_seen > decommissioned_at",
+		)
+		.execute(db)
+		.await?;
+
+		Ok(reanimated)
+	}
+
+	/// Live (not decommissioned) catalogued checks whose most recent
+	/// fleet-wide report is older than `cutoff`. Ordered by source then
+	/// name. Drives the operator "gone quiet" list and the stale-check
+	/// self-alert.
+	pub async fn gone_quiet(db: &mut AsyncPgConnection, cutoff: Timestamp) -> Result<Vec<Self>> {
+		use crate::schema::check_policies::dsl;
+		dsl::check_policies
+			.select(Self::as_select())
+			.filter(dsl::decommissioned_at.is_null())
+			.filter(dsl::last_seen.is_not_null())
+			.filter(dsl::last_seen.lt(jiff_diesel::Timestamp::from(cutoff)))
+			.order((dsl::source, dsl::check_name))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Decommission a `(source, check)` fleet-wide: mark the catalog row,
+	/// resolve the check's outstanding states on every server (recording
+	/// decommissioning as the reason, re-evaluating incident membership),
+	/// and — when the source has no live checks left — clear its per-server
+	/// staleness so a retired reporter stops being flagged. Operator action.
+	pub async fn decommission(
+		db: &mut AsyncPgConnection,
+		source: &str,
+		check_name: &str,
+		by: &str,
+	) -> Result<()> {
+		use crate::schema::check_policies::dsl as cp;
+		use crate::schema::issues::dsl as iss;
+		use commons_types::issue::ResolvedReason;
+
+		let now = jiff_diesel::Timestamp::from(Timestamp::now());
+		diesel::update(
+			cp::check_policies.filter(cp::source.eq(source).and(cp::check_name.eq(check_name))),
+		)
+		.set((
+			cp::decommissioned_at.eq(Some(now)),
+			cp::decommissioned_by.eq(Some(by)),
+		))
+		.execute(db)
+		.await?;
+
+		// Resolve the check's outstanding states on every server, so they
+		// stop counting toward health and incidents.
+		let state_ids: Vec<Uuid> = iss::issues
+			.select(iss::id)
+			.filter(iss::source.eq(source))
+			.filter(iss::check_name.eq(check_name))
+			.filter(iss::server_id.is_not_null())
+			.filter(iss::resolved_at.is_null())
+			.load(db)
+			.await?;
+		for id in state_ids {
+			crate::issues::Issue::resolve(db, id, by, ResolvedReason::Decommissioned).await?;
+		}
+
+		// A source with no live checks left is no longer expected to report;
+		// clear any per-server staleness it still carries (source_freshness
+		// now excludes it, so nothing re-files these).
+		let live: i64 = cp::check_policies
+			.filter(cp::source.eq(source))
+			.filter(cp::decommissioned_at.is_null())
+			.count()
+			.get_result(db)
+			.await?;
+		if live == 0 {
+			let stale_ref = format!("{}{}", crate::statuses::STALE_REF_PREFIX, source);
+			let stale_ids: Vec<Uuid> = iss::issues
+				.select(iss::id)
+				.filter(iss::source.eq(crate::statuses::CANOPY_SOURCE))
+				.filter(iss::check_name.eq(&stale_ref))
+				.filter(iss::server_id.is_not_null())
+				.filter(iss::resolved_at.is_null())
+				.load(db)
+				.await?;
+			for id in stale_ids {
+				crate::issues::Issue::resolve(db, id, by, ResolvedReason::Decommissioned).await?;
+			}
+		}
+		Ok(())
+	}
+
 	/// Insert a row for `(source, check_name)` with default values
 	/// (ceiling = warning) if and only if no row exists yet. Idempotent:
 	/// safe to call on every status push for every check seen, including

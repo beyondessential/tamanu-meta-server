@@ -2507,6 +2507,56 @@
         ]
       }
     },
+    "/api/healthchecks/decommission": {
+      "post": {
+        "tags": [
+          "healthchecks"
+        ],
+        "summary": "Decommission a check fleet-wide.",
+        "description": "Retires the (source, check): its state on every server is resolved and\nit stops counting toward health, incidents, and source staleness. When\nthe source has no live checks left, its per-server staleness clears\ntoo. If the check is ever reported again it returns pending review at\nthe warning ceiling.",
+        "operationId": "healthcheck_decommission",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecommissionArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Check decommissioned."
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/healthchecks/list": {
       "post": {
         "tags": [
@@ -7196,6 +7246,14 @@
             "type": "string",
             "description": "The healthcheck's name, exactly as reported by monitored servers."
           },
+          "decommissioned_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this check was decommissioned, if it has been. A decommissioned\ncheck contributes to nothing until it is reported again. `null` while\nlive."
+          },
           "documentation": {
             "type": [
               "string",
@@ -7211,6 +7269,14 @@
             "type": "string",
             "format": "date-time",
             "description": "When this check was first reported and this policy entry was\ncreated."
+          },
+          "last_seen": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this check was most recently reported on any server across the\nfleet. `null` until liveness has been reconciled since it first\nappeared. A check quiet for long enough is a decommissioning\ncandidate."
           },
           "notes": {
             "type": [
@@ -7532,6 +7598,24 @@
             "type": "string",
             "format": "uuid",
             "description": "The server group to onboard."
+          }
+        }
+      },
+      "DecommissionArgs": {
+        "type": "object",
+        "description": "Request body for decommissioning a check.",
+        "required": [
+          "source",
+          "check_name"
+        ],
+        "properties": {
+          "check_name": {
+            "type": "string",
+            "description": "The healthcheck name to decommission; must already exist in the\ncatalog."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source whose check to decommission."
           }
         }
       },
@@ -10414,13 +10498,14 @@
       },
       "ResolvedReason": {
         "type": "string",
-        "description": "Reason an issue or incident was resolved by an operator.\n\nStored as text in Postgres, validated as this enum at the API layer.\nCategories follow common operational practice (PagerDuty/Sentry/Opsgenie):\n\n- `Fixed` — the underlying problem was addressed.\n- `WontFix` — won't fix; not worth doing, or not actually a problem.\n- `Expected` — known/expected behaviour (e.g. planned maintenance window).\n- `Duplicate` — a duplicate of another issue.\n- `Flapping` — too noisy; suppressed rather than fixed (often paired with\n  a snooze).",
+        "description": "Reason an issue or incident was resolved by an operator.\n\nStored as text in Postgres, validated as this enum at the API layer.\nCategories follow common operational practice (PagerDuty/Sentry/Opsgenie):\n\n- `Fixed` — the underlying problem was addressed.\n- `WontFix` — won't fix; not worth doing, or not actually a problem.\n- `Expected` — known/expected behaviour (e.g. planned maintenance window).\n- `Duplicate` — a duplicate of another issue.\n- `Flapping` — too noisy; suppressed rather than fixed (often paired with\n  a snooze).\n- `Decommissioned` — the check itself was retired fleet-wide; its states\n  are resolved as a side effect, not by an operator addressing them.",
         "enum": [
           "fixed",
           "wont_fix",
           "expected",
           "duplicate",
-          "flapping"
+          "flapping",
+          "decommissioned"
         ]
       },
       "RestoreActivity": {

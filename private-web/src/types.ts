@@ -416,6 +416,9 @@ export const RESOLVED_REASON_LABEL: Record<ResolvedReason, string> = {
 	expected: "Expected",
 	duplicate: "Duplicate",
 	flapping: "Flapping",
+	// Applied as a side effect of decommissioning a check, not operator-
+	// selectable — but shown when an affected issue is displayed.
+	decommissioned: "Decommissioned",
 };
 
 // Shown wherever a resolver is named but no operator login is attached: the

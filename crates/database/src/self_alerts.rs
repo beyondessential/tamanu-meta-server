@@ -31,6 +31,65 @@ The Slack outbox drainer gave up delivering a notification after exhausting its 
 
 Check the abandoned row's last error and response in the slack_outbox table, and the webhook URLs in the drainer's configuration. Slack workflow-trigger changes are the usual cause.";
 
+/// One or more catalogued checks have gone unreported across the whole
+/// fleet for the stale-alert window. Coalescing: one alert lists them all.
+/// Recovers when none remain — each having been reported again or
+/// decommissioned.
+pub const STALE_CHECKS_REF: &str = "stale-healthchecks";
+
+pub const STALE_CHECKS_DOC: &str = "## Description
+
+One or more catalogued healthchecks have not been reported by any server in the fleet for 30 days. A check that has gone away everywhere is usually a reporter that was retired or renamed; its stale state lingers until an operator decommissions it.
+
+## Results
+
+- **warn** — at least one check is unreported fleet-wide for 30 days; recovers when none remain (each reported again or decommissioned).
+
+## Solve
+
+Review the checks listed in the operator UI's healthcheck settings and decommission the ones that are gone for good; a decommissioned check's stale issues are cleared fleet-wide.";
+
+/// Evaluate the fleet-wide check-liveness condition and raise or recover
+/// the coalescing [`STALE_CHECKS_REF`] self-alert. Runs after liveness is
+/// reconciled so it reads fresh `last_seen`. Returns the affected issue,
+/// if any.
+pub async fn sweep_stale_healthchecks(conn: &mut AsyncPgConnection) -> Result<Option<Issue>> {
+	use crate::check_policies::{CheckPolicy, STALE_ALERT_HOURS};
+
+	let cutoff = jiff::Timestamp::now() - jiff::SignedDuration::from_hours(STALE_ALERT_HOURS);
+	let quiet = CheckPolicy::gone_quiet(conn, cutoff).await?;
+	if quiet.is_empty() {
+		return recover(
+			conn,
+			STALE_CHECKS_REF,
+			"all catalogued checks are reporting again or decommissioned",
+		)
+		.await;
+	}
+
+	let names: Vec<String> = quiet
+		.iter()
+		.map(|p| format!("{}/{}", p.source, p.check_name))
+		.collect();
+	let message = format!(
+		"{} healthcheck(s) unreported fleet-wide for 30 days: {}",
+		quiet.len(),
+		names.join(", "),
+	);
+	raise(
+		conn,
+		STALE_CHECKS_REF,
+		CheckResult::Warning,
+		CheckResult::Warning,
+		false,
+		Some(STALE_CHECKS_DOC),
+		"Healthchecks gone quiet",
+		&message,
+	)
+	.await
+	.map(Some)
+}
+
 /// Raise (or re-affirm) a self-alert: file the coalescing canopy-wide
 /// check with the given observation, registering its catalog entry with
 /// the policy the condition warrants (first sight only — operator edits

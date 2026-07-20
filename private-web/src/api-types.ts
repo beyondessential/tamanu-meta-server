@@ -1255,6 +1255,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/healthchecks/decommission": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decommission a check fleet-wide.
+         * @description Retires the (source, check): its state on every server is resolved and
+         *     it stops counting toward health, incidents, and source staleness. When
+         *     the source has no live checks left, its per-server staleness clears
+         *     too. If the check is ever reported again it returns pending review at
+         *     the warning ceiling.
+         */
+        post: operations["healthcheck_decommission"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/healthchecks/list": {
         parameters: {
             query?: never;
@@ -3823,6 +3847,13 @@ export interface components {
             /** @description The healthcheck's name, exactly as reported by monitored servers. */
             check_name: string;
             /**
+             * Format: date-time
+             * @description When this check was decommissioned, if it has been. A decommissioned
+             *     check contributes to nothing until it is reported again. `null` while
+             *     live.
+             */
+            decommissioned_at?: string | null;
+            /**
              * @description Operator-authored documentation for this check: a single markdown
              *     document. By convention it covers what the check observes, what
              *     each result means, and hints for solving a failure, but no
@@ -3840,6 +3871,14 @@ export interface components {
              *     created.
              */
             first_seen: string;
+            /**
+             * Format: date-time
+             * @description When this check was most recently reported on any server across the
+             *     fleet. `null` until liveness has been reconciled since it first
+             *     appeared. A check quiet for long enough is a decommissioning
+             *     candidate.
+             */
+            last_seen?: string | null;
             /** @description Free-form operator notes about this check. */
             notes?: string | null;
             /** @description `true` if no operator has reviewed this policy yet. */
@@ -4047,6 +4086,16 @@ export interface components {
              * @description The server group to onboard.
              */
             server_group_id: string;
+        };
+        /** @description Request body for decommissioning a check. */
+        DecommissionArgs: {
+            /**
+             * @description The healthcheck name to decommission; must already exist in the
+             *     catalog.
+             */
+            check_name: string;
+            /** @description The source whose check to decommission. */
+            source: string;
         };
         /** @description Request body for revoking admin access from an email address. */
         DeleteArgs: {
@@ -5868,9 +5917,11 @@ export interface components {
          *     - `Duplicate` — a duplicate of another issue.
          *     - `Flapping` — too noisy; suppressed rather than fixed (often paired with
          *       a snooze).
+         *     - `Decommissioned` — the check itself was retired fleet-wide; its states
+         *       are resolved as a side effect, not by an operator addressing them.
          * @enum {string}
          */
-        ResolvedReason: "fixed" | "wont_fix" | "expected" | "duplicate" | "flapping";
+        ResolvedReason: "fixed" | "wont_fix" | "expected" | "duplicate" | "flapping" | "decommissioned";
         /**
          * @description One row of the restore-activity view: either a consumer-reported restore
          *     health check, or a restore inferred from a credential issuance that never
@@ -9287,6 +9338,44 @@ export interface operations {
                 content?: never;
             };
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    healthcheck_decommission: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DecommissionArgs"];
+            };
+        };
+        responses: {
+            /** @description Check decommissioned. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

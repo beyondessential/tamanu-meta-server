@@ -17,6 +17,7 @@ The current conditions are:
 - Canopy's own identity for reaching backup storage is broken (escalating).
 - An operator-notification delivery has permanently failed (stays until operator-resolved).
 - An MCP access token is within fifteen days of its expiry (see [MCP](mcp.md), "Access tokens").
+- One or more catalogued checks have gone unreported across the whole fleet for thirty days (see [CHK](../monitoring/checks.md), "Liveness and decommissioning"); it clears when no such check remains, each having been decommissioned or reported again.
 
 ## Notification
 
