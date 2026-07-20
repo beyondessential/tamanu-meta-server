@@ -59,6 +59,63 @@ async fn versions_list_with_data() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn releases_rss_feed() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		conn.batch_execute(
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES
+			(1, 0, 0, 'Initial release', 'published'),
+			(1, 1, 0, '## Highlights\n\n- New thing', 'published'),
+			(1, 2, 0, 'Draft only', 'draft')",
+		)
+		.await
+		.unwrap();
+
+		let response = public.get("/versions/rss").await;
+		response.assert_status_ok();
+		response.assert_header("content-type", "application/rss+xml; charset=utf-8");
+
+		let body = response.text();
+		assert!(body.contains("<rss"), "should be an RSS document: {body}");
+		assert!(body.contains("<title>Canopy releases</title>"));
+		// Newest first, published only.
+		assert!(body.contains("Canopy 1.1.0"));
+		assert!(body.contains("Canopy 1.0.0"));
+		assert!(!body.contains("Canopy 1.2.0"), "drafts must not appear");
+		let first = body.find("Canopy 1.1.0").unwrap();
+		let second = body.find("Canopy 1.0.0").unwrap();
+		assert!(first < second, "items should be newest-first");
+		// Changelog markdown is rendered to HTML in the item body.
+		assert!(body.contains("New thing"));
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn releases_rss_feed_excludes_known_issue_versions() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		conn.batch_execute(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
+			('11111111-1111-1111-1111-111111111100', 1, 0, 0, 'good', 'published'),
+			('11111111-1111-1111-1111-111111111101', 1, 0, 1, 'broken', 'published');
+			INSERT INTO version_known_issues (author, description, min_major, min_minor, min_patch)
+			VALUES ('admin', 'broken', 1, 0, 1)",
+		)
+		.await
+		.unwrap();
+
+		let response = public.get("/versions/rss").await;
+		response.assert_status_ok();
+		let body = response.text();
+		assert!(body.contains("Canopy 1.0.0"));
+		assert!(
+			!body.contains("Canopy 1.0.1"),
+			"known-issue versions must be hidden"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn view_version_artifacts_html() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
