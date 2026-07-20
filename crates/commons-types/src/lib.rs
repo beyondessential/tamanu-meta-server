@@ -5,6 +5,7 @@ pub mod device;
 pub mod geo;
 pub mod issue;
 pub mod server;
+pub mod source;
 pub mod status;
 pub mod units;
 pub mod version;
