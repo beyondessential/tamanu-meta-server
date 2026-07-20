@@ -170,6 +170,15 @@ pub fn spawn() -> JoinHandle<()> {
 				Err(err) => error!("staleness sweep failed: {err}"),
 			}
 
+			// Fleet-wide check liveness: refresh each catalogued check's
+			// last_seen and re-animate any decommissioned check that has
+			// reported again. Off the hot ingestion path, minute cadence.
+			match database::check_policies::CheckPolicy::reconcile_liveness(&mut db).await {
+				Ok(0) => {}
+				Ok(n) => debug!("re-animated {n} decommissioned check(s)"),
+				Err(err) => error!("check liveness reconcile failed: {err}"),
+			}
+
 			// Incidents whose linger window has expired: the last effective
 			// failure left, nothing came back, close them and ship the
 			// pending Slack cancel-or-resolve.

@@ -102,6 +102,49 @@ pub struct GradedResult {
 }
 
 impl CheckPolicy {
+	/// Reconcile fleet-wide check liveness. Refreshes every catalogued
+	/// `(source, check)`'s `last_seen` to the most recent report of that
+	/// check on any server (synthetic `canopy`/`manual` sources excluded),
+	/// and re-animates any decommissioned check that has been reported
+	/// since it was retired: cleared back to the newly-registered state
+	/// (warning ceiling, pending review) so a resurrected check never
+	/// silently resumes a retired policy. Runs periodically off the hot
+	/// ingestion path — a few minutes of lag is fine. Returns the number of
+	/// checks re-animated.
+	pub async fn reconcile_liveness(db: &mut AsyncPgConnection) -> Result<usize> {
+		use diesel::sql_query;
+
+		// Refresh last_seen from current check state: one row per
+		// (server, source, check) carries that check's most recent report
+		// time, so the fleet-wide max per (source, check) is its liveness.
+		let refresh = format!(
+			"UPDATE check_policies cp SET last_seen = f.max_seen FROM (\
+			 SELECT source, check_name, max(last_seen) AS max_seen FROM issues \
+			 WHERE server_id IS NOT NULL AND check_name IS NOT NULL \
+			 AND source NOT IN ('{canopy}', '{manual}') \
+			 GROUP BY source, check_name) f \
+			 WHERE cp.source = f.source AND cp.check_name = f.check_name \
+			 AND (cp.last_seen IS NULL OR cp.last_seen < f.max_seen)",
+			canopy = crate::statuses::CANOPY_SOURCE,
+			manual = crate::issues::MANUAL_SOURCE,
+		);
+		sql_query(refresh).execute(db).await?;
+
+		// Re-animate any decommissioned check that has reported since it was
+		// retired: reset to the newly-registered state (warning ceiling,
+		// pending review, no rules) so its policy is re-vetted.
+		let reanimated = sql_query(
+			"UPDATE check_policies SET decommissioned_at = NULL, decommissioned_by = NULL, \
+			 ceiling = 'warning', rules = NULL, reviewed_at = NULL, reviewed_by = NULL \
+			 WHERE decommissioned_at IS NOT NULL AND last_seen IS NOT NULL \
+			 AND last_seen > decommissioned_at",
+		)
+		.execute(db)
+		.await?;
+
+		Ok(reanimated)
+	}
+
 	/// Insert a row for `(source, check_name)` with default values
 	/// (ceiling = warning) if and only if no row exists yet. Idempotent:
 	/// safe to call on every status push for every check seen, including

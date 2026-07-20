@@ -3,6 +3,7 @@
 //! checks, so a source whose every check is retired stops being expected.
 
 use commons_types::status::CheckResult;
+use database::check_policies::CheckPolicy;
 use database::issues::{CheckFiling, FilingScope, Issue, file_check};
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::RunQueryDsl;
@@ -103,6 +104,113 @@ async fn source_with_a_live_check_stays_expected() {
 			source_expected(&mut conn, server_id, "alertd").await,
 			"a source with any live check is still expected",
 		);
+	})
+	.await
+}
+
+#[derive(QueryableByName)]
+struct PolicyRow {
+	#[diesel(sql_type = sql_types::Bool)]
+	last_seen_present: bool,
+	#[diesel(sql_type = sql_types::Bool)]
+	decommissioned: bool,
+	#[diesel(sql_type = sql_types::Text)]
+	ceiling: String,
+	#[diesel(sql_type = sql_types::Bool)]
+	reviewed: bool,
+}
+
+async fn policy(
+	conn: &mut diesel_async::AsyncPgConnection,
+	source: &str,
+	check: &str,
+) -> PolicyRow {
+	sql_query(
+		"SELECT last_seen IS NOT NULL AS last_seen_present, \
+		 decommissioned_at IS NOT NULL AS decommissioned, \
+		 ceiling, reviewed_at IS NOT NULL AS reviewed \
+		 FROM check_policies WHERE source = $1 AND check_name = $2",
+	)
+	.bind::<sql_types::Text, _>(source)
+	.bind::<sql_types::Text, _>(check)
+	.get_result(conn)
+	.await
+	.expect("policy row")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reconcile_stamps_last_seen() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn).await;
+		file_check(&mut conn, filing(server_id, "alertd", "a"))
+			.await
+			.expect("file");
+		assert!(
+			!policy(&mut conn, "alertd", "a").await.last_seen_present,
+			"last_seen is not stamped on ingestion",
+		);
+
+		CheckPolicy::reconcile_liveness(&mut conn)
+			.await
+			.expect("reconcile");
+		assert!(
+			policy(&mut conn, "alertd", "a").await.last_seen_present,
+			"reconcile stamps last_seen from check state",
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reconcile_ignores_synthetic_sources() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn).await;
+		file_check(&mut conn, filing(server_id, "canopy", "reachability"))
+			.await
+			.expect("file");
+
+		CheckPolicy::reconcile_liveness(&mut conn)
+			.await
+			.expect("reconcile");
+		assert!(
+			!policy(&mut conn, "canopy", "reachability")
+				.await
+				.last_seen_present,
+			"synthetic canopy checks are not tracked for liveness",
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reconcile_reanimates_a_reported_decommissioned_check() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn).await;
+		file_check(&mut conn, filing(server_id, "alertd", "a"))
+			.await
+			.expect("file");
+		// Retire it in the past, with an operator-adjusted, reviewed policy.
+		sql_query(
+			"UPDATE check_policies SET decommissioned_at = now() - interval '1 day', \
+			 decommissioned_by = 'op', ceiling = 'failed', reviewed_at = now(), reviewed_by = 'op' \
+			 WHERE source = 'alertd' AND check_name = 'a'",
+		)
+		.execute(&mut conn)
+		.await
+		.expect("decommission");
+
+		// It reports again.
+		file_check(&mut conn, filing(server_id, "alertd", "a"))
+			.await
+			.expect("re-report");
+		CheckPolicy::reconcile_liveness(&mut conn)
+			.await
+			.expect("reconcile");
+
+		let p = policy(&mut conn, "alertd", "a").await;
+		assert!(!p.decommissioned, "a re-reported check is re-animated");
+		assert_eq!(p.ceiling, "warning", "re-animated at the warning ceiling");
+		assert!(!p.reviewed, "re-animated pending operator review");
 	})
 	.await
 }
