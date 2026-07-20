@@ -111,6 +111,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 
 	#[cfg(feature = "ui")]
 	let extras = extras
+		.route("/rss", get(releases_rss))
 		.route("/{version}", get(view_artifacts))
 		.route("/{version}/mobile", get(view_mobile_install));
 
@@ -177,6 +178,82 @@ async fn list(State(db): State<Db>) -> Result<Json<Vec<Version>>> {
 	let versions = Version::get_all(&mut db).await?;
 	let versions = filter_ready(&mut db, versions).await?;
 	Ok(Json(versions))
+}
+
+/// Base URL for absolute links in the feed. Prefers the configured
+/// `PUBLIC_URL`; otherwise reconstructs the origin from the request's
+/// forwarded scheme and `Host` header so local and test runs still emit
+/// well-formed links.
+#[cfg(feature = "ui")]
+fn feed_base_url(headers: &axum::http::HeaderMap) -> String {
+	if let Ok(url) = std::env::var("PUBLIC_URL") {
+		let trimmed = url.trim_end_matches('/');
+		if !trimmed.is_empty() {
+			return trimmed.to_owned();
+		}
+	}
+
+	let scheme = headers
+		.get("x-forwarded-proto")
+		.and_then(|v| v.to_str().ok())
+		.unwrap_or("https");
+	let host = headers
+		.get(header::HOST)
+		.and_then(|v| v.to_str().ok())
+		.unwrap_or("localhost");
+	format!("{scheme}://{host}")
+}
+
+/// RSS 2.0 feed of published releases.
+///
+/// Emits one item per published, ready-to-serve version (the same set as
+/// the `/versions` listing), newest first, with the changelog rendered to
+/// HTML as the item content. Feed readers poll this to learn about new
+/// releases.
+#[cfg(feature = "ui")]
+async fn releases_rss(
+	State(db): State<Db>,
+	headers: axum::http::HeaderMap,
+) -> Result<impl IntoResponse> {
+	use rss::{ChannelBuilder, GuidBuilder, ItemBuilder};
+
+	let mut db = db.get().await?;
+	let versions = Version::get_all(&mut db).await?;
+	let versions = filter_ready(&mut db, versions).await?;
+
+	let base = feed_base_url(&headers);
+
+	let items: Vec<rss::Item> = versions
+		.into_iter()
+		.map(|v| {
+			let version = format!("{}.{}.{}", v.major, v.minor, v.patch);
+			let link = format!("{base}/versions/{version}");
+			// RFC 2822 date, in UTC (jiff timestamps carry no offset).
+			let pub_date = v
+				.created_at
+				.strftime("%a, %d %b %Y %H:%M:%S %z")
+				.to_string();
+			ItemBuilder::default()
+				.title(format!("Canopy {version}"))
+				.link(link.clone())
+				.guid(GuidBuilder::default().value(link).permalink(true).build())
+				.pub_date(pub_date)
+				.description(parse_markdown(&v.changelog))
+				.build()
+		})
+		.collect();
+
+	let channel = ChannelBuilder::default()
+		.title("Canopy releases")
+		.link(format!("{base}/"))
+		.description("Latest published Canopy releases and their changelogs.")
+		.items(items)
+		.build();
+
+	Ok((
+		[(header::CONTENT_TYPE, "application/rss+xml; charset=utf-8")],
+		channel.to_string(),
+	))
 }
 
 /// Publish a version with its changelog.

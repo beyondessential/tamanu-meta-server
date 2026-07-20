@@ -41,6 +41,7 @@ node-semver.workspace = true
 pulldown-cmark = { workspace = true, optional = true }
 qrcode = { version = "0.14.1", optional = true, features = ["svg"] }
 reqwest.workspace = true
+rss = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 tera = { workspace = true, optional = true }
 tokio.workspace = true
@@ -82,6 +83,7 @@ cli = [
 ui = [
 	"dep:pulldown-cmark",
 	"dep:qrcode",
+	"dep:rss",
 	"dep:subtle",
 	"dep:tera",
 	"dep:timesimp",
