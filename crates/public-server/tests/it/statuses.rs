@@ -998,17 +998,26 @@ async fn submit_status_ingest_gating() {
 				.assert_status_forbidden();
 			assert_eq!(count_issues_for_server(&mut conn, server_id).await, 0);
 
-			// ignore: the push is accepted but nothing is recorded.
+			// ignore: the push is accepted but the source's data isn't
+			// recorded — while the backflow still comes back. A catalogued
+			// check (independent of this push) proves the response is still
+			// computed from server state, not short-circuited to empty.
+			set_check_severity(&mut conn, "db", "warning").await;
 			SourcePolicy::set_ingest(&mut conn, "alertd", IngestMode::Ignore)
 				.await
 				.expect("set ignore");
-			public
+			let ignored = public
 				.post(&format!("/status/{server_id}"))
 				.add_header("mtls-certificate", &cert)
 				.json(&body)
-				.await
-				.assert_status_ok();
+				.await;
+			ignored.assert_status_ok();
 			assert_eq!(count_issues_for_server(&mut conn, server_id).await, 0);
+			let backflow: serde_json::Value = ignored.json();
+			assert_eq!(
+				backflow["check_severities"]["db"], "warn",
+				"an ignored push still returns backflow: {backflow}"
+			);
 
 			// allow: the push is ingested and its check recorded.
 			SourcePolicy::set_ingest(&mut conn, "alertd", IngestMode::Allow)

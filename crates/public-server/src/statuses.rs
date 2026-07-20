@@ -255,22 +255,20 @@ async fn create(
 	};
 
 	// Ingest gating (see CHK "Source policy"): a denied source's push is
-	// rejected; an ignored source's push is accepted but recorded nowhere.
-	match database::source_policies::SourcePolicy::ingest_for(&mut db, &source).await? {
-		commons_types::source::IngestMode::Allow => {}
-		commons_types::source::IngestMode::Ignore => {
-			return Ok(Json(StatusResponse {
-				backup_now: Vec::new(),
-				check_severities: Default::default(),
-				tags: Default::default(),
-			}));
-		}
+	// rejected outright; an ignored source's push is accepted but its data
+	// is not recorded. Either way the device still gets the normal response
+	// below (backup instructions, tags, severities) — those come from server
+	// state, not from this push, so an ignored reporter keeps functioning.
+	let record = match database::source_policies::SourcePolicy::ingest_for(&mut db, &source).await?
+	{
+		commons_types::source::IngestMode::Allow => true,
+		commons_types::source::IngestMode::Ignore => false,
 		commons_types::source::IngestMode::Deny => return Err(AppError::IngestDenied(source)),
-	}
+	};
 
-	// Resolve the server's effective tag map outside the write transaction.
-	// Read-only; shared across every rule evaluation for this push. JSON-
-	// wrapped so the rule evaluator can compare uniformly with extras.
+	// Resolve the server's effective tag map. Read-only; the rule evaluator
+	// in file_health_events compares against it. JSON-wrapped so it can
+	// compare uniformly with extras.
 	let tag_map = server.tags_merged_with_group(&mut db).await?;
 	let tags: std::collections::HashMap<String, serde_json::Value> = tag_map
 		.0
@@ -278,26 +276,31 @@ async fn create(
 		.map(|(k, v)| (k, serde_json::Value::String(v)))
 		.collect();
 
-	// Insert + file events atomically. NewEvent::save itself opens
-	// a transaction; diesel-async nests it as a SAVEPOINT.
-	db.transaction::<_, AppError, _>(async |conn| {
-		let status = NewStatus {
-			server_id,
-			device_id: Some(id),
-			version,
-			extra,
-			healthy,
-			health,
-			source: source.clone(),
-		}
-		.save(conn)
+	// Only the recording is conditional on ingest mode; everything else —
+	// backup instructions, tags, severities computed below — is returned
+	// regardless, so an ignored reporter keeps working.
+	if record {
+		// Insert + file events atomically. NewEvent::save itself opens
+		// a transaction; diesel-async nests it as a SAVEPOINT.
+		db.transaction::<_, AppError, _>(async |conn| {
+			let status = NewStatus {
+				server_id,
+				device_id: Some(id),
+				version,
+				extra,
+				healthy,
+				health,
+				source: source.clone(),
+			}
+			.save(conn)
+			.await?;
+
+			file_health_events(conn, server_id, server.group_id, Some(id), &status, &tags).await?;
+
+			Ok(())
+		})
 		.await?;
-
-		file_health_events(conn, server_id, server.group_id, Some(id), &status, &tags).await?;
-
-		Ok(())
-	})
-	.await?;
+	}
 
 	// Tell the device which backup types to run now (operator one-offs +
 	// schedule-due), riding the heartbeat response. Only alertd runs
