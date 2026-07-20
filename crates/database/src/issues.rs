@@ -2402,11 +2402,24 @@ impl Issue {
 		db: &mut AsyncPgConnection,
 		server_ids: &[Uuid],
 	) -> Result<Vec<(Uuid, String, Timestamp)>> {
-		use crate::schema::issues::dsl;
+		use crate::schema::{check_policies, issues::dsl};
+		use std::collections::{HashMap, HashSet};
 		if server_ids.is_empty() {
 			return Ok(Vec::new());
 		}
-		let rows: Vec<(Uuid, String, jiff_diesel::Timestamp)> = dsl::issues
+
+		// Checks retired fleet-wide don't keep their source "expected": a
+		// source whose every check is decommissioned drops out of freshness
+		// entirely, so per-server staleness stops being raised for it.
+		let decommissioned: HashSet<(String, String)> = check_policies::table
+			.select((check_policies::source, check_policies::check_name))
+			.filter(check_policies::decommissioned_at.is_not_null())
+			.load::<(String, String)>(db)
+			.await?
+			.into_iter()
+			.collect();
+
+		let rows: Vec<(Uuid, String, String, jiff_diesel::Timestamp)> = dsl::issues
 			.filter(
 				dsl::server_id
 					.eq_any(server_ids)
@@ -2416,18 +2429,34 @@ impl Issue {
 					)
 					.and(dsl::check_name.is_not_null()),
 			)
-			.group_by((dsl::server_id, dsl::source))
 			.select((
 				dsl::server_id.assume_not_null(),
 				dsl::source,
-				diesel::dsl::max(dsl::last_seen).assume_not_null(),
+				dsl::check_name.assume_not_null(),
+				dsl::last_seen,
 			))
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
-		Ok(rows
+
+		let mut latest: HashMap<(Uuid, String), Timestamp> = HashMap::new();
+		for (server, source, check, seen) in rows {
+			if decommissioned.contains(&(source.clone(), check)) {
+				continue;
+			}
+			let seen: Timestamp = seen.into();
+			latest
+				.entry((server, source))
+				.and_modify(|t| {
+					if seen > *t {
+						*t = seen;
+					}
+				})
+				.or_insert(seen);
+		}
+		Ok(latest
 			.into_iter()
-			.map(|(server, source, seen)| (server, source, seen.into()))
+			.map(|((server, source), seen)| (server, source, seen))
 			.collect())
 	}
 
