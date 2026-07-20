@@ -231,12 +231,6 @@ export default function HealthcheckSettings() {
 								{rows.length > 1 && ` (as reported by ${row.source})`}
 							</RouterLink>
 						</Typography>
-						<Typography variant="body2">
-							<RouterLink to={healthcheckPath(row.source, row.check_name)}>
-								See servers currently flagging this check
-								{rows.length > 1 && ` (as reported by ${row.source})`}
-							</RouterLink>
-						</Typography>
 						<RowMetadata row={row} />
 						<CeilingCard row={row} canEdit={isAdmin} onChanged={list.reload} />
 						<DocumentationCard
@@ -335,18 +329,32 @@ function CeilingCard({
 				) : (
 					<CheckResultChip result={row.ceiling as Ceiling} />
 				)}
-				<FormControlLabel
-					control={
-						<Switch
-							size="small"
-							checked={escalates}
-							onChange={(e) => setEscalates(e.target.checked)}
-							disabled={!canEdit || update.pending}
-						/>
-					}
-					label="Escalates: an effective failure notifies immediately, bypassing the incident grace period"
-					slotProps={{ typography: { variant: "caption" } }}
-				/>
+				{canEdit ? (
+					<FormControlLabel
+						control={
+							<Switch
+								size="small"
+								checked={escalates}
+								onChange={(e) => setEscalates(e.target.checked)}
+								disabled={update.pending}
+							/>
+						}
+						label="Escalates: an effective failure notifies immediately, bypassing the incident grace period"
+						slotProps={{ typography: { variant: "caption" } }}
+					/>
+				) : row.escalates ? (
+					<Chip
+						label="escalates"
+						color="error"
+						size="small"
+						variant="outlined"
+						title="An effective failure notifies immediately, bypassing the incident grace period"
+					/>
+				) : (
+					<Typography variant="caption" color="text.secondary">
+						Does not escalate
+					</Typography>
+				)}
 				{canEdit && (
 					<Button size="small" variant="outlined" onClick={save} disabled={update.pending}>
 						Save
