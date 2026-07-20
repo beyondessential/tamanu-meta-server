@@ -254,6 +254,20 @@ async fn create(
 		),
 	};
 
+	// Ingest gating (see CHK "Source policy"): a denied source's push is
+	// rejected; an ignored source's push is accepted but recorded nowhere.
+	match database::source_policies::SourcePolicy::ingest_for(&mut db, &source).await? {
+		commons_types::source::IngestMode::Allow => {}
+		commons_types::source::IngestMode::Ignore => {
+			return Ok(Json(StatusResponse {
+				backup_now: Vec::new(),
+				check_severities: Default::default(),
+				tags: Default::default(),
+			}));
+		}
+		commons_types::source::IngestMode::Deny => return Err(AppError::IngestDenied(source)),
+	}
+
 	// Resolve the server's effective tag map outside the write transaction.
 	// Read-only; shared across every rule evaluation for this push. JSON-
 	// wrapped so the rule evaluator can compare uniformly with extras.

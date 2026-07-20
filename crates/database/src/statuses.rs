@@ -261,9 +261,10 @@ impl Status {
 
 		// Per-source freshness (already excludes canopy/manual and
 		// decommissioned checks), grouped by server, plus each source's
-		// reachability mode.
+		// reachability and ingest modes.
 		let freshness = Issue::source_freshness(db, &server_ids).await?;
 		let modes = crate::source_policies::SourcePolicy::modes(db).await?;
+		let ingest = crate::source_policies::SourcePolicy::ingest_modes(db).await?;
 		let mut by_server: HashMap<Uuid, Vec<(String, Timestamp)>> = HashMap::new();
 		for (sid, source, last_seen) in freshness {
 			by_server.entry(sid).or_default().push((source, last_seen));
@@ -288,8 +289,10 @@ impl Status {
 			let threshold = server.alert_when_down_for.0;
 			let label = server_label(server);
 
-			// Sources reporting on this server that aren't switched off for
-			// reachability, with how long each has been silent.
+			// Sources reporting on this server that count for reachability:
+			// not switched off, and actually ingested (an ignored/denied
+			// source has no fresh data to judge). With how long each has
+			// been silent.
 			let expected: Vec<(&str, SignedDuration, ReachabilityMode)> = by_server
 				.get(&server.id)
 				.into_iter()
@@ -298,7 +301,11 @@ impl Status {
 					let mode = modes.get(source).copied().unwrap_or_default();
 					(source.as_str(), now.duration_since(*last_seen).abs(), mode)
 				})
-				.filter(|(_, _, mode)| *mode != ReachabilityMode::Off)
+				.filter(|(source, _, mode)| {
+					*mode != ReachabilityMode::Off
+						&& ingest.get(*source).copied().unwrap_or_default()
+							== commons_types::source::IngestMode::Allow
+				})
 				.collect();
 
 			let (observed, message, detail) = if expected.is_empty() {

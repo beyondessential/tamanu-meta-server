@@ -8,7 +8,7 @@ use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
-use commons_types::source::ReachabilityMode;
+use commons_types::source::{IngestMode, ReachabilityMode};
 use commons_types::status::CheckResult;
 use database::check_policies::{CheckPolicy, IfLadder};
 use database::servers::Server;
@@ -27,6 +27,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(list))
 		.routes(routes!(sources))
 		.routes(routes!(set_source_reachability))
+		.routes(routes!(set_source_ingest))
 		.routes(routes!(update))
 		.routes(routes!(decommission))
 		.routes(routes!(update_rules))
@@ -186,6 +187,10 @@ pub struct SourceData {
 	/// (a stale source warns, all-stale is unreachable), `quiet` (never
 	/// warns, still counts toward unreachable), or `off` (excluded).
 	pub reachability: ReachabilityMode,
+	/// Whether the device API ingests this source's reports: `allow`,
+	/// `ignore` (accepted but discarded), or `deny` (rejected). A source
+	/// that isn't ingested is excluded from reachability.
+	pub ingest: IngestMode,
 	/// When any of this source's checks was most recently reported anywhere
 	/// in the fleet. `null` until liveness has been reconciled.
 	pub last_seen: Option<Timestamp>,
@@ -219,6 +224,7 @@ pub async fn sources(
 			.map(|s| SourceData {
 				source: s.source,
 				reachability: s.reachability,
+				ingest: s.ingest,
 				last_seen: s.last_seen,
 			})
 			.collect(),
@@ -266,6 +272,50 @@ pub async fn set_source_reachability(
 	}
 	let mut conn = state.db.get().await?;
 	SourcePolicy::set_reachability(&mut conn, &args.source, args.reachability).await?;
+	Ok(Json(()))
+}
+
+/// Request body for setting a source's ingest mode.
+#[derive(Deserialize, ToSchema)]
+pub struct SetSourceIngestArgs {
+	/// The source to configure. The reserved `canopy`/`manual` names are
+	/// rejected.
+	pub source: String,
+	/// The ingest mode to apply: `allow`, `ignore`, or `deny`.
+	pub ingest: IngestMode,
+}
+
+/// Set a source's ingest mode.
+///
+/// Governs whether the device API accepts the source's reports: `allow`
+/// ingests normally, `ignore` accepts but discards them, `deny` rejects
+/// the push. The reserved `canopy`/`manual` names are rejected.
+#[utoipa::path(
+	post,
+	path = "/set_source_ingest",
+	operation_id = "healthcheck_set_source_ingest",
+	tag = "healthchecks",
+	security(("tailscale-admin" = [])),
+	request_body = SetSourceIngestArgs,
+	responses(
+		(status = 200, description = "Ingest mode set."),
+		(status = 400, body = ProblemDetailsSchema),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn set_source_ingest(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<SetSourceIngestArgs>,
+) -> Result<Json<()>> {
+	if args.source == "canopy" || args.source == "manual" {
+		return Err(AppError::BadRequest(
+			"the reserved canopy/manual sources have no ingest policy".into(),
+		));
+	}
+	let mut conn = state.db.get().await?;
+	SourcePolicy::set_ingest(&mut conn, &args.source, args.ingest).await?;
 	Ok(Json(()))
 }
 
