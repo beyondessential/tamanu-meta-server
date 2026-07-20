@@ -266,14 +266,17 @@ async fn create(
 		commons_types::source::IngestMode::Deny => return Err(AppError::IngestDenied(source)),
 	};
 
-	// Resolve the server's effective tag map. Read-only; the rule evaluator
-	// in file_health_events compares against it. JSON-wrapped so it can
-	// compare uniformly with extras.
-	let tag_map = server.tags_merged_with_group(&mut db).await?;
-	let tags: std::collections::HashMap<String, serde_json::Value> = tag_map
+	// The server's effective tags: stored server+group tags plus the
+	// synthetic `canopy:*` tags and computed `billing.*` labels. Computed
+	// once and used for both grading (per CHK, rules evaluate against the
+	// effective tags, so a rule can predicate on any of them) and the
+	// device response. JSON-wrapped so the rule evaluator compares
+	// uniformly with extras.
+	let effective_tags = crate::tags::effective_tags_for_server(&mut db, &server).await?;
+	let tags: std::collections::HashMap<String, serde_json::Value> = effective_tags
 		.0
-		.into_iter()
-		.map(|(k, v)| (k, serde_json::Value::String(v)))
+		.iter()
+		.map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
 		.collect();
 
 	// Only the recording is conditional on ingest mode; everything else —
@@ -318,7 +321,6 @@ async fn create(
 	// (upserted into the catalog above) are already in the map.
 	let check_severities =
 		effective_check_severities(&mut db, server_id, server.group_id, &source).await?;
-	let effective_tags = crate::tags::effective_tags_for_server(&mut db, &server).await?;
 
 	Ok(Json(StatusResponse {
 		backup_now,
