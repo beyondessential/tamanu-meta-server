@@ -962,6 +962,9 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 	}
 }
 
+/// One rollup input row: `(server_id, source, check_name, effective_result)`.
+type HealthCheckRow = (Option<Uuid>, String, Option<String>, Option<String>);
+
 /// Per-server health rollup from current check state: the worst
 /// effective result across every source's checks on the server — any
 /// failure ⇒ unhealthy, otherwise any warning or brokenness ⇒ warning,
@@ -982,7 +985,7 @@ pub async fn health_from_check_state(
 	let server_ids: Vec<Uuid> = servers.iter().map(|(id, _)| *id).collect();
 	let group_of: HashMap<Uuid, Option<Uuid>> = servers.iter().copied().collect();
 
-	let rows: Vec<(Option<Uuid>, String, Option<String>, Option<String>)> = issues::table
+	let rows: Vec<HealthCheckRow> = issues::table
 		.select((
 			issues::server_id,
 			issues::source,
@@ -1076,6 +1079,16 @@ pub async fn health_from_check_state(
 		.collect())
 }
 
+/// One consolidated check row:
+/// `(source, check_name, observed_result, effective_result, detail)`.
+type ConsolidatedRow = (
+	String,
+	Option<String>,
+	Option<String>,
+	Option<String>,
+	Option<serde_json::Value>,
+);
+
 /// A server's current checks across every source, graded, for presentation.
 /// The health rollup uses [`health_from_check_state`] (so it matches the
 /// headline exactly); the check list is every non-decommissioned reported
@@ -1098,13 +1111,7 @@ pub async fn consolidated_checks_latest(
 		.copied()
 		.unwrap_or_default();
 
-	let rows: Vec<(
-		String,
-		Option<String>,
-		Option<String>,
-		Option<String>,
-		Option<serde_json::Value>,
-	)> = issues::table
+	let rows: Vec<ConsolidatedRow> = issues::table
 		.select((
 			issues::source,
 			issues::check_name,
