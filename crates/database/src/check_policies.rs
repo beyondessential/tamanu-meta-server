@@ -152,6 +152,21 @@ impl CheckPolicy {
 		Ok(reanimated)
 	}
 
+	/// The set of decommissioned `(source, check)` pairs. Callers exclude
+	/// these from anything user-facing — health, incidents, presentation.
+	pub async fn decommissioned_pairs(
+		db: &mut AsyncPgConnection,
+	) -> Result<std::collections::HashSet<(String, String)>> {
+		use crate::schema::check_policies::dsl;
+		Ok(dsl::check_policies
+			.select((dsl::source, dsl::check_name))
+			.filter(dsl::decommissioned_at.is_not_null())
+			.load::<(String, String)>(db)
+			.await?
+			.into_iter()
+			.collect())
+	}
+
 	/// Live (not decommissioned) catalogued checks whose most recent
 	/// fleet-wide report is older than `cutoff`. Ordered by source then
 	/// name. Drives the operator "gone quiet" list and the stale-check

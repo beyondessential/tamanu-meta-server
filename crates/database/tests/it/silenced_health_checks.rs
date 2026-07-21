@@ -1,9 +1,9 @@
 //! `silenced_refs::silenced_health_checks_for_server`: resolving the set
 //! of healthcheck names silenced for a server under one reporting
-//! source, at server and group scope. This set feeds
-//! `Status::health_state_ignoring` so silenced checks don't count toward
-//! the health rollup — scoped to the status row's own source, since a
-//! check's identity is the (source, check) pair.
+//! source, at server and group scope. This set feeds the consolidated
+//! check readers so silenced checks don't count toward the health
+//! rollup — scoped to the status row's own source, since a check's
+//! identity is the (source, check) pair.
 
 use std::collections::BTreeSet;
 

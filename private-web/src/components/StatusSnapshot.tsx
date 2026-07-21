@@ -11,8 +11,6 @@ import BuildCircleIcon from "@mui/icons-material/BuildCircle";
 import CancelIcon from "@mui/icons-material/Cancel";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CloseIcon from "@mui/icons-material/Close";
-import CircleIcon from "@mui/icons-material/Circle";
-import InfoIcon from "@mui/icons-material/Info";
 import NotificationsOffIcon from "@mui/icons-material/NotificationsOff";
 import PreviewIcon from "@mui/icons-material/Preview";
 import RemoveCircleOutlinedIcon from "@mui/icons-material/RemoveCircleOutlined";
@@ -28,9 +26,8 @@ import TimezoneTooltip from "./TimezoneTooltip";
 import VersionIndicator from "./VersionIndicator";
 import {
 	CHECK_RESULT_INTENT,
-	CHECK_RESULT_ORDER,
-	checkResultOf,
 	type CheckResult,
+	type ConsolidatedChecks,
 	type StatusSnapshotData,
 } from "../types";
 
@@ -76,7 +73,7 @@ export default function StatusSnapshotPanel({
 				</Typography>
 				{result.status === "ok" && result.data && (
 					<>
-						<HealthChip health={result.data.health_state} />
+						<HealthChip health={result.data.checks.health_state} />
 						<Typography variant="body2" color="text.secondary">
 							<TimeAgo timestamp={result.data.created_at} />
 						</Typography>
@@ -116,12 +113,7 @@ function PanelBody({
 	return (
 		<Stack spacing={2}>
 			<CuratedFields snap={snap} />
-			<ChecksBlock
-				health={snap.health}
-				results={snap.check_results}
-				operators={snap.operators}
-				silencedChecks={snap.silenced_checks}
-			/>
+			<ChecksBlock checks={snap.checks} operators={snap.operators} />
 			<ExtrasBlock extra={snap.extra} />
 		</Stack>
 	);
@@ -186,19 +178,13 @@ function Field({
 }
 
 function ChecksBlock({
-	health,
-	results,
+	checks,
 	operators,
-	silencedChecks,
 }: {
-	health: StatusSnapshotData["health"];
-	results: StatusSnapshotData["check_results"];
+	checks: ConsolidatedChecks;
 	operators: StatusSnapshotData["operators"];
-	silencedChecks: StatusSnapshotData["silenced_checks"];
 }) {
-	// Silenced checks render skip-style and sort with the skipped tail —
-	// the backend excludes them from `health_state` the same way.
-	const entries = parseChecks(health, new Set(silencedChecks));
+	const entries = checks.checks;
 	if (entries.length === 0) return null;
 	return (
 		<Box>
@@ -207,23 +193,27 @@ function ChecksBlock({
 			</Typography>
 			<Stack spacing={1} sx={{ mt: 0.5 }}>
 				{entries.map((entry) => {
-					// Same special-case as the ServerDetail checks table:
-					// formatted session rows for `external_users`, generic
-					// dl fallback when the shape is unexpected. No "right
-					// now" claim here — a snapshot is "as of" its push.
+					// external_users gets formatted session rows; otherwise a
+					// generic dl of the check's detail. No "right now" claim
+					// here — a snapshot is "as of" its push.
+					const extras = checkEntryExtras(
+						(entry.detail ?? {}) as Record<string, unknown>,
+					);
 					const sessions =
 						entry.check === "external_users"
-							? parseExternalUserSessions(entry.extras)
+							? parseExternalUserSessions(extras)
 							: null;
-					const extras =
+					const shownExtras =
 						sessions === null
-							? entry.extras
-							: entry.extras.filter(
-									([k]) => k !== "users" && k !== "count",
-								);
+							? extras
+							: extras.filter(([k]) => k !== "users" && k !== "count");
+					const quiet =
+						entry.silenced ||
+						entry.effective === "passed" ||
+						entry.effective === "skipped";
 					return (
 						<Stack
-							key={entry.check}
+							key={`${entry.source}:${entry.check}`}
 							direction="row"
 							spacing={1.5}
 							sx={{
@@ -232,32 +222,34 @@ function ChecksBlock({
 								borderColor: "divider",
 								borderRadius: 1,
 								alignItems: "flex-start",
-								bgcolor:
-									entry.result === "passed" ||
-									entry.result === "skipped" ||
-									entry.silenced
-										? undefined
-										: "action.hover",
+								bgcolor: quiet ? undefined : "action.hover",
 							}}
 						>
 							<CheckIcon
-								result={entry.result}
-								effective={
-									(results[entry.check] as CheckResult | undefined) ?? null
-								}
+								observed={entry.observed as CheckResult | null}
+								effective={entry.effective as CheckResult}
 								silenced={entry.silenced}
 							/>
 							<Box sx={{ flex: 1, minWidth: 0 }}>
-								<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
-									{entry.check}
-								</Typography>
+								<Stack
+									direction="row"
+									spacing={1}
+									sx={{ alignItems: "baseline" }}
+								>
+									<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
+										{entry.check}
+									</Typography>
+									<Typography variant="caption" color="text.secondary">
+										{entry.source}
+									</Typography>
+								</Stack>
 								{sessions !== null && (
 									<ExternalUsersDetails
 										sessions={sessions}
 										operators={operators}
 									/>
 								)}
-								<CheckExtrasList extras={extras} />
+								<CheckExtrasList extras={shownExtras} />
 							</Box>
 						</Stack>
 					);
@@ -273,7 +265,7 @@ function ExtrasBlock({ extra }: { extra: StatusSnapshotData["extra"] }) {
 	return (
 		<Box>
 			<details>
-				<summary>Raw payload</summary>
+				<summary>Raw payload by source</summary>
 				<Box
 					component="pre"
 					sx={{
@@ -292,112 +284,42 @@ function ExtrasBlock({ extra }: { extra: StatusSnapshotData["extra"] }) {
 	);
 }
 
-type ParsedCheck = {
-	check: string;
-	result: CheckResult;
-	/** Whether the check is silenced (server or group scope), per the
-	 * snapshot's `silenced_checks`: presented skip-style and excluded
-	 * from the health rollup. */
-	silenced: boolean;
-	extras: Array<[string, unknown]>;
-};
-
-function parseChecks(
-	health: StatusSnapshotData["health"],
-	silencedChecks: Set<string>,
-): ParsedCheck[] {
-	if (!Array.isArray(health)) return [];
-	const parsed: ParsedCheck[] = [];
-	for (const raw of health as unknown[]) {
-		if (typeof raw !== "object" || raw === null) continue;
-		const obj = raw as Record<string, unknown>;
-		const check = obj.check;
-		const result = checkResultOf(obj);
-		if (typeof check !== "string" || result === null) continue;
-		parsed.push({
-			check,
-			result,
-			silenced: silencedChecks.has(check),
-			extras: checkEntryExtras(obj),
-		});
-	}
-	const sortResult = (e: ParsedCheck): CheckResult =>
-		e.silenced ? "skipped" : e.result;
-	parsed.sort((a, b) => {
-		if (sortResult(a) !== sortResult(b)) {
-			return (
-				CHECK_RESULT_ORDER.indexOf(sortResult(a)) -
-				CHECK_RESULT_ORDER.indexOf(sortResult(b))
-			);
-		}
-		return a.check.localeCompare(b.check);
-	});
-	return parsed;
-}
-
-/// Per-check status indicator. Passed checks render as a green tick;
-/// broken checks (the check itself errored, not the system) as an
-/// orange wrench; skipped checks (precondition not met) as a grey
-/// dash. Warning/failed checks render the icon for the rules engine's
-/// computed severity (debug → grey dot, info → blue i, warning →
-/// yellow triangle, error → red ⊘, critical → red filled exclamation).
-/// Falls back to the warning icon when the severity is absent — the
-/// catalog hasn't been touched for this check yet, so we surface it
-/// at the default level rather than miscolouring it. Silenced checks
-/// get the same neutral grey treatment as skipped ones, whatever they
-/// reported — they don't count toward the server's health.
+/// Per-check status indicator, coloured by the check's *effective* result
+/// (what policy grades it to): passed → green tick, failed → red ⊘,
+/// warning → amber triangle, broken → orange wrench (the check itself
+/// errored, not the system), skipped → grey dash. Silenced checks get a
+/// neutral grey icon whatever they reported. When the observed result
+/// differs from the effective one, the tooltip notes the grading.
 function CheckIcon({
-	result,
+	observed,
 	effective,
 	silenced = false,
 }: {
-	result: CheckResult;
-	effective: CheckResult | null;
+	observed: CheckResult | null;
+	effective: CheckResult;
 	silenced?: boolean;
 }) {
 	if (silenced) {
 		return (
 			<Tooltip
-				title={`Silenced — reported ${result}, not counted toward server health`}
+				title={`Silenced — reported ${observed ?? "?"}, not counted toward server health`}
 				arrow
 			>
 				<NotificationsOffIcon fontSize="small" color="disabled" />
 			</Tooltip>
 		);
 	}
-	switch (result) {
+	const tooltip =
+		observed && observed !== effective
+			? `${observed}, graded ${effective} — ${CHECK_RESULT_INTENT[effective]}`
+			: `${effective} — ${CHECK_RESULT_INTENT[effective]}`;
+	switch (effective) {
 		case "passed":
 			return (
-				<Tooltip title="Passing" arrow>
+				<Tooltip title={tooltip} arrow>
 					<CheckCircleIcon fontSize="small" color="success" />
 				</Tooltip>
 			);
-		case "broken":
-			return (
-				<Tooltip
-					title="Broken — the check itself is failing, not the system under test"
-					arrow
-				>
-					<BuildCircleIcon fontSize="small" color="warning" />
-				</Tooltip>
-			);
-		case "skipped":
-			return (
-				<Tooltip title="Skipped — a precondition was not met" arrow>
-					<RemoveCircleOutlinedIcon fontSize="small" color="disabled" />
-				</Tooltip>
-			);
-		case "warning":
-		case "failed":
-			break;
-	}
-	// A degraded observation renders by what policy grades it to.
-	const eff: CheckResult = effective ?? "warning";
-	const tooltip =
-		result === eff
-			? `${result} — ${CHECK_RESULT_INTENT[eff]}`
-			: `${result}, graded ${eff} — ${CHECK_RESULT_INTENT[eff]}`;
-	switch (eff) {
 		case "failed":
 			return (
 				<Tooltip title={tooltip} arrow>
@@ -405,22 +327,21 @@ function CheckIcon({
 				</Tooltip>
 			);
 		case "warning":
-		case "broken":
 			return (
 				<Tooltip title={tooltip} arrow>
 					<WarningAmberIcon fontSize="small" color="warning" />
 				</Tooltip>
 			);
-		case "passed":
+		case "broken":
 			return (
 				<Tooltip title={tooltip} arrow>
-					<InfoIcon fontSize="small" color="info" />
+					<BuildCircleIcon fontSize="small" color="warning" />
 				</Tooltip>
 			);
 		case "skipped":
 			return (
 				<Tooltip title={tooltip} arrow>
-					<CircleIcon fontSize="small" color="disabled" sx={{ fontSize: 12 }} />
+					<RemoveCircleOutlinedIcon fontSize="small" color="disabled" />
 				</Tooltip>
 			);
 	}

@@ -962,6 +962,9 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 	}
 }
 
+/// One rollup input row: `(server_id, source, check_name, effective_result)`.
+type HealthCheckRow = (Option<Uuid>, String, Option<String>, Option<String>);
+
 /// Per-server health rollup from current check state: the worst
 /// effective result across every source's checks on the server — any
 /// failure ⇒ unhealthy, otherwise any warning or brokenness ⇒ warning,
@@ -976,14 +979,13 @@ pub async fn health_from_check_state(
 	use commons_types::status::HealthState;
 	use std::collections::{HashMap, HashSet};
 
-	let mut out: HashMap<Uuid, HealthState> = HashMap::new();
 	if servers.is_empty() {
-		return Ok(out);
+		return Ok(HashMap::new());
 	}
 	let server_ids: Vec<Uuid> = servers.iter().map(|(id, _)| *id).collect();
 	let group_of: HashMap<Uuid, Option<Uuid>> = servers.iter().copied().collect();
 
-	let rows: Vec<(Option<Uuid>, String, Option<String>, Option<String>)> = issues::table
+	let rows: Vec<HealthCheckRow> = issues::table
 		.select((
 			issues::server_id,
 			issues::source,
@@ -1040,6 +1042,9 @@ pub async fn health_from_check_state(
 		}
 	}
 
+	// Collect each server's surviving effective results, then roll up
+	// through the one shared classifier — the same rules everywhere.
+	let mut contributing: HashMap<Uuid, Vec<CheckResult>> = HashMap::new();
 	for (server_id, source, check_name, effective) in rows {
 		let Some(server_id) = server_id else {
 			continue;
@@ -1059,18 +1064,141 @@ pub async fn health_from_check_state(
 		{
 			continue;
 		}
-		let contribution = match effective.as_deref().and_then(|e| e.parse().ok()) {
-			Some(CheckResult::Failed) => HealthState::Unhealthy,
-			Some(CheckResult::Warning | CheckResult::Broken) => HealthState::Warning,
-			_ => continue,
+		let Some(result) = effective
+			.as_deref()
+			.and_then(|e| e.parse::<CheckResult>().ok())
+		else {
+			continue;
 		};
-		let entry = out.entry(server_id).or_insert(HealthState::Healthy);
-		if contribution == HealthState::Unhealthy || *entry == HealthState::Healthy {
-			*entry = contribution;
-		}
+		contributing.entry(server_id).or_default().push(result);
 	}
 
-	Ok(out)
+	Ok(contributing
+		.into_iter()
+		.map(|(server_id, results)| (server_id, HealthState::from_results(results)))
+		.collect())
+}
+
+/// One consolidated check row:
+/// `(source, check_name, observed_result, effective_result, detail)`.
+type ConsolidatedRow = (
+	String,
+	Option<String>,
+	Option<String>,
+	Option<String>,
+	Option<serde_json::Value>,
+);
+
+/// A server's current checks across every source, graded, for presentation.
+/// The health rollup uses [`health_from_check_state`] (so it matches the
+/// headline exactly); the check list is every non-decommissioned reported
+/// `(source, check)` with its observed/effective results, detail, and
+/// whether it's silenced — most urgent first. This is the live side of the
+/// consolidated checks view; the point-in-time side reconstructs the same
+/// shape from status history.
+pub async fn consolidated_checks_latest(
+	conn: &mut AsyncPgConnection,
+	server_id: Uuid,
+	group_id: Option<Uuid>,
+) -> Result<commons_types::status::ConsolidatedChecks> {
+	use crate::schema::{check_policies, issues, scoped_check_policies};
+	use commons_types::status::{ConsolidatedCheck, ConsolidatedChecks};
+	use std::collections::HashSet;
+
+	let health_state = health_from_check_state(conn, &[(server_id, group_id)])
+		.await?
+		.get(&server_id)
+		.copied()
+		.unwrap_or_default();
+
+	let rows: Vec<ConsolidatedRow> = issues::table
+		.select((
+			issues::source,
+			issues::check_name,
+			issues::observed_result,
+			issues::effective_result,
+			issues::detail,
+		))
+		.filter(issues::server_id.eq(server_id))
+		.filter(issues::check_name.is_not_null())
+		.filter(issues::effective_result.is_not_null())
+		.load(conn)
+		.await?;
+
+	let decommissioned: HashSet<(String, String)> = check_policies::table
+		.select((check_policies::source, check_policies::check_name))
+		.filter(check_policies::decommissioned_at.is_not_null())
+		.load::<(String, String)>(conn)
+		.await?
+		.into_iter()
+		.collect();
+
+	let group_ids: Vec<Uuid> = group_id.into_iter().collect();
+	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
+		scoped_check_policies::table
+			.select((
+				scoped_check_policies::server_id,
+				scoped_check_policies::server_group_id,
+				scoped_check_policies::source,
+				scoped_check_policies::check_name,
+			))
+			.filter(scoped_check_policies::ceiling.eq("skipped"))
+			.filter(
+				scoped_check_policies::server_id
+					.eq(server_id)
+					.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
+			)
+			.load(conn)
+			.await?;
+	// This is one server, so a matching (source, check) at either scope means
+	// silenced here.
+	let silenced: HashSet<(String, String)> = silence_rows
+		.into_iter()
+		.map(|(_, _, source, check)| (source, check))
+		.collect();
+
+	let mut checks: Vec<ConsolidatedCheck> = rows
+		.into_iter()
+		.filter_map(|(source, check_name, observed, effective, detail)| {
+			let check = check_name?;
+			if decommissioned.contains(&(source.clone(), check.clone())) {
+				return None;
+			}
+			let stored: CheckResult = effective.as_deref().and_then(|e| e.parse().ok())?;
+			let is_silenced = silenced.contains(&(source.clone(), check.clone()));
+			// A silence is a scoped ceiling of `skipped`: cap the effective
+			// result here so the live view matches both the health rollup
+			// (which excludes silenced checks) and the snapshot path (which
+			// re-grades through `apply_scoped`). The stored effective may
+			// still read failed/warning if the silence post-dates the last
+			// push — the observed result keeps what was reported.
+			let effective = if is_silenced {
+				CheckResult::Skipped
+			} else {
+				stored
+			};
+			Some(ConsolidatedCheck {
+				silenced: is_silenced,
+				observed: observed.as_deref().and_then(|o| o.parse().ok()),
+				source,
+				check,
+				effective,
+				detail: detail.unwrap_or_else(|| serde_json::json!({})),
+			})
+		})
+		.collect();
+	checks.sort_by(|a, b| {
+		a.effective
+			.urgency_rank()
+			.cmp(&b.effective.urgency_rank())
+			.then_with(|| a.source.cmp(&b.source))
+			.then_with(|| a.check.cmp(&b.check))
+	});
+
+	Ok(ConsolidatedChecks {
+		health_state,
+		checks,
+	})
 }
 
 impl Issue {

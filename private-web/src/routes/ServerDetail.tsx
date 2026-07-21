@@ -72,13 +72,12 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import { humanSeconds } from "../lib/humanDuration";
 import ServerNameWithGroup from "../components/ServerNameWithGroup";
 import {
-	CHECK_RESULT_ORDER,
-	checkResultOf,
 	compareServersByRankThenKind,
 	groupServersByRank,
-	healthcheckNameFromRef,
 	healthcheckPath,
 	type CheckResult,
+	type ConsolidatedCheck,
+	type ConsolidatedChecks,
 	type DeviceInfo,
 	type HealthState,
 	type OperatorPresence,
@@ -185,6 +184,7 @@ export default function ServerDetail() {
 				server={data.server}
 				status={data.last_status}
 				health={data.health}
+				checks={data.checks}
 				onSilenced={bumpRefresh}
 				up={data.up}
 				refreshTick={refreshTick}
@@ -731,6 +731,7 @@ function InfoSection({
 	server,
 	status,
 	health,
+	checks,
 	onSilenced,
 	up,
 	refreshTick,
@@ -738,6 +739,7 @@ function InfoSection({
 	server: ServerInfo;
 	status: ServerLastStatusData | null;
 	health: HealthState;
+	checks: ConsolidatedChecks;
 	onSilenced: () => void;
 	up: ShortStatus;
 	refreshTick: number;
@@ -779,18 +781,14 @@ function InfoSection({
 					/>
 				)}
 			</Stack>
-			{status && (
-				<ChecksTable
-					health={status.health}
-					statusSource={status.source}
-					overallHealthy={status.healthy}
-					operators={status.operators}
-					serverId={server.id}
-					groupId={server.group_id}
-					refreshTick={refreshTick}
-					onSilenced={onSilenced}
-				/>
-			)}
+			<ChecksTable
+				checks={checks}
+				operators={status?.operators ?? []}
+				serverId={server.id}
+				groupId={server.group_id}
+				refreshTick={refreshTick}
+				onSilenced={onSilenced}
+			/>
 			{status && Object.keys((status.extra ?? {}) as Record<string, unknown>).length > 0 && (
 				<Box sx={{ mt: 2 }}>
 					<details>
@@ -856,20 +854,20 @@ function HealthIndicator({
 	);
 }
 
-/** Per-check table from the most recent status push. Failing entries
- * sort first so the operator sees them without scrolling, then
- * alphabetical. Capped at 5 visible rows with an "expand all" toggle
- * so a server reporting 30 checks doesn't push the rest of the page
- * off-screen. Render nothing when the server doesn't ship per-check
- * data (legacy / minimal payloads).
+/** Consolidated per-check table: every source's current checks, graded
+ * and sorted most-urgent-first by the backend. Capped at 5 visible rows
+ * with an "expand all" toggle so a server reporting 30 checks doesn't
+ * push the rest of the page off-screen. Render nothing when there are no
+ * checks to show.
  *
+ * Each entry already carries its own `silenced` flag (from the same
+ * scoped-policy pass the health rollup uses); the silenced-refs fetch
+ * here only feeds the manage buttons and the "silenced at N scope" chip.
  * Splits into a grouped/ungrouped variant only to keep the group-scope
  * silenced-refs fetch off ungrouped servers — `useApi` is unconditional,
  * so a single component can't gate the hook on `groupId`. */
 function ChecksTable(props: {
-	health: ServerLastStatusData["health"];
-	statusSource: string;
-	overallHealthy: boolean;
+	checks: ConsolidatedChecks;
 	operators: OperatorPresence[];
 	serverId: string;
 	groupId: string | null;
@@ -903,9 +901,7 @@ function ChecksTable(props: {
 }
 
 function ChecksTableGrouped(props: {
-	health: ServerLastStatusData["health"];
-	statusSource: string;
-	overallHealthy: boolean;
+	checks: ConsolidatedChecks;
 	operators: OperatorPresence[];
 	serverId: string;
 	groupId: string;
@@ -924,9 +920,7 @@ function ChecksTableGrouped(props: {
 }
 
 function ChecksTableBody({
-	health,
-	statusSource,
-	overallHealthy,
+	checks,
 	operators,
 	serverId,
 	groupId,
@@ -934,9 +928,7 @@ function ChecksTableBody({
 	serverSilences,
 	groupSilences,
 }: {
-	health: ServerLastStatusData["health"];
-	statusSource: string;
-	overallHealthy: boolean;
+	checks: ConsolidatedChecks;
 	operators: OperatorPresence[];
 	serverId: string;
 	groupId: string | null;
@@ -944,18 +936,7 @@ function ChecksTableBody({
 	serverSilences: ServerSilencedRef[];
 	groupSilences: ServerGroupSilencedRef[];
 }) {
-	// Silenced checks render skip-style and sort with the skipped tail —
-	// they don't count toward the server's health rollup (the backend
-	// applies the same exclusion to the headline HealthState). Only this
-	// status's own source's silences apply: a silence on another source's
-	// same-named check is about a different check.
-	const silencedChecks = new Set<string>();
-	for (const s of [...serverSilences, ...groupSilences]) {
-		if (s.source !== statusSource) continue;
-		const check = healthcheckNameFromRef(s.source, s.ref);
-		if (check !== null) silencedChecks.add(check);
-	}
-	const entries = parseChecks(health, overallHealthy, silencedChecks);
+	const entries = checks.checks;
 	const [expanded, setExpanded] = useState(false);
 	if (entries.length === 0) return null;
 	const HIDE_AFTER = 5;
@@ -968,23 +949,25 @@ function ChecksTableBody({
 			</Typography>
 			<Stack spacing={1} sx={{ mt: 0.5 }}>
 				{visible.map((entry) => {
+					// Match the silence refs to this entry's own source — a
+					// silence on another source's same-named check is a
+					// different check.
 					const refName = `health/${entry.check}`;
 					const serverSilence =
 						serverSilences.find(
-							(s) => s.source === statusSource && s.ref === refName,
+							(s) => s.source === entry.source && s.ref === refName,
 						) ?? null;
 					const groupSilence =
 						groupSilences.find(
-							(s) => s.source === statusSource && s.ref === refName,
+							(s) => s.source === entry.source && s.ref === refName,
 						) ?? null;
 					return (
 						<CheckRow
-							key={entry.check}
+							key={`${entry.source}:${entry.check}`}
 							entry={entry}
 							operators={operators}
 							serverId={serverId}
 							groupId={groupId}
-							statusSource={statusSource}
 							onSilenced={onSilenced}
 							serverSilence={serverSilence}
 							groupSilence={groupSilence}
@@ -1014,76 +997,19 @@ function ChecksTableBody({
 	);
 }
 
-type ParsedCheck = {
-	check: string;
-	result: CheckResult;
-	/** Whether the check's `(status, health/<check>)` ref is silenced at
-	 * either scope: presented skip-style and excluded from the rollup. */
-	silenced: boolean;
-	/** Everything other than the reserved `check` / `healthy` /
-	 * `result` keys, preserved in source order. */
-	extras: Array<[string, unknown]>;
-};
-
-function parseChecks(
-	health: ServerLastStatusData["health"],
-	overallHealthy: boolean,
-	silencedChecks: Set<string>,
-): ParsedCheck[] {
-	if (!Array.isArray(health)) return [];
-	const parsed: ParsedCheck[] = [];
-	for (const raw of health as unknown[]) {
-		if (typeof raw !== "object" || raw === null) continue;
-		const obj = raw as Record<string, unknown>;
-		const check = obj.check;
-		let result = checkResultOf(obj);
-		if (typeof check !== "string" || result === null) continue;
-		// Legacy bestool encoded a per-check warning as `healthy: false`
-		// with top-level `healthy: true` — soften those for display, as
-		// this table did before the result enum existed. New-form pushes
-		// say `result: "warning"` outright and don't need the heuristic.
-		if (typeof obj.result !== "string" && result === "failed" && overallHealthy) {
-			result = "warning";
-		}
-		parsed.push({
-			check,
-			result,
-			silenced: silencedChecks.has(check),
-			extras: checkEntryExtras(obj),
-		});
-	}
-	// Most urgent first, then alphabetical by name. Silenced checks sort
-	// as if skipped, whatever they reported. Stable: same input always
-	// produces the same visible order.
-	const sortResult = (e: ParsedCheck): CheckResult =>
-		e.silenced ? "skipped" : e.result;
-	parsed.sort((a, b) => {
-		if (sortResult(a) !== sortResult(b)) {
-			return (
-				CHECK_RESULT_ORDER.indexOf(sortResult(a)) -
-				CHECK_RESULT_ORDER.indexOf(sortResult(b))
-			);
-		}
-		return a.check.localeCompare(b.check);
-	});
-	return parsed;
-}
-
 function CheckRow({
 	entry,
 	operators,
 	serverId,
 	groupId,
-	statusSource,
 	onSilenced,
 	serverSilence,
 	groupSilence,
 }: {
-	entry: ParsedCheck;
+	entry: ConsolidatedCheck;
 	operators: OperatorPresence[];
 	serverId: string;
 	groupId: string | null;
-	statusSource: string;
 	onSilenced: () => void;
 	serverSilence: ServerSilencedRef | null;
 	groupSilence: ServerGroupSilencedRef | null;
@@ -1092,14 +1018,20 @@ function CheckRow({
 	// `external_users` gets a formatted session list instead of the raw
 	// `users` JSON; the headline `count` is subsumed by it too. Falls
 	// through to the generic dl when the payload shape is unexpected.
+	const allExtras = checkEntryExtras(
+		(entry.detail ?? {}) as Record<string, unknown>,
+	);
 	const sessions =
 		entry.check === "external_users"
-			? parseExternalUserSessions(entry.extras)
+			? parseExternalUserSessions(allExtras)
 			: null;
 	const extras =
 		sessions === null
-			? entry.extras
-			: entry.extras.filter(([k]) => k !== "users" && k !== "count");
+			? allExtras
+			: allExtras.filter(([k]) => k !== "users" && k !== "count");
+	const effective = entry.effective as CheckResult;
+	const quiet =
+		entry.silenced || effective === "passed" || effective === "skipped";
 	return (
 		<Stack
 			direction="row"
@@ -1110,15 +1042,14 @@ function CheckRow({
 				borderColor: "divider",
 				borderRadius: 1,
 				alignItems: "flex-start",
-				bgcolor:
-					entry.result === "passed" ||
-					entry.result === "skipped" ||
-					entry.silenced
-						? undefined
-						: "action.hover",
+				bgcolor: quiet ? undefined : "action.hover",
 			}}
 		>
-			<CheckResultIcon result={entry.result} silenced={entry.silenced} />
+			<CheckResultIcon
+				observed={entry.observed as CheckResult | null}
+				effective={effective}
+				silenced={entry.silenced}
+			/>
 			<Box sx={{ flex: 1, minWidth: 0 }}>
 				<Stack
 					direction="row"
@@ -1127,11 +1058,14 @@ function CheckRow({
 					useFlexGap
 				>
 					<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
-						<MuiLink component={RouterLink} to={healthcheckPath(statusSource, entry.check)}>
+						<MuiLink component={RouterLink} to={healthcheckPath(entry.source, entry.check)}>
 							{entry.check}
 						</MuiLink>
 					</Typography>
-					<CheckDocButton source={statusSource} check={entry.check} />
+					<Typography variant="caption" color="text.secondary">
+						{entry.source}
+					</Typography>
+					<CheckDocButton source={entry.source} check={entry.check} />
 					<SilencedChip
 						serverSilence={serverSilence}
 						groupSilence={groupSilence}
@@ -1150,7 +1084,7 @@ function CheckRow({
 					check={entry.check}
 					serverId={serverId}
 					groupId={groupId}
-					source={statusSource}
+					source={entry.source}
 					onSilenced={onSilenced}
 					serverSilence={serverSilence}
 					groupSilence={groupSilence}
@@ -1160,59 +1094,69 @@ function CheckRow({
 	);
 }
 
-/** Per-check result icon for the checks table. Unlike the snapshot
- * panel this table has no computed severity to hand, so failed is a
- * flat red and warning a flat amber. A silenced check gets the same
- * neutral grey treatment as a skipped one — its result still records,
- * it just doesn't count toward the server's health. */
+/** Per-check result icon, coloured by the check's *effective* result
+ * (what policy grades it to). A silenced check gets the same neutral
+ * grey treatment as a skipped one — its result still records, it just
+ * doesn't count toward the server's health. When the observed result
+ * differs from the effective one, the tooltip notes the grading. */
 function CheckResultIcon({
-	result,
+	observed,
+	effective,
 	silenced = false,
 }: {
-	result: CheckResult;
+	observed: CheckResult | null;
+	effective: CheckResult;
 	silenced?: boolean;
 }) {
 	if (silenced) {
 		return (
 			<Tooltip
-				title={`Silenced — reported ${result}, not counted toward server health`}
+				title={`Silenced — reported ${observed ?? "?"}, not counted toward server health`}
 				arrow
 			>
 				<NotificationsOffIcon fontSize="small" color="disabled" />
 			</Tooltip>
 		);
 	}
-	switch (result) {
+	const DESCRIPTION: Record<CheckResult, string> = {
+		passed: "Passing",
+		warning: "Warning — degraded but not failing",
+		failed: "Failing",
+		broken: "Broken — the check itself is failing, not the system under test",
+		skipped: "Skipped — a precondition was not met",
+	};
+	const tooltip =
+		observed && observed !== effective
+			? `${DESCRIPTION[effective]} (reported ${observed}, graded ${effective})`
+			: DESCRIPTION[effective];
+	switch (effective) {
 		case "passed":
 			return (
-				<Tooltip title="Passing" arrow>
+				<Tooltip title={tooltip} arrow>
 					<CheckCircleIcon fontSize="small" color="success" />
 				</Tooltip>
 			);
 		case "warning":
 			return (
-				<Tooltip title="Warning — degraded but not failing" arrow>
+				<Tooltip title={tooltip} arrow>
 					<WarningAmberIcon fontSize="small" color="warning" />
 				</Tooltip>
 			);
 		case "failed":
 			return (
-				<Tooltip title="Failing" arrow>
+				<Tooltip title={tooltip} arrow>
 					<CancelIcon fontSize="small" color="error" />
 				</Tooltip>
 			);
 		case "broken":
 			return (
-				<Tooltip
-					title="Broken — the check itself is failing, not the system under test"
-					arrow
-				>
+				<Tooltip title={tooltip} arrow>
 					<BuildCircleIcon fontSize="small" color="warning" />
 				</Tooltip>
 			);
 		case "skipped":
 			return (
-				<Tooltip title="Skipped — a precondition was not met" arrow>
+				<Tooltip title={tooltip} arrow>
 					<RemoveCircleOutlinedIcon fontSize="small" color="disabled" />
 				</Tooltip>
 			);

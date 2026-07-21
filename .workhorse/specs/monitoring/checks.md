@@ -151,6 +151,13 @@ If a decommissioned check is reported again it is treated as newly registered �
 A server's health is derived from the checks currently contributing across all its sources: any effective failure makes it unhealthy; otherwise any effective warning or brokenness makes it degraded; otherwise it is healthy.
 Passed and skipped checks, and states that are resolved, snoozed, or decommissioned, do not count against a server.
 
+## Presentation
+
+Wherever a server's checks are presented — as they stand now, or as they stood at a past time — all of its sources' checks are shown together, each by its effective result and rolled into the server's health by the same rules used everywhere else.
+The detail a source attached to a check is presented with it, attributed to its source.
+A past state is reconstructed from the status history.
+No surface presents one source's checks in isolation, and none exposes a source's report other than as classified check state.
+
 ## Operator controls
 
 **Silences** are the scoped policy described above.

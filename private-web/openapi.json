@@ -7558,6 +7558,67 @@
           }
         }
       },
+      "ConsolidatedCheck": {
+        "type": "object",
+        "description": "One check in a server's consolidated state: a single `(source, check)`\nwith its results already graded by policy, ready to present. The same\nshape whether taken from current state or reconstructed as of a past\ntime, and across every reporting source — the presentation never sees a\nsingle source's raw report.",
+        "required": [
+          "source",
+          "check",
+          "effective",
+          "silenced",
+          "detail"
+        ],
+        "properties": {
+          "check": {
+            "type": "string",
+            "description": "The check's name, as reported."
+          },
+          "detail": {
+            "type": "object",
+            "description": "The detail the source attached to the check (its extra fields), as an\nobject. Empty object when the check carried none."
+          },
+          "effective": {
+            "type": "string",
+            "description": "The result after policy grading — what everything acts on and what\nthe presentation colours by."
+          },
+          "observed": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the source reported, before policy. `None` if the stored state\ncarried no observed result."
+          },
+          "silenced": {
+            "type": "boolean",
+            "description": "Whether this check is silenced at server or group scope."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source that reports this check."
+          }
+        }
+      },
+      "ConsolidatedChecks": {
+        "type": "object",
+        "description": "A server's checks across every source, graded and classified as one —\ncurrent or as of a past time.",
+        "required": [
+          "health_state",
+          "checks"
+        ],
+        "properties": {
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConsolidatedCheck"
+            },
+            "description": "Every source's checks, most urgent first."
+          },
+          "health_state": {
+            "$ref": "#/components/schemas/HealthState",
+            "description": "The rolled-up health over these checks, by the one classifier."
+          }
+        }
+      },
       "CreateArtifactArgs": {
         "type": "object",
         "description": "A new artifact to register against a version.",
@@ -11598,6 +11659,7 @@
           "server",
           "up",
           "health",
+          "checks",
           "siblings",
           "billing_labels"
         ],
@@ -11608,6 +11670,10 @@
               "$ref": "#/components/schemas/BillingTag"
             },
             "description": "The server's effective `billing.*` labels — i.e. its group's\n(product/deployment/stage). Empty when the server is ungrouped."
+          },
+          "checks": {
+            "$ref": "#/components/schemas/ConsolidatedChecks",
+            "description": "The server's current checks across every source, graded and\nclassified — the live consolidated checks view."
           },
           "device_info": {
             "oneOf": [
@@ -12095,8 +12161,6 @@
         "required": [
           "id",
           "created_at",
-          "healthy",
-          "health",
           "source",
           "extra",
           "operators"
@@ -12110,14 +12174,6 @@
           "extra": {
             "$ref": "#/components/schemas/Value",
             "description": "Additional endpoint-defined data included with this status push."
-          },
-          "health": {
-            "$ref": "#/components/schemas/Value",
-            "description": "Per-check health breakdown from this push. Empty for reports\npredating structured per-check health."
-          },
-          "healthy": {
-            "type": "boolean",
-            "description": "Server's overall self-reported health from this status push. `true`\nfor reports predating structured per-check health."
           },
           "id": {
             "type": "string",
@@ -12163,7 +12219,7 @@
           },
           "source": {
             "type": "string",
-            "description": "The source that pushed this status (e.g. `alertd`). Silences on\nthe checks it carries are keyed by this source."
+            "description": "The source that pushed this status (e.g. `alertd`)."
           },
           "timezone": {
             "type": [
@@ -12768,24 +12824,14 @@
           "id",
           "created_at",
           "server_id",
-          "healthy",
-          "health_state",
-          "health",
           "extra",
           "operators",
-          "check_results",
-          "silenced_checks"
+          "checks"
         ],
         "properties": {
-          "check_results": {
-            "type": "object",
-            "description": "For each currently-unhealthy check in this push, the effective\nresult its policy grades it to. Healthy checks are omitted. An\nunhealthy check not listed here should be treated as warning.",
-            "additionalProperties": {
-              "type": "string"
-            },
-            "propertyNames": {
-              "type": "string"
-            }
+          "checks": {
+            "$ref": "#/components/schemas/ConsolidatedChecks",
+            "description": "The server's consolidated checks as of this snapshot: every source's\nchecks, graded and classified, with silenced flags and the rolled-up\nhealth state — the same shape the live view uses."
           },
           "created_at": {
             "type": "string",
@@ -12801,18 +12847,7 @@
             "description": "Id of the device that sent this status push, if known."
           },
           "extra": {
-            "description": "Additional unstructured data reported alongside this push, for\nfields not yet promoted to a named field on this response."
-          },
-          "health": {
-            "description": "Raw per-check health results as reported in this push."
-          },
-          "health_state": {
-            "$ref": "#/components/schemas/HealthState",
-            "description": "Overall health rollup for this push, derived from its individual\nhealth checks (falling back to the legacy `healthy` flag). A single\nfailing check can't be masked by an otherwise-healthy overall\nreport."
-          },
-          "healthy": {
-            "type": "boolean",
-            "description": "Legacy overall self-reported health flag. Being phased out in favor\nof `health_state`; new integrations should not rely on it."
+            "description": "Additional unstructured data reported alongside the snapshot, keyed\nby source (`{ [source]: { …fields } }`) so a multi-source snapshot's\nraw payloads stay attributed rather than merged. Sources whose\npayload is empty are omitted."
           },
           "id": {
             "type": "string",
@@ -12860,14 +12895,6 @@
             "type": "string",
             "format": "uuid",
             "description": "Id of the server this status was reported by."
-          },
-          "silenced_checks": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Check names currently silenced for this server (at server or\ngroup scope). These don't count toward `health_state` and the UI\nrenders them with its skipped affordance. Reflects the silence\nlist as of the request, not as of the snapshot's push.",
-            "uniqueItems": true
           },
           "timezone": {
             "type": [

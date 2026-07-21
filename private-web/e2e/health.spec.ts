@@ -3,6 +3,7 @@ import {
 	seedCheckPolicy,
 	resetSeededTables,
 	seedGroupSilencedRef,
+	seedIssue,
 	seedServer,
 	seedServerGroup,
 	seedServerSilencedRef,
@@ -96,6 +97,41 @@ test.describe("server detail checks table", () => {
 		// The failing entry surfaces its extras as a key/value line.
 		await expect(page.getByText("hint")).toBeVisible();
 		await expect(page.getByText("free_pct: 2")).toBeVisible();
+	});
+
+	test("merges checks from every source, each labelled with its source", async ({
+		page,
+		sql,
+	}) => {
+		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
+		const server = await seedServer(sql, {
+			name: "multi-source-server",
+			kind: "central",
+		});
+		// alertd reports a failing check (via a status push).
+		await seedStatus(sql, {
+			serverId: server.id,
+			healthy: false,
+			health: [{ check: "postgres", result: "failed" }],
+		});
+		// A second source reports its own check independently.
+		await seedIssue(sql, {
+			serverId: server.id,
+			source: "tamanu",
+			ref: "health/sync",
+			severity: "warning",
+		});
+
+		await page.goto(`/servers/${server.id}`);
+
+		// Both sources' checks render in the one consolidated table, each
+		// linked and labelled with the source it came from.
+		await expect(
+			page.getByRole("link", { name: "postgres" }),
+		).toBeVisible();
+		await expect(page.getByRole("link", { name: "sync" })).toBeVisible();
+		await expect(page.getByText("alertd", { exact: true }).first()).toBeVisible();
+		await expect(page.getByText("tamanu", { exact: true }).first()).toBeVisible();
 	});
 
 	test("the ? button pops up the check's rendered documentation", async ({

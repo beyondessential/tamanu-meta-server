@@ -10,3 +10,5 @@ TODO.txt
 /private-web/dist
 /private-web/test-results
 /private-web/playwright-report
+/test-results
+/playwright-report

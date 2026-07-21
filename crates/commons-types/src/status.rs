@@ -422,3 +422,98 @@ pub enum HealthState {
 	/// At least one health check failed. Considered an incident.
 	Unhealthy,
 }
+
+/// One check in a server's consolidated state: a single `(source, check)`
+/// with its results already graded by policy, ready to present. The same
+/// shape whether taken from current state or reconstructed as of a past
+/// time, and across every reporting source — the presentation never sees a
+/// single source's raw report.
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ConsolidatedCheck {
+	/// The source that reports this check.
+	pub source: String,
+	/// The check's name, as reported.
+	pub check: String,
+	/// What the source reported, before policy. `None` if the stored state
+	/// carried no observed result.
+	#[schema(value_type = Option<String>)]
+	pub observed: Option<CheckResult>,
+	/// The result after policy grading — what everything acts on and what
+	/// the presentation colours by.
+	#[schema(value_type = String)]
+	pub effective: CheckResult,
+	/// Whether this check is silenced at server or group scope.
+	pub silenced: bool,
+	/// The detail the source attached to the check (its extra fields), as an
+	/// object. Empty object when the check carried none.
+	#[schema(value_type = Object)]
+	pub detail: serde_json::Value,
+}
+
+/// A server's checks across every source, graded and classified as one —
+/// current or as of a past time.
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ConsolidatedChecks {
+	/// The rolled-up health over these checks, by the one classifier.
+	pub health_state: HealthState,
+	/// Every source's checks, most urgent first.
+	pub checks: Vec<ConsolidatedCheck>,
+}
+
+impl HealthState {
+	/// Roll a set of effective check results into a server health state:
+	/// any failure ⇒ unhealthy; otherwise any warning or brokenness ⇒
+	/// warning; otherwise healthy. Passed and skipped results don't count.
+	/// The single source of truth for every health rollup — callers filter
+	/// out silenced/resolved/decommissioned checks first, then pass the
+	/// surviving effective results.
+	pub fn from_results(results: impl IntoIterator<Item = CheckResult>) -> Self {
+		let mut state = HealthState::Healthy;
+		for result in results {
+			match result {
+				CheckResult::Failed => return HealthState::Unhealthy,
+				CheckResult::Warning | CheckResult::Broken => state = HealthState::Warning,
+				CheckResult::Passed | CheckResult::Skipped => {}
+			}
+		}
+		state
+	}
+}
+
+#[cfg(test)]
+mod health_state_tests {
+	use super::{CheckResult, HealthState};
+
+	#[test]
+	fn any_failure_is_unhealthy() {
+		assert_eq!(
+			HealthState::from_results([
+				CheckResult::Passed,
+				CheckResult::Warning,
+				CheckResult::Failed,
+			]),
+			HealthState::Unhealthy,
+		);
+	}
+
+	#[test]
+	fn warning_or_broken_without_failure_is_warning() {
+		assert_eq!(
+			HealthState::from_results([CheckResult::Passed, CheckResult::Broken]),
+			HealthState::Warning,
+		);
+		assert_eq!(
+			HealthState::from_results([CheckResult::Warning, CheckResult::Passed]),
+			HealthState::Warning,
+		);
+	}
+
+	#[test]
+	fn only_passed_and_skipped_is_healthy() {
+		assert_eq!(
+			HealthState::from_results([CheckResult::Passed, CheckResult::Skipped]),
+			HealthState::Healthy,
+		);
+		assert_eq!(HealthState::from_results([]), HealthState::Healthy);
+	}
+}

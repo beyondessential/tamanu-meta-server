@@ -117,11 +117,10 @@ pub async fn is_silenced(
 /// check) pair, so a silence on another source's same-named check never
 /// applies.
 ///
-/// This feeds [`crate::statuses::Status::health_state_ignoring`] (a
-/// status row's checks all belong to the row's one source) and the
-/// device-facing effective check map: a silenced check keeps recording
-/// results but is presented as skipped and doesn't count toward the
-/// server's health rollup.
+/// This feeds the consolidated check readers and the device-facing
+/// effective check map: a silenced check keeps recording results but is
+/// presented as skipped and doesn't count toward the server's health
+/// rollup.
 pub async fn silenced_health_checks_for_server(
 	db: &mut AsyncPgConnection,
 	server_id: Uuid,
