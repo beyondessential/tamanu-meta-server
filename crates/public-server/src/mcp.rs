@@ -1,4 +1,4 @@
-//! The internet-facing mount of the read-only MCP query interface, gated by
+//! The internet-facing mount of the MCP query interface, gated by
 //! bearer tokens ([`database::mcp_tokens::McpToken`]).
 //!
 //! Spec: `.workhorse/specs/private-server/mcp.md` (id `MCP`).
@@ -31,11 +31,12 @@ const RL_WINDOW: Duration = Duration::from_secs(60);
 const RL_PER_IP: u32 = 30;
 
 /// The `/mcp` mount: the shared MCP tower service behind the bearer gate.
+/// Reads go to the replica pool; manual-incident writes to the primary.
 pub fn routes(state: AppState) -> Router<()> {
 	Router::new().nest(
 		"/mcp",
 		Router::new()
-			.fallback_service(canopy_mcp::service(state.db_read.clone()))
+			.fallback_service(canopy_mcp::service(state.db.clone(), state.db_read.clone()))
 			.layer(middleware::from_fn_with_state(state, require_bearer_token)),
 	)
 }
@@ -43,11 +44,13 @@ pub fn routes(state: AppState) -> Router<()> {
 /// Gate on a usable bearer token. Missing, malformed, unknown, revoked, and
 /// expired tokens all yield the same opaque 401 (with a `WWW-Authenticate`
 /// challenge); the distinction is logged. The token's name is logged on
-/// success so each query is attributable, and its `last_used_at` is bumped.
+/// success so each query is attributable, its `last_used_at` is bumped, and
+/// it becomes the request's [`canopy_mcp::McpIdentity`] — with write access
+/// only if the token was minted with it.
 async fn require_bearer_token(
 	State(state): State<AppState>,
 	ClientIp(ip): ClientIp,
-	req: Request,
+	mut req: Request,
 	next: Next,
 ) -> Result<Response, AppError> {
 	let presented = req
@@ -83,6 +86,10 @@ async fn require_bearer_token(
 		let mut conn = state.db.get().await?;
 		McpToken::touch_last_used(&mut conn, token.id).await?;
 	}
+	req.extensions_mut().insert(canopy_mcp::McpIdentity {
+		who: token.name.clone(),
+		can_write: token.write_access,
+	});
 
 	Ok(next.run(req).await)
 }

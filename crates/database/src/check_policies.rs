@@ -111,7 +111,7 @@ pub struct GradedResult {
 impl CheckPolicy {
 	/// Reconcile fleet-wide check liveness. Refreshes every catalogued
 	/// `(source, check)`'s `last_seen` to the most recent report of that
-	/// check on any server (synthetic `canopy`/`manual` sources excluded),
+	/// check on any server (the synthetic `canopy` source excluded),
 	/// and re-animates any decommissioned check that has been reported
 	/// since it was retired: cleared back to the newly-registered state
 	/// (warning ceiling, pending review) so a resurrected check never
@@ -128,12 +128,11 @@ impl CheckPolicy {
 			"UPDATE check_policies cp SET last_seen = f.max_seen FROM (\
 			 SELECT source, check_name, max(last_seen) AS max_seen FROM issues \
 			 WHERE server_id IS NOT NULL AND check_name IS NOT NULL \
-			 AND source NOT IN ('{canopy}', '{manual}') \
+			 AND source != '{canopy}' \
 			 GROUP BY source, check_name) f \
 			 WHERE cp.source = f.source AND cp.check_name = f.check_name \
 			 AND (cp.last_seen IS NULL OR cp.last_seen < f.max_seen)",
 			canopy = crate::statuses::CANOPY_SOURCE,
-			manual = crate::issues::MANUAL_SOURCE,
 		);
 		sql_query(refresh).execute(db).await?;
 

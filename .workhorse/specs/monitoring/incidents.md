@@ -49,3 +49,14 @@ Resolution cascades to the incident's open issues — each is resolved with the 
 Unresolving clears the resolution record; it does not reopen the incident.
 
 Notes attach free-form operator commentary to an incident.
+
+## Manual incidents
+
+Alongside the automatic incidents above, Canopy keeps manual incidents: records of incidents the support team managed, written after the fact rather than derived from check state.
+
+A manual incident carries a title, a markdown description, when it started, and when it ended; an ended time may be absent while the incident is ongoing.
+It may name one server group as the affected target; a manual incident without a group concerns the fleet or Canopy generally.
+Each records who created it and when it was created and last changed.
+
+Manual incidents are independent of the check-state model: no issue joins them, they never notify, and nothing opens, closes, or resolves them except the people editing them.
+They are created, edited, and deleted over the MCP interface (see [MCP](../private-server/mcp.md)) and presented read-only in the operator UI alongside automatic incidents.

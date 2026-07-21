@@ -1,7 +1,9 @@
 # canopy-mcp plugin
 
-Points agents at the internet-facing mount of Canopy's read-only MCP fleet
-query interface (`https://meta.tamanu.app/mcp`). The `.mcp.json` carries no
+Points agents at the internet-facing mount of Canopy's MCP fleet query
+interface (`https://meta.tamanu.app/mcp`). Queries are read-only except
+manual incidents (support-recorded incident records), which tokens minted
+with write access can record and edit. The `.mcp.json` carries no
 credentials: the endpoint requires a bearer token, which must be supplied by
 the agent platform (for Claude Tag, the admin Connections credential proxy).
 

@@ -73,7 +73,7 @@ impl SourcePolicy {
 			 max(cp.last_seen) AS last_seen \
 			 FROM check_policies cp \
 			 LEFT JOIN source_policies sp ON sp.source = cp.source \
-			 WHERE cp.source NOT IN ('canopy', 'manual') \
+			 WHERE cp.source != 'canopy' \
 			 GROUP BY cp.source, sp.reachability, sp.ingest \
 			 ORDER BY cp.source",
 		)

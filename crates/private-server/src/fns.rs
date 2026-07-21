@@ -9,6 +9,7 @@ pub mod devices;
 pub mod healthchecks;
 pub mod incidents;
 pub mod issues;
+pub mod manual_incidents;
 pub mod mcp_tokens;
 pub mod restore_replicas;
 pub mod self_alerts;
@@ -58,6 +59,7 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 			.nest("/healthchecks", healthchecks::routes())
 			.nest("/incidents", incidents::routes())
 			.nest("/issues", issues::routes())
+			.nest("/manual_incidents", manual_incidents::routes())
 			.nest("/mcp_tokens", mcp_tokens::routes())
 			.nest("/restore_replicas", restore_replicas::routes())
 			.nest("/self_alerts", self_alerts::routes())

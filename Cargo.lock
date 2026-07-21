@@ -1304,6 +1304,7 @@ version = "6.6.6"
 dependencies = [
  "commons-types",
  "database",
+ "http 1.4.2",
  "jiff",
  "rmcp",
  "schemars",

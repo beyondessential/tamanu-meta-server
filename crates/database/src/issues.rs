@@ -325,8 +325,8 @@ impl NewEvent {
 	/// 2. if the server is in a group: (re)evaluate incident contribution.
 	///
 	/// `server_id` is the server the issue is attached to: derived from the
-	/// device for public submissions, supplied by the operator for manual.
-	/// `device_id` is `None` for manual events.
+	/// device for public submissions. `device_id` is `None` for canopy's
+	/// own filings.
 	///
 	/// Issues from an **ungrouped** server are still recorded — the issue
 	/// row goes in just like any other push — but the incident
@@ -788,17 +788,12 @@ pub enum FilingScope {
 	Global,
 }
 
-/// The source operator-raised manual conditions file under.
-pub const MANUAL_SOURCE: &str = "manual";
-
-/// One canopy-determined or operator-raised check result to file:
-/// reachability, backup health, key expiry, self-monitoring, manual
-/// conditions, and the like.
+/// One canopy-determined check result to file: reachability, backup
+/// health, key expiry, self-monitoring, and the like.
 #[derive(Debug, Clone)]
 pub struct CheckFiling<'a> {
-	/// The reserved source this filing belongs to: [`MANUAL_SOURCE`] for
-	/// operator-raised conditions (server scope only), `canopy` for
-	/// canopy's own determinations.
+	/// The reserved source this filing belongs to: `canopy` for canopy's
+	/// own determinations.
 	pub source: &'a str,
 	pub scope: FilingScope,
 	/// The check's stable name (doubles as the issue ref under the
@@ -823,13 +818,10 @@ pub struct CheckFiling<'a> {
 	pub documentation: Option<&'a str>,
 }
 
-/// File one canopy-determined or operator-raised check result: register
-/// its catalog entry (first sight only), grade the observation through
-/// the operator's policy, and upsert the check state at the right scope
-/// — driving incident membership exactly like a device-reported check.
-///
-/// Group- and canopy-wide scopes are canopy's own (their raise paths
-/// file under the `canopy` source); manual conditions are server-scoped.
+/// File one canopy-determined check result: register its catalog entry
+/// (first sight only), grade the observation through the operator's
+/// policy, and upsert the check state at the right scope — driving
+/// incident membership exactly like a device-reported check.
 ///
 /// Until issues themselves carry results, the effective result maps to
 /// the issue severity the same way status ingestion does: failed →
@@ -840,9 +832,8 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 
 	let source = filing.source;
 	debug_assert!(
-		matches!(filing.scope, FilingScope::Server { .. })
-			|| source == crate::statuses::CANOPY_SOURCE,
-		"group- and canopy-wide filings are canopy's own",
+		source == crate::statuses::CANOPY_SOURCE,
+		"filings are canopy's own",
 	);
 	CheckPolicy::register(
 		conn,
@@ -856,11 +847,7 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 
 	// Rule-evaluation context: the check's detail (with the normalised
 	// result injected, mirroring status ingestion), no report-wide
-	// extras, and the server's tags where there is a server. Filings
-	// whose observation policy shouldn't touch (an operator explicitly
-	// raising a manual condition) still flow through so the catalog row
-	// and stamps exist, but manual entries register at a failed ceiling
-	// so the operator's chosen result passes through ungraded by default.
+	// extras, and the server's tags where there is a server.
 	let mut check_extra = filing
 		.detail
 		.as_ref()
@@ -2395,9 +2382,9 @@ impl Issue {
 	/// report a source pushes re-stamps `last_seen` on the state rows of
 	/// the checks it mentions, so the max per source is when that source
 	/// last reported — maintained incrementally by ingestion, with no scan
-	/// of the statuses history. The reserved sources are excluded (canopy
-	/// and manual filings aren't reports), as are rows never stamped by
-	/// the check-state model.
+	/// of the statuses history. The reserved source is excluded (canopy
+	/// filings aren't reports), as are rows never stamped by the
+	/// check-state model.
 	pub async fn source_freshness(
 		db: &mut AsyncPgConnection,
 		server_ids: &[Uuid],
@@ -2423,10 +2410,7 @@ impl Issue {
 			.filter(
 				dsl::server_id
 					.eq_any(server_ids)
-					.and(
-						dsl::source
-							.ne_all([crate::statuses::CANOPY_SOURCE, crate::issues::MANUAL_SOURCE]),
-					)
+					.and(dsl::source.ne(crate::statuses::CANOPY_SOURCE))
 					.and(dsl::check_name.is_not_null()),
 			)
 			.select((

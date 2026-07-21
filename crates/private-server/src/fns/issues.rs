@@ -4,10 +4,7 @@ use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::{Uuid, issue::ResolvedReason, status::CheckResult};
-use database::issues::{
-	CheckFiling, FilingScope, Incident, Issue, IssueFilter, IssueIncidentRef, IssueListFilters,
-	MANUAL_SOURCE, file_check,
-};
+use database::issues::{Incident, Issue, IssueFilter, IssueIncidentRef, IssueListFilters};
 use database::notes::IssueNote;
 use database::servers::Server;
 use database::tailscale_users::TailscaleUser as CachedTailscaleUser;
@@ -40,10 +37,9 @@ pub struct IssueData {
 	/// when the server isn't in a group.
 	pub server_group_name: Option<String>,
 	/// Id of the device that reported the underlying event, if the issue
-	/// originated from a device push rather than a manual entry.
+	/// originated from a device push rather than canopy's own monitoring.
 	pub device_id: Option<Uuid>,
-	/// What raised the issue (for example, an automated health check or a
-	/// manually submitted event).
+	/// What raised the issue (for example, an automated health check).
 	pub source: String,
 	/// Identifier used to match new incoming events to this issue; unique
 	/// within its source and server.
@@ -280,7 +276,6 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(list))
 		.routes(routes!(list_for_device))
 		.routes(routes!(list_for_server))
-		.routes(routes!(submit_manual_event))
 		.routes(routes!(resolve))
 		.routes(routes!(unresolve))
 		.routes(routes!(snooze))
@@ -443,98 +438,6 @@ pub async fn list_for_server(
 	)
 	.await?;
 	Ok(Json(enrich_issues(&mut conn, issues).await?))
-}
-
-/// A manually raised condition to record against a server.
-#[derive(Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SubmitManualEventArgs {
-	/// Id of the server the condition applies to.
-	pub server_id: Uuid,
-	/// Identifier for the underlying condition. Reports with the same
-	/// `ref` on the same server update the same issue rather than opening
-	/// a new one each time; use a fresh unique value if that deduplication
-	/// isn't wanted.
-	#[serde(rename = "ref")]
-	pub r#ref: String,
-	/// The condition's result: `failed` (can open an incident) or
-	/// `warning` (context only). Defaults to `failed`. `passed` records
-	/// the condition as cleared, same as `active: false`.
-	#[serde(default)]
-	pub result: Option<CheckResult>,
-	/// Whether the condition's failures should notify immediately,
-	/// bypassing the incident grace period. Only consulted the first time
-	/// a `ref` is seen (it seeds the condition's catalog entry); adjust
-	/// later from the healthchecks catalog.
-	#[serde(default)]
-	pub escalates: Option<bool>,
-	/// Short, single-line headline for the condition. Must not contain
-	/// newlines — use `message` for multi-line detail.
-	#[serde(default)]
-	pub description: Option<String>,
-	/// Human-readable message describing the condition. May be multi-line.
-	pub message: String,
-	/// Whether the underlying condition is currently active. Defaults to
-	/// `true` when omitted; `false` records it as cleared regardless of
-	/// `result`.
-	#[serde(default)]
-	pub active: Option<bool>,
-}
-
-/// Manually raise (or clear) a condition against a server.
-///
-/// Finds or creates an issue keyed by the server and the given `ref`
-/// under the `manual` source, grades the chosen result through the
-/// condition's catalog policy, and returns the resulting issue. Returns
-/// 400 if `ref` is empty or if `description` contains a newline.
-#[utoipa::path(
-	post,
-	path = "/submit_manual_event",
-	tag = "issues",
-	security(("tailscale-admin" = [])),
-	request_body = SubmitManualEventArgs,
-	responses(
-		(status = 200, body = IssueData),
-		(status = 400, body = ProblemDetailsSchema),
-	),
-)]
-pub async fn submit_manual_event(
-	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
-	Json(args): Json<SubmitManualEventArgs>,
-) -> Result<Json<IssueData>> {
-	if args.r#ref.trim().is_empty() {
-		return Err(AppError::custom("ref is required"));
-	}
-
-	let observed = if args.active == Some(false) {
-		CheckResult::Passed
-	} else {
-		args.result.unwrap_or(CheckResult::Failed)
-	};
-	let mut conn = state.db.get().await?;
-	let issue = file_check(
-		&mut conn,
-		CheckFiling {
-			source: MANUAL_SOURCE,
-			scope: FilingScope::Server {
-				server_id: args.server_id,
-				device_id: None,
-			},
-			check: &args.r#ref,
-			observed,
-			title: args.description.as_deref(),
-			message: &args.message,
-			detail: None,
-			// The operator's chosen result passes through ungraded; the
-			// escalation choice seeds the catalog entry on first sight.
-			default_ceiling: CheckResult::Failed,
-			default_escalates: args.escalates.unwrap_or(false),
-			documentation: None,
-		},
-	)
-	.await?;
-	Ok(Json(enrich_issue(&mut conn, issue).await?))
 }
 
 /// Identifies a single issue by id.

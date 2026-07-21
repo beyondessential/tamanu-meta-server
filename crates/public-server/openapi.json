@@ -1796,7 +1796,7 @@
                   "string",
                   "null"
                 ],
-                "description": "The name of the source pushing this status: the reporting agent, e.g.\n`alertd`. Multiple sources may report on one server, each with its own\nset of checks; a source's push only opens and recovers its own checks.\n\n**Transitionally optional: this field will become mandatory.** A push\nwithout a `source` is attributed to `alertd`; new reporters must send\ntheir own name. Must be a non-empty string; the names `canopy` and\n`manual` are reserved for canopy itself and are rejected."
+                "description": "The name of the source pushing this status: the reporting agent, e.g.\n`alertd`. Multiple sources may report on one server, each with its own\nset of checks; a source's push only opens and recovers its own checks.\n\n**Transitionally optional: this field will become mandatory.** A push\nwithout a `source` is attributed to `alertd`; new reporters must send\ntheir own name. Must be a non-empty string; the name `canopy` is\nreserved for canopy itself and is rejected."
               }
             }
           }

@@ -4,8 +4,9 @@ id: MCP
 
 # Fleet query interface
 
-A read-only query interface to the Canopy fleet, exposed for AI agents and other automated clients that operators run.
+A query interface to the Canopy fleet, exposed for AI agents and other automated clients that operators run.
 It lets such a client discover servers and groups, read their status and health, learn what Tamanu versions exist and which are deployed, and inspect backup state and problems — without granting any ability to change the fleet.
+Its one write surface is the manual incident record (see [INC](../monitoring/incidents.md), "Manual incidents"), which suitably authorised callers can create and edit.
 
 ## Why it exists
 
@@ -32,16 +33,22 @@ Each query a caller makes is attributable to its identity: the tailnet user on t
 
 Access tokens are minted, listed, and revoked by administrators on the operator surface.
 Each token has an operator-chosen name, records who minted it and when, and carries a fixed lifetime of one year from minting that cannot be extended or chosen at mint time.
+A token is read-only unless it was minted with write access, a mint-time choice that cannot be changed afterwards; a token's scope is visible wherever the token is listed.
 The token secret is shown exactly once, at minting; the system persists only a digest of it, and never logs or re-displays the secret.
 A token can be revoked at any time, taking effect immediately.
 Each token records when it was last used, so idle tokens are visible.
 
 From fifteen days before a token's expiry until that token expires or is revoked, a [self-alert](self-alerts.md) is raised, so rotation happens on schedule rather than as an outage.
 
-## Read-only
+## Reads and writes
 
 Every query in this interface only reads.
-Nothing it exposes creates, modifies, deletes, or triggers any fleet action, and no query has a side effect beyond being recorded as having happened.
+Nothing it exposes triggers any fleet action, and no query has a side effect beyond being recorded as having happened.
+
+The sole write surface is the manual incident record: the interface can create, edit, and delete manual incidents, which describe incidents the support team managed and touch nothing in the fleet or the automatic monitoring.
+On the token path, writing requires a token minted with write access; a read-only token's write attempt is refused with a message saying so.
+On the operator path, any tailnet user may write.
+Every write is attributed: the identity that made it — the token's name or the tailnet user — is recorded as the manual incident's author at creation.
 Mutating the fleet is out of scope for this interface.
 
 ## Queries
@@ -93,6 +100,23 @@ A summary or ranking of incidents should count published incidents rather than r
 **Find issues** returns issues across the fleet, filtered by active state, by effective result, by group, by server, and by recency (issues last seen within a look-back window).
 
 **Get issue** takes an issue identifier and returns the issue with the incidents it is or was part of.
+
+### Manual incidents
+
+Manual incidents (see [INC](../monitoring/incidents.md), "Manual incidents") are both queried and written through this interface.
+
+**Find manual incidents** optionally narrows by group and to ongoing ones only, and returns a bounded list ordered most recently started first, each with its title, description, start and end times, target group (with its name resolved), author, and when it was created and last changed.
+When the result is truncated to its bound, the result says so.
+
+**Get manual incident** takes an identifier and returns the full record.
+
+**Record manual incident** takes a title and a start time, and optionally a markdown description, an end time, and a target group; it creates the record with the caller's identity as author and returns it.
+
+**Update manual incident** takes an identifier and any subset of title, description, start time, and end time, and applies them; it can also explicitly clear the end time, marking the incident ongoing again.
+
+**Delete manual incident** takes an identifier and removes the record.
+
+### Check knowledge
 
 **Get check documentation** takes a source and check name and returns the check's operator-authored markdown documentation (see [CHK](../monitoring/checks.md), "Documentation"), which by convention covers what the check observes, what each result means, and how to solve a failure.
 A client investigating an issue consults this before deriving a check's meaning from other sources.

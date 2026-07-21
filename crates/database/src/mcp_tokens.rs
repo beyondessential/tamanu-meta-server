@@ -41,6 +41,9 @@ pub struct McpToken {
 	pub revoked_at: Option<Timestamp>,
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp)]
 	pub last_used_at: Option<Timestamp>,
+	/// Whether the token may call the MCP write tools (manual incidents).
+	/// A mint-time choice, immutable afterwards.
+	pub write_access: bool,
 }
 
 /// SHA-256 of the token string. Unsalted is correct here: the token is 256 bits
@@ -59,6 +62,7 @@ impl McpToken {
 		db: &mut AsyncPgConnection,
 		name: &str,
 		created_by: &str,
+		write_access: bool,
 	) -> Result<(Self, String)> {
 		use crate::schema::mcp_tokens::dsl;
 
@@ -79,6 +83,7 @@ impl McpToken {
 				dsl::token_hash.eq(&token_hash),
 				dsl::created_by.eq(created_by),
 				dsl::expires_at.eq(jiff_diesel::Timestamp::from(expires_at)),
+				dsl::write_access.eq(write_access),
 			))
 			.returning(Self::as_select())
 			.get_result(db)

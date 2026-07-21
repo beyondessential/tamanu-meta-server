@@ -19,6 +19,7 @@ import { useSearchParams } from "react-router-dom";
 import { useApi } from "../api";
 import IncidentCard from "../components/IncidentCard";
 import IssueRow from "../components/IssueRow";
+import ManualIncidentCard from "../components/ManualIncidentCard";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { CHECK_RESULT_ORDER, type CheckResult } from "../types";
 
@@ -28,7 +29,7 @@ export default function Incidents() {
 	usePageTitle("Incidents");
 
 	// Page-level refresh signal: a single tick refetches incidents + issues
-	// together after any mutation (resolve, snooze, manual submit).
+	// together after any mutation (resolve, snooze).
 	const [refreshTick, setRefreshTick] = useState(0);
 	const bumpRefresh = () => setRefreshTick((t) => t + 1);
 
@@ -62,6 +63,14 @@ export default function Incidents() {
 		"incidents",
 		"list_active",
 		{},
+		[refreshTick],
+	);
+	// Manual incidents are support-recorded history, not live alerting; the
+	// section only surfaces recent and ongoing ones, marked as manual.
+	const manualIncidents = useApi(
+		"manual_incidents",
+		"list",
+		{ limit: 12 },
 		[refreshTick],
 	);
 	const groups = useApi("server_groups", "list", {}, []);
@@ -105,6 +114,30 @@ export default function Incidents() {
 					{incidents.data.map((inc) => (
 						<IncidentCard key={inc.id} incident={inc} />
 					))}
+				</Box>
+			)}
+
+			{manualIncidents.status === "ok" && manualIncidents.data.length > 0 && (
+				<Box>
+					<Typography variant="h5" component="h2" gutterBottom>
+						Manual incidents
+					</Typography>
+					<Box
+						sx={{
+							display: "grid",
+							gridTemplateColumns: {
+								xs: "1fr",
+								sm: "repeat(2, 1fr)",
+								md: "repeat(3, 1fr)",
+								lg: "repeat(4, 1fr)",
+							},
+							gap: 2,
+						}}
+					>
+						{manualIncidents.data.map((inc) => (
+							<ManualIncidentCard key={inc.id} incident={inc} />
+						))}
+					</Box>
 				</Box>
 			)}
 

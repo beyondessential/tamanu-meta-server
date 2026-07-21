@@ -2970,7 +2970,7 @@ async fn source_field_validation() {
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = insert_health_test_server(&mut conn, device_id).await;
 
-			for source in ["canopy", "Manual", ""] {
+			for source in ["canopy", "Canopy", ""] {
 				public
 					.post(&format!("/status/{server_id}"))
 					.add_header("mtls-certificate", &cert)

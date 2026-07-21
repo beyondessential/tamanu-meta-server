@@ -22,9 +22,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::check_policies::{PolicyScope, ScopedCheckPolicy};
-use crate::issues::{
-	MANUAL_SOURCE, reevaluate_open_issues_for_group_ref, reevaluate_open_issues_for_server_ref,
-};
+use crate::issues::{reevaluate_open_issues_for_group_ref, reevaluate_open_issues_for_server_ref};
 use crate::statuses::CANOPY_SOURCE;
 
 /// The ref prefix (with trailing separator) healthcheck issues use,
@@ -32,16 +30,16 @@ use crate::statuses::CANOPY_SOURCE;
 const HEALTH_REF_PREFIX: &str = "health/";
 
 /// The check name a silence ref maps to: refs of source-reported checks
-/// carry the `health/` namespace prefix, canopy/manual refs are already
-/// bare check names.
+/// carry the `health/` namespace prefix, canopy refs are already bare
+/// check names.
 fn ref_to_check(r#ref: &str) -> &str {
 	r#ref.strip_prefix(HEALTH_REF_PREFIX).unwrap_or(r#ref)
 }
 
-/// The ref a silenced check name presents as: reserved sources file at
-/// bare refs, everything else under the `health/` namespace.
+/// The ref a silenced check name presents as: the reserved source files
+/// at bare refs, everything else under the `health/` namespace.
 fn check_to_ref(source: &str, check: &str) -> String {
-	if source == CANOPY_SOURCE || source == MANUAL_SOURCE {
+	if source == CANOPY_SOURCE {
 		check.to_string()
 	} else {
 		format!("{HEALTH_REF_PREFIX}{check}")

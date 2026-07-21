@@ -34,6 +34,25 @@ pub(crate) fn mcp_err(e: impl std::fmt::Display) -> McpError {
 	McpError::internal_error(e.to_string(), None)
 }
 
+/// Authorise a write tool call: dig the mount-inserted [`crate::McpIdentity`]
+/// out of the HTTP request parts and check it may write, returning the
+/// caller's identity for attribution. Refused write access names the fix (a
+/// token minted with write access); a missing identity is a mount wiring bug.
+pub(crate) fn require_write(parts: &http::request::Parts) -> Result<String, McpError> {
+	let identity = parts
+		.extensions
+		.get::<crate::McpIdentity>()
+		.ok_or_else(|| McpError::internal_error("caller identity missing from request", None))?;
+	if !identity.can_write {
+		return Err(McpError::invalid_request(
+			"this access token is read-only; recording manual incidents needs a token minted \
+			 with write access",
+			None,
+		));
+	}
+	Ok(identity.who.clone())
+}
+
 pub(crate) fn parse_opt<T: std::str::FromStr>(
 	v: &Option<String>,
 	field: &str,

@@ -13,6 +13,7 @@ authors = [
 [dependencies]
 commons-types = { path = "../commons-types" }
 database = { path = "../database" }
+http.workspace = true
 jiff = { version = "0.2.24", features = ["serde"] }
 rmcp = { version = "1.8", features = ["server", "macros", "transport-streamable-http-server"] }
 schemars = "1"

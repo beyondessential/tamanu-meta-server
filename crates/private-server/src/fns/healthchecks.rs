@@ -200,7 +200,7 @@ pub struct SourceData {
 ///
 /// Every non-reserved source that has catalogued checks, with its
 /// reachability mode (defaulting to `on`) and most recent fleet-wide
-/// report. The reserved `canopy`/`manual` sources are excluded.
+/// report. The reserved `canopy` source is excluded.
 #[utoipa::path(
 	post,
 	path = "/sources",
@@ -234,8 +234,7 @@ pub async fn sources(
 /// Request body for setting a source's reachability mode.
 #[derive(Deserialize, ToSchema)]
 pub struct SetSourceReachabilityArgs {
-	/// The source to configure. The reserved `canopy`/`manual` names are
-	/// rejected.
+	/// The source to configure. The reserved `canopy` name is rejected.
 	pub source: String,
 	/// The reachability mode to apply: `on`, `quiet`, or `off`.
 	pub reachability: ReachabilityMode,
@@ -245,7 +244,7 @@ pub struct SetSourceReachabilityArgs {
 ///
 /// Governs how the source's silence bears on its servers' reachability:
 /// `on` warns, `quiet` never warns but still counts toward unreachable,
-/// `off` is excluded. The reserved `canopy`/`manual` names are rejected.
+/// `off` is excluded. The reserved `canopy` name is rejected.
 #[utoipa::path(
 	post,
 	path = "/set_source_reachability",
@@ -265,9 +264,9 @@ pub async fn set_source_reachability(
 	_admin: TailscaleAdmin,
 	Json(args): Json<SetSourceReachabilityArgs>,
 ) -> Result<Json<()>> {
-	if args.source == "canopy" || args.source == "manual" {
+	if args.source == "canopy" {
 		return Err(AppError::BadRequest(
-			"the reserved canopy/manual sources have no reachability policy".into(),
+			"the reserved canopy source has no reachability policy".into(),
 		));
 	}
 	let mut conn = state.db.get().await?;

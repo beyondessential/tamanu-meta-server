@@ -14,6 +14,7 @@ pub mod check_policies;
 pub mod chrome_releases;
 pub mod devices;
 pub mod issues;
+pub mod manual_incidents;
 pub mod mcp_tokens;
 pub mod notes;
 pub mod pg_duration;
