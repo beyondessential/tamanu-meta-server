@@ -112,6 +112,7 @@ When adding or changing a UI feature, add Playwright coverage for it in `private
 
 ## Development Workflow
 - Write or change specs in `.workhorse/specs/`; follow the spec rules in [.workhorse/rules.md](.workhorse/rules.md)
+- Design docs for in-flight, not-yet-shipped work live as plans in `.workhorse/plans/`. Delete a plan once its work has shipped — the convention is a dedicated `unplan:` commit (e.g. `unplan: <what> (shipped)`); git history is the durable record, so nothing is lost by removing it.
 - Always check: `just check` for basic compilation
 - Run full test suite: `just test`
 - Run specific tests: `just test-name <test_name>`

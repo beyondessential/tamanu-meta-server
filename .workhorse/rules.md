@@ -1,13 +1,24 @@
 # Spec rules
 
 Specs live in `.workhorse/specs/<area>/<name>.md`.
-Each carries an `id` in its frontmatter (e.g. `BAK`, `S3P`) and is cross-referenced by linking the file under that id, e.g. `[BAK](backup.md)`.
+This file is canopy's house style; it sits on top of the Workhorse spec conventions in `.agents/docs/spec-format.md` and wins wherever the two differ.
 
 A spec is the durable description of **what** the system requires.
 It is read by someone deciding whether the implementation is correct, or re-implementing the feature from scratch — not as a narrative of how the code works or how it came to be.
 
+Spec ids, frontmatter, and the fold-vs-create-vs-split decision follow `.agents/docs/spec-format.md`.
+The spec-first workflow — spec before implementation before tests — is carried by the Workhorse skills (Draft spec changes, Implement this, Draft test cases); it is not restated here.
+
+## Prose, not checklists
+
 Specs are written in markdown prose with each sentence on its own line and no hard-wrapping.
 This balances ease of writing and diff parseability.
+Acceptance criteria are prose sentences rather than `- [ ]` checklist items; this overrides the checklist format shown in `.agents/docs/spec-format.md`.
+
+## Cross-references
+
+Link a spec to a related spec — or reference one from any other markdown — by its path under its id: `[BAK](../public-server/backup.md)`.
+From code, tie an implementation back to its spec with an inline `// spec: BAK` comment.
 
 ## What, not how
 
@@ -30,7 +41,3 @@ This balances ease of writing and diff parseability.
   Don't narrate a dependency's decision logic or version-specific quirks beyond the minimum needed to justify a requirement.
 - Don't scaffold or label: no "Strategy A/B", "Phase N", or plan tags in spec prose.
   Describe the mechanism directly.
-
-## Workflow
-
-- When adding or changing a feature, or fixing a bug: update the spec in `.workhorse/specs` first, then implement, then add tests.
