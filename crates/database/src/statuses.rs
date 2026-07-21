@@ -518,6 +518,34 @@ impl Status {
 			.map_err(AppError::from)
 	}
 
+	/// Each source's most recent status for `server` at or before `at`
+	/// (latest overall when `at` is `None`) — one row per source. Unlike
+	/// [`Self::at_time`], which collapses to a single row regardless of
+	/// source, this keeps every source's contribution, for reconstructing
+	/// the consolidated multi-source checks view as of a point in time.
+	pub async fn latest_per_source_at(
+		db: &mut AsyncPgConnection,
+		server: Uuid,
+		at: Option<Timestamp>,
+	) -> Result<Vec<Status>> {
+		use crate::schema::statuses::dsl::*;
+
+		let cutoff = at.unwrap_or_else(Timestamp::now);
+		statuses
+			.select(Status::as_select())
+			.filter(
+				server_id
+					.eq(server)
+					.and(id.ne(Uuid::nil()))
+					.and(created_at.le(jiff_diesel::Timestamp::from(cutoff))),
+			)
+			.distinct_on(source)
+			.order((source, created_at.desc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// The most recent status for `server` that carries a version — **not**
 	/// bounded by the live 7-day window. Used for the status card's headline
 	/// version, which should reflect the last version a server ever reported

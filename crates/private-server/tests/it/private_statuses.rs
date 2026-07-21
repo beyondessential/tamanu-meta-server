@@ -817,9 +817,7 @@ async fn server_grouped_ids_excludes_ungrouped() {
 #[derive(Debug, Deserialize)]
 struct SnapshotData {
 	#[serde(default)]
-	healthy: Option<bool>,
-	#[serde(default)]
-	health: Option<serde_json::Value>,
+	checks: Option<serde_json::Value>,
 	#[serde(default)]
 	nodejs: Option<String>,
 }
@@ -851,9 +849,11 @@ async fn snapshot_returns_latest_when_at_omitted() {
 		r.assert_status_ok();
 		let data: Option<SnapshotData> = r.json();
 		let data = data.expect("snapshot returned for server with statuses");
-		assert_eq!(data.healthy, Some(false), "latest is the most recent");
-		let health = data.health.unwrap();
-		assert_eq!(health.as_array().unwrap().len(), 1);
+		// The latest push (the failing `db` check) is what's reconstructed.
+		let checks = data.checks.expect("consolidated checks");
+		let arr = checks["checks"].as_array().unwrap();
+		assert_eq!(arr.len(), 1);
+		assert_eq!(arr[0]["check"], "db");
 	})
 	.await
 }
@@ -949,9 +949,9 @@ async fn snapshot_at_time_returns_prior_row() {
 		// time-range-partitioned `statuses` table's live partitions.
 		conn.batch_execute(
 			"INSERT INTO statuses (server_id, created_at, healthy, health) VALUES
-			('20000000-0000-0000-0000-000000000002', NOW() - INTERVAL '3 hours', true, '[]'::jsonb),
-			('20000000-0000-0000-0000-000000000002', NOW() - INTERVAL '2 hours', false, '[]'::jsonb),
-			('20000000-0000-0000-0000-000000000002', NOW() - INTERVAL '1 hour', true, '[]'::jsonb)",
+			('20000000-0000-0000-0000-000000000002', NOW() - INTERVAL '3 hours', true, '[{\"check\":\"old\",\"result\":\"passed\"}]'::jsonb),
+			('20000000-0000-0000-0000-000000000002', NOW() - INTERVAL '2 hours', false, '[{\"check\":\"mid\",\"result\":\"failed\"}]'::jsonb),
+			('20000000-0000-0000-0000-000000000002', NOW() - INTERVAL '1 hour', true, '[{\"check\":\"new\",\"result\":\"passed\"}]'::jsonb)",
 		)
 		.await
 		.unwrap();
@@ -969,7 +969,12 @@ async fn snapshot_at_time_returns_prior_row() {
 		r.assert_status_ok();
 		let data: Option<SnapshotData> = r.json();
 		let data = data.expect("row exists at this point");
-		assert_eq!(data.healthy, Some(false));
+		// The 2h-ago row ("mid") is the most recent at-or-before 90m ago; the
+		// 1h-ago row ("new") is excluded.
+		let checks = data.checks.expect("checks");
+		let arr = checks["checks"].as_array().unwrap();
+		assert_eq!(arr.len(), 1);
+		assert_eq!(arr[0]["check"], "mid");
 	})
 	.await
 }
@@ -1270,6 +1275,44 @@ async fn check_detail_returns_catalog_policy_and_ignores_non_matching_check() {
 	.await
 }
 
+/// The consolidated snapshot merges every source's checks, not just one
+/// source's push.
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_merges_all_sources() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, host, kind) VALUES \
+				('30000000-0000-0000-0000-00000000000a', 'https://multi.example.com', 'central'); \
+			 INSERT INTO statuses (server_id, source, healthy, health) VALUES \
+				('30000000-0000-0000-0000-00000000000a', 'alertd', true, \
+				 '[{\"check\":\"db\",\"result\":\"passed\"}]'::jsonb), \
+				('30000000-0000-0000-0000-00000000000a', 'tamanu', true, \
+				 '[{\"check\":\"tasks\",\"result\":\"passed\"}]'::jsonb);",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/snapshot")
+			.json(&serde_json::json!({
+				"server_id": "30000000-0000-0000-0000-00000000000a"
+			}))
+			.await;
+		r.assert_status_ok();
+		let body: serde_json::Value = r.json();
+		let checks = body["checks"]["checks"].as_array().unwrap();
+		assert!(
+			checks.iter().any(|c| c["source"] == "alertd"),
+			"alertd's checks present: {body}"
+		);
+		assert!(
+			checks.iter().any(|c| c["source"] == "tamanu"),
+			"tamanu's checks present: {body}"
+		);
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn snapshot_surfaces_per_check_results() {
 	commons_tests::server::run(async |mut conn, _, private| {
@@ -1312,17 +1355,21 @@ async fn snapshot_surfaces_per_check_results() {
 			.await;
 		r.assert_status_ok();
 		let body: serde_json::Value = r.json();
-		let results = &body["check_results"];
-		assert_eq!(results["catalog_only"], "warning");
-		assert_eq!(results["elevated"], "failed");
+		let checks = body["checks"]["checks"].as_array().unwrap();
+		let eff = |name: &str| {
+			checks
+				.iter()
+				.find(|c| c["check"] == name)
+				.unwrap_or_else(|| panic!("{name} missing from {body}"))["effective"]
+				.clone()
+		};
+		assert_eq!(eff("catalog_only"), serde_json::json!("warning"));
+		assert_eq!(eff("elevated"), serde_json::json!("failed"));
 		// version_gated's rule fires because bestoolVersion 1.5.0 is in
 		// the >=1.0.0 <2.0.0 range — graded failed.
-		assert_eq!(results["version_gated"], "failed");
-		// Passing checks must not appear in the map.
-		assert!(
-			results.get("passing").is_none(),
-			"healthy checks are omitted; got {results}",
-		);
+		assert_eq!(eff("version_gated"), serde_json::json!("failed"));
+		// Passing checks now appear too, graded passed.
+		assert_eq!(eff("passing"), serde_json::json!("passed"));
 	})
 	.await
 }
@@ -1363,19 +1410,24 @@ async fn snapshot_check_results_cover_result_form() {
 			.await;
 		r.assert_status_ok();
 		let body: serde_json::Value = r.json();
-		let results = &body["check_results"];
-		assert_eq!(results["elevated"], "failed");
+		let checks = body["checks"]["checks"].as_array().unwrap();
+		let eff = |name: &str| {
+			checks
+				.iter()
+				.find(|c| c["check"] == name)
+				.unwrap_or_else(|| panic!("{name} missing from {body}"))["effective"]
+				.clone()
+		};
+		assert_eq!(eff("elevated"), serde_json::json!("failed"));
 		assert_eq!(
-			results["degraded"], "warning",
+			eff("degraded"),
+			serde_json::json!("warning"),
 			"a warning observation is already below the ceiling"
 		);
-		// Broken/skipped/passed don't go through the rules engine.
-		for check in ["busted", "absent", "fine"] {
-			assert!(
-				results.get(check).is_none(),
-				"{check} must be omitted; got {results}",
-			);
-		}
+		// The consolidated view shows every check by its effective result.
+		assert_eq!(eff("busted"), serde_json::json!("broken"));
+		assert_eq!(eff("absent"), serde_json::json!("skipped"));
+		assert_eq!(eff("fine"), serde_json::json!("passed"));
 	})
 	.await
 }
@@ -1506,8 +1558,15 @@ async fn snapshot_reports_and_excludes_silenced_checks() {
 			.await;
 		response.assert_status_ok();
 		let body: serde_json::Value = response.json();
-		assert_eq!(body["health_state"], "healthy");
-		assert_eq!(body["silenced_checks"], serde_json::json!(["postgres"]));
+		// postgres is failing but silenced → excluded from the rollup, which
+		// stays healthy — and it's flagged silenced in the check list.
+		assert_eq!(body["checks"]["health_state"], "healthy");
+		let checks = body["checks"]["checks"].as_array().unwrap();
+		let postgres = checks
+			.iter()
+			.find(|c| c["check"] == "postgres")
+			.expect("postgres present");
+		assert_eq!(postgres["silenced"], serde_json::json!(true));
 	})
 	.await
 }

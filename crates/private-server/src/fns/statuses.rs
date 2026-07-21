@@ -592,16 +592,6 @@ pub struct StatusSnapshotData {
 	pub nodejs: Option<String>,
 	/// Reported system timezone.
 	pub timezone: Option<String>,
-	/// Legacy overall self-reported health flag. Being phased out in favor
-	/// of `health_state`; new integrations should not rely on it.
-	pub healthy: bool,
-	/// Overall health rollup for this push, derived from its individual
-	/// health checks (falling back to the legacy `healthy` flag). A single
-	/// failing check can't be masked by an otherwise-healthy overall
-	/// report.
-	pub health_state: commons_types::status::HealthState,
-	/// Raw per-check health results as reported in this push.
-	pub health: serde_json::Value,
 	/// Additional unstructured data reported alongside this push, for
 	/// fields not yet promoted to a named field on this response.
 	pub extra: serde_json::Value,
@@ -609,16 +599,10 @@ pub struct StatusSnapshotData {
 	/// with display name and profile picture filled in where known. Not
 	/// filtered by recency — reflects this specific point-in-time snapshot.
 	pub operators: Vec<OperatorPresence>,
-	/// For each currently-unhealthy check in this push, the effective
-	/// result its policy grades it to. Healthy checks are omitted. An
-	/// unhealthy check not listed here should be treated as warning.
-	#[schema(value_type = std::collections::HashMap<String, String>)]
-	pub check_results: std::collections::HashMap<String, commons_types::status::CheckResult>,
-	/// Check names currently silenced for this server (at server or
-	/// group scope). These don't count toward `health_state` and the UI
-	/// renders them with its skipped affordance. Reflects the silence
-	/// list as of the request, not as of the snapshot's push.
-	pub silenced_checks: BTreeSet<String>,
+	/// The server's consolidated checks as of this snapshot: every source's
+	/// checks, graded and classified, with silenced flags and the rolled-up
+	/// health state — the same shape the live view uses.
+	pub checks: commons_types::status::ConsolidatedChecks,
 }
 
 /// Selects a server and a point in time to fetch a status snapshot for.
@@ -703,23 +687,11 @@ pub async fn snapshot(
 	let platform = status.platform();
 	let postgres = status.postgres_version();
 
-	// Compute the per-unhealthy-check severity the rules engine would
-	// file at given this push. Healthy checks are omitted; the UI
-	// renders them with its 'passing' affordance regardless.
-	let check_results = compute_check_results(&mut conn, &server, &status).await?;
-	// Operator-silenced healthchecks present as skipped and don't count
-	// toward the rollup, even on historical snapshots — a silence
-	// expresses current operator intent about the check, not the push.
-	// Scoped to the push's own source: a silence on another source's
-	// same-named check is about a different check.
-	let silenced_checks = database::silenced_refs::silenced_health_checks_for_server(
-		&mut conn,
-		server.id,
-		server.group_id,
-		&status.source,
-	)
-	.await?;
-	let health_state = status.health_state_ignoring(&silenced_checks);
+	// The consolidated checks as of this snapshot: every source's most
+	// recent report at-or-before `at`, re-graded through current policy.
+	// The single `status` above is still used for the push's metadata
+	// (version, platform, operators, etc.).
+	let checks = consolidated_checks_at(&mut conn, &server, args.at).await?;
 	let mut operators = status.operators();
 	enrich_operators(&mut conn, operators.iter_mut()).await?;
 
@@ -735,13 +707,9 @@ pub async fn snapshot(
 		postgres,
 		nodejs,
 		timezone,
-		healthy: status.healthy,
-		health_state,
-		health: status.health,
 		extra: status.extra,
 		operators,
-		check_results,
-		silenced_checks,
+		checks,
 	})))
 }
 
@@ -780,81 +748,107 @@ pub(crate) async fn enrich_operators(
 /// the public-server ingestion path (`file_health_events`) so the UI
 /// displays what *would* be filed. Broken checks aren't included — they
 /// file as warnings and the UI renders them from the result directly.
-async fn compute_check_results(
+/// Reconstruct a server's consolidated checks as of a point in time (or
+/// latest) from status history: each source's most recent report at-or-
+/// before `at`, every check re-graded through current policy — the same
+/// shape the live path builds from current state. The point-in-time side
+/// of the consolidated checks view.
+async fn consolidated_checks_at(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	server: &Server,
-	status: &Status,
-) -> commons_errors::Result<std::collections::HashMap<String, commons_types::status::CheckResult>> {
-	use commons_types::status::CheckResult;
+	at: Option<Timestamp>,
+) -> commons_errors::Result<commons_types::status::ConsolidatedChecks> {
+	use commons_types::status::{CheckResult, ConsolidatedCheck, ConsolidatedChecks, HealthState};
 	use database::check_policies::{CheckPolicy, EvaluationContext};
 
-	let Some(arr) = status.health.as_array() else {
-		return Ok(Default::default());
-	};
-	// Walk the health array once, collect (check_name, result,
-	// check_extra) for every warning/failed entry. Other results don't
-	// drive the rules engine on the ingestion path either, so we skip
-	// them. Like ingestion, the normalised result is injected so rules
-	// see a uniform `check.result` even on legacy stored rows.
-	let mut failing: Vec<(
-		String,
-		CheckResult,
-		serde_json::Map<String, serde_json::Value>,
-	)> = Vec::new();
-	for raw in arr {
-		let Some(obj) = raw.as_object() else { continue };
-		let Some(check_name) = obj.get("check").and_then(|v| v.as_str()) else {
-			continue;
-		};
-		let Some(result) = CheckResult::from_entry(obj) else {
-			continue;
-		};
-		if !matches!(result, CheckResult::Warning | CheckResult::Failed) {
-			continue;
-		}
-		let mut extra = obj.clone();
-		extra.remove("check");
-		extra.remove("healthy");
-		extra.insert(
-			"result".into(),
-			serde_json::Value::String(result.to_string()),
-		);
-		failing.push((check_name.to_string(), result, extra));
-	}
-	if failing.is_empty() {
-		return Ok(Default::default());
-	}
+	let statuses = Status::latest_per_source_at(conn, server.id, at).await?;
 
+	// Tags for rule evaluation, as private-server's other rule-eval sites
+	// resolve them.
 	let tag_map = server.tags_merged_with_group(conn).await?;
 	let tags: std::collections::HashMap<String, serde_json::Value> = tag_map
 		.0
 		.into_iter()
 		.map(|(k, v)| (k, serde_json::Value::String(v)))
 		.collect();
-	let empty_map = serde_json::Map::new();
-	let status_extra = status.extra.as_object().unwrap_or(&empty_map);
+	let decommissioned = CheckPolicy::decommissioned_pairs(conn).await?;
 
-	let mut out = std::collections::HashMap::with_capacity(failing.len());
-	for (name, result, check_extra) in failing {
-		let ctx = EvaluationContext {
-			status_extra,
-			check_extra: &check_extra,
-			tags: &tags,
+	let mut checks: Vec<ConsolidatedCheck> = Vec::new();
+	for status in &statuses {
+		let Some(arr) = status.health.as_array() else {
+			continue;
 		};
-		let graded = CheckPolicy::apply_scoped(
+		let silenced = database::silenced_refs::silenced_health_checks_for_server(
 			conn,
-			&status.source,
-			&name,
-			result,
-			&ctx,
-			Some(server.id),
+			server.id,
 			server.group_id,
+			&status.source,
 		)
 		.await?;
-		match graded.effective {
-			CheckResult::Passed | CheckResult::Skipped => continue,
-			effective => out.insert(name, effective),
-		};
+		let empty = serde_json::Map::new();
+		let status_extra = status.extra.as_object().unwrap_or(&empty).clone();
+		for raw in arr {
+			let Some(obj) = raw.as_object() else { continue };
+			let Some(name) = obj.get("check").and_then(|v| v.as_str()) else {
+				continue;
+			};
+			if decommissioned.contains(&(status.source.clone(), name.to_string())) {
+				continue;
+			}
+			let Some(observed) = CheckResult::from_entry(obj) else {
+				continue;
+			};
+			// Re-grade this entry through current policy, mirroring ingestion:
+			// the normalised result is injected so rules see a uniform
+			// `check.result` even on legacy stored rows.
+			let mut check_extra = obj.clone();
+			check_extra.remove("check");
+			check_extra.remove("healthy");
+			check_extra.insert(
+				"result".into(),
+				serde_json::Value::String(observed.to_string()),
+			);
+			let ctx = EvaluationContext {
+				status_extra: &status_extra,
+				check_extra: &check_extra,
+				tags: &tags,
+			};
+			let graded = CheckPolicy::apply_scoped(
+				conn,
+				&status.source,
+				name,
+				observed,
+				&ctx,
+				Some(server.id),
+				server.group_id,
+			)
+			.await?;
+			// The check's own detail fields, verbatim.
+			let mut detail = obj.clone();
+			detail.remove("check");
+			detail.remove("healthy");
+			detail.remove("result");
+			checks.push(ConsolidatedCheck {
+				silenced: silenced.contains(name),
+				source: status.source.clone(),
+				check: name.to_string(),
+				observed: Some(observed),
+				effective: graded.effective,
+				detail: serde_json::Value::Object(detail),
+			});
+		}
 	}
-	Ok(out)
+	checks.sort_by(|a, b| {
+		a.effective
+			.urgency_rank()
+			.cmp(&b.effective.urgency_rank())
+			.then_with(|| a.source.cmp(&b.source))
+			.then_with(|| a.check.cmp(&b.check))
+	});
+	let health_state =
+		HealthState::from_results(checks.iter().filter(|c| !c.silenced).map(|c| c.effective));
+	Ok(ConsolidatedChecks {
+		health_state,
+		checks,
+	})
 }

@@ -4038,6 +4038,46 @@ export interface components {
              */
             limit?: number | null;
         };
+        /**
+         * @description One check in a server's consolidated state: a single `(source, check)`
+         *     with its results already graded by policy, ready to present. The same
+         *     shape whether taken from current state or reconstructed as of a past
+         *     time, and across every reporting source — the presentation never sees a
+         *     single source's raw report.
+         */
+        ConsolidatedCheck: {
+            /** @description The check's name, as reported. */
+            check: string;
+            /**
+             * @description The detail the source attached to the check (its extra fields), as an
+             *     object. Empty object when the check carried none.
+             */
+            detail: Record<string, never>;
+            /**
+             * @description The result after policy grading — what everything acts on and what
+             *     the presentation colours by.
+             */
+            effective: string;
+            /**
+             * @description What the source reported, before policy. `None` if the stored state
+             *     carried no observed result.
+             */
+            observed?: string | null;
+            /** @description Whether this check is silenced at server or group scope. */
+            silenced: boolean;
+            /** @description The source that reports this check. */
+            source: string;
+        };
+        /**
+         * @description A server's checks across every source, graded and classified as one —
+         *     current or as of a past time.
+         */
+        ConsolidatedChecks: {
+            /** @description Every source's checks, most urgent first. */
+            checks: components["schemas"]["ConsolidatedCheck"][];
+            /** @description The rolled-up health over these checks, by the one classifier. */
+            health_state: components["schemas"]["HealthState"];
+        };
         /** @description A new artifact to register against a version. */
         CreateArtifactArgs: {
             /** @description Artifact type. */
@@ -7305,13 +7345,11 @@ export interface components {
          */
         StatusSnapshotData: {
             /**
-             * @description For each currently-unhealthy check in this push, the effective
-             *     result its policy grades it to. Healthy checks are omitted. An
-             *     unhealthy check not listed here should be treated as warning.
+             * @description The server's consolidated checks as of this snapshot: every source's
+             *     checks, graded and classified, with silenced flags and the rolled-up
+             *     health state — the same shape the live view uses.
              */
-            check_results: {
-                [key: string]: string;
-            };
+            checks: components["schemas"]["ConsolidatedChecks"];
             /**
              * Format: date-time
              * @description When this status push was recorded.
@@ -7327,20 +7365,6 @@ export interface components {
              *     fields not yet promoted to a named field on this response.
              */
             extra: unknown;
-            /** @description Raw per-check health results as reported in this push. */
-            health: unknown;
-            /**
-             * @description Overall health rollup for this push, derived from its individual
-             *     health checks (falling back to the legacy `healthy` flag). A single
-             *     failing check can't be masked by an otherwise-healthy overall
-             *     report.
-             */
-            health_state: components["schemas"]["HealthState"];
-            /**
-             * @description Legacy overall self-reported health flag. Being phased out in favor
-             *     of `health_state`; new integrations should not rely on it.
-             */
-            healthy: boolean;
             /**
              * Format: uuid
              * @description Unique identifier for this status push.
@@ -7369,13 +7393,6 @@ export interface components {
              * @description Id of the server this status was reported by.
              */
             server_id: string;
-            /**
-             * @description Check names currently silenced for this server (at server or
-             *     group scope). These don't count toward `health_state` and the UI
-             *     renders them with its skipped affordance. Reflects the silence
-             *     list as of the request, not as of the snapshot's push.
-             */
-            silenced_checks: string[];
             /** @description Reported system timezone. */
             timezone?: string | null;
             version?: null | components["schemas"]["VersionStr"];
