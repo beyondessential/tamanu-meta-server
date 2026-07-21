@@ -1157,9 +1157,21 @@ pub async fn consolidated_checks_latest(
 			if decommissioned.contains(&(source.clone(), check.clone())) {
 				return None;
 			}
-			let effective = effective.as_deref().and_then(|e| e.parse().ok())?;
+			let stored: CheckResult = effective.as_deref().and_then(|e| e.parse().ok())?;
+			let is_silenced = silenced.contains(&(source.clone(), check.clone()));
+			// A silence is a scoped ceiling of `skipped`: cap the effective
+			// result here so the live view matches both the health rollup
+			// (which excludes silenced checks) and the snapshot path (which
+			// re-grades through `apply_scoped`). The stored effective may
+			// still read failed/warning if the silence post-dates the last
+			// push — the observed result keeps what was reported.
+			let effective = if is_silenced {
+				CheckResult::Skipped
+			} else {
+				stored
+			};
 			Some(ConsolidatedCheck {
-				silenced: silenced.contains(&(source.clone(), check.clone())),
+				silenced: is_silenced,
 				observed: observed.as_deref().and_then(|o| o.parse().ok()),
 				source,
 				check,

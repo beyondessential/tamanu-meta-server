@@ -133,6 +133,11 @@ async fn latest_excludes_decommissioned_and_flags_silenced() {
 		assert_eq!(consolidated.checks.len(), 1);
 		assert_eq!(consolidated.checks[0].check, "hushed");
 		assert!(consolidated.checks[0].silenced);
+		// Silencing caps the effective result to skipped — matching the
+		// rollup's exclusion and the snapshot path's ceiling — while the
+		// observed result still records what was reported.
+		assert_eq!(consolidated.checks[0].effective, CheckResult::Skipped);
+		assert_eq!(consolidated.checks[0].observed, Some(CheckResult::Warning));
 	})
 	.await
 }
