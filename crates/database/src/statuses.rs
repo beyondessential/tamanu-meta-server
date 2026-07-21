@@ -6,7 +6,7 @@ use std::{
 use commons_errors::{AppError, Result};
 use commons_types::{
 	server::rank::ServerRank,
-	status::{CheckResult, HealthState, ShortStatus},
+	status::{CheckResult, ShortStatus},
 	version::VersionStr,
 };
 use diesel::prelude::*;
@@ -643,70 +643,6 @@ impl Status {
 		self.extra("nodeVersion")
 			.and_then(|v| v.as_str())
 			.map(ToOwned::to_owned)
-	}
-
-	/// Server's self-reported health state derived from this status
-	/// row's per-check results. The top-level `healthy` bool is being
-	/// retired from the wire (absent ⇒ true on ingestion), so this
-	/// rollup is primarily result-driven, consulting top-level only
-	/// as legacy input:
-	///
-	/// - top-level `false` ⇒ [`HealthState::Unhealthy`] (legacy
-	///   self-report; new bestool doesn't send it)
-	/// - any entry with an explicit `result: failed` ⇒ `Unhealthy` —
-	///   this is exactly what legacy bestool folded into top-level
-	///   `healthy: false`
-	/// - any warning/broken entry, or a legacy `healthy: false` entry
-	///   under top-level `true` (legacy bestool's warning encoding) ⇒
-	///   [`HealthState::Warning`]
-	/// - otherwise [`HealthState::Healthy`] (passed and skipped
-	///   entries don't count against the server)
-	pub fn health_state(&self) -> HealthState {
-		self.health_state_ignoring(&Default::default())
-	}
-
-	/// Like [`Self::health_state`], but entries whose check name is in
-	/// `silenced_checks` are treated as skipped: an operator-silenced
-	/// check keeps recording its results, they just don't count toward
-	/// the server's health rollup. Callers get the set from
-	/// [`crate::silenced_refs::silenced_health_checks_for_servers`].
-	///
-	/// The legacy top-level `healthy: false` short-circuit still wins:
-	/// that flag predates per-check results, so a false can't be
-	/// attributed to (and excused by) any particular silenced check.
-	pub fn health_state_ignoring(
-		&self,
-		silenced_checks: &std::collections::BTreeSet<String>,
-	) -> HealthState {
-		if !self.healthy {
-			return HealthState::Unhealthy;
-		}
-		let mut state = HealthState::Healthy;
-		if let Some(arr) = self.health.as_array() {
-			for entry in arr {
-				let Some(obj) = entry.as_object() else {
-					continue;
-				};
-				if let Some(check) = obj.get("check").and_then(|v| v.as_str())
-					&& silenced_checks.contains(check)
-				{
-					continue;
-				}
-				let Some(result) = CheckResult::from_entry(obj) else {
-					continue;
-				};
-				match result {
-					CheckResult::Failed if obj.contains_key("result") => {
-						return HealthState::Unhealthy;
-					}
-					CheckResult::Failed | CheckResult::Warning | CheckResult::Broken => {
-						state = HealthState::Warning;
-					}
-					CheckResult::Passed | CheckResult::Skipped => {}
-				}
-			}
-		}
-		state
 	}
 
 	/// Identified operators connected to the server as of this status
