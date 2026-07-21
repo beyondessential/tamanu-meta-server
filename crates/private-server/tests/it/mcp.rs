@@ -125,6 +125,11 @@ async fn initialize_and_list_tools() {
 			"find_restore_replicas",
 			"get_restore_replica",
 			"get_backup_defaults",
+			"find_manual_incidents",
+			"get_manual_incident",
+			"record_manual_incident",
+			"update_manual_incident",
+			"delete_manual_incident",
 		] {
 			assert!(body.contains(tool), "tools/list missing {tool}: {body}");
 		}
@@ -772,6 +777,92 @@ async fn backup_defaults_lists_seeded_org_default() {
 		assert_eq!(tpg["default_interval_seconds"], 6 * 60 * 60);
 		assert_eq!(tpg["default_retention"]["keep_daily"], 7);
 		assert_eq!(tpg["auto_enable"], false);
+	})
+	.await
+}
+
+// --- manual incidents --------------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread")]
+async fn manual_incidents_write_roundtrip_over_operator_mount() {
+	// The operator mount inserts an always-can-write identity carrying the
+	// tailnet login; in debug builds the dev bypass yields `admin@localhost`.
+	commons_tests::server::run(async |mut conn, _public, private| {
+		seed(&mut conn).await;
+
+		let created = call_tool!(
+			private,
+			"record_manual_incident",
+			serde_json::json!({
+				"title": "Fibre cut in Suva",
+				"description": "ISP outage took the whole site offline.",
+				"started_at": "2026-07-01T10:00:00Z",
+				"group_id": GROUP,
+			})
+		);
+		assert_eq!(created["title"], "Fibre cut in Suva");
+		assert_eq!(
+			created["description"],
+			"ISP outage took the whole site offline."
+		);
+		assert!(created["ended_at"].is_null(), "ongoing: {created}");
+		assert_eq!(created["group_id"], GROUP);
+		assert_eq!(created["group_name"], "Prod Group");
+		assert_eq!(created["created_by"], "admin@localhost");
+		let id = created["id"].as_str().expect("id").to_string();
+
+		let found = call_tool!(private, "find_manual_incidents", serde_json::json!({}));
+		assert_eq!(found["count"], 1);
+		assert_eq!(found["truncated"], false);
+		assert_eq!(found["incidents"][0]["id"], id.as_str());
+
+		let one = call_tool!(
+			private,
+			"get_manual_incident",
+			serde_json::json!({ "id": id })
+		);
+		assert_eq!(one["title"], "Fibre cut in Suva");
+		assert_eq!(one["created_by"], "admin@localhost");
+
+		let updated = call_tool!(
+			private,
+			"update_manual_incident",
+			serde_json::json!({ "id": id, "ended_at": "2026-07-01T12:30:00Z" })
+		);
+		assert!(
+			updated["ended_at"]
+				.as_str()
+				.expect("ended_at set")
+				.starts_with("2026-07-01T12:30:00"),
+			"{updated}"
+		);
+		// No longer ongoing, so the ongoing_only filter drops it.
+		let ongoing = call_tool!(
+			private,
+			"find_manual_incidents",
+			serde_json::json!({ "ongoing_only": true })
+		);
+		assert_eq!(ongoing["count"], 0);
+
+		let deleted = call_tool!(
+			private,
+			"delete_manual_incident",
+			serde_json::json!({ "id": id })
+		);
+		assert_eq!(deleted["deleted"], id.as_str());
+
+		// Gone: fetching it again is a tool error, not a protocol error.
+		let missing = private
+			.post("/api/mcp")
+			.add_header("accept", ACCEPT)
+			.add_header("mcp-protocol-version", PROTO)
+			.json(&serde_json::json!({
+				"jsonrpc": "2.0", "id": 5, "method": "tools/call",
+				"params": { "name": "get_manual_incident", "arguments": { "id": id } }
+			}))
+			.await;
+		let env = parse_envelope(&missing.text());
+		assert_eq!(env["result"]["isError"], serde_json::json!(true));
 	})
 	.await
 }

@@ -15,6 +15,7 @@ mod group_card_version;
 mod health;
 mod healthchecks;
 mod issues;
+mod manual_incidents;
 mod mcp;
 mod notes;
 mod openapi_spec;
