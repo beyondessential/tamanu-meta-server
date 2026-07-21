@@ -1433,8 +1433,9 @@ async fn snapshot_check_results_cover_result_form() {
 }
 
 /// A silenced healthcheck stops counting toward the server's health
-/// rollup (`get_detail`'s `health`), while the raw check result stays
-/// on `last_status.health` for display; unsilencing brings it back.
+/// rollup (`get_detail`'s `health`), while the check stays in the
+/// consolidated `checks` view — flagged silenced, its observed result
+/// preserved and effective capped to skipped; unsilencing brings it back.
 #[tokio::test(flavor = "multi_thread")]
 async fn get_detail_health_excludes_silenced_checks() {
 	commons_tests::server::run(async |mut conn, _, private| {
@@ -1477,11 +1478,17 @@ async fn get_detail_health_excludes_silenced_checks() {
 
 		let body = detail().await;
 		assert_eq!(body["health"], "healthy");
-		// The check keeps recording — only the rollup changes.
-		assert_eq!(
-			body["last_status"]["health"][0]["result"], "failed",
-			"raw check result must stay on the status payload"
-		);
+		// The check keeps recording — only the rollup changes. It stays in
+		// the consolidated view, flagged silenced, its observed result
+		// preserved while the effective is capped to skipped.
+		let checks = body["checks"]["checks"].as_array().unwrap();
+		let postgres = checks
+			.iter()
+			.find(|c| c["check"] == "postgres")
+			.expect("silenced check still listed");
+		assert_eq!(postgres["observed"], "failed");
+		assert_eq!(postgres["effective"], "skipped");
+		assert_eq!(postgres["silenced"], true);
 
 		conn.batch_execute("DELETE FROM scoped_check_policies")
 			.await

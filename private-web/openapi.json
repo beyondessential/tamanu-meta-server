@@ -11659,6 +11659,7 @@
           "server",
           "up",
           "health",
+          "checks",
           "siblings",
           "billing_labels"
         ],
@@ -11669,6 +11670,10 @@
               "$ref": "#/components/schemas/BillingTag"
             },
             "description": "The server's effective `billing.*` labels — i.e. its group's\n(product/deployment/stage). Empty when the server is ungrouped."
+          },
+          "checks": {
+            "$ref": "#/components/schemas/ConsolidatedChecks",
+            "description": "The server's current checks across every source, graded and\nclassified — the live consolidated checks view."
           },
           "device_info": {
             "oneOf": [
@@ -12156,8 +12161,6 @@
         "required": [
           "id",
           "created_at",
-          "healthy",
-          "health",
           "source",
           "extra",
           "operators"
@@ -12171,14 +12174,6 @@
           "extra": {
             "$ref": "#/components/schemas/Value",
             "description": "Additional endpoint-defined data included with this status push."
-          },
-          "health": {
-            "$ref": "#/components/schemas/Value",
-            "description": "Per-check health breakdown from this push. Empty for reports\npredating structured per-check health."
-          },
-          "healthy": {
-            "type": "boolean",
-            "description": "Server's overall self-reported health from this status push. `true`\nfor reports predating structured per-check health."
           },
           "id": {
             "type": "string",
@@ -12224,7 +12219,7 @@
           },
           "source": {
             "type": "string",
-            "description": "The source that pushed this status (e.g. `alertd`). Silences on\nthe checks it carries are keyed by this source."
+            "description": "The source that pushed this status (e.g. `alertd`)."
           },
           "timezone": {
             "type": [

@@ -6651,6 +6651,11 @@ export interface components {
              *     (product/deployment/stage). Empty when the server is ungrouped.
              */
             billing_labels: components["schemas"]["BillingTag"][];
+            /**
+             * @description The server's current checks across every source, graded and
+             *     classified — the live consolidated checks view.
+             */
+            checks: components["schemas"]["ConsolidatedChecks"];
             device_info?: null | components["schemas"]["DeviceInfo"];
             group?: null | components["schemas"]["ServerGroup"];
             /** @description Current self-reported health, derived from the most recent status report. */
@@ -6932,16 +6937,6 @@ export interface components {
             /** @description Additional endpoint-defined data included with this status push. */
             extra: components["schemas"]["Value"];
             /**
-             * @description Per-check health breakdown from this push. Empty for reports
-             *     predating structured per-check health.
-             */
-            health: components["schemas"]["Value"];
-            /**
-             * @description Server's overall self-reported health from this status push. `true`
-             *     for reports predating structured per-check health.
-             */
-            healthy: boolean;
-            /**
              * Format: uuid
              * @description Unique identifier for this status report.
              */
@@ -6964,10 +6959,7 @@ export interface components {
             platform?: string | null;
             /** @description PostgreSQL version the server reported, if any. */
             postgres?: string | null;
-            /**
-             * @description The source that pushed this status (e.g. `alertd`). Silences on
-             *     the checks it carries are keyed by this source.
-             */
+            /** @description The source that pushed this status (e.g. `alertd`). */
             source: string;
             /** @description Timezone the server reported, if any. */
             timezone?: string | null;

@@ -44,6 +44,9 @@ pub struct ServerDetailData {
 	pub up: ShortStatus,
 	/// Current self-reported health, derived from the most recent status report.
 	pub health: HealthState,
+	/// The server's current checks across every source, graded and
+	/// classified — the live consolidated checks view.
+	pub checks: commons_types::status::ConsolidatedChecks,
 	/// The group this server belongs to, with its notes/tags so the UI can
 	/// render the "Group" section without a second fetch. `None` when the
 	/// server is ungrouped.
@@ -145,14 +148,7 @@ pub struct ServerLastStatusData {
 	pub nodejs: Option<String>,
 	/// Timezone the server reported, if any.
 	pub timezone: Option<String>,
-	/// Server's overall self-reported health from this status push. `true`
-	/// for reports predating structured per-check health.
-	pub healthy: bool,
-	/// Per-check health breakdown from this push. Empty for reports
-	/// predating structured per-check health.
-	pub health: JsonValue,
-	/// The source that pushed this status (e.g. `alertd`). Silences on
-	/// the checks it carries are keyed by this source.
+	/// The source that pushed this status (e.g. `alertd`).
 	pub source: String,
 	/// Additional endpoint-defined data included with this status push.
 	pub extra: JsonValue,
@@ -593,15 +589,12 @@ pub async fn get_detail(
 		.as_ref()
 		.map(|s| s.short_status())
 		.unwrap_or_default();
-	// The headline health chip rolls up current check state across every
-	// source; silenced checks are already skipped in the rollup, while
-	// the checks table still shows them (as skipped).
-	let health =
-		database::issues::health_from_check_state(&mut conn, &[(server.id, server.group_id)])
-			.await?
-			.get(&server.id)
-			.copied()
-			.unwrap_or_default();
+	// One consolidated read drives both the headline health chip and the
+	// checks table, so they can't disagree: the rollup and the list come
+	// from the same graded state across every source.
+	let checks =
+		database::issues::consolidated_checks_latest(&mut conn, server.id, server.group_id).await?;
+	let health = checks.health_state;
 
 	let device_with_info = if let Some(device_id) = device_id {
 		Some(Device::get_with_info(&mut conn, device_id).await?)
@@ -654,8 +647,6 @@ pub async fn get_detail(
 			timezone: st
 				.extra("timezone")
 				.and_then(|s| s.as_str().map(|s| s.to_string())),
-			healthy: st.healthy,
-			health: st.health.clone(),
 			source: st.source.clone(),
 			extra: st.extra.clone(),
 			operators,
@@ -697,6 +688,7 @@ pub async fn get_detail(
 		last_status,
 		up,
 		health,
+		checks,
 		group,
 		siblings,
 		billing_labels,
