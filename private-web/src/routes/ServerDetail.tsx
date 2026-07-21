@@ -46,7 +46,7 @@ import {
 	useParams,
 } from "react-router-dom";
 import CheckDocButton from "../components/CheckDocButton";
-import CheckExtrasList from "../components/CheckExtras";
+import CheckExtrasList, { checkEntryExtras } from "../components/CheckExtras";
 import ExternalUsersDetails, {
 	parseExternalUserSessions,
 } from "../components/ExternalUsersDetails";
@@ -1018,7 +1018,7 @@ function CheckRow({
 	// `external_users` gets a formatted session list instead of the raw
 	// `users` JSON; the headline `count` is subsumed by it too. Falls
 	// through to the generic dl when the payload shape is unexpected.
-	const allExtras = Object.entries(
+	const allExtras = checkEntryExtras(
 		(entry.detail ?? {}) as Record<string, unknown>,
 	);
 	const sessions =

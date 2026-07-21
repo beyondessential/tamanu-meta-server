@@ -16,7 +16,7 @@ import PreviewIcon from "@mui/icons-material/Preview";
 import RemoveCircleOutlinedIcon from "@mui/icons-material/RemoveCircleOutlined";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { useApi, type ApiState } from "../api";
-import CheckExtrasList from "./CheckExtras";
+import CheckExtrasList, { checkEntryExtras } from "./CheckExtras";
 import ExternalUsersDetails, {
 	parseExternalUserSessions,
 } from "./ExternalUsersDetails";
@@ -196,7 +196,7 @@ function ChecksBlock({
 					// external_users gets formatted session rows; otherwise a
 					// generic dl of the check's detail. No "right now" claim
 					// here — a snapshot is "as of" its push.
-					const extras = Object.entries(
+					const extras = checkEntryExtras(
 						(entry.detail ?? {}) as Record<string, unknown>,
 					);
 					const sessions =
