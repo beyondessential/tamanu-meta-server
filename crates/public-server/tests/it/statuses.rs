@@ -1782,12 +1782,18 @@ async fn set_check_rules(
 	.execute(conn)
 	.await
 	.expect("ensure catalog row");
-	sql_query("UPDATE check_policies SET rules = $1::jsonb WHERE check_name = $2")
-		.bind::<sql_types::Text, _>(rules.to_string())
-		.bind::<sql_types::Text, _>(check_name)
-		.execute(conn)
-		.await
-		.expect("set rules");
+	// Setting rules reviews the policy in production (via update_rules), and
+	// a pending-review policy is hard-capped at warning regardless of its
+	// rules — so stamp the review here to mirror the real path.
+	sql_query(
+		"UPDATE check_policies SET rules = $1::jsonb, reviewed_at = NOW(), reviewed_by = 'test' \
+		 WHERE check_name = $2",
+	)
+	.bind::<sql_types::Text, _>(rules.to_string())
+	.bind::<sql_types::Text, _>(check_name)
+	.execute(conn)
+	.await
+	.expect("set rules");
 }
 
 async fn set_server_tags(
