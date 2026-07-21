@@ -11,6 +11,7 @@ mod check_policies;
 mod check_policy_rules;
 mod check_severity_map;
 mod check_stability;
+mod consolidated_checks;
 mod event_validation;
 mod health_rollup;
 mod incident_close_result;
