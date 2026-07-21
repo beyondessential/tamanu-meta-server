@@ -141,6 +141,8 @@ struct PolicyRow {
 	ceiling: String,
 	#[diesel(sql_type = sql_types::Bool)]
 	reviewed: bool,
+	#[diesel(sql_type = sql_types::Bool)]
+	escalates: bool,
 }
 
 async fn policy(
@@ -151,7 +153,7 @@ async fn policy(
 	sql_query(
 		"SELECT last_seen IS NOT NULL AS last_seen_present, \
 		 decommissioned_at IS NOT NULL AS decommissioned, \
-		 ceiling, reviewed_at IS NOT NULL AS reviewed \
+		 ceiling, reviewed_at IS NOT NULL AS reviewed, escalates \
 		 FROM check_policies WHERE source = $1 AND check_name = $2",
 	)
 	.bind::<sql_types::Text, _>(source)
@@ -212,10 +214,12 @@ async fn reconcile_reanimates_a_reported_decommissioned_check() {
 		file_check(&mut conn, filing(server_id, "alertd", "a"))
 			.await
 			.expect("file");
-		// Retire it in the past, with an operator-adjusted, reviewed policy.
+		// Retire it in the past, with an operator-adjusted, reviewed,
+		// escalating policy (valid only at the failed ceiling).
 		sql_query(
 			"UPDATE check_policies SET decommissioned_at = now() - interval '1 day', \
-			 decommissioned_by = 'op', ceiling = 'failed', reviewed_at = now(), reviewed_by = 'op' \
+			 decommissioned_by = 'op', ceiling = 'failed', escalates = true, \
+			 reviewed_at = now(), reviewed_by = 'op' \
 			 WHERE source = 'alertd' AND check_name = 'a'",
 		)
 		.execute(&mut conn)
@@ -234,6 +238,10 @@ async fn reconcile_reanimates_a_reported_decommissioned_check() {
 		assert!(!p.decommissioned, "a re-reported check is re-animated");
 		assert_eq!(p.ceiling, "warning", "re-animated at the warning ceiling");
 		assert!(!p.reviewed, "re-animated pending operator review");
+		assert!(
+			!p.escalates,
+			"re-animation clears escalation with the reset to warning",
+		);
 	})
 	.await
 }

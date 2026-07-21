@@ -1323,19 +1323,19 @@ async fn snapshot_merges_all_sources() {
 #[tokio::test(flavor = "multi_thread")]
 async fn snapshot_surfaces_per_check_results() {
 	commons_tests::server::run(async |mut conn, _, private| {
-		// Seed catalog: catalog_only stays at the default warning
-		// ceiling; elevated has its ceiling lifted to failed so the
+		// Seed catalog (all reviewed, so grading isn't capped to warning as
+		// a pending check would be): catalog_only stays at the default
+		// warning ceiling; elevated has its ceiling lifted to failed so the
 		// snapshot returns the operator-set grading; version_gated has a
-		// rules ladder firing on a specific status.bestoolVersion, and
-		// escalates.
+		// rules ladder firing on a specific status.bestoolVersion.
 		conn.batch_execute(
 			"INSERT INTO check_policies (source, check_name, ceiling, escalates) VALUES \
 				('alertd', 'catalog_only', 'warning', FALSE), \
 				('alertd', 'elevated', 'failed', FALSE), \
-				('alertd', 'version_gated', 'warning', TRUE); \
+				('alertd', 'version_gated', 'warning', FALSE); \
 			 UPDATE check_policies \
 				SET rules = '{\"if\":[{\"in_range\":[{\"var\":\"status.bestoolVersion\"},\">=1.0.0 <2.0.0\"]},\"failed\"]}'::jsonb \
-				WHERE check_name = 'version_gated';",
+				WHERE check_name = 'version_gated'; UPDATE check_policies SET reviewed_at = NOW(), reviewed_by = 'test' WHERE source = 'alertd';",
 		)
 		.await
 		.unwrap();
@@ -1389,7 +1389,7 @@ async fn snapshot_check_results_cover_result_form() {
 		conn.batch_execute(
 			"INSERT INTO check_policies (source, check_name, ceiling) VALUES \
 				('alertd', 'elevated', 'failed'), \
-				('alertd', 'degraded', 'failed');",
+				('alertd', 'degraded', 'failed'); UPDATE check_policies SET reviewed_at = NOW(), reviewed_by = 'test' WHERE source = 'alertd';",
 		)
 		.await
 		.unwrap();

@@ -98,6 +98,16 @@ pub struct CheckPolicy {
 	pub decommissioned_by: Option<String>,
 }
 
+/// Escalation only makes sense at a `failed` ceiling: it bypasses
+/// incident grace on an effective *failure*, and only a `failed` ceiling
+/// lets an effective result reach failed in the first place. At any lower
+/// ceiling the flag can never fire, so it is dropped rather than stored as
+/// dead configuration. The `check_policies` schema enforces the same
+/// invariant with a check constraint.
+fn escalates_normalised(ceiling: CheckResult, escalates: bool) -> bool {
+	escalates && ceiling == CheckResult::Failed
+}
+
 /// The outcome of applying a check's policy to an observed result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GradedResult {
@@ -138,11 +148,15 @@ impl CheckPolicy {
 		sql_query(refresh).execute(db).await?;
 
 		// Re-animate any decommissioned check that has reported since it was
-		// retired: reset to the newly-registered state (warning ceiling,
-		// pending review, no rules) so its policy is re-vetted.
+		// retired: reset to the newly-registered state (warning ceiling, no
+		// escalation, pending review, no rules) so its policy is re-vetted.
+		// Escalation must clear alongside the drop to the warning ceiling —
+		// it is only valid at a failed ceiling (enforced by a check
+		// constraint).
 		let reanimated = sql_query(
 			"UPDATE check_policies SET decommissioned_at = NULL, decommissioned_by = NULL, \
-			 ceiling = 'warning', rules = NULL, reviewed_at = NULL, reviewed_by = NULL \
+			 ceiling = 'warning', escalates = FALSE, rules = NULL, \
+			 reviewed_at = NULL, reviewed_by = NULL \
 			 WHERE decommissioned_at IS NOT NULL AND last_seen IS NOT NULL \
 			 AND last_seen > decommissioned_at",
 		)
@@ -277,7 +291,7 @@ impl CheckPolicy {
 				dsl::source.eq(source),
 				dsl::check_name.eq(check_name),
 				dsl::ceiling.eq(ceiling.to_string()),
-				dsl::escalates.eq(escalates),
+				dsl::escalates.eq(escalates_normalised(ceiling, escalates)),
 				dsl::documentation.eq(documentation),
 				dsl::reviewed_at.eq(Some(now)),
 				dsl::reviewed_by.eq(Some(source)),
@@ -499,6 +513,11 @@ impl CheckPolicy {
 	/// check, stamping `reviewed_at = NOW()` and `reviewed_by = by`. Even
 	/// a no-op save marks the row reviewed — operators can ack a check
 	/// without changing it.
+	///
+	/// Escalation is only meaningful at a `failed` ceiling — it bypasses
+	/// incident grace on an effective failure, and only a `failed` ceiling
+	/// admits a failed effective result — so it is dropped at any lower
+	/// ceiling (see [`escalates_normalised`]).
 	pub async fn update(
 		db: &mut AsyncPgConnection,
 		source: &str,
@@ -515,7 +534,7 @@ impl CheckPolicy {
 		)
 		.set((
 			dsl::ceiling.eq(ceiling.to_string()),
-			dsl::escalates.eq(escalates),
+			dsl::escalates.eq(escalates_normalised(ceiling, escalates)),
 			dsl::notes.eq(notes),
 			dsl::reviewed_at.eq(jiff_diesel::Timestamp::from(now)),
 			dsl::reviewed_by.eq(by),

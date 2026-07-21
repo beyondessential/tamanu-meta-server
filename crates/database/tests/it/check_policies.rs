@@ -279,6 +279,70 @@ async fn register_marks_canopy_checks_already_reviewed() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn escalates_only_sticks_at_a_failed_ceiling() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		CheckPolicy::upsert_default(&mut conn, "alertd", "disk_space")
+			.await
+			.expect("seed");
+
+		// Escalation is meaningless below a failed ceiling: only a failed
+		// effective result opens an incident, so only there can escalation
+		// (bypassing incident grace) fire. Requesting it at a lower ceiling
+		// must not stick.
+		let warned = CheckPolicy::update(
+			&mut conn,
+			"alertd",
+			"disk_space",
+			CheckResult::Warning,
+			true,
+			None,
+			"op",
+		)
+		.await
+		.expect("update");
+		assert!(
+			!warned.escalates,
+			"escalates is dropped below a failed ceiling",
+		);
+
+		// At a failed ceiling it sticks.
+		let failed = CheckPolicy::update(
+			&mut conn,
+			"alertd",
+			"disk_space",
+			CheckResult::Failed,
+			true,
+			None,
+			"op",
+		)
+		.await
+		.expect("update");
+		assert!(failed.escalates, "escalates applies at a failed ceiling");
+
+		// register() normalises the same way.
+		CheckPolicy::register(
+			&mut conn,
+			"canopy",
+			"warn_only",
+			CheckResult::Warning,
+			true,
+			None,
+		)
+		.await
+		.expect("register");
+		let registered = CheckPolicy::get(&mut conn, "canopy", "warn_only")
+			.await
+			.expect("get")
+			.expect("row exists");
+		assert!(
+			!registered.escalates,
+			"register drops escalates below a failed ceiling",
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn update_stamps_review_metadata_even_on_no_op_save() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		CheckPolicy::upsert_default(&mut conn, "alertd", "noisy_check")

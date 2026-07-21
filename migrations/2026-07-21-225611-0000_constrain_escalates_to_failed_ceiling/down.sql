@@ -1,0 +1,2 @@
+ALTER TABLE check_policies
+	DROP CONSTRAINT check_policies_escalates_needs_failed_ceiling;
