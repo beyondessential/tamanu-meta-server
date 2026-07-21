@@ -972,6 +972,75 @@ async fn post_status(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn submit_status_ingest_gating() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			use commons_types::source::IngestMode;
+			use database::source_policies::SourcePolicy;
+
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+			let body = serde_json::json!({
+				"source": "alertd",
+				"healthy": true,
+				"health": [{ "check": "db", "result": "passed" }],
+			});
+
+			// deny: the push is rejected and nothing is recorded.
+			SourcePolicy::set_ingest(&mut conn, "alertd", IngestMode::Deny)
+				.await
+				.expect("set deny");
+			public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&body)
+				.await
+				.assert_status_forbidden();
+			assert_eq!(count_issues_for_server(&mut conn, server_id).await, 0);
+
+			// ignore: the push is accepted but the source's data isn't
+			// recorded — while the backflow still comes back. A catalogued
+			// check (independent of this push) proves the response is still
+			// computed from server state, not short-circuited to empty.
+			set_check_severity(&mut conn, "db", "warning").await;
+			SourcePolicy::set_ingest(&mut conn, "alertd", IngestMode::Ignore)
+				.await
+				.expect("set ignore");
+			let ignored = public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&body)
+				.await;
+			ignored.assert_status_ok();
+			assert_eq!(count_issues_for_server(&mut conn, server_id).await, 0);
+			let backflow: serde_json::Value = ignored.json();
+			assert_eq!(
+				backflow["check_severities"]["db"], "warn",
+				"an ignored push still returns backflow: {backflow}"
+			);
+
+			// allow: the push is ingested and its check recorded.
+			SourcePolicy::set_ingest(&mut conn, "alertd", IngestMode::Allow)
+				.await
+				.expect("set allow");
+			public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&body)
+				.await
+				.assert_status_ok();
+			assert!(
+				fetch_issue(&mut conn, server_id, "alertd", "health/db")
+					.await
+					.is_some(),
+				"an allowed source's check is recorded"
+			);
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn submit_status_legacy_files_no_health_issues() {
 	commons_tests::server::run_with_device_auth(
 		"server",

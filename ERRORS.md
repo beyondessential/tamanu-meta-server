@@ -88,6 +88,12 @@ source IP in the Tailscale CGNAT or ULA ranges) hits any private-server
 route outside `/public/...`. Those routes are for human admins and
 internal callers only.
 
+## Ingest denied
+
+Issued when a status push comes from a reporting source whose ingest mode
+is set to `deny`. The source's reports are refused outright; set the
+source to `allow` or `ignore` in the healthcheck settings to change this.
+
 ## Device tailscale node already claimed
 
 Issued by the admin attach-tailscale flow when the requested node id

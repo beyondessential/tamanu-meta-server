@@ -26,7 +26,9 @@ The server's application version is taken from the server-wide detail, falling b
 
 Per the check-state model, the push is the source's whole truth: checks omitted from it are recovered, and other sources' checks are unaffected.
 
-Every push is recorded in full as the server's status history.
+The source's ingest mode (see [CHK](../monitoring/checks.md), "Source policy") gates the push: an `allow` source is ingested as above; an `ignore` source's push is accepted but recorded nowhere, its checks and detail discarded; a `deny` source's push is rejected. Gating is per source, so other sources on the same server are unaffected.
+
+Every ingested push is recorded in full as the server's status history.
 
 ## Legacy pushes
 

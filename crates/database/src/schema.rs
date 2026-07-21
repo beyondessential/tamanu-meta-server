@@ -551,6 +551,7 @@ diesel::table! {
 		reachability -> Text,
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
+		ingest -> Text,
 	}
 }
 

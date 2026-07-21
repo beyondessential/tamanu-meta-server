@@ -102,6 +102,9 @@ pub enum AppError {
 	#[error("tagged-device callers are only allowed on /public/... routes")]
 	TaggedDeviceNotAllowed,
 
+	#[error("source '{0}' is denied ingestion")]
+	IngestDenied(String),
+
 	#[error("another device already claims this tailscale node id")]
 	DeviceTailscaleNodeAlreadyClaimed,
 
@@ -207,6 +210,7 @@ impl AppError {
 			Self::AuthTailnetDirectoryUnavailable => StatusCode::SERVICE_UNAVAILABLE,
 			Self::AuthTailnetNodeNotPermitted => StatusCode::FORBIDDEN,
 			Self::TaggedDeviceNotAllowed => StatusCode::FORBIDDEN,
+			Self::IngestDenied(_) => StatusCode::FORBIDDEN,
 			Self::DeviceTailscaleNodeAlreadyClaimed => StatusCode::CONFLICT,
 			Self::DeviceMergeConflict => StatusCode::CONFLICT,
 			Self::AuthTailnetIdentityMissing => StatusCode::UNAUTHORIZED,
@@ -259,6 +263,7 @@ impl AppError {
 							"auth-tailnet-directory-unavailable",
 						Self::AuthTailnetNodeNotPermitted => "auth-tailnet-node-not-permitted",
 						Self::TaggedDeviceNotAllowed => "tagged-device-not-allowed",
+						Self::IngestDenied(_) => "ingest-denied",
 						Self::DeviceTailscaleNodeAlreadyClaimed =>
 							"device-tailscale-node-already-claimed",
 						Self::DeviceMergeConflict => "device-merge-conflict",

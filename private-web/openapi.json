@@ -2664,6 +2664,66 @@
         ]
       }
     },
+    "/api/healthchecks/set_source_ingest": {
+      "post": {
+        "tags": [
+          "healthchecks"
+        ],
+        "summary": "Set a source's ingest mode.",
+        "description": "Governs whether the device API accepts the source's reports: `allow`\ningests normally, `ignore` accepts but discards them, `deny` rejects\nthe push. The reserved `canopy`/`manual` names are rejected.",
+        "operationId": "healthcheck_set_source_ingest",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSourceIngestArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Ingest mode set."
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/healthchecks/set_source_reachability": {
       "post": {
         "tags": [
@@ -8761,6 +8821,15 @@
           }
         }
       },
+      "IngestMode": {
+        "type": "string",
+        "description": "Whether the device API ingests a source's reports.\n\nStored as text in Postgres, validated as this enum at the edges.",
+        "enum": [
+          "allow",
+          "ignore",
+          "deny"
+        ]
+      },
       "IntentDescriptor": {
         "type": "object",
         "description": "One restore purpose a consumer advertises support for: the behaviours it\nopts into and the settings it accepts per replica.",
@@ -12307,6 +12376,24 @@
           }
         }
       },
+      "SetSourceIngestArgs": {
+        "type": "object",
+        "description": "Request body for setting a source's ingest mode.",
+        "required": [
+          "source",
+          "ingest"
+        ],
+        "properties": {
+          "ingest": {
+            "$ref": "#/components/schemas/IngestMode",
+            "description": "The ingest mode to apply: `allow`, `ignore`, or `deny`."
+          },
+          "source": {
+            "type": "string",
+            "description": "The source to configure. The reserved `canopy`/`manual` names are\nrejected."
+          }
+        }
+      },
       "SetSourceReachabilityArgs": {
         "type": "object",
         "description": "Request body for setting a source's reachability mode.",
@@ -12465,9 +12552,14 @@
         "description": "One reporting source with its reachability policy and fleet-wide\nlast-seen.",
         "required": [
           "source",
-          "reachability"
+          "reachability",
+          "ingest"
         ],
         "properties": {
+          "ingest": {
+            "$ref": "#/components/schemas/IngestMode",
+            "description": "Whether the device API ingests this source's reports: `allow`,\n`ignore` (accepted but discarded), or `deny` (rejected). A source\nthat isn't ingested is excluded from reachability."
+          },
           "last_seen": {
             "type": [
               "string",

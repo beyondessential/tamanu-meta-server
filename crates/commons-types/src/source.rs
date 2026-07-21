@@ -62,3 +62,61 @@ impl From<ReachabilityMode> for String {
 		m.to_string()
 	}
 }
+
+/// Whether the device API ingests a source's reports.
+///
+/// Stored as text in Postgres, validated as this enum at the edges.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum IngestMode {
+	/// Reports are ingested normally. The default.
+	#[default]
+	Allow,
+	/// Reports are accepted but the source's data is discarded before
+	/// ingestion — nothing is recorded.
+	Ignore,
+	/// The device API rejects the push outright.
+	Deny,
+}
+
+#[derive(Debug, Clone, Copy, thiserror::Error)]
+#[error("invalid ingest mode; expected one of: allow, ignore, deny")]
+pub struct IngestModeFromStringError;
+
+impl std::str::FromStr for IngestMode {
+	type Err = IngestModeFromStringError;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		match s.to_ascii_lowercase().as_str() {
+			"allow" => Ok(Self::Allow),
+			"ignore" => Ok(Self::Ignore),
+			"deny" => Ok(Self::Deny),
+			_ => Err(IngestModeFromStringError),
+		}
+	}
+}
+
+impl TryFrom<String> for IngestMode {
+	type Error = IngestModeFromStringError;
+
+	fn try_from(value: String) -> Result<Self, Self::Error> {
+		value.parse()
+	}
+}
+
+impl std::fmt::Display for IngestMode {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		let s = match self {
+			Self::Allow => "allow",
+			Self::Ignore => "ignore",
+			Self::Deny => "deny",
+		};
+		write!(f, "{s}")
+	}
+}
+
+impl From<IngestMode> for String {
+	fn from(m: IngestMode) -> Self {
+		m.to_string()
+	}
+}

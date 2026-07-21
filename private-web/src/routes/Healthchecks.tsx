@@ -32,6 +32,7 @@ import {
 	healthcheckSettingsPath,
 	type Ceiling,
 	type CheckPolicyData,
+	type IngestMode,
 	type ReachabilityMode,
 	type SourceData,
 } from "../types";
@@ -170,6 +171,7 @@ export default function Healthchecks() {
 }
 
 const REACHABILITY_MODES: ReachabilityMode[] = ["on", "quiet", "off"];
+const INGEST_MODES: IngestMode[] = ["allow", "ignore", "deny"];
 
 function SourcesSection({ isAdmin }: { isAdmin: boolean }) {
 	const sources = useApi("healthchecks", "sources");
@@ -183,10 +185,13 @@ function SourcesSection({ isAdmin }: { isAdmin: boolean }) {
 				Sources
 			</Typography>
 			<Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-				Reporters canopy expects to hear from. Reachability controls how a
-				source going quiet affects its servers: <strong>on</strong> warns,{" "}
-				<strong>quiet</strong> never warns but still marks a server unreachable
-				when it's the only source left, <strong>off</strong> ignores it.
+				Reporters canopy expects to hear from. <strong>Reachability</strong>{" "}
+				controls how a source going quiet affects its servers: <em>on</em>{" "}
+				warns, <em>quiet</em> never warns but still marks a server unreachable
+				when it's the only source left, <em>off</em> ignores it.{" "}
+				<strong>Ingest</strong> controls the device API: <em>allow</em> accepts
+				reports, <em>ignore</em> discards them, <em>deny</em> rejects the push.
+				A source that isn't ingested can't count for reachability.
 			</Typography>
 			{sources.status === "loading" || sources.status === "idle" ? (
 				<LinearProgress />
@@ -201,6 +206,7 @@ function SourcesSection({ isAdmin }: { isAdmin: boolean }) {
 									<TableCell>Source</TableCell>
 									<TableCell>Last seen</TableCell>
 									<TableCell>Reachability</TableCell>
+									<TableCell>Ingest</TableCell>
 								</TableRow>
 							</TableHead>
 							<TableBody>
@@ -230,20 +236,39 @@ function SourceRow({
 	canEdit: boolean;
 	onChanged: () => void;
 }) {
-	const setMode = useApiAction("healthchecks", "set_source_reachability");
-	const [local, setLocal] = useState<ReachabilityMode>(row.reachability);
+	const setReach = useApiAction("healthchecks", "set_source_reachability");
+	const setIngest = useApiAction("healthchecks", "set_source_ingest");
+	const [reach, setReachLocal] = useState<ReachabilityMode>(row.reachability);
+	const [ingest, setIngestLocal] = useState<IngestMode>(row.ingest);
 
-	const change = async (mode: ReachabilityMode | null) => {
-		if (!mode || mode === local) return;
-		const prev = local;
-		setLocal(mode);
+	const changeReach = async (mode: ReachabilityMode | null) => {
+		if (!mode || mode === reach) return;
+		const prev = reach;
+		setReachLocal(mode);
 		try {
-			await setMode.call({ source: row.source, reachability: mode });
+			await setReach.call({ source: row.source, reachability: mode });
 			onChanged();
 		} catch {
-			setLocal(prev);
+			setReachLocal(prev);
 		}
 	};
+
+	const changeIngest = async (mode: IngestMode | null) => {
+		if (!mode || mode === ingest) return;
+		const prev = ingest;
+		setIngestLocal(mode);
+		try {
+			await setIngest.call({ source: row.source, ingest: mode });
+			onChanged();
+		} catch {
+			setIngestLocal(prev);
+		}
+	};
+
+	// A source that isn't ingested is excluded from reachability; show the
+	// reachability control as a disabled "off".
+	const ingested = ingest === "allow";
+	const reachShown: ReachabilityMode = ingested ? reach : "off";
 
 	return (
 		<TableRow hover>
@@ -262,9 +287,9 @@ function SourceRow({
 					<ToggleButtonGroup
 						size="small"
 						exclusive
-						value={local}
-						onChange={(_, v) => change(v as ReachabilityMode | null)}
-						disabled={setMode.pending}
+						value={reachShown}
+						onChange={(_, v) => changeReach(v as ReachabilityMode | null)}
+						disabled={setReach.pending || !ingested}
 					>
 						{REACHABILITY_MODES.map((mode) => (
 							<ToggleButton key={mode} value={mode}>
@@ -273,11 +298,35 @@ function SourceRow({
 						))}
 					</ToggleButtonGroup>
 				) : (
-					<Chip size="small" label={local} />
+					<Chip size="small" label={reachShown} />
 				)}
-				{setMode.error && (
+				{setReach.error && (
 					<Typography variant="caption" color="error" sx={{ display: "block" }}>
-						{formatError(setMode.error)}
+						{formatError(setReach.error)}
+					</Typography>
+				)}
+			</TableCell>
+			<TableCell>
+				{canEdit ? (
+					<ToggleButtonGroup
+						size="small"
+						exclusive
+						value={ingest}
+						onChange={(_, v) => changeIngest(v as IngestMode | null)}
+						disabled={setIngest.pending}
+					>
+						{INGEST_MODES.map((mode) => (
+							<ToggleButton key={mode} value={mode}>
+								{mode}
+							</ToggleButton>
+						))}
+					</ToggleButtonGroup>
+				) : (
+					<Chip size="small" label={ingest} />
+				)}
+				{setIngest.error && (
+					<Typography variant="caption" color="error" sx={{ display: "block" }}>
+						{formatError(setIngest.error)}
 					</Typography>
 				)}
 			</TableCell>

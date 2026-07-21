@@ -254,36 +254,56 @@ async fn create(
 		),
 	};
 
-	// Resolve the server's effective tag map outside the write transaction.
-	// Read-only; shared across every rule evaluation for this push. JSON-
-	// wrapped so the rule evaluator can compare uniformly with extras.
-	let tag_map = server.tags_merged_with_group(&mut db).await?;
-	let tags: std::collections::HashMap<String, serde_json::Value> = tag_map
+	// Ingest gating (see CHK "Source policy"): a denied source's push is
+	// rejected outright; an ignored source's push is accepted but its data
+	// is not recorded. Either way the device still gets the normal response
+	// below (backup instructions, tags, severities) — those come from server
+	// state, not from this push, so an ignored reporter keeps functioning.
+	let record = match database::source_policies::SourcePolicy::ingest_for(&mut db, &source).await?
+	{
+		commons_types::source::IngestMode::Allow => true,
+		commons_types::source::IngestMode::Ignore => false,
+		commons_types::source::IngestMode::Deny => return Err(AppError::IngestDenied(source)),
+	};
+
+	// The server's effective tags: stored server+group tags plus the
+	// synthetic `canopy:*` tags and computed `billing.*` labels. Computed
+	// once and used for both grading (per CHK, rules evaluate against the
+	// effective tags, so a rule can predicate on any of them) and the
+	// device response. JSON-wrapped so the rule evaluator compares
+	// uniformly with extras.
+	let effective_tags = crate::tags::effective_tags_for_server(&mut db, &server).await?;
+	let tags: std::collections::HashMap<String, serde_json::Value> = effective_tags
 		.0
-		.into_iter()
-		.map(|(k, v)| (k, serde_json::Value::String(v)))
+		.iter()
+		.map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
 		.collect();
 
-	// Insert + file events atomically. NewEvent::save itself opens
-	// a transaction; diesel-async nests it as a SAVEPOINT.
-	db.transaction::<_, AppError, _>(async |conn| {
-		let status = NewStatus {
-			server_id,
-			device_id: Some(id),
-			version,
-			extra,
-			healthy,
-			health,
-			source: source.clone(),
-		}
-		.save(conn)
+	// Only the recording is conditional on ingest mode; everything else —
+	// backup instructions, tags, severities computed below — is returned
+	// regardless, so an ignored reporter keeps working.
+	if record {
+		// Insert + file events atomically. NewEvent::save itself opens
+		// a transaction; diesel-async nests it as a SAVEPOINT.
+		db.transaction::<_, AppError, _>(async |conn| {
+			let status = NewStatus {
+				server_id,
+				device_id: Some(id),
+				version,
+				extra,
+				healthy,
+				health,
+				source: source.clone(),
+			}
+			.save(conn)
+			.await?;
+
+			file_health_events(conn, server_id, server.group_id, Some(id), &status, &tags).await?;
+
+			Ok(())
+		})
 		.await?;
-
-		file_health_events(conn, server_id, server.group_id, Some(id), &status, &tags).await?;
-
-		Ok(())
-	})
-	.await?;
+	}
 
 	// Tell the device which backup types to run now (operator one-offs +
 	// schedule-due), riding the heartbeat response. Only alertd runs
@@ -301,7 +321,6 @@ async fn create(
 	// (upserted into the catalog above) are already in the map.
 	let check_severities =
 		effective_check_severities(&mut db, server_id, server.group_id, &source).await?;
-	let effective_tags = crate::tags::effective_tags_for_server(&mut db, &server).await?;
 
 	Ok(Json(StatusResponse {
 		backup_now,

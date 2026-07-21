@@ -1,4 +1,4 @@
-use commons_types::source::ReachabilityMode;
+use commons_types::source::{IngestMode, ReachabilityMode};
 use commons_types::status::CheckResult;
 use database::{
 	issues::Issue,
@@ -349,6 +349,29 @@ async fn sweep_off_source_is_excluded() {
 		let filed = Status::sweep_staleness(&mut conn).await.expect("sweep");
 		assert_eq!(filed, 0);
 		assert!(issue_for(&mut conn, id).await.is_none());
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sweep_excludes_a_non_allow_source() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		// A source whose ingest is `ignore` has no fresh data, so it's
+		// excluded from reachability even when stale and mode `on`: only the
+		// fresh `alertd` source counts → passed, no warning.
+		let id = insert_server(&mut conn, "http://ignored-source.invalid/", 600).await;
+		insert_check_state(&mut conn, id, "alertd", "db", 2).await; // fresh, on
+		insert_check_state(&mut conn, id, "legacyagent", "beat", 30).await; // stale, on
+		SourcePolicy::set_ingest(&mut conn, "legacyagent", IngestMode::Ignore)
+			.await
+			.expect("set ignore");
+
+		let filed = Status::sweep_staleness(&mut conn).await.expect("sweep");
+		assert_eq!(filed, 0);
+		assert!(
+			issue_for(&mut conn, id).await.is_none(),
+			"an ignored source going stale never affects reachability"
+		);
 	})
 	.await
 }

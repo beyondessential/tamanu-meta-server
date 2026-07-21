@@ -1327,6 +1327,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/healthchecks/set_source_ingest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set a source's ingest mode.
+         * @description Governs whether the device API accepts the source's reports: `allow`
+         *     ingests normally, `ignore` accepts but discards them, `deny` rejects
+         *     the push. The reserved `canopy`/`manual` names are rejected.
+         */
+        post: operations["healthcheck_set_source_ingest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/healthchecks/set_source_reachability": {
         parameters: {
             query?: never;
@@ -4810,6 +4832,13 @@ export interface components {
             issues: components["schemas"]["IncidentIssueData"][];
         };
         /**
+         * @description Whether the device API ingests a source's reports.
+         *
+         *     Stored as text in Postgres, validated as this enum at the edges.
+         * @enum {string}
+         */
+        IngestMode: "allow" | "ignore" | "deny";
+        /**
          * @description One restore purpose a consumer advertises support for: the behaviours it
          *     opts into and the settings it accepts per replica.
          */
@@ -7010,6 +7039,16 @@ export interface components {
             /** @description Backup type this schedule and retention apply to. */
             type: string;
         };
+        /** @description Request body for setting a source's ingest mode. */
+        SetSourceIngestArgs: {
+            /** @description The ingest mode to apply: `allow`, `ignore`, or `deny`. */
+            ingest: components["schemas"]["IngestMode"];
+            /**
+             * @description The source to configure. The reserved `canopy`/`manual` names are
+             *     rejected.
+             */
+            source: string;
+        };
         /** @description Request body for setting a source's reachability mode. */
         SetSourceReachabilityArgs: {
             /** @description The reachability mode to apply: `on`, `quiet`, or `off`. */
@@ -7119,6 +7158,12 @@ export interface components {
          *     last-seen.
          */
         SourceData: {
+            /**
+             * @description Whether the device API ingests this source's reports: `allow`,
+             *     `ignore` (accepted but discarded), or `deny` (rejected). A source
+             *     that isn't ingested is excluded from reachability.
+             */
+            ingest: components["schemas"]["IngestMode"];
             /**
              * Format: date-time
              * @description When any of this source's checks was most recently reported anywhere
@@ -9522,6 +9567,52 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthcheckSampleResponse"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    healthcheck_set_source_ingest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetSourceIngestArgs"];
+            };
+        };
+        responses: {
+            /** @description Ingest mode set. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
             401: {
