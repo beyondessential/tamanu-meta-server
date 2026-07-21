@@ -97,6 +97,10 @@ pub struct ManualIncidentListArgs {
 }
 
 /// List manual incidents, most recently started first.
+///
+/// Manual incidents are support-recorded incident records, written over the
+/// MCP interface rather than derived from check state. Optionally narrowed
+/// to one group or to ongoing incidents (those without an end time).
 #[utoipa::path(
 	post,
 	path = "/list",
@@ -134,6 +138,9 @@ pub struct ManualIncidentGetArgs {
 }
 
 /// Fetch one manual incident by id.
+///
+/// Returns the full record, with the affected group's display name resolved
+/// when one is set. Responds 404 if no manual incident has that id.
 #[utoipa::path(
 	post,
 	path = "/get",

@@ -3814,6 +3814,7 @@
           "manual_incidents"
         ],
         "summary": "Fetch one manual incident by id.",
+        "description": "Returns the full record, with the affected group's display name resolved\nwhen one is set. Responds 404 if no manual incident has that id.",
         "operationId": "manual_incidents_get",
         "requestBody": {
           "content": {
@@ -3870,6 +3871,7 @@
           "manual_incidents"
         ],
         "summary": "List manual incidents, most recently started first.",
+        "description": "Manual incidents are support-recorded incident records, written over the\nMCP interface rather than derived from check state. Optionally narrowed\nto one group or to ongoing incidents (those without an end time).",
         "operationId": "manual_incidents_list",
         "requestBody": {
           "content": {

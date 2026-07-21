@@ -1903,7 +1903,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Fetch one manual incident by id. */
+        /**
+         * Fetch one manual incident by id.
+         * @description Returns the full record, with the affected group's display name resolved
+         *     when one is set. Responds 404 if no manual incident has that id.
+         */
         post: operations["manual_incidents_get"];
         delete?: never;
         options?: never;
@@ -1920,7 +1924,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** List manual incidents, most recently started first. */
+        /**
+         * List manual incidents, most recently started first.
+         * @description Manual incidents are support-recorded incident records, written over the
+         *     MCP interface rather than derived from check state. Optionally narrowed
+         *     to one group or to ongoing incidents (those without an end time).
+         */
         post: operations["manual_incidents_list"];
         delete?: never;
         options?: never;

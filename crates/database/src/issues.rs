@@ -832,8 +832,9 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 
 	let source = filing.source;
 	debug_assert!(
-		source == crate::statuses::CANOPY_SOURCE,
-		"filings are canopy's own",
+		matches!(filing.scope, FilingScope::Server { .. })
+			|| source == crate::statuses::CANOPY_SOURCE,
+		"group- and canopy-wide filings are canopy's own",
 	);
 	CheckPolicy::register(
 		conn,
