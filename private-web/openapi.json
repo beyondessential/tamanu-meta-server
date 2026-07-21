@@ -2670,7 +2670,7 @@
           "healthchecks"
         ],
         "summary": "Set a source's ingest mode.",
-        "description": "Governs whether the device API accepts the source's reports: `allow`\ningests normally, `ignore` accepts but discards them, `deny` rejects\nthe push. The reserved `canopy`/`manual` names are rejected.",
+        "description": "Governs whether the device API accepts the source's reports: `allow`\ningests normally, `ignore` accepts but discards them, `deny` rejects\nthe push. The reserved `canopy` name is rejected.",
         "operationId": "healthcheck_set_source_ingest",
         "requestBody": {
           "content": {
@@ -12570,7 +12570,7 @@
           },
           "source": {
             "type": "string",
-            "description": "The source to configure. The reserved `canopy`/`manual` names are\nrejected."
+            "description": "The source to configure. The reserved `canopy` name is rejected."
           }
         }
       },

@@ -1340,7 +1340,7 @@ export interface paths {
          * Set a source's ingest mode.
          * @description Governs whether the device API accepts the source's reports: `allow`
          *     ingests normally, `ignore` accepts but discards them, `deny` rejects
-         *     the push. The reserved `canopy`/`manual` names are rejected.
+         *     the push. The reserved `canopy` name is rejected.
          */
         post: operations["healthcheck_set_source_ingest"];
         delete?: never;
@@ -7130,10 +7130,7 @@ export interface components {
         SetSourceIngestArgs: {
             /** @description The ingest mode to apply: `allow`, `ignore`, or `deny`. */
             ingest: components["schemas"]["IngestMode"];
-            /**
-             * @description The source to configure. The reserved `canopy`/`manual` names are
-             *     rejected.
-             */
+            /** @description The source to configure. The reserved `canopy` name is rejected. */
             source: string;
         };
         /** @description Request body for setting a source's reachability mode. */
