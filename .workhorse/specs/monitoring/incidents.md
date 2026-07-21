@@ -55,8 +55,8 @@ Notes attach free-form operator commentary to an incident.
 Alongside the automatic incidents above, Canopy keeps manual incidents: records of incidents the support team managed, written after the fact rather than derived from check state.
 
 A manual incident carries a title, a markdown description, when it started, and when it ended; an ended time may be absent while the incident is ongoing.
-It may name one server group as the affected target; a manual incident without a group concerns the fleet or Canopy generally.
+Every manual incident names exactly one server group as the affected target, and a group with manual incidents on record cannot be removed: the record is history.
 Each records who created it and when it was created and last changed.
 
 Manual incidents are independent of the check-state model: no issue joins them, they never notify, and nothing opens, closes, or resolves them except the people editing them.
-They are created, edited, and deleted over the MCP interface (see [MCP](../private-server/mcp.md)) and presented read-only in the operator UI alongside automatic incidents.
+They are created, edited, and deleted both over the MCP interface (see [MCP](../private-server/mcp.md)) and in the operator UI, where they are presented alongside automatic incidents; either way every write is attributed to the identity that made it.

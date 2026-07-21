@@ -353,7 +353,7 @@ diesel::table! {
 		description -> Text,
 		started_at -> Timestamptz,
 		ended_at -> Nullable<Timestamptz>,
-		server_group_id -> Nullable<Uuid>,
+		server_group_id -> Uuid,
 		created_by -> Text,
 	}
 }

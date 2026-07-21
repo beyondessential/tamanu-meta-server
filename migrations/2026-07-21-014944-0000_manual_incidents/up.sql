@@ -10,9 +10,9 @@ CREATE TABLE manual_incidents (
 	started_at TIMESTAMP WITH TIME ZONE NOT NULL,
 	-- NULL while the incident is ongoing.
 	ended_at TIMESTAMP WITH TIME ZONE,
-	-- The affected group; NULL for fleet/canopy-wide incidents. Kept (not
-	-- cascaded) when the group goes away: the record is history.
-	server_group_id UUID REFERENCES server_groups (id) ON DELETE SET NULL ON UPDATE CASCADE,
+	-- The affected group. RESTRICT: the record is history, so a group with
+	-- manual incidents on record can't be removed out from under it.
+	server_group_id UUID NOT NULL REFERENCES server_groups (id) ON DELETE RESTRICT ON UPDATE CASCADE,
 	-- Who recorded it: a tailnet login or an MCP token name.
 	created_by TEXT NOT NULL
 );
@@ -20,4 +20,4 @@ CREATE TABLE manual_incidents (
 SELECT diesel_manage_updated_at('manual_incidents');
 
 CREATE INDEX manual_incidents_started ON manual_incidents (started_at DESC);
-CREATE INDEX manual_incidents_group ON manual_incidents (server_group_id) WHERE server_group_id IS NOT NULL;
+CREATE INDEX manual_incidents_group ON manual_incidents (server_group_id);

@@ -105,14 +105,14 @@ A summary or ranking of incidents should count published incidents rather than r
 
 Manual incidents (see [INC](../monitoring/incidents.md), "Manual incidents") are both queried and written through this interface.
 
-**Find manual incidents** optionally narrows by group and to ongoing ones only, and returns a bounded list ordered most recently started first, each with its title, description, start and end times, target group (with its name resolved), author, and when it was created and last changed.
+**Find manual incidents** optionally narrows by group and to ongoing ones only, and returns a bounded list ordered most recently started first, each with its title, description, start and end times, affected group (with its name resolved), author, and when it was created and last changed.
 When the result is truncated to its bound, the result says so.
 
 **Get manual incident** takes an identifier and returns the full record.
 
-**Record manual incident** takes a title and a start time, and optionally a markdown description, an end time, and a target group; it creates the record with the caller's identity as author and returns it.
+**Record manual incident** takes a title, a start time, and the affected group, and optionally a markdown description and an end time; it creates the record with the caller's identity as author and returns it.
 
-**Update manual incident** takes an identifier and any subset of title, description, start time, and end time, and applies them; it can also explicitly clear the end time, marking the incident ongoing again.
+**Update manual incident** takes an identifier and any subset of title, description, start time, end time, and affected group, and applies them; it can also explicitly clear the end time, marking the incident ongoing again.
 
 **Delete manual incident** takes an identifier and removes the record.
 

@@ -1,6 +1,7 @@
 //! Manual incidents model: create/get roundtrip, list ordering and filters,
-//! partial updates (including clearing the end time via `Some(None)`), and
-//! delete semantics on known and unknown ids.
+//! partial updates (including clearing the end time via `Some(None)` and
+//! moving the record to another group), and delete semantics on known and
+//! unknown ids.
 
 use database::manual_incidents::{ManualIncident, ManualIncidentUpdate};
 use diesel_async::SimpleAsyncConnection as _;
@@ -11,10 +12,10 @@ fn ts(s: &str) -> Timestamp {
 	s.parse().unwrap()
 }
 
-async fn seed_group(conn: &mut database::diesel_async::AsyncPgConnection) -> Uuid {
+async fn seed_group(conn: &mut database::diesel_async::AsyncPgConnection, name: &str) -> Uuid {
 	let id = Uuid::new_v4();
 	conn.batch_execute(&format!(
-		"INSERT INTO server_groups (id, name) VALUES ('{id}', 'Manual Group')"
+		"INSERT INTO server_groups (id, name) VALUES ('{id}', '{name}')"
 	))
 	.await
 	.expect("seed group");
@@ -24,14 +25,14 @@ async fn seed_group(conn: &mut database::diesel_async::AsyncPgConnection) -> Uui
 #[tokio::test(flavor = "multi_thread")]
 async fn create_and_get_roundtrip() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let group = seed_group(&mut conn).await;
+		let group = seed_group(&mut conn, "Manual Group").await;
 		let created = ManualIncident::create(
 			&mut conn,
 			"Fibre cut in Suva",
 			"ISP outage took the whole site offline.",
 			ts("2026-07-01T10:00:00Z"),
 			Some(ts("2026-07-01T12:30:00Z")),
-			Some(group),
+			group,
 			"admin@localhost",
 		)
 		.await
@@ -43,7 +44,7 @@ async fn create_and_get_roundtrip() {
 		);
 		assert_eq!(created.started_at, ts("2026-07-01T10:00:00Z"));
 		assert_eq!(created.ended_at, Some(ts("2026-07-01T12:30:00Z")));
-		assert_eq!(created.server_group_id, Some(group));
+		assert_eq!(created.server_group_id, group);
 		assert_eq!(created.created_by, "admin@localhost");
 
 		let fetched = ManualIncident::get(&mut conn, created.id)
@@ -56,6 +57,21 @@ async fn create_and_get_roundtrip() {
 		assert_eq!(fetched.ended_at, created.ended_at);
 		assert_eq!(fetched.server_group_id, created.server_group_id);
 		assert_eq!(fetched.created_by, created.created_by);
+
+		// A record naming an unknown group is refused outright.
+		assert!(
+			ManualIncident::create(
+				&mut conn,
+				"orphan",
+				"",
+				ts("2026-07-01T10:00:00Z"),
+				None,
+				Uuid::new_v4(),
+				"t",
+			)
+			.await
+			.is_err()
+		);
 
 		// Unknown ids: get is None, get_required errors (404).
 		assert!(
@@ -76,14 +92,15 @@ async fn create_and_get_roundtrip() {
 #[tokio::test(flavor = "multi_thread")]
 async fn list_orders_and_filters() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let group = seed_group(&mut conn).await;
+		let group = seed_group(&mut conn, "Filtered Group").await;
+		let other = seed_group(&mut conn, "Other Group").await;
 		let ended = ManualIncident::create(
 			&mut conn,
 			"ended",
 			"",
 			ts("2026-07-01T10:00:00Z"),
 			Some(ts("2026-07-01T11:00:00Z")),
-			None,
+			other,
 			"t",
 		)
 		.await
@@ -94,22 +111,22 @@ async fn list_orders_and_filters() {
 			"",
 			ts("2026-07-03T10:00:00Z"),
 			None,
-			Some(group),
+			group,
 			"t",
 		)
 		.await
 		.expect("create grouped ongoing");
-		let ungrouped_ongoing = ManualIncident::create(
+		let other_ongoing = ManualIncident::create(
 			&mut conn,
-			"ungrouped ongoing",
+			"other ongoing",
 			"",
 			ts("2026-07-02T10:00:00Z"),
 			None,
-			None,
+			other,
 			"t",
 		)
 		.await
-		.expect("create ungrouped ongoing");
+		.expect("create other ongoing");
 
 		let ids = |list: Vec<ManualIncident>| list.into_iter().map(|i| i.id).collect::<Vec<_>>();
 
@@ -119,7 +136,7 @@ async fn list_orders_and_filters() {
 			.expect("list");
 		assert_eq!(
 			ids(all),
-			vec![grouped_ongoing.id, ungrouped_ongoing.id, ended.id]
+			vec![grouped_ongoing.id, other_ongoing.id, ended.id]
 		);
 
 		// group filter narrows to that group's incidents.
@@ -138,7 +155,7 @@ async fn list_orders_and_filters() {
 		let ongoing = ManualIncident::list(&mut conn, None, true, 100)
 			.await
 			.expect("list ongoing");
-		assert_eq!(ids(ongoing), vec![grouped_ongoing.id, ungrouped_ongoing.id]);
+		assert_eq!(ids(ongoing), vec![grouped_ongoing.id, other_ongoing.id]);
 
 		// Filters combine.
 		let grouped_and_ongoing = ManualIncident::list(&mut conn, Some(group), true, 100)
@@ -150,7 +167,7 @@ async fn list_orders_and_filters() {
 		let limited = ManualIncident::list(&mut conn, None, false, 2)
 			.await
 			.expect("list limited");
-		assert_eq!(ids(limited), vec![grouped_ongoing.id, ungrouped_ongoing.id]);
+		assert_eq!(ids(limited), vec![grouped_ongoing.id, other_ongoing.id]);
 	})
 	.await
 }
@@ -158,13 +175,15 @@ async fn list_orders_and_filters() {
 #[tokio::test(flavor = "multi_thread")]
 async fn update_applies_partial_edits_and_clears_end_time() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let group = seed_group(&mut conn, "First Group").await;
+		let other = seed_group(&mut conn, "Second Group").await;
 		let created = ManualIncident::create(
 			&mut conn,
 			"original title",
 			"original description",
 			ts("2026-07-01T10:00:00Z"),
 			None,
-			None,
+			group,
 			"t",
 		)
 		.await
@@ -186,6 +205,7 @@ async fn update_applies_partial_edits_and_clears_end_time() {
 		assert_eq!(updated.description, "original description");
 		assert_eq!(updated.started_at, ts("2026-07-01T10:00:00Z"));
 		assert_eq!(updated.ended_at, None);
+		assert_eq!(updated.server_group_id, group);
 		assert_eq!(updated.created_by, "t");
 
 		// Setting an end time: Some(Some(_)).
@@ -218,6 +238,33 @@ async fn update_applies_partial_edits_and_clears_end_time() {
 		assert_eq!(updated.ended_at, None);
 		assert_eq!(updated.title, "new title");
 
+		// The record can move to another (existing) group, but not to an
+		// unknown one.
+		let updated = ManualIncident::update(
+			&mut conn,
+			created.id,
+			ManualIncidentUpdate {
+				server_group_id: Some(other),
+				..Default::default()
+			},
+		)
+		.await
+		.expect("update")
+		.expect("known id");
+		assert_eq!(updated.server_group_id, other);
+		assert!(
+			ManualIncident::update(
+				&mut conn,
+				created.id,
+				ManualIncidentUpdate {
+					server_group_id: Some(Uuid::new_v4()),
+					..Default::default()
+				},
+			)
+			.await
+			.is_err()
+		);
+
 		// Unknown id → None, not an error.
 		assert!(
 			ManualIncident::update(&mut conn, Uuid::new_v4(), ManualIncidentUpdate::default())
@@ -232,17 +279,25 @@ async fn update_applies_partial_edits_and_clears_end_time() {
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_removes_the_record_once() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let group = seed_group(&mut conn, "Doomed Group").await;
 		let created = ManualIncident::create(
 			&mut conn,
 			"to delete",
 			"",
 			ts("2026-07-01T10:00:00Z"),
 			None,
-			None,
+			group,
 			"t",
 		)
 		.await
 		.expect("create");
+
+		// The group can't be removed while the record exists: it's history.
+		assert!(
+			conn.batch_execute(&format!("DELETE FROM server_groups WHERE id = '{group}'"))
+				.await
+				.is_err()
+		);
 
 		assert!(
 			ManualIncident::delete(&mut conn, created.id)

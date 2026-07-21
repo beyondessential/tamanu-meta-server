@@ -558,9 +558,9 @@ export interface SeededManualIncident {
 	title: string;
 }
 
-/** Seed a manual incident (a support-recorded record, normally written
- * over the MCP interface). Omit `endedAt` for an ongoing one; pass
- * `serverGroupId: null` (or omit it) for a fleet-wide record. */
+/** Seed a manual incident (a support-recorded record, written in the UI or
+ * over the MCP interface). Omit `endedAt` for an ongoing one. The affected
+ * group is mandatory. */
 export async function seedManualIncident(
 	sql: Sql,
 	opts: {
@@ -571,9 +571,9 @@ export async function seedManualIncident(
 		startedAt?: string;
 		/** ISO 8601; omit/null while the incident is ongoing. */
 		endedAt?: string | null;
-		serverGroupId?: string | null;
+		serverGroupId: string;
 		createdBy?: string;
-	} = {},
+	},
 ): Promise<SeededManualIncident> {
 	const id = randomUUID();
 	const title = opts.title ?? randomLabel("manual-incident");
@@ -587,7 +587,7 @@ export async function seedManualIncident(
 			opts.description ?? "",
 			opts.startedAt ?? null,
 			opts.endedAt ?? null,
-			opts.serverGroupId ?? null,
+			opts.serverGroupId,
 			opts.createdBy ?? "e2e@example.com",
 		],
 	);

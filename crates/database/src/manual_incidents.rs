@@ -5,8 +5,7 @@
 //! incidents". Independent of the issue/incident machinery in
 //! [`crate::issues`]: nothing joins these, they never notify, and only the
 //! people editing them change them. Written over the MCP interface (see
-//! `.workhorse/specs/private-server/mcp.md`), displayed read-only in the
-//! operator UI.
+//! `.workhorse/specs/private-server/mcp.md`) and the operator UI.
 
 use commons_errors::{AppError, Result};
 use diesel::prelude::*;
@@ -33,9 +32,8 @@ pub struct ManualIncident {
 	/// `None` while the incident is ongoing.
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
 	pub ended_at: Option<Timestamp>,
-	/// The affected server group, or `None` for an incident concerning the
-	/// fleet or Canopy generally.
-	pub server_group_id: Option<Uuid>,
+	/// The affected server group.
+	pub server_group_id: Uuid,
 	/// Who recorded it: a tailnet login or an MCP token name.
 	pub created_by: String,
 }
@@ -49,6 +47,7 @@ pub struct ManualIncidentUpdate {
 	pub description: Option<String>,
 	pub started_at: Option<Timestamp>,
 	pub ended_at: Option<Option<Timestamp>>,
+	pub server_group_id: Option<Uuid>,
 }
 
 impl ManualIncident {
@@ -58,7 +57,7 @@ impl ManualIncident {
 		description: &str,
 		started_at: Timestamp,
 		ended_at: Option<Timestamp>,
-		server_group_id: Option<Uuid>,
+		server_group_id: Uuid,
 		created_by: &str,
 	) -> Result<Self> {
 		use crate::schema::manual_incidents::dsl;
@@ -139,6 +138,7 @@ impl ManualIncident {
 			Some(ended_at) => ended_at,
 			None => current.ended_at,
 		};
+		let server_group_id = up.server_group_id.unwrap_or(current.server_group_id);
 
 		diesel::update(dsl::manual_incidents.filter(dsl::id.eq(id)))
 			.set((
@@ -146,6 +146,7 @@ impl ManualIncident {
 				dsl::description.eq(description),
 				dsl::started_at.eq(jiff_diesel::Timestamp::from(started_at)),
 				dsl::ended_at.eq(jiff_diesel::NullableTimestamp::from(ended_at)),
+				dsl::server_group_id.eq(server_group_id),
 			))
 			.returning(Self::as_select())
 			.get_result(db)

@@ -146,6 +146,9 @@ async fn read_only_token_reads_but_cannot_write_manual_incidents() {
 				serde_json::json!({
 					"title": "Attempted by a reader",
 					"started_at": "2026-07-01T10:00:00Z",
+					// Any well-formed group id: the write gate refuses before
+					// the group is ever looked up.
+					"group_id": "99999999-9999-9999-9999-999999999999",
 				}),
 			))
 			.await;
@@ -180,6 +183,13 @@ async fn read_only_token_reads_but_cannot_write_manual_incidents() {
 #[tokio::test(flavor = "multi_thread")]
 async fn write_token_records_manual_incident_attributed_to_token_name() {
 	commons_tests::server::run(async |mut conn, public, _private| {
+		use commons_tests::diesel_async::SimpleAsyncConnection as _;
+		let group_id = uuid::Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'Token Group')"
+		))
+		.await
+		.expect("seed group");
 		let (token, plaintext) = McpToken::mint(&mut conn, "scribe", "test@example.com", true)
 			.await
 			.expect("mint");
@@ -197,6 +207,7 @@ async fn write_token_records_manual_incident_attributed_to_token_name() {
 					"description": "ISP outage.",
 					"started_at": "2026-07-01T10:00:00Z",
 					"ended_at": "2026-07-01T12:30:00Z",
+					"group_id": group_id,
 				}),
 			))
 			.await;
@@ -212,6 +223,8 @@ async fn write_token_records_manual_incident_attributed_to_token_name() {
 		let out = &result["structuredContent"];
 		assert_eq!(out["title"], "Fibre cut in Suva");
 		assert_eq!(out["created_by"], "scribe");
+		assert_eq!(out["group_id"], group_id.to_string());
+		assert_eq!(out["group_name"], "Token Group");
 
 		// The row exists and is attributed to the token's name.
 		let rows = ManualIncident::list(&mut conn, None, false, 10)

@@ -1894,6 +1894,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/manual_incidents/create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record a manual incident.
+         * @description Creates the record with the calling tailnet user as author and returns
+         *     it. The title must be non-empty and the affected group must exist.
+         */
+        post: operations["manual_incidents_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/manual_incidents/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete a manual incident.
+         * @description Removes the record entirely. Responds 404 if no manual incident has
+         *     that id.
+         */
+        post: operations["manual_incidents_delete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/manual_incidents/get": {
         parameters: {
             query?: never;
@@ -1905,8 +1947,8 @@ export interface paths {
         put?: never;
         /**
          * Fetch one manual incident by id.
-         * @description Returns the full record, with the affected group's display name resolved
-         *     when one is set. Responds 404 if no manual incident has that id.
+         * @description Returns the full record, with the affected group's display name
+         *     resolved. Responds 404 if no manual incident has that id.
          */
         post: operations["manual_incidents_get"];
         delete?: never;
@@ -1926,11 +1968,34 @@ export interface paths {
         put?: never;
         /**
          * List manual incidents, most recently started first.
-         * @description Manual incidents are support-recorded incident records, written over the
-         *     MCP interface rather than derived from check state. Optionally narrowed
-         *     to one group or to ongoing incidents (those without an end time).
+         * @description Manual incidents are support-recorded incident records, written in this
+         *     UI or over the MCP interface rather than derived from check state.
+         *     Optionally narrowed to one group or to ongoing incidents (those without
+         *     an end time).
          */
         post: operations["manual_incidents_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/manual_incidents/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update a manual incident.
+         * @description Applies any subset of title, description, start and end times, and
+         *     affected group; `clearEndedAt` removes the end time, marking the
+         *     incident ongoing again. Responds 404 if no manual incident has that id.
+         */
+        post: operations["manual_incidents_update"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5276,10 +5341,32 @@ export interface components {
          * @enum {string}
          */
         MaintenanceKind: "quick" | "full";
+        /** @description Arguments for recording a manual incident. */
+        ManualIncidentCreateArgs: {
+            /** @description Markdown body. Defaults to empty. */
+            description?: string | null;
+            /**
+             * Format: date-time
+             * @description When the incident ended. Omit while it is ongoing.
+             */
+            endedAt?: string | null;
+            /**
+             * Format: uuid
+             * @description Id of the affected server group.
+             */
+            serverGroupId: string;
+            /**
+             * Format: date-time
+             * @description When the incident started.
+             */
+            startedAt: string;
+            /** @description Single-line headline. */
+            title: string;
+        };
         /**
-         * @description A support-recorded incident: written after the fact by people (over the
-         *     MCP interface), independent of the automatic incidents derived from
-         *     check state.
+         * @description A support-recorded incident: written after the fact by people (in this
+         *     UI or over the MCP interface), independent of the automatic incidents
+         *     derived from check state.
          */
         ManualIncidentData: {
             /**
@@ -5303,12 +5390,11 @@ export interface components {
             id: string;
             /**
              * Format: uuid
-             * @description Id of the affected server group. Absent for incidents concerning the
-             *     fleet or Canopy generally.
+             * @description Id of the affected server group.
              */
-            server_group_id?: string | null;
-            /** @description Display name of the affected server group, when one is set. */
-            server_group_name?: string | null;
+            server_group_id: string;
+            /** @description Display name of the affected server group. */
+            server_group_name: string;
             /**
              * Format: date-time
              * @description When the incident started.
@@ -5344,6 +5430,35 @@ export interface components {
             limit?: number | null;
             /** @description Only incidents without an end time (still ongoing). */
             ongoingOnly?: boolean | null;
+        };
+        /** @description Field edits for one manual incident. Omitted fields are unchanged. */
+        ManualIncidentUpdateArgs: {
+            /** @description Clear the end time, marking the incident ongoing again. */
+            clearEndedAt?: boolean | null;
+            /** @description New markdown body. */
+            description?: string | null;
+            /**
+             * Format: date-time
+             * @description New end time. Mutually exclusive with `clearEndedAt`.
+             */
+            endedAt?: string | null;
+            /**
+             * Format: uuid
+             * @description Id of the manual incident to edit.
+             */
+            id: string;
+            /**
+             * Format: uuid
+             * @description Id of a different affected server group.
+             */
+            serverGroupId?: string | null;
+            /**
+             * Format: date-time
+             * @description New start time.
+             */
+            startedAt?: string | null;
+            /** @description New headline. */
+            title?: string | null;
         };
         /**
          * @description Metadata about an MCP access token. Never includes the secret value
@@ -10390,6 +10505,84 @@ export interface operations {
             };
         };
     };
+    manual_incidents_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualIncidentCreateArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManualIncidentData"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    manual_incidents_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualIncidentGetArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     manual_incidents_get: {
         parameters: {
             query?: never;
@@ -10452,6 +10645,53 @@ export interface operations {
                 };
             };
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    manual_incidents_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualIncidentUpdateArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManualIncidentData"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

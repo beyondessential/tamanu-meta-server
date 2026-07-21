@@ -1,6 +1,7 @@
 import {
 	Alert as MuiAlert,
 	Box,
+	Button,
 	Checkbox,
 	FormControlLabel,
 	IconButton,
@@ -20,6 +21,7 @@ import { useApi } from "../api";
 import IncidentCard from "../components/IncidentCard";
 import IssueRow from "../components/IssueRow";
 import ManualIncidentCard from "../components/ManualIncidentCard";
+import ManualIncidentFormDialog from "../components/ManualIncidentFormDialog";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { CHECK_RESULT_ORDER, type CheckResult } from "../types";
 
@@ -37,6 +39,7 @@ export default function Incidents() {
 	// Defaults aren't written into the URL (clean address bar for the
 	// common case).
 	const [params, setParams] = useSearchParams();
+	const [recordOpen, setRecordOpen] = useState(false);
 	const activeOnly = params.get("showAll") !== "1";
 	const results = (params.get("result") ?? "")
 		.split(",")
@@ -117,29 +120,44 @@ export default function Incidents() {
 				</Box>
 			)}
 
-			{manualIncidents.status === "ok" && manualIncidents.data.length > 0 && (
-				<Box>
-					<Typography variant="h5" component="h2" gutterBottom>
+			<Box>
+				<Stack
+					direction="row"
+					spacing={2}
+					sx={{ alignItems: "center", mb: 1 }}
+				>
+					<Typography variant="h5" component="h2">
 						Manual incidents
 					</Typography>
-					<Box
-						sx={{
-							display: "grid",
-							gridTemplateColumns: {
-								xs: "1fr",
-								sm: "repeat(2, 1fr)",
-								md: "repeat(3, 1fr)",
-								lg: "repeat(4, 1fr)",
-							},
-							gap: 2,
-						}}
-					>
-						{manualIncidents.data.map((inc) => (
-							<ManualIncidentCard key={inc.id} incident={inc} />
-						))}
-					</Box>
-				</Box>
-			)}
+					<Button size="small" onClick={() => setRecordOpen(true)}>
+						Record incident
+					</Button>
+				</Stack>
+				{manualIncidents.status === "ok" &&
+					manualIncidents.data.length > 0 && (
+						<Box
+							sx={{
+								display: "grid",
+								gridTemplateColumns: {
+									xs: "1fr",
+									sm: "repeat(2, 1fr)",
+									md: "repeat(3, 1fr)",
+									lg: "repeat(4, 1fr)",
+								},
+								gap: 2,
+							}}
+						>
+							{manualIncidents.data.map((inc) => (
+								<ManualIncidentCard key={inc.id} incident={inc} />
+							))}
+						</Box>
+					)}
+				<ManualIncidentFormDialog
+					open={recordOpen}
+					onClose={() => setRecordOpen(false)}
+					onSaved={bumpRefresh}
+				/>
+			</Box>
 
 			<FilterBar
 				activeOnly={activeOnly}

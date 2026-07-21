@@ -48,9 +48,8 @@ pub struct RecordManualIncidentArgs {
 	pub started_at: String,
 	/// When the incident ended (RFC 3339). Omit while it is ongoing.
 	pub ended_at: Option<String>,
-	/// Id of the affected server group. Omit for incidents concerning the
-	/// fleet or Canopy generally.
-	pub group_id: Option<String>,
+	/// Id of the affected server group.
+	pub group_id: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -68,6 +67,8 @@ pub struct UpdateManualIncidentArgs {
 	/// Clear the end time, marking the incident ongoing again. Mutually
 	/// exclusive with `ended_at`.
 	pub clear_ended_at: Option<bool>,
+	/// Id of a different affected server group. Omitted = unchanged.
+	pub group_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -79,10 +80,9 @@ struct ManualIncidentOut {
 	started_at: Timestamp,
 	/// `null` while the incident is ongoing.
 	ended_at: Option<Timestamp>,
-	/// The affected server group, or `null` for an incident concerning the
-	/// fleet or Canopy generally.
-	group_id: Option<Uuid>,
-	group_name: Option<String>,
+	/// The affected server group.
+	group_id: Uuid,
+	group_name: String,
 	/// Who recorded it: a tailnet login or an MCP token name.
 	created_by: String,
 	created_at: Timestamp,
@@ -116,7 +116,7 @@ impl CanopyMcp {
 		conn: &mut database::diesel_async::AsyncPgConnection,
 		incidents: Vec<ManualIncident>,
 	) -> Result<Vec<ManualIncidentOut>, McpError> {
-		let group_ids: Vec<Uuid> = incidents.iter().filter_map(|i| i.server_group_id).collect();
+		let group_ids: Vec<Uuid> = incidents.iter().map(|i| i.server_group_id).collect();
 		let names = group_names(conn, &group_ids).await?;
 		Ok(incidents
 			.into_iter()
@@ -127,7 +127,7 @@ impl CanopyMcp {
 				started_at: i.started_at,
 				ended_at: i.ended_at,
 				group_id: i.server_group_id,
-				group_name: i.server_group_id.and_then(|id| names.get(&id).cloned()),
+				group_name: names.get(&i.server_group_id).cloned().unwrap_or_default(),
 				created_by: i.created_by,
 				created_at: i.created_at,
 				updated_at: i.updated_at,
@@ -185,8 +185,8 @@ impl CanopyMcp {
 
 	#[tool(
 		description = "Record a manual incident: a support-managed incident written after the \
-		               fact. Takes a title and a start time; optionally a markdown description, \
-		               an end time (omit while ongoing), and the affected group. The caller's \
+		               fact. Takes a title, a start time, and the affected group; optionally a \
+		               markdown description and an end time (omit while ongoing). The caller's \
 		               identity is recorded as the author. Requires write access."
 	)]
 	async fn record_manual_incident(
@@ -197,19 +197,17 @@ impl CanopyMcp {
 		let who = require_write(&parts)?;
 		let started_at = parse_timestamp(&args.started_at, "started_at")?;
 		let ended_at = parse_opt_timestamp(&args.ended_at, "ended_at")?;
-		let group = parse_opt_uuid(&args.group_id, "group_id")?;
+		let group = parse_uuid(&args.group_id, "group_id")?;
 		if args.title.trim().is_empty() {
 			return Err(McpError::invalid_params("title is required", None));
 		}
 
 		let mut conn = self.write_conn().await?;
-		if let Some(group) = group {
-			if group_names(&mut conn, &[group]).await?.is_empty() {
-				return Err(McpError::invalid_params(
-					format!("no server group {group}"),
-					None,
-				));
-			}
+		if group_names(&mut conn, &[group]).await?.is_empty() {
+			return Err(McpError::invalid_params(
+				format!("no server group {group}"),
+				None,
+			));
 		}
 		let incident = ManualIncident::create(
 			&mut conn,
@@ -229,8 +227,8 @@ impl CanopyMcp {
 
 	#[tool(
 		description = "Update a manual incident: any subset of title, description, start and end \
-		               times. `clear_ended_at` removes the end time, marking it ongoing again. \
-		               Requires write access."
+		               times, and affected group. `clear_ended_at` removes the end time, marking \
+		               it ongoing again. Requires write access."
 	)]
 	async fn update_manual_incident(
 		&self,
@@ -249,6 +247,7 @@ impl CanopyMcp {
 		if args.title.as_deref().is_some_and(|t| t.trim().is_empty()) {
 			return Err(McpError::invalid_params("title cannot be empty", None));
 		}
+		let group = parse_opt_uuid(&args.group_id, "group_id")?;
 
 		let up = ManualIncidentUpdate {
 			title: args.title.map(|t| t.trim().to_string()),
@@ -259,8 +258,17 @@ impl CanopyMcp {
 			} else {
 				ended_at.map(Some)
 			},
+			server_group_id: group,
 		};
 		let mut conn = self.write_conn().await?;
+		if let Some(group) = group
+			&& group_names(&mut conn, &[group]).await?.is_empty()
+		{
+			return Err(McpError::invalid_params(
+				format!("no server group {group}"),
+				None,
+			));
+		}
 		let Some(incident) = ManualIncident::update(&mut conn, id, up)
 			.await
 			.map_err(mcp_err)?

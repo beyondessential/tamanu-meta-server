@@ -36,7 +36,7 @@ export default function ManualIncidentCard({
 				{ongoing && <Chip size="small" color="warning" label="ongoing" />}
 			</Stack>
 			<Typography variant="body2" color="text.secondary">
-				{incident.server_group_name ?? "Fleet-wide"} · started{" "}
+				{incident.server_group_name} · started{" "}
 				<TimeAgo timestamp={incident.started_at} />
 				{incident.ended_at && (
 					<>
