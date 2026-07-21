@@ -7353,8 +7353,10 @@ export interface components {
              */
             device_id?: string | null;
             /**
-             * @description Additional unstructured data reported alongside this push, for
-             *     fields not yet promoted to a named field on this response.
+             * @description Additional unstructured data reported alongside the snapshot, keyed
+             *     by source (`{ [source]: { …fields } }`) so a multi-source snapshot's
+             *     raw payloads stay attributed rather than merged. Sources whose
+             *     payload is empty are omitted.
              */
             extra: unknown;
             /**

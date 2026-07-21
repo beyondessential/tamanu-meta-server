@@ -42,6 +42,62 @@ test.describe("issue check documentation", () => {
 	});
 });
 
+test.describe("issue status snapshot", () => {
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("opens a consolidated multi-source snapshot from an issue row", async ({
+		page,
+		sql,
+	}) => {
+		const server = await seedServer(sql, {
+			name: "snapshot-issue-server",
+			kind: "central",
+		});
+		// Two sources reported around the issue's time, each with its own
+		// check and its own raw payload. Inserted directly (not via
+		// seedStatus) so they don't also fabricate issue rows.
+		await sql.query(
+			`INSERT INTO statuses (server_id, source, healthy, health, extra) VALUES
+			 ($1, 'alertd', false, $2::jsonb, $3::jsonb),
+			 ($1, 'tamanu', true,  $4::jsonb, $5::jsonb)`,
+			[
+				server.id,
+				JSON.stringify([{ check: "postgres", result: "failed" }]),
+				JSON.stringify({ queue: 3 }),
+				JSON.stringify([{ check: "tasks", result: "passed" }]),
+				JSON.stringify({ jobs: "ok" }),
+			],
+		);
+		// The issue provides the row (and its last_seen is the snapshot's `at`).
+		await seedIssue(sql, {
+			serverId: server.id,
+			ref: "health/postgres",
+			message: "postgres is down",
+		});
+
+		await page.goto("/incidents?showAll=1");
+		await page
+			.getByRole("button", {
+				name: "Status snapshot when this issue was last seen",
+			})
+			.first()
+			.click();
+
+		// The panel merges both sources into one checks list...
+		await expect(
+			page.getByText("Status snapshot", { exact: true }),
+		).toBeVisible();
+		await expect(page.getByText("Health checks (2)")).toBeVisible();
+		await expect(page.getByText("tamanu", { exact: true })).toBeVisible();
+		// ...and its raw-payload panel keeps each source's payload attributed.
+		await page.getByText("Raw payload by source").click();
+		await expect(page.locator("pre")).toContainText("queue");
+		await expect(page.locator("pre")).toContainText("jobs");
+	});
+});
+
 test.describe("group-scoped issue rendering", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);

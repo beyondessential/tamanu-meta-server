@@ -592,8 +592,10 @@ pub struct StatusSnapshotData {
 	pub nodejs: Option<String>,
 	/// Reported system timezone.
 	pub timezone: Option<String>,
-	/// Additional unstructured data reported alongside this push, for
-	/// fields not yet promoted to a named field on this response.
+	/// Additional unstructured data reported alongside the snapshot, keyed
+	/// by source (`{ [source]: { …fields } }`) so a multi-source snapshot's
+	/// raw payloads stay attributed rather than merged. Sources whose
+	/// payload is empty are omitted.
 	pub extra: serde_json::Value,
 	/// Operators identified as connected to the server as of this push,
 	/// with display name and profile picture filled in where known. Not
@@ -691,7 +693,7 @@ pub async fn snapshot(
 	// recent report at-or-before `at`, re-graded through current policy.
 	// The single `status` above is still used for the push's metadata
 	// (version, platform, operators, etc.).
-	let checks = consolidated_checks_at(&mut conn, &server, args.at).await?;
+	let (checks, extra) = consolidated_checks_at(&mut conn, &server, args.at).await?;
 	let mut operators = status.operators();
 	enrich_operators(&mut conn, operators.iter_mut()).await?;
 
@@ -707,7 +709,7 @@ pub async fn snapshot(
 		postgres,
 		nodejs,
 		timezone,
-		extra: status.extra,
+		extra,
 		operators,
 		checks,
 	})))
@@ -757,11 +759,23 @@ async fn consolidated_checks_at(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	server: &Server,
 	at: Option<Timestamp>,
-) -> commons_errors::Result<commons_types::status::ConsolidatedChecks> {
+) -> commons_errors::Result<(commons_types::status::ConsolidatedChecks, serde_json::Value)> {
 	use commons_types::status::{CheckResult, ConsolidatedCheck, ConsolidatedChecks, HealthState};
 	use database::check_policies::{CheckPolicy, EvaluationContext};
 
 	let statuses = Status::latest_per_source_at(conn, server.id, at).await?;
+
+	// Each source's raw status-level payload, keyed by source, so the
+	// snapshot's raw-payload panel is consolidated rather than one source's
+	// blob. Sources with an empty payload are omitted.
+	let mut by_source_extra = serde_json::Map::new();
+	for status in &statuses {
+		if let Some(obj) = status.extra.as_object()
+			&& !obj.is_empty()
+		{
+			by_source_extra.insert(status.source.clone(), status.extra.clone());
+		}
+	}
 
 	// Tags for rule evaluation, as private-server's other rule-eval sites
 	// resolve them.
@@ -847,8 +861,11 @@ async fn consolidated_checks_at(
 	});
 	let health_state =
 		HealthState::from_results(checks.iter().filter(|c| !c.silenced).map(|c| c.effective));
-	Ok(ConsolidatedChecks {
-		health_state,
-		checks,
-	})
+	Ok((
+		ConsolidatedChecks {
+			health_state,
+			checks,
+		},
+		serde_json::Value::Object(by_source_extra),
+	))
 }

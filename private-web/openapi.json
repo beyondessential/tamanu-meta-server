@@ -12847,7 +12847,7 @@
             "description": "Id of the device that sent this status push, if known."
           },
           "extra": {
-            "description": "Additional unstructured data reported alongside this push, for\nfields not yet promoted to a named field on this response."
+            "description": "Additional unstructured data reported alongside the snapshot, keyed\nby source (`{ [source]: { …fields } }`) so a multi-source snapshot's\nraw payloads stay attributed rather than merged. Sources whose\npayload is empty are omitted."
           },
           "id": {
             "type": "string",

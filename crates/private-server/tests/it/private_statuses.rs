@@ -1283,11 +1283,11 @@ async fn snapshot_merges_all_sources() {
 		conn.batch_execute(
 			"INSERT INTO servers (id, host, kind) VALUES \
 				('30000000-0000-0000-0000-00000000000a', 'https://multi.example.com', 'central'); \
-			 INSERT INTO statuses (server_id, source, healthy, health) VALUES \
+			 INSERT INTO statuses (server_id, source, healthy, health, extra) VALUES \
 				('30000000-0000-0000-0000-00000000000a', 'alertd', true, \
-				 '[{\"check\":\"db\",\"result\":\"passed\"}]'::jsonb), \
+				 '[{\"check\":\"db\",\"result\":\"passed\"}]'::jsonb, '{\"queue\":3}'::jsonb), \
 				('30000000-0000-0000-0000-00000000000a', 'tamanu', true, \
-				 '[{\"check\":\"tasks\",\"result\":\"passed\"}]'::jsonb);",
+				 '[{\"check\":\"tasks\",\"result\":\"passed\"}]'::jsonb, '{\"jobs\":\"ok\"}'::jsonb);",
 		)
 		.await
 		.unwrap();
@@ -1308,6 +1308,13 @@ async fn snapshot_merges_all_sources() {
 		assert!(
 			checks.iter().any(|c| c["source"] == "tamanu"),
 			"tamanu's checks present: {body}"
+		);
+		// The raw-payload panel is consolidated: each source's extra
+		// stays attributed under its own key rather than merged.
+		assert_eq!(body["extra"]["alertd"]["queue"], 3, "alertd extra: {body}");
+		assert_eq!(
+			body["extra"]["tamanu"]["jobs"], "ok",
+			"tamanu extra: {body}"
 		);
 	})
 	.await

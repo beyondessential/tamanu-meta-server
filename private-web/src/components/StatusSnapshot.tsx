@@ -265,7 +265,7 @@ function ExtrasBlock({ extra }: { extra: StatusSnapshotData["extra"] }) {
 	return (
 		<Box>
 			<details>
-				<summary>Raw payload</summary>
+				<summary>Raw payload by source</summary>
 				<Box
 					component="pre"
 					sx={{
