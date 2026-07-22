@@ -975,7 +975,7 @@ pub async fn health_from_check_state(
 	conn: &mut AsyncPgConnection,
 	servers: &[(Uuid, Option<Uuid>)],
 ) -> Result<std::collections::HashMap<Uuid, commons_types::status::HealthState>> {
-	use crate::schema::{check_policies, issues, scoped_check_policies};
+	use crate::schema::{issues, scoped_check_policies};
 	use commons_types::status::HealthState;
 	use std::collections::{HashMap, HashSet};
 
@@ -1004,16 +1004,10 @@ pub async fn health_from_check_state(
 		.load(conn)
 		.await?;
 
-	// Decommissioned checks contribute to nothing. Keyed fleet-wide by
-	// (source, check) in the catalog, so a check retired anywhere is
-	// skipped everywhere.
-	let decommissioned: HashSet<(String, String)> = check_policies::table
-		.select((check_policies::source, check_policies::check_name))
-		.filter(check_policies::decommissioned_at.is_not_null())
-		.load::<(String, String)>(conn)
-		.await?
-		.into_iter()
-		.collect();
+	// A check-state only contributes to health if a live catalog policy
+	// backs it: this skips decommissioned checks and orphaned check-states
+	// (no catalog row at all) fleet-wide. See `live_cataloged_pairs`.
+	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_pairs(conn).await?;
 
 	let group_ids: Vec<Uuid> = group_of.values().filter_map(|g| *g).collect();
 	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
@@ -1053,7 +1047,7 @@ pub async fn health_from_check_state(
 			continue;
 		};
 		let key = (server_id, source, check_name);
-		if decommissioned.contains(&(key.1.clone(), key.2.clone())) {
+		if !cataloged.contains(&(key.1.clone(), key.2.clone())) {
 			continue;
 		}
 		if server_silences.contains(&key) {
@@ -1101,7 +1095,7 @@ pub async fn consolidated_checks_latest(
 	server_id: Uuid,
 	group_id: Option<Uuid>,
 ) -> Result<commons_types::status::ConsolidatedChecks> {
-	use crate::schema::{check_policies, issues, scoped_check_policies};
+	use crate::schema::{issues, scoped_check_policies};
 	use commons_types::status::{ConsolidatedCheck, ConsolidatedChecks};
 	use std::collections::HashSet;
 
@@ -1125,13 +1119,11 @@ pub async fn consolidated_checks_latest(
 		.load(conn)
 		.await?;
 
-	let decommissioned: HashSet<(String, String)> = check_policies::table
-		.select((check_policies::source, check_policies::check_name))
-		.filter(check_policies::decommissioned_at.is_not_null())
-		.load::<(String, String)>(conn)
-		.await?
-		.into_iter()
-		.collect();
+	// A check-state only presents if a live catalog policy backs it: this
+	// excludes decommissioned checks and orphaned check-states (no catalog
+	// row at all — invisible in settings and unmanageable, so never a
+	// phantom failure here). See `live_cataloged_pairs`.
+	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_pairs(conn).await?;
 
 	let group_ids: Vec<Uuid> = group_id.into_iter().collect();
 	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
@@ -1161,7 +1153,7 @@ pub async fn consolidated_checks_latest(
 		.into_iter()
 		.filter_map(|(source, check_name, observed, effective, detail)| {
 			let check = check_name?;
-			if decommissioned.contains(&(source.clone(), check.clone())) {
+			if !cataloged.contains(&(source.clone(), check.clone())) {
 				return None;
 			}
 			let stored: CheckResult = effective.as_deref().and_then(|e| e.parse().ok())?;
