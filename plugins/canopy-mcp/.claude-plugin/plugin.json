@@ -1,5 +1,5 @@
 {
 	"name": "canopy-mcp",
 	"version": "1.0.0",
-	"description": "Read-only fleet queries against Canopy: Tamanu servers, groups, versions, backups, incidents, and issues. Requires a Canopy MCP bearer token credential for meta.tamanu.app."
+	"description": "Fleet queries against Canopy: Tamanu servers, groups, versions, backups, incidents, and issues; read-only except support-recorded manual incidents (write-scoped tokens only). Requires a Canopy MCP bearer token credential for meta.tamanu.app."
 }

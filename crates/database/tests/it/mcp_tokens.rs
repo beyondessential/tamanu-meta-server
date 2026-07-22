@@ -10,7 +10,7 @@ use uuid::Uuid;
 #[tokio::test(flavor = "multi_thread")]
 async fn mint_find_touch_revoke_lifecycle() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let (token, plaintext) = McpToken::mint(&mut conn, "claude", "admin@example.com")
+		let (token, plaintext) = McpToken::mint(&mut conn, "claude", "admin@example.com", false)
 			.await
 			.expect("mint");
 		assert!(plaintext.starts_with(TOKEN_PREFIX));
@@ -18,6 +18,7 @@ async fn mint_find_touch_revoke_lifecycle() {
 		assert_eq!(token.created_by, "admin@example.com");
 		assert!(token.revoked_at.is_none());
 		assert!(token.last_used_at.is_none());
+		assert!(!token.write_access, "mint(..., false) is read-only");
 		// Roughly a year out; exact value is the model's business.
 		let ttl = token.expires_at.duration_since(token.created_at);
 		assert!(ttl.as_hours() > 364 * 24 && ttl.as_hours() <= 366 * 24);
@@ -61,9 +62,41 @@ async fn mint_find_touch_revoke_lifecycle() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn write_access_is_a_mint_time_choice_and_round_trips() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let (reader, reader_plaintext) =
+			McpToken::mint(&mut conn, "reader", "a@example.com", false)
+				.await
+				.expect("mint");
+		assert!(!reader.write_access);
+		let (writer, writer_plaintext) = McpToken::mint(&mut conn, "writer", "a@example.com", true)
+			.await
+			.expect("mint");
+		assert!(writer.write_access);
+
+		// find_active returns the flag, so the auth gate sees it.
+		assert!(
+			!McpToken::find_active(&mut conn, &reader_plaintext)
+				.await
+				.expect("find")
+				.expect("active")
+				.write_access
+		);
+		assert!(
+			McpToken::find_active(&mut conn, &writer_plaintext)
+				.await
+				.expect("find")
+				.expect("active")
+				.write_access
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn expired_tokens_do_not_authenticate() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let (token, plaintext) = McpToken::mint(&mut conn, "old", "admin@example.com")
+		let (token, plaintext) = McpToken::mint(&mut conn, "old", "admin@example.com", false)
 			.await
 			.expect("mint");
 		conn.batch_execute(&format!(
@@ -87,16 +120,16 @@ async fn expired_tokens_do_not_authenticate() {
 #[tokio::test(flavor = "multi_thread")]
 async fn expiring_soon_catches_the_alert_window() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let (fresh, _) = McpToken::mint(&mut conn, "fresh", "a@example.com")
+		let (fresh, _) = McpToken::mint(&mut conn, "fresh", "a@example.com", false)
 			.await
 			.expect("mint");
-		let (closing, _) = McpToken::mint(&mut conn, "closing", "a@example.com")
+		let (closing, _) = McpToken::mint(&mut conn, "closing", "a@example.com", false)
 			.await
 			.expect("mint");
-		let (lapsed, _) = McpToken::mint(&mut conn, "lapsed", "a@example.com")
+		let (lapsed, _) = McpToken::mint(&mut conn, "lapsed", "a@example.com", false)
 			.await
 			.expect("mint");
-		let (revoked, _) = McpToken::mint(&mut conn, "revoked", "a@example.com")
+		let (revoked, _) = McpToken::mint(&mut conn, "revoked", "a@example.com", false)
 			.await
 			.expect("mint");
 
@@ -149,7 +182,7 @@ async fn expiry_sweep_files_one_self_alert_and_recovers() {
 		);
 
 		// A token inside the 15-day lead raises the single self-alert.
-		let (token, _) = McpToken::mint(&mut conn, "claude", "admin@example.com")
+		let (token, _) = McpToken::mint(&mut conn, "claude", "admin@example.com", false)
 			.await
 			.expect("mint");
 		conn.batch_execute(&format!(

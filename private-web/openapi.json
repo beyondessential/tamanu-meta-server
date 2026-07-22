@@ -2670,7 +2670,7 @@
           "healthchecks"
         ],
         "summary": "Set a source's ingest mode.",
-        "description": "Governs whether the device API accepts the source's reports: `allow`\ningests normally, `ignore` accepts but discards them, `deny` rejects\nthe push. The reserved `canopy`/`manual` names are rejected.",
+        "description": "Governs whether the device API accepts the source's reports: `allow`\ningests normally, `ignore` accepts but discards them, `deny` rejects\nthe push. The reserved `canopy` name is rejected.",
         "operationId": "healthcheck_set_source_ingest",
         "requestBody": {
           "content": {
@@ -2730,7 +2730,7 @@
           "healthchecks"
         ],
         "summary": "Set a source's reachability mode.",
-        "description": "Governs how the source's silence bears on its servers' reachability:\n`on` warns, `quiet` never warns but still counts toward unreachable,\n`off` is excluded. The reserved `canopy`/`manual` names are rejected.",
+        "description": "Governs how the source's silence bears on its servers' reachability:\n`on` warns, `quiet` never warns but still counts toward unreachable,\n`off` is excluded. The reserved `canopy` name is rejected.",
         "operationId": "healthcheck_set_source_reachability",
         "requestBody": {
           "content": {
@@ -2790,7 +2790,7 @@
           "healthchecks"
         ],
         "summary": "List the reporting sources and their reachability policy.",
-        "description": "Every non-reserved source that has catalogued checks, with its\nreachability mode (defaulting to `on`) and most recent fleet-wide\nreport. The reserved `canopy`/`manual` sources are excluded.",
+        "description": "Every non-reserved source that has catalogued checks, with its\nreachability mode (defaulting to `on`) and most recent fleet-wide\nreport. The reserved `canopy` source is excluded.",
         "operationId": "healthcheck_sources",
         "responses": {
           "200": {
@@ -3734,53 +3734,6 @@
         ]
       }
     },
-    "/api/issues/submit_manual_event": {
-      "post": {
-        "tags": [
-          "issues"
-        ],
-        "summary": "Manually raise (or clear) a condition against a server.",
-        "description": "Finds or creates an issue keyed by the server and the given `ref`\nunder the `manual` source, grades the chosen result through the\ncondition's catalog policy, and returns the resulting issue. Returns\n400 if `ref` is empty or if `description` contains a newline.",
-        "operationId": "submit_manual_event",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SubmitManualEventArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IssueData"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
     "/api/issues/unresolve": {
       "post": {
         "tags": [
@@ -3851,6 +3804,294 @@
         "security": [
           {
             "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/manual_incidents/create": {
+      "post": {
+        "tags": [
+          "manual_incidents"
+        ],
+        "summary": "Record a manual incident.",
+        "description": "Creates the record with the calling tailnet user as author and returns\nit. The title must be non-empty and the affected group must exist.",
+        "operationId": "manual_incidents_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualIncidentCreateArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManualIncidentData"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/manual_incidents/delete": {
+      "post": {
+        "tags": [
+          "manual_incidents"
+        ],
+        "summary": "Delete a manual incident.",
+        "description": "Removes the record entirely. Responds 404 if no manual incident has\nthat id.",
+        "operationId": "manual_incidents_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualIncidentGetArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "default": null
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/manual_incidents/get": {
+      "post": {
+        "tags": [
+          "manual_incidents"
+        ],
+        "summary": "Fetch one manual incident by id.",
+        "description": "Returns the full record, with the affected group's display name\nresolved. Responds 404 if no manual incident has that id.",
+        "operationId": "manual_incidents_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualIncidentGetArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManualIncidentData"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/manual_incidents/list": {
+      "post": {
+        "tags": [
+          "manual_incidents"
+        ],
+        "summary": "List manual incidents, most recently started first.",
+        "description": "Manual incidents are support-recorded incident records, written in this\nUI or over the MCP interface rather than derived from check state.\nOptionally narrowed to one group or to ongoing incidents (those without\nan end time).",
+        "operationId": "manual_incidents_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualIncidentListArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Manual incidents, most recently started first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ManualIncidentData"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/manual_incidents/update": {
+      "post": {
+        "tags": [
+          "manual_incidents"
+        ],
+        "summary": "Update a manual incident.",
+        "description": "Applies any subset of title, description, start and end times, and\naffected group; `clearEndedAt` removes the end time, marking the\nincident ongoing again. Responds 404 if no manual incident has that id.",
+        "operationId": "manual_incidents_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualIncidentUpdateArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManualIncidentData"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
           }
         ]
       }
@@ -8991,7 +9232,7 @@
               "null"
             ],
             "format": "uuid",
-            "description": "Id of the device that reported the underlying event, if the issue\noriginated from a device push rather than a manual entry."
+            "description": "Id of the device that reported the underlying event, if the issue\noriginated from a device push rather than canopy's own monitoring."
           },
           "effective_result": {
             "type": [
@@ -9121,7 +9362,7 @@
           },
           "source": {
             "type": "string",
-            "description": "What raised the issue (for example, an automated health check or a\nmanually submitted event)."
+            "description": "What raised the issue (for example, an automated health check)."
           },
           "updated_at": {
             "type": "string",
@@ -9537,6 +9778,214 @@
           "full"
         ]
       },
+      "ManualIncidentCreateArgs": {
+        "type": "object",
+        "description": "Arguments for recording a manual incident.",
+        "required": [
+          "title",
+          "startedAt",
+          "serverGroupId"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Markdown body. Defaults to empty."
+          },
+          "endedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the incident ended. Omit while it is ongoing."
+          },
+          "serverGroupId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id of the affected server group."
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the incident started."
+          },
+          "title": {
+            "type": "string",
+            "description": "Single-line headline."
+          }
+        }
+      },
+      "ManualIncidentData": {
+        "type": "object",
+        "description": "A support-recorded incident: written after the fact by people (in this\nUI or over the MCP interface), independent of the automatic incidents\nderived from check state.",
+        "required": [
+          "id",
+          "title",
+          "description",
+          "started_at",
+          "server_group_id",
+          "server_group_name",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the record was created."
+          },
+          "created_by": {
+            "type": "string",
+            "description": "Who recorded it: a tailnet login or an MCP token name."
+          },
+          "description": {
+            "type": "string",
+            "description": "Markdown body; empty when nobody has written one yet."
+          },
+          "ended_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the incident ended; absent while it is ongoing."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for this manual incident."
+          },
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id of the affected server group."
+          },
+          "server_group_name": {
+            "type": "string",
+            "description": "Display name of the affected server group."
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the incident started."
+          },
+          "title": {
+            "type": "string",
+            "description": "Single-line headline."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the record was last changed."
+          }
+        }
+      },
+      "ManualIncidentGetArgs": {
+        "type": "object",
+        "description": "Arguments identifying one manual incident.",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id of the manual incident to fetch."
+          }
+        }
+      },
+      "ManualIncidentListArgs": {
+        "type": "object",
+        "description": "Arguments for listing manual incidents.",
+        "properties": {
+          "groupId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Restrict to one group's incidents."
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Max incidents to return (default 100)."
+          },
+          "ongoingOnly": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Only incidents without an end time (still ongoing)."
+          }
+        }
+      },
+      "ManualIncidentUpdateArgs": {
+        "type": "object",
+        "description": "Field edits for one manual incident. Omitted fields are unchanged.",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "clearEndedAt": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Clear the end time, marking the incident ongoing again."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New markdown body."
+          },
+          "endedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "New end time. Mutually exclusive with `clearEndedAt`."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id of the manual incident to edit."
+          },
+          "serverGroupId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Id of a different affected server group."
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "New start time."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New headline."
+          }
+        }
+      },
       "McpTokenView": {
         "type": "object",
         "description": "Metadata about an MCP access token. Never includes the secret value\nitself — that's only ever returned once, at minting time.",
@@ -9545,7 +9994,8 @@
           "name",
           "created_by",
           "created_at",
-          "expires_at"
+          "expires_at",
+          "write_access"
         ],
         "properties": {
           "created_at": {
@@ -9586,6 +10036,10 @@
             ],
             "format": "date-time",
             "description": "When the token was revoked, or `null` if it has not been revoked."
+          },
+          "write_access": {
+            "type": "boolean",
+            "description": "Whether the token may call the MCP write tools (manual incidents).\nChosen at mint time; immutable afterwards."
           }
         }
       },
@@ -9676,6 +10130,10 @@
           "name": {
             "type": "string",
             "description": "Operator-chosen label, e.g. which agent will hold this token. Cannot\nbe empty or only whitespace."
+          },
+          "write_access": {
+            "type": "boolean",
+            "description": "Grant the token the MCP write tools (manual incidents). Defaults to\nfalse (read-only); cannot be changed after minting."
           }
         }
       },
@@ -12446,7 +12904,7 @@
           },
           "source": {
             "type": "string",
-            "description": "The source to configure. The reserved `canopy`/`manual` names are\nrejected."
+            "description": "The source to configure. The reserved `canopy` name is rejected."
           }
         }
       },
@@ -12464,7 +12922,7 @@
           },
           "source": {
             "type": "string",
-            "description": "The source to configure. The reserved `canopy`/`manual` names are\nrejected."
+            "description": "The source to configure. The reserved `canopy` name is rejected."
           }
         }
       },
@@ -12922,62 +13380,6 @@
             "format": "int64",
             "description": "How many releases behind the latest published version this push's\nversion is. Absent when there's no published version to compare\nagainst.",
             "minimum": 0
-          }
-        }
-      },
-      "SubmitManualEventArgs": {
-        "type": "object",
-        "description": "A manually raised condition to record against a server.",
-        "required": [
-          "serverId",
-          "ref",
-          "message"
-        ],
-        "properties": {
-          "active": {
-            "type": [
-              "boolean",
-              "null"
-            ],
-            "description": "Whether the underlying condition is currently active. Defaults to\n`true` when omitted; `false` records it as cleared regardless of\n`result`."
-          },
-          "description": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Short, single-line headline for the condition. Must not contain\nnewlines — use `message` for multi-line detail."
-          },
-          "escalates": {
-            "type": [
-              "boolean",
-              "null"
-            ],
-            "description": "Whether the condition's failures should notify immediately,\nbypassing the incident grace period. Only consulted the first time\na `ref` is seen (it seeds the condition's catalog entry); adjust\nlater from the healthchecks catalog."
-          },
-          "message": {
-            "type": "string",
-            "description": "Human-readable message describing the condition. May be multi-line."
-          },
-          "ref": {
-            "type": "string",
-            "description": "Identifier for the underlying condition. Reports with the same\n`ref` on the same server update the same issue rather than opening\na new one each time; use a fresh unique value if that deduplication\nisn't wanted."
-          },
-          "result": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/CheckResult",
-                "description": "The condition's result: `failed` (can open an incident) or\n`warning` (context only). Defaults to `failed`. `passed` records\nthe condition as cleared, same as `active: false`."
-              }
-            ]
-          },
-          "serverId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Id of the server the condition applies to."
           }
         }
       },
@@ -13576,6 +13978,10 @@
     {
       "name": "issues",
       "description": "Per-server issues raised from device events."
+    },
+    {
+      "name": "manual_incidents",
+      "description": "Support-recorded incident records, written over MCP and displayed read-only."
     },
     {
       "name": "mcp_tokens",

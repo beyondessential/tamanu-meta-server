@@ -1,4 +1,6 @@
 use commons_tests::diesel_async::SimpleAsyncConnection;
+use commons_types::status::CheckResult;
+use database::issues::{CheckFiling, FilingScope};
 use uuid::Uuid;
 
 async fn seed_issue_and_incident(
@@ -15,24 +17,27 @@ async fn seed_issue_and_incident(
 	.await
 	.expect("seed server");
 
-	let r = private
-		.post("/api/issues/submit_manual_event")
-		.json(&serde_json::json!({
-			"serverId": server_id,
-			"ref": "x",
-			"result": "failed",
-			"message": "trouble",
-		}))
-		.await;
-	r.assert_status_ok();
-	let issue_id = Uuid::parse_str(
-		r.json::<serde_json::Value>()
-			.get("id")
-			.unwrap()
-			.as_str()
-			.unwrap(),
+	let issue_id = database::issues::file_check(
+		conn,
+		CheckFiling {
+			source: database::statuses::CANOPY_SOURCE,
+			scope: FilingScope::Server {
+				server_id,
+				device_id: None,
+			},
+			check: "x",
+			observed: CheckResult::Failed,
+			title: None,
+			message: "trouble",
+			detail: None,
+			default_ceiling: CheckResult::Failed,
+			default_escalates: false,
+			documentation: None,
+		},
 	)
-	.unwrap();
+	.await
+	.expect("file check")
+	.id;
 
 	let resp = private
 		.post("/api/incidents/list_for_server")

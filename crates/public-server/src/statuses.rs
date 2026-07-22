@@ -48,8 +48,8 @@ pub struct StatusPayload {
 	///
 	/// **Transitionally optional: this field will become mandatory.** A push
 	/// without a `source` is attributed to `alertd`; new reporters must send
-	/// their own name. Must be a non-empty string; the names `canopy` and
-	/// `manual` are reserved for canopy itself and are rejected.
+	/// their own name. Must be a non-empty string; the name `canopy` is
+	/// reserved for canopy itself and is rejected.
 	pub source: Option<String>,
 
 	/// Overall self-reported health of the server. **Absent means `true`**,
@@ -131,8 +131,8 @@ const LEGACY_SOURCE: &str = "tamanu";
 /// server that goes quiet trips the source-staleness net.
 const LEGACY_CHECK: &str = "tasks";
 /// Source names a push may not claim: `canopy` is canopy's own
-/// determinations (reachability sweep etc.), `manual` is operator-entered.
-const RESERVED_SOURCES: &[&str] = &[database::statuses::CANOPY_SOURCE, "manual"];
+/// determinations (reachability sweep etc.).
+const RESERVED_SOURCES: &[&str] = &[database::statuses::CANOPY_SOURCE];
 /// Prefix for per-check refs. Each check is filed at
 /// `(<source>, health/<check_name>)` — one thread per check, brokenness
 /// included (a broken check retains the previous definite result's
@@ -716,8 +716,8 @@ fn per_check_description(
 /// - missing or `null` body → `source = alertd`, `healthy = true`,
 ///   `health = []`, `extra = {}`
 /// - `source` absent ⇒ `alertd` (transitional — the field will become
-///   mandatory); present must be a non-empty string and not one of the
-///   reserved names (`canopy`, `manual`)
+///   mandatory); present must be a non-empty string and not the
+///   reserved name (`canopy`)
 /// - `healthy` absent ⇒ `true` (legacy compat — non-negotiable, this is
 ///   what stops every legacy server from false-positiving unhealthy on
 ///   the day we deploy)

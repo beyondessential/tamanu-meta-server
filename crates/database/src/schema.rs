@@ -345,6 +345,20 @@ diesel::table! {
 }
 
 diesel::table! {
+	manual_incidents (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+		title -> Text,
+		description -> Text,
+		started_at -> Timestamptz,
+		ended_at -> Nullable<Timestamptz>,
+		server_group_id -> Uuid,
+		created_by -> Text,
+	}
+}
+
+diesel::table! {
 	mcp_tokens (id) {
 		id -> Uuid,
 		name -> Text,
@@ -354,6 +368,7 @@ diesel::table! {
 		expires_at -> Timestamptz,
 		revoked_at -> Nullable<Timestamptz>,
 		last_used_at -> Nullable<Timestamptz>,
+		write_access -> Bool,
 	}
 }
 
@@ -641,6 +656,7 @@ diesel::joinable!(issue_notes -> issues (issue_id));
 diesel::joinable!(issues -> devices (device_id));
 diesel::joinable!(issues -> server_groups (server_group_id));
 diesel::joinable!(issues -> servers (server_id));
+diesel::joinable!(manual_incidents -> server_groups (server_group_id));
 diesel::joinable!(restore_consumer_capabilities -> devices (consumer_device_id));
 diesel::joinable!(restore_replicas -> devices (consumer_device_id));
 diesel::joinable!(restore_replicas -> server_groups (group_id));
@@ -686,6 +702,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	incidents,
 	issue_notes,
 	issues,
+	manual_incidents,
 	mcp_tokens,
 	recovery_vault_writes,
 	restore_consumer_capabilities,

@@ -314,7 +314,9 @@ impl CanopyMcp {
 		)
 		.await?;
 		let ids: Vec<Uuid> = incidents.iter().map(|i| i.id).collect();
-		let stats = Incident::stats_for(&self.db, &ids).await.map_err(mcp_err)?;
+		let stats = Incident::stats_for(&self.db_read, &ids)
+			.await
+			.map_err(mcp_err)?;
 		let published = SlackOutbox::delivered_open_ids(&mut conn, &ids)
 			.await
 			.map_err(mcp_err)?;

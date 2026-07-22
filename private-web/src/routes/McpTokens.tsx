@@ -2,12 +2,14 @@ import {
 	Alert,
 	Box,
 	Button,
+	Checkbox,
 	Chip,
 	Dialog,
 	DialogActions,
 	DialogContent,
 	DialogContentText,
 	DialogTitle,
+	FormControlLabel,
 	IconButton,
 	LinearProgress,
 	Paper,
@@ -39,12 +41,14 @@ type TokenRow = {
 	expires_at: string;
 	revoked_at?: string | null;
 	last_used_at?: string | null;
+	write_access: boolean;
 };
 
 export default function McpTokens() {
 	usePageTitle("MCP access");
 	const list = useApi("mcp_tokens", "list");
 	const [name, setName] = useState("");
+	const [writeAccess, setWriteAccess] = useState(false);
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [toast, setToast] = useState<string | null>(null);
@@ -60,8 +64,12 @@ export default function McpTokens() {
 		setPending(true);
 		setError(null);
 		try {
-			const res = await callApi("mcp_tokens", "mint", { name: trimmed });
+			const res = await callApi("mcp_tokens", "mint", {
+				name: trimmed,
+				write_access: writeAccess,
+			});
 			setName("");
+			setWriteAccess(false);
 			setMinted({ name: res.token.name, secret: res.secret });
 			list.reload();
 		} catch (err) {
@@ -112,6 +120,16 @@ export default function McpTokens() {
 							{pending ? "Minting…" : "Mint token"}
 						</Button>
 					</Stack>
+					<FormControlLabel
+						control={
+							<Checkbox
+								checked={writeAccess}
+								onChange={(e) => setWriteAccess(e.target.checked)}
+								disabled={pending}
+							/>
+						}
+						label="Allow writes (manual incidents) — cannot be changed after minting"
+					/>
 					{error && (
 						<Alert severity="error" sx={{ mt: 2 }}>
 							{error}
@@ -136,6 +154,7 @@ export default function McpTokens() {
 							<TableRow>
 								<TableCell>Name</TableCell>
 								<TableCell>Minted by</TableCell>
+								<TableCell>Scope</TableCell>
 								<TableCell>Expires</TableCell>
 								<TableCell>Last used</TableCell>
 								<TableCell>Status</TableCell>
@@ -149,6 +168,13 @@ export default function McpTokens() {
 										{token.name}
 									</TableCell>
 									<TableCell>{token.created_by}</TableCell>
+									<TableCell>
+										{token.write_access ? (
+											<Chip size="small" color="warning" label="read-write" />
+										) : (
+											<Chip size="small" variant="outlined" label="read-only" />
+										)}
+									</TableCell>
 									<TableCell>{formatDate(token.expires_at)}</TableCell>
 									<TableCell>
 										{token.last_used_at

@@ -24,6 +24,7 @@ use utoipa::{
 		(name = "healthchecks", description = "Healthcheck catalog: severities, conditional rules, and sample data."),
 		(name = "incidents", description = "Operational incidents (groups of issues against a server)."),
 		(name = "issues", description = "Per-server issues raised from device events."),
+		(name = "manual_incidents", description = "Support-recorded incident records, written over MCP and displayed read-only."),
 		(name = "mcp_tokens", description = "Bearer tokens for the public MCP mount."),
 		(name = "restore_replicas", description = "Managed restore replicas: capabilities, worklist, and health."),
 		(name = "self_alerts", description = "Canopy's alerts about its own operation."),

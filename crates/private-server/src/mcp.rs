@@ -6,7 +6,8 @@
 /// Gate the MCP mount on an authenticated tailnet user (any user, not only
 /// admins). Reuses the operator surface's `TailscaleUser` extractor, so the
 /// debug-build dev bypass applies in local dev and tests. The caller's login is
-/// logged so each query is attributable.
+/// logged so each query is attributable, and inserted as the request's
+/// [`canopy_mcp::McpIdentity`] — any tailnet user may use the write tools.
 pub async fn require_tailnet_user(
 	req: axum::extract::Request,
 	next: axum::middleware::Next,
@@ -17,6 +18,10 @@ pub async fn require_tailnet_user(
 	let (mut parts, body) = req.into_parts();
 	let user = TailscaleUser::from_request_parts(&mut parts, &()).await?;
 	tracing::info!(login = %user.login, "mcp request");
+	parts.extensions.insert(canopy_mcp::McpIdentity {
+		who: user.login.clone(),
+		can_write: true,
+	});
 	let req = axum::extract::Request::from_parts(parts, body);
 	Ok(next.run(req).await)
 }

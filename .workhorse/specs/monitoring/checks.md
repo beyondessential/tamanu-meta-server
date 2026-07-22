@@ -21,12 +21,12 @@ Canopy-wide checks are Canopy monitoring its own operation (see [SELF](../privat
 A source is a named reporter of checks, identified by a short string.
 Multiple sources may report on the same server, each concerned with part of the system, and each source's reports are independent: a report from one source says nothing about another source's checks.
 
-Two source names are reserved for Canopy itself: `canopy` for conditions Canopy determines on its own (reachability, backup health, key expiry, self-monitoring), and `manual` for conditions raised by operators.
-Reports arriving over the device API cannot use the reserved names.
+One source name is reserved for Canopy itself: `canopy`, for conditions Canopy determines on its own (reachability, backup health, key expiry, self-monitoring).
+Reports arriving over the device API cannot use the reserved name.
 
 ### Source policy
 
-Each source other than the reserved names carries two operator-set modes, global to the source and edited alongside the check catalog.
+Each source other than the reserved name carries two operator-set modes, global to the source and edited alongside the check catalog.
 
 Its **reachability mode** governs how the source's silence bears on its servers' reachability (see "Reachability"):
 
@@ -169,11 +169,6 @@ No surface presents one source's checks in isolation, and none exposes a source'
 A resolved state that degrades again reopens: the resolution is cleared and the state contributes anew.
 
 **Notes** attach free-form operator commentary to a state.
-
-## Manual conditions
-
-Operators can raise a condition directly against a server, under the `manual` source, with a chosen check name, result, and message, and optionally marked as escalating.
-A manual condition behaves as a reported check whose reporter is the operator: it stays active until an operator resolves it or raises it again as recovered.
 
 ## Monitoring gate
 

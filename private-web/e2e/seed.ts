@@ -47,7 +47,7 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, check_policies, scoped_check_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, recovery_vault_writes RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, check_policies, scoped_check_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, recovery_vault_writes, manual_incidents RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" server with it;
 	// self-alerts attach to that row, so put it back.
@@ -551,6 +551,47 @@ export async function seedIncident(
 		);
 	}
 	return { id };
+}
+
+export interface SeededManualIncident {
+	id: string;
+	title: string;
+}
+
+/** Seed a manual incident (a support-recorded record, written in the UI or
+ * over the MCP interface). Omit `endedAt` for an ongoing one. The affected
+ * group is mandatory. */
+export async function seedManualIncident(
+	sql: Sql,
+	opts: {
+		title?: string;
+		/** Markdown body. */
+		description?: string;
+		/** ISO 8601; defaults to NOW(). */
+		startedAt?: string;
+		/** ISO 8601; omit/null while the incident is ongoing. */
+		endedAt?: string | null;
+		serverGroupId: string;
+		createdBy?: string;
+	},
+): Promise<SeededManualIncident> {
+	const id = randomUUID();
+	const title = opts.title ?? randomLabel("manual-incident");
+	await sql.query(
+		`INSERT INTO manual_incidents
+		 (id, title, description, started_at, ended_at, server_group_id, created_by)
+		 VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5::timestamptz, $6, $7)`,
+		[
+			id,
+			title,
+			opts.description ?? "",
+			opts.startedAt ?? null,
+			opts.endedAt ?? null,
+			opts.serverGroupId,
+			opts.createdBy ?? "e2e@example.com",
+		],
+	);
+	return { id, title };
 }
 
 export interface SeededVersion {

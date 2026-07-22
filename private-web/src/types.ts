@@ -147,6 +147,7 @@ export function isIncidentLingering(
 }
 export type IncidentIssueData = Solidify<Schemas["IncidentIssueData"]>;
 export type IncidentWithIssues = Solidify<Schemas["IncidentWithIssues"]>;
+export type ManualIncidentData = Solidify<Schemas["ManualIncidentData"]>;
 export type IssueNoteData = Solidify<Schemas["IssueNoteData"]>;
 export type IncidentNoteData = Solidify<Schemas["IncidentNoteData"]>;
 
@@ -356,7 +357,7 @@ export function healthcheckSettingsPath(source: string, check: string): string {
 
 /// The check name embedded in a health issue's `ref` (`health/<check>`,
 /// filed under whichever source reports the check), or `null` for
-/// issues whose ref isn't a healthcheck (backups, manual, canopy
+/// issues whose ref isn't a healthcheck (backups, canopy
 /// reachability, …).
 export function healthcheckNameFromRef(
 	_source: string,

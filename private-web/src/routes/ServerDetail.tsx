@@ -53,7 +53,6 @@ import ExternalUsersDetails, {
 import HealthChip from "../components/HealthChip";
 import IncidentsLink from "../components/IncidentsLink";
 import OperatorAvatars from "../components/OperatorAvatars";
-import ManualEventButton from "../components/ManualEventButton";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import StatusDot from "../components/StatusDot";
 import TailnetIdentitySection from "../components/TailnetIdentitySection";
@@ -101,24 +100,12 @@ export default function ServerDetail() {
 	);
 	const isAdmin = useApi("commons", "is_current_user_admin");
 	// Single refresh signal for everything on the page that talks to the
-	// issues/incidents APIs. Any mutation (manual-event submit, resolve/
-	// snooze on a row, etc.) bumps this so all sibling panels refetch in
-	// lockstep — otherwise resolving an issue (which can auto-close an
-	// incident) leaves a stale incidents list.
+	// issues/incidents APIs. Any mutation (resolve/snooze on a row, etc.)
+	// bumps this so all sibling panels refetch in lockstep — otherwise
+	// resolving an issue (which can auto-close an incident) leaves a stale
+	// incidents list.
 	const [refreshTick, setRefreshTick] = useState(0);
 	const bumpRefresh = () => setRefreshTick((t) => t + 1);
-	// Single source of truth for the group's open-incident state. Used to
-	// label every ManualEventButton on the page identically — a child
-	// server's own incidents list is empty (incidents live at the root),
-	// so per-button local queries would mislabel.
-	const openIncidents = useApi(
-		"incidents",
-		"list_for_server",
-		{ server_id: id, include_closed: false },
-		[id, refreshTick],
-	);
-	const hasOpenIncident =
-		openIncidents.status === "ok" && openIncidents.data.length > 0;
 	// Honour a `#backups` anchor (linked from the group's backup page): once the
 	// detail has loaded and the section is painted, scroll it into view.
 	const location = useLocation();
@@ -155,9 +142,7 @@ export default function ServerDetail() {
 			<Header
 				data={data}
 				isAdmin={admin}
-				hasOpenIncident={hasOpenIncident}
 				refreshTick={refreshTick}
-				onEventSubmitted={bumpRefresh}
 				onArchived={() => detail.reload()}
 			/>
 			{archived ? (
@@ -212,12 +197,7 @@ export default function ServerDetail() {
 				refresh={() => detail.reload()}
 			/>
 			{data.siblings.length > 0 && (
-				<SiblingServers
-					siblings={data.siblings}
-					isAdmin={admin}
-					hasOpenIncident={hasOpenIncident}
-					onEventSubmitted={bumpRefresh}
-				/>
+				<SiblingServers siblings={data.siblings} />
 			)}
 			<SilencedRefsSection
 				scope="server"
@@ -241,16 +221,12 @@ export default function ServerDetail() {
 function Header({
 	data,
 	isAdmin,
-	hasOpenIncident,
 	refreshTick,
-	onEventSubmitted,
 	onArchived,
 }: {
 	data: ServerDetailData;
 	isAdmin: boolean;
-	hasOpenIncident: boolean;
 	refreshTick: number;
-	onEventSubmitted: () => void;
 	onArchived: () => void;
 }) {
 	const archived = data.server.archived;
@@ -289,11 +265,6 @@ function Header({
 				/>
 				{isAdmin && (
 					<>
-						<ManualEventButton
-							serverId={data.server.id}
-							hasOpenIncident={hasOpenIncident}
-							onSubmitted={onEventSubmitted}
-						/>
 						<Button
 							component={RouterLink}
 							to={`/servers/${data.server.id}/edit`}
@@ -1487,14 +1458,8 @@ function renderLocation(server: ServerInfo): string {
 
 function SiblingServers({
 	siblings,
-	isAdmin,
-	hasOpenIncident,
-	onEventSubmitted,
 }: {
 	siblings: ServerDetailData["siblings"];
-	isAdmin: boolean;
-	hasOpenIncident: boolean;
-	onEventSubmitted: () => void;
 }) {
 	// Same rank-then-kind grouping as the GroupDetail server list, so a
 	// reader scanning ServerDetail's sibling section sees the production
@@ -1572,13 +1537,6 @@ function SiblingServers({
 										</Tooltip>
 									)}
 									<Box sx={{ flex: 1 }} />
-									{isAdmin && (
-										<ManualEventButton
-											serverId={sib.id}
-											hasOpenIncident={hasOpenIncident}
-											onSubmitted={onEventSubmitted}
-										/>
-									)}
 								</Stack>
 							))}
 						</Stack>

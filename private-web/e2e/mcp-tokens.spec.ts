@@ -45,8 +45,40 @@ test.describe("mcp tokens page", () => {
 
 		const row = page.getByRole("row").filter({ hasText: name });
 		await expect(row).toBeVisible();
+		// Checkbox left unticked, so the token is read-only.
+		await expect(row.getByText("read-only")).toBeVisible();
 		// The secret is not re-displayed anywhere on the page.
 		await expect(page.getByText(secret)).not.toBeVisible();
+
+		// Clean up via the API so other tests see a quiet list.
+		const list = await request.post("/api/mcp_tokens/list", { data: {} });
+		const tokens = (await list.json()) as Array<{ id: string; name: string }>;
+		const mine = tokens.find((t) => t.name === name);
+		expect(mine).toBeTruthy();
+		await request.post("/api/mcp_tokens/revoke", {
+			data: { id: mine?.id },
+		});
+	});
+
+	test("minting with write access shows the read-write scope", async ({
+		page,
+		request,
+	}) => {
+		const name = uniqueName("write");
+
+		await page.goto("/settings/mcp-tokens");
+		await page.getByLabel("Token name").fill(name);
+		await page.getByLabel(/Allow writes \(manual incidents\)/).check();
+		await page.getByRole("button", { name: "Mint token" }).click();
+
+		const dialog = page.getByRole("dialog");
+		await expect(dialog.getByText(`Token "${name}" minted`)).toBeVisible();
+		await dialog.getByRole("button", { name: "Done" }).click();
+
+		const row = page.getByRole("row").filter({ hasText: name });
+		await expect(row).toBeVisible();
+		await expect(row.getByText("read-write")).toBeVisible();
+		await expect(row.getByText("read-only")).not.toBeVisible();
 
 		// Clean up via the API so other tests see a quiet list.
 		const list = await request.post("/api/mcp_tokens/list", { data: {} });

@@ -259,7 +259,7 @@ impl Status {
 		}
 		let server_ids: Vec<Uuid> = monitored.iter().map(|s| s.id).collect();
 
-		// Per-source freshness (already excludes canopy/manual and
+		// Per-source freshness (already excludes canopy and
 		// decommissioned checks), grouped by server, plus each source's
 		// reachability and ingest modes.
 		let freshness = Issue::source_freshness(db, &server_ids).await?;

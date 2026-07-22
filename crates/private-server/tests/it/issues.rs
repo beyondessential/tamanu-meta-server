@@ -1,5 +1,39 @@
 use commons_tests::diesel_async::SimpleAsyncConnection;
+use commons_types::status::CheckResult;
+use database::issues::{CheckFiling, FilingScope};
 use uuid::Uuid;
+
+/// File one canopy-determined check observation on a server through the
+/// real filing path, the way the reachability/backup sweeps do.
+async fn seed_filed_check(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	server_id: Uuid,
+	check: &str,
+	observed: CheckResult,
+	escalates: bool,
+	message: &str,
+) -> database::issues::Issue {
+	database::issues::file_check(
+		conn,
+		CheckFiling {
+			source: database::statuses::CANOPY_SOURCE,
+			scope: FilingScope::Server {
+				server_id,
+				device_id: None,
+			},
+			check,
+			observed,
+			title: None,
+			message,
+			detail: None,
+			default_ceiling: CheckResult::Failed,
+			default_escalates: escalates,
+			documentation: None,
+		},
+	)
+	.await
+	.expect("file check")
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn list_issues_for_device_and_server() {
@@ -44,41 +78,6 @@ async fn list_issues_for_device_and_server() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn manual_event_submit_creates_issue_without_device() {
-	commons_tests::server::run(async |mut conn, _public, private| {
-		let server_id = Uuid::new_v4();
-		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind) VALUES \
-				('{server_id}', 'https://example.com', 'central');"
-		))
-		.await
-		.expect("seed");
-
-		let resp = private
-			.post("/api/issues/submit_manual_event")
-			.json(&serde_json::json!({
-				"serverId": server_id,
-				"ref": "operator-note-1",
-				"message": "manually opened",
-			}))
-			.await;
-		resp.assert_status_ok();
-		let body: serde_json::Value = resp.json();
-		assert_eq!(body.get("source").and_then(|v| v.as_str()), Some("manual"));
-		assert!(body.get("device_id").map_or(true, |v| v.is_null()));
-		assert_eq!(
-			body.get("observed_result").and_then(|v| v.as_str()),
-			Some("failed")
-		);
-		assert_eq!(
-			body.get("effective_result").and_then(|v| v.as_str()),
-			Some("failed")
-		);
-	})
-	.await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
 async fn incident_groups_at_server_group() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		// One group containing two equal-level servers.
@@ -99,17 +98,16 @@ async fn incident_groups_at_server_group() {
 		.await
 		.expect("seed");
 
-		// Submit a manual event on server B with severity=error → opens incident on group.
-		let resp = private
-			.post("/api/issues/submit_manual_event")
-			.json(&serde_json::json!({
-				"serverId": server_b_id,
-				"ref": "x",
-				"result": "failed",
-				"message": "trouble in B",
-			}))
-			.await;
-		resp.assert_status_ok();
+		// File a failing check on server B → opens an incident on the group.
+		seed_filed_check(
+			&mut conn,
+			server_b_id,
+			"x",
+			CheckResult::Failed,
+			false,
+			"trouble in B",
+		)
+		.await;
 
 		// Listing incidents by either member's id finds the same group-level incident.
 		let resp = private
@@ -162,16 +160,15 @@ async fn ungrouped_server_event_skips_incident() {
 		.await
 		.expect("seed");
 
-		let resp = private
-			.post("/api/issues/submit_manual_event")
-			.json(&serde_json::json!({
-				"serverId": server_id,
-				"ref": "x",
-				"result": "failed",
-				"message": "no group yet",
-			}))
-			.await;
-		resp.assert_status_ok();
+		seed_filed_check(
+			&mut conn,
+			server_id,
+			"x",
+			CheckResult::Failed,
+			false,
+			"no group yet",
+		)
+		.await;
 
 		let resp = private
 			.post("/api/incidents/list_for_server")
@@ -201,17 +198,16 @@ async fn assigning_group_opens_pending_incident() {
 		.await
 		.expect("seed");
 
-		// File an event while ungrouped: issue exists, no incident opens.
-		let resp = private
-			.post("/api/issues/submit_manual_event")
-			.json(&serde_json::json!({
-				"serverId": server_id,
-				"ref": "stuck",
-				"result": "failed",
-				"message": "waiting to be grouped",
-			}))
-			.await;
-		resp.assert_status_ok();
+		// File a check while ungrouped: issue exists, no incident opens.
+		seed_filed_check(
+			&mut conn,
+			server_id,
+			"stuck",
+			CheckResult::Failed,
+			false,
+			"waiting to be grouped",
+		)
+		.await;
 
 		let resp = private
 			.post("/api/incidents/list_for_server")
@@ -259,44 +255,23 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 		.await
 		.expect("seed");
 
-		// 1. Open with error.
-		let r1 = private
-			.post("/api/issues/submit_manual_event")
-			.json(&serde_json::json!({
-				"serverId": server_id,
-				"ref": "x",
-				"result": "failed",
-				"message": "trouble",
-			}))
-			.await;
-		r1.assert_status_ok();
-		let issue_id_1 = r1
-			.json::<serde_json::Value>()
-			.get("id")
-			.unwrap()
-			.as_str()
-			.unwrap()
-			.to_string();
+		// 1. Open with a failure.
+		let issue_id_1 = seed_filed_check(
+			&mut conn,
+			server_id,
+			"x",
+			CheckResult::Failed,
+			false,
+			"trouble",
+		)
+		.await
+		.id;
 
-		// 2. Resolve.
-		let r2 = private
-			.post("/api/issues/submit_manual_event")
-			.json(&serde_json::json!({
-				"serverId": server_id,
-				"ref": "x",
-				"result": "failed",
-				"active": false,
-				"message": "ok",
-			}))
-			.await;
-		r2.assert_status_ok();
-		let issue_id_2 = r2
-			.json::<serde_json::Value>()
-			.get("id")
-			.unwrap()
-			.as_str()
-			.unwrap()
-			.to_string();
+		// 2. Recover — a passing observation closes the issue.
+		let issue_id_2 =
+			seed_filed_check(&mut conn, server_id, "x", CheckResult::Passed, false, "ok")
+				.await
+				.id;
 		assert_eq!(issue_id_1, issue_id_2, "same identity through inactive");
 
 		// The recovery leaves the incident lingering; let the window
@@ -313,24 +288,10 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 			.expect("linger sweep");
 
 		// 3. Reopen — same identity, severity ≥ error.
-		let r3 = private
-			.post("/api/issues/submit_manual_event")
-			.json(&serde_json::json!({
-				"serverId": server_id,
-				"ref": "x",
-				"result": "failed",
-				"escalates": true,
-				"message": "back",
-			}))
-			.await;
-		r3.assert_status_ok();
-		let issue_id_3 = r3
-			.json::<serde_json::Value>()
-			.get("id")
-			.unwrap()
-			.as_str()
-			.unwrap()
-			.to_string();
+		let issue_id_3 =
+			seed_filed_check(&mut conn, server_id, "x", CheckResult::Failed, true, "back")
+				.await
+				.id;
 		assert_eq!(issue_id_1, issue_id_3, "reopen keeps identity");
 
 		// Two incidents on the server (first closed, second open).
@@ -364,30 +325,28 @@ async fn low_severity_issue_joins_existing_open_incident() {
 		.await
 		.expect("seed");
 
-		// 1. Open an incident at severity = error.
-		private
-			.post("/api/issues/submit_manual_event")
-			.json(&serde_json::json!({
-				"serverId": server_id,
-				"ref": "a",
-				"result": "failed",
-				"message": "primary trouble",
-			}))
-			.await
-			.assert_status_ok();
+		// 1. Open an incident with a failure.
+		seed_filed_check(
+			&mut conn,
+			server_id,
+			"a",
+			CheckResult::Failed,
+			false,
+			"primary trouble",
+		)
+		.await;
 
-		// 2. A warning event would normally not open an incident on its own,
+		// 2. A warning would normally not open an incident on its own,
 		//    but because one is already open it should join in.
-		private
-			.post("/api/issues/submit_manual_event")
-			.json(&serde_json::json!({
-				"serverId": server_id,
-				"ref": "b",
-				"result": "warning",
-				"message": "ride-along",
-			}))
-			.await
-			.assert_status_ok();
+		seed_filed_check(
+			&mut conn,
+			server_id,
+			"b",
+			CheckResult::Warning,
+			false,
+			"ride-along",
+		)
+		.await;
 
 		// Still one incident, with two contributing issues.
 		let resp = private
@@ -420,17 +379,16 @@ async fn low_severity_alone_does_not_open_incident() {
 		.await
 		.expect("seed");
 
-		// Warning event with no open incident: must not create one.
-		private
-			.post("/api/issues/submit_manual_event")
-			.json(&serde_json::json!({
-				"serverId": server_id,
-				"ref": "b",
-				"result": "warning",
-				"message": "minor",
-			}))
-			.await
-			.assert_status_ok();
+		// Warning with no open incident: must not create one.
+		seed_filed_check(
+			&mut conn,
+			server_id,
+			"b",
+			CheckResult::Warning,
+			false,
+			"minor",
+		)
+		.await;
 
 		let resp = private
 			.post("/api/incidents/list_for_server")
@@ -458,29 +416,27 @@ async fn severity_downgrade_keeps_issue_in_incident() {
 		.await
 		.expect("seed");
 
-		// Open at error.
-		private
-			.post("/api/issues/submit_manual_event")
-			.json(&serde_json::json!({
-				"serverId": server_id,
-				"ref": "x",
-				"result": "failed",
-				"message": "trouble",
-			}))
-			.await
-			.assert_status_ok();
+		// Open with a failure.
+		seed_filed_check(
+			&mut conn,
+			server_id,
+			"x",
+			CheckResult::Failed,
+			false,
+			"trouble",
+		)
+		.await;
 
 		// Downgrade to warning — still active.
-		private
-			.post("/api/issues/submit_manual_event")
-			.json(&serde_json::json!({
-				"serverId": server_id,
-				"ref": "x",
-				"result": "warning",
-				"message": "less bad now",
-			}))
-			.await
-			.assert_status_ok();
+		seed_filed_check(
+			&mut conn,
+			server_id,
+			"x",
+			CheckResult::Warning,
+			false,
+			"less bad now",
+		)
+		.await;
 
 		// Incident should still be open.
 		let resp = private
@@ -495,11 +451,7 @@ async fn severity_downgrade_keeps_issue_in_incident() {
 	.await;
 }
 
-async fn open_issue(
-	conn: &mut database::diesel_async::AsyncPgConnection,
-	private: &commons_tests::axum_test::TestServer,
-	server_id: Uuid,
-) -> Uuid {
+async fn open_issue(conn: &mut database::diesel_async::AsyncPgConnection, server_id: Uuid) -> Uuid {
 	// Standalone server in its own group — incidents are group-keyed.
 	let group_id = Uuid::new_v4();
 	conn.batch_execute(&format!(
@@ -510,31 +462,16 @@ async fn open_issue(
 	.await
 	.expect("seed");
 
-	let r = private
-		.post("/api/issues/submit_manual_event")
-		.json(&serde_json::json!({
-			"serverId": server_id,
-			"ref": "x",
-			"result": "failed",
-			"message": "trouble",
-		}))
-		.await;
-	r.assert_status_ok();
-	Uuid::parse_str(
-		r.json::<serde_json::Value>()
-			.get("id")
-			.unwrap()
-			.as_str()
-			.unwrap(),
-	)
-	.unwrap()
+	seed_filed_check(conn, server_id, "x", CheckResult::Failed, false, "trouble")
+		.await
+		.id
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn resolve_closes_incident_and_records_reason() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let server_id = Uuid::new_v4();
-		let issue_id = open_issue(&mut conn, &private, server_id).await;
+		let issue_id = open_issue(&mut conn, server_id).await;
 
 		let r = private
 			.post("/api/issues/resolve")
@@ -568,7 +505,7 @@ async fn resolve_closes_incident_and_records_reason() {
 async fn unresolve_reopens_incident_if_still_active() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let server_id = Uuid::new_v4();
-		let issue_id = open_issue(&mut conn, &private, server_id).await;
+		let issue_id = open_issue(&mut conn, server_id).await;
 
 		private
 			.post("/api/issues/resolve")
@@ -678,7 +615,7 @@ async fn reopen_via_device_clears_resolved_fields() {
 async fn snooze_leaves_incident_and_blocks_rejoin() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let server_id = Uuid::new_v4();
-		let issue_id = open_issue(&mut conn, &private, server_id).await;
+		let issue_id = open_issue(&mut conn, server_id).await;
 
 		// Snooze until far future.
 		private
@@ -702,18 +639,16 @@ async fn snooze_leaves_incident_and_blocks_rejoin() {
 			"incident should be closed"
 		);
 
-		// A new error event during snooze should *not* open a new incident.
-		private
-			.post("/api/issues/submit_manual_event")
-			.json(&serde_json::json!({
-				"serverId": server_id,
-				"ref": "x",
-				"result": "failed",
-				"escalates": true,
-				"message": "still flapping",
-			}))
-			.await
-			.assert_status_ok();
+		// A new failure during snooze should *not* open a new incident.
+		seed_filed_check(
+			&mut conn,
+			server_id,
+			"x",
+			CheckResult::Failed,
+			true,
+			"still flapping",
+		)
+		.await;
 
 		let resp = private
 			.post("/api/incidents/list_for_server")
@@ -762,19 +697,17 @@ async fn unmonitored_server_event_does_not_open_incident() {
 		.await
 		.expect("seed");
 
-		// Manual event with severity=error normally opens an incident. The
-		// server is unmonitored, so the issue is recorded but no incident
-		// fires.
-		let resp = private
-			.post("/api/issues/submit_manual_event")
-			.json(&serde_json::json!({
-				"serverId": server_id,
-				"ref": "ignored",
-				"result": "failed",
-				"message": "should not open an incident",
-			}))
-			.await;
-		resp.assert_status_ok();
+		// A failing check normally opens an incident. The server is
+		// unmonitored, so the issue is recorded but no incident fires.
+		seed_filed_check(
+			&mut conn,
+			server_id,
+			"ignored",
+			CheckResult::Failed,
+			false,
+			"should not open an incident",
+		)
+		.await;
 
 		let resp = private
 			.post("/api/incidents/list_for_server")
@@ -813,16 +746,15 @@ async fn enabling_monitoring_opens_pending_incident() {
 		.expect("seed");
 
 		// File an issue while unmonitored: no incident.
-		let resp = private
-			.post("/api/issues/submit_manual_event")
-			.json(&serde_json::json!({
-				"serverId": server_id,
-				"ref": "stuck",
-				"result": "failed",
-				"message": "waiting to be re-enabled",
-			}))
-			.await;
-		resp.assert_status_ok();
+		seed_filed_check(
+			&mut conn,
+			server_id,
+			"stuck",
+			CheckResult::Failed,
+			false,
+			"waiting to be re-enabled",
+		)
+		.await;
 
 		// Flip monitoring on: the open issue should be promoted.
 		let resp = private
@@ -852,7 +784,7 @@ async fn disabling_monitoring_removes_open_contribution() {
 			.expect("seed admin");
 
 		let server_id = Uuid::new_v4();
-		open_issue(&mut conn, &private, server_id).await;
+		open_issue(&mut conn, server_id).await;
 
 		// Sanity: there's an incident before we flip.
 		let resp = private
@@ -900,22 +832,21 @@ async fn silencing_server_ref_closes_only_matching_open_incident() {
 			.expect("seed admin");
 
 		let server_id = Uuid::new_v4();
-		let _issue_id = open_issue(&mut conn, &private, server_id).await;
+		let _issue_id = open_issue(&mut conn, server_id).await;
 
 		// File a *different* ref on the same server — also an incident-class
 		// issue. Two incidents, or one incident with two contributors? Per
 		// the existing semantics, the first opens a group incident and the
 		// second joins it. We'll see one open incident with two contributors.
-		let resp = private
-			.post("/api/issues/submit_manual_event")
-			.json(&serde_json::json!({
-				"serverId": server_id,
-				"ref": "other",
-				"result": "failed",
-				"message": "second contributor",
-			}))
-			.await;
-		resp.assert_status_ok();
+		seed_filed_check(
+			&mut conn,
+			server_id,
+			"other",
+			CheckResult::Failed,
+			false,
+			"second contributor",
+		)
+		.await;
 		let resp = private
 			.post("/api/incidents/list_for_server")
 			.json(&serde_json::json!({ "server_id": server_id }))
@@ -928,7 +859,7 @@ async fn silencing_server_ref_closes_only_matching_open_incident() {
 			.post("/api/silenced_refs/silence_server")
 			.json(&serde_json::json!({
 				"server_id": server_id,
-				"source": "manual",
+				"source": "canopy",
 				"ref": "x",
 			}))
 			.await;
@@ -952,7 +883,7 @@ async fn unsilencing_server_ref_rejoins_open_incident() {
 			.expect("seed admin");
 
 		let server_id = Uuid::new_v4();
-		let _issue_id = open_issue(&mut conn, &private, server_id).await;
+		let _issue_id = open_issue(&mut conn, server_id).await;
 
 		// Silence then unsilence: the (re-)evaluation should leave the issue
 		// in the same state we started in.
@@ -960,7 +891,7 @@ async fn unsilencing_server_ref_rejoins_open_incident() {
 			.post("/api/silenced_refs/silence_server")
 			.json(&serde_json::json!({
 				"server_id": server_id,
-				"source": "manual",
+				"source": "canopy",
 				"ref": "x",
 			}))
 			.await;
@@ -980,7 +911,7 @@ async fn unsilencing_server_ref_rejoins_open_incident() {
 			.post("/api/silenced_refs/unsilence_server")
 			.json(&serde_json::json!({
 				"server_id": server_id,
-				"source": "manual",
+				"source": "canopy",
 				"ref": "x",
 			}))
 			.await;
@@ -1021,7 +952,7 @@ async fn group_silence_blocks_events_from_all_members() {
 			.post("/api/silenced_refs/silence_group")
 			.json(&serde_json::json!({
 				"server_group_id": group_id,
-				"source": "manual",
+				"source": "canopy",
 				"ref": "noisy",
 			}))
 			.await;
@@ -1029,16 +960,15 @@ async fn group_silence_blocks_events_from_all_members() {
 
 		// Either member firing the silenced ref doesn't open an incident.
 		for sid in [server_a, server_b] {
-			let resp = private
-				.post("/api/issues/submit_manual_event")
-				.json(&serde_json::json!({
-					"serverId": sid,
-					"ref": "noisy",
-					"result": "failed",
-					"message": "should not fire",
-				}))
-				.await;
-			resp.assert_status_ok();
+			seed_filed_check(
+				&mut conn,
+				sid,
+				"noisy",
+				CheckResult::Failed,
+				false,
+				"should not fire",
+			)
+			.await;
 		}
 
 		let resp = private
@@ -1048,16 +978,15 @@ async fn group_silence_blocks_events_from_all_members() {
 		assert!(resp.json::<Vec<serde_json::Value>>().is_empty());
 
 		// A different ref still opens an incident — silence is ref-specific.
-		let resp = private
-			.post("/api/issues/submit_manual_event")
-			.json(&serde_json::json!({
-				"serverId": server_a,
-				"ref": "other",
-				"result": "failed",
-				"message": "should still fire",
-			}))
-			.await;
-		resp.assert_status_ok();
+		seed_filed_check(
+			&mut conn,
+			server_a,
+			"other",
+			CheckResult::Failed,
+			false,
+			"should still fire",
+		)
+		.await;
 		let resp = private
 			.post("/api/incidents/list_for_server")
 			.json(&serde_json::json!({ "server_id": server_a }))
@@ -1088,7 +1017,7 @@ async fn list_silenced_refs_for_server_and_group() {
 			.post("/api/silenced_refs/silence_server")
 			.json(&serde_json::json!({
 				"server_id": server_id,
-				"source": "manual",
+				"source": "canopy",
 				"ref": "srv-ref",
 			}))
 			.await
@@ -1132,7 +1061,7 @@ async fn list_silenced_refs_for_server_and_group() {
 async fn incident_resolve_metadata() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let server_id = Uuid::new_v4();
-		open_issue(&mut conn, &private, server_id).await;
+		open_issue(&mut conn, server_id).await;
 
 		let resp = private
 			.post("/api/incidents/list_for_server")

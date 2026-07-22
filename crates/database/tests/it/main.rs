@@ -20,6 +20,7 @@ mod incident_linger;
 mod incident_reeval_queue;
 mod incident_result_semantics;
 mod incident_stats;
+mod manual_incidents;
 mod mcp_tokens;
 mod reachability_sweep;
 mod recovery_vault;

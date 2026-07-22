@@ -1,4 +1,4 @@
-//! Read-only MCP (Model Context Protocol) query interface over the fleet.
+//! MCP (Model Context Protocol) query interface over the fleet.
 //!
 //! Spec: `.workhorse/specs/private-server/mcp.md` (id `MCP`).
 //!
@@ -6,7 +6,9 @@
 //! tagged-device guard and an "any tailnet user" gate (private-server's
 //! `mcp::require_tailnet_user`), and at `/mcp` on the internet-facing
 //! surface behind the bearer-token gate (public-server's `mcp` module).
-//! Every tool only reads; nothing here mutates the fleet.
+//! Every fleet tool only reads; nothing here mutates the fleet. The one
+//! write surface is the manual incident record (`manual_incidents`
+//! module), gated per caller by [`McpIdentity`].
 //!
 //! Tools call the existing `database` read functions directly and shape lean,
 //! agent-legible JSON. The one piece of logic that must NOT be reimplemented is
@@ -15,15 +17,17 @@
 //! so the verdicts match what the operator UI and the alerting sweep present.
 //!
 //! Tools are grouped into domain modules (`servers`, `groups`, `versions`,
-//! `fleet`, `backups`, `restore`, `incidents`), each contributing its own tool
-//! router (via rmcp's `#[tool_router(router = ..., vis = "pub(crate)")]`) that
-//! [`CanopyMcp::new`] combines into the single stored `ToolRouter`. `util`
-//! holds helpers shared across more than one of those modules.
+//! `fleet`, `backups`, `restore`, `incidents`, `manual_incidents`), each
+//! contributing its own tool router (via rmcp's `#[tool_router(router = ...,
+//! vis = "pub(crate)")]`) that [`CanopyMcp::new`] combines into the single
+//! stored `ToolRouter`. `util` holds helpers shared across more than one of
+//! those modules.
 
 mod backups;
 mod fleet;
 mod groups;
 mod incidents;
+mod manual_incidents;
 mod restore;
 mod servers;
 mod util;
@@ -40,28 +44,53 @@ use rmcp::{
 	},
 };
 
+/// The authenticated caller, inserted into the HTTP request's extensions by
+/// each mount's auth gate. The transport carries the request parts into the
+/// tool context, where the write tools read this to authorise and attribute
+/// the write; the read tools never look at it.
+#[derive(Clone, Debug)]
+pub struct McpIdentity {
+	/// The tailnet user's login (operator mount) or the token's name
+	/// (internet-facing mount); recorded as the author of writes.
+	pub who: String,
+	/// Whether this caller may use the write tools: always for tailnet
+	/// users, only for tokens minted with write access.
+	pub can_write: bool,
+}
+
 #[derive(Clone)]
 pub struct CanopyMcp {
-	db: database::Db,
+	db_read: database::Db,
+	db_write: database::Db,
 	tool_router: ToolRouter<CanopyMcp>,
 }
 
 impl CanopyMcp {
-	pub fn new(db: database::Db) -> Self {
+	pub fn new(db_write: database::Db, db_read: database::Db) -> Self {
 		Self {
-			db,
+			db_read,
+			db_write,
 			tool_router: Self::servers_router()
 				+ Self::groups_router()
 				+ Self::versions_router()
 				+ Self::fleet_router()
 				+ Self::backups_router()
 				+ Self::restore_router()
-				+ Self::incidents_router(),
+				+ Self::incidents_router()
+				+ Self::manual_incidents_router(),
 		}
 	}
 
 	async fn conn(&self) -> Result<impl std::ops::DerefMut<Target = AsyncPgConnection>, McpError> {
-		self.db.get().await.map_err(util::mcp_err)
+		self.db_read.get().await.map_err(util::mcp_err)
+	}
+
+	/// A connection on the primary pool, for the manual-incident write
+	/// tools; everything else reads via [`Self::conn`].
+	async fn write_conn(
+		&self,
+	) -> Result<impl std::ops::DerefMut<Target = AsyncPgConnection>, McpError> {
+		self.db_write.get().await.map_err(util::mcp_err)
 	}
 }
 
@@ -70,9 +99,13 @@ impl ServerHandler for CanopyMcp {
 	fn get_info(&self) -> ServerInfo {
 		let mut info = ServerInfo::default();
 		info.instructions = Some(
-			"Read-only access to the Canopy fleet: servers, groups, health/status, Tamanu \
-			 versions, backups, and incidents/issues. All data is live. Use find_* to locate \
-			 entities and get_* for detail; fleet_summary and find_backup_problems for triage.\n\n\
+			"Access to the Canopy fleet: servers, groups, health/status, Tamanu versions, \
+			 backups, and incidents/issues. All data is live. Use find_* to locate entities and \
+			 get_* for detail; fleet_summary and find_backup_problems for triage. Everything is \
+			 read-only except manual incidents: support-recorded incident records \
+			 (record/update/delete_manual_incident), which touch nothing else in the fleet. On \
+			 the token-authenticated surface those write tools need a token minted with write \
+			 access.\n\n\
 			 Incidents: an incident groups the issues active for a group over a span of time. \
 			 find_incidents returns everything open in the window, including heavy sub-grace \
 			 flapping that was recorded but never surfaced. When summarizing or ranking, count \
@@ -93,8 +126,13 @@ impl ServerHandler for CanopyMcp {
 
 /// Build the tower service nested into an axum router (`/api/mcp` on the
 /// operator surface, `/mcp` on the internet-facing one). Auth is the mount's
-/// business, not this service's.
-pub fn service(db: database::Db) -> StreamableHttpService<CanopyMcp, LocalSessionManager> {
+/// business, not this service's: the mount's gate must insert an
+/// [`McpIdentity`] into the request extensions for the write tools to work.
+/// Reads go to `db_read`; only the manual-incident writes touch `db_write`.
+pub fn service(
+	db_write: database::Db,
+	db_read: database::Db,
+) -> StreamableHttpService<CanopyMcp, LocalSessionManager> {
 	let mut config = StreamableHttpServerConfig::default();
 	// Stateless: each request is self-contained, with no server-side session.
 	// The default stateful mode keeps sessions in process memory and 404s
@@ -129,7 +167,7 @@ pub fn service(db: database::Db) -> StreamableHttpService<CanopyMcp, LocalSessio
 	}
 
 	StreamableHttpService::new(
-		move || Ok(CanopyMcp::new(db.clone())),
+		move || Ok(CanopyMcp::new(db_write.clone(), db_read.clone())),
 		LocalSessionManager::default().into(),
 		config,
 	)

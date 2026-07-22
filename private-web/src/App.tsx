@@ -36,6 +36,7 @@ import HealthcheckSettings from "./routes/HealthcheckSettings";
 import Healthchecks from "./routes/Healthchecks";
 import IncidentDetail from "./routes/IncidentDetail";
 import Incidents from "./routes/Incidents";
+import ManualIncidentDetail from "./routes/ManualIncidentDetail";
 import Status from "./routes/Status";
 import ServerCreate from "./routes/ServerCreate";
 import ServerDetail from "./routes/ServerDetail";
@@ -184,6 +185,10 @@ export default function App() {
 					<Route path="/status" element={<Status />} />
 					<Route path="/alerts" element={<SelfAlerts />} />
 					<Route path="/incidents" element={<Incidents />} />
+					<Route
+						path="/incidents/manual/:id"
+						element={<ManualIncidentDetail />}
+					/>
 					<Route path="/incidents/:id" element={<IncidentDetail />} />
 					<Route path="/healthchecks/:source/:check" element={<CheckDetail />} />
 					<Route path="/versions" element={<Versions />} />
