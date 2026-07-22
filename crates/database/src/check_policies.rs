@@ -98,6 +98,16 @@ pub struct CheckPolicy {
 	pub decommissioned_by: Option<String>,
 }
 
+/// Escalation only makes sense at a `failed` ceiling: it bypasses
+/// incident grace on an effective *failure*, and only a `failed` ceiling
+/// lets an effective result reach failed in the first place. At any lower
+/// ceiling the flag can never fire, so it is dropped rather than stored as
+/// dead configuration. The `check_policies` schema enforces the same
+/// invariant with a check constraint.
+fn escalates_normalised(ceiling: CheckResult, escalates: bool) -> bool {
+	escalates && ceiling == CheckResult::Failed
+}
+
 /// The outcome of applying a check's policy to an observed result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GradedResult {
@@ -138,11 +148,15 @@ impl CheckPolicy {
 		sql_query(refresh).execute(db).await?;
 
 		// Re-animate any decommissioned check that has reported since it was
-		// retired: reset to the newly-registered state (warning ceiling,
-		// pending review, no rules) so its policy is re-vetted.
+		// retired: reset to the newly-registered state (warning ceiling, no
+		// escalation, pending review, no rules) so its policy is re-vetted.
+		// Escalation must clear alongside the drop to the warning ceiling —
+		// it is only valid at a failed ceiling (enforced by a check
+		// constraint).
 		let reanimated = sql_query(
 			"UPDATE check_policies SET decommissioned_at = NULL, decommissioned_by = NULL, \
-			 ceiling = 'warning', rules = NULL, reviewed_at = NULL, reviewed_by = NULL \
+			 ceiling = 'warning', escalates = FALSE, rules = NULL, \
+			 reviewed_at = NULL, reviewed_by = NULL \
 			 WHERE decommissioned_at IS NOT NULL AND last_seen IS NOT NULL \
 			 AND last_seen > decommissioned_at",
 		)
@@ -256,6 +270,12 @@ impl CheckPolicy {
 	/// if no row exists yet. Canopy's own checks register with the policy
 	/// their condition warrants instead of the default warning ceiling;
 	/// operator edits stick (this never overwrites).
+	///
+	/// Registered checks are canopy's own or operator-raised (never
+	/// un-vetted device pushes, which go through [`Self::upsert_default`]),
+	/// so they register **already reviewed** (`reviewed_at` stamped) — they
+	/// alert at their real ceiling rather than being capped at warning like
+	/// a pending device check (see [`Self::apply`] and the CHK spec).
 	pub async fn register(
 		db: &mut AsyncPgConnection,
 		source: &str,
@@ -265,13 +285,16 @@ impl CheckPolicy {
 		documentation: Option<&str>,
 	) -> Result<()> {
 		use crate::schema::check_policies::dsl;
+		let now = jiff_diesel::Timestamp::from(Timestamp::now());
 		diesel::insert_into(dsl::check_policies)
 			.values((
 				dsl::source.eq(source),
 				dsl::check_name.eq(check_name),
 				dsl::ceiling.eq(ceiling.to_string()),
-				dsl::escalates.eq(escalates),
+				dsl::escalates.eq(escalates_normalised(ceiling, escalates)),
 				dsl::documentation.eq(documentation),
+				dsl::reviewed_at.eq(Some(now)),
+				dsl::reviewed_by.eq(Some(source)),
 			))
 			.on_conflict((dsl::source, dsl::check_name))
 			.do_nothing()
@@ -287,6 +310,12 @@ impl CheckPolicy {
 	/// direction — rules can upgrade as well as downgrade); otherwise the
 	/// observed result is capped at the entry's ceiling.
 	///
+	/// A check still **pending operator review** (`reviewed_at IS NULL`)
+	/// has never been vetted, so it must not alert: its effective result is
+	/// hard-capped at warning (and warnings never open incidents),
+	/// whatever its ceiling or rules say. Reviewing the policy — even a
+	/// no-op save — lifts the cap.
+	///
 	/// Falls back to the default policy (ceiling = warning, no
 	/// escalation) if no row exists yet — in practice the status handler
 	/// upserts before reading, so this branch only covers the genuine
@@ -299,27 +328,30 @@ impl CheckPolicy {
 		ctx: &EvaluationContext<'_>,
 	) -> Result<GradedResult> {
 		use crate::schema::check_policies::dsl;
-		let row: Option<(String, bool, Option<JsonValue>)> = dsl::check_policies
-			.select((dsl::ceiling, dsl::escalates, dsl::rules))
+		let row: Option<(String, bool, Option<JsonValue>, bool)> = dsl::check_policies
+			.select((
+				dsl::ceiling,
+				dsl::escalates,
+				dsl::rules,
+				dsl::reviewed_at.is_not_null(),
+			))
 			.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name)))
 			.first(db)
 			.await
 			.optional()?;
-		let Some((ceiling_str, escalates, rules_json)) = row else {
+		let Some((ceiling_str, escalates, rules_json, reviewed)) = row else {
 			return Ok(GradedResult {
 				effective: observed.capped_at(CheckResult::Warning),
 				escalates: false,
 			});
 		};
 		let ceiling = ceiling_str.parse().unwrap_or(CheckResult::Warning);
+		let mut effective = observed.capped_at(ceiling);
 		if let Some(rules) = rules_json {
 			match serde_json::from_value::<IfLadder>(rules) {
 				Ok(ladder) => {
 					if let Some(result) = ladder.evaluate(ctx) {
-						return Ok(GradedResult {
-							effective: result,
-							escalates,
-						});
+						effective = result;
 					}
 				}
 				Err(err) => {
@@ -332,8 +364,12 @@ impl CheckPolicy {
 				}
 			}
 		}
+		// A never-reviewed check is inert until an operator vets it.
+		if !reviewed {
+			effective = effective.capped_at(CheckResult::Warning);
+		}
 		Ok(GradedResult {
-			effective: observed.capped_at(ceiling),
+			effective,
 			escalates,
 		})
 	}
@@ -346,6 +382,12 @@ impl CheckPolicy {
 	///
 	/// A scoped silence is a skipped ceiling in this chain: whatever the
 	/// fleet grading said, the effective result lands at skipped.
+	///
+	/// The pending-review warning cap (see [`Self::apply`]) is applied to
+	/// the fleet grade. Scoped transforms could in principle grade back up,
+	/// but the only surface that creates them is the silence (a skipped
+	/// ceiling, which only narrows), so a pending check stays capped in
+	/// every reachable state.
 	pub async fn apply_scoped(
 		db: &mut AsyncPgConnection,
 		source: &str,
@@ -471,6 +513,11 @@ impl CheckPolicy {
 	/// check, stamping `reviewed_at = NOW()` and `reviewed_by = by`. Even
 	/// a no-op save marks the row reviewed — operators can ack a check
 	/// without changing it.
+	///
+	/// Escalation is only meaningful at a `failed` ceiling — it bypasses
+	/// incident grace on an effective failure, and only a `failed` ceiling
+	/// admits a failed effective result — so it is dropped at any lower
+	/// ceiling (see [`escalates_normalised`]).
 	pub async fn update(
 		db: &mut AsyncPgConnection,
 		source: &str,
@@ -487,7 +534,7 @@ impl CheckPolicy {
 		)
 		.set((
 			dsl::ceiling.eq(ceiling.to_string()),
-			dsl::escalates.eq(escalates),
+			dsl::escalates.eq(escalates_normalised(ceiling, escalates)),
 			dsl::notes.eq(notes),
 			dsl::reviewed_at.eq(jiff_diesel::Timestamp::from(now)),
 			dsl::reviewed_by.eq(by),

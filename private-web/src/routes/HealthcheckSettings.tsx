@@ -285,13 +285,19 @@ function CeilingCard({
 	const update = useApiAction("healthchecks", "update");
 	const [ceiling, setCeiling] = useState<Ceiling>(row.ceiling as Ceiling);
 	const [escalates, setEscalates] = useState(row.escalates);
+	// Escalation only means anything at a failed ceiling: it bypasses
+	// incident grace on an effective failure, and only a failed ceiling
+	// admits a failed effective result. Below that it is dead config, so
+	// the toggle is disabled and never sent as set.
+	const canEscalate = ceiling === "failed";
+	const effectiveEscalates = canEscalate && escalates;
 	const save = async () => {
 		try {
 			await update.call({
 				source: row.source,
 				check_name: row.check_name,
 				ceiling,
-				escalates,
+				escalates: effectiveEscalates,
 				notes: row.notes,
 			});
 			onChanged();
@@ -337,12 +343,16 @@ function CeilingCard({
 						control={
 							<Switch
 								size="small"
-								checked={escalates}
+								checked={effectiveEscalates}
 								onChange={(e) => setEscalates(e.target.checked)}
-								disabled={update.pending}
+								disabled={update.pending || !canEscalate}
 							/>
 						}
-						label="Escalates: an effective failure notifies immediately, bypassing the incident grace period"
+						label={
+							canEscalate
+								? "Escalates: an effective failure notifies immediately, bypassing the incident grace period"
+								: "Escalates: only available at a failed ceiling — a lower ceiling never produces a failure to escalate"
+						}
 						slotProps={{ typography: { variant: "caption" } }}
 					/>
 				) : row.escalates ? (

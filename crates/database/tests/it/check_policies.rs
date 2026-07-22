@@ -181,6 +181,168 @@ async fn apply_caps_at_ceiling_or_defaults_to_warning() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn pending_review_policy_hard_caps_at_warning() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		use database::schema::check_policies::dsl;
+		use diesel::prelude::*;
+		use diesel_async::RunQueryDsl;
+
+		let empty_map = serde_json::Map::new();
+		let empty_tags = std::collections::HashMap::new();
+		let ctx = database::check_policies::EvaluationContext {
+			status_extra: &empty_map,
+			check_extra: &empty_map,
+			tags: &empty_tags,
+		};
+
+		// A pending-review policy (reviewed_at IS NULL) whose ceiling column
+		// says failed — the shape a never-vetted alertd check migrated in as,
+		// or a check registered before review. A never-vetted check must not
+		// open incidents: pending review hard-caps the effective result at
+		// warning regardless of the stored ceiling.
+		CheckPolicy::upsert_default(&mut conn, "alertd", "disk_space")
+			.await
+			.expect("seed");
+		diesel::update(dsl::check_policies)
+			.set(dsl::ceiling.eq(CheckResult::Failed.to_string()))
+			.execute(&mut conn)
+			.await
+			.expect("force a failed ceiling while leaving reviewed_at null");
+
+		let pending =
+			CheckPolicy::apply(&mut conn, "alertd", "disk_space", CheckResult::Failed, &ctx)
+				.await
+				.expect("apply");
+		assert_eq!(
+			pending.effective,
+			CheckResult::Warning,
+			"pending-review check caps at warning regardless of ceiling",
+		);
+
+		// Once an operator reviews it (any save stamps reviewed_at), the
+		// failed ceiling applies and failures pass through.
+		CheckPolicy::update(
+			&mut conn,
+			"alertd",
+			"disk_space",
+			CheckResult::Failed,
+			false,
+			None,
+			"dana",
+		)
+		.await
+		.expect("review");
+		let reviewed =
+			CheckPolicy::apply(&mut conn, "alertd", "disk_space", CheckResult::Failed, &ctx)
+				.await
+				.expect("apply after review");
+		assert_eq!(
+			reviewed.effective,
+			CheckResult::Failed,
+			"a reviewed check alerts normally",
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn register_marks_canopy_checks_already_reviewed() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		// Canopy's own checks (and operator-raised manual conditions) go
+		// through `register`, and the CHK spec says they register *already
+		// reviewed*, with the policy their condition warrants — so they
+		// alert at their real ceiling instead of being capped at warning
+		// like a pending, never-vetted device check.
+		CheckPolicy::register(
+			&mut conn,
+			"canopy",
+			"backup_stale",
+			CheckResult::Failed,
+			true,
+			None,
+		)
+		.await
+		.expect("register");
+
+		let row = CheckPolicy::get(&mut conn, "canopy", "backup_stale")
+			.await
+			.expect("get")
+			.expect("row exists");
+		assert_eq!(row.ceiling, CheckResult::Failed);
+		assert!(row.escalates);
+		assert!(
+			row.reviewed_at.is_some(),
+			"canopy's own checks register already reviewed",
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn escalates_only_sticks_at_a_failed_ceiling() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		CheckPolicy::upsert_default(&mut conn, "alertd", "disk_space")
+			.await
+			.expect("seed");
+
+		// Escalation is meaningless below a failed ceiling: only a failed
+		// effective result opens an incident, so only there can escalation
+		// (bypassing incident grace) fire. Requesting it at a lower ceiling
+		// must not stick.
+		let warned = CheckPolicy::update(
+			&mut conn,
+			"alertd",
+			"disk_space",
+			CheckResult::Warning,
+			true,
+			None,
+			"op",
+		)
+		.await
+		.expect("update");
+		assert!(
+			!warned.escalates,
+			"escalates is dropped below a failed ceiling",
+		);
+
+		// At a failed ceiling it sticks.
+		let failed = CheckPolicy::update(
+			&mut conn,
+			"alertd",
+			"disk_space",
+			CheckResult::Failed,
+			true,
+			None,
+			"op",
+		)
+		.await
+		.expect("update");
+		assert!(failed.escalates, "escalates applies at a failed ceiling");
+
+		// register() normalises the same way.
+		CheckPolicy::register(
+			&mut conn,
+			"canopy",
+			"warn_only",
+			CheckResult::Warning,
+			true,
+			None,
+		)
+		.await
+		.expect("register");
+		let registered = CheckPolicy::get(&mut conn, "canopy", "warn_only")
+			.await
+			.expect("get")
+			.expect("row exists");
+		assert!(
+			!registered.escalates,
+			"register drops escalates below a failed ceiling",
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn update_stamps_review_metadata_even_on_no_op_save() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		CheckPolicy::upsert_default(&mut conn, "alertd", "noisy_check")

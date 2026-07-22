@@ -68,6 +68,7 @@ An entry carries:
 - an **escalates** flag — an effective failure of this check notifies immediately, bypassing incident grace (see [INC](incidents.md)).
 
 A check is registered in the catalog with a ceiling of `warning` the first time it is reported, and is pending operator review; operators confirm or adjust its policy from there, and checks still awaiting review are surfaced for it.
+While a check is pending review its effective result is hard-capped at warning — whatever its ceiling or rules would otherwise yield — so a never-vetted check records state but cannot open an incident (see [INC](incidents.md)); reviewing the policy, even a no-op save, lifts the cap.
 Canopy's own checks register already reviewed, with the policy their condition warrants instead of the default.
 
 ### Scoped policy

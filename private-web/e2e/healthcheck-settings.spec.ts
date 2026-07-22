@@ -72,7 +72,9 @@ test.describe("healthcheck settings page", () => {
 		await seedCheckPolicy(sql, {
 			checkName: "caddy_version",
 			source: "alertd",
-			ceiling: "warning",
+			// Escalation is only offered at a failed ceiling, so seed one to
+			// see the toggle in its enabled state.
+			ceiling: "failed",
 		});
 
 		await page.goto("/settings/healthchecks/alertd/caddy_version");
@@ -87,5 +89,31 @@ test.describe("healthcheck settings page", () => {
 		await expect(
 			page.getByRole("button", { name: /Write documentation|^Edit$/ }),
 		).toBeVisible();
+	});
+
+	test("escalate toggle is only enabled at a failed ceiling", async ({
+		page,
+		sql,
+	}) => {
+		// A warning-ceiling check can never produce a failed effective result,
+		// so there is nothing for escalation to bypass grace on: the toggle is
+		// disabled.
+		await seedCheckPolicy(sql, {
+			checkName: "caddy_version",
+			source: "alertd",
+			ceiling: "warning",
+		});
+
+		await page.goto("/settings/healthchecks/alertd/caddy_version");
+		const escalate = page.getByRole("switch", { name: /Escalates/ });
+		await expect(escalate).toBeDisabled();
+
+		// Raising the ceiling to failed makes escalation meaningful, so the
+		// toggle becomes enabled.
+		await page.getByRole("combobox").first().click();
+		await page
+			.getByRole("option", { name: /Failures count in full/ })
+			.click();
+		await expect(escalate).toBeEnabled();
 	});
 });
