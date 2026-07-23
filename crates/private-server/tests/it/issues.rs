@@ -1079,7 +1079,9 @@ async fn list_silenced_refs_for_server_and_group() {
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
 			 INSERT INTO servers (id, host, kind, group_id) VALUES \
-				('{server_id}', 'https://l.example.com', 'central', '{group_id}');"
+				('{server_id}', 'https://l.example.com', 'central', '{group_id}');
+			 INSERT INTO check_policies (source, check_name) VALUES \
+				('manual', 'srv-ref'), ('canopy', 'grp-ref');"
 		))
 		.await
 		.expect("seed");

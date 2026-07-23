@@ -278,3 +278,77 @@ async fn silence_on_a_scoped_rule_row_keeps_the_rules() {
 	})
 	.await
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn decommission_clears_the_checks_silences() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn, None).await;
+		CheckPolicy::upsert_default(&mut conn, "alertd", "noisy")
+			.await
+			.expect("seed catalog");
+		ScopedCheckPolicy::silence(
+			&mut conn,
+			PolicyScope::Server(server_id),
+			"alertd",
+			"noisy",
+			Some("op"),
+		)
+		.await
+		.expect("silence");
+
+		CheckPolicy::decommission(&mut conn, "alertd", "noisy", "op")
+			.await
+			.expect("decommission");
+
+		// The silence row is deleted outright, not just hidden.
+		assert!(
+			ScopedCheckPolicy::get(&mut conn, PolicyScope::Server(server_id), "alertd", "noisy")
+				.await
+				.expect("get")
+				.is_none(),
+			"decommissioning a check clears its silences",
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn list_silences_excludes_orphaned_check_silences() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn, None).await;
+		CheckPolicy::upsert_default(&mut conn, "bestool-alertd", "sync")
+			.await
+			.expect("seed catalog");
+		ScopedCheckPolicy::silence(
+			&mut conn,
+			PolicyScope::Server(server_id),
+			"bestool-alertd",
+			"sync",
+			Some("op"),
+		)
+		.await
+		.expect("silence");
+		assert_eq!(
+			ScopedCheckPolicy::list_silences(&mut conn, PolicyScope::Server(server_id))
+				.await
+				.expect("list")
+				.len(),
+			1,
+		);
+
+		// Orphan the check: its catalog row goes, its silence row lingers.
+		sql_query("DELETE FROM check_policies WHERE source = 'bestool-alertd'")
+			.execute(&mut conn)
+			.await
+			.expect("orphan the check");
+
+		assert!(
+			ScopedCheckPolicy::list_silences(&mut conn, PolicyScope::Server(server_id))
+				.await
+				.expect("list")
+				.is_empty(),
+			"a silence for a dead (orphaned) check is not listed",
+		);
+	})
+	.await
+}

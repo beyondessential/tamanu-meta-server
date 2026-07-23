@@ -1,0 +1,2 @@
+-- Irreversible: silences for dead checks are deleted for good. Nothing to
+-- restore.
