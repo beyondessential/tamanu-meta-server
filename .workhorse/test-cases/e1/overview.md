@@ -20,4 +20,3 @@ confirmation gate on every source-policy change.
 ## Preserved behaviour
 
 - [x] After ingest is set to a non-allow mode, the reachability control is disabled — verifies spec: CHK
-- [ ] Non-admin operators see the modes as read-only chips, with no toggles or confirmation — manual only: the e2e auth bypass treats every caller as an admin, so there's no automated path for the read-only view
