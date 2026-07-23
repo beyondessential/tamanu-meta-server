@@ -20,4 +20,13 @@ confirmation gate on every source-policy change.
 ## Preserved behaviour
 
 - [x] After ingest is set to a non-allow mode, the reachability control is disabled — verifies spec: CHK
-- [ ] Non-admin operators see the modes as read-only chips, with no toggles or confirmation — ⚠ BLOCKED: no automated path yet. The e2e harness authenticates every caller as `admin@localhost`, so Playwright can't render the non-admin view, and the repo has no component-test setup wired up. Needs a testability decision (see chat).
+- [x] Non-admin operators see the modes as read-only chips, with no toggles or confirmation — covered via the new `nonAdminPage` fixture
+
+## Test harness: non-admin coverage
+
+The e2e auth bypass authenticated every caller as an admin, leaving the
+non-admin view untestable. A dev-only request header now downgrades the bypass
+to a non-admin identity, exercised end-to-end by the `nonAdminPage` fixture.
+
+- [x] The dev non-admin header makes `is_current_user_admin` report false
+- [x] The dev non-admin header makes an admin-gated endpoint reject with 403

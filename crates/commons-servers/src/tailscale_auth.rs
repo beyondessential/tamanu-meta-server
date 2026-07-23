@@ -10,6 +10,14 @@ const TAILSCALE_USER_LOGIN: &str = "Tailscale-User-Login";
 const TAILSCALE_USER_NAME: &str = "Tailscale-User-Name";
 const TAILSCALE_USER_PROFILE_PIC: &str = "Tailscale-User-Profile-Pic";
 
+/// Dev/test-only header that downgrades the auth bypass to a non-admin
+/// identity, so tests can exercise the read-only, non-admin UI against a
+/// debug build. Honoured under the same `debug_assertions` gate as the
+/// bypass itself, and it only ever *drops* privileges — the branch that
+/// reads it is not compiled into release builds, so it carries no risk
+/// there.
+const DEV_NON_ADMIN_HEADER: &str = "x-canopy-dev-non-admin";
+
 #[derive(Debug, Clone, Default)]
 pub struct TailscaleUser {
 	pub login: String,
@@ -49,10 +57,16 @@ where
 		// Dev / test bypass: mirrors `TailscaleAdmin`. Without it, every
 		// integration test would need to set the three Tailscale headers on
 		// every authenticated request, even for endpoints that only need
-		// "any user".
+		// "any user". A non-admin and an admin are both "any user", so the
+		// non-admin override only changes the identity, not the outcome here.
 		if cfg!(debug_assertions) {
+			let login = if parts.headers.contains_key(DEV_NON_ADMIN_HEADER) {
+				"user@localhost"
+			} else {
+				"admin@localhost"
+			};
 			return Ok(TailscaleUser {
-				login: "admin@localhost".into(),
+				login: login.into(),
 				name: "You".into(),
 				profile_pic: None,
 			});
@@ -138,6 +152,14 @@ where
 
 	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
 		let user = if cfg!(debug_assertions) {
+			// The bypass grants admin, unless a test opts into the non-admin
+			// path with the dev header — then behave like the real extractor
+			// does for a non-admin: reject with insufficient permissions.
+			if parts.headers.contains_key(DEV_NON_ADMIN_HEADER) {
+				return Err(AppError::AuthInsufficientPermissions {
+					required: "admin".into(),
+				});
+			}
 			TailscaleUser {
 				login: "admin@localhost".into(),
 				name: "You".into(),

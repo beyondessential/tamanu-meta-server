@@ -31,4 +31,29 @@ test.describe("Sources page", () => {
 		await page.getByRole("link", { name: /all healthchecks/i }).click();
 		await expect(page).toHaveURL(/\/settings\/healthchecks$/);
 	});
+
+	test("non-admin operators see the modes as read-only chips", async ({
+		nonAdminPage,
+		sql,
+	}) => {
+		await seedCheckPolicy(sql, { source: "alertd", checkName: "db_connect" });
+		await nonAdminPage.goto("/settings/healthchecks/sources");
+
+		const row = nonAdminPage.getByRole("row", { name: /alertd/ }).first();
+		await expect(row).toBeVisible();
+
+		// Reachability and ingest render as read-only chips showing the
+		// current mode...
+		await expect(row.getByText("on", { exact: true })).toBeVisible();
+		await expect(row.getByText("allow", { exact: true })).toBeVisible();
+
+		// ...with no mode toggles to click, so no change and no confirmation
+		// is reachable.
+		await expect(
+			row.getByRole("button", { name: "quiet", exact: true }),
+		).toHaveCount(0);
+		await expect(
+			row.getByRole("button", { name: "deny", exact: true }),
+		).toHaveCount(0);
+	});
 });

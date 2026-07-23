@@ -4,18 +4,26 @@
 //   just works).
 // - `sql`: a worker-scoped pg client against the same per-worker DB,
 //   used by the seed helpers in `seed.ts`.
+// - `nonAdminPage`: a page whose requests carry the dev non-admin header,
+//   so admin-gated UI renders in its read-only, non-admin form. Use it to
+//   cover the non-admin path (the default `page` is always an admin,
+//   because the server's debug auth bypass grants admin by default).
 
-import { test as base, expect } from "@playwright/test";
+import { test as base, expect, type Page } from "@playwright/test";
 
 import { startStack, type StackHandle } from "./fixture";
 import { connect, type Sql } from "./seed";
 
-type Fixtures = {
+type WorkerFixtures = {
 	stack: StackHandle;
 	sql: Sql;
 };
 
-export const test = base.extend<Record<string, never>, Fixtures>({
+type TestFixtures = {
+	nonAdminPage: Page;
+};
+
+export const test = base.extend<TestFixtures, WorkerFixtures>({
 	stack: [
 		async ({}, use) => {
 			const handle = await startStack();
@@ -41,6 +49,17 @@ export const test = base.extend<Record<string, never>, Fixtures>({
 		},
 		{ scope: "worker" },
 	],
+	nonAdminPage: async ({ browser, baseURL }, use) => {
+		const context = await browser.newContext({
+			baseURL,
+			extraHTTPHeaders: { "x-canopy-dev-non-admin": "1" },
+		});
+		try {
+			await use(await context.newPage());
+		} finally {
+			await context.close();
+		}
+	},
 });
 
 export { expect };
