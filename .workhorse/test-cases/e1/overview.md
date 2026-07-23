@@ -15,9 +15,9 @@ confirmation gate on every source-policy change.
 - [x] Changing a source's reachability mode opens a dialog naming the source and target mode, and only persists on Confirm — verifies spec: CHK
 - [x] Changing a source's ingest mode opens the same confirmation, and persists on Confirm — verifies spec: CHK
 - [x] Cancelling the confirmation leaves the mode and stored policy untouched — verifies spec: CHK
-- [ ] The dialog copy states the consequence of the chosen mode (warns/quiet/off; allow/ignore/deny)
+- [x] The dialog copy states the consequence of the chosen mode (warns/quiet/off; allow/ignore/deny) — verifies spec: CHK
 
 ## Preserved behaviour
 
 - [x] After ingest is set to a non-allow mode, the reachability control is disabled — verifies spec: CHK
-- [ ] Non-admin operators see the modes as read-only chips, with no toggles or confirmation
+- [ ] Non-admin operators see the modes as read-only chips, with no toggles or confirmation — manual only: the e2e auth bypass treats every caller as an admin, so there's no automated path for the read-only view

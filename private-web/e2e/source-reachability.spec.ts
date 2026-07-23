@@ -22,10 +22,11 @@ test.describe("Source reachability", () => {
 
 		await row.getByRole("button", { name: "quiet", exact: true }).click();
 
-		// The change is confirmed in a dialog spelling out the consequence
-		// before it applies.
+		// The change is confirmed in a dialog naming the target mode and
+		// spelling out its consequence before it applies.
 		const dialog = page.getByRole("dialog");
 		await expect(dialog).toContainText(/set alertd reachability to .quiet./i);
+		await expect(dialog).toContainText(/no longer raise a warning/i);
 		await dialog.getByRole("button", { name: /confirm/i }).click();
 
 		// The change persists to the source policy.
