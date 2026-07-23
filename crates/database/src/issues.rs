@@ -2522,22 +2522,21 @@ impl Issue {
 		db: &mut AsyncPgConnection,
 		server_ids: &[Uuid],
 	) -> Result<Vec<(Uuid, String, Timestamp)>> {
-		use crate::schema::{check_policies, issues::dsl};
-		use std::collections::{HashMap, HashSet};
+		use crate::check_policies::CheckPolicy;
+		use crate::schema::issues::dsl;
+		use std::collections::HashMap;
 		if server_ids.is_empty() {
 			return Ok(Vec::new());
 		}
 
-		// Checks retired fleet-wide don't keep their source "expected": a
-		// source whose every check is decommissioned drops out of freshness
-		// entirely, so per-server staleness stops being raised for it.
-		let decommissioned: HashSet<(String, String)> = check_policies::table
-			.select((check_policies::source, check_policies::check_name))
-			.filter(check_policies::decommissioned_at.is_not_null())
-			.load::<(String, String)>(db)
-			.await?
-			.into_iter()
-			.collect();
+		// A source is only "expected" through check-states backed by a live
+		// catalog row: this drops sources whose every check is decommissioned,
+		// and orphaned sources whose check-states have no catalog row at all
+		// (e.g. a superseded reporter like bestool-alertd) — otherwise a dead
+		// source would hold servers into a reachability warning forever, with
+		// no catalog entry to silence or decommission. Mirrors the health
+		// rollup (see [`health_from_check_state`]).
+		let cataloged = CheckPolicy::live_cataloged_pairs(db).await?;
 
 		let rows: Vec<(Uuid, String, String, jiff_diesel::Timestamp)> = dsl::issues
 			.filter(
@@ -2561,7 +2560,7 @@ impl Issue {
 
 		let mut latest: HashMap<(Uuid, String), Timestamp> = HashMap::new();
 		for (server, source, check, seen) in rows {
-			if decommissioned.contains(&(source.clone(), check)) {
+			if !cataloged.contains(&(source.clone(), check)) {
 				continue;
 			}
 			let seen: Timestamp = seen.into();
