@@ -199,13 +199,12 @@ A restore for which credentials were issued but no report has arrived is shown a
 
 ## Alerting
 
-A failed or overdue restore-health report is a group-level incident that pages regardless of any individual server's monitoring state, because an unrestorable backup is a control-plane and data-safety concern, not one server's operational noise.
+A failed or overdue restore-health report raises a restore-verification check on the affected server, subject to the same monitoring and incident gates as any other of that server's checks.
 
-A failure raises a group-scoped restore-verification alert identifying the affected server and snapshot.
-Restore-health is tracked independently per server, type, and intent, so one replica's failed restore does not mask or merge with another's.
-The alert recovers when the next report for the same server, type, and intent is healthy.
+Restore-health is tracked independently per server, type, and intent: the affected server is the check's scope, and the type and intent name it, so one replica's failed restore does not mask or merge with another's, and the snapshot is carried in the check's detail.
+The check recovers when the next report for the same server, type, and intent is healthy.
 
-A replica is also overdue — raising the same alert on a periodic sweep, rather than waiting for a report that never arrives — when it has not met its intent's health expectation within the declaration's overdue bound.
+A replica is also overdue — raising the same check on a periodic sweep, rather than waiting for a report that never arrives — when it has not met its intent's health expectation within the declaration's overdue bound.
 For an intent carrying `once`, the expectation is measured against the latest snapshot: the replica is overdue when the latest snapshot has gone unverified for longer than the bound, not merely because time has passed since an earlier snapshot was verified.
 For an intent without `once`, it is measured against wall-clock time since the last healthy report.
 Overdue applies only to intents carrying `check`.
