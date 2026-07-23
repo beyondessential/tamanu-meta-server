@@ -26,7 +26,8 @@ Reports arriving over the device API cannot use the reserved names.
 
 ### Source policy
 
-Each source other than the reserved names carries two operator-set modes, global to the source and edited alongside the check catalog.
+Each source other than the reserved names carries two operator-set modes, global to the source and edited on a dedicated Sources page reached from the check catalog.
+Because each mode governs the whole reporter fleet-wide and is changed only rarely, switching either mode is confirmed before it takes effect, with the consequence of the chosen mode spelled out; abandoning the confirmation leaves the policy untouched.
 
 Its **reachability mode** governs how the source's silence bears on its servers' reachability (see "Reachability"):
 

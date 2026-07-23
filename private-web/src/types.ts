@@ -354,6 +354,11 @@ export function healthcheckSettingsPath(source: string, check: string): string {
 	return `/settings/healthchecks/${encodeURIComponent(source)}/${encodeURIComponent(check)}`;
 }
 
+/// Route to the Sources page — the per-source reachability/ingest policy
+/// editor, reached from the healthcheck catalog. A single static page, so
+/// no interpolation is needed.
+export const HEALTHCHECK_SOURCES_PATH = "/settings/healthchecks/sources";
+
 /// The check name embedded in a health issue's `ref` (`health/<check>`,
 /// filed under whichever source reports the check), or `null` for
 /// issues whose ref isn't a healthcheck (backups, manual, canopy
