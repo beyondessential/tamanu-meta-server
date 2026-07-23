@@ -232,9 +232,8 @@ async fn worklist(
 			None => Server::list_live_in_group(&mut conn, d.group_id).await?,
 		};
 
-		if !snapshot_cache.contains_key(&d.group_id) {
-			snapshot_cache.insert(
-				d.group_id,
+		if let std::collections::hash_map::Entry::Vacant(e) = snapshot_cache.entry(d.group_id) {
+			e.insert(
 				BackupRun::latest_success_by_server_type_for_group(&mut conn, d.group_id).await?,
 			);
 			verified_cache.insert(
