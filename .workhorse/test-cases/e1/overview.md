@@ -20,3 +20,4 @@ confirmation gate on every source-policy change.
 ## Preserved behaviour
 
 - [x] After ingest is set to a non-allow mode, the reachability control is disabled — verifies spec: CHK
+- [ ] Non-admin operators see the modes as read-only chips, with no toggles or confirmation — ⚠ BLOCKED: no automated path yet. The e2e harness authenticates every caller as `admin@localhost`, so Playwright can't render the non-admin view, and the repo has no component-test setup wired up. Needs a testability decision (see chat).
