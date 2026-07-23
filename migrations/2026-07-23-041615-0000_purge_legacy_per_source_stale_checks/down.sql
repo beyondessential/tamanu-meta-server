@@ -1,0 +1,3 @@
+-- Irreversible: the legacy per-source stale check-states and their catalog
+-- rows are removed for good (no current code files `canopy`/`stale/<source>`).
+-- Nothing to restore.
