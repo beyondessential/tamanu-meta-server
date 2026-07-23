@@ -243,6 +243,17 @@ impl CheckPolicy {
 			crate::issues::Issue::resolve(db, id, by, ResolvedReason::Decommissioned).await?;
 		}
 
+		// Clear any scoped silences for the now-dead check: a silence on a
+		// check that contributes to nothing is dead configuration, and it
+		// would otherwise linger in the operator's silence list forever.
+		use crate::schema::scoped_check_policies::dsl as scp;
+		diesel::delete(
+			scp::scoped_check_policies
+				.filter(scp::source.eq(source).and(scp::check_name.eq(check_name))),
+		)
+		.execute(db)
+		.await?;
+
 		// A source whose checks are all decommissioned drops out of
 		// source_freshness, so it stops counting toward reachability with no
 		// further action here.
@@ -706,14 +717,17 @@ impl ScopedCheckPolicy {
 	}
 
 	/// All silences (skipped-ceiling transforms) at one scope, newest
-	/// first.
+	/// first. Silences for dead checks — a `(source, check)` with no live
+	/// catalog row (decommissioned, or orphaned with no catalog row at all)
+	/// — are excluded: the check contributes to nothing, so its silence is
+	/// dead config that shouldn't clutter the operator's list.
 	pub async fn list_silences(
 		db: &mut AsyncPgConnection,
 		scope: PolicyScope,
 	) -> Result<Vec<Self>> {
 		use crate::schema::scoped_check_policies::dsl;
 		let (server, group) = Self::scope_filter(scope);
-		dsl::scoped_check_policies
+		let rows: Vec<Self> = dsl::scoped_check_policies
 			.select(Self::as_select())
 			.filter(
 				dsl::server_id
@@ -724,7 +738,12 @@ impl ScopedCheckPolicy {
 			.order(dsl::created_at.desc())
 			.load(db)
 			.await
-			.map_err(AppError::from)
+			.map_err(AppError::from)?;
+		let cataloged = CheckPolicy::live_cataloged_pairs(db).await?;
+		Ok(rows
+			.into_iter()
+			.filter(|r| cataloged.contains(&(r.source.clone(), r.check_name.clone())))
+			.collect())
 	}
 
 	/// The scoped transforms that apply to a filing, in application
