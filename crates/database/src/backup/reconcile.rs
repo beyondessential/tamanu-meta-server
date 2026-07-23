@@ -38,7 +38,7 @@ use uuid::Uuid;
 
 use crate::{
 	backup::{refs, staleness::ScanRow},
-	issues::{CheckFiling, FilingScope, file_check},
+	issues::{CheckFiling, Scope, file_check},
 	servers::Server,
 };
 
@@ -109,7 +109,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					db,
 					CheckFiling {
 						source: crate::statuses::CANOPY_SOURCE,
-						scope: FilingScope::Group(row.group_id),
+						scope: Scope::Group(row.group_id),
+						device_id: None,
 						check: &missing_ref,
 						observed: CheckResult::Failed,
 						title: None,
@@ -136,7 +137,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 						db,
 						CheckFiling {
 							source: crate::statuses::CANOPY_SOURCE,
-							scope: FilingScope::Group(row.group_id),
+							scope: Scope::Group(row.group_id),
+							device_id: None,
 							check: &missing_ref,
 							observed: CheckResult::Passed,
 							title: None,
@@ -163,10 +165,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					db,
 					CheckFiling {
 						source: crate::statuses::CANOPY_SOURCE,
-						scope: FilingScope::Server {
-							server_id: row.server_id,
-							device_id: row.device_id,
-						},
+						scope: Scope::Server(row.server_id),
+						device_id: row.device_id,
 						check: &gap_ref,
 						observed: CheckResult::Warning,
 						title: None,
@@ -205,10 +205,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					db,
 					CheckFiling {
 						source: crate::statuses::CANOPY_SOURCE,
-						scope: FilingScope::Server {
-							server_id: row.server_id,
-							device_id: row.device_id,
-						},
+						scope: Scope::Server(row.server_id),
+						device_id: row.device_id,
 						check: &size_ref,
 						observed: CheckResult::Warning,
 						title: None,
@@ -252,10 +250,8 @@ async fn clear_size_mismatch(
 		db,
 		CheckFiling {
 			source: crate::statuses::CANOPY_SOURCE,
-			scope: FilingScope::Server {
-				server_id: row.server_id,
-				device_id: row.device_id,
-			},
+			scope: Scope::Server(row.server_id),
+			device_id: row.device_id,
 			check: size_ref,
 			observed: CheckResult::Passed,
 			title: None,
@@ -287,10 +283,8 @@ async fn clear_report_gap(
 		db,
 		CheckFiling {
 			source: crate::statuses::CANOPY_SOURCE,
-			scope: FilingScope::Server {
-				server_id: row.server_id,
-				device_id: row.device_id,
-			},
+			scope: Scope::Server(row.server_id),
+			device_id: row.device_id,
 			check: gap_ref,
 			observed: CheckResult::Passed,
 			title: None,
@@ -316,6 +310,14 @@ async fn open_group_active(
 	crate::backup::staleness::open_group_issue_active(db, group_id, r#ref).await
 }
 
+/// Raw snapshot row: `(server_id, type, latest_snapshot_at, observed_at)`.
+type SnapshotRow = (
+	Option<Uuid>,
+	Option<String>,
+	Option<jiff_diesel::Timestamp>,
+	jiff_diesel::Timestamp,
+);
+
 /// Latest snapshot + observed-at per `(server_id, type)` for the given groups.
 /// Rows with a NULL `server_id` (sources we can't attribute to a server) are
 /// skipped.
@@ -329,12 +331,7 @@ async fn snapshot_info(
 		return Ok(HashMap::new());
 	}
 
-	let rows: Vec<(
-		Option<Uuid>,
-		Option<String>,
-		Option<jiff_diesel::Timestamp>,
-		jiff_diesel::Timestamp,
-	)> = s::table
+	let rows: Vec<SnapshotRow> = s::table
 		.filter(s::group_id.eq_any(group_ids))
 		.filter(s::server_id.is_not_null())
 		.select((

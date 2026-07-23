@@ -26,7 +26,7 @@ use commons_types::status::CheckResult;
 use database::{
 	BackupConfigStatus, ServerGroupBackupConfig,
 	backup::refs,
-	issues::{CheckFiling, FilingScope, file_check},
+	issues::{CheckFiling, Scope, file_check},
 };
 use jiff::Timestamp;
 use tokio::{
@@ -98,7 +98,8 @@ async fn recover_identity_alert(
 			db,
 			CheckFiling {
 				source: database::statuses::CANOPY_SOURCE,
-				scope: FilingScope::Group(group_id),
+				scope: Scope::Group(group_id),
+				device_id: None,
 				check: refs::PREFLIGHT_IDENTITY,
 				observed: CheckResult::Passed,
 				title: None,
@@ -245,7 +246,8 @@ async fn deep_check_group(
 				db,
 				CheckFiling {
 					source: database::statuses::CANOPY_SOURCE,
-					scope: FilingScope::Group(cfg.group_id),
+					scope: Scope::Group(cfg.group_id),
+					device_id: None,
 					check: refs::PREFLIGHT_ASSUME,
 					observed: CheckResult::Passed,
 					title: None,
@@ -264,7 +266,8 @@ async fn deep_check_group(
 				db,
 				CheckFiling {
 					source: database::statuses::CANOPY_SOURCE,
-					scope: FilingScope::Group(cfg.group_id),
+					scope: Scope::Group(cfg.group_id),
+					device_id: None,
 					check: refs::PREFLIGHT_ASSUME,
 					observed: CheckResult::Failed,
 					title: Some("backup maintenance-role access failed"),
@@ -284,7 +287,8 @@ async fn deep_check_group(
 				db,
 				CheckFiling {
 					source: database::statuses::CANOPY_SOURCE,
-					scope: FilingScope::Group(cfg.group_id),
+					scope: Scope::Group(cfg.group_id),
+					device_id: None,
 					check: refs::PREFLIGHT_OBJECT_LOCK,
 					observed: CheckResult::Passed,
 					title: None,
@@ -303,7 +307,8 @@ async fn deep_check_group(
 				db,
 				CheckFiling {
 					source: database::statuses::CANOPY_SOURCE,
-					scope: FilingScope::Group(cfg.group_id),
+					scope: Scope::Group(cfg.group_id),
+					device_id: None,
 					check: refs::PREFLIGHT_OBJECT_LOCK,
 					observed: CheckResult::Failed,
 					title: Some("bucket Object-Lock missing or weakened"),

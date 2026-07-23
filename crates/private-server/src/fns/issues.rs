@@ -5,8 +5,8 @@ use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::{Uuid, issue::ResolvedReason, status::CheckResult};
 use database::issues::{
-	CheckFiling, FilingScope, Incident, Issue, IssueFilter, IssueIncidentRef, IssueListFilters,
-	MANUAL_SOURCE, file_check,
+	CheckFiling, Incident, Issue, IssueFilter, IssueIncidentRef, IssueListFilters, MANUAL_SOURCE,
+	Scope, file_check,
 };
 use database::notes::IssueNote;
 use database::servers::Server;
@@ -517,10 +517,8 @@ pub async fn submit_manual_event(
 		&mut conn,
 		CheckFiling {
 			source: MANUAL_SOURCE,
-			scope: FilingScope::Server {
-				server_id: args.server_id,
-				device_id: None,
-			},
+			scope: Scope::Server(args.server_id),
+			device_id: None,
 			check: &args.r#ref,
 			observed,
 			title: args.description.as_deref(),

@@ -23,7 +23,7 @@ use uuid::Uuid;
 
 use crate::{
 	backup::refs,
-	issues::{CheckFiling, FilingScope, file_check},
+	issues::{CheckFiling, Scope, file_check},
 	servers::Server,
 };
 
@@ -108,6 +108,18 @@ impl ScanRow {
 	}
 }
 
+/// Raw scan-set row: `(server_id, group_id, is_monitored, device_id, type,
+/// expected_interval, config_created_at)`.
+type ScanBaseRow = (
+	Uuid,
+	Uuid,
+	bool,
+	Option<Uuid>,
+	String,
+	crate::pg_duration::PgDuration,
+	jiff_diesel::Timestamp,
+);
+
 /// Build the scan set: every enabled `(server, type)` capability in a
 /// `status='ready'` group whose effective schedule has a non-NULL
 /// `expected_interval`. Per `(server, type)`, attach the latest backup success
@@ -118,18 +130,9 @@ pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 		server_group_backup_config as cfg, server_group_backup_schedule as sched, servers,
 	};
 
-	// (server_id, group_id, is_monitored, device_id, type, expected_interval, config_created_at)
 	// Join: servers -> their group's ready config -> enabled capability ->
 	// per-(group,type) schedule with a non-NULL interval.
-	let base: Vec<(
-		Uuid,
-		Uuid,
-		bool,
-		Option<Uuid>,
-		String,
-		crate::pg_duration::PgDuration,
-		jiff_diesel::Timestamp,
-	)> = servers::table
+	let base: Vec<ScanBaseRow> = servers::table
 		.inner_join(cfg::table.on(cfg::group_id.nullable().eq(servers::group_id)))
 		.inner_join(cap::table.on(cap::server_id.eq(servers::id)))
 		.inner_join(
@@ -240,10 +243,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					db,
 					CheckFiling {
 						source: crate::statuses::CANOPY_SOURCE,
-						scope: FilingScope::Server {
-							server_id: row.server_id,
-							device_id: row.device_id,
-						},
+						scope: Scope::Server(row.server_id),
+						device_id: row.device_id,
 						check: &staleness_ref,
 						observed: CheckResult::Failed,
 						title: None,
@@ -273,10 +274,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					db,
 					CheckFiling {
 						source: crate::statuses::CANOPY_SOURCE,
-						scope: FilingScope::Server {
-							server_id: row.server_id,
-							device_id: row.device_id,
-						},
+						scope: Scope::Server(row.server_id),
+						device_id: row.device_id,
 						check: &staleness_ref,
 						observed: CheckResult::Passed,
 						title: None,
@@ -307,10 +306,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					db,
 					CheckFiling {
 						source: crate::statuses::CANOPY_SOURCE,
-						scope: FilingScope::Server {
-							server_id: row.server_id,
-							device_id: row.device_id,
-						},
+						scope: Scope::Server(row.server_id),
+						device_id: row.device_id,
 						check: &never_ref,
 						observed: CheckResult::Warning,
 						title: None,
@@ -341,10 +338,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 						db,
 						CheckFiling {
 							source: crate::statuses::CANOPY_SOURCE,
-							scope: FilingScope::Server {
-								server_id: row.server_id,
-								device_id: row.device_id,
-							},
+							scope: Scope::Server(row.server_id),
+							device_id: row.device_id,
 							check: &never_ref,
 							observed: CheckResult::Passed,
 							title: None,
@@ -409,7 +404,8 @@ async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result
 				db,
 				CheckFiling {
 					source: crate::statuses::CANOPY_SOURCE,
-					scope: FilingScope::Group(group_id),
+					scope: Scope::Group(group_id),
+					device_id: None,
 					check: refs::MAINTENANCE_STALE,
 					observed: CheckResult::Failed,
 					title: None,
@@ -436,7 +432,8 @@ async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result
 				db,
 				CheckFiling {
 					source: crate::statuses::CANOPY_SOURCE,
-					scope: FilingScope::Group(group_id),
+					scope: Scope::Group(group_id),
+					device_id: None,
 					check: refs::MAINTENANCE_STALE,
 					observed: CheckResult::Passed,
 					title: None,
@@ -463,7 +460,8 @@ async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result
 					db,
 					CheckFiling {
 						source: crate::statuses::CANOPY_SOURCE,
-						scope: FilingScope::Group(group_id),
+						scope: Scope::Group(group_id),
+						device_id: None,
 						check: refs::MAINTENANCE_ERROR,
 						observed: CheckResult::Failed,
 						title: None,
@@ -491,7 +489,8 @@ async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result
 					db,
 					CheckFiling {
 						source: crate::statuses::CANOPY_SOURCE,
-						scope: FilingScope::Group(group_id),
+						scope: Scope::Group(group_id),
+						device_id: None,
 						check: refs::MAINTENANCE_ERROR,
 						observed: CheckResult::Passed,
 						title: None,

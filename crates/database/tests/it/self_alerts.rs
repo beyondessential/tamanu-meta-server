@@ -255,10 +255,8 @@ async fn quiet_check(conn: &mut diesel_async::AsyncPgConnection, check: &str, ho
 		conn,
 		database::issues::CheckFiling {
 			source: "alertd",
-			scope: database::issues::FilingScope::Server {
-				server_id,
-				device_id: None,
-			},
+			scope: database::issues::Scope::Server(server_id),
+			device_id: None,
 			check,
 			observed: CheckResult::Passed,
 			title: None,

@@ -4,7 +4,7 @@
 
 use commons_types::status::{CheckResult, HealthState};
 use database::check_policies::CheckPolicy;
-use database::issues::{CheckFiling, FilingScope, Issue, file_check, health_from_check_state};
+use database::issues::{CheckFiling, Issue, Scope, file_check, health_from_check_state};
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
@@ -17,10 +17,8 @@ fn filing_result<'a>(
 ) -> CheckFiling<'a> {
 	CheckFiling {
 		source,
-		scope: FilingScope::Server {
-			server_id,
-			device_id: None,
-		},
+		scope: Scope::Server(server_id),
+		device_id: None,
 		check,
 		observed,
 		title: Some("decommission test"),
@@ -50,10 +48,8 @@ async fn insert_server(conn: &mut diesel_async::AsyncPgConnection) -> Uuid {
 fn filing<'a>(server_id: Uuid, source: &'a str, check: &'a str) -> CheckFiling<'a> {
 	CheckFiling {
 		source,
-		scope: FilingScope::Server {
-			server_id,
-			device_id: None,
-		},
+		scope: Scope::Server(server_id),
+		device_id: None,
 		check,
 		observed: CheckResult::Passed,
 		title: None,

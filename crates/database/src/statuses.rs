@@ -401,10 +401,8 @@ impl Status {
 				db,
 				crate::issues::CheckFiling {
 					source: CANOPY_SOURCE,
-					scope: crate::issues::FilingScope::Server {
-						server_id: server.id,
-						device_id: None,
-					},
+					scope: crate::issues::Scope::Server(server.id),
+					device_id: None,
 					check: REACHABILITY_REF,
 					observed,
 					title: Some("Server reachability"),

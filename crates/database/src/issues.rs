@@ -421,7 +421,7 @@ impl NewEvent {
 					)
 					.await?;
 				}
-				let issue = diesel::update(issues::table.filter(issues::id.eq(existing.id)))
+				diesel::update(issues::table.filter(issues::id.eq(existing.id)))
 					.set((
 						issues::device_id.eq(device_id),
 						issues::description.eq(description),
@@ -452,8 +452,7 @@ impl NewEvent {
 					))
 					.returning(Issue::as_select())
 					.get_result(conn)
-					.await?;
-				issue
+					.await?
 			} else {
 				let inserted: Issue = diesel::insert_into(issues::table)
 					.values((
@@ -777,15 +776,60 @@ pub async fn raise_global_event_with_state(
 	.await
 }
 
-/// Where a canopy-determined check's state attaches.
-#[derive(Debug, Clone, Copy)]
-pub enum FilingScope {
-	Server {
-		server_id: Uuid,
-		device_id: Option<Uuid>,
-	},
+/// The scope a check-state, issue, or scoped policy attaches to: one
+/// server, a server group, or canopy as a whole. This is the single scope
+/// vocabulary for check state — do not reintroduce a parallel scope enum or
+/// an ad-hoc `match (server_id, server_group_id)`; map through the methods
+/// here. Provenance (which device reported a filing) is a separate concern
+/// (see `CheckFiling::device_id`), not part of scope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+	Server(Uuid),
 	Group(Uuid),
 	Global,
+}
+
+impl Scope {
+	/// The `(server_id, server_group_id)` storage columns for this scope.
+	pub fn to_columns(self) -> (Option<Uuid>, Option<Uuid>) {
+		match self {
+			Scope::Server(id) => (Some(id), None),
+			Scope::Group(id) => (None, Some(id)),
+			Scope::Global => (None, None),
+		}
+	}
+
+	/// The scope encoded by a `(server_id, server_group_id)` pair. A set
+	/// group wins (the storage CHECK allows at most one set; both null is
+	/// canopy-wide).
+	pub fn from_columns(server_id: Option<Uuid>, server_group_id: Option<Uuid>) -> Self {
+		match (server_id, server_group_id) {
+			(_, Some(gid)) => Scope::Group(gid),
+			(Some(sid), None) => Scope::Server(sid),
+			(None, None) => Scope::Global,
+		}
+	}
+
+	/// Resolve this scope to the incident target it contributes to and
+	/// whether that contribution is monitored. A server maps to its group,
+	/// carrying the server's `is_monitored`; a group targets itself and a
+	/// canopy-wide scope the global target, both always monitored. An
+	/// ungrouped server has no target and no incident path.
+	pub async fn resolve_incident_target(
+		self,
+		conn: &mut AsyncPgConnection,
+	) -> Result<Option<(IncidentTarget, bool)>> {
+		match self {
+			Scope::Group(gid) => Ok(Some((IncidentTarget::Group(gid), true))),
+			Scope::Server(sid) => {
+				let server = Server::get_by_id(conn, sid).await?;
+				Ok(server
+					.group_id
+					.map(|gid| (IncidentTarget::Group(gid), server.is_monitored)))
+			}
+			Scope::Global => Ok(Some((IncidentTarget::Global, true))),
+		}
+	}
 }
 
 /// The source operator-raised manual conditions file under.
@@ -800,7 +844,10 @@ pub struct CheckFiling<'a> {
 	/// operator-raised conditions (server scope only), `canopy` for
 	/// canopy's own determinations.
 	pub source: &'a str,
-	pub scope: FilingScope,
+	pub scope: Scope,
+	/// The reporting device, for server-scoped filings — provenance, not
+	/// scope. `None` for operator/platform filings and non-server scopes.
+	pub device_id: Option<Uuid>,
 	/// The check's stable name (doubles as the issue ref under the
 	/// source): a contract with stored silences.
 	pub check: &'a str,
@@ -840,8 +887,7 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 
 	let source = filing.source;
 	debug_assert!(
-		matches!(filing.scope, FilingScope::Server { .. })
-			|| source == crate::statuses::CANOPY_SOURCE,
+		matches!(filing.scope, Scope::Server(_)) || source == crate::statuses::CANOPY_SOURCE,
 		"group- and canopy-wide filings are canopy's own",
 	);
 	CheckPolicy::register(
@@ -876,7 +922,7 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 		Option<Uuid>,
 		Option<Uuid>,
 	) = match filing.scope {
-		FilingScope::Server { server_id, .. } => {
+		Scope::Server(server_id) => {
 			let server = Server::get_by_id(conn, server_id).await?;
 			let group_id = server.group_id;
 			let tags = server
@@ -888,8 +934,8 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 				.collect();
 			(tags, Some(server_id), group_id)
 		}
-		FilingScope::Group(group_id) => (Default::default(), None, Some(group_id)),
-		FilingScope::Global => (Default::default(), None, None),
+		Scope::Group(group_id) => (Default::default(), None, Some(group_id)),
+		Scope::Global => (Default::default(), None, None),
 	};
 	let ctx = EvaluationContext {
 		status_extra: &status_extra,
@@ -921,10 +967,7 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 	};
 
 	match filing.scope {
-		FilingScope::Server {
-			server_id,
-			device_id,
-		} => {
+		Scope::Server(server_id) => {
 			NewEvent {
 				source: source.to_string(),
 				r#ref: filing.check.to_string(),
@@ -933,10 +976,10 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 				active: Some(active),
 				occurred_at: None,
 			}
-			.save_with_state(conn, server_id, device_id, Some(&stamp), false)
+			.save_with_state(conn, server_id, filing.device_id, Some(&stamp), false)
 			.await
 		}
-		FilingScope::Group(gid) => {
+		Scope::Group(gid) => {
 			raise_group_event_with_state(
 				conn,
 				gid,
@@ -948,7 +991,7 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 			)
 			.await
 		}
-		FilingScope::Global => {
+		Scope::Global => {
 			raise_global_event_with_state(
 				conn,
 				filing.check,
@@ -1292,7 +1335,7 @@ async fn re_evaluate_incident_membership(
 	use crate::schema::{incident_issues, incidents};
 
 	let was_in = is_issue_in_open_incident(conn, issue.id).await?;
-	let snoozed = issue.snoozed_until.map_or(false, |t| t > Timestamp::now());
+	let snoozed = issue.snoozed_until.is_some_and(|t| t > Timestamp::now());
 	// A group-scoped issue (server_id = None) can only be silenced at the
 	// group level; pass the nil server so only the group list is consulted.
 	// Canopy-wide issues have no silence scope (yet).
@@ -1520,16 +1563,9 @@ async fn issue_target_and_monitored(
 	conn: &mut AsyncPgConnection,
 	issue: &Issue,
 ) -> Result<Option<(IncidentTarget, bool)>> {
-	match (issue.server_id, issue.server_group_id) {
-		(_, Some(gid)) => Ok(Some((IncidentTarget::Group(gid), true))),
-		(Some(sid), None) => {
-			let server = Server::get_by_id(conn, sid).await?;
-			Ok(server
-				.group_id
-				.map(|gid| (IncidentTarget::Group(gid), server.is_monitored)))
-		}
-		(None, None) => Ok(Some((IncidentTarget::Global, true))),
-	}
+	Scope::from_columns(issue.server_id, issue.server_group_id)
+		.resolve_incident_target(conn)
+		.await
 }
 
 /// Re-evaluate every currently-open issue on `server_id` against incident
@@ -1853,10 +1889,14 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 		let now = Timestamp::now();
 		let mut evaluated = 0usize;
 		for issue in open_issues {
-			match (issue.server_id, issue.server_group_id) {
+			// Classify via the shared scope vocabulary, but resolve the
+			// server case from the batched `by_id` map (rather than
+			// `Scope::resolve_incident_target`, which queries per issue) to
+			// keep this startup sweep to a single server fetch.
+			match Scope::from_columns(issue.server_id, issue.server_group_id) {
 				// Group-scoped issue: resolve its group directly, bypass the
 				// per-server is_monitored gate (monitored = true).
-				(None, Some(gid)) => {
+				Scope::Group(gid) => {
 					re_evaluate_incident_membership(
 						conn,
 						&issue,
@@ -1869,7 +1909,7 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 					evaluated += 1;
 				}
 				// Server-scoped issue: look up the server and its group.
-				(Some(sid), _) => {
+				Scope::Server(sid) => {
 					let Some(server) = by_id.get(&sid) else {
 						continue;
 					};
@@ -1889,7 +1929,7 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 					evaluated += 1;
 				}
 				// Canopy-wide issue: the global target, always monitored.
-				(None, None) => {
+				Scope::Global => {
 					re_evaluate_incident_membership(
 						conn,
 						&issue,
