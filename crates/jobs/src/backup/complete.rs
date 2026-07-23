@@ -117,7 +117,8 @@ pub(crate) async fn complete_inspect(
 		db,
 		database::issues::CheckFiling {
 			source: database::statuses::CANOPY_SOURCE,
-			scope: database::issues::FilingScope::Group(group_id),
+			scope: database::issues::Scope::Group(group_id),
+			device_id: None,
 			check: database::backup::refs::CORRUPTION,
 			observed,
 			title,

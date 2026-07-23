@@ -39,6 +39,7 @@ Avoid writing large summaries of actions taken when done.
 - Use `commons_tests::server::run()` for HTTP endpoint tests
 - Use `commons_tests::server::run_with_device_auth()` for authenticated device tests in the public server
 - Admin endpoints take a `TailscaleAdmin` axum extractor; the React UI gates with `commons.is_current_user_admin`
+- **Check-state / issue / policy scope** is the single `database::issues::Scope` enum (`Server(id)`, `Group(id)`, `Global`) — use it for filing (`CheckFiling.scope`, with `device_id` a *separate* provenance field), scoped silences (`ScopedCheckPolicy`), and incident-target resolution. Never add another scope enum or hand-write `match (server_id, server_group_id)`; map through `Scope::from_columns` / `to_columns` / `resolve_incident_target`. Storage stays two nullable FK columns (`server_id`, `server_group_id`) so Postgres keeps the `ON DELETE CASCADE` + uniqueness that prevents orphaned check-states.
 
 ## Private server architecture
 - **Server fns** under `crates/private-server/src/fns/<module>.rs` are bare axum handlers with `(State, [auth extractor], Json<Args>) -> Result<Json<T>>` signatures.

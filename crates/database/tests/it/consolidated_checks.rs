@@ -2,7 +2,7 @@
 //! every source, graded, with the health rollup matching the headline.
 
 use commons_types::status::{CheckResult, HealthState};
-use database::issues::{CheckFiling, FilingScope, consolidated_checks_latest, file_check};
+use database::issues::{CheckFiling, Scope, consolidated_checks_latest, file_check};
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
@@ -31,10 +31,8 @@ fn filing<'a>(
 ) -> CheckFiling<'a> {
 	CheckFiling {
 		source,
-		scope: FilingScope::Server {
-			server_id,
-			device_id: None,
-		},
+		scope: Scope::Server(server_id),
+		device_id: None,
 		check,
 		observed,
 		title: None,

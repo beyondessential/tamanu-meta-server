@@ -16,6 +16,7 @@
 //! and edit the catalog via the private-server `/api/healthchecks`
 //! endpoints.
 
+use crate::issues::Scope;
 use commons_errors::{AppError, Result};
 use commons_types::status::CheckResult;
 use diesel::prelude::*;
@@ -562,15 +563,6 @@ impl CheckPolicy {
 	}
 }
 
-/// The scope a scoped transform (or silence) attaches to: a server, a
-/// server group, or canopy-wide — mirroring check targets.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PolicyScope {
-	Server(Uuid),
-	Group(Uuid),
-	Global,
-}
-
 /// A result transform scoped to one target, applied after the fleet
 /// catalog: fleet, then group, then server, each acting on the previous
 /// effective result. Either side may be present — a ceiling, a rules
@@ -612,23 +604,15 @@ pub struct ScopedCheckPolicy {
 }
 
 impl ScopedCheckPolicy {
-	fn scope_filter(scope: PolicyScope) -> (Option<Uuid>, Option<Uuid>) {
-		match scope {
-			PolicyScope::Server(id) => (Some(id), None),
-			PolicyScope::Group(id) => (None, Some(id)),
-			PolicyScope::Global => (None, None),
-		}
-	}
-
 	/// The transform at exactly this (scope, source, check), if any.
 	pub async fn get(
 		db: &mut AsyncPgConnection,
-		scope: PolicyScope,
+		scope: Scope,
 		source: &str,
 		check_name: &str,
 	) -> Result<Option<Self>> {
 		use crate::schema::scoped_check_policies::dsl;
-		let (server, group) = Self::scope_filter(scope);
+		let (server, group) = scope.to_columns();
 		dsl::scoped_check_policies
 			.select(Self::as_select())
 			.filter(
@@ -649,13 +633,13 @@ impl ScopedCheckPolicy {
 	/// ceiling becomes skipped. Idempotent.
 	pub async fn silence(
 		db: &mut AsyncPgConnection,
-		scope: PolicyScope,
+		scope: Scope,
 		source: &str,
 		check_name: &str,
 		created_by: Option<&str>,
 	) -> Result<Self> {
 		use crate::schema::scoped_check_policies::dsl;
-		let (server, group) = Self::scope_filter(scope);
+		let (server, group) = scope.to_columns();
 		if let Some(existing) = Self::get(db, scope, source, check_name).await? {
 			return diesel::update(dsl::scoped_check_policies.filter(dsl::id.eq(existing.id)))
 				.set((
@@ -687,7 +671,7 @@ impl ScopedCheckPolicy {
 	/// when scoped rules remain. A no-op if nothing is silenced there.
 	pub async fn unsilence(
 		db: &mut AsyncPgConnection,
-		scope: PolicyScope,
+		scope: Scope,
 		source: &str,
 		check_name: &str,
 	) -> Result<()> {
@@ -721,12 +705,9 @@ impl ScopedCheckPolicy {
 	/// catalog row (decommissioned, or orphaned with no catalog row at all)
 	/// — are excluded: the check contributes to nothing, so its silence is
 	/// dead config that shouldn't clutter the operator's list.
-	pub async fn list_silences(
-		db: &mut AsyncPgConnection,
-		scope: PolicyScope,
-	) -> Result<Vec<Self>> {
+	pub async fn list_silences(db: &mut AsyncPgConnection, scope: Scope) -> Result<Vec<Self>> {
 		use crate::schema::scoped_check_policies::dsl;
-		let (server, group) = Self::scope_filter(scope);
+		let (server, group) = scope.to_columns();
 		let rows: Vec<Self> = dsl::scoped_check_policies
 			.select(Self::as_select())
 			.filter(

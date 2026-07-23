@@ -21,9 +21,10 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::check_policies::{PolicyScope, ScopedCheckPolicy};
+use crate::check_policies::ScopedCheckPolicy;
 use crate::issues::{
-	MANUAL_SOURCE, reevaluate_open_issues_for_group_ref, reevaluate_open_issues_for_server_ref,
+	MANUAL_SOURCE, Scope, reevaluate_open_issues_for_group_ref,
+	reevaluate_open_issues_for_server_ref,
 };
 use crate::statuses::CANOPY_SOURCE;
 
@@ -99,15 +100,14 @@ pub async fn is_silenced(
 	let check = ref_to_check(r#ref);
 	let is_silence =
 		|p: Option<ScopedCheckPolicy>| p.is_some_and(|p| p.ceiling.as_deref() == Some("skipped"));
-	if is_silence(ScopedCheckPolicy::get(db, PolicyScope::Server(server_id), source, check).await?)
-	{
+	if is_silence(ScopedCheckPolicy::get(db, Scope::Server(server_id), source, check).await?) {
 		return Ok(true);
 	}
 	let Some(gid) = group_id else {
 		return Ok(false);
 	};
 	Ok(is_silence(
-		ScopedCheckPolicy::get(db, PolicyScope::Group(gid), source, check).await?,
+		ScopedCheckPolicy::get(db, Scope::Group(gid), source, check).await?,
 	))
 }
 
@@ -165,7 +165,7 @@ impl ServerSilencedRef {
 	) -> Result<Self> {
 		let policy = ScopedCheckPolicy::silence(
 			db,
-			PolicyScope::Server(server_id),
+			Scope::Server(server_id),
 			source,
 			ref_to_check(r#ref),
 			created_by,
@@ -183,20 +183,15 @@ impl ServerSilencedRef {
 		source: &str,
 		r#ref: &str,
 	) -> Result<()> {
-		ScopedCheckPolicy::unsilence(
-			db,
-			PolicyScope::Server(server_id),
-			source,
-			ref_to_check(r#ref),
-		)
-		.await?;
+		ScopedCheckPolicy::unsilence(db, Scope::Server(server_id), source, ref_to_check(r#ref))
+			.await?;
 		reevaluate_open_issues_for_server_ref(db, server_id, source, r#ref).await?;
 		Ok(())
 	}
 
 	pub async fn list_for_server(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Vec<Self>> {
 		Ok(
-			ScopedCheckPolicy::list_silences(db, PolicyScope::Server(server_id))
+			ScopedCheckPolicy::list_silences(db, Scope::Server(server_id))
 				.await?
 				.into_iter()
 				.filter_map(Self::from_policy)
@@ -225,7 +220,7 @@ impl ServerGroupSilencedRef {
 	) -> Result<Self> {
 		let policy = ScopedCheckPolicy::silence(
 			db,
-			PolicyScope::Group(server_group_id),
+			Scope::Group(server_group_id),
 			source,
 			ref_to_check(r#ref),
 			created_by,
@@ -243,7 +238,7 @@ impl ServerGroupSilencedRef {
 	) -> Result<()> {
 		ScopedCheckPolicy::unsilence(
 			db,
-			PolicyScope::Group(server_group_id),
+			Scope::Group(server_group_id),
 			source,
 			ref_to_check(r#ref),
 		)
@@ -257,7 +252,7 @@ impl ServerGroupSilencedRef {
 		server_group_id: Uuid,
 	) -> Result<Vec<Self>> {
 		Ok(
-			ScopedCheckPolicy::list_silences(db, PolicyScope::Group(server_group_id))
+			ScopedCheckPolicy::list_silences(db, Scope::Group(server_group_id))
 				.await?
 				.into_iter()
 				.filter_map(Self::from_policy)

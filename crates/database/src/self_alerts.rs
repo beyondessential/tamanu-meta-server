@@ -13,7 +13,7 @@ use commons_errors::Result;
 use commons_types::status::CheckResult;
 use diesel_async::AsyncPgConnection;
 
-use crate::issues::{CheckFiling, FilingScope, Issue, file_check, get_global_issue};
+use crate::issues::{CheckFiling, Issue, Scope, file_check, get_global_issue};
 
 /// An operator-notification delivery permanently failed (the drainer gave up
 /// on an outbox row). No automatic recovery: stays until operator-resolved.
@@ -111,7 +111,8 @@ pub async fn raise(
 		conn,
 		CheckFiling {
 			source: crate::statuses::CANOPY_SOURCE,
-			scope: FilingScope::Global,
+			scope: Scope::Global,
+			device_id: None,
 			check: r#ref,
 			observed,
 			title: Some(title),
@@ -147,7 +148,8 @@ pub async fn recover(
 		conn,
 		CheckFiling {
 			source: crate::statuses::CANOPY_SOURCE,
-			scope: FilingScope::Global,
+			scope: Scope::Global,
+			device_id: None,
 			check: r#ref,
 			observed: CheckResult::Passed,
 			title: None,

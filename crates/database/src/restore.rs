@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 use crate::backup::refs;
 use crate::backups::BackupRun;
-use crate::issues::{CheckFiling, FilingScope, file_check};
+use crate::issues::{CheckFiling, Scope, file_check};
 use crate::pg_duration::PgDuration;
 
 /// An operator's declaration that a restore consumer should maintain a
@@ -449,10 +449,7 @@ async fn recover_old_scope_alerts(
 			db,
 			CheckFiling {
 				source: crate::statuses::CANOPY_SOURCE,
-				scope: FilingScope::Server {
-					server_id: sid,
-					device_id: None,
-				},
+				scope: Scope::Server(sid), device_id: None,
 				check: &r#ref,
 				observed: CheckResult::Passed,
 				title: None,
@@ -596,10 +593,8 @@ impl BackupRestoreCheck {
 					db,
 					CheckFiling {
 						source: crate::statuses::CANOPY_SOURCE,
-						scope: FilingScope::Server {
-							server_id: sid,
-							device_id: None,
-						},
+						scope: Scope::Server(sid),
+						device_id: None,
 						check: &r#ref,
 						observed: CheckResult::Passed,
 						title: None,
@@ -624,10 +619,8 @@ impl BackupRestoreCheck {
 					db,
 					CheckFiling {
 						source: crate::statuses::CANOPY_SOURCE,
-						scope: FilingScope::Server {
-							server_id: sid,
-							device_id: None,
-						},
+						scope: Scope::Server(sid),
+						device_id: None,
 						check: &r#ref,
 						observed: CheckResult::Failed,
 						title: Some("restore verification failed"),
@@ -875,10 +868,8 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 				db,
 				CheckFiling {
 					source: crate::statuses::CANOPY_SOURCE,
-					scope: FilingScope::Server {
-						server_id: sid,
-						device_id: None,
-					},
+					scope: Scope::Server(sid),
+					device_id: None,
 					check: &r#ref,
 					observed: CheckResult::Failed,
 					title: Some("restore verification overdue"),

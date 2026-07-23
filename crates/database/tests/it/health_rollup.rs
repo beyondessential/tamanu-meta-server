@@ -5,7 +5,7 @@
 
 use commons_types::issue::ResolvedReason;
 use commons_types::status::{CheckResult, HealthState};
-use database::issues::{CheckFiling, FilingScope, Issue, file_check, health_from_check_state};
+use database::issues::{CheckFiling, Issue, Scope, file_check, health_from_check_state};
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
@@ -28,10 +28,8 @@ async fn insert_server(conn: &mut diesel_async::AsyncPgConnection) -> Uuid {
 fn failed_filing(server_id: Uuid, check: &str) -> CheckFiling<'_> {
 	CheckFiling {
 		source: "alertd",
-		scope: FilingScope::Server {
-			server_id,
-			device_id: None,
-		},
+		scope: Scope::Server(server_id),
+		device_id: None,
 		check,
 		observed: CheckResult::Failed,
 		title: Some("rollup test"),
