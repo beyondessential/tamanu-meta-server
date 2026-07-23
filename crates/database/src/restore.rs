@@ -414,18 +414,11 @@ impl RestoreConsumerCapability {
 /// `(server, type, intent)` so each replica recovers independently (one
 /// intent's healthy report must not clear another's failure on the same
 /// server).
-fn restore_verification_ref(
-	server_id: Uuid,
-	r#type: &BackupType,
-	intent: &RestoreIntent,
-) -> String {
-	format!(
-		"{}:{}:{}:{}",
-		refs::RESTORE_VERIFICATION,
-		server_id,
-		r#type,
-		intent
-	)
+fn restore_verification_ref(r#type: &BackupType, intent: &RestoreIntent) -> String {
+	// The check is server-scoped (the per-server dimension is the filing's
+	// server_id), so the name is stable per (type, intent) and shared across
+	// the fleet — one catalog policy, not one single-use name per server.
+	format!("{}:{}:{}", refs::RESTORE_VERIFICATION, r#type, intent)
 }
 
 /// Recover any active restore-verification alert keyed to a declaration's old
@@ -451,12 +444,15 @@ async fn recover_old_scope_alerts(
 	};
 
 	for sid in servers {
-		let r#ref = restore_verification_ref(sid, old_type, old_intent);
+		let r#ref = restore_verification_ref(old_type, old_intent);
 		file_check(
 			db,
 			CheckFiling {
 				source: crate::statuses::CANOPY_SOURCE,
-				scope: FilingScope::Group(old_group_id),
+				scope: FilingScope::Server {
+					server_id: sid,
+					device_id: None,
+				},
 				check: &r#ref,
 				observed: CheckResult::Passed,
 				title: None,
@@ -580,7 +576,6 @@ impl BackupRestoreCheck {
 		use crate::schema::backup_restore_checks::dsl;
 
 		let healthy = new.outcome == RunOutcome::Success && new.replica_healthy;
-		let group_id = new.group_id;
 		let server_id = new.server_id;
 		let r#type = new.r#type.clone();
 		let intent = new.intent.clone();
@@ -595,13 +590,16 @@ impl BackupRestoreCheck {
 		// Restore-health is attributed per server; a report without one is
 		// recorded but raises no group-level incident.
 		if let Some(sid) = server_id {
-			let r#ref = restore_verification_ref(sid, &r#type, &intent);
+			let r#ref = restore_verification_ref(&r#type, &intent);
 			if healthy {
 				file_check(
 					db,
 					CheckFiling {
 						source: crate::statuses::CANOPY_SOURCE,
-						scope: FilingScope::Group(group_id),
+						scope: FilingScope::Server {
+							server_id: sid,
+							device_id: None,
+						},
 						check: &r#ref,
 						observed: CheckResult::Passed,
 						title: None,
@@ -626,7 +624,10 @@ impl BackupRestoreCheck {
 					db,
 					CheckFiling {
 						source: crate::statuses::CANOPY_SOURCE,
-						scope: FilingScope::Group(group_id),
+						scope: FilingScope::Server {
+							server_id: sid,
+							device_id: None,
+						},
 						check: &r#ref,
 						observed: CheckResult::Failed,
 						title: Some("restore verification failed"),
@@ -859,7 +860,7 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 			if !overdue {
 				continue;
 			}
-			let r#ref = restore_verification_ref(sid, &d.r#type, &d.intent);
+			let r#ref = restore_verification_ref(&d.r#type, &d.intent);
 			let message = if once {
 				format!(
 					"Latest snapshot for {} / {} on server {sid} has not been verified within its overdue bound",
@@ -875,7 +876,10 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 				db,
 				CheckFiling {
 					source: crate::statuses::CANOPY_SOURCE,
-					scope: FilingScope::Group(d.group_id),
+					scope: FilingScope::Server {
+						server_id: sid,
+						device_id: None,
+					},
 					check: &r#ref,
 					observed: CheckResult::Failed,
 					title: Some("restore verification overdue"),

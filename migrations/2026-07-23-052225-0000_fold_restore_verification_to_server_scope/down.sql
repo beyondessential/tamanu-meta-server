@@ -1,0 +1,3 @@
+-- Irreversible: the server id can be moved back into the check name, but the
+-- original group scope isn't recoverable from the folded rows, and the old
+-- per-server catalog rows are gone. Nothing to restore.
