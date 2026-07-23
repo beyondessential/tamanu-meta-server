@@ -83,6 +83,17 @@ async fn insert_check_state(
 	check: &str,
 	minutes_ago: i32,
 ) {
+	// Mirror ingestion's upsert_default: a check-state only keeps its source
+	// "expected" for reachability if a live catalog row backs it.
+	sql_query(
+		"INSERT INTO check_policies (source, check_name) VALUES ($1, $2) \
+		 ON CONFLICT (source, check_name) DO NOTHING",
+	)
+	.bind::<sql_types::Text, _>(source)
+	.bind::<sql_types::Text, _>(check)
+	.execute(conn)
+	.await
+	.expect("catalog the seeded check");
 	sql_query(
 		r#"
 			INSERT INTO issues

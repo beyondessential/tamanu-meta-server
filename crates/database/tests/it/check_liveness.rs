@@ -131,6 +131,34 @@ async fn source_with_a_live_check_stays_expected() {
 	.await
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn orphaned_source_drops_out_of_freshness() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn).await;
+		file_check(
+			&mut conn,
+			filing(server_id, "bestool-alertd", "sync-errors"),
+		)
+		.await
+		.expect("file");
+		assert!(source_expected(&mut conn, server_id, "bestool-alertd").await);
+
+		// Strand the check-state by deleting its catalog row — a superseded
+		// source whose issue rows linger with no catalog entry. It must stop
+		// being "expected", or it would hold servers into a reachability
+		// warning forever with no catalog row to silence or decommission.
+		sql_query("DELETE FROM check_policies WHERE source = 'bestool-alertd'")
+			.execute(&mut conn)
+			.await
+			.expect("strand the check-state");
+		assert!(
+			!source_expected(&mut conn, server_id, "bestool-alertd").await,
+			"an orphaned source (no live catalog row) is not expected for reachability",
+		);
+	})
+	.await
+}
+
 #[derive(QueryableByName)]
 struct PolicyRow {
 	#[diesel(sql_type = sql_types::Bool)]
