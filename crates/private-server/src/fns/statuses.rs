@@ -785,7 +785,11 @@ async fn consolidated_checks_at(
 		.into_iter()
 		.map(|(k, v)| (k, serde_json::Value::String(v)))
 		.collect();
-	let decommissioned = CheckPolicy::decommissioned_pairs(conn).await?;
+	// Only present checks backed by a live catalog row, matching the live
+	// consolidated view: this drops decommissioned checks and orphaned
+	// check-states (a source's catalog rows removed out from under its
+	// states) so the point-in-time view reconstructs the same shape.
+	let cataloged = CheckPolicy::live_cataloged_pairs(conn).await?;
 
 	let mut checks: Vec<ConsolidatedCheck> = Vec::new();
 	for status in &statuses {
@@ -806,7 +810,7 @@ async fn consolidated_checks_at(
 			let Some(name) = obj.get("check").and_then(|v| v.as_str()) else {
 				continue;
 			};
-			if decommissioned.contains(&(status.source.clone(), name.to_string())) {
+			if !cataloged.contains(&(status.source.clone(), name.to_string())) {
 				continue;
 			}
 			let Some(observed) = CheckResult::from_entry(obj) else {

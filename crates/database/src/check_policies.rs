@@ -166,15 +166,20 @@ impl CheckPolicy {
 		Ok(reanimated)
 	}
 
-	/// The set of decommissioned `(source, check)` pairs. Callers exclude
-	/// these from anything user-facing — health, incidents, presentation.
-	pub async fn decommissioned_pairs(
+	/// The set of `(source, check)` pairs backed by a **live** catalog row
+	/// (present and not decommissioned). Callers require membership before
+	/// treating a check-state as a real check — anything user-facing
+	/// (health, presentation) ignores states with no live catalog row: both
+	/// decommissioned checks and orphaned check-states (an `issues` row whose
+	/// (source, check) has no catalog row at all, e.g. a superseded source
+	/// whose catalog rows were removed while its states lingered).
+	pub async fn live_cataloged_pairs(
 		db: &mut AsyncPgConnection,
 	) -> Result<std::collections::HashSet<(String, String)>> {
 		use crate::schema::check_policies::dsl;
 		Ok(dsl::check_policies
 			.select((dsl::source, dsl::check_name))
-			.filter(dsl::decommissioned_at.is_not_null())
+			.filter(dsl::decommissioned_at.is_null())
 			.load::<(String, String)>(db)
 			.await?
 			.into_iter()

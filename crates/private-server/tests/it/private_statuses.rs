@@ -832,7 +832,9 @@ async fn snapshot_returns_latest_when_at_omitted() {
 		.await
 		.unwrap();
 		conn.batch_execute(
-			"INSERT INTO statuses (server_id, created_at, healthy, health) VALUES
+			"INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'db');
+
+			INSERT INTO statuses (server_id, created_at, healthy, health) VALUES
 			('20000000-0000-0000-0000-000000000001', NOW() - INTERVAL '2 hours', true, '[]'::jsonb),
 			('20000000-0000-0000-0000-000000000001', NOW() - INTERVAL '1 hour', false,
 				'[{\"check\":\"db\",\"healthy\":false}]'::jsonb)",
@@ -941,7 +943,8 @@ async fn snapshot_at_time_returns_prior_row() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
 			"INSERT INTO servers (id, host, kind) VALUES
-			('20000000-0000-0000-0000-000000000002', 'https://snap2.example.com', 'central')",
+			('20000000-0000-0000-0000-000000000002', 'https://snap2.example.com', 'central');
+			INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'old'), ('alertd', 'mid'), ('alertd', 'new')",
 		)
 		.await
 		.unwrap();
@@ -1283,6 +1286,7 @@ async fn snapshot_merges_all_sources() {
 		conn.batch_execute(
 			"INSERT INTO servers (id, host, kind) VALUES \
 				('30000000-0000-0000-0000-00000000000a', 'https://multi.example.com', 'central'); \
+				 INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'db'), ('tamanu', 'tasks'); \
 			 INSERT INTO statuses (server_id, source, healthy, health, extra) VALUES \
 				('30000000-0000-0000-0000-00000000000a', 'alertd', true, \
 				 '[{\"check\":\"db\",\"result\":\"passed\"}]'::jsonb, '{\"queue\":3}'::jsonb), \
@@ -1332,7 +1336,7 @@ async fn snapshot_surfaces_per_check_results() {
 			"INSERT INTO check_policies (source, check_name, ceiling, escalates) VALUES \
 				('alertd', 'catalog_only', 'warning', FALSE), \
 				('alertd', 'elevated', 'failed', FALSE), \
-				('alertd', 'version_gated', 'warning', FALSE); \
+				('alertd', 'passing', 'warning', FALSE), ('alertd', 'version_gated', 'warning', FALSE); \
 			 UPDATE check_policies \
 				SET rules = '{\"if\":[{\"in_range\":[{\"var\":\"status.bestoolVersion\"},\">=1.0.0 <2.0.0\"]},\"failed\"]}'::jsonb \
 				WHERE check_name = 'version_gated'; UPDATE check_policies SET reviewed_at = NOW(), reviewed_by = 'test' WHERE source = 'alertd';",
@@ -1389,7 +1393,7 @@ async fn snapshot_check_results_cover_result_form() {
 		conn.batch_execute(
 			"INSERT INTO check_policies (source, check_name, ceiling) VALUES \
 				('alertd', 'elevated', 'failed'), \
-				('alertd', 'degraded', 'failed'); UPDATE check_policies SET reviewed_at = NOW(), reviewed_by = 'test' WHERE source = 'alertd';",
+				('alertd', 'degraded', 'failed'), ('alertd', 'busted', 'warning'), ('alertd', 'absent', 'warning'), ('alertd', 'fine', 'warning'); UPDATE check_policies SET reviewed_at = NOW(), reviewed_by = 'test' WHERE source = 'alertd';",
 		)
 		.await
 		.unwrap();
@@ -1456,6 +1460,8 @@ async fn get_detail_health_excludes_silenced_checks() {
 			INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '1.0.0', true,
 			 '[{\"check\": \"postgres\", \"result\": \"failed\"}]'::jsonb, '{}'::jsonb, NOW());
+
+			INSERT INTO check_policies (source, check_name, ceiling) VALUES ('alertd', 'postgres', 'failed');
 
 			INSERT INTO issues (server_id, source, ref, check_name, observed_result, effective_result, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed', 'postgres failed', true, NOW(), NOW(), NOW(), NOW())",
@@ -1559,6 +1565,8 @@ async fn snapshot_reports_and_excludes_silenced_checks() {
 			INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '1.0.0', true,
 			 '[{\"check\": \"postgres\", \"result\": \"failed\"}, {\"check\": \"disk\", \"result\": \"passed\"}]'::jsonb, '{}'::jsonb, NOW());
+
+			INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'postgres'), ('alertd', 'disk');
 
 			INSERT INTO scoped_check_policies (server_id, source, check_name, ceiling) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd', 'postgres', 'skipped')",

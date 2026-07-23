@@ -256,6 +256,14 @@ export async function seedStatus(
 						: "failed"
 					: null;
 		if (result === null) continue;
+		// Mirror ingestion's upsert_default: a check-state only presents and
+		// counts if a live catalog row backs it. Never clobbers an explicit
+		// seedCheckPolicy for the same (source, check).
+		await sql.query(
+			`INSERT INTO check_policies (source, check_name) VALUES ('alertd', $1)
+			 ON CONFLICT (source, check_name) DO NOTHING`,
+			[check],
+		);
 		const degraded = ["failed", "warning", "broken"].includes(result);
 		await sql.query(
 			`INSERT INTO issues
@@ -484,6 +492,16 @@ export async function seedIssue(
 			? "warning"
 			: "failed";
 	const check = (opts.ref ?? "health").replace(/^health\//, "");
+	// A server-scoped check-state only presents/counts if a live catalog row
+	// backs it (mirrors ingestion's upsert_default); never clobbers an
+	// explicit seedCheckPolicy for the same (source, check).
+	if (opts.serverId) {
+		await sql.query(
+			`INSERT INTO check_policies (source, check_name) VALUES ($1, $2)
+			 ON CONFLICT (source, check_name) DO NOTHING`,
+			[opts.source ?? "alertd", check],
+		);
+	}
 	// Every seeded issue was degraded at some point — that's what makes it
 	// an issue rather than healthy check state, which the listings exclude.
 	await sql.query(

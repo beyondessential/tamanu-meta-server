@@ -70,6 +70,13 @@ test.describe("issue status snapshot", () => {
 				JSON.stringify({ jobs: "ok" }),
 			],
 		);
+		// Both checks need a live catalog row to present (mirrors ingestion,
+		// which upserts one per reported check); the snapshot excludes
+		// orphaned check-states with no catalog policy.
+		await sql.query(
+			`INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'postgres'), ('tamanu', 'tasks')
+			 ON CONFLICT (source, check_name) DO NOTHING`,
+		);
 		// The issue provides the row (and its last_seen is the snapshot's `at`).
 		await seedIssue(sql, {
 			serverId: server.id,

@@ -91,6 +91,46 @@ async fn latest_merges_all_sources_and_matches_rollup() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn latest_excludes_orphaned_check_states() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn).await;
+		// A failing check whose catalog row is then deleted, stranding its
+		// check-state row (the bestool-alertd situation: an `issues` row with
+		// no `check_policies` policy — invisible in settings, unmanageable).
+		file_check(
+			&mut conn,
+			filing(
+				server_id,
+				"bestool-alertd",
+				"sync-errors",
+				CheckResult::Failed,
+			),
+		)
+		.await
+		.expect("file");
+		sql_query("DELETE FROM check_policies WHERE source = 'bestool-alertd'")
+			.execute(&mut conn)
+			.await
+			.expect("strand the check-state");
+
+		let consolidated = consolidated_checks_latest(&mut conn, server_id, None)
+			.await
+			.expect("consolidated");
+
+		// An orphaned check-state (no catalog row) is not a manageable check:
+		// it must not surface in the detail view...
+		assert!(
+			consolidated.checks.is_empty(),
+			"orphaned check-state is excluded from the detail view",
+		);
+		// ...nor drag the health rollup — a server cannot be broken by a check
+		// that no longer exists in the catalog.
+		assert_eq!(consolidated.health_state, HealthState::Healthy);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn latest_excludes_decommissioned_and_flags_silenced() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn).await;
