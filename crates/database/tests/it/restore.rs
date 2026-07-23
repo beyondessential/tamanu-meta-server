@@ -21,11 +21,13 @@ struct Count {
 	count: i64,
 }
 
-/// Count active `restore-verification:*` group issues for a group.
+/// Count active `restore-verification:*` check-states across a group's
+/// servers. The checks are server-scoped now, so join through `servers`.
 async fn active_restore_issues(conn: &mut AsyncPgConnection, group: Uuid) -> i64 {
 	sql_query(
-		"SELECT count(*) AS count FROM issues \
-		 WHERE server_group_id = $1 AND ref LIKE 'restore-verification:%' AND active = true",
+		"SELECT count(*) AS count FROM issues i \
+		 JOIN servers s ON s.id = i.server_id \
+		 WHERE s.group_id = $1 AND i.ref LIKE 'restore-verification:%' AND i.active = true",
 	)
 	.bind::<sql_types::Uuid, _>(group)
 	.get_result::<Count>(conn)
@@ -453,6 +455,57 @@ async fn record_report_raises_then_recovers() {
 		.await
 		.expect("record success");
 		assert_eq!(active_restore_issues(&mut conn, group).await, 0);
+	})
+	.await;
+}
+
+#[derive(diesel::QueryableByName)]
+struct VerifRow {
+	#[diesel(sql_type = sql_types::Text)]
+	check_name: String,
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Uuid>)]
+	server_id: Option<Uuid>,
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Uuid>)]
+	server_group_id: Option<Uuid>,
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn record_report_files_server_scoped_with_stable_name() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let server = insert_server(&mut conn, group).await;
+
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			new_check(
+				consumer,
+				group,
+				server,
+				RestoreIntent::from("verify"),
+				RunOutcome::Failure,
+				false,
+			),
+		)
+		.await
+		.expect("record failure");
+
+		// The check is server-scoped with a stable name: the server is the
+		// scope (issues.server_id), not baked into the check name.
+		let rows: Vec<VerifRow> = sql_query(
+			"SELECT check_name, server_id, server_group_id FROM issues \
+			 WHERE source = 'canopy' AND ref LIKE 'restore-verification:%' AND active",
+		)
+		.load(&mut conn)
+		.await
+		.expect("load");
+		assert_eq!(rows.len(), 1);
+		assert_eq!(
+			rows[0].check_name,
+			"restore-verification:tamanu-postgres:verify",
+		);
+		assert_eq!(rows[0].server_id, Some(server));
+		assert_eq!(rows[0].server_group_id, None);
 	})
 	.await;
 }

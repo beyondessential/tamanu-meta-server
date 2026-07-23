@@ -501,8 +501,9 @@ async fn restore_verification_records_and_raises_alert() {
 			assert_eq!(
 				count(
 					&mut conn,
-					"SELECT count(*) AS count FROM issues WHERE server_group_id = $1 \
-					 AND ref LIKE 'restore-verification:%' AND active = true",
+					"SELECT count(*) AS count FROM issues i \
+					 JOIN servers s ON s.id = i.server_id \
+					 WHERE s.group_id = $1 AND i.ref LIKE 'restore-verification:%' AND i.active = true",
 					group,
 				)
 				.await,

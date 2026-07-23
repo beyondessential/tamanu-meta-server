@@ -4,7 +4,7 @@
 //! ([`RestoreConsumerCapability`]). The worklist expansion, credential issuance,
 //! and restore-health ingest live in the public-server and `jobs` components.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map::Entry};
 
 use commons_errors::{AppError, Result};
 use commons_types::backup::{BackupType, IntentDescriptor, RestoreIntent, RunOutcome, semantics};
@@ -414,18 +414,11 @@ impl RestoreConsumerCapability {
 /// `(server, type, intent)` so each replica recovers independently (one
 /// intent's healthy report must not clear another's failure on the same
 /// server).
-fn restore_verification_ref(
-	server_id: Uuid,
-	r#type: &BackupType,
-	intent: &RestoreIntent,
-) -> String {
-	format!(
-		"{}:{}:{}:{}",
-		refs::RESTORE_VERIFICATION,
-		server_id,
-		r#type,
-		intent
-	)
+fn restore_verification_ref(r#type: &BackupType, intent: &RestoreIntent) -> String {
+	// The check is server-scoped (the per-server dimension is the filing's
+	// server_id), so the name is stable per (type, intent) and shared across
+	// the fleet — one catalog policy, not one single-use name per server.
+	format!("{}:{}:{}", refs::RESTORE_VERIFICATION, r#type, intent)
 }
 
 /// Recover any active restore-verification alert keyed to a declaration's old
@@ -451,12 +444,15 @@ async fn recover_old_scope_alerts(
 	};
 
 	for sid in servers {
-		let r#ref = restore_verification_ref(sid, old_type, old_intent);
+		let r#ref = restore_verification_ref(old_type, old_intent);
 		file_check(
 			db,
 			CheckFiling {
 				source: crate::statuses::CANOPY_SOURCE,
-				scope: FilingScope::Group(old_group_id),
+				scope: FilingScope::Server {
+					server_id: sid,
+					device_id: None,
+				},
 				check: &r#ref,
 				observed: CheckResult::Passed,
 				title: None,
@@ -580,7 +576,6 @@ impl BackupRestoreCheck {
 		use crate::schema::backup_restore_checks::dsl;
 
 		let healthy = new.outcome == RunOutcome::Success && new.replica_healthy;
-		let group_id = new.group_id;
 		let server_id = new.server_id;
 		let r#type = new.r#type.clone();
 		let intent = new.intent.clone();
@@ -595,13 +590,16 @@ impl BackupRestoreCheck {
 		// Restore-health is attributed per server; a report without one is
 		// recorded but raises no group-level incident.
 		if let Some(sid) = server_id {
-			let r#ref = restore_verification_ref(sid, &r#type, &intent);
+			let r#ref = restore_verification_ref(&r#type, &intent);
 			if healthy {
 				file_check(
 					db,
 					CheckFiling {
 						source: crate::statuses::CANOPY_SOURCE,
-						scope: FilingScope::Group(group_id),
+						scope: FilingScope::Server {
+							server_id: sid,
+							device_id: None,
+						},
 						check: &r#ref,
 						observed: CheckResult::Passed,
 						title: None,
@@ -626,7 +624,10 @@ impl BackupRestoreCheck {
 					db,
 					CheckFiling {
 						source: crate::statuses::CANOPY_SOURCE,
-						scope: FilingScope::Group(group_id),
+						scope: FilingScope::Server {
+							server_id: sid,
+							device_id: None,
+						},
 						check: &r#ref,
 						observed: CheckResult::Failed,
 						title: Some("restore verification failed"),
@@ -785,15 +786,17 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 
 		// Skip declarations the consumer can't satisfy — those are gaps, not
 		// restore-health incidents. Only `check` intents are held to a bound.
-		if !capability_cache.contains_key(&d.consumer_device_id) {
-			let map = RestoreConsumerCapability::list_for_consumer(db, d.consumer_device_id)
-				.await?
-				.into_iter()
-				.map(|desc| (desc.intent.clone(), desc))
-				.collect();
-			capability_cache.insert(d.consumer_device_id, map);
-		}
-		let Some(descriptor) = capability_cache[&d.consumer_device_id].get(&d.intent) else {
+		let capabilities = match capability_cache.entry(d.consumer_device_id) {
+			Entry::Occupied(e) => e.into_mut(),
+			Entry::Vacant(e) => e.insert(
+				RestoreConsumerCapability::list_for_consumer(db, d.consumer_device_id)
+					.await?
+					.into_iter()
+					.map(|desc| (desc.intent.clone(), desc))
+					.collect(),
+			),
+		};
+		let Some(descriptor) = capabilities.get(&d.intent) else {
 			continue;
 		};
 		if !descriptor.has_semantic(semantics::CHECK) {
@@ -818,11 +821,8 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 				.collect(),
 		};
 
-		if !healthy_cache.contains_key(&d.group_id) {
-			healthy_cache.insert(
-				d.group_id,
-				BackupRestoreCheck::latest_healthy_by_key_for_group(db, d.group_id).await?,
-			);
+		if let Entry::Vacant(e) = healthy_cache.entry(d.group_id) {
+			e.insert(BackupRestoreCheck::latest_healthy_by_key_for_group(db, d.group_id).await?);
 			verified_snapshot_cache.insert(
 				d.group_id,
 				BackupRestoreCheck::latest_healthy_snapshot_by_key_for_group(db, d.group_id)
@@ -859,7 +859,7 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 			if !overdue {
 				continue;
 			}
-			let r#ref = restore_verification_ref(sid, &d.r#type, &d.intent);
+			let r#ref = restore_verification_ref(&d.r#type, &d.intent);
 			let message = if once {
 				format!(
 					"Latest snapshot for {} / {} on server {sid} has not been verified within its overdue bound",
@@ -875,7 +875,10 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 				db,
 				CheckFiling {
 					source: crate::statuses::CANOPY_SOURCE,
-					scope: FilingScope::Group(d.group_id),
+					scope: FilingScope::Server {
+						server_id: sid,
+						device_id: None,
+					},
 					check: &r#ref,
 					observed: CheckResult::Failed,
 					title: Some("restore verification overdue"),
