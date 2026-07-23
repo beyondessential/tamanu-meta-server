@@ -34,6 +34,7 @@ import GroupsList from "./routes/GroupsList";
 import CheckDetail from "./routes/CheckDetail";
 import HealthcheckSettings from "./routes/HealthcheckSettings";
 import Healthchecks from "./routes/Healthchecks";
+import SourcesSettings from "./routes/SourcesSettings";
 import IncidentDetail from "./routes/IncidentDetail";
 import Incidents from "./routes/Incidents";
 import Status from "./routes/Status";
@@ -219,6 +220,10 @@ export default function App() {
 						<Route path="backup-defaults" element={<BackupDefaults />} />
 						<Route path="recovery" element={<RecoveryVault />} />
 						<Route path="healthchecks" element={<Healthchecks />} />
+						<Route
+							path="healthchecks/sources"
+							element={<SourcesSettings />}
+						/>
 						<Route
 							path="healthchecks/:source/:checkName"
 							element={<HealthcheckSettings />}

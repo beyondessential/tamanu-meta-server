@@ -9,7 +9,7 @@ pill-order:
   reviewing: 7
 surface: both
 jockey-hint: "Always available but low-traffic — surface as an available pill, not a top suggestion. Most cards are implemented as one PR; only suggest prominently when the conversation has already revealed the card is too large to ship in one piece."
-workhorse-version: 0.1.0
+workhorse-version: 0.2.0
 ---
 
 ## Your task: Plan cards

@@ -16,8 +16,6 @@ import {
 	TableContainer,
 	TableHead,
 	TableRow,
-	ToggleButton,
-	ToggleButtonGroup,
 	Typography,
 } from "@mui/material";
 import { useMemo, useState } from "react";
@@ -29,12 +27,10 @@ import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import {
 	CEILINGS,
+	HEALTHCHECK_SOURCES_PATH,
 	healthcheckSettingsPath,
 	type Ceiling,
 	type CheckPolicyData,
-	type IngestMode,
-	type ReachabilityMode,
-	type SourceData,
 } from "../types";
 
 /** A catalogued check unreported anywhere for this long is a
@@ -83,7 +79,7 @@ export default function Healthchecks() {
 				</Typography>
 			</Box>
 
-			<SourcesSection isAdmin={isAdmin} />
+			<SourcesLink />
 
 			<Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
 				{pendingCount > 0 ? (
@@ -170,167 +166,35 @@ export default function Healthchecks() {
 	);
 }
 
-const REACHABILITY_MODES: ReachabilityMode[] = ["on", "quiet", "off"];
-const INGEST_MODES: IngestMode[] = ["allow", "ignore", "deny"];
-
-function SourcesSection({ isAdmin }: { isAdmin: boolean }) {
-	const sources = useApi("healthchecks", "sources");
-	const rows = sources.status === "ok" ? sources.data : [];
-	// Nothing to show until at least one source has reported.
-	if (sources.status === "ok" && rows.length === 0) return null;
-
+function SourcesLink() {
 	return (
-		<Box>
-			<Typography variant="subtitle2" component="h3" gutterBottom>
-				Sources
-			</Typography>
-			<Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-				Reporters canopy expects to hear from. <strong>Reachability</strong>{" "}
-				controls how a source going quiet affects its servers: <em>on</em>{" "}
-				warns, <em>quiet</em> never warns but still marks a server unreachable
-				when it's the only source left, <em>off</em> ignores it.{" "}
-				<strong>Ingest</strong> controls the device API: <em>allow</em> accepts
-				reports, <em>ignore</em> discards them, <em>deny</em> rejects the push.
-				A source that isn't ingested can't count for reachability.
-			</Typography>
-			{sources.status === "loading" || sources.status === "idle" ? (
-				<LinearProgress />
-			) : sources.status === "error" ? (
-				<Alert severity="error">{sources.error.message}</Alert>
-			) : (
-				<Paper variant="outlined">
-					<TableContainer>
-						<Table size="small">
-							<TableHead>
-								<TableRow>
-									<TableCell>Source</TableCell>
-									<TableCell>Last seen</TableCell>
-									<TableCell>Reachability</TableCell>
-									<TableCell>Ingest</TableCell>
-								</TableRow>
-							</TableHead>
-							<TableBody>
-								{rows.map((row) => (
-									<SourceRow
-										key={row.source}
-										row={row}
-										canEdit={isAdmin}
-										onChanged={() => sources.reload()}
-									/>
-								))}
-							</TableBody>
-						</Table>
-					</TableContainer>
-				</Paper>
-			)}
-		</Box>
-	);
-}
-
-function SourceRow({
-	row,
-	canEdit,
-	onChanged,
-}: {
-	row: SourceData;
-	canEdit: boolean;
-	onChanged: () => void;
-}) {
-	const setReach = useApiAction("healthchecks", "set_source_reachability");
-	const setIngest = useApiAction("healthchecks", "set_source_ingest");
-	const [reach, setReachLocal] = useState<ReachabilityMode>(row.reachability);
-	const [ingest, setIngestLocal] = useState<IngestMode>(row.ingest);
-
-	const changeReach = async (mode: ReachabilityMode | null) => {
-		if (!mode || mode === reach) return;
-		const prev = reach;
-		setReachLocal(mode);
-		try {
-			await setReach.call({ source: row.source, reachability: mode });
-			onChanged();
-		} catch {
-			setReachLocal(prev);
-		}
-	};
-
-	const changeIngest = async (mode: IngestMode | null) => {
-		if (!mode || mode === ingest) return;
-		const prev = ingest;
-		setIngestLocal(mode);
-		try {
-			await setIngest.call({ source: row.source, ingest: mode });
-			onChanged();
-		} catch {
-			setIngestLocal(prev);
-		}
-	};
-
-	// A source that isn't ingested is excluded from reachability; show the
-	// reachability control as a disabled "off".
-	const ingested = ingest === "allow";
-	const reachShown: ReachabilityMode = ingested ? reach : "off";
-
-	return (
-		<TableRow hover>
-			<TableCell sx={{ fontFamily: "monospace" }}>{row.source}</TableCell>
-			<TableCell>
-				{row.last_seen ? (
-					<TimeAgo timestamp={row.last_seen} />
-				) : (
-					<Typography variant="caption" color="text.secondary">
-						never
+		<Paper variant="outlined" sx={{ p: 2 }}>
+			<Stack
+				direction="row"
+				spacing={2}
+				sx={{ alignItems: "center", justifyContent: "space-between" }}
+			>
+				<Box>
+					<Typography variant="subtitle2" component="h3">
+						Sources
 					</Typography>
-				)}
-			</TableCell>
-			<TableCell>
-				{canEdit ? (
-					<ToggleButtonGroup
-						size="small"
-						exclusive
-						value={reachShown}
-						onChange={(_, v) => changeReach(v as ReachabilityMode | null)}
-						disabled={setReach.pending || !ingested}
-					>
-						{REACHABILITY_MODES.map((mode) => (
-							<ToggleButton key={mode} value={mode}>
-								{mode}
-							</ToggleButton>
-						))}
-					</ToggleButtonGroup>
-				) : (
-					<Chip size="small" label={reachShown} />
-				)}
-				{setReach.error && (
-					<Typography variant="caption" color="error" sx={{ display: "block" }}>
-						{formatError(setReach.error)}
+					<Typography variant="body2" color="text.secondary">
+						Per-source reachability and ingest policy — how canopy treats each
+						reporter going quiet, and whether the device API accepts its
+						reports. High-danger, rarely changed; each change is confirmed.
 					</Typography>
-				)}
-			</TableCell>
-			<TableCell>
-				{canEdit ? (
-					<ToggleButtonGroup
-						size="small"
-						exclusive
-						value={ingest}
-						onChange={(_, v) => changeIngest(v as IngestMode | null)}
-						disabled={setIngest.pending}
-					>
-						{INGEST_MODES.map((mode) => (
-							<ToggleButton key={mode} value={mode}>
-								{mode}
-							</ToggleButton>
-						))}
-					</ToggleButtonGroup>
-				) : (
-					<Chip size="small" label={ingest} />
-				)}
-				{setIngest.error && (
-					<Typography variant="caption" color="error" sx={{ display: "block" }}>
-						{formatError(setIngest.error)}
-					</Typography>
-				)}
-			</TableCell>
-		</TableRow>
+				</Box>
+				<Button
+					component={RouterLink}
+					to={HEALTHCHECK_SOURCES_PATH}
+					variant="outlined"
+					size="small"
+					sx={{ flexShrink: 0 }}
+				>
+					Manage sources
+				</Button>
+			</Stack>
+		</Paper>
 	);
 }
 
