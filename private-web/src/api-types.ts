@@ -6661,6 +6661,12 @@ export interface components {
             /** @description Current self-reported health, derived from the most recent status report. */
             health: components["schemas"]["HealthState"];
             last_status?: null | components["schemas"]["ServerLastStatusData"];
+            /**
+             * @description Whether the server is known to run Munin, from the last status that
+             *     reported the flag (persisted with grace — see [`database::statuses`]).
+             *     The UI offers a Munin link only when this is true.
+             */
+            munin: boolean;
             /** @description The server's own record. */
             server: components["schemas"]["ServerInfo"];
             /**

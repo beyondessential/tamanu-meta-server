@@ -11661,7 +11661,8 @@
           "health",
           "checks",
           "siblings",
-          "billing_labels"
+          "billing_labels",
+          "munin"
         ],
         "properties": {
           "billing_labels": {
@@ -11711,6 +11712,10 @@
                 "description": "The server's most recently reported status, if it has ever reported one."
               }
             ]
+          },
+          "munin": {
+            "type": "boolean",
+            "description": "Whether the server is known to run Munin, from the last status that\nreported the flag (persisted with grace — see [`database::statuses`]).\nThe UI offers a Munin link only when this is true."
           },
           "server": {
             "$ref": "#/components/schemas/ServerInfo",
