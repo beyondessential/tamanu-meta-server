@@ -656,6 +656,63 @@
         }
       }
     },
+    "/servers/self": {
+      "get": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Report the calling device's own identity.",
+        "description": "Resolves the caller from its device certificate and returns the server\nit is enrolled as together with its own device ID — the same pair\nreturned when the device completed enrollment. A device authenticates\nentirely from its certificate, so it never needs these IDs to make\ncalls; this endpoint lets one that has lost track of them recover them.\n\n- **401**: the request has no client certificate, or the certificate\n  doesn't match a known device.\n- **409**: the calling device is attached to more than one server, which\n  should not normally happen; contact support if you see this.\n- **412**: the device is registered but has not yet been attached to a\n  server.",
+        "operationId": "server_self",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "server-device": []
+          }
+        ]
+      }
+    },
     "/status/{server_id}": {
       "post": {
         "tags": [
@@ -1733,6 +1790,26 @@
           "success",
           "failure"
         ]
+      },
+      "SelfResponse": {
+        "type": "object",
+        "description": "The calling device's own identity, as assigned at enrollment.",
+        "required": [
+          "server_id",
+          "device_id"
+        ],
+        "properties": {
+          "device_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The calling device's own identity."
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The server the calling device is enrolled as."
+          }
+        }
       },
       "ServerRank": {
         "type": "string",
