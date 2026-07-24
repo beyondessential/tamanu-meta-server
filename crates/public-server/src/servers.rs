@@ -4,7 +4,7 @@ use axum::{Json, extract::State, http::HeaderMap};
 use axum_client_ip::ClientIp;
 use base64::Engine;
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::device_auth::{mtls, pop};
+use commons_servers::device_auth::{ServerDevice, mtls, pop};
 use commons_servers::tailnet_directory::TailnetDirectory;
 
 use crate::ratelimit::RateLimiter;
@@ -37,6 +37,7 @@ const CHALLENGE_TTL: jiff::SignedDuration = jiff::SignedDuration::from_mins(5);
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(list))
+		.routes(routes!(self_identity))
 		.routes(routes!(register_begin))
 		.routes(routes!(register_complete))
 }
@@ -107,6 +108,63 @@ pub async fn list(State(db): State<Db>) -> Result<Json<Vec<PublicServer>>> {
 	});
 
 	Ok(Json(servers))
+}
+
+/// The calling device's own identity, as assigned at enrollment.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SelfResponse {
+	/// The server the calling device is enrolled as.
+	pub server_id: Uuid,
+	/// The calling device's own identity.
+	pub device_id: Uuid,
+}
+
+/// Report the calling device's own identity.
+///
+/// Resolves the caller from its device certificate and returns the server
+/// it is enrolled as together with its own device ID — the same pair
+/// returned when the device completed enrollment. A device authenticates
+/// entirely from its certificate, so it never needs these IDs to make
+/// calls; this endpoint lets one that has lost track of them recover them.
+///
+/// - **401**: the request has no client certificate, or the certificate
+///   doesn't match a known device.
+/// - **409**: the calling device is attached to more than one server, which
+///   should not normally happen; contact support if you see this.
+/// - **412**: the device is registered but has not yet been attached to a
+///   server.
+// spec: DID
+#[utoipa::path(
+	get,
+	path = "/self",
+	operation_id = "server_self",
+	tag = "servers",
+	security(("server-device" = [])),
+	responses(
+		(status = 200, body = SelfResponse),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 409, body = ProblemDetailsSchema),
+		(status = 412, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn self_identity(
+	device: ServerDevice,
+	State(db): State<Db>,
+) -> Result<Json<SelfResponse>> {
+	let mut conn = db.get().await?;
+	let device_id = device.0.0.id;
+	let mut servers = Server::get_by_device_id(&mut conn, device_id).await?;
+	if servers.len() > 1 {
+		return Err(AppError::Conflict(format!(
+			"device {device_id} is attached to {} servers; expected at most one",
+			servers.len(),
+		)));
+	}
+	let server = servers.pop().ok_or(AppError::DeviceHasNoServer)?;
+	Ok(Json(SelfResponse {
+		server_id: server.id,
+		device_id,
+	}))
 }
 
 /// Request to start device enrollment against a server.

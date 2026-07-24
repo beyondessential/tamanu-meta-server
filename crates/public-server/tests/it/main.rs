@@ -16,6 +16,7 @@ mod openapi_spec;
 mod password;
 mod restore;
 mod server_enrollment;
+mod server_self;
 mod server_versions;
 mod servers_list;
 mod static_files;
