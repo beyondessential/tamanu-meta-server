@@ -30,6 +30,8 @@ struct ServerDetailResponse {
 	group: Option<ServerGroupResponse>,
 	#[serde(default)]
 	siblings: Vec<serde_json::Value>,
+	#[serde(default)]
+	munin: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -556,6 +558,42 @@ async fn get_detail_basic() {
 		assert!(detail.last_status.is_none());
 		assert_eq!(detail.up, "gone");
 		assert!(detail.siblings.is_empty());
+	})
+	.await
+}
+
+// spec: SVC#munin-link
+#[tokio::test(flavor = "multi_thread")]
+async fn get_detail_munin_flag() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Munin Server', 'https://munin.example.com', 'production', 'central'),
+			('22222222-2222-2222-2222-222222222222', 'Plain Server', 'https://plain.example.com', 'production', 'central');
+
+			INSERT INTO statuses (server_id, extra, created_at) VALUES
+			('11111111-1111-1111-1111-111111111111', '{\"munin\": true}'::jsonb, NOW()),
+			('22222222-2222-2222-2222-222222222222', '{\"uptime\": 3600}'::jsonb, NOW())",
+		)
+		.await
+		.unwrap();
+
+		let munin_detail: ServerDetailResponse = private
+			.post("/api/servers/get_detail")
+			.json(&serde_json::json!({"server_id": "11111111-1111-1111-1111-111111111111"}))
+			.await
+			.json();
+		assert!(munin_detail.munin, "server that reported munin=true exposes munin");
+
+		let plain_detail: ServerDetailResponse = private
+			.post("/api/servers/get_detail")
+			.json(&serde_json::json!({"server_id": "22222222-2222-2222-2222-222222222222"}))
+			.await
+			.json();
+		assert!(
+			!plain_detail.munin,
+			"server whose status omits the flag does not expose munin"
+		);
 	})
 	.await
 }
