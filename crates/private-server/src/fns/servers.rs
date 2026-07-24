@@ -58,6 +58,11 @@ pub struct ServerDetailData {
 	/// The server's effective `billing.*` labels — i.e. its group's
 	/// (product/deployment/stage). Empty when the server is ungrouped.
 	pub billing_labels: Vec<super::server_groups::BillingTag>,
+	/// Whether the server is known to run Munin, from the last status that
+	/// reported the flag (persisted with grace — see [`database::statuses`]).
+	/// The UI offers a Munin link only when this is true.
+	// spec: SVC#munin-link
+	pub munin: bool,
 }
 
 /// A server in the fleet inventory: its identity, classification, network
@@ -682,6 +687,10 @@ pub async fn get_detail(
 		None => Vec::new(),
 	};
 
+	let munin = Status::latest_munin_for_server(&mut conn, server.id)
+		.await?
+		.unwrap_or(false);
+
 	Ok(Json(ServerDetailData {
 		server: server_details,
 		device_info,
@@ -692,6 +701,7 @@ pub async fn get_detail(
 		group,
 		siblings,
 		billing_labels,
+		munin,
 	}))
 }
 

@@ -569,6 +569,34 @@ impl Status {
 			.map_err(AppError::from)
 	}
 
+	/// Whether `server` runs Munin, from the most recent status that carried
+	/// the `munin` flag — **not** bounded by the live 7-day window. Once a
+	/// server reports the flag the value persists even after it goes quiet,
+	/// and a later status that omits the flag leaves it untouched; only an
+	/// explicit later value overrides it. Returns `None` when the server has
+	/// never reported the flag.
+	// spec: SVC#munin-link
+	pub async fn latest_munin_for_server(
+		db: &mut AsyncPgConnection,
+		server: Uuid,
+	) -> Result<Option<bool>> {
+		use crate::schema::statuses::dsl::*;
+
+		let row: Option<Status> = statuses
+			.select(Status::as_select())
+			.filter(server_id.eq(server).and(id.ne(Uuid::nil())))
+			.filter(diesel::dsl::sql::<diesel::sql_types::Bool>(
+				"jsonb_exists(extra, 'munin')",
+			))
+			.order(created_at.desc())
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)?;
+
+		Ok(row.map(|st| st.extra("munin").and_then(|v| v.as_bool()).unwrap_or(false)))
+	}
+
 	pub async fn latest_for_servers(
 		db: &mut AsyncPgConnection,
 		server_ids: &[Uuid],

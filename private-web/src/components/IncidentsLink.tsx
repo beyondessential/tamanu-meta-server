@@ -1,7 +1,6 @@
-import { Button } from "@mui/material";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
-import { Link as RouterLink } from "react-router-dom";
+import ActionButton from "./ActionButton";
 import { useApi } from "../api";
 import { useIsNotificationHeld } from "../hooks/useIsNotificationHeld";
 import { isIncidentLingering } from "../types";
@@ -48,12 +47,10 @@ export default function IncidentsLink({
 		const lingering = isIncidentLingering(openIncident);
 		const held = heldUntilActive && !lingering;
 		return (
-			<Button
-				component={RouterLink}
+			<ActionButton
 				to={`/incidents/${openIncident.id}`}
-				variant="outlined"
 				color={lingering ? "info" : held ? "warning" : "error"}
-				startIcon={<WarningAmberIcon />}
+				icon={<WarningAmberIcon />}
 				title={
 					lingering
 						? "All failures have recovered; the incident closes if they stay quiet through the linger window"
@@ -61,32 +58,26 @@ export default function IncidentsLink({
 							? "Slack notice still inside the per-group cooldown window"
 							: undefined
 				}
-			>
-				Incident {openIncident.id.slice(0, 8)}
-				{lingering ? " (recovering)" : held ? " (held)" : ""}
-			</Button>
+				label={`Incident ${openIncident.id.slice(0, 8)}${
+					lingering ? " (recovering)" : held ? " (held)" : ""
+				}`}
+			/>
 		);
 	}
 	if (hasActive) {
 		return (
-			<Button
-				component={RouterLink}
+			<ActionButton
 				to={`/incidents?group=${serverId}`}
-				variant="outlined"
-				startIcon={<OpenInNewIcon />}
-			>
-				Active issues
-			</Button>
+				icon={<OpenInNewIcon />}
+				label="Active issues"
+			/>
 		);
 	}
 	return (
-		<Button
-			component={RouterLink}
+		<ActionButton
 			to={`/incidents?group=${serverId}&showAll=1`}
-			variant="outlined"
-			startIcon={<OpenInNewIcon />}
-		>
-			Past issues
-		</Button>
+			icon={<OpenInNewIcon />}
+			label="Past issues"
+		/>
 	);
 }

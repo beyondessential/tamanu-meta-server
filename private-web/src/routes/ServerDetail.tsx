@@ -31,6 +31,7 @@ import RemoveCircleOutlinedIcon from "@mui/icons-material/RemoveCircleOutlined";
 import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
 import EditIcon from "@mui/icons-material/Edit";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import InsightsIcon from "@mui/icons-material/Insights";
 import LanguageIcon from "@mui/icons-material/Language";
 import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
 import RestoreDataIcon from "@mui/icons-material/SettingsBackupRestore";
@@ -45,6 +46,7 @@ import {
 	useNavigate,
 	useParams,
 } from "react-router-dom";
+import ActionButton from "../components/ActionButton";
 import CheckDocButton from "../components/CheckDocButton";
 import CheckExtrasList, { checkEntryExtras } from "../components/CheckExtras";
 import ExternalUsersDetails, {
@@ -254,12 +256,19 @@ function Header({
 	onArchived: () => void;
 }) {
 	const archived = data.server.archived;
+	// Munin runs on the server's own box, reachable over the tailnet — build
+	// its URL from the bound device's MagicDNS name (live value preferred,
+	// falling back to the stored snapshot). Only offered when the server is
+	// known to run Munin and has a tailnet name.
+	// spec: SVC#munin-link
+	const tailnetName =
+		data.device_info?.tailnet_live?.display_name ??
+		data.device_info?.device?.tailscale_node_name ??
+		null;
+	const muninUrl =
+		data.munin && tailnetName ? `https://${tailnetName}:4950/` : null;
 	return (
-		<Stack
-			direction="row"
-			spacing={2}
-			sx={{ alignItems: "center", justifyContent: "space-between" }}
-		>
+		<Stack spacing={1.5}>
 			<Stack
 				direction="row"
 				spacing={1}
@@ -282,26 +291,38 @@ function Header({
 					/>
 				</Typography>
 			</Stack>
-			<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-				<IncidentsLink
-					serverId={data.server.id}
-					refreshKey={refreshTick}
-				/>
+			<Stack
+				direction="row"
+				spacing={1}
+				sx={{ alignItems: "center", flexWrap: "wrap" }}
+				useFlexGap
+			>
+				{data.server.display_host && (
+					<ActionButton
+						href={data.server.display_host}
+						icon={<LanguageIcon />}
+						label="Open"
+						title={data.server.display_host}
+					/>
+				)}
+				{muninUrl && (
+					<ActionButton href={muninUrl} icon={<InsightsIcon />} label="Munin" />
+				)}
+				<IncidentsLink serverId={data.server.id} refreshKey={refreshTick} />
 				{isAdmin && (
 					<>
 						<ManualEventButton
 							serverId={data.server.id}
 							hasOpenIncident={hasOpenIncident}
 							onSubmitted={onEventSubmitted}
+							action
 						/>
-						<Button
-							component={RouterLink}
+						<ActionButton
 							to={`/servers/${data.server.id}/edit`}
-							variant="contained"
-							startIcon={<EditIcon />}
-						>
-							Edit
-						</Button>
+							icon={<EditIcon />}
+							label="Edit"
+							color="primary"
+						/>
 						{!archived && (
 							<DeleteServerButton
 								serverId={data.server.id}
@@ -347,14 +368,12 @@ function DeleteServerButton({
 
 	return (
 		<>
-			<Button
-				variant="outlined"
+			<ActionButton
 				color="error"
-				startIcon={<ArchiveIcon />}
+				icon={<ArchiveIcon />}
+				label="Archive"
 				onClick={() => setOpen(true)}
-			>
-				Archive
-			</Button>
+			/>
 			<Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth>
 				<DialogTitle>Archive server?</DialogTitle>
 				<DialogContent>

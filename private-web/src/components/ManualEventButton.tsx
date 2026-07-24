@@ -1,6 +1,7 @@
 import { Button, Dialog, DialogContent, DialogTitle } from "@mui/material";
 import AddAlertIcon from "@mui/icons-material/AddAlert";
 import { useState } from "react";
+import ActionButton from "./ActionButton";
 import ManualEventForm from "./ManualEventForm";
 
 /** Admin-only button on the ServerDetail header: opens a dialog with the
@@ -13,6 +14,7 @@ export default function ManualEventButton({
 	hasOpenIncident,
 	onSubmitted,
 	size = "medium",
+	action = false,
 }: {
 	serverId: string;
 	/** Whether the server group currently has an open incident. The parent
@@ -24,20 +26,31 @@ export default function ManualEventButton({
 	 * panels (issues, incidents) that are now stale. */
 	onSubmitted?: () => void;
 	size?: "small" | "medium" | "large";
+	/** Render as an expanding icon button for the server-detail action row.
+	 * Default is the full-width labelled button used in the siblings table. */
+	action?: boolean;
 }) {
 	const [open, setOpen] = useState(false);
 	const label = hasOpenIncident ? "Add issue" : "New incident";
 
 	return (
 		<>
-			<Button
-				variant="outlined"
-				size={size}
-				startIcon={<AddAlertIcon />}
-				onClick={() => setOpen(true)}
-			>
-				{label}
-			</Button>
+			{action ? (
+				<ActionButton
+					icon={<AddAlertIcon />}
+					label={label}
+					onClick={() => setOpen(true)}
+				/>
+			) : (
+				<Button
+					variant="outlined"
+					size={size}
+					startIcon={<AddAlertIcon />}
+					onClick={() => setOpen(true)}
+				>
+					{label}
+				</Button>
+			)}
 			<Dialog open={open} onClose={() => setOpen(false)} fullWidth maxWidth="sm">
 				<DialogTitle>{label}</DialogTitle>
 				<DialogContent>

@@ -163,11 +163,14 @@ export interface SeededDevice {
 
 export async function seedDevice(
 	sql: Sql,
-	opts: { role?: string } = {},
+	opts: { role?: string; tailscaleNodeName?: string } = {},
 ): Promise<SeededDevice> {
 	const id = randomUUID();
 	const role = opts.role ?? "server";
-	await sql.query(`INSERT INTO devices (id, role) VALUES ($1, $2)`, [id, role]);
+	await sql.query(
+		`INSERT INTO devices (id, role, tailscale_node_name) VALUES ($1, $2, $3)`,
+		[id, role, opts.tailscaleNodeName ?? null],
+	);
 	return { id, role };
 }
 
