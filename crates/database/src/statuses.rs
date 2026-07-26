@@ -43,6 +43,33 @@ Tracks whether the sources canopy expects to report on this server are actually 
 
 Check whether the server is down, its network/VPN path to canopy, and whether its reporting agents are running. A source that was deliberately retired should be set to `quiet` or `off` in the source list.";
 
+/// How far back a "last value this server ever reported" read may look.
+///
+/// `statuses` is range-partitioned by week and prod already carries ~100
+/// partitions with the better part of a million rows *per server*. A
+/// predicate on `server_id` alone cannot be partition-pruned, so a query
+/// with no lower bound on `created_at` degrades into a scan of every
+/// partition — measured at 217s in production for a single row. Worse, the
+/// pruning-free plan reads far more than `shared_buffers` holds, so it
+/// evicts the buffer pool and drags every unrelated query down with it.
+///
+/// Every lookback here is therefore capped. The cost is that a server quiet
+/// for longer than the window reads as "never reported"; that is preferable
+/// to an unbounded scan, and the windows are generous next to how long a
+/// server can be down before someone notices.
+const GRACE_LOOKBACK_SQL: &str = "NOW() - INTERVAL '30 days'";
+
+/// [`GRACE_LOOKBACK_SQL`] as a span, for bounding a lookback relative to a
+/// caller-supplied point in time rather than to `NOW()`.
+const GRACE_LOOKBACK: SignedDuration = SignedDuration::from_hours(24 * 30);
+
+/// Lookback for the last version a server reported. Longer than
+/// [`GRACE_LOOKBACK_SQL`] because a group's displayed version is cached from
+/// its canonical member, and a member down for a month or two should not
+/// blank out the group's version label. Still bounded — see
+/// [`GRACE_LOOKBACK_SQL`] for why an unbounded read is not an option.
+const VERSION_LOOKBACK_SQL: &str = "NOW() - INTERVAL '90 days'";
+
 fn server_label(s: &Server) -> String {
 	s.name
 		.clone()
@@ -427,6 +454,11 @@ impl Status {
 	/// extras, and the server's tags resolved up the group). Scoped to
 	/// the check's own source — another source's same-named check may
 	/// carry entirely different fields.
+	///
+	/// Bounded to [`GRACE_LOOKBACK_SQL`]: a recent sample is the useful one,
+	/// and the `health @>` containment is not indexable, so without the
+	/// window a check that has stopped reporting scans every partition
+	/// across every server.
 	pub async fn latest_for_check_name(
 		db: &mut AsyncPgConnection,
 		source: &str,
@@ -444,12 +476,13 @@ impl Status {
 		// Two-step: pick the id via raw SQL (JSONB containment needs a
 		// parameterised JSON literal that Diesel's typed DSL doesn't
 		// express cleanly), then load the typed Status row by id.
-		let picked: Option<Picked> = sql_query(
+		let picked: Option<Picked> = sql_query(format!(
 			"SELECT id FROM statuses \
 			 WHERE source = $1 \
 			 AND health @> jsonb_build_array(jsonb_build_object('check', $2::text)) \
-			 ORDER BY created_at DESC LIMIT 1",
-		)
+			 AND created_at >= {GRACE_LOOKBACK_SQL} \
+			 ORDER BY created_at DESC LIMIT 1"
+		))
 		.bind::<Text, _>(source)
 		.bind::<Text, _>(check_name)
 		.get_result(db)
@@ -521,6 +554,14 @@ impl Status {
 	/// [`Self::at_time`], which collapses to a single row regardless of
 	/// source, this keeps every source's contribution, for reconstructing
 	/// the consolidated multi-source checks view as of a point in time.
+	///
+	/// Bounded to [`GRACE_LOOKBACK`] before the cutoff, so a source silent
+	/// for the whole window contributes nothing as of `at`. The bound is
+	/// load-bearing: `DISTINCT ON` cannot terminate early (it has to see
+	/// every candidate row before it knows which is each group's newest), so
+	/// an upper bound alone made this read a server's entire status history —
+	/// ~864k rows across every partition in prod — to return one row per
+	/// source. This is the same trap [`Self::latest_for_servers`] documents.
 	pub async fn latest_per_source_at(
 		db: &mut AsyncPgConnection,
 		server: Uuid,
@@ -529,13 +570,15 @@ impl Status {
 		use crate::schema::statuses::dsl::*;
 
 		let cutoff = at.unwrap_or_else(Timestamp::now);
+		let floor = cutoff.checked_sub(GRACE_LOOKBACK).unwrap_or(Timestamp::MIN);
 		statuses
 			.select(Status::as_select())
 			.filter(
 				server_id
 					.eq(server)
 					.and(id.ne(Uuid::nil()))
-					.and(created_at.le(jiff_diesel::Timestamp::from(cutoff))),
+					.and(created_at.le(jiff_diesel::Timestamp::from(cutoff)))
+					.and(created_at.ge(jiff_diesel::Timestamp::from(floor))),
 			)
 			.distinct_on(source)
 			.order((source, created_at.desc()))
@@ -544,10 +587,12 @@ impl Status {
 			.map_err(AppError::from)
 	}
 
-	/// The most recent status for `server` that carries a version — **not**
-	/// bounded by the live 7-day window. Used for the status card's headline
-	/// version, which should reflect the last version a server ever reported
-	/// even if it's currently down (and hence has no recent status).
+	/// The most recent status for `server` that carries a version — wider
+	/// than the live 7-day window. Used for the status card's headline
+	/// version, which should reflect the last version a server reported even
+	/// if it's currently down (and hence has no recent status). Capped at
+	/// [`VERSION_LOOKBACK_SQL`]; see [`GRACE_LOOKBACK_SQL`] for why the read
+	/// can't be left unbounded.
 	pub async fn last_with_version_for_server(
 		db: &mut AsyncPgConnection,
 		server: Uuid,
@@ -560,6 +605,7 @@ impl Status {
 				server_id
 					.eq(server)
 					.and(version.is_not_null())
+					.and(created_at.ge(diesel::dsl::sql(VERSION_LOOKBACK_SQL)))
 					.and(id.ne(Uuid::nil())),
 			)
 			.order(created_at.desc())
@@ -570,11 +616,16 @@ impl Status {
 	}
 
 	/// Whether `server` runs Munin, from the most recent status that carried
-	/// the `munin` flag — **not** bounded by the live 7-day window. Once a
-	/// server reports the flag the value persists even after it goes quiet,
-	/// and a later status that omits the flag leaves it untouched; only an
-	/// explicit later value overrides it. Returns `None` when the server has
-	/// never reported the flag.
+	/// the `munin` flag — wider than the live 7-day window, so the value
+	/// persists after a server goes quiet: a later status that omits the flag
+	/// leaves it untouched, and only an explicit later value overrides it.
+	/// Returns `None` when the server has not reported the flag within
+	/// [`GRACE_LOOKBACK_SQL`].
+	///
+	/// The lookback is what keeps this cheap. `jsonb_exists` is not
+	/// indexable, so the `LIMIT 1` cannot terminate early on a server that
+	/// never reports the flag (~2/3 of the fleet) — without the window this
+	/// drains all ~100 partitions.
 	// spec: SVC#munin-link
 	pub async fn latest_munin_for_server(
 		db: &mut AsyncPgConnection,
@@ -584,7 +635,12 @@ impl Status {
 
 		let row: Option<Status> = statuses
 			.select(Status::as_select())
-			.filter(server_id.eq(server).and(id.ne(Uuid::nil())))
+			.filter(
+				server_id
+					.eq(server)
+					.and(created_at.ge(diesel::dsl::sql(GRACE_LOOKBACK_SQL)))
+					.and(id.ne(Uuid::nil())),
+			)
 			.filter(diesel::dsl::sql::<diesel::sql_types::Bool>(
 				"jsonb_exists(extra, 'munin')",
 			))

@@ -80,3 +80,55 @@ async fn munin_flag_read_with_grace() {
 	})
 	.await
 }
+
+/// The grace read is capped rather than unbounded: `statuses` is partitioned
+/// weekly, and a lookback with no lower bound can't be partition-pruned, so
+/// it degrades into a scan of every partition. A server that hasn't reported
+/// the flag inside the window therefore reads as "never reported".
+// spec: SVC#munin-link
+#[tokio::test(flavor = "multi_thread")]
+async fn munin_flag_grace_is_bounded() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let host = format!("http://munin.invalid/{}", Uuid::new_v4());
+		let server: RowId = sql_query("INSERT INTO servers (host) VALUES ($1) RETURNING id")
+			.bind::<sql_types::Text, _>(host)
+			.get_result(&mut conn)
+			.await
+			.expect("insert server");
+		let server_id = server.id;
+
+		// Inside the 30-day window: still honoured.
+		insert_status(
+			&mut conn,
+			server_id,
+			r#"'{"munin": true}'"#,
+			"NOW() - INTERVAL '29 days'",
+		)
+		.await;
+		assert_eq!(
+			Status::latest_munin_for_server(&mut conn, server_id)
+				.await
+				.expect("query munin"),
+			Some(true),
+			"a flag reported inside the grace window is honoured",
+		);
+
+		// Push the only munin-bearing status outside the window.
+		sql_query(
+			"UPDATE statuses SET created_at = NOW() - INTERVAL '31 days' WHERE server_id = $1",
+		)
+		.bind::<sql_types::Uuid, _>(server_id)
+		.execute(&mut conn)
+		.await
+		.expect("age the status");
+
+		assert_eq!(
+			Status::latest_munin_for_server(&mut conn, server_id)
+				.await
+				.expect("query munin"),
+			None,
+			"beyond the grace window the flag reads as never reported",
+		);
+	})
+	.await
+}
