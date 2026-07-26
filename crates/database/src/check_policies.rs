@@ -19,6 +19,7 @@
 use crate::issues::Scope;
 use commons_errors::{AppError, Result};
 use commons_types::status::CheckResult;
+use diesel::dsl::{AsSelect, SqlTypeOf};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
@@ -117,6 +118,34 @@ pub struct GradedResult {
 	/// Whether this check's effective failures escalate (notify
 	/// immediately, bypassing incident grace).
 	pub escalates: bool,
+}
+
+/// The catalog fields that grade one check, detached from the query that
+/// loaded them. Callers grading a whole report's worth of checks load these
+/// once via [`CheckPolicy::grading_table`] and grade in memory, rather than
+/// issuing a query per check.
+#[derive(Debug, Clone)]
+pub struct FleetGrading {
+	ceiling: CheckResult,
+	escalates: bool,
+	rules: Option<JsonValue>,
+	reviewed: bool,
+}
+
+impl FleetGrading {
+	/// An unparseable stored ceiling falls back to warning rather than
+	/// failing the whole grading pass — the column is constrained, so this
+	/// only covers data written outside the model.
+	fn from_row(
+		(ceiling, escalates, rules, reviewed): (String, bool, Option<JsonValue>, bool),
+	) -> Self {
+		Self {
+			ceiling: ceiling.parse().unwrap_or(CheckResult::Warning),
+			escalates,
+			rules,
+			reviewed,
+		}
+	}
 }
 
 impl CheckPolicy {
@@ -356,16 +385,36 @@ impl CheckPolicy {
 			.first(db)
 			.await
 			.optional()?;
-		let Some((ceiling_str, escalates, rules_json, reviewed)) = row else {
-			return Ok(GradedResult {
+		let entry = row.map(FleetGrading::from_row);
+		Ok(Self::grade(
+			entry.as_ref(),
+			source,
+			check_name,
+			observed,
+			ctx,
+		))
+	}
+
+	/// The pure half of [`Self::apply`]: grade `observed` through an
+	/// already-loaded catalog entry, with `None` standing for a check that
+	/// has no catalog row yet. Shared by the single-check path and the batch
+	/// path so there is exactly one grading implementation.
+	pub fn grade(
+		entry: Option<&FleetGrading>,
+		source: &str,
+		check_name: &str,
+		observed: CheckResult,
+		ctx: &EvaluationContext<'_>,
+	) -> GradedResult {
+		let Some(entry) = entry else {
+			return GradedResult {
 				effective: observed.capped_at(CheckResult::Warning),
 				escalates: false,
-			});
+			};
 		};
-		let ceiling = ceiling_str.parse().unwrap_or(CheckResult::Warning);
-		let mut effective = observed.capped_at(ceiling);
-		if let Some(rules) = rules_json {
-			match serde_json::from_value::<IfLadder>(rules) {
+		let mut effective = observed.capped_at(entry.ceiling);
+		if let Some(rules) = &entry.rules {
+			match serde_json::from_value::<IfLadder>(rules.clone()) {
 				Ok(ladder) => {
 					if let Some(result) = ladder.evaluate(ctx) {
 						effective = result;
@@ -382,13 +431,49 @@ impl CheckPolicy {
 			}
 		}
 		// A never-reviewed check is inert until an operator vets it.
-		if !reviewed {
+		if !entry.reviewed {
 			effective = effective.capped_at(CheckResult::Warning);
 		}
-		Ok(GradedResult {
+		GradedResult {
 			effective,
-			escalates,
-		})
+			escalates: entry.escalates,
+		}
+	}
+
+	/// Grading fields for every catalog row, keyed by `(source, check_name)`.
+	///
+	/// For callers grading many checks in one pass: the catalog holds one row
+	/// per distinct check the fleet reports, so a single load is far cheaper
+	/// than [`Self::apply`]'s query per check. Feed the entries to
+	/// [`Self::grade`].
+	pub async fn grading_table(
+		db: &mut AsyncPgConnection,
+	) -> Result<HashMap<(String, String), FleetGrading>> {
+		use crate::schema::check_policies::dsl;
+		let rows: Vec<(String, String, String, bool, Option<JsonValue>, bool)> =
+			dsl::check_policies
+				.select((
+					dsl::source,
+					dsl::check_name,
+					dsl::ceiling,
+					dsl::escalates,
+					dsl::rules,
+					dsl::reviewed_at.is_not_null(),
+				))
+				.load(db)
+				.await
+				.map_err(AppError::from)?;
+		Ok(rows
+			.into_iter()
+			.map(
+				|(source, check_name, ceiling, escalates, rules, reviewed)| {
+					(
+						(source, check_name),
+						FleetGrading::from_row((ceiling, escalates, rules, reviewed)),
+					)
+				},
+			)
+			.collect())
 	}
 
 	/// [`Self::apply`], then the scoped transforms that cover the filing's
@@ -417,14 +502,27 @@ impl CheckPolicy {
 		let fleet = Self::apply(db, source, check_name, observed, ctx).await?;
 		let scoped =
 			ScopedCheckPolicy::chain_for(db, source, check_name, server_id, group_id).await?;
+		Ok(Self::chain_scoped(fleet, &scoped, ctx))
+	}
+
+	/// The pure half of [`Self::apply_scoped`]: run an already-loaded scoped
+	/// chain over an already-computed fleet grade. Pair with [`Self::grade`]
+	/// plus [`CheckPolicy::grading_table`] and
+	/// [`ScopedCheckPolicy::chains_for_scope`] to grade a whole report's
+	/// checks without a query per check.
+	pub fn chain_scoped(
+		fleet: GradedResult,
+		chain: &[ScopedCheckPolicy],
+		ctx: &EvaluationContext<'_>,
+	) -> GradedResult {
 		let mut effective = fleet.effective;
-		for transform in &scoped {
+		for transform in chain {
 			effective = transform.transform(effective, ctx);
 		}
-		Ok(GradedResult {
+		GradedResult {
 			effective,
 			escalates: fleet.escalates,
-		})
+		}
 	}
 
 	/// Replace the documentation for a check (or clear it with `None`).
@@ -738,11 +836,55 @@ impl ScopedCheckPolicy {
 		group_id: Option<Uuid>,
 	) -> Result<Vec<Self>> {
 		use crate::schema::scoped_check_policies::dsl;
-		let mut query = dsl::scoped_check_policies
+		let query = Self::scoped_to(server_id, group_id)
+			.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name)));
+		let mut rows: Vec<Self> = query.load(db).await.map_err(AppError::from)?;
+		Self::order_chain(&mut rows);
+		Ok(rows)
+	}
+
+	/// Every scoped transform covering `(server_id, group_id)`, grouped by
+	/// `(source, check_name)` and in application order within each group —
+	/// the batch form of [`Self::chain_for`], for callers walking a whole
+	/// report's checks. One query for the lot instead of one per check.
+	pub async fn chains_for_scope(
+		db: &mut AsyncPgConnection,
+		server_id: Option<Uuid>,
+		group_id: Option<Uuid>,
+	) -> Result<HashMap<(String, String), Vec<Self>>> {
+		let rows: Vec<Self> = Self::scoped_to(server_id, group_id)
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		let mut chains: HashMap<(String, String), Vec<Self>> = HashMap::new();
+		for row in rows {
+			chains
+				.entry((row.source.clone(), row.check_name.clone()))
+				.or_default()
+				.push(row);
+		}
+		for chain in chains.values_mut() {
+			Self::order_chain(chain);
+		}
+		Ok(chains)
+	}
+
+	/// The scope half of the chain predicate: the rows whose scope covers a
+	/// filing against `(server_id, group_id)`. Shared so the single-check and
+	/// batch paths can never disagree about what a scope covers.
+	fn scoped_to(
+		server_id: Option<Uuid>,
+		group_id: Option<Uuid>,
+	) -> crate::schema::scoped_check_policies::BoxedQuery<
+		'static,
+		diesel::pg::Pg,
+		SqlTypeOf<AsSelect<Self, diesel::pg::Pg>>,
+	> {
+		use crate::schema::scoped_check_policies::dsl;
+		let query = dsl::scoped_check_policies
 			.select(Self::as_select())
-			.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name)))
 			.into_boxed();
-		query = match (server_id, group_id) {
+		match (server_id, group_id) {
 			(None, None) => {
 				query.filter(dsl::server_id.is_null().and(dsl::server_group_id.is_null()))
 			}
@@ -754,12 +896,13 @@ impl ScopedCheckPolicy {
 						.is_not_distinct_from(group)
 						.and(dsl::server_group_id.is_not_null())),
 			),
-		};
-		let mut rows: Vec<Self> = query.load(db).await.map_err(AppError::from)?;
-		// Group scope applies before server scope: the most specific
-		// transform has the last word.
+		}
+	}
+
+	/// Group scope applies before server scope: the most specific transform
+	/// has the last word.
+	fn order_chain(rows: &mut [Self]) {
 		rows.sort_by_key(|r| r.server_id.is_some());
-		Ok(rows)
 	}
 
 	/// Apply this transform to the effective result arriving from the
