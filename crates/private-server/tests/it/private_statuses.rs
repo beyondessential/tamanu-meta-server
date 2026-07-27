@@ -183,7 +183,12 @@ async fn status_json_server_with_recent_status() {
 			('11111111-1111-1111-1111-111111111111', 'Active Server', 'https://active.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 
 			INSERT INTO statuses (server_id, version, extra, created_at) VALUES
-			('11111111-1111-1111-1111-111111111111', '1.2.3', '{\"uptime\": 3600}'::jsonb, NOW())"
+			('11111111-1111-1111-1111-111111111111', '1.2.3', '{\"uptime\": 3600}'::jsonb, NOW());
+
+			-- Ingestion records the source's current detail alongside the
+			-- status, and that's what the group's headline version reads.
+			INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', '{\"uptime\": 3600}'::jsonb, '1.2.3')"
 		)
 		.await
 		.unwrap();
