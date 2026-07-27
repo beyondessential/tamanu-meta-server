@@ -935,13 +935,13 @@ impl BackupCredentialIssuance {
 	}
 
 	/// Latest *backup-purpose* credential issuance per `(device, type)` within a
-	/// group, as `(issued_at, expires_at)`. Keyed `(device_id, type)`; restore
-	/// issuances are excluded. Used to infer an in-flight backup: creds still
-	/// within their validity window with no newer run report.
+	/// group. Keyed `(device_id, type)`; restore issuances are excluded. Used to
+	/// infer an in-flight backup: creds still within their validity window with no
+	/// newer run report.
 	pub async fn latest_backup_by_device_type_for_group(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
-	) -> Result<HashMap<(Uuid, BackupType), (Timestamp, Timestamp)>> {
+	) -> Result<HashMap<(Uuid, BackupType), LatestIssuance>> {
 		use crate::schema::backup_credential_issuances::dsl;
 
 		let rows: Vec<Self> = dsl::backup_credential_issuances
@@ -955,9 +955,31 @@ impl BackupCredentialIssuance {
 
 		Ok(rows
 			.into_iter()
-			.map(|r| ((r.device_id, r.r#type.clone()), (r.issued_at, r.expires_at)))
+			.map(|r| {
+				(
+					(r.device_id, r.r#type.clone()),
+					LatestIssuance {
+						issued_at: r.issued_at,
+						expires_at: r.expires_at,
+						run_id: r.run_id,
+					},
+				)
+			})
 			.collect())
 	}
+}
+
+/// The latest backup credential issuance for a `(device, type)`, reduced to what
+/// the activity views need of it.
+///
+/// `run_id` is what ties the inferred in-flight state to the progress that run has
+/// been reporting; an issuance from a client predating run correlation has none,
+/// and so has no progress to match.
+#[derive(Debug, Clone, Copy)]
+pub struct LatestIssuance {
+	pub issued_at: Timestamp,
+	pub expires_at: Timestamp,
+	pub run_id: Option<Uuid>,
 }
 
 // ---------------------------------------------------------------------------

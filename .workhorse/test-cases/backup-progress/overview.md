@@ -63,6 +63,10 @@ landed.
 - [x] A completed run shows the moment its data was frozen alongside its report time, and carries no live figures — verifies spec: BKO
 - [x] A completed run that reported no freeze moment shows none — verifies spec: BKO
 - [x] An issuance from a client predating run correlation shows as in flight with no figures, rather than picking up another run's progress — verifies spec: BKO
+- [x] The server's own page shows the running backup's transferred/expected, rate, progress bar, and time since last contact — verifies spec: BKO
+- [x] The server's page shows no figures when the running backup reports none, keeping only its "backing up" state — verifies spec: BKO
+- [x] A capability row drops its live figures once the run reports, once its credentials expire, and when its issuance carries no correlation id — so a finished run's leftover progress is never shown as live — verifies spec: BKO
+- [x] Capability progress is scoped to devices mapped into the view, so a sibling server's run cannot leak onto another's row — verifies spec: BKO
 
 ## Not covered
 

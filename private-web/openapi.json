@@ -11982,6 +11982,17 @@
             "format": "date-time",
             "description": "`Some(issued_at)` when a backup of this type appears to be in flight:\nbackup credentials were issued and are still valid, and no run has\nbeen reported since they were issued. `None` otherwise. Lets the UI\nshow a \"backing up…\" state."
           },
+          "progress": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LiveProgress",
+                "description": "Live figures for the in-flight run of this type, when it is reporting\nprogress. `None` when nothing is in flight, or when the run reports no\nprogress — which is unknown, not zero."
+              }
+            ]
+          },
           "server_id": {
             "type": "string",
             "format": "uuid",

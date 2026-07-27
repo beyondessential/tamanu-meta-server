@@ -363,7 +363,7 @@ const RATE_WINDOW_SECS: i64 = 10 * 60;
 ///
 /// Every byte figure here is cumulative since the run started, exactly as
 /// reported; [`Self::bytes_per_second`] is the only derived rate.
-#[derive(Serialize, ToSchema)]
+#[derive(Clone, Serialize, ToSchema)]
 pub struct LiveProgress {
 	/// When the last sample arrived, as timed by Canopy on receipt.
 	pub observed_at: Timestamp,
@@ -453,6 +453,62 @@ fn live_progress(
 		bytes_per_second,
 		extra: latest.extra.clone(),
 	}
+}
+
+/// Batch-load live figures for a set of in-flight runs, keyed by run.
+///
+/// Two queries regardless of how many runs are asked about — the last sample per
+/// run, and each run's trailing window for the rate. Shared by the group activity
+/// view and the per-server capability list so both derive rate identically.
+async fn load_live_progress(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	run_ids: &[Uuid],
+	now: Timestamp,
+) -> Result<std::collections::HashMap<Uuid, LiveProgress>> {
+	if run_ids.is_empty() {
+		return Ok(std::collections::HashMap::new());
+	}
+	let latest = database::backups::BackupRunProgress::latest_by_run(conn, run_ids).await?;
+	let windows = database::backups::BackupRunProgress::for_runs_since(
+		conn,
+		run_ids,
+		now - jiff::SignedDuration::from_secs(RATE_WINDOW_SECS),
+	)
+	.await?;
+	Ok(latest
+		.into_iter()
+		.map(|(run_id, sample)| {
+			let window = windows.get(&run_id).map(Vec::as_slice).unwrap_or_default();
+			(run_id, live_progress(&sample, window, now))
+		})
+		.collect())
+}
+
+/// The in-flight run ids implied by a group's latest backup issuances — the runs a
+/// capability row might have live progress for.
+///
+/// Derived from the issuance and report maps alone, so it needs no knowledge of
+/// which capabilities exist and can run before they're loaded.
+fn in_flight_run_ids(
+	latest_issuance: &std::collections::HashMap<
+		(Uuid, BackupType),
+		database::backups::LatestIssuance,
+	>,
+	latest_report: &std::collections::HashMap<(Uuid, BackupType), Timestamp>,
+	server_by_device: &std::collections::HashMap<Uuid, Uuid>,
+	now: Timestamp,
+) -> Vec<Uuid> {
+	let mut ids: Vec<Uuid> = latest_issuance
+		.iter()
+		.filter_map(|((device_id, ty), issuance)| {
+			let server_id = server_by_device.get(device_id)?;
+			let last_report = latest_report.get(&(*server_id, ty.clone())).copied();
+			in_flight_run_id(now, Some(*issuance), last_report)
+		})
+		.collect();
+	ids.sort_unstable();
+	ids.dedup();
+	ids
 }
 
 /// One row of the recent-runs view: either a device-reported [`BackupRun`] or a
@@ -793,17 +849,31 @@ async fn effective_interval_secs(
 /// itself — once the creds expire the device can no longer be using them.
 fn processing_since(
 	now: Timestamp,
-	issuance: Option<(Timestamp, Timestamp)>,
+	issuance: Option<database::backups::LatestIssuance>,
 	last_report_at: Option<Timestamp>,
 ) -> Option<Timestamp> {
-	let (issued, expires) = issuance?;
-	if now >= expires {
+	let issuance = issuance?;
+	if now >= issuance.expires_at {
 		return None;
 	}
 	match last_report_at {
-		Some(reported) if reported >= issued => None,
-		_ => Some(issued),
+		Some(reported) if reported >= issuance.issued_at => None,
+		_ => Some(issuance.issued_at),
 	}
+}
+
+/// The run whose progress belongs on a capability row: the latest issuance's run,
+/// when that issuance still looks in flight.
+///
+/// Gated on [`processing_since`] rather than merely on the issuance existing, so a
+/// finished run's leftover progress can't be shown as if it were live.
+fn in_flight_run_id(
+	now: Timestamp,
+	issuance: Option<database::backups::LatestIssuance>,
+	last_report_at: Option<Timestamp>,
+) -> Option<Uuid> {
+	processing_since(now, issuance, last_report_at)?;
+	issuance?.run_id
 }
 
 /// Next expected backup for one `(server, type)`: the server's own last success
@@ -858,6 +928,10 @@ pub struct ServerBackupCapabilityView {
 	/// been reported since they were issued. `None` otherwise. Lets the UI
 	/// show a "backing up…" state.
 	pub processing_since: Option<Timestamp>,
+	/// Live figures for the in-flight run of this type, when it is reporting
+	/// progress. `None` when nothing is in flight, or when the run reports no
+	/// progress — which is unknown, not zero.
+	pub progress: Option<LiveProgress>,
 }
 
 /// Identifies a server.
@@ -2012,6 +2086,15 @@ pub async fn stats(
 		.iter()
 		.filter_map(|s| s.device_id.map(|d| (d, s.id)))
 		.collect();
+	// Live figures for the capability rows below, for whichever types look in
+	// flight. Derived from the issuance/report maps, so it doesn't wait on the
+	// per-server capability loads.
+	let capability_progress = load_live_progress(
+		&mut conn,
+		&in_flight_run_ids(&latest_issuance, &latest_report, &device_to_server, now),
+		now,
+	)
+	.await?;
 	let issuance_since =
 		run_pairing::issuance_since(now, reported_runs.iter().map(|r| r.reported_at).min());
 	let issuances = BackupCredentialIssuance::list_for_group_since(
@@ -2127,6 +2210,8 @@ pub async fn stats(
 					now,
 				),
 				processing_since: processing_since(now, issuance, last_report),
+				progress: in_flight_run_id(now, issuance, last_report)
+					.and_then(|rid| capability_progress.get(&rid).cloned()),
 				r#type: cap.r#type,
 				enabled: cap.enabled,
 			});
@@ -2261,6 +2346,17 @@ pub async fn capabilities(
 		),
 		None => Default::default(),
 	};
+	// Live figures for whichever of this server's types look in flight. Scoped to
+	// this device's issuances so a sibling server's run can't leak onto these rows.
+	let server_by_device: std::collections::HashMap<Uuid, Uuid> = device_id
+		.map(|d| std::collections::HashMap::from([(d, args.server_id)]))
+		.unwrap_or_default();
+	let capability_progress = load_live_progress(
+		&mut conn,
+		&in_flight_run_ids(&latest_issuance, &latest_report, &server_by_device, now),
+		now,
+	)
+	.await?;
 	let rows = ServerBackupCapability::list_for_server(&mut conn, args.server_id).await?;
 	let mut out = Vec::with_capacity(rows.len());
 	for c in rows {
@@ -2283,6 +2379,8 @@ pub async fn capabilities(
 				now,
 			),
 			processing_since: processing_since(now, issuance, last_report),
+			progress: in_flight_run_id(now, issuance, last_report)
+				.and_then(|rid| capability_progress.get(&rid).cloned()),
 			r#type: c.r#type,
 			enabled: c.enabled,
 		});
@@ -3102,6 +3200,77 @@ mod tests {
 		assert!(rows[0].run_id.is_none());
 		assert!(rows[0].progress.is_none());
 		assert_eq!(rows[0].snapshot_taken_at, None);
+	}
+
+	// --- capability-row progress gating -------------------------------------
+
+	fn latest_issuance(
+		issued: i64,
+		expires: i64,
+		run_id: Option<Uuid>,
+	) -> database::backups::LatestIssuance {
+		database::backups::LatestIssuance {
+			issued_at: ts(issued),
+			expires_at: ts(expires),
+			run_id,
+		}
+	}
+
+	#[test]
+	fn capability_run_id_is_none_once_the_run_has_reported() {
+		let rid = Uuid::from_u128(5);
+		let iss = latest_issuance(1000, 5000, Some(rid));
+		// Creds still valid, no report since issuance → in flight, so its progress
+		// is the row's.
+		assert_eq!(in_flight_run_id(ts(2000), Some(iss), None), Some(rid));
+		// A report landed after the issuance → the run is done, and its leftover
+		// progress must not be shown as if it were still live.
+		assert_eq!(in_flight_run_id(ts(2000), Some(iss), Some(ts(1500))), None);
+	}
+
+	#[test]
+	fn capability_run_id_is_none_once_credentials_expire() {
+		let rid = Uuid::from_u128(5);
+		let iss = latest_issuance(1000, 5000, Some(rid));
+		assert_eq!(in_flight_run_id(ts(6000), Some(iss), None), None);
+	}
+
+	/// An issuance from a client predating run correlation looks in flight but has
+	/// no id to match progress by.
+	#[test]
+	fn capability_run_id_is_none_without_a_correlation_id() {
+		let iss = latest_issuance(1000, 5000, None);
+		assert!(processing_since(ts(2000), Some(iss), None).is_some());
+		assert_eq!(in_flight_run_id(ts(2000), Some(iss), None), None);
+	}
+
+	/// The ids come from the issuance/report maps alone, and only for devices that
+	/// map to a server in scope — so a sibling's run can't leak onto these rows.
+	#[test]
+	fn in_flight_run_ids_are_scoped_to_mapped_devices() {
+		let (mine, theirs) = (Uuid::from_u128(1), Uuid::from_u128(2));
+		let (my_run, their_run) = (Uuid::from_u128(10), Uuid::from_u128(20));
+		let pg = BackupType::TamanuPostgres;
+		let issuances = std::collections::HashMap::from([
+			(
+				(mine, pg.clone()),
+				latest_issuance(1000, 5000, Some(my_run)),
+			),
+			(
+				(theirs, pg.clone()),
+				latest_issuance(1000, 5000, Some(their_run)),
+			),
+		]);
+		let server = Uuid::from_u128(9);
+		let mapped = std::collections::HashMap::from([(mine, server)]);
+
+		let ids = in_flight_run_ids(&issuances, &Default::default(), &mapped, ts(2000));
+		assert_eq!(ids, vec![my_run]);
+
+		// And a report for the mapped server's type drops it back out.
+		let reports = std::collections::HashMap::from([((server, pg), ts(4000))]);
+		let ids = in_flight_run_ids(&issuances, &reports, &mapped, ts(4500));
+		assert!(ids.is_empty());
 	}
 
 	/// A reported run's figures live on the row itself; the live view is over.

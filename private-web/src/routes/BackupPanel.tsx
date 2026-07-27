@@ -48,6 +48,7 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import TimeAgo from "../components/TimeAgo";
 import { LatestSnapshot, SnapshotId } from "../components/SnapshotId";
 import { BackupProcessingChip } from "../components/BackupProcessingChip";
+import { BackupLiveProgress } from "../components/BackupLiveProgress";
 import RestoreReplicasSection from "../components/RestoreReplicasSection";
 import RunThroughputChart from "../components/RunThroughputChart";
 import {
@@ -1608,11 +1609,18 @@ function ServersPanel({
 	members: ServerInfo[];
 	isAdmin: boolean;
 }) {
+	// As with the runs panel: watch closely while a backup is in flight so its
+	// figures move on their own, and back off once nothing is running.
+	const [inFlight, setInFlight] = useState(false);
+	const tick = useReloadInterval(
+		inFlight ? 5_000 : 30_000,
+		"canopy-data-changed",
+	);
 	const stats = useApi(
 		"backups",
 		"stats",
 		{ server_group_id: groupId },
-		[groupId],
+		[groupId, tick],
 	);
 	const requestNow = useApiAction("backups", "request_now");
 	const cancel = useApiAction("backups", "cancel_request");
@@ -1621,6 +1629,10 @@ function ServersPanel({
 
 	const pending = stats.status === "ok" ? stats.data.pending_requests : [];
 	const capabilities = stats.status === "ok" ? stats.data.capabilities : [];
+	const anyInFlight = capabilities.some((c) => c.processing_since != null);
+	useEffect(() => {
+		setInFlight(anyInFlight);
+	}, [anyInFlight]);
 	const restoreWindows =
 		stats.status === "ok" ? stats.data.restore_windows : [];
 	const restoreWindowFor = (serverId: string) =>
@@ -1906,6 +1918,7 @@ function ServersPanel({
 																since={cap?.processing_since}
 															/>
 														</Stack>
+														<BackupLiveProgress progress={cap?.progress} />
 													</TableCell>
 													<TableCell>
 														{cap?.next_backup_at ? (

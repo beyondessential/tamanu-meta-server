@@ -8,6 +8,7 @@ import {
 	seedBackupRunProgress,
 	seedDevice,
 	seedServer,
+	seedServerBackupCapability,
 	seedServerGroup,
 	seedServerGroupBackupConfig,
 	type Sql,
@@ -302,6 +303,66 @@ test.describe("in-flight backup progress", () => {
 		// One point can't make a line — the chart says so rather than drawing a
 		// flat zero.
 		await expect(page.getByTestId("throughput-empty")).toBeVisible();
+	});
+
+	test("the server's own backup section shows live figures and a progress bar", async ({
+		page,
+		sql,
+	}) => {
+		const { group, device, server, runId } = await seedInFlightGroup(
+			sql,
+			"progress-serverpage",
+		);
+		await seedServerBackupCapability(sql, {
+			serverId: server.id,
+			type: "tamanu-postgres",
+			enabled: true,
+		});
+		const MIB = 1024 * 1024;
+		await seedBackupRunProgress(sql, {
+			runId,
+			deviceId: device.id,
+			groupId: group.id,
+			serverId: server.id,
+			observedAgoSecs: 130,
+			bytesUploaded: 200 * MIB,
+			bytesEstimated: 1024 * MIB,
+		});
+		await seedBackupRunProgress(sql, {
+			runId,
+			deviceId: device.id,
+			groupId: group.id,
+			serverId: server.id,
+			observedAgoSecs: 30,
+			bytesUploaded: 400 * MIB,
+			bytesEstimated: 1024 * MIB,
+		});
+
+		await page.goto(`/servers/${server.id}#backups`);
+		await expect(page.getByText("backing up…")).toBeVisible();
+		const progress = page.getByTestId("capability-progress").first();
+		await expect(progress).toContainText("400.0 MiB");
+		await expect(progress).toContainText("~1.0 GiB");
+		await expect(progress).toContainText("2.0 MiB/s");
+		await expect(progress).toContainText(/last heard/i);
+		await expect(progress.getByRole("progressbar")).toHaveAccessibleName(/39%/);
+	});
+
+	test("the server's backup section shows no figures when the run reports none", async ({
+		page,
+		sql,
+	}) => {
+		const { server } = await seedInFlightGroup(sql, "progress-serverpage-bare");
+		await seedServerBackupCapability(sql, {
+			serverId: server.id,
+			type: "tamanu-postgres",
+			enabled: true,
+		});
+
+		await page.goto(`/servers/${server.id}#backups`);
+		// Still visibly running, but nothing invented.
+		await expect(page.getByText("backing up…")).toBeVisible();
+		await expect(page.getByTestId("capability-progress")).toHaveCount(0);
 	});
 
 	test("a completed run shows the moment its data was frozen", async ({

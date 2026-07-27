@@ -6872,6 +6872,7 @@ export interface components {
              *     show a "backing up…" state.
              */
             processing_since?: string | null;
+            progress?: null | components["schemas"]["LiveProgress"];
             /**
              * Format: uuid
              * @description The server this capability belongs to.
