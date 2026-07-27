@@ -1842,3 +1842,50 @@ async fn snapshot_reports_and_excludes_silenced_checks() {
 	})
 	.await
 }
+
+/// The release summary counts each still-reporting production server once, at
+/// the version the most recent source to report one gave — and ignores
+/// servers that have gone quiet, or that aren't production.
+// spec: FIG#active-versions
+#[tokio::test(flavor = "multi_thread")]
+async fn summary_covers_actively_reporting_production_servers() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, kind, rank) VALUES
+			('40000000-0000-0000-0000-000000000001', 'live-a', 'https://a.example.com', 'central', 'production'),
+			('40000000-0000-0000-0000-000000000002', 'live-b', 'https://b.example.com', 'central', 'production'),
+			('40000000-0000-0000-0000-000000000003', 'quiet', 'https://q.example.com', 'central', 'production');
+
+			INSERT INTO servers (id, name, host, kind, rank) VALUES
+			('40000000-0000-0000-0000-000000000004', 'testing', 'https://t.example.com', 'central', 'test');
+
+			INSERT INTO server_reported_detail (server_id, source, extra, version, reported_at) VALUES
+			('40000000-0000-0000-0000-000000000001', 'alertd', '{}'::jsonb, '2.34.1', NOW() - INTERVAL '2 hours'),
+			-- A later source reports no version: live-a still runs 2.34.1.
+			('40000000-0000-0000-0000-000000000001', 'tamanu', '{\"uptimeSecs\": 42}'::jsonb, NULL, NOW()),
+			('40000000-0000-0000-0000-000000000002', 'alertd', '{}'::jsonb, '2.35.0', NOW()),
+			('40000000-0000-0000-0000-000000000003', 'alertd', '{}'::jsonb, '2.10.0', NOW() - INTERVAL '8 days'),
+			('40000000-0000-0000-0000-000000000004', 'alertd', '{}'::jsonb, '2.40.0', NOW())",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/summary")
+			.json(&serde_json::json!({}))
+			.await;
+		r.assert_status_ok();
+		let body: serde_json::Value = r.json();
+
+		assert_eq!(
+			body["versions"],
+			serde_json::json!(["2.34.1", "2.35.0"]),
+			"the quiet server and the non-production one are not actively running anything, \
+			 and a version-less later push doesn't drop live-a",
+		);
+		assert_eq!(body["releases"], serde_json::json!([[2, 34], [2, 35]]));
+		assert_eq!(body["bracket"]["min"], "2.34.1");
+		assert_eq!(body["bracket"]["max"], "2.35.0");
+	})
+	.await
+}

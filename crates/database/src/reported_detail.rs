@@ -12,7 +12,7 @@
 //! record of what stands.
 
 use commons_errors::{AppError, Result};
-use commons_types::version::VersionStr;
+use commons_types::{server::rank::ServerRank, version::VersionStr};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
@@ -20,6 +20,16 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::statuses::MergedDetail;
+
+/// How recently a server must have reported to count as still running what it
+/// last reported.
+///
+/// Most reads here deliberately have no such bound — a figure is what the
+/// server runs, and that doesn't stop being true because the server went
+/// quiet. But "what is the fleet *actively* running" is a different question:
+/// a decommissioned server that was never archived would otherwise keep its
+/// release branch in the count forever.
+const ACTIVE_LOOKBACK_SQL: &str = "NOW() - INTERVAL '7 days'";
 
 /// One source's latest server-wide detail for one server.
 // spec: FIG#sourcing
@@ -96,6 +106,34 @@ impl ReportedDetail {
 			.load(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// The application version each still-reporting production server runs,
+	/// one per server.
+	///
+	/// A server's version is the one the most recent source to report a
+	/// version gave: a source that reports none doesn't drop the server from
+	/// the count just by having pushed last. Bounded by
+	/// [`ACTIVE_LOOKBACK_SQL`], so this answers what is *running*, not what
+	/// was last seen at any point in the past.
+	// spec: FIG#active-versions
+	pub async fn production_versions(db: &mut AsyncPgConnection) -> Result<Vec<VersionStr>> {
+		use crate::schema::{server_reported_detail as detail, servers};
+
+		let rows: Vec<Option<VersionStr>> = detail::table
+			.inner_join(servers::table.on(servers::id.eq(detail::server_id)))
+			.filter(servers::rank.eq(ServerRank::Production))
+			.filter(servers::deleted_at.is_null())
+			.filter(detail::version.is_not_null())
+			.filter(detail::reported_at.ge(diesel::dsl::sql(ACTIVE_LOOKBACK_SQL)))
+			.distinct_on(detail::server_id)
+			.order((detail::server_id, detail::reported_at.desc()))
+			.select(detail::version)
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(rows.into_iter().flatten().collect())
 	}
 
 	/// Resolve one server's figures from its sources' current reports.

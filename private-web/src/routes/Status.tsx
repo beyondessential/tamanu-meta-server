@@ -104,11 +104,14 @@ function ReleaseSummary({ tick }: { tick: number }) {
 		<Card variant="outlined">
 			<CardContent>
 				<Typography variant="body1">
-					{releases.length} release branches in active use:{" "}
+					{releases.length} release{" "}
+					{releases.length === 1 ? "branch" : "branches"} in active use:{" "}
 					{releases
 						.map(([major, minor]) => `${major}.${minor}`)
 						.join(", ")}{" "}
-					({versions.length} versions: {bracket.min} — {bracket.max})
+					({versions.length}{" "}
+					{versions.length === 1 ? "version" : "versions"}: {bracket.min} —{" "}
+					{bracket.max})
 				</Typography>
 			</CardContent>
 		</Card>

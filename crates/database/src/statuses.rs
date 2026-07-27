@@ -5,7 +5,6 @@ use std::{
 
 use commons_errors::{AppError, Result};
 use commons_types::{
-	server::rank::ServerRank,
 	status::{CheckResult, ShortStatus},
 	version::VersionStr,
 };
@@ -641,22 +640,6 @@ impl Status {
 		.bind::<diesel::sql_types::Array<diesel::sql_types::Uuid>, _>(server_ids);
 
 		query.load::<Status>(db).await.map_err(AppError::from)
-	}
-
-	pub async fn production_versions(db: &mut AsyncPgConnection) -> Result<Vec<VersionStr>> {
-		use crate::schema::servers::dsl as servers_dsl;
-
-		let production_server_ids: Vec<Uuid> = servers_dsl::servers
-			.select(servers_dsl::id)
-			.filter(servers_dsl::rank.eq(ServerRank::Production))
-			.load(db)
-			.await?;
-
-		Ok(Self::latest_for_servers(db, &production_server_ids)
-			.await?
-			.into_iter()
-			.filter_map(|s| s.version)
-			.collect())
 	}
 
 	/// This one status's server-wide detail, for a caller that has a single

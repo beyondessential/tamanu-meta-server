@@ -47,6 +47,13 @@ A field whose values are near-unique across the fleet presents its largest group
 An operator can also cross two fields, presenting a table of one against the other: for each combination of values, how many servers report both, with the servers behind each combination available.
 Servers reporting no value for either field occupy their own row and column, so a combination is never silently dropped.
 
+## Active versions
+
+The status view summarises which release branches the production fleet is actively running: how many distinct branches, which they are, and the range of exact versions across them.
+
+A production server counts once, at the version the most recent source to report one gave — a source reporting no version does not drop the server from the summary by having pushed last.
+Unlike the figures elsewhere, this summary is bounded by recency: a server that has not reported within the last week is not running anything as far as the summary is concerned, so a decommissioned server that was never archived stops inflating the count.
+
 ## Point in time
 
 The status snapshot presents the same figures as of the moment being viewed, from each source's most recent report at or before that moment.

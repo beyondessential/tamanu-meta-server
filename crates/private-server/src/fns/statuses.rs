@@ -122,7 +122,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 pub async fn summary(State(state): State<AppState>) -> Result<Json<SummaryData>> {
 	let mut conn = state.db_read.get().await?;
 
-	let versions: BTreeSet<VersionStr> = Status::production_versions(&mut conn)
+	let versions: BTreeSet<VersionStr> = ReportedDetail::production_versions(&mut conn)
 		.await?
 		.into_iter()
 		.collect();

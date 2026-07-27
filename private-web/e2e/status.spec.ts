@@ -139,4 +139,45 @@ test.describe("status page", () => {
 			await expect(strip.locator("> *")).toHaveCount(size + 2);
 		}
 	});
+
+	// spec: FIG#active-versions
+	test("counts the release branches production is actively running", async ({
+		page,
+		sql,
+	}) => {
+		const live = await seedServer(sql, {
+			name: "prod-live",
+			rank: "production",
+		});
+		const quiet = await seedServer(sql, {
+			name: "prod-quiet",
+			rank: "production",
+		});
+		const testing = await seedServer(sql, { name: "test-box", rank: "test" });
+
+		await seedStatus(sql, { serverId: live.id, version: "2.34.1" });
+		// A later push from a source carrying no version must not drop the
+		// server out of the summary.
+		await seedStatus(sql, {
+			serverId: live.id,
+			source: "tamanu",
+			extra: { uptimeSecs: 42 },
+		});
+		// Quiet for longer than a week: not running anything, as far as the
+		// summary is concerned.
+		await seedStatus(sql, {
+			serverId: quiet.id,
+			version: "2.10.0",
+			createdAt: "NOW() - INTERVAL '8 days'",
+		});
+		await seedStatus(sql, { serverId: testing.id, version: "2.40.0" });
+
+		await page.goto("/status");
+
+		await expect(
+			page.getByText(
+				"1 release branch in active use: 2.34 (1 version: 2.34.1 — 2.34.1)",
+			),
+		).toBeVisible();
+	});
 });
