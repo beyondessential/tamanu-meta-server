@@ -697,24 +697,20 @@ impl Status {
 			.collect())
 	}
 
+	/// This one status's server-wide detail, for a caller that has a single
+	/// status in hand rather than a server's set of sources. Prefer
+	/// [`MergedDetail::from_statuses`] where every source is available: a
+	/// figure this push doesn't carry is one another source may.
+	pub fn detail(&self) -> MergedDetail {
+		MergedDetail(self.extra.as_object().cloned().unwrap_or_default())
+	}
+
 	pub fn platform(&self) -> Option<String> {
-		self.extra("pgVersion")
-			.and_then(|pg| pg.as_str())
-			.map(|pg| {
-				if pg.contains("Visual C++") || pg.contains("windows") {
-					"Windows"
-				} else {
-					"Linux"
-				}
-				.into()
-			})
+		self.detail().platform()
 	}
 
 	pub fn postgres_version(&self) -> Option<String> {
-		self.extra("pgVersion")
-			.and_then(|pg| pg.as_str())
-			.and_then(|pg| pg.split_ascii_whitespace().nth(1))
-			.map(|vers| vers.trim_end_matches(',').into())
+		self.detail().postgres_version()
 	}
 
 	/// Node.js runtime version the server reported in its status payload
@@ -722,9 +718,7 @@ impl Status {
 	/// connection's User-Agent (see [`crate::devices::DeviceConnection::nodejs_version`]),
 	/// which only reflects whichever transport happened to set that header.
 	pub fn node_version(&self) -> Option<String> {
-		self.extra("nodeVersion")
-			.and_then(|v| v.as_str())
-			.map(ToOwned::to_owned)
+		self.detail().node_version()
 	}
 
 	/// Identified operators connected to the server as of this status
@@ -750,6 +744,95 @@ impl Status {
 	pub fn distance_from_version(&self, version: &Version) -> Option<u64> {
 		let current = self.version.as_ref().map(|v| &v.0)?;
 		Some(version_distance(current, version))
+	}
+}
+
+/// A server's server-wide detail resolved across all the sources reporting on
+/// it: for each key, the value from the most recent source that carries it.
+///
+/// Sources don't all report the same fields — only bestool reports
+/// `bestoolVersion`, while a legacy Tamanu push carries neither that nor
+/// `pgVersion` — so reading the figures off whichever source pushed last
+/// makes them blink out as sources interleave. Falling through to an older
+/// source per key holds each figure at its last reported value instead.
+// spec: FIG#sourcing
+#[derive(Debug, Clone, Default)]
+pub struct MergedDetail(serde_json::Map<String, serde_json::Value>);
+
+impl MergedDetail {
+	/// Fold `statuses` — one server's statuses, in any order — into the
+	/// resolved detail. Newer statuses win per key; a key absent from the
+	/// newest falls through to the newest status that has it.
+	///
+	/// Which statuses are passed sets the window this sees: callers hand it
+	/// each source's latest push (see [`Status::latest_per_source_at`]), so
+	/// a source silent beyond that lookback contributes nothing.
+	pub fn from_statuses(statuses: &[Status]) -> Self {
+		// latest_per_source_at orders by source name, not time, so sort
+		// rather than trusting the caller's order: "newest wins" reading as
+		// "last source alphabetically wins" would be silent and wrong.
+		let mut ordered: Vec<&Status> = statuses.iter().collect();
+		ordered.sort_by_key(|st| st.created_at);
+
+		let mut merged = serde_json::Map::new();
+		for status in ordered {
+			let Some(obj) = status.extra.as_object() else {
+				continue;
+			};
+			for (key, value) in obj {
+				if value.is_null() {
+					continue;
+				}
+				merged.insert(key.clone(), value.clone());
+			}
+		}
+		Self(merged)
+	}
+
+	pub fn get(&self, key: &str) -> Option<&serde_json::Value> {
+		self.0.get(key)
+	}
+
+	fn string(&self, key: &str) -> Option<String> {
+		self.get(key)
+			.and_then(|v| v.as_str())
+			.map(ToOwned::to_owned)
+	}
+
+	/// Operating system family, inferred from the shape of the reported
+	/// PostgreSQL version banner — which names its build toolchain, and so
+	/// distinguishes a Windows build from any other.
+	pub fn platform(&self) -> Option<String> {
+		self.string("pgVersion").map(|pg| {
+			if pg.contains("Visual C++") || pg.contains("windows") {
+				"Windows"
+			} else {
+				"Linux"
+			}
+			.into()
+		})
+	}
+
+	pub fn postgres_version(&self) -> Option<String> {
+		self.get("pgVersion")
+			.and_then(|pg| pg.as_str())
+			.and_then(|pg| pg.split_ascii_whitespace().nth(1))
+			.map(|vers| vers.trim_end_matches(',').into())
+	}
+
+	pub fn node_version(&self) -> Option<String> {
+		self.string("nodeVersion")
+	}
+
+	pub fn timezone(&self) -> Option<String> {
+		self.string("timezone")
+	}
+
+	/// Version of bestool itself, which it reports alongside the rest of its
+	/// server-wide detail. Absent for a server no bestool reports on.
+	// spec: FIG#figures
+	pub fn bestool_version(&self) -> Option<String> {
+		self.string("bestoolVersion")
 	}
 }
 

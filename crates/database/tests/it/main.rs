@@ -33,6 +33,7 @@ mod server_group_version_cache;
 mod server_restore_window;
 mod silenced_health_checks;
 mod slack_outbox_enqueue;
+mod status_figures;
 mod statuses_device_fk;
 mod statuses_munin;
 mod tag_reserved_prefix;
