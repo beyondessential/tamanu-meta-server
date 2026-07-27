@@ -1656,7 +1656,7 @@
           "commons"
         ],
         "summary": "Check whether the caller is an admin.",
-        "description": "Reports `true` if the caller is authenticated and their identity is on\nthe admin allow-list, `false` otherwise — including when the caller is\nnot authenticated at all. This endpoint intentionally requires no\nauthentication of its own, since it exists so a client can check whether\nto show admin-only controls before doing anything else.",
+        "description": "Reports `true` if the caller is authenticated and their identity is on\nthe admin allow-list, `false` if the caller definitely isn't an admin —\nincluding when the caller is not authenticated at all. This endpoint\nintentionally requires no authentication of its own, since it exists so a\nclient can check whether to show admin-only controls before doing anything\nelse.\n\nA failure that isn't an authorization outcome (a database blip while\nreading the allow-list, say) is reported as an error, not as `false`.",
         "operationId": "is_current_user_admin",
         "responses": {
           "200": {
@@ -1665,6 +1665,16 @@
               "application/json": {
                 "schema": {
                   "type": "boolean"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The caller's admin status could not be determined. Distinct from a `false` answer: retry rather than treating the caller as a non-admin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
                 }
               }
             }

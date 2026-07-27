@@ -805,10 +805,14 @@ export interface paths {
         /**
          * Check whether the caller is an admin.
          * @description Reports `true` if the caller is authenticated and their identity is on
-         *     the admin allow-list, `false` otherwise — including when the caller is
-         *     not authenticated at all. This endpoint intentionally requires no
-         *     authentication of its own, since it exists so a client can check whether
-         *     to show admin-only controls before doing anything else.
+         *     the admin allow-list, `false` if the caller definitely isn't an admin —
+         *     including when the caller is not authenticated at all. This endpoint
+         *     intentionally requires no authentication of its own, since it exists so a
+         *     client can check whether to show admin-only controls before doing anything
+         *     else.
+         *
+         *     A failure that isn't an authorization outcome (a database blip while
+         *     reading the allow-list, say) is reported as an error, not as `false`.
          */
         post: operations["is_current_user_admin"];
         delete?: never;
@@ -9009,6 +9013,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": boolean;
+                };
+            };
+            /** @description The caller's admin status could not be determined. Distinct from a `false` answer: retry rather than treating the caller as a non-admin. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
         };
