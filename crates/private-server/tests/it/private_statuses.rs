@@ -183,7 +183,12 @@ async fn status_json_server_with_recent_status() {
 			('11111111-1111-1111-1111-111111111111', 'Active Server', 'https://active.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 
 			INSERT INTO statuses (server_id, version, extra, created_at) VALUES
-			('11111111-1111-1111-1111-111111111111', '1.2.3', '{\"uptime\": 3600}'::jsonb, NOW())"
+			('11111111-1111-1111-1111-111111111111', '1.2.3', '{\"uptime\": 3600}'::jsonb, NOW());
+
+			-- Ingestion records the source's current detail alongside the
+			-- status, and that's what the group's headline version reads.
+			INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', '{\"uptime\": 3600}'::jsonb, '1.2.3')"
 		)
 		.await
 		.unwrap();
@@ -1046,6 +1051,8 @@ struct FleetRow {
 	bestool: Option<String>,
 	postgres: Option<String>,
 	detail: serde_json::Value,
+	#[serde(default)]
+	checks: serde_json::Value,
 }
 
 /// The fleet view lists every live server with its currently reported detail,
@@ -1105,6 +1112,65 @@ async fn fleet_detail_covers_live_servers() {
 			silent.detail,
 			serde_json::json!({}),
 			"a server that has never reported is listed with nothing reported",
+		);
+	})
+	.await
+}
+
+/// The fleet row carries each server's healthcheck state keyed by check name,
+/// which is what a `check.field` lookup reads: the check's own fields plus
+/// its graded result.
+// spec: FIG#fleet-spread
+#[tokio::test(flavor = "multi_thread")]
+async fn fleet_detail_carries_healthcheck_fields() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, kind) VALUES
+			('50000000-0000-0000-0000-000000000001', 'checked', 'https://checked.example.com', 'central'),
+			('50000000-0000-0000-0000-000000000002', 'unchecked', 'https://unchecked.example.com', 'central');
+
+			INSERT INTO check_policies (source, check_name) VALUES
+			('alertd', 'diskspace');
+
+			INSERT INTO issues (server_id, source, ref, check_name, observed_result, effective_result, detail, message, active) VALUES
+			('50000000-0000-0000-0000-000000000001', 'alertd', 'health/diskspace', 'diskspace',
+			 'warning', 'warning',
+			 '{\"check\": \"diskspace\", \"result\": \"warning\", \"percent\": 91}'::jsonb,
+			 'disk filling up', true),
+			-- No catalog row backs this one: unmanageable, so it doesn't present.
+			('50000000-0000-0000-0000-000000000001', 'stray', 'health/nocatalog', 'nocatalog',
+			 'failed', 'failed', '{\"percent\": 5}'::jsonb, 'orphaned state', true)",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/fleet_detail")
+			.json(&serde_json::json!({}))
+			.await;
+		r.assert_status_ok();
+		let rows: Vec<FleetRow> = r.json();
+
+		let checked = rows
+			.iter()
+			.find(|s| s.server_id == "50000000-0000-0000-0000-000000000001")
+			.expect("checked server listed");
+		assert_eq!(checked.checks["diskspace"]["percent"], 91);
+		assert_eq!(checked.checks["diskspace"]["result"], "warning");
+		assert_eq!(checked.checks["diskspace"]["observed"], "warning");
+		assert!(
+			checked.checks.get("nocatalog").is_none(),
+			"an orphaned check-state has no catalog row, so it isn't a field to look up",
+		);
+
+		let unchecked = rows
+			.iter()
+			.find(|s| s.server_name == "unchecked")
+			.expect("unchecked server listed");
+		assert_eq!(
+			unchecked.checks,
+			serde_json::json!({}),
+			"a server with no check state reports no check fields",
 		);
 	})
 	.await
@@ -1839,6 +1905,53 @@ async fn snapshot_reports_and_excludes_silenced_checks() {
 			.find(|c| c["check"] == "postgres")
 			.expect("postgres present");
 		assert_eq!(postgres["silenced"], serde_json::json!(true));
+	})
+	.await
+}
+
+/// The release summary counts each still-reporting production server once, at
+/// the version the most recent source to report one gave — and ignores
+/// servers that have gone quiet, or that aren't production.
+// spec: FIG#active-versions
+#[tokio::test(flavor = "multi_thread")]
+async fn summary_covers_actively_reporting_production_servers() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, kind, rank) VALUES
+			('40000000-0000-0000-0000-000000000001', 'live-a', 'https://a.example.com', 'central', 'production'),
+			('40000000-0000-0000-0000-000000000002', 'live-b', 'https://b.example.com', 'central', 'production'),
+			('40000000-0000-0000-0000-000000000003', 'quiet', 'https://q.example.com', 'central', 'production');
+
+			INSERT INTO servers (id, name, host, kind, rank) VALUES
+			('40000000-0000-0000-0000-000000000004', 'testing', 'https://t.example.com', 'central', 'test');
+
+			INSERT INTO server_reported_detail (server_id, source, extra, version, reported_at) VALUES
+			('40000000-0000-0000-0000-000000000001', 'alertd', '{}'::jsonb, '2.34.1', NOW() - INTERVAL '2 hours'),
+			-- A later source reports no version: live-a still runs 2.34.1.
+			('40000000-0000-0000-0000-000000000001', 'tamanu', '{\"uptimeSecs\": 42}'::jsonb, NULL, NOW()),
+			('40000000-0000-0000-0000-000000000002', 'alertd', '{}'::jsonb, '2.35.0', NOW()),
+			('40000000-0000-0000-0000-000000000003', 'alertd', '{}'::jsonb, '2.10.0', NOW() - INTERVAL '8 days'),
+			('40000000-0000-0000-0000-000000000004', 'alertd', '{}'::jsonb, '2.40.0', NOW())",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/summary")
+			.json(&serde_json::json!({}))
+			.await;
+		r.assert_status_ok();
+		let body: serde_json::Value = r.json();
+
+		assert_eq!(
+			body["versions"],
+			serde_json::json!(["2.34.1", "2.35.0"]),
+			"the quiet server and the non-production one are not actively running anything, \
+			 and a version-less later push doesn't drop live-a",
+		);
+		assert_eq!(body["releases"], serde_json::json!([[2, 34], [2, 35]]));
+		assert_eq!(body["bracket"]["min"], "2.34.1");
+		assert_eq!(body["bracket"]["max"], "2.35.0");
 	})
 	.await
 }

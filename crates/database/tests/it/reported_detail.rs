@@ -24,6 +24,198 @@ async fn insert_server(conn: &mut AsyncPgConnection) -> Uuid {
 	server.id
 }
 
+async fn insert_production_server(conn: &mut AsyncPgConnection) -> Uuid {
+	let host = format!("http://prod.invalid/{}", Uuid::new_v4());
+	let server: RowId =
+		sql_query("INSERT INTO servers (host, rank) VALUES ($1, 'production') RETURNING id")
+			.bind::<sql_types::Text, _>(host)
+			.get_result(conn)
+			.await
+			.expect("insert production server");
+	server.id
+}
+
+async fn age_report(conn: &mut AsyncPgConnection, server: Uuid, interval: &str) {
+	sql_query(format!(
+		"UPDATE server_reported_detail SET reported_at = NOW() - INTERVAL '{interval}' \
+		 WHERE server_id = $1"
+	))
+	.bind::<sql_types::Uuid, _>(server)
+	.execute(conn)
+	.await
+	.expect("age report");
+}
+
+/// A report carrying no version keeps the version its source last reported —
+/// the agent reporting while the application is down doesn't mean the server
+/// stopped being on that version.
+// spec: FIG#sourcing
+#[tokio::test(flavor = "multi_thread")]
+async fn a_version_less_report_keeps_the_last_version() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server = insert_server(&mut conn).await;
+
+		ReportedDetail::record(
+			&mut conn,
+			server,
+			"alertd",
+			&json!({}),
+			Some(&"2.34.1".parse().unwrap()),
+		)
+		.await
+		.unwrap();
+		ReportedDetail::record(
+			&mut conn,
+			server,
+			"alertd",
+			&json!({"uptimeSecs": 42}),
+			None,
+		)
+		.await
+		.unwrap();
+
+		assert_eq!(
+			ReportedDetail::last_version(&mut conn, server)
+				.await
+				.unwrap()
+				.map(|v| v.to_string())
+				.as_deref(),
+			Some("2.34.1"),
+		);
+
+		// An explicit later version still supersedes it.
+		ReportedDetail::record(
+			&mut conn,
+			server,
+			"alertd",
+			&json!({}),
+			Some(&"2.35.0".parse().unwrap()),
+		)
+		.await
+		.unwrap();
+		assert_eq!(
+			ReportedDetail::last_version(&mut conn, server)
+				.await
+				.unwrap()
+				.map(|v| v.to_string())
+				.as_deref(),
+			Some("2.35.0"),
+		);
+	})
+	.await
+}
+
+/// The last version survives however long the server has been quiet: a group's
+/// headline version shouldn't blank out because its canonical member is down.
+// spec: FIG#sourcing
+#[tokio::test(flavor = "multi_thread")]
+async fn last_version_is_not_bounded_by_a_lookback() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server = insert_server(&mut conn).await;
+		ReportedDetail::record(
+			&mut conn,
+			server,
+			"alertd",
+			&json!({}),
+			Some(&"2.34.1".parse().unwrap()),
+		)
+		.await
+		.unwrap();
+		// Well past the ninety-day cap the status-history read needed.
+		age_report(&mut conn, server, "200 days").await;
+
+		assert_eq!(
+			ReportedDetail::last_version(&mut conn, server)
+				.await
+				.unwrap()
+				.map(|v| v.to_string())
+				.as_deref(),
+			Some("2.34.1"),
+		);
+	})
+	.await
+}
+
+/// The active-version summary counts each still-reporting production server
+/// once, at the version the most recent source to report one gave.
+// spec: FIG#active-versions
+#[tokio::test(flavor = "multi_thread")]
+async fn production_versions_counts_reporting_servers_once() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server = insert_production_server(&mut conn).await;
+		ReportedDetail::record(
+			&mut conn,
+			server,
+			"alertd",
+			&json!({}),
+			Some(&"2.34.1".parse().unwrap()),
+		)
+		.await
+		.unwrap();
+		// A later source reports no version at all: the server still runs
+		// 2.34.1, and must not drop out of the summary.
+		age_report(&mut conn, server, "2 hours").await;
+		ReportedDetail::record(
+			&mut conn,
+			server,
+			"tamanu",
+			&json!({"uptimeSecs": 42}),
+			None,
+		)
+		.await
+		.unwrap();
+
+		let versions = ReportedDetail::production_versions(&mut conn)
+			.await
+			.expect("production versions");
+		assert_eq!(
+			versions.iter().map(ToString::to_string).collect::<Vec<_>>(),
+			vec!["2.34.1"],
+			"one entry per server, from the newest source that reported a version",
+		);
+	})
+	.await
+}
+
+/// Only production servers that are still reporting count as actively
+/// running something.
+// spec: FIG#active-versions
+#[tokio::test(flavor = "multi_thread")]
+async fn production_versions_excludes_the_quiet_and_the_unranked() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let live = insert_production_server(&mut conn).await;
+		let quiet = insert_production_server(&mut conn).await;
+		let unranked = insert_server(&mut conn).await;
+
+		for (server, version) in [(live, "2.34.1"), (quiet, "2.10.0"), (unranked, "2.20.0")] {
+			ReportedDetail::record(
+				&mut conn,
+				server,
+				"alertd",
+				&json!({}),
+				Some(&version.parse().unwrap()),
+			)
+			.await
+			.unwrap();
+		}
+		age_report(&mut conn, quiet, "8 days").await;
+
+		let versions: Vec<String> = ReportedDetail::production_versions(&mut conn)
+			.await
+			.expect("production versions")
+			.iter()
+			.map(ToString::to_string)
+			.collect();
+		assert_eq!(
+			versions,
+			vec!["2.34.1"],
+			"a server quiet beyond the week, and a server that isn't production, are not \
+			 actively running anything",
+		);
+	})
+	.await
+}
+
 /// A source's report replaces what it reported before, and leaves other
 /// sources' reports alone.
 // spec: FIG#sourcing

@@ -13,6 +13,9 @@ Canopy keeps each source's server-wide detail as that source's current report on
 Canopy's own generated statuses carry no reported detail and leave a server's reports unchanged.
 A source's current report is kept for as long as the server exists, so a figure remains available however long the server has been quiet, and is discarded with the server.
 
+The application version is the exception to a report replacing what came before: a report that carries no version keeps the version that source last reported.
+An agent omits the version when it cannot read it — the application is down, or mid-upgrade — which says nothing about what the server is installed to run.
+
 Several sources report on one server, and they do not all report the same figures.
 Each figure is taken from the most recent source to report that figure, rather than from whichever source pushed most recently.
 So a figure holds its last reported value when the newest push comes from a source that does not carry it, and two figures presented together may come from different sources reporting at different times.
@@ -44,8 +47,20 @@ Beyond the figures, an operator can name any field a source reports and see its 
 The fields the fleet currently reports are offered as suggestions, so an operator can find a field without knowing its name in advance.
 A field whose values are near-unique across the fleet presents its largest groups with the remainder collapsed, rather than a line per server.
 
+A field a source reports on one of its healthchecks rather than server-wide is named through the check that reports it, as `check.field`, and spreads across the fleet the same way.
+A check's own graded result is available as one of those fields, so the fleet spread of a check's outcome reads like any other field.
+What presents here is what the server's own check list presents: a silenced check reads as skipped, and a decommissioned check doesn't present at all.
+Checks are named by check alone, though a check's identity is the source and the check together: two sources reporting the same check name present as one, the more recently reported field winning, as elsewhere.
+
 An operator can also cross two fields, presenting a table of one against the other: for each combination of values, how many servers report both, with the servers behind each combination available.
 Servers reporting no value for either field occupy their own row and column, so a combination is never silently dropped.
+
+## Active versions
+
+The status view summarises which release branches the production fleet is actively running: how many distinct branches, which they are, and the range of exact versions across them.
+
+A production server counts once, at the version the most recent source to report one gave — a source reporting no version does not drop the server from the summary by having pushed last.
+Unlike the figures elsewhere, this summary is bounded by recency: a server that has not reported within the last week is not running anything as far as the summary is concerned, so a decommissioned server that was never archived stops inflating the count.
 
 ## Point in time
 

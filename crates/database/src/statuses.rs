@@ -5,7 +5,6 @@ use std::{
 
 use commons_errors::{AppError, Result};
 use commons_types::{
-	server::rank::ServerRank,
 	status::{CheckResult, ShortStatus},
 	version::VersionStr,
 };
@@ -62,13 +61,6 @@ const GRACE_LOOKBACK_SQL: &str = "NOW() - INTERVAL '30 days'";
 /// [`GRACE_LOOKBACK_SQL`] as a span, for bounding a lookback relative to a
 /// caller-supplied point in time rather than to `NOW()`.
 const GRACE_LOOKBACK: SignedDuration = SignedDuration::from_hours(24 * 30);
-
-/// Lookback for the last version a server reported. Longer than
-/// [`GRACE_LOOKBACK_SQL`] because a group's displayed version is cached from
-/// its canonical member, and a member down for a month or two should not
-/// blank out the group's version label. Still bounded — see
-/// [`GRACE_LOOKBACK_SQL`] for why an unbounded read is not an option.
-const VERSION_LOOKBACK_SQL: &str = "NOW() - INTERVAL '90 days'";
 
 fn server_label(s: &Server) -> String {
 	s.name
@@ -587,34 +579,6 @@ impl Status {
 			.map_err(AppError::from)
 	}
 
-	/// The most recent status for `server` that carries a version — wider
-	/// than the live 7-day window. Used for the status card's headline
-	/// version, which should reflect the last version a server reported even
-	/// if it's currently down (and hence has no recent status). Capped at
-	/// [`VERSION_LOOKBACK_SQL`]; see [`GRACE_LOOKBACK_SQL`] for why the read
-	/// can't be left unbounded.
-	pub async fn last_with_version_for_server(
-		db: &mut AsyncPgConnection,
-		server: Uuid,
-	) -> Result<Option<Status>> {
-		use crate::schema::statuses::dsl::*;
-
-		statuses
-			.select(Status::as_select())
-			.filter(
-				server_id
-					.eq(server)
-					.and(version.is_not_null())
-					.and(created_at.ge(diesel::dsl::sql(VERSION_LOOKBACK_SQL)))
-					.and(id.ne(Uuid::nil())),
-			)
-			.order(created_at.desc())
-			.first(db)
-			.await
-			.optional()
-			.map_err(AppError::from)
-	}
-
 	pub async fn latest_for_servers(
 		db: &mut AsyncPgConnection,
 		server_ids: &[Uuid],
@@ -641,22 +605,6 @@ impl Status {
 		.bind::<diesel::sql_types::Array<diesel::sql_types::Uuid>, _>(server_ids);
 
 		query.load::<Status>(db).await.map_err(AppError::from)
-	}
-
-	pub async fn production_versions(db: &mut AsyncPgConnection) -> Result<Vec<VersionStr>> {
-		use crate::schema::servers::dsl as servers_dsl;
-
-		let production_server_ids: Vec<Uuid> = servers_dsl::servers
-			.select(servers_dsl::id)
-			.filter(servers_dsl::rank.eq(ServerRank::Production))
-			.load(db)
-			.await?;
-
-		Ok(Self::latest_for_servers(db, &production_server_ids)
-			.await?
-			.into_iter()
-			.filter_map(|s| s.version)
-			.collect())
 	}
 
 	/// This one status's server-wide detail, for a caller that has a single

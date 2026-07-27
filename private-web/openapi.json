@@ -5855,7 +5855,7 @@
           "statuses"
         ],
         "summary": "Get every live server's currently reported detail.",
-        "description": "One row per server, carrying the derived figures and the full resolved\npayload its sources report. This is the data behind the fleet view, which\ngroups it to show how each figure — or any field a source reports — is\nspread across the fleet, and can cross two fields against each other.\n\nReads each source's current report rather than status history, so it\ncovers servers that have been quiet for any length of time. Archived\nservers and canopy's own row are excluded; a live server that has never\nreported appears with everything absent.",
+        "description": "One row per server, carrying the derived figures, the full resolved\npayload its sources report, and its current healthcheck state. This is\nthe data behind the fleet view, which groups it to show how each figure —\nor any field a source reports, whether server-wide or on one check — is\nspread across the fleet, and can cross two fields against each other.\n\nReads each source's current report rather than status history, so it\ncovers servers that have been quiet for any length of time. Archived\nservers and canopy's own row are excluded; a live server that has never\nreported appears with everything absent.",
         "operationId": "status_fleet_detail",
         "responses": {
           "200": {
@@ -8263,7 +8263,8 @@
           "server_id",
           "server_name",
           "kind",
-          "detail"
+          "detail",
+          "checks"
         ],
         "properties": {
           "bestool": {
@@ -8272,6 +8273,10 @@
               "null"
             ],
             "description": "Version of bestool, the agent reporting on the server."
+          },
+          "checks": {
+            "type": "object",
+            "description": "The server's current healthcheck state, keyed by check name: each\ncheck's reported fields plus its graded `result` and the `observed`\nresult behind it. This is what a `check.field` lookup reads."
           },
           "detail": {
             "type": "object",

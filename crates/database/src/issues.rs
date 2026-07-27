@@ -1116,6 +1116,138 @@ pub async fn health_from_check_state(
 		.collect())
 }
 
+/// One fleet check-detail row: `(server_id, source, check_name,
+/// observed_result, effective_result, detail)`.
+type FleetCheckRow = (
+	Option<Uuid>,
+	String,
+	Option<String>,
+	Option<String>,
+	Option<String>,
+	Option<serde_json::Value>,
+);
+
+/// Every named check's current state across the given servers, as one JSON
+/// object per server keyed by check name.
+///
+/// Each check's value is the detail its source attached, with `result` and
+/// `observed` set from the graded state — so a field a check reports is
+/// addressable as `check.field`, and the check's own grade as
+/// `check.result`. Silenced and decommissioned checks are treated exactly
+/// as the server's own check list treats them: silenced reads `skipped`,
+/// decommissioned and orphaned states don't present at all.
+///
+/// A check's identity is `(source, check)`, but the fleet addresses it by
+/// name alone: two sources reporting the same check name merge, the more
+/// recently updated state winning field by field, mirroring how a server's
+/// figures resolve across sources.
+// spec: FIG#fleet-spread
+pub async fn check_detail_by_server(
+	conn: &mut AsyncPgConnection,
+	servers: &[(Uuid, Option<Uuid>)],
+) -> Result<std::collections::HashMap<Uuid, serde_json::Map<String, serde_json::Value>>> {
+	use crate::schema::{issues, scoped_check_policies};
+	use std::collections::{HashMap, HashSet};
+
+	if servers.is_empty() {
+		return Ok(HashMap::new());
+	}
+	let server_ids: Vec<Uuid> = servers.iter().map(|(id, _)| *id).collect();
+	let group_of: HashMap<Uuid, Option<Uuid>> = servers.iter().copied().collect();
+
+	let rows: Vec<FleetCheckRow> = issues::table
+		.select((
+			issues::server_id,
+			issues::source,
+			issues::check_name,
+			issues::observed_result,
+			issues::effective_result,
+			issues::detail,
+		))
+		.filter(issues::server_id.eq_any(&server_ids))
+		.filter(issues::check_name.is_not_null())
+		.filter(issues::effective_result.is_not_null())
+		// Oldest first, so a later source's fields overwrite an earlier
+		// one's when both report the same check name.
+		.order(issues::updated_at.asc())
+		.load(conn)
+		.await?;
+
+	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_pairs(conn).await?;
+
+	let group_ids: Vec<Uuid> = group_of.values().filter_map(|g| *g).collect();
+	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
+		scoped_check_policies::table
+			.select((
+				scoped_check_policies::server_id,
+				scoped_check_policies::server_group_id,
+				scoped_check_policies::source,
+				scoped_check_policies::check_name,
+			))
+			.filter(scoped_check_policies::ceiling.eq("skipped"))
+			.filter(
+				scoped_check_policies::server_id
+					.eq_any(&server_ids)
+					.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
+			)
+			.load(conn)
+			.await?;
+	let mut server_silences: HashSet<(Uuid, String, String)> = HashSet::new();
+	let mut group_silences: HashSet<(Uuid, String, String)> = HashSet::new();
+	for (server_id, group_id, source, check) in silence_rows {
+		if let Some(sid) = server_id {
+			server_silences.insert((sid, source, check));
+		} else if let Some(gid) = group_id {
+			group_silences.insert((gid, source, check));
+		}
+	}
+
+	let mut by_server: HashMap<Uuid, serde_json::Map<String, serde_json::Value>> = HashMap::new();
+	for (server_id, source, check_name, observed, effective, detail) in rows {
+		let (Some(server_id), Some(check)) = (server_id, check_name) else {
+			continue;
+		};
+		if !cataloged.contains(&(source.clone(), check.clone())) {
+			continue;
+		}
+		let Some(stored) = effective
+			.as_deref()
+			.and_then(|e| e.parse::<CheckResult>().ok())
+		else {
+			continue;
+		};
+		let silenced = server_silences.contains(&(server_id, source.clone(), check.clone()))
+			|| matches!(group_of.get(&server_id), Some(Some(gid))
+				if group_silences.contains(&(*gid, source.clone(), check.clone())));
+		let effective = if silenced {
+			CheckResult::Skipped
+		} else {
+			stored
+		};
+
+		let entry = by_server
+			.entry(server_id)
+			.or_default()
+			.entry(check)
+			.or_insert_with(|| serde_json::Value::Object(Default::default()));
+		let Some(fields) = entry.as_object_mut() else {
+			continue;
+		};
+		if let Some(serde_json::Value::Object(reported)) = detail {
+			fields.extend(reported);
+		}
+		// The graded state is authoritative over anything of the same name
+		// in the reported detail: `result` there is what the source said,
+		// which is `observed` here once policy has had its say.
+		fields.insert("result".into(), effective.to_string().into());
+		if let Some(observed) = observed {
+			fields.insert("observed".into(), observed.into());
+		}
+	}
+
+	Ok(by_server)
+}
+
 /// One consolidated check row:
 /// `(source, check_name, observed_result, effective_result, detail)`.
 type ConsolidatedRow = (

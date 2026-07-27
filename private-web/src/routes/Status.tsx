@@ -1,6 +1,7 @@
 import {
 	Alert,
 	Box,
+	Button,
 	Card,
 	CardContent,
 	Chip,
@@ -10,6 +11,7 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
+import BarChartIcon from "@mui/icons-material/BarChart";
 import PersonIcon from "@mui/icons-material/Person";
 import { Link as RouterLink } from "react-router-dom";
 import StatusDot from "../components/StatusDot";
@@ -103,13 +105,40 @@ function ReleaseSummary({ tick }: { tick: number }) {
 	return (
 		<Card variant="outlined">
 			<CardContent>
-				<Typography variant="body1">
-					{releases.length} release branches in active use:{" "}
-					{releases
-						.map(([major, minor]) => `${major}.${minor}`)
-						.join(", ")}{" "}
-					({versions.length} versions: {bracket.min} — {bracket.max})
-				</Typography>
+				<Stack
+					direction="row"
+					spacing={2}
+					sx={{
+						alignItems: "center",
+						justifyContent: "space-between",
+						flexWrap: "wrap",
+					}}
+					useFlexGap
+				>
+					<Typography variant="body1">
+						{releases.length} release{" "}
+						{releases.length === 1 ? "branch" : "branches"} in active use:{" "}
+						{releases
+							.map(([major, minor]) => `${major}.${minor}`)
+							.join(", ")}{" "}
+						({versions.length}{" "}
+						{versions.length === 1 ? "version" : "versions"}: {bracket.min} —{" "}
+						{bracket.max})
+					</Typography>
+					{/* The version spread is one of several figures the fleet
+					    reports; this card answers "which branches", the figures
+					    page answers "which servers, and what else are they on". */}
+					<Button
+						component={RouterLink}
+						to="/servers/figures"
+						variant="outlined"
+						size="small"
+						startIcon={<BarChartIcon />}
+						sx={{ flexShrink: 0 }}
+					>
+						Fleet figures
+					</Button>
+				</Stack>
 			</CardContent>
 		</Card>
 	);

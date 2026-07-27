@@ -72,6 +72,42 @@ test.describe("fleet figures", () => {
 		).toBeVisible();
 	});
 
+	test("looks up a field a healthcheck reports, as check.field", async ({
+		page,
+		sql,
+	}) => {
+		const { alpha, beta, gamma } = await seedFleet(sql);
+		// Two servers share a disk-usage bucket, the third differs; the fourth
+		// runs no such check at all.
+		await seedStatus(sql, {
+			serverId: alpha.id,
+			health: [{ check: "diskspace", result: "warning", percent: 91 }],
+		});
+		await seedStatus(sql, {
+			serverId: beta.id,
+			health: [{ check: "diskspace", result: "warning", percent: 91 }],
+		});
+		await seedStatus(sql, {
+			serverId: gamma.id,
+			health: [{ check: "diskspace", result: "passed", percent: 12 }],
+		});
+
+		await page.goto("/servers/figures");
+		await page
+			.getByRole("combobox", { name: "Field" })
+			.fill("diskspace.percent");
+
+		await expect(page.getByRole("button", { name: "91: 2" })).toBeVisible();
+		await expect(page.getByRole("button", { name: "12: 1" })).toBeVisible();
+
+		// The check's own grade is a field like any other.
+		await page.getByRole("combobox", { name: "Field" }).fill("diskspace.result");
+		await expect(
+			page.getByRole("button", { name: "warning: 2" }),
+		).toBeVisible();
+		await expect(page.getByRole("button", { name: "passed: 1" })).toBeVisible();
+	});
+
 	test("crosses two fields into a table of counts", async ({ page, sql }) => {
 		await seedFleet(sql);
 
