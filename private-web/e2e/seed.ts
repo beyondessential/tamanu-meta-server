@@ -47,12 +47,17 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, server_reported_detail, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, check_policies, scoped_check_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, recovery_vault_writes RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, server_reported_detail, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, recovery_vault_writes RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" server with it;
 	// self-alerts attach to that row, so put it back.
 	await sql.query(
 		"INSERT INTO servers (id, kind, name, host) VALUES ('00000000-0000-0000-0000-000000000000', 'canopy', 'Canopy', 'http://localhost')",
+	);
+	// Same for the migration's one seeded source policy: tamanu reports on
+	// its own schedule, so its silence is not a reachability signal.
+	await sql.query(
+		"INSERT INTO source_policies (source, reachability) VALUES ('tamanu', 'quiet')",
 	);
 }
 

@@ -1,9 +1,16 @@
-import { seedCheckPolicy } from "./seed";
+import { resetSeededTables, seedCheckPolicy } from "./seed";
 import { expect, test } from "./test-fixtures";
 
 const SOURCES_PATH = "/settings/healthchecks/sources";
 
 test.describe("Source reachability", () => {
+	// Each test asserts against a source's starting policy, and a policy set
+	// here outlives the test that set it — the stack (and its database) is
+	// per worker, not per test.
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
 	test("an operator can change a source's reachability mode", async ({
 		page,
 		sql,
