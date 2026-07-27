@@ -761,7 +761,7 @@ async fn consolidated_checks_at(
 	at: Option<Timestamp>,
 ) -> commons_errors::Result<(commons_types::status::ConsolidatedChecks, serde_json::Value)> {
 	use commons_types::status::{CheckResult, ConsolidatedCheck, ConsolidatedChecks, HealthState};
-	use database::check_policies::{CheckPolicy, EvaluationContext};
+	use database::check_policies::{CheckPolicy, EvaluationContext, ScopedCheckPolicy};
 
 	let statuses = Status::latest_per_source_at(conn, server.id, at).await?;
 
@@ -790,6 +790,12 @@ async fn consolidated_checks_at(
 	// check-states (a source's catalog rows removed out from under its
 	// states) so the point-in-time view reconstructs the same shape.
 	let cataloged = CheckPolicy::live_cataloged_pairs(conn).await?;
+	// Grading tables loaded once, not once per check: a status can carry
+	// dozens of checks, and re-querying the catalog and the scoped chain for
+	// each one turned this reconstruction into a few hundred round-trips.
+	let grading = CheckPolicy::grading_table(conn).await?;
+	let chains =
+		ScopedCheckPolicy::chains_for_scope(conn, Some(server.id), server.group_id).await?;
 
 	let mut checks: Vec<ConsolidatedCheck> = Vec::new();
 	for status in &statuses {
@@ -831,16 +837,13 @@ async fn consolidated_checks_at(
 				check_extra: &check_extra,
 				tags: &tags,
 			};
-			let graded = CheckPolicy::apply_scoped(
-				conn,
-				&status.source,
-				name,
-				observed,
+			let key = (status.source.clone(), name.to_string());
+			let fleet = CheckPolicy::grade(grading.get(&key), &status.source, name, observed, &ctx);
+			let graded = CheckPolicy::chain_scoped(
+				fleet,
+				chains.get(&key).map_or(&[][..], Vec::as_slice),
 				&ctx,
-				Some(server.id),
-				server.group_id,
-			)
-			.await?;
+			);
 			// The check's own detail fields, verbatim.
 			let mut detail = obj.clone();
 			detail.remove("check");
