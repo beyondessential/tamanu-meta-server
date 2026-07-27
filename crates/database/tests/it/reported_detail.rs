@@ -227,6 +227,76 @@ async fn reported_detail_is_deleted_with_its_server() {
 	.await
 }
 
+/// The platform is what the server says it runs; only a server that reports
+/// no operating system falls back to what the database engine gives away.
+// spec: FIG#figures
+#[tokio::test(flavor = "multi_thread")]
+async fn platform_prefers_the_reported_operating_system() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn).await;
+		let platform = async |conn: &mut AsyncPgConnection| {
+			ReportedDetail::merge(&ReportedDetail::for_server(conn, server_id).await.unwrap())
+				.platform()
+		};
+
+		// Only a PostgreSQL banner: the family is all it can give.
+		ReportedDetail::record(
+			&mut conn,
+			server_id,
+			"alertd",
+			&json!({"pgVersion": "PostgreSQL 16.3 (Visual C++ build 1940), 64-bit"}),
+			None,
+		)
+		.await
+		.unwrap();
+		assert_eq!(platform(&mut conn).await.as_deref(), Some("Windows"));
+
+		// A reported name supersedes the inference, and the version qualifies
+		// it. Values are as the fleet actually reports them.
+		ReportedDetail::record(
+			&mut conn,
+			server_id,
+			"alertd",
+			&json!({"osName": "Windows", "osVersion": "10 (17763)"}),
+			None,
+		)
+		.await
+		.unwrap();
+		assert_eq!(
+			platform(&mut conn).await.as_deref(),
+			Some("Windows 10 (17763)"),
+			"the reported OS is finer than the family the banner implies",
+		);
+
+		ReportedDetail::record(
+			&mut conn,
+			server_id,
+			"alertd",
+			&json!({"osName": "Ubuntu", "osVersion": "24.04"}),
+			None,
+		)
+		.await
+		.unwrap();
+		assert_eq!(platform(&mut conn).await.as_deref(), Some("Ubuntu 24.04"));
+
+		// A name without a version stands alone.
+		ReportedDetail::record(
+			&mut conn,
+			server_id,
+			"alertd",
+			&json!({"osName": "Debian GNU/Linux"}),
+			None,
+		)
+		.await
+		.unwrap();
+		assert_eq!(
+			platform(&mut conn).await.as_deref(),
+			Some("Debian GNU/Linux"),
+		);
+	})
+	.await
+}
+
 /// The fleet read resolves each server's figures independently.
 // spec: FIG#fleet-spread
 #[tokio::test(flavor = "multi_thread")]

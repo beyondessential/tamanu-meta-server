@@ -23,7 +23,8 @@ A figure that has never been reported is omitted rather than presented empty.
 
 The application version is presented with how far behind the latest published version it is, and with the minimum embedded browser version that release requires.
 
-The platform names the operating system family the server runs, derived from the reported database engine.
+The platform is the operating system the server runs, as the server reports it, qualified by the operating system version where the server reports one.
+A server that reports no operating system falls back to the family the reported database engine gives away, which distinguishes Windows from anything else but nothing finer.
 
 The timezone is the server's own configured timezone, presented so an operator can read the server's local time.
 

@@ -777,10 +777,23 @@ impl MergedDetail {
 			.map(ToOwned::to_owned)
 	}
 
-	/// Operating system family, inferred from the shape of the reported
-	/// PostgreSQL version banner — which names its build toolchain, and so
-	/// distinguishes a Windows build from any other.
+	/// The operating system the server runs, as it reports it — the name,
+	/// qualified by the version when it reports one.
+	///
+	/// A server that reports neither falls back to what the PostgreSQL
+	/// version banner gives away: it names its build toolchain, which
+	/// distinguishes a Windows build from any other but says nothing finer.
+	/// So an unreported platform degrades to the family rather than to
+	/// nothing.
+	// spec: FIG#figures
 	pub fn platform(&self) -> Option<String> {
+		if let Some(name) = self.string("osName") {
+			return Some(match self.string("osVersion") {
+				Some(version) => format!("{name} {version}"),
+				None => name,
+			});
+		}
+
 		self.string("pgVersion").map(|pg| {
 			if pg.contains("Visual C++") || pg.contains("windows") {
 				"Windows"
