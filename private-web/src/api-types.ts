@@ -2982,6 +2982,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/statuses/fleet_detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get every live server's currently reported detail.
+         * @description One row per server, carrying the derived figures and the full resolved
+         *     payload its sources report. This is the data behind the fleet view, which
+         *     groups it to show how each figure — or any field a source reports — is
+         *     spread across the fleet, and can cross two fields against each other.
+         *
+         *     Reads each source's current report rather than status history, so it
+         *     covers servers that have been quiet for any length of time. Archived
+         *     servers and canopy's own row are excluded; a live server that has never
+         *     reported appears with everything absent.
+         */
+        post: operations["status_fleet_detail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/statuses/group_details": {
         parameters: {
             query?: never;
@@ -4421,6 +4449,46 @@ export interface components {
              *     status update.
              */
             up: components["schemas"]["ShortStatus"];
+        };
+        /**
+         * @description One server's identity and its currently reported detail, as a row of the
+         *     fleet view.
+         */
+        FleetServerDetailData: {
+            /** @description Version of bestool, the agent reporting on the server. */
+            bestool?: string | null;
+            /**
+             * @description Every field the server's sources currently report, resolved across
+             *     them — the raw material behind the derived figures above, and what an
+             *     arbitrary-field lookup reads.
+             */
+            detail: Record<string, never>;
+            /**
+             * Format: uuid
+             * @description The group the server belongs to, if any.
+             */
+            group_id?: string | null;
+            /** @description Display name of that group, if any. */
+            group_name?: string | null;
+            /** @description The kind of deployment the server represents. */
+            kind: components["schemas"]["ServerKind"];
+            /** @description Reported runtime version. */
+            nodejs?: string | null;
+            /** @description Operating system family, derived from the reported database engine. */
+            platform?: string | null;
+            /** @description Reported database engine version. */
+            postgres?: string | null;
+            rank?: null | components["schemas"]["ServerRank"];
+            /**
+             * Format: uuid
+             * @description Unique identifier for the server.
+             */
+            server_id: string;
+            /** @description Operator-assigned name for the server, empty when it has none. */
+            server_name: string;
+            /** @description Reported system timezone. */
+            timezone?: string | null;
+            version?: null | components["schemas"]["VersionStr"];
         };
         /** @description A geographic coordinate, used to place a server on a map. */
         GeoPoint: {
@@ -6662,9 +6730,8 @@ export interface components {
             health: components["schemas"]["HealthState"];
             last_status?: null | components["schemas"]["ServerLastStatusData"];
             /**
-             * @description Whether the server is known to run Munin, from the last status that
-             *     reported the flag (persisted with grace — see [`database::statuses`]).
-             *     The UI offers a Munin link only when this is true.
+             * @description Whether the server is known to run Munin, from the most recent source
+             *     to report the flag. The UI offers a Munin link only when this is true.
              */
             munin: boolean;
             /** @description The server's own record. */
@@ -11754,6 +11821,34 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CheckDetailData"];
+                };
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    status_fleet_detail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every live server's currently reported detail. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FleetServerDetailData"][];
                 };
             };
             500: {

@@ -575,7 +575,11 @@ async fn get_detail_munin_flag() {
 
 			INSERT INTO statuses (server_id, extra, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '{\"munin\": true}'::jsonb, NOW()),
-			('22222222-2222-2222-2222-222222222222', '{\"uptime\": 3600}'::jsonb, NOW())",
+			('22222222-2222-2222-2222-222222222222', '{\"uptime\": 3600}'::jsonb, NOW());
+
+			INSERT INTO server_reported_detail (server_id, source, extra) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', '{\"munin\": true}'::jsonb),
+			('22222222-2222-2222-2222-222222222222', 'alertd', '{\"uptime\": 3600}'::jsonb)",
 		)
 		.await
 		.unwrap();
@@ -616,7 +620,10 @@ async fn get_detail_with_status() {
 			('11111111-1111-1111-1111-111111111111', 'Status Server', 'https://status.example.com', 'test', 'central');
 
 			INSERT INTO statuses (server_id, version, extra, created_at) VALUES
-			('11111111-1111-1111-1111-111111111111', '2.5.1', '{\"timezone\": \"Pacific/Auckland\", \"pgVersion\": \"PostgreSQL 17.2, (x86_64-pc-linux-gnu, compiled by gcc)\"}'::jsonb, NOW())"
+			('11111111-1111-1111-1111-111111111111', '2.5.1', '{\"timezone\": \"Pacific/Auckland\", \"pgVersion\": \"PostgreSQL 17.2, (x86_64-pc-linux-gnu, compiled by gcc)\"}'::jsonb, NOW());
+
+			INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', '{\"timezone\": \"Pacific/Auckland\", \"pgVersion\": \"PostgreSQL 17.2, (x86_64-pc-linux-gnu, compiled by gcc)\"}'::jsonb, '2.5.1')"
 		)
 		.await
 		.unwrap();
@@ -654,6 +661,13 @@ async fn get_detail_figures_resolve_across_sources() {
 			('22222222-2222-2222-2222-222222222222', 'Tamanu Only', 'https://tamanuonly.example.com', 'test', 'central');
 
 			INSERT INTO statuses (server_id, source, extra, created_at) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd',
+			 '{\"bestoolVersion\": \"2.10.5\", \"pgVersion\": \"PostgreSQL 17.2, (x86_64-pc-linux-gnu, compiled by gcc)\", \"timezone\": \"Pacific/Auckland\"}'::jsonb,
+			 NOW() - INTERVAL '10 minutes'),
+			('11111111-1111-1111-1111-111111111111', 'tamanu', '{\"uptimeSecs\": 6038594}'::jsonb, NOW()),
+			('22222222-2222-2222-2222-222222222222', 'tamanu', '{\"uptimeSecs\": 42}'::jsonb, NOW());
+
+			INSERT INTO server_reported_detail (server_id, source, extra, reported_at) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd',
 			 '{\"bestoolVersion\": \"2.10.5\", \"pgVersion\": \"PostgreSQL 17.2, (x86_64-pc-linux-gnu, compiled by gcc)\", \"timezone\": \"Pacific/Auckland\"}'::jsonb,
 			 NOW() - INTERVAL '10 minutes'),
@@ -1021,6 +1035,77 @@ async fn snapshot_has_no_bestool_version_when_unreported() {
 		r.assert_status_ok();
 		let data: Option<SnapshotData> = r.json();
 		assert_eq!(data.expect("snapshot returned").bestool, None);
+	})
+	.await
+}
+
+#[derive(Debug, Deserialize)]
+struct FleetRow {
+	server_id: String,
+	server_name: String,
+	bestool: Option<String>,
+	postgres: Option<String>,
+	detail: serde_json::Value,
+}
+
+/// The fleet view lists every live server with its currently reported detail,
+/// resolved across sources — including servers that have never reported, and
+/// excluding archived ones.
+// spec: FIG#fleet-spread
+#[tokio::test(flavor = "multi_thread")]
+async fn fleet_detail_covers_live_servers() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, kind) VALUES
+			('30000000-0000-0000-0000-000000000001', 'reports', 'https://reports.example.com', 'central'),
+			('30000000-0000-0000-0000-000000000002', 'silent', 'https://silent.example.com', 'central');
+
+			INSERT INTO servers (id, name, host, kind, deleted_at) VALUES
+			('30000000-0000-0000-0000-000000000003', 'archived', 'https://archived.example.com', 'central', NOW());
+
+			INSERT INTO server_reported_detail (server_id, source, extra, reported_at) VALUES
+			('30000000-0000-0000-0000-000000000001', 'alertd',
+			 '{\"bestoolVersion\": \"2.10.5\", \"pgVersion\": \"PostgreSQL 16.3 on x86_64-pc-linux-gnu\"}'::jsonb,
+			 NOW() - INTERVAL '2 hours'),
+			('30000000-0000-0000-0000-000000000001', 'tamanu', '{\"uptimeSecs\": 6038594}'::jsonb, NOW()),
+			('30000000-0000-0000-0000-000000000003', 'alertd', '{\"bestoolVersion\": \"1.0.0\"}'::jsonb, NOW())",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/fleet_detail")
+			.json(&serde_json::json!({}))
+			.await;
+		r.assert_status_ok();
+		let rows: Vec<FleetRow> = r.json();
+
+		assert!(
+			!rows.iter().any(|s| s.server_name == "archived"),
+			"an archived server is not part of the fleet",
+		);
+
+		let reporting = rows
+			.iter()
+			.find(|s| s.server_id == "30000000-0000-0000-0000-000000000001")
+			.expect("reporting server listed");
+		assert_eq!(reporting.bestool.as_deref(), Some("2.10.5"));
+		assert_eq!(reporting.postgres.as_deref(), Some("16.3"));
+		assert_eq!(
+			reporting.detail["uptimeSecs"], 6038594,
+			"the raw payload carries fields canopy derives no figure from",
+		);
+
+		let silent = rows
+			.iter()
+			.find(|s| s.server_id == "30000000-0000-0000-0000-000000000002")
+			.expect("silent server listed");
+		assert_eq!(silent.bestool, None);
+		assert_eq!(
+			silent.detail,
+			serde_json::json!({}),
+			"a server that has never reported is listed with nothing reported",
+		);
 	})
 	.await
 }

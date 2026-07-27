@@ -615,44 +615,6 @@ impl Status {
 			.map_err(AppError::from)
 	}
 
-	/// Whether `server` runs Munin, from the most recent status that carried
-	/// the `munin` flag — wider than the live 7-day window, so the value
-	/// persists after a server goes quiet: a later status that omits the flag
-	/// leaves it untouched, and only an explicit later value overrides it.
-	/// Returns `None` when the server has not reported the flag within
-	/// [`GRACE_LOOKBACK_SQL`].
-	///
-	/// The lookback is what keeps this cheap. `jsonb_exists` is not
-	/// indexable, so the `LIMIT 1` cannot terminate early on a server that
-	/// never reports the flag (~2/3 of the fleet) — without the window this
-	/// drains all ~100 partitions.
-	// spec: SVC#munin-link
-	pub async fn latest_munin_for_server(
-		db: &mut AsyncPgConnection,
-		server: Uuid,
-	) -> Result<Option<bool>> {
-		use crate::schema::statuses::dsl::*;
-
-		let row: Option<Status> = statuses
-			.select(Status::as_select())
-			.filter(
-				server_id
-					.eq(server)
-					.and(created_at.ge(diesel::dsl::sql(GRACE_LOOKBACK_SQL)))
-					.and(id.ne(Uuid::nil())),
-			)
-			.filter(diesel::dsl::sql::<diesel::sql_types::Bool>(
-				"jsonb_exists(extra, 'munin')",
-			))
-			.order(created_at.desc())
-			.first(db)
-			.await
-			.optional()
-			.map_err(AppError::from)?;
-
-		Ok(row.map(|st| st.extra("munin").and_then(|v| v.as_bool()).unwrap_or(false)))
-	}
-
 	pub async fn latest_for_servers(
 		db: &mut AsyncPgConnection,
 		server_ids: &[Uuid],
@@ -760,23 +722,28 @@ impl Status {
 pub struct MergedDetail(serde_json::Map<String, serde_json::Value>);
 
 impl MergedDetail {
-	/// Fold `statuses` — one server's statuses, in any order — into the
-	/// resolved detail. Newer statuses win per key; a key absent from the
-	/// newest falls through to the newest status that has it.
+	/// Fold each source's report — `(when it was reported, what it carried)`,
+	/// in any order — into the resolved detail. Newer reports win per key; a
+	/// key absent from the newest falls through to the newest report that
+	/// has it.
 	///
-	/// Which statuses are passed sets the window this sees: callers hand it
-	/// each source's latest push (see [`Status::latest_per_source_at`]), so
-	/// a source silent beyond that lookback contributes nothing.
-	pub fn from_statuses(statuses: &[Status]) -> Self {
-		// latest_per_source_at orders by source name, not time, so sort
-		// rather than trusting the caller's order: "newest wins" reading as
-		// "last source alphabetically wins" would be silent and wrong.
-		let mut ordered: Vec<&Status> = statuses.iter().collect();
-		ordered.sort_by_key(|st| st.created_at);
+	/// Which reports are passed sets what this sees. The live path hands it
+	/// every source's current report (see
+	/// [`crate::reported_detail::ReportedDetail`]); the point-in-time path
+	/// hands it each source's latest push at-or-before a moment.
+	pub fn from_reports<'a>(
+		reports: impl IntoIterator<Item = (Timestamp, &'a serde_json::Value)>,
+	) -> Self {
+		// Callers' orderings vary and none of them are chronological —
+		// latest_per_source_at orders by source name, the table read by
+		// whatever the scan yields. "Newest wins" silently reading as "last
+		// row wins" would be wrong in a way nothing would surface.
+		let mut ordered: Vec<(Timestamp, &serde_json::Value)> = reports.into_iter().collect();
+		ordered.sort_by_key(|(at, _)| *at);
 
 		let mut merged = serde_json::Map::new();
-		for status in ordered {
-			let Some(obj) = status.extra.as_object() else {
+		for (_, extra) in ordered {
+			let Some(obj) = extra.as_object() else {
 				continue;
 			};
 			for (key, value) in obj {
@@ -789,8 +756,19 @@ impl MergedDetail {
 		Self(merged)
 	}
 
+	/// [`Self::from_reports`] over one server's statuses.
+	pub fn from_statuses(statuses: &[Status]) -> Self {
+		Self::from_reports(statuses.iter().map(|st| (st.created_at, &st.extra)))
+	}
+
 	pub fn get(&self, key: &str) -> Option<&serde_json::Value> {
 		self.0.get(key)
+	}
+
+	/// The resolved detail as a JSON object, for handing to a client that
+	/// wants to read fields canopy doesn't derive figures from.
+	pub fn into_json(self) -> serde_json::Value {
+		serde_json::Value::Object(self.0)
 	}
 
 	fn string(&self, key: &str) -> Option<String> {
@@ -826,6 +804,13 @@ impl MergedDetail {
 
 	pub fn timezone(&self) -> Option<String> {
 		self.string("timezone")
+	}
+
+	/// Whether the server runs Munin. Absent when no source has reported the
+	/// flag — which is not the same as reporting that it doesn't.
+	// spec: SVC#munin-link
+	pub fn munin(&self) -> Option<bool> {
+		self.get("munin").and_then(|v| v.as_bool())
 	}
 
 	/// Version of bestool itself, which it reports alongside the rest of its

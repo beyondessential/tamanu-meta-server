@@ -13,6 +13,12 @@ struct StatusResult {
 }
 
 #[derive(QueryableByName)]
+struct ExtraOnly {
+	#[diesel(sql_type = sql_types::Jsonb)]
+	extra: serde_json::Value,
+}
+
+#[derive(QueryableByName)]
 struct HealthResult {
 	#[diesel(sql_type = sql_types::Bool)]
 	healthy: bool,
@@ -3066,6 +3072,101 @@ async fn filings_stamp_check_state_columns() {
 			let row = fetch(&mut conn).await;
 			assert_eq!(row.observed_result.as_deref(), Some("passed"));
 			assert_eq!(row.effective_result.as_deref(), Some("passed"));
+		},
+	)
+	.await
+}
+
+/// Ingest keeps each source's current server-wide detail, so the live views
+/// never have to search status history for it. A source's push replaces its
+/// own row and leaves other sources' alone.
+// spec: FIG#sourcing
+#[tokio::test(flavor = "multi_thread")]
+async fn push_records_the_source_s_current_detail() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = Uuid::new_v4();
+			sql_query(
+				"INSERT INTO servers (id, host, kind, device_id) \
+				 VALUES ($1, 'https://detail.example.com', 'central', $2)",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(device_id))
+			.execute(&mut conn)
+			.await
+			.unwrap();
+
+			let detail = async |conn: &mut diesel_async::AsyncPgConnection, source: &str| {
+				sql_query(
+					"SELECT extra FROM server_reported_detail \
+					 WHERE server_id = $1 AND source = $2",
+				)
+				.bind::<sql_types::Uuid, _>(server_id)
+				.bind::<sql_types::Text, _>(source.to_owned())
+				.get_result::<ExtraOnly>(conn)
+				.await
+				.ok()
+				.map(|row| row.extra)
+			};
+
+			public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"health": [],
+					"bestoolVersion": "2.10.5",
+					"pgVersion": "PostgreSQL 16.3 on x86_64-pc-linux-gnu",
+				}))
+				.await
+				.assert_status_ok();
+
+			let recorded = detail(&mut conn, "alertd").await.expect("alertd recorded");
+			assert_eq!(recorded["bestoolVersion"], "2.10.5");
+
+			// A second source's push doesn't disturb the first's.
+			public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"source": "tamanu",
+					"health": [],
+					"uptimeSecs": 42,
+				}))
+				.await
+				.assert_status_ok();
+			assert_eq!(
+				detail(&mut conn, "alertd")
+					.await
+					.expect("alertd still there")["bestoolVersion"],
+				"2.10.5",
+			);
+			assert_eq!(
+				detail(&mut conn, "tamanu").await.expect("tamanu recorded")["uptimeSecs"],
+				42,
+			);
+
+			// alertd pushes again without pgVersion: the push is its whole
+			// truth, so the dropped field goes with it.
+			public
+				.post(&format!("/status/{server_id}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"health": [],
+					"bestoolVersion": "2.11.0",
+				}))
+				.await
+				.assert_status_ok();
+			let recorded = detail(&mut conn, "alertd")
+				.await
+				.expect("alertd re-recorded");
+			assert_eq!(recorded["bestoolVersion"], "2.11.0");
+			assert!(
+				recorded.get("pgVersion").is_none(),
+				"a field the source stopped reporting is no longer its current detail",
+			);
 		},
 	)
 	.await

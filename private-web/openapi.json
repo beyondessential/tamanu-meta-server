@@ -5849,6 +5849,46 @@
         }
       }
     },
+    "/api/statuses/fleet_detail": {
+      "post": {
+        "tags": [
+          "statuses"
+        ],
+        "summary": "Get every live server's currently reported detail.",
+        "description": "One row per server, carrying the derived figures and the full resolved\npayload its sources report. This is the data behind the fleet view, which\ngroups it to show how each figure — or any field a source reports — is\nspread across the fleet, and can cross two fields against each other.\n\nReads each source's current report rather than status history, so it\ncovers servers that have been quiet for any length of time. Archived\nservers and canopy's own row are excluded; a live server that has never\nreported appears with everything absent.",
+        "operationId": "status_fleet_detail",
+        "responses": {
+          "200": {
+            "description": "Every live server's currently reported detail.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FleetServerDetailData"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
     "/api/statuses/group_details": {
       "post": {
         "tags": [
@@ -8213,6 +8253,107 @@
           "up": {
             "$ref": "#/components/schemas/ShortStatus",
             "description": "Reachability of the server, based on how recently it last reported a\nstatus update."
+          }
+        }
+      },
+      "FleetServerDetailData": {
+        "type": "object",
+        "description": "One server's identity and its currently reported detail, as a row of the\nfleet view.",
+        "required": [
+          "server_id",
+          "server_name",
+          "kind",
+          "detail"
+        ],
+        "properties": {
+          "bestool": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Version of bestool, the agent reporting on the server."
+          },
+          "detail": {
+            "type": "object",
+            "description": "Every field the server's sources currently report, resolved across\nthem — the raw material behind the derived figures above, and what an\narbitrary-field lookup reads."
+          },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The group the server belongs to, if any."
+          },
+          "group_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name of that group, if any."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ServerKind",
+            "description": "The kind of deployment the server represents."
+          },
+          "nodejs": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Reported runtime version."
+          },
+          "platform": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Operating system family, derived from the reported database engine."
+          },
+          "postgres": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Reported database engine version."
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "Where the server sits in its deployment's promotion order, if set."
+              }
+            ]
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for the server."
+          },
+          "server_name": {
+            "type": "string",
+            "description": "Operator-assigned name for the server, empty when it has none."
+          },
+          "timezone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Reported system timezone."
+          },
+          "version": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VersionStr",
+                "description": "Application version the server reports running, if any."
+              }
+            ]
           }
         }
       },
@@ -11715,7 +11856,7 @@
           },
           "munin": {
             "type": "boolean",
-            "description": "Whether the server is known to run Munin, from the last status that\nreported the flag (persisted with grace — see [`database::statuses`]).\nThe UI offers a Munin link only when this is true."
+            "description": "Whether the server is known to run Munin, from the most recent source\nto report the flag. The UI offers a Munin link only when this is true."
           },
           "server": {
             "$ref": "#/components/schemas/ServerInfo",

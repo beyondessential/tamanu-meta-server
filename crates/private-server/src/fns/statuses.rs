@@ -18,6 +18,7 @@ use database::{
 	check_policies::CheckPolicy,
 	devices::DeviceConnection,
 	issues::Issue,
+	reported_detail::ReportedDetail,
 	server_groups::ServerGroup,
 	servers::Server,
 	statuses::{MergedDetail, Status},
@@ -100,6 +101,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(group_details))
 		.routes(routes!(snapshot))
 		.routes(routes!(check_detail))
+		.routes(routes!(fleet_detail))
 }
 
 /// Get a fleet-wide summary of software versions running in production.
@@ -901,4 +903,113 @@ async fn consolidated_checks_at(
 		by_source_extra: serde_json::Value::Object(by_source_extra),
 		figures,
 	})
+}
+
+/// One server's identity and its currently reported detail, as a row of the
+/// fleet view.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct FleetServerDetailData {
+	/// Unique identifier for the server.
+	pub server_id: Uuid,
+	/// Operator-assigned name for the server, empty when it has none.
+	pub server_name: String,
+	/// The group the server belongs to, if any.
+	pub group_id: Option<Uuid>,
+	/// Display name of that group, if any.
+	pub group_name: Option<String>,
+	/// Where the server sits in its deployment's promotion order, if set.
+	pub rank: Option<ServerRank>,
+	/// The kind of deployment the server represents.
+	pub kind: ServerKind,
+	/// Application version the server reports running, if any.
+	pub version: Option<VersionStr>,
+	/// Operating system family, derived from the reported database engine.
+	pub platform: Option<String>,
+	/// Reported database engine version.
+	pub postgres: Option<String>,
+	/// Reported runtime version.
+	pub nodejs: Option<String>,
+	/// Version of bestool, the agent reporting on the server.
+	pub bestool: Option<String>,
+	/// Reported system timezone.
+	pub timezone: Option<String>,
+	/// Every field the server's sources currently report, resolved across
+	/// them — the raw material behind the derived figures above, and what an
+	/// arbitrary-field lookup reads.
+	#[schema(additional_properties = true, value_type = Object)]
+	pub detail: serde_json::Value,
+}
+
+/// Get every live server's currently reported detail.
+///
+/// One row per server, carrying the derived figures and the full resolved
+/// payload its sources report. This is the data behind the fleet view, which
+/// groups it to show how each figure — or any field a source reports — is
+/// spread across the fleet, and can cross two fields against each other.
+///
+/// Reads each source's current report rather than status history, so it
+/// covers servers that have been quiet for any length of time. Archived
+/// servers and canopy's own row are excluded; a live server that has never
+/// reported appears with everything absent.
+// spec: FIG#fleet-spread
+#[utoipa::path(
+	post,
+	path = "/fleet_detail",
+	operation_id = "status_fleet_detail",
+	tag = "statuses",
+	security(("tailscale-user" = [])),
+	responses(
+		(status = 200, description = "Every live server's currently reported detail.", body = Vec<FleetServerDetailData>),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn fleet_detail(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+) -> Result<Json<Vec<FleetServerDetailData>>> {
+	let mut conn = state.db_read.get().await?;
+
+	// get_all already excludes archived servers and canopy's own row.
+	let servers = Server::get_all(&mut conn, 0, None).await?;
+
+	let group_ids: Vec<Uuid> = servers
+		.iter()
+		.filter_map(|s| s.group_id)
+		.collect::<BTreeSet<_>>()
+		.into_iter()
+		.collect();
+	let group_names: HashMap<Uuid, String> = ServerGroup::list_by_ids(&mut conn, &group_ids)
+		.await?
+		.into_iter()
+		.map(|g| (g.id, g.name))
+		.collect();
+
+	// One read for the whole fleet: the current-detail table is a row per
+	// (server, source), so this is a few hundred rows however much status
+	// history sits behind it.
+	let mut merged = ReportedDetail::merge_by_server(ReportedDetail::all(&mut conn).await?);
+
+	let rows = servers
+		.into_iter()
+		.map(|server| {
+			let (figures, version) = merged.remove(&server.id).unwrap_or_default();
+			FleetServerDetailData {
+				server_id: server.id,
+				server_name: server.name.unwrap_or_default(),
+				group_id: server.group_id,
+				group_name: server.group_id.and_then(|g| group_names.get(&g).cloned()),
+				rank: server.rank,
+				kind: server.kind,
+				version,
+				platform: figures.platform(),
+				postgres: figures.postgres_version(),
+				nodejs: figures.node_version(),
+				bestool: figures.bestool_version(),
+				timezone: figures.timezone(),
+				detail: figures.into_json(),
+			}
+		})
+		.collect();
+
+	Ok(Json(rows))
 }

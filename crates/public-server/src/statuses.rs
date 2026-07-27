@@ -298,6 +298,19 @@ async fn create(
 			.save(conn)
 			.await?;
 
+			// This source's current server-wide detail, replacing what it
+			// last reported. The push is the source's whole truth, the same
+			// rule its checks follow just below.
+			// spec: FIG#sourcing
+			database::reported_detail::ReportedDetail::record(
+				conn,
+				server_id,
+				&status.source,
+				&status.extra,
+				status.version.as_ref(),
+			)
+			.await?;
+
 			file_health_events(conn, server_id, server.group_id, Some(id), &status, &tags).await?;
 
 			Ok(())
