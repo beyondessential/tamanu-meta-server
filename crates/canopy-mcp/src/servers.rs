@@ -225,13 +225,12 @@ impl CanopyMcp {
 		let latest = Status::latest_for_server(&mut conn, id)
 			.await
 			.map_err(mcp_err)?;
-		let last_versioned = Status::last_with_version_for_server(&mut conn, id)
+		// The last version any source reported, which already prefers the
+		// newest report — no need to check the latest push separately, and it
+		// holds for a server that's been down for months.
+		let version = ReportedDetail::last_version(&mut conn, id)
 			.await
 			.map_err(mcp_err)?;
-		let version = latest
-			.as_ref()
-			.and_then(|s| s.version.clone())
-			.or_else(|| last_versioned.and_then(|s| s.version));
 
 		let group = match server.group_id {
 			Some(gid) => ServerGroup::get_by_id(&mut conn, gid).await.ok(),

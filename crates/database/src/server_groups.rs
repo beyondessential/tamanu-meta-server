@@ -384,10 +384,8 @@ impl ServerGroup {
 	///
 	/// Loads every member of the group, picks the canonical one (lowest
 	/// `(rank_priority, kind_priority)`, tie-broken by `id`), and caches that
-	/// member's last version-bearing status. No members → both cache columns
-	/// are cleared. Runs only on infrequent membership/rank/kind/delete
-	/// changes, so the unbounded `last_with_version_for_server` query is fine
-	/// here. The `statuses` trigger handles the hot path (canonical member
+	/// member's last reported version. No members → both cache columns are
+	/// cleared. The `statuses` trigger handles the hot path (canonical member
 	/// reporting a new version) without touching this.
 	pub async fn recompute_version(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<()> {
 		use crate::schema::server_groups::dsl;
@@ -413,9 +411,8 @@ impl ServerGroup {
 		let (version_server_id, effective_version) = match canonical {
 			None => (None, None),
 			Some(server) => {
-				let version = Status::last_with_version_for_server(db, server.id)
-					.await?
-					.and_then(|s| s.version);
+				let version =
+					crate::reported_detail::ReportedDetail::last_version(db, server.id).await?;
 				(Some(server.id), version)
 			}
 		};

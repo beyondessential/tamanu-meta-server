@@ -13,6 +13,9 @@ Canopy keeps each source's server-wide detail as that source's current report on
 Canopy's own generated statuses carry no reported detail and leave a server's reports unchanged.
 A source's current report is kept for as long as the server exists, so a figure remains available however long the server has been quiet, and is discarded with the server.
 
+The application version is the exception to a report replacing what came before: a report that carries no version keeps the version that source last reported.
+An agent omits the version when it cannot read it — the application is down, or mid-upgrade — which says nothing about what the server is installed to run.
+
 Several sources report on one server, and they do not all report the same figures.
 Each figure is taken from the most recent source to report that figure, rather than from whichever source pushed most recently.
 So a figure holds its last reported value when the newest push comes from a source that does not carry it, and two figures presented together may come from different sources reporting at different times.

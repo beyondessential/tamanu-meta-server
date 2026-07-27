@@ -46,6 +46,96 @@ async fn age_report(conn: &mut AsyncPgConnection, server: Uuid, interval: &str) 
 	.expect("age report");
 }
 
+/// A report carrying no version keeps the version its source last reported —
+/// the agent reporting while the application is down doesn't mean the server
+/// stopped being on that version.
+// spec: FIG#sourcing
+#[tokio::test(flavor = "multi_thread")]
+async fn a_version_less_report_keeps_the_last_version() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server = insert_server(&mut conn).await;
+
+		ReportedDetail::record(
+			&mut conn,
+			server,
+			"alertd",
+			&json!({}),
+			Some(&"2.34.1".parse().unwrap()),
+		)
+		.await
+		.unwrap();
+		ReportedDetail::record(
+			&mut conn,
+			server,
+			"alertd",
+			&json!({"uptimeSecs": 42}),
+			None,
+		)
+		.await
+		.unwrap();
+
+		assert_eq!(
+			ReportedDetail::last_version(&mut conn, server)
+				.await
+				.unwrap()
+				.map(|v| v.to_string())
+				.as_deref(),
+			Some("2.34.1"),
+		);
+
+		// An explicit later version still supersedes it.
+		ReportedDetail::record(
+			&mut conn,
+			server,
+			"alertd",
+			&json!({}),
+			Some(&"2.35.0".parse().unwrap()),
+		)
+		.await
+		.unwrap();
+		assert_eq!(
+			ReportedDetail::last_version(&mut conn, server)
+				.await
+				.unwrap()
+				.map(|v| v.to_string())
+				.as_deref(),
+			Some("2.35.0"),
+		);
+	})
+	.await
+}
+
+/// The last version survives however long the server has been quiet: a group's
+/// headline version shouldn't blank out because its canonical member is down.
+// spec: FIG#sourcing
+#[tokio::test(flavor = "multi_thread")]
+async fn last_version_is_not_bounded_by_a_lookback() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server = insert_server(&mut conn).await;
+		ReportedDetail::record(
+			&mut conn,
+			server,
+			"alertd",
+			&json!({}),
+			Some(&"2.34.1".parse().unwrap()),
+		)
+		.await
+		.unwrap();
+		// Well past the ninety-day cap the status-history read needed.
+		age_report(&mut conn, server, "200 days").await;
+
+		assert_eq!(
+			ReportedDetail::last_version(&mut conn, server)
+				.await
+				.unwrap()
+				.map(|v| v.to_string())
+				.as_deref(),
+			Some("2.34.1"),
+		);
+	})
+	.await
+}
+
 /// The active-version summary counts each still-reporting production server
 /// once, at the version the most recent source to report one gave.
 // spec: FIG#active-versions

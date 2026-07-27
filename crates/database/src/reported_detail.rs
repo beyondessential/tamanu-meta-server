@@ -54,6 +54,13 @@ impl ReportedDetail {
 	/// Record `source`'s current detail for `server`, replacing what it
 	/// reported before. A push is the source's whole truth, so this is a
 	/// replace and not a merge; other sources' rows are untouched.
+	///
+	/// The version is the exception: a push that carries none keeps the last
+	/// one this source reported. An agent omits the version when it can't
+	/// read it — the application is down, or mid-upgrade — which says nothing
+	/// about what the server is installed to run, and blanking on it would
+	/// make a group's headline version flicker off exactly when an operator
+	/// is looking at it.
 	pub async fn record(
 		db: &mut AsyncPgConnection,
 		server: Uuid,
@@ -75,7 +82,13 @@ impl ReportedDetail {
 			.do_update()
 			.set((
 				dsl::extra.eq(extra),
-				dsl::version.eq(version),
+				// COALESCE over the excluded row: a version-less push keeps
+				// the version this source last reported.
+				dsl::version.eq(diesel::dsl::sql::<
+					diesel::sql_types::Nullable<diesel::sql_types::Text>,
+				>(
+					"COALESCE(EXCLUDED.version, server_reported_detail.version)",
+				)),
 				dsl::reported_at.eq(diesel::dsl::now),
 			))
 			.execute(db)
@@ -106,6 +119,34 @@ impl ReportedDetail {
 			.load(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// The last application version `server` reported, from the most recent
+	/// source to report one.
+	///
+	/// Unbounded by design: this answers "what was it running", which stays
+	/// true however long the server has been down — a group's headline
+	/// version shouldn't blank out because its canonical member went quiet.
+	/// Reading the current-detail table is what makes that affordable; the
+	/// same question against status history needed a lookback cap.
+	// spec: FIG#sourcing
+	pub async fn last_version(
+		db: &mut AsyncPgConnection,
+		server: Uuid,
+	) -> Result<Option<VersionStr>> {
+		use crate::schema::server_reported_detail::dsl;
+
+		let version: Option<Option<VersionStr>> = dsl::server_reported_detail
+			.select(dsl::version)
+			.filter(dsl::server_id.eq(server))
+			.filter(dsl::version.is_not_null())
+			.order(dsl::reported_at.desc())
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)?;
+
+		Ok(version.flatten())
 	}
 
 	/// The application version each still-reporting production server runs,
