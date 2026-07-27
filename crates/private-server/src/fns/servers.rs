@@ -18,7 +18,7 @@ use database::{
 	server_enrollment_tokens::ServerEnrollmentToken,
 	server_groups::ServerGroup,
 	servers::{PartialServer, Server},
-	statuses::Status,
+	statuses::{MergedDetail, Status},
 	versions::Version,
 };
 use futures::future::join;
@@ -151,6 +151,9 @@ pub struct ServerLastStatusData {
 	pub postgres: Option<String>,
 	/// Node.js version associated with the server, if known.
 	pub nodejs: Option<String>,
+	/// Version of bestool, the agent reporting on the server. Absent when no
+	/// source reports one.
+	pub bestool: Option<String>,
 	/// Timezone the server reported, if any.
 	pub timezone: Option<String>,
 	/// The source that pushed this status (e.g. `alertd`).
@@ -622,11 +625,17 @@ pub async fn get_detail(
 			None => None,
 		};
 
-		let platform = st.platform();
-		let postgres = st.postgres_version();
+		// The figures are resolved across every source reporting on the
+		// server, not just off `st`: sources don't all carry the same fields,
+		// so reading them off the latest push alone drops a figure whenever
+		// the source that reports it isn't the one that pushed last.
+		// spec: FIG#sourcing
+		let figures = MergedDetail::from_statuses(
+			&Status::latest_per_source_at(&mut conn, server.id, None).await?,
+		);
 		// Prefer the payload-reported `nodeVersion`; fall back to the device
 		// connection's User-Agent.
-		let nodejs = st
+		let nodejs = figures
 			.node_version()
 			.or_else(|| connection.and_then(|d| d.nodejs_version()));
 		let version_distance = latest_version
@@ -646,12 +655,11 @@ pub async fn get_detail(
 			version: st.version.clone(),
 			version_distance,
 			min_chrome_version,
-			platform,
-			postgres,
+			platform: figures.platform(),
+			postgres: figures.postgres_version(),
 			nodejs,
-			timezone: st
-				.extra("timezone")
-				.and_then(|s| s.as_str().map(|s| s.to_string())),
+			bestool: figures.bestool_version(),
+			timezone: figures.timezone(),
 			source: st.source.clone(),
 			extra: st.extra.clone(),
 			operators,

@@ -12171,6 +12171,13 @@
           "operators"
         ],
         "properties": {
+          "bestool": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Version of bestool, the agent reporting on the server. Absent when no\nsource reports one."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -12834,6 +12841,13 @@
           "checks"
         ],
         "properties": {
+          "bestool": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Version of bestool, the agent reporting on the server. Absent when no\nsource reports one."
+          },
           "checks": {
             "$ref": "#/components/schemas/ConsolidatedChecks",
             "description": "The server's consolidated checks as of this snapshot: every source's\nchecks, graded and classified, with silenced flags and the rolled-up\nhealth state — the same shape the live view uses."

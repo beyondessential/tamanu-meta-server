@@ -6936,6 +6936,11 @@ export interface components {
          */
         ServerLastStatusData: {
             /**
+             * @description Version of bestool, the agent reporting on the server. Absent when no
+             *     source reports one.
+             */
+            bestool?: string | null;
+            /**
              * Format: date-time
              * @description When this status was reported.
              */
@@ -7342,6 +7347,11 @@ export interface components {
          *     health and version information.
          */
         StatusSnapshotData: {
+            /**
+             * @description Version of bestool, the agent reporting on the server. Absent when no
+             *     source reports one.
+             */
+            bestool?: string | null;
             /**
              * @description The server's consolidated checks as of this snapshot: every source's
              *     checks, graded and classified, with silenced flags and the rolled-up

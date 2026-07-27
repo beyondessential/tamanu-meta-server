@@ -15,9 +15,14 @@ use commons_types::{
 	version::VersionStr,
 };
 use database::{
-	check_policies::CheckPolicy, devices::DeviceConnection, issues::Issue,
-	server_groups::ServerGroup, servers::Server, statuses::Status,
-	tailscale_users::TailscaleUser as CachedTailscaleUser, versions::Version,
+	check_policies::CheckPolicy,
+	devices::DeviceConnection,
+	issues::Issue,
+	server_groups::ServerGroup,
+	servers::Server,
+	statuses::{MergedDetail, Status},
+	tailscale_users::TailscaleUser as CachedTailscaleUser,
+	versions::Version,
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -590,6 +595,9 @@ pub struct StatusSnapshotData {
 	pub postgres: Option<String>,
 	/// Reported runtime version.
 	pub nodejs: Option<String>,
+	/// Version of bestool, the agent reporting on the server. Absent when no
+	/// source reports one.
+	pub bestool: Option<String>,
 	/// Reported system timezone.
 	pub timezone: Option<String>,
 	/// Additional unstructured data reported alongside the snapshot, keyed
@@ -660,11 +668,22 @@ pub async fn snapshot(
 		Ok(v) => status.distance_from_version(&v.as_semver()),
 		Err(_) => None,
 	};
-	// Prefer the Node.js version the server reported in its status payload
+	// The consolidated checks as of this snapshot: every source's most
+	// recent report at-or-before `at`, re-graded through current policy,
+	// plus the figures those same reports resolve to. The single `status`
+	// above is still used for the push's own metadata (version, operators,
+	// etc.).
+	let SnapshotState {
+		checks,
+		by_source_extra,
+		figures,
+	} = consolidated_checks_at(&mut conn, &server, args.at).await?;
+
+	// Prefer the Node.js version reported in a status payload
 	// (`nodeVersion`). Fall back to scraping the *latest* device connection's
 	// User-Agent — that metadata isn't versioned in lockstep with status
 	// pushes, so looking it up "as of" a time would mostly mislead.
-	let nodejs = match status.node_version() {
+	let nodejs = match figures.node_version() {
 		Some(v) => Some(v),
 		None => {
 			if let Some(dev_id) = status.device_id {
@@ -683,17 +702,6 @@ pub async fn snapshot(
 	} else {
 		None
 	};
-	let timezone = status
-		.extra("timezone")
-		.and_then(|v| v.as_str().map(|s| s.to_string()));
-	let platform = status.platform();
-	let postgres = status.postgres_version();
-
-	// The consolidated checks as of this snapshot: every source's most
-	// recent report at-or-before `at`, re-graded through current policy.
-	// The single `status` above is still used for the push's metadata
-	// (version, platform, operators, etc.).
-	let (checks, extra) = consolidated_checks_at(&mut conn, &server, args.at).await?;
 	let mut operators = status.operators();
 	enrich_operators(&mut conn, operators.iter_mut()).await?;
 
@@ -705,11 +713,12 @@ pub async fn snapshot(
 		version: status.version,
 		version_distance,
 		min_chrome_version,
-		platform,
-		postgres,
+		platform: figures.platform(),
+		postgres: figures.postgres_version(),
 		nodejs,
-		timezone,
-		extra,
+		bestool: figures.bestool_version(),
+		timezone: figures.timezone(),
+		extra: by_source_extra,
 		operators,
 		checks,
 	})))
@@ -750,6 +759,16 @@ pub(crate) async fn enrich_operators(
 /// the public-server ingestion path (`file_health_events`) so the UI
 /// displays what *would* be filed. Broken checks aren't included — they
 /// file as warnings and the UI renders them from the result directly.
+/// What one pass over a server's per-source statuses yields: everything the
+/// snapshot needs from status history, so the pass isn't repeated per figure.
+struct SnapshotState {
+	checks: commons_types::status::ConsolidatedChecks,
+	/// Each source's raw payload, keyed by source.
+	by_source_extra: serde_json::Value,
+	/// The server-wide figures resolved across those sources.
+	figures: MergedDetail,
+}
+
 /// Reconstruct a server's consolidated checks as of a point in time (or
 /// latest) from status history: each source's most recent report at-or-
 /// before `at`, every check re-graded through current policy — the same
@@ -759,11 +778,17 @@ async fn consolidated_checks_at(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	server: &Server,
 	at: Option<Timestamp>,
-) -> commons_errors::Result<(commons_types::status::ConsolidatedChecks, serde_json::Value)> {
+) -> commons_errors::Result<SnapshotState> {
 	use commons_types::status::{CheckResult, ConsolidatedCheck, ConsolidatedChecks, HealthState};
 	use database::check_policies::{CheckPolicy, EvaluationContext, ScopedCheckPolicy};
 
 	let statuses = Status::latest_per_source_at(conn, server.id, at).await?;
+
+	// The figures come from the same set of statuses the checks do, so the
+	// snapshot presents each figure as of `at` from whichever source last
+	// reported it, rather than from whichever source happened to push last.
+	// spec: FIG#point-in-time
+	let figures = MergedDetail::from_statuses(&statuses);
 
 	// Each source's raw status-level payload, keyed by source, so the
 	// snapshot's raw-payload panel is consolidated rather than one source's
@@ -868,11 +893,12 @@ async fn consolidated_checks_at(
 	});
 	let health_state =
 		HealthState::from_results(checks.iter().filter(|c| !c.silenced).map(|c| c.effective));
-	Ok((
-		ConsolidatedChecks {
+	Ok(SnapshotState {
+		checks: ConsolidatedChecks {
 			health_state,
 			checks,
 		},
-		serde_json::Value::Object(by_source_extra),
-	))
+		by_source_extra: serde_json::Value::Object(by_source_extra),
+		figures,
+	})
 }
