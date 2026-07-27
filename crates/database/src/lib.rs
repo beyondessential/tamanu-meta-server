@@ -18,6 +18,7 @@ pub mod mcp_tokens;
 pub mod notes;
 pub mod pg_duration;
 pub mod recovery_vault;
+pub mod reported_detail;
 pub mod restore;
 pub mod schema;
 pub mod self_alerts;

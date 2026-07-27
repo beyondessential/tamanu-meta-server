@@ -110,6 +110,9 @@ export type ServerInfo = Solidify<Schemas["ServerInfo"]>;
 export type ServerLastStatusData = Solidify<Schemas["ServerLastStatusData"]>;
 export type ServerDetailData = Solidify<Schemas["ServerDetailData"]>;
 export type StatusSnapshotData = Solidify<Schemas["StatusSnapshotData"]>;
+export type FleetServerDetailData = Solidify<
+	Schemas["FleetServerDetailData"]
+>;
 export type ServerSilencedRef = Solidify<Schemas["ServerSilencedRef"]>;
 export type ServerGroupSilencedRef = Solidify<Schemas["ServerGroupSilencedRef"]>;
 

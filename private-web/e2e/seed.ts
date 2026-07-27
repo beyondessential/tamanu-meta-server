@@ -47,7 +47,7 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, check_policies, scoped_check_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, recovery_vault_writes RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, server_reported_detail, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, check_policies, scoped_check_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, recovery_vault_writes RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" server with it;
 	// self-alerts attach to that row, so put it back.
@@ -246,6 +246,25 @@ export async function seedStatus(
 		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, ${createdAtClause})
 		 RETURNING created_at`,
 		params,
+	);
+
+	// Mirror ingestion: the push is the source's current server-wide detail,
+	// which is what the live figures (and the Munin flag) read — they never
+	// search status history. Ordered by the status's own timestamp so
+	// out-of-order seeding still resolves newest-wins correctly.
+	await sql.query(
+		`INSERT INTO server_reported_detail (server_id, source, extra, version, reported_at)
+		 VALUES ($1, $2, $3::jsonb, $4, $5)
+		 ON CONFLICT (server_id, source) DO UPDATE
+		 SET extra = EXCLUDED.extra, version = EXCLUDED.version, reported_at = EXCLUDED.reported_at
+		 WHERE server_reported_detail.reported_at <= EXCLUDED.reported_at`,
+		[
+			opts.serverId,
+			source,
+			JSON.stringify(opts.extra ?? {}),
+			opts.version ?? null,
+			rows[0]!.created_at,
+		],
 	);
 
 	// Mirror ingestion: each check in the push has a check-state row, which

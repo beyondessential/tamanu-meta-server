@@ -14,12 +14,8 @@ A server with no known address offers no application link.
 
 ## Munin link
 
-A server reports whether it runs Munin as a field in its pushed status.
-Canopy remembers the value with grace: the most recently reported value persists, a status that omits the flag leaves it unchanged, and the value outlives the window that governs a server's live status.
-So a server that has reported running Munin keeps the link for a while after it stops reporting, and a server that reports it has stopped running Munin loses the link.
-
-The grace is a bounded lookback, not an indefinite memory: a server that has not reported the flag within the lookback is treated as not running Munin and offers no link.
-The bound is a deliberate cost of keeping the read cheap — status history is partitioned by time, so an unbounded lookback cannot be pruned to a slice of it and instead reads the whole history.
+A server reports whether it runs Munin as a field in its pushed status, and the flag is one of the server's reported figures (see [FIG](server-figures.md)) — read from the most recent source to report it, and held for as long as the server exists.
+So a server that has reported running Munin keeps the link however long it has been quiet since, a status that omits the flag leaves the value unchanged, and a server that reports it has stopped running Munin loses the link.
 
 The detail view offers a link to a server's Munin only when the server is known to run Munin and has a bound tailnet name.
 The link opens the server's Munin in a new tab, over HTTPS at the server's tailnet MagicDNS name on port 4950.

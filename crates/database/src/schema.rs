@@ -494,6 +494,16 @@ diesel::table! {
 }
 
 diesel::table! {
+	server_reported_detail (server_id, source) {
+		server_id -> Uuid,
+		source -> Text,
+		extra -> Jsonb,
+		version -> Nullable<Text>,
+		reported_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	servers (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -652,6 +662,7 @@ diesel::joinable!(server_enrollment_challenges -> servers (server_id));
 diesel::joinable!(server_enrollment_tokens -> servers (server_id));
 diesel::joinable!(server_group_backup_config -> server_groups (group_id));
 diesel::joinable!(server_group_backup_schedule -> server_groups (group_id));
+diesel::joinable!(server_reported_detail -> servers (server_id));
 diesel::joinable!(servers -> devices (device_id));
 diesel::joinable!(slack_outbox -> incident_notes (note_id));
 diesel::joinable!(slack_outbox -> incidents (incident_id));
@@ -697,6 +708,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	server_group_backup_config,
 	server_group_backup_schedule,
 	server_groups,
+	server_reported_detail,
 	servers,
 	slack_outbox,
 	sql_playground_history,

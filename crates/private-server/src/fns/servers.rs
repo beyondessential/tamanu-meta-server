@@ -15,10 +15,11 @@ use commons_types::{
 use database::{
 	devices::{Device, DeviceConnection, TailscaleIdentity},
 	pg_duration::PgDuration,
+	reported_detail::ReportedDetail,
 	server_enrollment_tokens::ServerEnrollmentToken,
 	server_groups::ServerGroup,
 	servers::{PartialServer, Server},
-	statuses::{MergedDetail, Status},
+	statuses::Status,
 	versions::Version,
 };
 use futures::future::join;
@@ -58,9 +59,8 @@ pub struct ServerDetailData {
 	/// The server's effective `billing.*` labels — i.e. its group's
 	/// (product/deployment/stage). Empty when the server is ungrouped.
 	pub billing_labels: Vec<super::server_groups::BillingTag>,
-	/// Whether the server is known to run Munin, from the last status that
-	/// reported the flag (persisted with grace — see [`database::statuses`]).
-	/// The UI offers a Munin link only when this is true.
+	/// Whether the server is known to run Munin, from the most recent source
+	/// to report the flag. The UI offers a Munin link only when this is true.
 	// spec: SVC#munin-link
 	pub munin: bool,
 }
@@ -610,6 +610,13 @@ pub async fn get_detail(
 		None
 	};
 
+	// Every source's current report on this server, resolved into one set of
+	// figures. Independent of `status` above: that's the latest push and its
+	// own metadata, this is what the server is running — which outlives any
+	// one push, and survives the server going quiet.
+	// spec: FIG#sourcing
+	let figures = ReportedDetail::merge(&ReportedDetail::for_server(&mut conn, server.id).await?);
+
 	let last_status = if let Some(st) = status.as_ref() {
 		// The status usually comes from the server's own device, whose
 		// latest connection was just fetched — only fall back to a
@@ -625,14 +632,6 @@ pub async fn get_detail(
 			None => None,
 		};
 
-		// The figures are resolved across every source reporting on the
-		// server, not just off `st`: sources don't all carry the same fields,
-		// so reading them off the latest push alone drops a figure whenever
-		// the source that reports it isn't the one that pushed last.
-		// spec: FIG#sourcing
-		let figures = MergedDetail::from_statuses(
-			&Status::latest_per_source_at(&mut conn, server.id, None).await?,
-		);
 		// Prefer the payload-reported `nodeVersion`; fall back to the device
 		// connection's User-Agent.
 		let nodejs = figures
@@ -695,9 +694,8 @@ pub async fn get_detail(
 		None => Vec::new(),
 	};
 
-	let munin = Status::latest_munin_for_server(&mut conn, server.id)
-		.await?
-		.unwrap_or(false);
+	// spec: SVC#munin-link
+	let munin = figures.munin().unwrap_or(false);
 
 	Ok(Json(ServerDetailData {
 		server: server_details,

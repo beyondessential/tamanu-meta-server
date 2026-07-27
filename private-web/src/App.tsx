@@ -42,6 +42,7 @@ import ServerCreate from "./routes/ServerCreate";
 import ServerDetail from "./routes/ServerDetail";
 import ServerEdit from "./routes/ServerEdit";
 import ArchivedList from "./routes/ArchivedList";
+import FleetFigures from "./routes/FleetFigures";
 import Servers from "./routes/Servers";
 import Settings from "./routes/Settings";
 import Sql from "./routes/Sql";
@@ -57,7 +58,7 @@ interface NavItem {
 const BASE_NAV: NavItem[] = [
 	{ label: "Status", to: "/status" },
 	{ label: "Incidents", to: "/incidents" },
-	{ label: "Servers", to: "/servers" },
+	{ label: "Fleet", to: "/servers" },
 	{ label: "Versions", to: "/versions" },
 	{ label: "Devices", to: "/devices" },
 	{ label: "Bestool", to: "/bestool" },
@@ -193,6 +194,7 @@ export default function App() {
 						<Route index element={<GroupsList />} />
 						<Route path="ungrouped" element={<UngroupedServersList />} />
 						<Route path="archived" element={<ArchivedList />} />
+						<Route path="figures" element={<FleetFigures />} />
 					</Route>
 					<Route
 						path="/groups/:id/servers/new"

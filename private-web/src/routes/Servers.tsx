@@ -11,12 +11,15 @@ export default function Servers() {
 		? "ungrouped"
 		: location.pathname.startsWith("/servers/archived")
 			? "archived"
-			: "groups";
+			: location.pathname.startsWith("/servers/figures")
+				? "figures"
+				: "groups";
 
 	const tabTarget: Record<string, string> = {
 		groups: "/servers",
 		ungrouped: "/servers/ungrouped",
 		archived: "/servers/archived",
+		figures: "/servers/figures",
 	};
 
 	return (
@@ -29,6 +32,7 @@ export default function Servers() {
 				<Tab label="Groups" value="groups" />
 				<Tab label="Ungrouped" value="ungrouped" />
 				<Tab label="Archived" value="archived" />
+				<Tab label="Figures" value="figures" />
 			</Tabs>
 			{params.id && <ServerNameBreadcrumb serverId={params.id} />}
 			<Outlet />
