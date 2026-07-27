@@ -62,6 +62,7 @@ import TailnetIdentitySection from "../components/TailnetIdentitySection";
 import TimeAgo from "../components/TimeAgo";
 import { LatestSnapshot } from "../components/SnapshotId";
 import { BackupProcessingChip } from "../components/BackupProcessingChip";
+import { BackupLiveProgress } from "../components/BackupLiveProgress";
 import TimezoneTooltip from "../components/TimezoneTooltip";
 import VersionIndicator from "../components/VersionIndicator";
 import { HealthLegend, StatusLegend, VersionLegend } from "../components/Legends";
@@ -71,6 +72,7 @@ import ServerSetupInstructions from "../components/ServerSetupInstructions";
 import { callApi, useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { useReloadInterval } from "../hooks/useReloadInterval";
 import { humanSeconds } from "../lib/humanDuration";
 import ServerNameWithGroup from "../components/ServerNameWithGroup";
 import {
@@ -1629,12 +1631,25 @@ function BackupCapabilitiesSection({
 	groupId: string | null;
 	isAdmin: boolean;
 }) {
+	// Poll faster while a backup of any type is in flight, so its figures advance
+	// and the "backing up…" chip appears and clears on its own; back off when
+	// nothing is running. Without this the section was frozen at page load.
+	const [inFlight, setInFlight] = useState(false);
+	const backupTick = useReloadInterval(
+		inFlight ? 5_000 : 30_000,
+		"canopy-data-changed",
+	);
 	const caps = useApi(
 		"backups",
 		"capabilities",
 		{ server_id: serverId },
-		[serverId],
+		[serverId, backupTick],
 	);
+	const anyInFlight =
+		caps.status === "ok" && caps.data.some((c) => c.processing_since != null);
+	useEffect(() => {
+		setInFlight(anyInFlight);
+	}, [anyInFlight]);
 	// Whether the group has an *active* (ready) backup config. Ungrouped servers
 	// query the nil group, which always returns no config. While this is loading
 	// we optimistically treat the section as active to avoid a grey→normal flash.
@@ -1860,6 +1875,7 @@ function BackupCapabilityRow({
 					</Typography>
 					<BackupProcessingChip since={cap.processing_since} />
 				</Stack>
+				<BackupLiveProgress progress={cap.progress} />
 				<LatestSnapshot
 					id={cap.latest_snapshot_id}
 					at={cap.latest_snapshot_at}

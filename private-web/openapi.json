@@ -1085,6 +1085,46 @@
         ]
       }
     },
+    "/api/backups/run_progress": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "The progress a run reported over its life, oldest first.",
+        "description": "Every figure is cumulative from the start of the run, so a rate is the\ndifference between adjacent points divided by the time between them — and a\ngap in the series costs resolution without distorting the totals either side\nof it.\n\nAvailable for a run in flight and for one that has finished, for as long as\nits series is retained. Empty for a run that reported no progress (an older\nclient), for one whose series has been pruned, and for an unknown run — all\nthree are \"nothing to plot\" rather than errors.",
+        "operationId": "backups_run_progress",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunProgressArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RunProgressPoint"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
     "/api/backups/set_capability": {
       "post": {
         "tags": [
@@ -9667,6 +9707,150 @@
           }
         }
       },
+      "LiveProgress": {
+        "type": "object",
+        "description": "The live state of a run still in flight, from the progress it has reported.\n\nAbsent entirely (`None` on the row) when a run has reported no progress —\neither an older client or one that cannot. That is a distinct state from a\nrun reporting zeroes, and the interface must render it as unknown rather than\nas a stalled run.\n\nEvery byte figure here is cumulative since the run started, exactly as\nreported; [`Self::bytes_per_second`] is the only derived rate.",
+        "required": [
+          "observed_at",
+          "seconds_since_observed",
+          "extra"
+        ],
+        "properties": {
+          "bytes_cached": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes found already present, and so not re-uploaded."
+          },
+          "bytes_estimated": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Total bytes the run currently expects to handle. An estimate the run may\nrevise upward, so a percentage derived from it can go down."
+          },
+          "bytes_hashed": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes processed so far."
+          },
+          "bytes_per_second": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Upload rate over the trailing window, derived by differencing cumulative\n`bytes_uploaded` across samples. `None` when the window holds fewer than\ntwo samples, spans no time, or the run reports no uploaded figure — never\nzero as a stand-in, since \"not enough data to say\" and \"moving no bytes\"\nare different answers."
+          },
+          "bytes_read": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Source bytes read so far."
+          },
+          "bytes_uploaded": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes uploaded so far."
+          },
+          "current_path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the run was working on at the last sample."
+          },
+          "errors": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Errors hit so far."
+          },
+          "extra": {
+            "type": "object",
+            "description": "Whatever the backup engine reported beyond what Canopy models, verbatim\nfrom the last sample. Shown for inspection; never interpreted."
+          },
+          "files_done": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Files finished so far."
+          },
+          "files_estimated": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Total files the run currently expects to handle."
+          },
+          "ignored_errors": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Errors hit and deliberately ignored so far."
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the last sample arrived, as timed by Canopy on receipt."
+          },
+          "s3_received_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Payload bytes received from object storage so far."
+          },
+          "s3_received_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Raw bytes received from object storage so far."
+          },
+          "s3_sent_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Payload bytes sent to object storage so far."
+          },
+          "s3_sent_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Raw bytes sent to object storage so far, as the client's proxy tallied."
+          },
+          "seconds_since_observed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How long since the last sample. The \"is anyone still there\" figure: it\ngrows without bound if a device goes quiet mid-run."
+          }
+        }
+      },
       "LiveVersionsBracket": {
         "type": "object",
         "description": "The lowest and highest software version currently reported by any\nproduction server.",
@@ -10577,6 +10761,17 @@
               }
             ]
           },
+          "progress": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LiveProgress",
+                "description": "Live figures for a run still in flight, from the progress it has reported.\n`None` when the run has reported none — which is unknown, not zero."
+              }
+            ]
+          },
           "purpose": {
             "type": "string",
             "description": "Whether the run was a backup or a restore."
@@ -10588,6 +10783,14 @@
             ],
             "format": "date-time",
             "description": "When the device reported the run. `None` for an inferred (unreported) row."
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The run identifier, when known — present on a reported run, and on an\ninferred row whose credential issuance carried one. Needed to fetch the\nrun's progress series; `None` for an issuance from a client that predates\nrun correlation, which therefore has no series to fetch."
           },
           "s3_received_payload_bytes": {
             "type": [
@@ -10643,6 +10846,14 @@
             ],
             "format": "int64",
             "description": "Logical size of the run's snapshot, if known (reported runs only). For\na backup this comes from repo inspection. For a restore it is resolved\nfrom the backup run that produced the snapshot (matched by snapshot id),\nfalling back to inspection's backfill onto the restore run itself."
+          },
+          "snapshot_taken_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the run froze the data it captured, if it reported that. Distinct from\n`reported_at`: for a long backup the two are hours apart, and this is the\none that says how old the data actually is."
           },
           "started_at": {
             "type": [
@@ -11422,6 +11633,106 @@
           "failure"
         ]
       },
+      "RunProgressArgs": {
+        "type": "object",
+        "description": "Identifies the run whose progress series to fetch.",
+        "required": [
+          "run_id"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The run identifier, as carried on the activity row (`run_id`)."
+          }
+        }
+      },
+      "RunProgressPoint": {
+        "type": "object",
+        "description": "One point of a run's progress series.\n\nA trimmed projection of what the device reported: the counters a rate or\nvolume chart plots, and nothing else. The full sample — including whatever the\nengine reported that Canopy does not model — is on the activity row's live\nfigures for a run still in flight.",
+        "required": [
+          "observed_at"
+        ],
+        "properties": {
+          "bytes_cached": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Cumulative bytes found already present at this point."
+          },
+          "bytes_estimated": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The run's expected total as of this point. May grow over the series."
+          },
+          "bytes_hashed": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Cumulative bytes processed at this point."
+          },
+          "bytes_read": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Cumulative source bytes read at this point."
+          },
+          "bytes_uploaded": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Cumulative bytes uploaded at this point."
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When Canopy received this sample."
+          },
+          "s3_received_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Cumulative payload bytes received from object storage at this point."
+          },
+          "s3_received_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Cumulative raw bytes received from object storage at this point."
+          },
+          "s3_sent_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Cumulative payload bytes sent to object storage at this point."
+          },
+          "s3_sent_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Cumulative raw bytes sent to object storage at this point."
+          }
+        }
+      },
       "RunStatus": {
         "type": "string",
         "description": "State of an activity row: a device-reported run, or a run inferred from a\ncredential issuance that never matched a report.",
@@ -11680,6 +11991,17 @@
             ],
             "format": "date-time",
             "description": "`Some(issued_at)` when a backup of this type appears to be in flight:\nbackup credentials were issued and are still valid, and no run has\nbeen reported since they were issued. `None` otherwise. Lets the UI\nshow a \"backing up…\" state."
+          },
+          "progress": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LiveProgress",
+                "description": "Live figures for the in-flight run of this type, when it is reporting\nprogress. `None` when nothing is in flight, or when the run reports no\nprogress — which is unknown, not zero."
+              }
+            ]
           },
           "server_id": {
             "type": "string",

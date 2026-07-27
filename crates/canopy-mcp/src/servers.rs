@@ -249,7 +249,7 @@ impl CanopyMcp {
 			backups.push(BackupCapabilityOut {
 				r#type: cap.r#type.to_string(),
 				enabled: cap.enabled,
-				last_successful_backup_at: last.as_ref().map(|r| r.reported_at),
+				last_successful_backup_at: last.as_ref().map(|r| r.anchor()),
 				last_snapshot_id: last.and_then(|r| r.snapshot_id),
 			});
 		}

@@ -215,9 +215,12 @@ pub async fn backups_due_now_for_server(
 		let Some(interval) = effective_interval_for_type(db, group_id, &cap.r#type).await? else {
 			continue;
 		};
+		// Due-ness is measured from the data's own moment, matching staleness
+		// detection — otherwise a server could be flagged stale without ever being
+		// asked to back up.
 		let last = BackupRun::latest_success_for_server(db, server_id, &cap.r#type)
 			.await?
-			.map(|r| r.reported_at);
+			.map(|r| r.anchor());
 		if is_due(interval, last, now) {
 			due.insert(cap.r#type);
 		}

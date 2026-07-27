@@ -47,7 +47,7 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, server_reported_detail, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, recovery_vault_writes RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, server_reported_detail, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, recovery_vault_writes RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" server with it;
 	// self-alerts attach to that row, so put it back.
@@ -718,16 +718,22 @@ export async function seedBackupRun(
 		s3ReceivedPayloadBytes?: number | null;
 		/** Backdate `reported_at` by this many seconds (default: now). */
 		reportedAgoSecs?: number;
+		/** How long before now the run froze its data. Omit for a run that
+		 * reported no freeze moment (the pre-progress client behaviour). */
+		snapshotTakenAgoSecs?: number | null;
+		/** Force the run's id, so progress samples can be correlated to it. */
+		id?: string;
 	},
 ): Promise<{ id: string }> {
-	const id = randomUUID();
+	const id = opts.id ?? randomUUID();
 	await sql.query(
 		`INSERT INTO backup_runs
 		 (id, device_id, group_id, server_id, type, purpose, outcome, error, bytes_uploaded, snapshot_id,
 		  s3_sent_raw_bytes, s3_sent_payload_bytes, s3_received_raw_bytes, s3_received_payload_bytes,
-		  snapshot_logical_bytes, reported_at)
+		  snapshot_logical_bytes, reported_at, snapshot_taken_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-		  NOW() - make_interval(secs => $16))`,
+		  NOW() - make_interval(secs => $16),
+		  CASE WHEN $17::float8 IS NULL THEN NULL ELSE NOW() - make_interval(secs => $17) END)`,
 		[
 			id,
 			opts.deviceId,
@@ -745,6 +751,7 @@ export async function seedBackupRun(
 			opts.s3ReceivedPayloadBytes ?? null,
 			opts.snapshotLogicalBytes ?? null,
 			opts.reportedAgoSecs ?? 0,
+			opts.snapshotTakenAgoSecs ?? null,
 		],
 	);
 	return { id };
@@ -820,6 +827,79 @@ export async function seedBackupCredentialIssuance(
 			"bes-test-bucket",
 			"",
 			opts.runId ?? null,
+		],
+	);
+}
+
+/** Seed a `backup_run_progress` sample.
+ *
+ * `observedAgoSecs` backdates `observed_at`, which is normally server-stamped on
+ * receipt — a series is built by seeding several samples at decreasing ages.
+ * Counters are cumulative from the start of the run, so each successive sample's
+ * figures should be equal to or larger than the previous one's. */
+export async function seedBackupRunProgress(
+	sql: Sql,
+	opts: {
+		runId: string;
+		deviceId: string;
+		groupId: string;
+		serverId?: string | null;
+		type?: string;
+		purpose?: "backup" | "restore";
+		observedAgoSecs?: number;
+		snapshotTakenAgoSecs?: number | null;
+		bytesRead?: number | null;
+		bytesHashed?: number | null;
+		bytesUploaded?: number | null;
+		bytesCached?: number | null;
+		bytesEstimated?: number | null;
+		filesDone?: number | null;
+		filesEstimated?: number | null;
+		errors?: number | null;
+		ignoredErrors?: number | null;
+		currentPath?: string | null;
+		s3SentRawBytes?: number | null;
+		s3SentPayloadBytes?: number | null;
+		s3ReceivedRawBytes?: number | null;
+		s3ReceivedPayloadBytes?: number | null;
+		extra?: unknown;
+	},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO backup_run_progress
+		 (run_id, device_id, group_id, server_id, type, purpose, observed_at, snapshot_taken_at,
+		  bytes_read, bytes_hashed, bytes_uploaded, bytes_cached, bytes_estimated,
+		  files_done, files_estimated, errors, ignored_errors, current_path,
+		  s3_sent_raw_bytes, s3_sent_payload_bytes, s3_received_raw_bytes, s3_received_payload_bytes,
+		  extra)
+		 VALUES ($1, $2, $3, $4, $5, $6,
+		         NOW() - make_interval(secs => $7),
+		         CASE WHEN $8::float8 IS NULL THEN NULL ELSE NOW() - make_interval(secs => $8) END,
+		         $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
+		[
+			opts.runId,
+			opts.deviceId,
+			opts.groupId,
+			opts.serverId ?? null,
+			opts.type ?? "tamanu-postgres",
+			opts.purpose ?? "backup",
+			opts.observedAgoSecs ?? 0,
+			opts.snapshotTakenAgoSecs ?? null,
+			opts.bytesRead ?? null,
+			opts.bytesHashed ?? null,
+			opts.bytesUploaded ?? null,
+			opts.bytesCached ?? null,
+			opts.bytesEstimated ?? null,
+			opts.filesDone ?? null,
+			opts.filesEstimated ?? null,
+			opts.errors ?? null,
+			opts.ignoredErrors ?? null,
+			opts.currentPath ?? null,
+			opts.s3SentRawBytes ?? null,
+			opts.s3SentPayloadBytes ?? null,
+			opts.s3ReceivedRawBytes ?? null,
+			opts.s3ReceivedPayloadBytes ?? null,
+			JSON.stringify(opts.extra ?? {}),
 		],
 	);
 }

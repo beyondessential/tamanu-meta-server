@@ -840,6 +840,10 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 							(verified, run.snapshot_id.as_ref()),
 							(Some(v), Some(s)) if v == s
 						);
+						// Measured from the report, not `run.anchor()`: the question is
+						// how long this snapshot has gone unverified since it became
+						// available to verify, which is when it landed — not how old
+						// the data inside it is.
 						!already && now.duration_since(run.reported_at) > overdue_after.0
 					}
 				}

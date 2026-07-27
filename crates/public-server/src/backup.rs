@@ -1,7 +1,7 @@
 //! Device backup endpoints — the on-demand credential-minting path of the
 //! backup-credentials system.
 //!
-//! Four `ServerDevice`-authenticated endpoints, all mounted at the root:
+//! Five `ServerDevice`-authenticated endpoints, all mounted at the root:
 //!
 //! - `POST /backup-capabilities` — bestool registers the backup types it can
 //!   run on this server.
@@ -9,14 +9,22 @@
 //!   cross-account `sts:AssumeRole`, returned as `credential_process` JSON.
 //! - `GET  /backup-target` — `{storage, bucket, prefix, region, repo_password}`
 //!   so bestool can reconstruct the kopia repo connection on every run.
+//! - `POST /backup-progress` — record a sample from a run still in flight into
+//!   `backup_run_progress`.
 //! - `POST /backup-report` — record a run outcome into `backup_runs`.
 //!
-//! All four resolve `device → live server → group_id → group backup config`
+//! They all resolve `device → live server → group_id → group backup config`
 //! identically: **412** when the device is bound to no live server, **409**
 //! when the server is ungrouped / has no `ready` config / (for a backup) the
 //! type is neither an enabled capability nor has a pending request / (for a
 //! restore) the server's restore window isn't open, **502** when STS or kube
 //! fails or isn't configured.
+//!
+//! `/backup-progress` and `/backup-report` deliberately stop at *grouped*: they
+//! describe a run that is already happening, so gating them on a ready config
+//! would blind Canopy exactly when a group is misconfigured. `/backup-progress`
+//! additionally answers **429**, being the only endpoint a client calls on a
+//! cadence of its own choosing.
 
 use aws_sdk_sts::operation::RequestId as _;
 use axum::{Json, extract::State, http::StatusCode};
@@ -59,6 +67,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(capabilities))
 		.routes(routes!(credentials))
 		.routes(routes!(target))
+		.routes(routes!(progress))
 		.routes(routes!(report))
 }
 
@@ -551,6 +560,175 @@ async fn target(
 }
 
 // ---------------------------------------------------------------------------
+// POST /backup-progress
+// ---------------------------------------------------------------------------
+
+/// Progress reports accepted per device within [`PROGRESS_RL_WINDOW`]. Generous
+/// against any sane sampling cadence (a 5s cadence fits inside it), tight enough
+/// that a stuck client can't flood the table. Cadence itself is the client's to
+/// pick; Canopy only caps it.
+const PROGRESS_RL_PER_DEVICE: u32 = 60;
+const PROGRESS_RL_WINDOW: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// A progress sample from a run still in flight.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ProgressArgs {
+	/// The run-uuid the client minted for this run — the same one it passes to
+	/// `POST /backup-credentials` and reports under at `POST /backup-report`.
+	pub run_id: Uuid,
+	/// The backup type being run (e.g. `tamanu-postgres`).
+	#[schema(value_type = String)]
+	pub r#type: BackupType,
+	/// Whether this is a `backup` or a `restore` run.
+	#[serde(default)]
+	pub purpose: BackupPurpose,
+	/// When this run froze the data it is backing up — the point in time the
+	/// backup represents, as opposed to when its upload finishes. Send it as soon
+	/// as it is known (before any transfer starts). Recorded once per run: the
+	/// first value Canopy sees stands, whether it arrives here or on the report.
+	pub snapshot_taken_at: Option<Timestamp>,
+	/// Source bytes read so far.
+	pub bytes_read: Option<i64>,
+	/// Bytes processed (hashed, compressed) so far.
+	pub bytes_hashed: Option<i64>,
+	/// Bytes uploaded to the repository so far.
+	pub bytes_uploaded: Option<i64>,
+	/// Bytes found already present in the repository, and so not re-uploaded.
+	pub bytes_cached: Option<i64>,
+	/// Total bytes this run currently expects to handle. May be revised upward.
+	pub bytes_estimated: Option<i64>,
+	/// Files finished so far.
+	pub files_done: Option<i64>,
+	/// Total files this run currently expects to handle.
+	pub files_estimated: Option<i64>,
+	/// Errors hit so far.
+	pub errors: Option<i64>,
+	/// Errors hit and deliberately ignored so far.
+	pub ignored_errors: Option<i64>,
+	/// What the run is working on right now, for display.
+	pub current_path: Option<String>,
+	/// Bytes of raw HTTP traffic sent to S3 so far, including protocol and
+	/// signing overhead.
+	pub s3_sent_raw_bytes: Option<i64>,
+	/// Bytes of decoded object payload sent to S3 so far.
+	pub s3_sent_payload_bytes: Option<i64>,
+	/// Bytes of raw HTTP traffic received from S3 so far.
+	pub s3_received_raw_bytes: Option<i64>,
+	/// Bytes of decoded object payload received from S3 so far.
+	pub s3_received_payload_bytes: Option<i64>,
+	/// Any further detail the backup engine emits. Canopy makes no commitment
+	/// about its shape: it is stored and shown verbatim, never interpreted.
+	#[serde(default)]
+	#[schema(value_type = Object)]
+	pub extra: serde_json::Value,
+}
+
+/// Report progress for a run that is still in flight.
+///
+/// Optional throughout: a run that never reports progress is recorded and
+/// displayed exactly as it is today. Reporting it lets Canopy show how far a
+/// long-running backup has got, at what rate, and when it last heard from the
+/// device — which for a multi-hour backup is the difference between "running"
+/// and "running, and moving".
+///
+/// **Every counter is cumulative from the start of the run**, not an interval
+/// delta. Send totals-so-far each time. A dropped or repeated report then costs
+/// only resolution, never the accuracy of a total, and the last report Canopy
+/// received can stand in for a figure the final report omits. Omit any counter
+/// you do not measure rather than sending zero.
+///
+/// Canopy timestamps each report on receipt, so no clock agreement is needed —
+/// except for `snapshot_taken_at`, which is necessarily the device's own claim
+/// about its filesystem.
+///
+/// Unlike `POST /backup-credentials`, this does not require the group's backup
+/// configuration to be ready or the type to be an enabled capability: it
+/// describes a run already under way, and refusing it would blind Canopy exactly
+/// when something is misconfigured.
+///
+/// A refused report is never a reason to abandon a run — this is telemetry.
+/// Reporting progress for a run that has already been reported complete is
+/// accepted rather than refused, so a report racing the completion is not an
+/// error.
+///
+/// Errors: 412 when the calling device is not bound to a live server; 409 when
+/// the server is not in a group; 429 when reporting faster than Canopy accepts.
+#[utoipa::path(
+	post,
+	path = "/backup-progress",
+	operation_id = "report_backup_progress",
+	tag = "backup",
+	security(("server-device" = [])),
+	request_body = ProgressArgs,
+	responses(
+		(status = 204, description = "Progress recorded."),
+		(status = 409, description = "Server is not in a group.", body = ProblemDetailsSchema),
+		(status = 412, description = "Device is not bound to a live server.", body = ProblemDetailsSchema),
+		(status = 429, description = "Reporting progress too frequently.", body = ProblemDetailsSchema),
+	),
+)]
+async fn progress(
+	State(db): State<Db>,
+	State(rl): State<crate::ratelimit::RateLimiter>,
+	device: ServerDevice,
+	Json(args): Json<ProgressArgs>,
+) -> Result<StatusCode> {
+	let mut conn = db.get().await?;
+	let device_id = device.0.0.id;
+
+	if !rl.check(
+		&format!("backup-progress:{device_id}"),
+		PROGRESS_RL_PER_DEVICE,
+		PROGRESS_RL_WINDOW,
+	) {
+		tracing::warn!(
+			target: "backup",
+			%device_id,
+			run_id = %args.run_id,
+			"backup-progress rate limit exceeded",
+		);
+		return Err(AppError::RateLimited);
+	}
+
+	let server = resolve_server(&mut conn, device_id).await?;
+	// As with a report: the server must be grouped so device/group/server come
+	// from the authenticated context rather than the body, but the config need not
+	// be ready — the run is already happening either way.
+	let group_id = require_group(&server)?;
+
+	database::backups::BackupRunProgress::record(
+		&mut conn,
+		database::backups::NewBackupRunProgress {
+			run_id: args.run_id,
+			device_id,
+			group_id,
+			server_id: Some(server.id),
+			r#type: args.r#type,
+			purpose: args.purpose,
+			snapshot_taken_at: args.snapshot_taken_at,
+			bytes_read: args.bytes_read,
+			bytes_hashed: args.bytes_hashed,
+			bytes_uploaded: args.bytes_uploaded,
+			bytes_cached: args.bytes_cached,
+			bytes_estimated: args.bytes_estimated,
+			files_done: args.files_done,
+			files_estimated: args.files_estimated,
+			errors: args.errors,
+			ignored_errors: args.ignored_errors,
+			current_path: args.current_path,
+			s3_sent_raw_bytes: args.s3_sent_raw_bytes,
+			s3_sent_payload_bytes: args.s3_sent_payload_bytes,
+			s3_received_raw_bytes: args.s3_received_raw_bytes,
+			s3_received_payload_bytes: args.s3_received_payload_bytes,
+			extra: args.extra,
+		},
+	)
+	.await?;
+
+	Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------------------
 // POST /backup-report
 // ---------------------------------------------------------------------------
 
@@ -587,6 +765,12 @@ pub struct ReportArgs {
 	pub s3_received_raw_bytes: Option<i64>,
 	/// Bytes of decoded object payload received from S3 during the run.
 	pub s3_received_payload_bytes: Option<i64>,
+	/// When this run froze the data it backed up — the point in time the backup
+	/// represents, as opposed to when its upload finished. Often a filesystem-level
+	/// snapshot taken before the transfer, in which case it is not recoverable
+	/// from the repository and only the device can report it. Recorded once per
+	/// run: if progress reports already carried it, that value stands.
+	pub snapshot_taken_at: Option<Timestamp>,
 }
 
 /// Report the outcome of a backup or restore run.
@@ -625,6 +809,25 @@ async fn report(
 	// device_id/group_id come from the authenticated context, never the body.
 	let group_id = require_group(&server)?;
 
+	// Where the report omits a figure this run already reported as progress, take
+	// the last progress value. Progress counters are cumulative, so the final
+	// sample is very nearly the run's total — "as of the last sample" rather than
+	// exact, which is worth far more than a NULL for a client that reports
+	// sparsely (and keeps the size-discrepancy check fed). A figure the report
+	// does supply always wins.
+	let last_progress =
+		database::backups::BackupRunProgress::latest_for_run(&mut conn, rep.run_id).await?;
+	// The freeze moment follows a different rule from the figures above: it is
+	// write-once per run and the *first* value seen stands, so a moment already
+	// announced during the run wins over one repeated on the report. A device
+	// often sends it on its first sample only, which is why this is its own query
+	// rather than a read of the last sample.
+	let progress_snapshot_taken_at =
+		database::backups::BackupRunProgress::earliest_snapshot_taken_at_for_run(
+			&mut conn, rep.run_id,
+		)
+		.await?;
+
 	// `record` maps a PK (duplicate run_id) violation to AppError::Conflict (409).
 	database::backups::BackupRun::record(
 		&mut conn,
@@ -637,12 +840,27 @@ async fn report(
 			purpose: rep.purpose,
 			outcome: rep.outcome,
 			error: rep.error,
-			bytes_uploaded: rep.bytes_uploaded,
+			bytes_uploaded: rep
+				.bytes_uploaded
+				.or_else(|| last_progress.as_ref().and_then(|p| p.bytes_uploaded)),
 			snapshot_id: rep.snapshot_id,
-			s3_sent_raw_bytes: rep.s3_sent_raw_bytes,
-			s3_sent_payload_bytes: rep.s3_sent_payload_bytes,
-			s3_received_raw_bytes: rep.s3_received_raw_bytes,
-			s3_received_payload_bytes: rep.s3_received_payload_bytes,
+			s3_sent_raw_bytes: rep
+				.s3_sent_raw_bytes
+				.or_else(|| last_progress.as_ref().and_then(|p| p.s3_sent_raw_bytes)),
+			s3_sent_payload_bytes: rep
+				.s3_sent_payload_bytes
+				.or_else(|| last_progress.as_ref().and_then(|p| p.s3_sent_payload_bytes)),
+			s3_received_raw_bytes: rep
+				.s3_received_raw_bytes
+				.or_else(|| last_progress.as_ref().and_then(|p| p.s3_received_raw_bytes)),
+			s3_received_payload_bytes: rep.s3_received_payload_bytes.or_else(|| {
+				last_progress
+					.as_ref()
+					.and_then(|p| p.s3_received_payload_bytes)
+			}),
+			// Write-once across both endpoints, first value seen wins — so unlike the
+			// figures above, progress takes precedence over the report here.
+			snapshot_taken_at: progress_snapshot_taken_at.or(rep.snapshot_taken_at),
 		},
 	)
 	.await?;

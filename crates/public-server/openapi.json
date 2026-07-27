@@ -225,6 +225,66 @@
         ]
       }
     },
+    "/backup-progress": {
+      "post": {
+        "tags": [
+          "backup"
+        ],
+        "summary": "Report progress for a run that is still in flight.",
+        "description": "Optional throughout: a run that never reports progress is recorded and\ndisplayed exactly as it is today. Reporting it lets Canopy show how far a\nlong-running backup has got, at what rate, and when it last heard from the\ndevice — which for a multi-hour backup is the difference between \"running\"\nand \"running, and moving\".\n\n**Every counter is cumulative from the start of the run**, not an interval\ndelta. Send totals-so-far each time. A dropped or repeated report then costs\nonly resolution, never the accuracy of a total, and the last report Canopy\nreceived can stand in for a figure the final report omits. Omit any counter\nyou do not measure rather than sending zero.\n\nCanopy timestamps each report on receipt, so no clock agreement is needed —\nexcept for `snapshot_taken_at`, which is necessarily the device's own claim\nabout its filesystem.\n\nUnlike `POST /backup-credentials`, this does not require the group's backup\nconfiguration to be ready or the type to be an enabled capability: it\ndescribes a run already under way, and refusing it would blind Canopy exactly\nwhen something is misconfigured.\n\nA refused report is never a reason to abandon a run — this is telemetry.\nReporting progress for a run that has already been reported complete is\naccepted rather than refused, so a report racing the completion is not an\nerror.\n\nErrors: 412 when the calling device is not bound to a live server; 409 when\nthe server is not in a group; 429 when reporting faster than Canopy accepts.",
+        "operationId": "report_backup_progress",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgressArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Progress recorded."
+          },
+          "409": {
+            "description": "Server is not in a group.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Device is not bound to a live server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Reporting progress too frequently.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "server-device": []
+          }
+        ]
+      }
+    },
     "/backup-report": {
       "post": {
         "tags": [
@@ -1610,6 +1670,152 @@
           }
         }
       },
+      "ProgressArgs": {
+        "type": "object",
+        "description": "A progress sample from a run still in flight.",
+        "required": [
+          "run_id",
+          "type"
+        ],
+        "properties": {
+          "bytes_cached": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes found already present in the repository, and so not re-uploaded."
+          },
+          "bytes_estimated": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Total bytes this run currently expects to handle. May be revised upward."
+          },
+          "bytes_hashed": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes processed (hashed, compressed) so far."
+          },
+          "bytes_read": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Source bytes read so far."
+          },
+          "bytes_uploaded": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes uploaded to the repository so far."
+          },
+          "current_path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the run is working on right now, for display."
+          },
+          "errors": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Errors hit so far."
+          },
+          "extra": {
+            "type": "object",
+            "description": "Any further detail the backup engine emits. Canopy makes no commitment\nabout its shape: it is stored and shown verbatim, never interpreted."
+          },
+          "files_done": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Files finished so far."
+          },
+          "files_estimated": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Total files this run currently expects to handle."
+          },
+          "ignored_errors": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Errors hit and deliberately ignored so far."
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/BackupPurpose",
+            "description": "Whether this is a `backup` or a `restore` run."
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The run-uuid the client minted for this run — the same one it passes to\n`POST /backup-credentials` and reports under at `POST /backup-report`."
+          },
+          "s3_received_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes of decoded object payload received from S3 so far."
+          },
+          "s3_received_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes of raw HTTP traffic received from S3 so far."
+          },
+          "s3_sent_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes of decoded object payload sent to S3 so far."
+          },
+          "s3_sent_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes of raw HTTP traffic sent to S3 so far, including protocol and\nsigning overhead."
+          },
+          "snapshot_taken_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this run froze the data it is backing up — the point in time the\nbackup represents, as opposed to when its upload finishes. Send it as soon\nas it is known (before any transfer starts). Recorded once per run: the\nfirst value Canopy sees stands, whether it arrives here or on the report."
+          },
+          "type": {
+            "type": "string",
+            "description": "The backup type being run (e.g. `tamanu-postgres`)."
+          }
+        }
+      },
       "PublicServer": {
         "type": "object",
         "description": "A publicly-listed central server that a client can connect to.",
@@ -1715,6 +1921,14 @@
               "null"
             ],
             "description": "Identifier of the repository snapshot the run produced, for a\nsuccessful backup."
+          },
+          "snapshot_taken_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this run froze the data it backed up — the point in time the backup\nrepresents, as opposed to when its upload finished. Often a filesystem-level\nsnapshot taken before the transfer, in which case it is not recoverable\nfrom the repository and only the device can report it. Recorded once per\nrun: if progress reports already carried it, that value stands."
           },
           "type": {
             "type": "string",
