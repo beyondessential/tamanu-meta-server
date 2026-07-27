@@ -1051,6 +1051,8 @@ struct FleetRow {
 	bestool: Option<String>,
 	postgres: Option<String>,
 	detail: serde_json::Value,
+	#[serde(default)]
+	checks: serde_json::Value,
 }
 
 /// The fleet view lists every live server with its currently reported detail,
@@ -1110,6 +1112,65 @@ async fn fleet_detail_covers_live_servers() {
 			silent.detail,
 			serde_json::json!({}),
 			"a server that has never reported is listed with nothing reported",
+		);
+	})
+	.await
+}
+
+/// The fleet row carries each server's healthcheck state keyed by check name,
+/// which is what a `check.field` lookup reads: the check's own fields plus
+/// its graded result.
+// spec: FIG#fleet-spread
+#[tokio::test(flavor = "multi_thread")]
+async fn fleet_detail_carries_healthcheck_fields() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, kind) VALUES
+			('50000000-0000-0000-0000-000000000001', 'checked', 'https://checked.example.com', 'central'),
+			('50000000-0000-0000-0000-000000000002', 'unchecked', 'https://unchecked.example.com', 'central');
+
+			INSERT INTO check_policies (source, check_name) VALUES
+			('alertd', 'diskspace');
+
+			INSERT INTO issues (server_id, source, ref, check_name, observed_result, effective_result, detail, message, active) VALUES
+			('50000000-0000-0000-0000-000000000001', 'alertd', 'health/diskspace', 'diskspace',
+			 'warning', 'warning',
+			 '{\"check\": \"diskspace\", \"result\": \"warning\", \"percent\": 91}'::jsonb,
+			 'disk filling up', true),
+			-- No catalog row backs this one: unmanageable, so it doesn't present.
+			('50000000-0000-0000-0000-000000000001', 'stray', 'health/nocatalog', 'nocatalog',
+			 'failed', 'failed', '{\"percent\": 5}'::jsonb, 'orphaned state', true)",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/fleet_detail")
+			.json(&serde_json::json!({}))
+			.await;
+		r.assert_status_ok();
+		let rows: Vec<FleetRow> = r.json();
+
+		let checked = rows
+			.iter()
+			.find(|s| s.server_id == "50000000-0000-0000-0000-000000000001")
+			.expect("checked server listed");
+		assert_eq!(checked.checks["diskspace"]["percent"], 91);
+		assert_eq!(checked.checks["diskspace"]["result"], "warning");
+		assert_eq!(checked.checks["diskspace"]["observed"], "warning");
+		assert!(
+			checked.checks.get("nocatalog").is_none(),
+			"an orphaned check-state has no catalog row, so it isn't a field to look up",
+		);
+
+		let unchecked = rows
+			.iter()
+			.find(|s| s.server_name == "unchecked")
+			.expect("unchecked server listed");
+		assert_eq!(
+			unchecked.checks,
+			serde_json::json!({}),
+			"a server with no check state reports no check fields",
 		);
 	})
 	.await

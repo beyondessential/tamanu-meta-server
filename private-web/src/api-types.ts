@@ -2993,9 +2993,10 @@ export interface paths {
         put?: never;
         /**
          * Get every live server's currently reported detail.
-         * @description One row per server, carrying the derived figures and the full resolved
-         *     payload its sources report. This is the data behind the fleet view, which
-         *     groups it to show how each figure — or any field a source reports — is
+         * @description One row per server, carrying the derived figures, the full resolved
+         *     payload its sources report, and its current healthcheck state. This is
+         *     the data behind the fleet view, which groups it to show how each figure —
+         *     or any field a source reports, whether server-wide or on one check — is
          *     spread across the fleet, and can cross two fields against each other.
          *
          *     Reads each source's current report rather than status history, so it
@@ -4457,6 +4458,12 @@ export interface components {
         FleetServerDetailData: {
             /** @description Version of bestool, the agent reporting on the server. */
             bestool?: string | null;
+            /**
+             * @description The server's current healthcheck state, keyed by check name: each
+             *     check's reported fields plus its graded `result` and the `observed`
+             *     result behind it. This is what a `check.field` lookup reads.
+             */
+            checks: Record<string, never>;
             /**
              * @description Every field the server's sources currently report, resolved across
              *     them — the raw material behind the derived figures above, and what an

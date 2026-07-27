@@ -47,6 +47,11 @@ Beyond the figures, an operator can name any field a source reports and see its 
 The fields the fleet currently reports are offered as suggestions, so an operator can find a field without knowing its name in advance.
 A field whose values are near-unique across the fleet presents its largest groups with the remainder collapsed, rather than a line per server.
 
+A field a source reports on one of its healthchecks rather than server-wide is named through the check that reports it, as `check.field`, and spreads across the fleet the same way.
+A check's own graded result is available as one of those fields, so the fleet spread of a check's outcome reads like any other field.
+What presents here is what the server's own check list presents: a silenced check reads as skipped, and a decommissioned check doesn't present at all.
+Checks are named by check alone, though a check's identity is the source and the check together: two sources reporting the same check name present as one, the more recently reported field winning, as elsewhere.
+
 An operator can also cross two fields, presenting a table of one against the other: for each combination of values, how many servers report both, with the servers behind each combination available.
 Servers reporting no value for either field occupy their own row and column, so a combination is never silently dropped.
 

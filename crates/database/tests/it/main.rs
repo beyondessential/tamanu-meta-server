@@ -13,6 +13,7 @@ mod check_severity_map;
 mod check_stability;
 mod consolidated_checks;
 mod event_validation;
+mod fleet_check_detail;
 mod health_rollup;
 mod incident_close_result;
 mod incident_get_with_issues;

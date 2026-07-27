@@ -938,13 +938,19 @@ pub struct FleetServerDetailData {
 	/// arbitrary-field lookup reads.
 	#[schema(additional_properties = true, value_type = Object)]
 	pub detail: serde_json::Value,
+	/// The server's current healthcheck state, keyed by check name: each
+	/// check's reported fields plus its graded `result` and the `observed`
+	/// result behind it. This is what a `check.field` lookup reads.
+	#[schema(additional_properties = true, value_type = Object)]
+	pub checks: serde_json::Value,
 }
 
 /// Get every live server's currently reported detail.
 ///
-/// One row per server, carrying the derived figures and the full resolved
-/// payload its sources report. This is the data behind the fleet view, which
-/// groups it to show how each figure — or any field a source reports — is
+/// One row per server, carrying the derived figures, the full resolved
+/// payload its sources report, and its current healthcheck state. This is
+/// the data behind the fleet view, which groups it to show how each figure —
+/// or any field a source reports, whether server-wide or on one check — is
 /// spread across the fleet, and can cross two fields against each other.
 ///
 /// Reads each source's current report rather than status history, so it
@@ -989,10 +995,16 @@ pub async fn fleet_detail(
 	// history sits behind it.
 	let mut merged = ReportedDetail::merge_by_server(ReportedDetail::all(&mut conn).await?);
 
+	// Same again for check state, which is a row per (server, source, check)
+	// and carries the fields each check reports.
+	let scopes: Vec<(Uuid, Option<Uuid>)> = servers.iter().map(|s| (s.id, s.group_id)).collect();
+	let mut checks = database::issues::check_detail_by_server(&mut conn, &scopes).await?;
+
 	let rows = servers
 		.into_iter()
 		.map(|server| {
 			let (figures, version) = merged.remove(&server.id).unwrap_or_default();
+			let checks = checks.remove(&server.id).unwrap_or_default();
 			FleetServerDetailData {
 				server_id: server.id,
 				server_name: server.name.unwrap_or_default(),
@@ -1007,6 +1019,7 @@ pub async fn fleet_detail(
 				bestool: figures.bestool_version(),
 				timezone: figures.timezone(),
 				detail: figures.into_json(),
+				checks: serde_json::Value::Object(checks),
 			}
 		})
 		.collect();
