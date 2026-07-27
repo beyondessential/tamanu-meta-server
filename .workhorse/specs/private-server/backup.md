@@ -66,6 +66,13 @@ The operator can see, per group: the repo's size and cost basis, recent runs wit
 
 Each run's duration is the time from its first credential issuance to its report; a run that re-issues credentials while it runs is measured from the first issuance of the sequence.
 A run for which credentials were issued but no report has arrived is shown from that issuance: in progress while the credentials remain valid, otherwise as a run whose outcome is unknown. This makes runs that don't report — such as an ad-hoc restore — visible; a later report for the same run replaces its issuance-derived entry.
+Where a run reported the moment its data was frozen (see [BAK](../public-server/backup.md)), that moment is shown alongside its report time, so a backup whose data is materially older than its upload is not read as a fresh one.
+
+For a run reporting progress, the operator can see how far it has got without waiting for it to finish: what it has transferred against the total it expects, its current transfer rate, and how long since the device last made contact.
+A run whose device reports no progress is still shown as in progress, unchanged from a run that cannot report it — an absent figure reads as unknown rather than as zero or as a fault.
+The rate over a run's life is available as a series, for a run in flight or a finished one, for as long as its progress is retained.
+The backup engine's own transferred figure and the object-storage traffic Canopy's proxy tallied are shown against each other, so a divergence between what a run believes it sent and what crossed the wire is visible.
+Engine-specific detail a device reported that Canopy does not model is available verbatim for inspection.
 
 ## Passphrase recovery
 
