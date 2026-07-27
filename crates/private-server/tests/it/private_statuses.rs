@@ -67,6 +67,8 @@ struct ServerLastStatusData {
 	platform: Option<String>,
 	postgres: Option<String>,
 	nodejs: Option<String>,
+	#[serde(default)]
+	bestool: Option<String>,
 	timezone: Option<String>,
 	extra: serde_json::Value,
 }
@@ -639,6 +641,57 @@ async fn get_detail_with_status() {
 	.await
 }
 
+/// The detail view's figures come from every source reporting on the server,
+/// so a later push from a source that carries none of them leaves them intact
+/// — and a server no bestool reports on presents no bestool version.
+// spec: FIG#sourcing
+#[tokio::test(flavor = "multi_thread")]
+async fn get_detail_figures_resolve_across_sources() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Bestool Server', 'https://bestool.example.com', 'test', 'central'),
+			('22222222-2222-2222-2222-222222222222', 'Tamanu Only', 'https://tamanuonly.example.com', 'test', 'central');
+
+			INSERT INTO statuses (server_id, source, extra, created_at) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd',
+			 '{\"bestoolVersion\": \"2.10.5\", \"pgVersion\": \"PostgreSQL 17.2, (x86_64-pc-linux-gnu, compiled by gcc)\", \"timezone\": \"Pacific/Auckland\"}'::jsonb,
+			 NOW() - INTERVAL '10 minutes'),
+			('11111111-1111-1111-1111-111111111111', 'tamanu', '{\"uptimeSecs\": 6038594}'::jsonb, NOW()),
+			('22222222-2222-2222-2222-222222222222', 'tamanu', '{\"uptimeSecs\": 42}'::jsonb, NOW())",
+		)
+		.await
+		.unwrap();
+
+		let detail: ServerDetailResponse = private
+			.post("/api/servers/get_detail")
+			.json(&serde_json::json!({"server_id": "11111111-1111-1111-1111-111111111111"}))
+			.await
+			.json();
+		let status = detail.last_status.expect("status reported");
+		assert_eq!(
+			status.bestool,
+			Some("2.10.5".to_string()),
+			"bestool's version survives a later push from a source that doesn't report one"
+		);
+		assert_eq!(status.postgres, Some("17.2".to_string()));
+		assert_eq!(status.platform, Some("Linux".to_string()));
+		assert_eq!(status.timezone, Some("Pacific/Auckland".to_string()));
+
+		let plain: ServerDetailResponse = private
+			.post("/api/servers/get_detail")
+			.json(&serde_json::json!({"server_id": "22222222-2222-2222-2222-222222222222"}))
+			.await
+			.json();
+		assert_eq!(
+			plain.last_status.expect("status reported").bestool,
+			None,
+			"a server no bestool reports on presents no bestool version"
+		);
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn get_detail_with_device() {
 	commons_tests::server::run(async |mut conn, _, private| {
@@ -858,6 +911,12 @@ struct SnapshotData {
 	checks: Option<serde_json::Value>,
 	#[serde(default)]
 	nodejs: Option<String>,
+	#[serde(default)]
+	postgres: Option<String>,
+	#[serde(default)]
+	bestool: Option<String>,
+	#[serde(default)]
+	timezone: Option<String>,
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -894,6 +953,74 @@ async fn snapshot_returns_latest_when_at_omitted() {
 		let arr = checks["checks"].as_array().unwrap();
 		assert_eq!(arr.len(), 1);
 		assert_eq!(arr[0]["check"], "db");
+	})
+	.await
+}
+
+/// The snapshot's figures are resolved across sources: a later push from a
+/// source carrying none of them doesn't blank out what bestool reported.
+// spec: FIG#sourcing
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_figures_survive_a_later_push_from_another_source() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, host, kind) VALUES
+			('20000000-0000-0000-0000-000000000030', 'https://figures.example.com', 'central');
+
+			INSERT INTO statuses (server_id, source, created_at, healthy, health, extra) VALUES
+			('20000000-0000-0000-0000-000000000030', 'alertd', NOW() - INTERVAL '2 hours', true, '[]'::jsonb,
+			 '{\"bestoolVersion\":\"2.10.5\",\"pgVersion\":\"PostgreSQL 16.3 on x86_64-pc-linux-gnu\",\"timezone\":\"Pacific/Auckland\"}'::jsonb),
+			('20000000-0000-0000-0000-000000000030', 'tamanu', NOW() - INTERVAL '1 hour', true, '[]'::jsonb,
+			 '{\"uptimeSecs\":6038594}'::jsonb)",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/snapshot")
+			.json(&serde_json::json!({
+				"server_id": "20000000-0000-0000-0000-000000000030"
+			}))
+			.await;
+		r.assert_status_ok();
+		let data: Option<SnapshotData> = r.json();
+		let data = data.expect("snapshot returned");
+		assert_eq!(
+			data.bestool,
+			Some("2.10.5".to_string()),
+			"bestool's version survives a later push from a source that doesn't report one"
+		);
+		assert_eq!(data.postgres, Some("16.3".to_string()));
+		assert_eq!(data.timezone, Some("Pacific/Auckland".to_string()));
+	})
+	.await
+}
+
+/// A server no bestool reports on presents no bestool version.
+// spec: FIG#figures
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_has_no_bestool_version_when_unreported() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO servers (id, host, kind) VALUES
+			('20000000-0000-0000-0000-000000000031', 'https://nobestool.example.com', 'central');
+
+			INSERT INTO statuses (server_id, source, created_at, healthy, health, extra) VALUES
+			('20000000-0000-0000-0000-000000000031', 'tamanu', NOW() - INTERVAL '1 hour', true, '[]'::jsonb,
+			 '{\"uptimeSecs\":42}'::jsonb)",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/snapshot")
+			.json(&serde_json::json!({
+				"server_id": "20000000-0000-0000-0000-000000000031"
+			}))
+			.await;
+		r.assert_status_ok();
+		let data: Option<SnapshotData> = r.json();
+		assert_eq!(data.expect("snapshot returned").bestool, None);
 	})
 	.await
 }

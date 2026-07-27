@@ -1460,6 +1460,9 @@ function StatusInfoFields({ status }: { status: ServerLastStatusData }) {
 			{status.nodejs && (
 				<InfoItem label="Node.js" value={status.nodejs} mono />
 			)}
+			{status.bestool && (
+				<InfoItem label="bestool" value={status.bestool} mono />
+			)}
 			{status.min_chrome_version != null && (
 				<InfoItem
 					label="Chrome"
