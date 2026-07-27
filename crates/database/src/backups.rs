@@ -1635,6 +1635,69 @@ impl BackupRunProgress {
 			.map_err(AppError::from)
 	}
 
+	/// The earliest freeze moment each of `run_ids` reported, for those that
+	/// reported one. Batch counterpart to
+	/// [`Self::earliest_snapshot_taken_at_for_run`], and subject to the same
+	/// subtlety: a device usually announces the moment once, on an early sample, so
+	/// this cannot be read off the latest sample.
+	pub async fn earliest_snapshot_taken_at_by_run(
+		db: &mut AsyncPgConnection,
+		run_ids: &[Uuid],
+	) -> Result<HashMap<Uuid, Timestamp>> {
+		use crate::schema::backup_run_progress::dsl;
+
+		if run_ids.is_empty() {
+			return Ok(HashMap::new());
+		}
+
+		let rows: Vec<(Uuid, jiff_diesel::Timestamp)> = dsl::backup_run_progress
+			.filter(dsl::run_id.eq_any(run_ids))
+			.filter(dsl::snapshot_taken_at.is_not_null())
+			.distinct_on(dsl::run_id)
+			.order_by((dsl::run_id, dsl::observed_at.asc(), dsl::id.asc()))
+			.select((dsl::run_id, dsl::snapshot_taken_at.assume_not_null()))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(rows
+			.into_iter()
+			.map(|(rid, ts)| (rid, Timestamp::from(ts)))
+			.collect())
+	}
+
+	/// Samples for a set of runs observed at or after `since`, oldest-first within
+	/// each run, grouped by run.
+	///
+	/// The batch counterpart to [`Self::for_run_since`]: the activity view needs a
+	/// trailing window for every in-flight row at once, and issuing one query per
+	/// row would be an N+1. Empty input short-circuits.
+	pub async fn for_runs_since(
+		db: &mut AsyncPgConnection,
+		run_ids: &[Uuid],
+		since: Timestamp,
+	) -> Result<HashMap<Uuid, Vec<Self>>> {
+		use crate::schema::backup_run_progress::dsl;
+
+		if run_ids.is_empty() {
+			return Ok(HashMap::new());
+		}
+
+		let rows: Vec<Self> = dsl::backup_run_progress
+			.filter(dsl::run_id.eq_any(run_ids))
+			.filter(dsl::observed_at.ge(jiff_diesel::Timestamp::from(since)))
+			.order_by((dsl::run_id, dsl::observed_at.asc(), dsl::id.asc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		let mut out: HashMap<Uuid, Vec<Self>> = HashMap::new();
+		for row in rows {
+			out.entry(row.run_id).or_default().push(row);
+		}
+		Ok(out)
+	}
+
 	/// Delete samples observed before `cutoff`, returning how many went. The
 	/// series is working data for watching and reviewing runs, not part of a
 	/// run's permanent record, so it is pruned wholesale on age.

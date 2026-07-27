@@ -73,6 +73,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(request_maintenance))
 		.routes(routes!(cancel_maintenance))
 		.routes(routes!(stats))
+		.routes(routes!(run_progress))
 		.routes(routes!(capabilities))
 		.routes(routes!(set_capability))
 		.routes(routes!(delete))
@@ -348,6 +349,112 @@ pub struct PendingRequestRow {
 	pub requested_by: Option<String>,
 }
 
+/// How far back to look when deriving a run's current transfer rate. Long enough
+/// that a lull between large files doesn't read as a stall, short enough that the
+/// figure tracks what the run is doing now rather than its lifetime average.
+const RATE_WINDOW_SECS: i64 = 10 * 60;
+
+/// The live state of a run still in flight, from the progress it has reported.
+///
+/// Absent entirely (`None` on the row) when a run has reported no progress —
+/// either an older client or one that cannot. That is a distinct state from a
+/// run reporting zeroes, and the interface must render it as unknown rather than
+/// as a stalled run.
+///
+/// Every byte figure here is cumulative since the run started, exactly as
+/// reported; [`Self::bytes_per_second`] is the only derived rate.
+#[derive(Serialize, ToSchema)]
+pub struct LiveProgress {
+	/// When the last sample arrived, as timed by Canopy on receipt.
+	pub observed_at: Timestamp,
+	/// How long since the last sample. The "is anyone still there" figure: it
+	/// grows without bound if a device goes quiet mid-run.
+	#[schema(value_type = i64, format = "int64")]
+	pub seconds_since_observed: i64,
+	/// Source bytes read so far.
+	pub bytes_read: Option<i64>,
+	/// Bytes processed so far.
+	pub bytes_hashed: Option<i64>,
+	/// Bytes uploaded so far.
+	pub bytes_uploaded: Option<i64>,
+	/// Bytes found already present, and so not re-uploaded.
+	pub bytes_cached: Option<i64>,
+	/// Total bytes the run currently expects to handle. An estimate the run may
+	/// revise upward, so a percentage derived from it can go down.
+	pub bytes_estimated: Option<i64>,
+	/// Files finished so far.
+	pub files_done: Option<i64>,
+	/// Total files the run currently expects to handle.
+	pub files_estimated: Option<i64>,
+	/// Errors hit so far.
+	pub errors: Option<i64>,
+	/// Errors hit and deliberately ignored so far.
+	pub ignored_errors: Option<i64>,
+	/// What the run was working on at the last sample.
+	pub current_path: Option<String>,
+	/// Raw bytes sent to object storage so far, as the client's proxy tallied.
+	pub s3_sent_raw_bytes: Option<i64>,
+	/// Payload bytes sent to object storage so far.
+	pub s3_sent_payload_bytes: Option<i64>,
+	/// Raw bytes received from object storage so far.
+	pub s3_received_raw_bytes: Option<i64>,
+	/// Payload bytes received from object storage so far.
+	pub s3_received_payload_bytes: Option<i64>,
+	/// Upload rate over the trailing window, derived by differencing cumulative
+	/// `bytes_uploaded` across samples. `None` when the window holds fewer than
+	/// two samples, spans no time, or the run reports no uploaded figure — never
+	/// zero as a stand-in, since "not enough data to say" and "moving no bytes"
+	/// are different answers.
+	pub bytes_per_second: Option<f64>,
+	/// Whatever the backup engine reported beyond what Canopy models, verbatim
+	/// from the last sample. Shown for inspection; never interpreted.
+	#[schema(value_type = Object)]
+	pub extra: serde_json::Value,
+}
+
+/// Build the live view of a run from its last sample and its trailing-window
+/// samples. `window` must be ordered oldest-first and may be empty (a run whose
+/// last sample predates the window — it has gone quiet).
+fn live_progress(
+	latest: &database::backups::BackupRunProgress,
+	window: &[database::backups::BackupRunProgress],
+	now: Timestamp,
+) -> LiveProgress {
+	// Rate needs two points that both carry a cumulative uploaded figure and are
+	// separated in time. Counters are cumulative, so this is a plain difference —
+	// and a dropped sample in between costs resolution but not correctness.
+	let bytes_per_second = window
+		.iter()
+		.rfind(|p| p.bytes_uploaded.is_some())
+		.zip(window.iter().find(|p| p.bytes_uploaded.is_some()))
+		.and_then(|(last, first)| {
+			let elapsed = last.observed_at.as_second() - first.observed_at.as_second();
+			let moved = last.bytes_uploaded? - first.bytes_uploaded?;
+			(elapsed > 0 && moved >= 0).then(|| moved as f64 / elapsed as f64)
+		});
+
+	LiveProgress {
+		observed_at: latest.observed_at,
+		seconds_since_observed: (now.as_second() - latest.observed_at.as_second()).max(0),
+		bytes_read: latest.bytes_read,
+		bytes_hashed: latest.bytes_hashed,
+		bytes_uploaded: latest.bytes_uploaded,
+		bytes_cached: latest.bytes_cached,
+		bytes_estimated: latest.bytes_estimated,
+		files_done: latest.files_done,
+		files_estimated: latest.files_estimated,
+		errors: latest.errors,
+		ignored_errors: latest.ignored_errors,
+		current_path: latest.current_path.clone(),
+		s3_sent_raw_bytes: latest.s3_sent_raw_bytes,
+		s3_sent_payload_bytes: latest.s3_sent_payload_bytes,
+		s3_received_raw_bytes: latest.s3_received_raw_bytes,
+		s3_received_payload_bytes: latest.s3_received_payload_bytes,
+		bytes_per_second,
+		extra: latest.extra.clone(),
+	}
+}
+
 /// One row of the recent-runs view: either a device-reported [`BackupRun`] or a
 /// run inferred from a [`BackupCredentialIssuance`] that never matched a report.
 /// Duration, when present, is Canopy-measured wall-clock — the interval from the
@@ -405,6 +512,43 @@ pub struct RecentRun {
 	/// issuance.
 	#[schema(value_type = Option<i64>, format = "int64")]
 	pub duration_seconds: Option<i64>,
+	/// The run identifier, when known — present on a reported run, and on an
+	/// inferred row whose credential issuance carried one. Needed to fetch the
+	/// run's progress series; `None` for an issuance from a client that predates
+	/// run correlation, which therefore has no series to fetch.
+	pub run_id: Option<Uuid>,
+	/// When the run froze the data it captured, if it reported that. Distinct from
+	/// `reported_at`: for a long backup the two are hours apart, and this is the
+	/// one that says how old the data actually is.
+	pub snapshot_taken_at: Option<Timestamp>,
+	/// Live figures for a run still in flight, from the progress it has reported.
+	/// `None` when the run has reported none — which is unknown, not zero.
+	pub progress: Option<LiveProgress>,
+}
+
+/// [`build_recent_runs_with_progress`] with no progress data, for the pairing
+/// tests — which exercise report/issuance correlation and are indifferent to
+/// what an in-flight row is decorated with.
+#[cfg(test)]
+fn build_recent_runs(
+	runs: Vec<BackupRun>,
+	issuances: Vec<BackupCredentialIssuance>,
+	device_to_server: &std::collections::HashMap<Uuid, Uuid>,
+	source_snapshot_sizes: &std::collections::HashMap<String, i64>,
+	now: Timestamp,
+	limit: usize,
+) -> Vec<RecentRun> {
+	build_recent_runs_with_progress(
+		runs,
+		issuances,
+		device_to_server,
+		source_snapshot_sizes,
+		&Default::default(),
+		&Default::default(),
+		&Default::default(),
+		now,
+		limit,
+	)
 }
 
 /// Merge device-reported runs with credential issuances into the recent-runs
@@ -425,11 +569,22 @@ pub struct RecentRun {
 /// (older clients) fall back to the time-window guesstimate in
 /// [`claim_chain_for_report`] — remove that fallback once `run_id` is mandatory
 /// on the credential call.
-fn build_recent_runs(
+///
+/// In-flight rows are then decorated with what their run has reported as
+/// progress. `latest_progress` is the last sample per run, `progress_windows` the
+/// trailing-window samples per run (for rate), and `progress_snapshot_taken` the
+/// freeze moment per run — all three batch-loaded by the caller, since a group's
+/// activity view can hold many in-flight rows and querying per row would be an
+/// N+1.
+#[allow(clippy::too_many_arguments)]
+fn build_recent_runs_with_progress(
 	runs: Vec<BackupRun>,
 	issuances: Vec<BackupCredentialIssuance>,
 	device_to_server: &std::collections::HashMap<Uuid, Uuid>,
 	source_snapshot_sizes: &std::collections::HashMap<String, i64>,
+	latest_progress: &std::collections::HashMap<Uuid, database::backups::BackupRunProgress>,
+	progress_windows: &std::collections::HashMap<Uuid, Vec<database::backups::BackupRunProgress>>,
+	progress_snapshot_taken: &std::collections::HashMap<Uuid, Timestamp>,
 	now: Timestamp,
 	limit: usize,
 ) -> Vec<RecentRun> {
@@ -478,6 +633,11 @@ fn build_recent_runs(
 				reported_at: Some(run.reported_at),
 				at: run.reported_at,
 				duration_seconds,
+				run_id: Some(run.id),
+				snapshot_taken_at: run.snapshot_taken_at,
+				// A finished run has no live view — its figures are on the row itself.
+				// The series stays fetchable by run_id for the rate chart.
+				progress: None,
 			}
 		})
 		.collect();
@@ -491,6 +651,19 @@ fn build_recent_runs(
 		}
 		let status = attempt.status(now);
 		let first = attempt.first;
+		// The issuance's run correlation is what ties this inferred row to the
+		// progress its run has been reporting. An issuance without one (a client
+		// predating correlation) simply has no progress to show.
+		let progress = first
+			.run_id
+			.and_then(|rid| latest_progress.get(&rid))
+			.map(|latest| {
+				let window = progress_windows
+					.get(&latest.run_id)
+					.map(Vec::as_slice)
+					.unwrap_or_default();
+				live_progress(latest, window, now)
+			});
 		rows.push(RecentRun {
 			key: format!("issuance-{}", first.id),
 			server_id: device_to_server.get(&first.device_id).copied(),
@@ -510,6 +683,14 @@ fn build_recent_runs(
 			reported_at: None,
 			at: first.issued_at,
 			duration_seconds: None,
+			run_id: first.run_id,
+			// Known mid-run: a device announces the freeze before it starts moving
+			// bytes, so an in-flight row can already say how old its data is.
+			snapshot_taken_at: first
+				.run_id
+				.and_then(|rid| progress_snapshot_taken.get(&rid))
+				.copied(),
+			progress,
 		});
 	}
 
@@ -1851,11 +2032,43 @@ pub async fn stats(
 	let source_snapshot_sizes =
 		BackupRun::snapshot_sizes_by_id(&mut conn, args.server_group_id, &restore_snapshot_ids)
 			.await?;
-	let recent_runs = build_recent_runs(
+	// Progress for the runs that could still be in flight: an issuance chain with
+	// no matching report. Three batch loads rather than per-row queries, since a
+	// busy group can have many such rows at once.
+	let candidate_run_ids: Vec<Uuid> = {
+		let reported: std::collections::HashSet<Uuid> =
+			reported_runs.iter().map(|r| r.id).collect();
+		let mut ids: Vec<Uuid> = issuances
+			.iter()
+			.filter_map(|i| i.run_id)
+			.filter(|rid| !reported.contains(rid))
+			.collect();
+		ids.sort_unstable();
+		ids.dedup();
+		ids
+	};
+	let latest_progress =
+		database::backups::BackupRunProgress::latest_by_run(&mut conn, &candidate_run_ids).await?;
+	let progress_windows = database::backups::BackupRunProgress::for_runs_since(
+		&mut conn,
+		&candidate_run_ids,
+		now - jiff::SignedDuration::from_secs(RATE_WINDOW_SECS),
+	)
+	.await?;
+	let progress_snapshot_taken =
+		database::backups::BackupRunProgress::earliest_snapshot_taken_at_by_run(
+			&mut conn,
+			&candidate_run_ids,
+		)
+		.await?;
+	let recent_runs = build_recent_runs_with_progress(
 		reported_runs,
 		issuances,
 		&device_to_server,
 		&source_snapshot_sizes,
+		&latest_progress,
+		&progress_windows,
+		&progress_snapshot_taken,
 		now,
 		RECENT_LIMIT as usize,
 	);
@@ -1930,6 +2143,89 @@ pub async fn stats(
 		s3_month_sent_bytes,
 		s3_month_received_bytes,
 	}))
+}
+
+/// Identifies the run whose progress series to fetch.
+#[derive(Deserialize, ToSchema)]
+pub struct RunProgressArgs {
+	/// The run identifier, as carried on the activity row (`run_id`).
+	pub run_id: Uuid,
+}
+
+/// One point of a run's progress series.
+///
+/// A trimmed projection of what the device reported: the counters a rate or
+/// volume chart plots, and nothing else. The full sample — including whatever the
+/// engine reported that Canopy does not model — is on the activity row's live
+/// figures for a run still in flight.
+#[derive(Serialize, ToSchema)]
+pub struct RunProgressPoint {
+	/// When Canopy received this sample.
+	pub observed_at: Timestamp,
+	/// Cumulative source bytes read at this point.
+	pub bytes_read: Option<i64>,
+	/// Cumulative bytes processed at this point.
+	pub bytes_hashed: Option<i64>,
+	/// Cumulative bytes uploaded at this point.
+	pub bytes_uploaded: Option<i64>,
+	/// Cumulative bytes found already present at this point.
+	pub bytes_cached: Option<i64>,
+	/// The run's expected total as of this point. May grow over the series.
+	pub bytes_estimated: Option<i64>,
+	/// Cumulative raw bytes sent to object storage at this point.
+	pub s3_sent_raw_bytes: Option<i64>,
+	/// Cumulative payload bytes sent to object storage at this point.
+	pub s3_sent_payload_bytes: Option<i64>,
+	/// Cumulative raw bytes received from object storage at this point.
+	pub s3_received_raw_bytes: Option<i64>,
+	/// Cumulative payload bytes received from object storage at this point.
+	pub s3_received_payload_bytes: Option<i64>,
+}
+
+/// The progress a run reported over its life, oldest first.
+///
+/// Every figure is cumulative from the start of the run, so a rate is the
+/// difference between adjacent points divided by the time between them — and a
+/// gap in the series costs resolution without distorting the totals either side
+/// of it.
+///
+/// Available for a run in flight and for one that has finished, for as long as
+/// its series is retained. Empty for a run that reported no progress (an older
+/// client), for one whose series has been pruned, and for an unknown run — all
+/// three are "nothing to plot" rather than errors.
+#[utoipa::path(
+	post,
+	path = "/run_progress",
+	operation_id = "backups_run_progress",
+	tag = "backups",
+	security(("tailscale-user" = [])),
+	request_body = RunProgressArgs,
+	responses((status = 200, body = Vec<RunProgressPoint>)),
+)]
+pub async fn run_progress(
+	State(state): State<AppState>,
+	Json(args): Json<RunProgressArgs>,
+) -> Result<Json<Vec<RunProgressPoint>>> {
+	let mut conn = state.db.get().await?;
+	let series =
+		database::backups::BackupRunProgress::series_for_run(&mut conn, args.run_id).await?;
+	Ok(Json(
+		series
+			.into_iter()
+			.map(|p| RunProgressPoint {
+				observed_at: p.observed_at,
+				bytes_read: p.bytes_read,
+				bytes_hashed: p.bytes_hashed,
+				bytes_uploaded: p.bytes_uploaded,
+				bytes_cached: p.bytes_cached,
+				bytes_estimated: p.bytes_estimated,
+				s3_sent_raw_bytes: p.s3_sent_raw_bytes,
+				s3_sent_payload_bytes: p.s3_sent_payload_bytes,
+				s3_received_raw_bytes: p.s3_received_raw_bytes,
+				s3_received_payload_bytes: p.s3_received_payload_bytes,
+			})
+			.collect(),
+	))
 }
 
 /// List a server's backup capabilities and their enabled state.

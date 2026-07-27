@@ -523,6 +523,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/backups/run_progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The progress a run reported over its life, oldest first.
+         * @description Every figure is cumulative from the start of the run, so a rate is the
+         *     difference between adjacent points divided by the time between them — and a
+         *     gap in the series costs resolution without distorting the totals either side
+         *     of it.
+         *
+         *     Available for a run in flight and for one that has finished, for as long as
+         *     its series is retained. Empty for a run that reported no progress (an older
+         *     client), for one whose series has been pruned, and for an unknown run — all
+         *     three are "nothing to plot" rather than errors.
+         */
+        post: operations["backups_run_progress"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backups/set_capability": {
         parameters: {
             query?: never;
@@ -5359,6 +5387,112 @@ export interface components {
             server_group_id: string;
         };
         /**
+         * @description The live state of a run still in flight, from the progress it has reported.
+         *
+         *     Absent entirely (`None` on the row) when a run has reported no progress —
+         *     either an older client or one that cannot. That is a distinct state from a
+         *     run reporting zeroes, and the interface must render it as unknown rather than
+         *     as a stalled run.
+         *
+         *     Every byte figure here is cumulative since the run started, exactly as
+         *     reported; [`Self::bytes_per_second`] is the only derived rate.
+         */
+        LiveProgress: {
+            /**
+             * Format: int64
+             * @description Bytes found already present, and so not re-uploaded.
+             */
+            bytes_cached?: number | null;
+            /**
+             * Format: int64
+             * @description Total bytes the run currently expects to handle. An estimate the run may
+             *     revise upward, so a percentage derived from it can go down.
+             */
+            bytes_estimated?: number | null;
+            /**
+             * Format: int64
+             * @description Bytes processed so far.
+             */
+            bytes_hashed?: number | null;
+            /**
+             * Format: double
+             * @description Upload rate over the trailing window, derived by differencing cumulative
+             *     `bytes_uploaded` across samples. `None` when the window holds fewer than
+             *     two samples, spans no time, or the run reports no uploaded figure — never
+             *     zero as a stand-in, since "not enough data to say" and "moving no bytes"
+             *     are different answers.
+             */
+            bytes_per_second?: number | null;
+            /**
+             * Format: int64
+             * @description Source bytes read so far.
+             */
+            bytes_read?: number | null;
+            /**
+             * Format: int64
+             * @description Bytes uploaded so far.
+             */
+            bytes_uploaded?: number | null;
+            /** @description What the run was working on at the last sample. */
+            current_path?: string | null;
+            /**
+             * Format: int64
+             * @description Errors hit so far.
+             */
+            errors?: number | null;
+            /**
+             * @description Whatever the backup engine reported beyond what Canopy models, verbatim
+             *     from the last sample. Shown for inspection; never interpreted.
+             */
+            extra: Record<string, never>;
+            /**
+             * Format: int64
+             * @description Files finished so far.
+             */
+            files_done?: number | null;
+            /**
+             * Format: int64
+             * @description Total files the run currently expects to handle.
+             */
+            files_estimated?: number | null;
+            /**
+             * Format: int64
+             * @description Errors hit and deliberately ignored so far.
+             */
+            ignored_errors?: number | null;
+            /**
+             * Format: date-time
+             * @description When the last sample arrived, as timed by Canopy on receipt.
+             */
+            observed_at: string;
+            /**
+             * Format: int64
+             * @description Payload bytes received from object storage so far.
+             */
+            s3_received_payload_bytes?: number | null;
+            /**
+             * Format: int64
+             * @description Raw bytes received from object storage so far.
+             */
+            s3_received_raw_bytes?: number | null;
+            /**
+             * Format: int64
+             * @description Payload bytes sent to object storage so far.
+             */
+            s3_sent_payload_bytes?: number | null;
+            /**
+             * Format: int64
+             * @description Raw bytes sent to object storage so far, as the client's proxy tallied.
+             */
+            s3_sent_raw_bytes?: number | null;
+            /**
+             * Format: int64
+             * @description How long since the last sample. The "is anyone still there" figure: it
+             *     grows without bound if a device goes quiet mid-run.
+             */
+            seconds_since_observed: number;
+        };
+        /**
          * @description The lowest and highest software version currently reported by any
          *     production server.
          */
@@ -5901,6 +6035,7 @@ export interface components {
              */
             key: string;
             outcome?: null | components["schemas"]["RunOutcome"];
+            progress?: null | components["schemas"]["LiveProgress"];
             /** @description Whether the run was a backup or a restore. */
             purpose: string;
             /**
@@ -5908,6 +6043,14 @@ export interface components {
              * @description When the device reported the run. `None` for an inferred (unreported) row.
              */
             reported_at?: string | null;
+            /**
+             * Format: uuid
+             * @description The run identifier, when known — present on a reported run, and on an
+             *     inferred row whose credential issuance carried one. Needed to fetch the
+             *     run's progress series; `None` for an issuance from a client that predates
+             *     run correlation, which therefore has no series to fetch.
+             */
+            run_id?: string | null;
             /**
              * Format: int64
              * @description Payload bytes received from S3 during the run, if tallied (reported runs only).
@@ -5946,6 +6089,13 @@ export interface components {
              *     falling back to inspection's backfill onto the restore run itself.
              */
             snapshot_logical_bytes?: number | null;
+            /**
+             * Format: date-time
+             * @description When the run froze the data it captured, if it reported that. Distinct from
+             *     `reported_at`: for a long backup the two are hours apart, and this is the
+             *     one that says how old the data actually is.
+             */
+            snapshot_taken_at?: string | null;
             /**
              * Format: date-time
              * @description When the run started, taken from its first matching credential issuance.
@@ -6483,6 +6633,74 @@ export interface components {
          * @enum {string}
          */
         RunOutcome: "success" | "failure";
+        /** @description Identifies the run whose progress series to fetch. */
+        RunProgressArgs: {
+            /**
+             * Format: uuid
+             * @description The run identifier, as carried on the activity row (`run_id`).
+             */
+            run_id: string;
+        };
+        /**
+         * @description One point of a run's progress series.
+         *
+         *     A trimmed projection of what the device reported: the counters a rate or
+         *     volume chart plots, and nothing else. The full sample — including whatever the
+         *     engine reported that Canopy does not model — is on the activity row's live
+         *     figures for a run still in flight.
+         */
+        RunProgressPoint: {
+            /**
+             * Format: int64
+             * @description Cumulative bytes found already present at this point.
+             */
+            bytes_cached?: number | null;
+            /**
+             * Format: int64
+             * @description The run's expected total as of this point. May grow over the series.
+             */
+            bytes_estimated?: number | null;
+            /**
+             * Format: int64
+             * @description Cumulative bytes processed at this point.
+             */
+            bytes_hashed?: number | null;
+            /**
+             * Format: int64
+             * @description Cumulative source bytes read at this point.
+             */
+            bytes_read?: number | null;
+            /**
+             * Format: int64
+             * @description Cumulative bytes uploaded at this point.
+             */
+            bytes_uploaded?: number | null;
+            /**
+             * Format: date-time
+             * @description When Canopy received this sample.
+             */
+            observed_at: string;
+            /**
+             * Format: int64
+             * @description Cumulative payload bytes received from object storage at this point.
+             */
+            s3_received_payload_bytes?: number | null;
+            /**
+             * Format: int64
+             * @description Cumulative raw bytes received from object storage at this point.
+             */
+            s3_received_raw_bytes?: number | null;
+            /**
+             * Format: int64
+             * @description Cumulative payload bytes sent to object storage at this point.
+             */
+            s3_sent_payload_bytes?: number | null;
+            /**
+             * Format: int64
+             * @description Cumulative raw bytes sent to object storage at this point.
+             */
+            s3_sent_raw_bytes?: number | null;
+        };
         /**
          * @description State of an activity row: a device-reported run, or a run inferred from a
          *     credential issuance that never matched a report.
@@ -8589,6 +8807,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    backups_run_progress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunProgressArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunProgressPoint"][];
                 };
             };
         };
