@@ -10,8 +10,8 @@ use commons_types::{
 	version::VersionStr,
 };
 use database::{
-	backups::BackupRun, backups::ServerBackupCapability, server_groups::ServerGroup,
-	servers::Server, statuses::Status,
+	backups::BackupRun, backups::ServerBackupCapability, reported_detail::ReportedDetail,
+	server_groups::ServerGroup, servers::Server, statuses::Status,
 };
 use jiff::Timestamp;
 use rmcp::{
@@ -86,10 +86,21 @@ struct StatusOut {
 	health: HealthState,
 	healthy: bool,
 	reachability: ShortStatus,
-	platform: Option<String>,
-	postgres_version: Option<String>,
 	/// Raw per-check breakdown from the status push.
 	checks: serde_json::Value,
+}
+
+/// What the server currently reports about the software it runs. Resolved
+/// across every source reporting on it — a field is the most recent value any
+/// source reported, so a field the latest push didn't carry is still here.
+// spec: FIG#sourcing
+#[derive(Serialize)]
+struct FiguresOut {
+	platform: Option<String>,
+	postgres_version: Option<String>,
+	node_version: Option<String>,
+	bestool_version: Option<String>,
+	timezone: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -117,6 +128,9 @@ struct ServerDetail {
 	sibling_count: usize,
 	reachability: ShortStatus,
 	health: HealthState,
+	/// What the server runs, as currently reported. Distinct from
+	/// `latest_status`, which is one push and its own metadata.
+	figures: FiguresOut,
 	latest_status: Option<StatusOut>,
 	backups: Vec<BackupCapabilityOut>,
 }
@@ -258,10 +272,25 @@ impl CanopyMcp {
 			health,
 			healthy: s.healthy,
 			reachability: s.short_status(),
-			platform: s.platform(),
-			postgres_version: s.postgres_version(),
 			checks: s.health.clone(),
 		});
+
+		// Resolved across every source, not read off the latest push: sources
+		// don't all carry the same fields, so a legacy heartbeat landing last
+		// would otherwise blank out what the reporting agent said.
+		// spec: FIG#sourcing
+		let merged = ReportedDetail::merge(
+			&ReportedDetail::for_server(&mut conn, server.id)
+				.await
+				.map_err(mcp_err)?,
+		);
+		let figures = FiguresOut {
+			platform: merged.platform(),
+			postgres_version: merged.postgres_version(),
+			node_version: merged.node_version(),
+			bestool_version: merged.bestool_version(),
+			timezone: merged.timezone(),
+		};
 
 		ok_json(&ServerDetail {
 			id: server.id,
@@ -281,6 +310,7 @@ impl CanopyMcp {
 				.as_ref()
 				.map_or(ShortStatus::Gone, |s| s.short_status()),
 			health,
+			figures,
 			latest_status,
 			backups,
 		})

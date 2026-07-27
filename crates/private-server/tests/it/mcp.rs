@@ -72,7 +72,10 @@ async fn seed(conn: &mut impl SimpleAsyncConnection) {
 			('{SRV_UNGROUPED}', 'https://lonely', 'Lonely Facility', 'facility'); \
 		 INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES \
 			('{SRV_GROUPED}', '2.34.1', true, '[]'::jsonb, \
-			 '{{\"pgVersion\": \"PostgreSQL 14.2 on x86_64-pc-linux-gnu\"}}'::jsonb, NOW() - interval '1 minute');"
+			 '{{\"pgVersion\": \"PostgreSQL 14.2 on x86_64-pc-linux-gnu\"}}'::jsonb, NOW() - interval '1 minute'); \
+		 INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES \
+			('{SRV_GROUPED}', 'alertd', \
+			 '{{\"pgVersion\": \"PostgreSQL 14.2 on x86_64-pc-linux-gnu\", \"bestoolVersion\": \"2.10.5\"}}'::jsonb, '2.34.1');"
 	))
 	.await
 	.expect("seed");
@@ -265,7 +268,12 @@ async fn get_server_detail_and_not_found() {
 		assert_eq!(detail["name"], "Prod Central");
 		assert_eq!(detail["group_name"], "Prod Group");
 		assert_eq!(detail["latest_status"]["version"], "2.34.1");
-		assert_eq!(detail["latest_status"]["platform"], "Linux");
+		// The figures describe the server, not the push that happened to
+		// land last, so they sit beside `latest_status` rather than inside it.
+		// spec: FIG#sourcing
+		assert_eq!(detail["figures"]["platform"], "Linux");
+		assert_eq!(detail["figures"]["postgres_version"], "14.2");
+		assert_eq!(detail["figures"]["bestool_version"], "2.10.5");
 
 		// Unknown id → tool error (isError), not a protocol error.
 		let missing = private
