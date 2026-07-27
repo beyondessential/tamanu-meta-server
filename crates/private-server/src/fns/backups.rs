@@ -1362,14 +1362,15 @@ pub async fn group_schedules(
 	for ((_, ty), run) in
 		BackupRun::latest_success_by_server_type_for_group(&mut conn, args.server_group_id).await?
 	{
+		let at = run.anchor();
 		last_success
 			.entry(ty)
 			.and_modify(|t| {
-				if run.reported_at > *t {
-					*t = run.reported_at;
+				if at > *t {
+					*t = at;
 				}
 			})
-			.or_insert(run.reported_at);
+			.or_insert(at);
 	}
 	let now = Timestamp::now();
 
@@ -1904,12 +1905,12 @@ pub async fn stats(
 			capabilities.push(ServerBackupCapabilityView {
 				server_id: cap.server_id,
 				latest_snapshot_id: last.and_then(|r| r.snapshot_id.clone()),
-				latest_snapshot_at: last.map(|r| r.reported_at),
+				latest_snapshot_at: last.map(|r| r.anchor()),
 				latest_snapshot_bytes: last.and_then(|r| r.bytes_uploaded),
 				next_backup_at: next_backup_at(
 					cap.enabled,
 					interval,
-					last.map(|r| r.reported_at),
+					last.map(|r| r.anchor()),
 					now,
 				),
 				processing_since: processing_since(now, issuance, last_report),
@@ -1977,12 +1978,12 @@ pub async fn capabilities(
 		out.push(ServerBackupCapabilityView {
 			server_id: c.server_id,
 			latest_snapshot_id: last.as_ref().and_then(|r| r.snapshot_id.clone()),
-			latest_snapshot_at: last.as_ref().map(|r| r.reported_at),
+			latest_snapshot_at: last.as_ref().map(|r| r.anchor()),
 			latest_snapshot_bytes: last.as_ref().and_then(|r| r.bytes_uploaded),
 			next_backup_at: next_backup_at(
 				c.enabled,
 				interval,
-				last.as_ref().map(|r| r.reported_at),
+				last.as_ref().map(|r| r.anchor()),
 				now,
 			),
 			processing_since: processing_since(now, issuance, last_report),
@@ -2359,6 +2360,7 @@ mod tests {
 			s3_received_raw_bytes: None,
 			s3_received_payload_bytes: None,
 			snapshot_logical_bytes: None,
+			snapshot_taken_at: None,
 		}
 	}
 

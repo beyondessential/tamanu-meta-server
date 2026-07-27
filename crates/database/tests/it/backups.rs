@@ -230,6 +230,7 @@ fn new_run(
 		s3_sent_payload_bytes: None,
 		s3_received_raw_bytes: None,
 		s3_received_payload_bytes: None,
+		snapshot_taken_at: None,
 	}
 }
 
@@ -564,6 +565,7 @@ async fn s3_traffic_this_month_sums_raw_bytes_within_the_month_window() {
 					s3_sent_payload_bytes: sent,
 					s3_received_raw_bytes: received,
 					s3_received_payload_bytes: received,
+					snapshot_taken_at: None,
 				},
 			)
 			.await

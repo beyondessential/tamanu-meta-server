@@ -188,6 +188,7 @@ async fn insert_backup_success_aged(
 			s3_sent_payload_bytes: None,
 			s3_received_raw_bytes: None,
 			s3_received_payload_bytes: None,
+			snapshot_taken_at: None,
 		},
 	)
 	.await
