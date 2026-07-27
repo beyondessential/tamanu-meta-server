@@ -124,6 +124,36 @@ diesel::table! {
 }
 
 diesel::table! {
+	backup_run_progress (id) {
+		id -> Int8,
+		run_id -> Uuid,
+		device_id -> Uuid,
+		group_id -> Uuid,
+		server_id -> Nullable<Uuid>,
+		#[sql_name = "type"]
+		type_ -> Text,
+		purpose -> Text,
+		observed_at -> Timestamptz,
+		snapshot_taken_at -> Nullable<Timestamptz>,
+		bytes_read -> Nullable<Int8>,
+		bytes_hashed -> Nullable<Int8>,
+		bytes_uploaded -> Nullable<Int8>,
+		bytes_cached -> Nullable<Int8>,
+		bytes_estimated -> Nullable<Int8>,
+		files_done -> Nullable<Int8>,
+		files_estimated -> Nullable<Int8>,
+		errors -> Nullable<Int8>,
+		ignored_errors -> Nullable<Int8>,
+		current_path -> Nullable<Text>,
+		s3_sent_raw_bytes -> Nullable<Int8>,
+		s3_sent_payload_bytes -> Nullable<Int8>,
+		s3_received_raw_bytes -> Nullable<Int8>,
+		s3_received_payload_bytes -> Nullable<Int8>,
+		extra -> Jsonb,
+	}
+}
+
+diesel::table! {
 	backup_runs (id) {
 		id -> Uuid,
 		device_id -> Uuid,
@@ -142,6 +172,7 @@ diesel::table! {
 		s3_received_raw_bytes -> Nullable<Int8>,
 		s3_received_payload_bytes -> Nullable<Int8>,
 		snapshot_logical_bytes -> Nullable<Int8>,
+		snapshot_taken_at -> Nullable<Timestamptz>,
 	}
 }
 
@@ -634,6 +665,9 @@ diesel::joinable!(backup_restore_checks -> devices (consumer_device_id));
 diesel::joinable!(backup_restore_checks -> restore_replicas (replica_id));
 diesel::joinable!(backup_restore_checks -> server_groups (group_id));
 diesel::joinable!(backup_restore_checks -> servers (server_id));
+diesel::joinable!(backup_run_progress -> devices (device_id));
+diesel::joinable!(backup_run_progress -> server_groups (group_id));
+diesel::joinable!(backup_run_progress -> servers (server_id));
 diesel::joinable!(backup_runs -> devices (device_id));
 diesel::joinable!(backup_runs -> server_groups (group_id));
 diesel::joinable!(backup_runs -> servers (server_id));
@@ -680,6 +714,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	backup_repo_snapshots,
 	backup_repo_stats,
 	backup_requests,
+	backup_run_progress,
 	backup_runs,
 	backup_type_defaults,
 	bestool_snippets,
