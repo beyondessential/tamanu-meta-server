@@ -10,6 +10,7 @@ import {
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { useApi } from "./api";
+import AdminProbeBanner from "./components/AdminProbeBanner";
 import { AdminProvider } from "./hooks/useIsAdmin";
 import { useReloadInterval } from "./hooks/useReloadInterval";
 import Admins from "./routes/Admins";
@@ -179,6 +180,7 @@ export default function App() {
 					))}
 				</Toolbar>
 			</AppBar>
+			<AdminProbeBanner />
 			<SelfAlertsBanner reloadTick={reloadTick} />
 			<Container maxWidth="lg" sx={{ py: 3 }}>
 				<Routes>

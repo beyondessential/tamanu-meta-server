@@ -20,6 +20,7 @@ import ServerShorty from "../components/ServerShorty";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import TimeAgo from "../components/TimeAgo";
 import { useApi, useApiAction } from "../api";
+import { useIsAdmin } from "../hooks/useIsAdmin";
 import { useIsNotificationHeld } from "../hooks/useIsNotificationHeld";
 import { usePageTitle } from "../hooks/usePageTitle";
 import {
@@ -37,7 +38,7 @@ export default function GroupDetail() {
 	const { id = "" } = useParams<{ id: string }>();
 	const navigate = useNavigate();
 	const detail = useApi("server_groups", "get", { server_group_id: id }, [id]);
-	const isAdmin = useApi("commons", "is_current_user_admin");
+	const admin = useIsAdmin() === true;
 	const archive = useApiAction("server_groups", "delete");
 	// Only the currently-open incident matters for the active-incident
 	// section; closed ones live behind the /incidents filter route.
@@ -65,7 +66,6 @@ export default function GroupDetail() {
 	}
 
 	const { group, servers, billing_labels } = detail.data;
-	const admin = isAdmin.status === "ok" && isAdmin.data;
 	const tagEntries = Object.entries(group.tags ?? {});
 	const operators =
 		groupStatuses.status === "ok"

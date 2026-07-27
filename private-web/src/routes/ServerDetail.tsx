@@ -101,7 +101,7 @@ export default function ServerDetail() {
 		{ server_id: id },
 		[id],
 	);
-	const isAdmin = useApi("commons", "is_current_user_admin");
+	const admin = useIsAdmin() === true;
 	// Single refresh signal for everything on the page that talks to the
 	// issues/incidents APIs. Any mutation (manual-event submit, resolve/
 	// snooze on a row, etc.) bumps this so all sibling panels refetch in
@@ -148,7 +148,6 @@ export default function ServerDetail() {
 	}
 
 	const data = detail.data;
-	const admin = isAdmin.status === "ok" && isAdmin.data;
 	const archived = data.server.archived;
 	const registered = data.server.registered_at != null;
 
