@@ -213,19 +213,22 @@ export async function seedStatus(
 		healthy?: boolean;
 		health?: unknown[];
 		extra?: Record<string, unknown>;
+		/** Reporting source. Defaults to `alertd`, as ingestion does. */
+		source?: string;
 		/** ISO 8601 timestamp or relative SQL like `NOW() - INTERVAL '1 hour'`.
 		 * Defaults to NOW(). */
 		createdAt?: string;
 	},
 ): Promise<SeededStatus> {
 	const id = randomUUID();
+	const source = opts.source ?? "alertd";
 	const useSqlExpr =
 		opts.createdAt !== undefined && opts.createdAt.toUpperCase().startsWith("NOW");
 	const createdAtClause = opts.createdAt === undefined
 		? "NOW()"
 		: useSqlExpr
 			? opts.createdAt
-			: "$8";
+			: "$9";
 	const params: unknown[] = [
 		id,
 		opts.serverId,
@@ -234,12 +237,13 @@ export async function seedStatus(
 		opts.healthy ?? true,
 		JSON.stringify(opts.health ?? []),
 		JSON.stringify(opts.extra ?? {}),
+		source,
 	];
 	if (!useSqlExpr && opts.createdAt !== undefined) params.push(opts.createdAt);
 	const rows = await sql.query<{ created_at: string }>(
 		`INSERT INTO statuses
-		 (id, server_id, device_id, version, healthy, health, extra, created_at)
-		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, ${createdAtClause})
+		 (id, server_id, device_id, version, healthy, health, extra, source, created_at)
+		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, ${createdAtClause})
 		 RETURNING created_at`,
 		params,
 	);
@@ -263,15 +267,15 @@ export async function seedStatus(
 		// counts if a live catalog row backs it. Never clobbers an explicit
 		// seedCheckPolicy for the same (source, check).
 		await sql.query(
-			`INSERT INTO check_policies (source, check_name) VALUES ('alertd', $1)
+			`INSERT INTO check_policies (source, check_name) VALUES ($1, $2)
 			 ON CONFLICT (source, check_name) DO NOTHING`,
-			[check],
+			[source, check],
 		);
 		const degraded = ["failed", "warning", "broken"].includes(result);
 		await sql.query(
 			`INSERT INTO issues
 			 (server_id, source, ref, check_name, observed_result, effective_result, detail, message, active, first_seen, last_seen, degraded_since, last_degraded_at)
-			 VALUES ($1, 'alertd', $2, $3, $4, $4, $5::jsonb, $6, $7, NOW(), NOW(), $8, $9)
+			 VALUES ($1, $10, $2, $3, $4, $4, $5::jsonb, $6, $7, NOW(), NOW(), $8, $9)
 			 ON CONFLICT DO NOTHING`,
 			[
 				opts.serverId,
@@ -283,6 +287,7 @@ export async function seedStatus(
 				degraded,
 				degraded ? new Date().toISOString() : null,
 				degraded ? new Date().toISOString() : null,
+				source,
 			],
 		);
 	}
