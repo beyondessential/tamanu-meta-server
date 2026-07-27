@@ -179,5 +179,11 @@ test.describe("status page", () => {
 				"1 release branch in active use: 2.34 (1 version: 2.34.1 — 2.34.1)",
 			),
 		).toBeVisible();
+
+		// The card answers "which branches"; the figures page answers "which
+		// servers, and what else are they running".
+		await page.getByRole("link", { name: "Fleet figures" }).click();
+		await expect(page).toHaveURL(/\/servers\/figures$/);
+		await expect(page.getByRole("group", { name: "Tamanu" })).toBeVisible();
 	});
 });
