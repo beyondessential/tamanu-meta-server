@@ -99,6 +99,47 @@ test.describe("in-flight backup progress", () => {
 		await expect(runs.getByTestId("snapshot-taken")).toContainText(/data from/i);
 	});
 
+	test("an in-flight run's figures advance without a page reload", async ({
+		page,
+		sql,
+	}) => {
+		const { group, device, server, runId } = await seedInFlightGroup(
+			sql,
+			"progress-polling",
+		);
+		const MIB = 1024 * 1024;
+		await seedBackupRunProgress(sql, {
+			runId,
+			deviceId: device.id,
+			groupId: group.id,
+			serverId: server.id,
+			observedAgoSecs: 60,
+			bytesUploaded: 100 * MIB,
+			bytesEstimated: 1024 * MIB,
+		});
+
+		await page.goto(`/groups/${group.id}/backups`);
+		const transfer = page.getByRole("table").last().getByTestId("live-transfer");
+		await expect(transfer).toContainText("100.0 MiB");
+
+		// A further sample arrives while the page is open. The panel polls at 5s
+		// while any row is in flight, so the figure must move on its own — a live
+		// view that only updated on reload would defeat the point.
+		await seedBackupRunProgress(sql, {
+			runId,
+			deviceId: device.id,
+			groupId: group.id,
+			serverId: server.id,
+			observedAgoSecs: 0,
+			bytesUploaded: 700 * MIB,
+			bytesEstimated: 1024 * MIB,
+		});
+
+		await expect(transfer).toContainText("700.0 MiB", { timeout: 20_000 });
+		// And the rate becomes derivable once there are two points.
+		await expect(transfer).not.toContainText(/rate unknown/i);
+	});
+
 	test("an in-flight run with no progress reported still shows as in progress", async ({
 		page,
 		sql,

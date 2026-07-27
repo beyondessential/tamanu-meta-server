@@ -54,6 +54,7 @@ landed.
 ## Operator view
 
 - [x] An in-flight run shows what it has transferred against the total it expects, with a progress bar and its current rate — verifies spec: BKO
+- [x] An in-flight run's figures advance on their own while the page stays open, and its rate becomes derivable once a second sample lands — verifies spec: BKO
 - [x] An in-flight run that has reported no progress still shows as in progress, with no figures invented and no freeze moment claimed — verifies spec: BKO
 - [x] An in-flight row's expanded detail shows the engine's counters and sets the proxy's tally against them, surfacing any divergence and the protocol overhead — verifies spec: BKO
 - [x] Raw engine data is behind a toggle and hidden until asked for — verifies spec: BKO

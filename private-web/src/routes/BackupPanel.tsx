@@ -26,7 +26,7 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import BackupIcon from "@mui/icons-material/Backup";
 import RestoreIcon from "@mui/icons-material/SettingsBackupRestore";
 import DeleteIcon from "@mui/icons-material/Delete";
@@ -927,7 +927,10 @@ function RunRow({ run, members }: { run: RecentRun; members: ServerInfo[] }) {
 							{/* Mounted only while open so an expanded row is the only one
 							    that fetches its series. */}
 							{open && chartable && run.run_id && (
-								<RunProgressSection runId={run.run_id} />
+								<RunProgressSection
+									runId={run.run_id}
+									live={run.status === "in_progress"}
+								/>
 							)}
 						</Collapse>
 					</TableCell>
@@ -1040,8 +1043,21 @@ function RawEngineDetail({ extra }: { extra: unknown }) {
 
 /// The run's rate over its life. Fetched per expanded row rather than with the
 /// panel, since a series is only wanted when someone opens the row.
-function RunProgressSection({ runId }: { runId: string }) {
-	const series = useApi("backups", "run_progress", { run_id: runId }, [runId]);
+///
+/// A run still in flight keeps extending its series, so poll while it does; a
+/// finished run's series is fixed and fetched once.
+function RunProgressSection({
+	runId,
+	live,
+}: {
+	runId: string;
+	live: boolean;
+}) {
+	const tick = useReloadInterval(live ? 5_000 : 300_000, "canopy-data-changed");
+	const series = useApi("backups", "run_progress", { run_id: runId }, [
+		runId,
+		live ? tick : 0,
+	]);
 	if (series.status === "loading" || series.status === "idle") {
 		return <LinearProgress sx={{ my: 1 }} />;
 	}
@@ -1223,12 +1239,27 @@ function RecentRunsPanel({
 	groupId: string;
 	members: ServerInfo[];
 }) {
+	// Poll faster while a run is in flight, so its progress figures actually
+	// advance while someone is watching — a live view that only moved on page
+	// reload would defeat the point. Back off to a gentle cadence when the table
+	// is all settled history. Mirrors MaintenancePanel.
+	const [inFlight, setInFlight] = useState(false);
+	const tick = useReloadInterval(
+		inFlight ? 5_000 : 30_000,
+		"canopy-data-changed",
+	);
 	const stats = useApi(
 		"backups",
 		"stats",
 		{ server_group_id: groupId },
-		[groupId],
+		[groupId, tick],
 	);
+	const anyInFlight =
+		stats.status === "ok" &&
+		stats.data.recent_runs.some((r) => r.status === "in_progress");
+	useEffect(() => {
+		setInFlight(anyInFlight);
+	}, [anyInFlight]);
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
 			<Typography variant="h6" component="h2" gutterBottom>
