@@ -7,11 +7,11 @@ use database::diesel_async::AsyncPgConnection;
 use database::pg_duration::PgDuration;
 use database::{
 	BackupConfigStatus, BackupCredentialIssuance, BackupMaintenanceRunFilters, BackupPurpose,
-	BackupRepoSnapshot, BackupRepoStats, BackupRequest, BackupRun, BackupRunFilters, BackupType,
-	BackupTypeDefault, MaintenanceKind, MaintenanceOutcomeFilter, NewBackupCredentialIssuance,
-	NewBackupRun, NewBackupTypeDefault, NewServerGroupBackupConfig, NewServerGroupBackupSchedule,
-	RunOutcome, ServerBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
-	backups::BackupMaintenanceRun,
+	BackupRepoSnapshot, BackupRepoStats, BackupRequest, BackupRun, BackupRunFilters,
+	BackupRunProgress, BackupType, BackupTypeDefault, MaintenanceKind, MaintenanceOutcomeFilter,
+	NewBackupCredentialIssuance, NewBackupRun, NewBackupRunProgress, NewBackupTypeDefault,
+	NewServerGroupBackupConfig, NewServerGroupBackupSchedule, RunOutcome, ServerBackupCapability,
+	ServerGroupBackupConfig, ServerGroupBackupSchedule, backups::BackupMaintenanceRun,
 };
 use diesel::{sql_query, sql_types};
 use diesel_async::RunQueryDsl;
@@ -1523,6 +1523,413 @@ async fn requests_enqueue_clear_list() {
 			.unwrap();
 		assert_eq!(pending.len(), 1);
 		assert_eq!(pending[0].purpose, BackupPurpose::Restore);
+	})
+	.await;
+}
+
+// --- backup_run_progress ----------------------------------------------------
+
+fn new_progress(
+	run_id: Uuid,
+	device_id: Uuid,
+	group_id: Uuid,
+	server_id: Uuid,
+	bytes_uploaded: Option<i64>,
+) -> NewBackupRunProgress {
+	NewBackupRunProgress {
+		run_id,
+		device_id,
+		group_id,
+		server_id: Some(server_id),
+		r#type: BackupType::TamanuPostgres,
+		purpose: BackupPurpose::Backup,
+		snapshot_taken_at: None,
+		bytes_read: None,
+		bytes_hashed: None,
+		bytes_uploaded,
+		bytes_cached: None,
+		bytes_estimated: None,
+		files_done: None,
+		files_estimated: None,
+		errors: None,
+		ignored_errors: None,
+		current_path: None,
+		s3_sent_raw_bytes: None,
+		s3_sent_payload_bytes: None,
+		s3_received_raw_bytes: None,
+		s3_received_payload_bytes: None,
+		extra: serde_json::json!({}),
+	}
+}
+
+/// A sample can be recorded for a run that has no `backup_runs` row — which is
+/// the normal case, since the run row only exists once the run finishes.
+#[tokio::test(flavor = "multi_thread")]
+async fn progress_records_without_a_run_row() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id).await;
+		let device_id = insert_device(&mut conn).await;
+		let run_id = Uuid::new_v4();
+
+		BackupRunProgress::record(
+			&mut conn,
+			new_progress(run_id, device_id, group_id, server_id, Some(10)),
+		)
+		.await
+		.expect("a sample for an unknown run must be accepted");
+
+		let latest = BackupRunProgress::latest_for_run(&mut conn, run_id)
+			.await
+			.unwrap()
+			.expect("sample stored");
+		assert_eq!(latest.bytes_uploaded, Some(10));
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn progress_series_is_oldest_first_and_latest_is_newest() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id).await;
+		let device_id = insert_device(&mut conn).await;
+		let run_id = Uuid::new_v4();
+
+		for uploaded in [1_i64, 2, 3] {
+			BackupRunProgress::record(
+				&mut conn,
+				new_progress(run_id, device_id, group_id, server_id, Some(uploaded)),
+			)
+			.await
+			.unwrap();
+		}
+
+		let series = BackupRunProgress::series_for_run(&mut conn, run_id)
+			.await
+			.unwrap();
+		assert_eq!(
+			series.iter().map(|p| p.bytes_uploaded).collect::<Vec<_>>(),
+			vec![Some(1), Some(2), Some(3)],
+		);
+
+		let latest = BackupRunProgress::latest_for_run(&mut conn, run_id)
+			.await
+			.unwrap()
+			.unwrap();
+		assert_eq!(latest.bytes_uploaded, Some(3));
+	})
+	.await;
+}
+
+/// The write-once subtlety: a device announces the freeze moment once, early, and
+/// omits it thereafter — so it must not be read off the latest sample.
+#[tokio::test(flavor = "multi_thread")]
+async fn earliest_snapshot_moment_ignores_later_null_samples() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id).await;
+		let device_id = insert_device(&mut conn).await;
+		let run_id = Uuid::new_v4();
+		let taken: Timestamp = "2026-07-01T04:12:00Z".parse().unwrap();
+
+		BackupRunProgress::record(
+			&mut conn,
+			NewBackupRunProgress {
+				snapshot_taken_at: Some(taken),
+				..new_progress(run_id, device_id, group_id, server_id, Some(1))
+			},
+		)
+		.await
+		.unwrap();
+		BackupRunProgress::record(
+			&mut conn,
+			new_progress(run_id, device_id, group_id, server_id, Some(2)),
+		)
+		.await
+		.unwrap();
+
+		assert_eq!(
+			BackupRunProgress::latest_for_run(&mut conn, run_id)
+				.await
+				.unwrap()
+				.unwrap()
+				.snapshot_taken_at,
+			None,
+			"the latest sample carries no moment — that's the trap",
+		);
+		assert_eq!(
+			BackupRunProgress::earliest_snapshot_taken_at_for_run(&mut conn, run_id)
+				.await
+				.unwrap(),
+			Some(taken),
+		);
+
+		let batch = BackupRunProgress::earliest_snapshot_taken_at_by_run(&mut conn, &[run_id])
+			.await
+			.unwrap();
+		assert_eq!(batch.get(&run_id).copied(), Some(taken));
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn progress_batch_loaders_key_by_run_and_short_circuit_empty() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id).await;
+		let device_id = insert_device(&mut conn).await;
+		let (run_a, run_b) = (Uuid::new_v4(), Uuid::new_v4());
+
+		for (run, uploaded) in [(run_a, 5_i64), (run_a, 9), (run_b, 100)] {
+			BackupRunProgress::record(
+				&mut conn,
+				new_progress(run, device_id, group_id, server_id, Some(uploaded)),
+			)
+			.await
+			.unwrap();
+		}
+
+		let latest = BackupRunProgress::latest_by_run(&mut conn, &[run_a, run_b])
+			.await
+			.unwrap();
+		assert_eq!(latest.get(&run_a).and_then(|p| p.bytes_uploaded), Some(9));
+		assert_eq!(latest.get(&run_b).and_then(|p| p.bytes_uploaded), Some(100));
+
+		let windows = BackupRunProgress::for_runs_since(
+			&mut conn,
+			&[run_a, run_b],
+			Timestamp::now() - SignedDuration::from_hours(1),
+		)
+		.await
+		.unwrap();
+		assert_eq!(windows.get(&run_a).map(Vec::len), Some(2));
+		assert_eq!(windows.get(&run_b).map(Vec::len), Some(1));
+
+		// No ids → no query, empty result.
+		assert!(
+			BackupRunProgress::latest_by_run(&mut conn, &[])
+				.await
+				.unwrap()
+				.is_empty()
+		);
+		assert!(
+			BackupRunProgress::for_runs_since(&mut conn, &[], Timestamp::now())
+				.await
+				.unwrap()
+				.is_empty()
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn progress_prune_deletes_only_past_the_cutoff() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id).await;
+		let device_id = insert_device(&mut conn).await;
+		let (old_run, fresh_run) = (Uuid::new_v4(), Uuid::new_v4());
+
+		let old = BackupRunProgress::record(
+			&mut conn,
+			new_progress(old_run, device_id, group_id, server_id, Some(1)),
+		)
+		.await
+		.unwrap();
+		BackupRunProgress::record(
+			&mut conn,
+			new_progress(fresh_run, device_id, group_id, server_id, Some(2)),
+		)
+		.await
+		.unwrap();
+
+		// Backdate the first sample well past any plausible retention.
+		sql_query(
+			"UPDATE backup_run_progress SET observed_at = now() - interval '30 days' WHERE id = $1",
+		)
+		.bind::<sql_types::BigInt, _>(old.id)
+		.execute(&mut conn)
+		.await
+		.unwrap();
+
+		let deleted = BackupRunProgress::prune_before(
+			&mut conn,
+			Timestamp::now() - SignedDuration::from_hours(14 * 24),
+		)
+		.await
+		.unwrap();
+		assert_eq!(deleted, 1);
+
+		assert!(
+			BackupRunProgress::latest_for_run(&mut conn, old_run)
+				.await
+				.unwrap()
+				.is_none()
+		);
+		assert!(
+			BackupRunProgress::latest_for_run(&mut conn, fresh_run)
+				.await
+				.unwrap()
+				.is_some(),
+			"a fresh sample must survive pruning",
+		);
+	})
+	.await;
+}
+
+// --- staleness anchor -------------------------------------------------------
+
+/// Record a success whose report is `reported_age` old and whose data was frozen
+/// `taken_age` before now (when given).
+async fn insert_success_with_moments(
+	conn: &mut AsyncPgConnection,
+	device_id: Uuid,
+	group_id: Uuid,
+	server_id: Uuid,
+	reported_age: SignedDuration,
+	taken_age: Option<SignedDuration>,
+) -> Uuid {
+	let id = Uuid::new_v4();
+	BackupRun::record(
+		conn,
+		NewBackupRun {
+			snapshot_taken_at: taken_age.map(|a| Timestamp::now() - a),
+			..new_run(
+				id,
+				device_id,
+				group_id,
+				Some(server_id),
+				BackupPurpose::Backup,
+				RunOutcome::Success,
+			)
+		},
+	)
+	.await
+	.unwrap();
+	sql_query(
+		"UPDATE backup_runs SET reported_at = now() - ($2 || ' seconds')::INTERVAL WHERE id = $1",
+	)
+	.bind::<sql_types::Uuid, _>(id)
+	.bind::<sql_types::Text, _>(reported_age.as_secs().to_string())
+	.execute(conn)
+	.await
+	.unwrap();
+	id
+}
+
+/// `anchor()` is the data's own moment, so a backup that took hours to upload is
+/// as old as what it captured — not as young as its report.
+#[tokio::test(flavor = "multi_thread")]
+async fn anchor_prefers_the_freeze_moment_over_the_report() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id).await;
+		let device_id = insert_device(&mut conn).await;
+		let pg = BackupType::TamanuPostgres;
+
+		// Reported an hour ago, but the data was frozen 22 hours ago — a long run.
+		insert_success_with_moments(
+			&mut conn,
+			device_id,
+			group_id,
+			server_id,
+			SignedDuration::from_hours(1),
+			Some(SignedDuration::from_hours(22)),
+		)
+		.await;
+
+		let run = BackupRun::latest_success_for_server(&mut conn, server_id, &pg)
+			.await
+			.unwrap()
+			.unwrap();
+		let age = Timestamp::now().duration_since(run.anchor());
+		assert!(
+			age > SignedDuration::from_hours(21),
+			"anchor must reflect the freeze moment (age was {age:?})",
+		);
+	})
+	.await;
+}
+
+/// A run that reports no freeze moment behaves exactly as before — this is what
+/// makes the change a no-op for clients that don't send it.
+#[tokio::test(flavor = "multi_thread")]
+async fn anchor_falls_back_to_the_report_time() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id).await;
+		let device_id = insert_device(&mut conn).await;
+		let pg = BackupType::TamanuPostgres;
+
+		insert_success_with_moments(
+			&mut conn,
+			device_id,
+			group_id,
+			server_id,
+			SignedDuration::from_hours(3),
+			None,
+		)
+		.await;
+
+		let run = BackupRun::latest_success_for_server(&mut conn, server_id, &pg)
+			.await
+			.unwrap()
+			.unwrap();
+		assert_eq!(run.anchor(), run.reported_at);
+	})
+	.await;
+}
+
+/// The reason selection and measure must use the same expression: a newer report
+/// carrying *older* data must not become the anchor, or a server's freshness
+/// would travel backwards as runs arrive.
+#[tokio::test(flavor = "multi_thread")]
+async fn latest_success_selects_by_data_age_not_report_order() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id).await;
+		let device_id = insert_device(&mut conn).await;
+		let pg = BackupType::TamanuPostgres;
+
+		// A: reported 2h ago, data frozen 3h ago — the fresher *data*.
+		let a = insert_success_with_moments(
+			&mut conn,
+			device_id,
+			group_id,
+			server_id,
+			SignedDuration::from_hours(2),
+			Some(SignedDuration::from_hours(3)),
+		)
+		.await;
+		// B: reported 1h ago (later), but data frozen 20h ago — staler data.
+		let b = insert_success_with_moments(
+			&mut conn,
+			device_id,
+			group_id,
+			server_id,
+			SignedDuration::from_hours(1),
+			Some(SignedDuration::from_hours(20)),
+		)
+		.await;
+
+		let picked = BackupRun::latest_success_for_server(&mut conn, server_id, &pg)
+			.await
+			.unwrap()
+			.unwrap();
+		assert_eq!(
+			picked.id, a,
+			"must pick the run with the newest data, not the newest report (b={b})",
+		);
+
+		let map = BackupRun::latest_success_by_server_type_for_group(&mut conn, group_id)
+			.await
+			.unwrap();
+		assert_eq!(
+			map.get(&(server_id, pg)).map(|r| r.id),
+			Some(a),
+			"the batch loader must agree with the single-server query",
+		);
 	})
 	.await;
 }

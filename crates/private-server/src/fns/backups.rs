@@ -2913,6 +2913,219 @@ mod tests {
 		assert_eq!(rows.len(), 1, "consumer-device issuance is excluded here");
 		assert_eq!(rows[0].server_id, Some(Uuid::from_u128(9)));
 	}
+
+	// --- live progress on in-flight rows ------------------------------------
+
+	fn sample(
+		run_id: Uuid,
+		observed: i64,
+		bytes_uploaded: Option<i64>,
+	) -> database::backups::BackupRunProgress {
+		database::backups::BackupRunProgress {
+			id: observed,
+			run_id,
+			device_id: Uuid::nil(),
+			group_id: Uuid::nil(),
+			server_id: None,
+			r#type: BackupType::TamanuPostgres,
+			purpose: BackupPurpose::Backup,
+			observed_at: ts(observed),
+			snapshot_taken_at: None,
+			bytes_read: None,
+			bytes_hashed: None,
+			bytes_uploaded,
+			bytes_cached: None,
+			bytes_estimated: Some(1_000),
+			files_done: None,
+			files_estimated: None,
+			errors: None,
+			ignored_errors: None,
+			current_path: None,
+			s3_sent_raw_bytes: None,
+			s3_sent_payload_bytes: None,
+			s3_received_raw_bytes: None,
+			s3_received_payload_bytes: None,
+			extra: serde_json::json!({}),
+		}
+	}
+
+	#[test]
+	fn rate_is_the_difference_of_cumulative_counters() {
+		let rid = Uuid::from_u128(1);
+		let window = vec![
+			sample(rid, 1000, Some(100)),
+			sample(rid, 1100, Some(300)),
+			sample(rid, 1200, Some(500)),
+		];
+		let live = live_progress(&window[2], &window, ts(1210));
+
+		// 400 bytes across 200 seconds — spanning the whole window, not just the
+		// last pair, so a single noisy interval doesn't dominate.
+		assert_eq!(live.bytes_per_second, Some(2.0));
+		assert_eq!(live.bytes_uploaded, Some(500));
+		assert_eq!(live.seconds_since_observed, 10);
+	}
+
+	/// A dropped sample costs resolution, never the correctness of the total —
+	/// which is the whole reason the counters are cumulative rather than deltas.
+	#[test]
+	fn rate_survives_a_dropped_sample() {
+		let rid = Uuid::from_u128(1);
+		// The sample that would have sat at t=1100 never arrived.
+		let window = vec![sample(rid, 1000, Some(100)), sample(rid, 1200, Some(500))];
+		let live = live_progress(&window[1], &window, ts(1200));
+		assert_eq!(live.bytes_per_second, Some(2.0));
+	}
+
+	#[test]
+	fn rate_is_unknown_with_a_single_sample() {
+		let rid = Uuid::from_u128(1);
+		let window = vec![sample(rid, 1000, Some(100))];
+		let live = live_progress(&window[0], &window, ts(1000));
+		assert_eq!(
+			live.bytes_per_second, None,
+			"one point cannot yield a rate — and must not read as zero",
+		);
+	}
+
+	/// Two samples at the same instant span no time; a zero divisor must not
+	/// produce an infinite rate.
+	#[test]
+	fn rate_is_unknown_when_the_window_spans_no_time() {
+		let rid = Uuid::from_u128(1);
+		let window = vec![sample(rid, 1000, Some(100)), sample(rid, 1000, Some(300))];
+		let live = live_progress(&window[1], &window, ts(1000));
+		assert_eq!(live.bytes_per_second, None);
+	}
+
+	/// A run that measures no uploaded figure still has a live view — it just has
+	/// no rate. "Not reported" must not collapse into "zero".
+	#[test]
+	fn rate_is_unknown_when_uploaded_is_not_reported() {
+		let rid = Uuid::from_u128(1);
+		let window = vec![sample(rid, 1000, None), sample(rid, 1100, None)];
+		let live = live_progress(&window[1], &window, ts(1100));
+		assert_eq!(live.bytes_per_second, None);
+		assert_eq!(live.bytes_uploaded, None);
+		assert_eq!(live.bytes_estimated, Some(1_000));
+	}
+
+	/// A device gone quiet mid-run keeps its last figures, and the silence shows
+	/// as an ever-growing gap rather than as absent progress.
+	#[test]
+	fn a_silent_device_keeps_its_last_sample_and_shows_the_gap() {
+		let rid = Uuid::from_u128(1);
+		let latest = sample(rid, 1000, Some(100));
+		// Window empty: the last sample predates the trailing window entirely.
+		let live = live_progress(&latest, &[], ts(9000));
+		assert_eq!(live.bytes_uploaded, Some(100));
+		assert_eq!(live.seconds_since_observed, 8000);
+		assert_eq!(live.bytes_per_second, None);
+	}
+
+	#[test]
+	fn in_flight_row_carries_progress_and_the_freeze_moment() {
+		let d = Uuid::from_u128(9);
+		let rid = Uuid::from_u128(77);
+		let taken = ts(500);
+		let latest = sample(rid, 4000, Some(700));
+
+		let rows = build_recent_runs_with_progress(
+			vec![],
+			// Creds still valid at ts(4500) → the row is in flight.
+			vec![issuance_for(1, d, BackupPurpose::Backup, 1000, 8000, rid)],
+			&device_map(d, 9),
+			&no_sizes(),
+			&std::collections::HashMap::from([(rid, latest.clone())]),
+			&std::collections::HashMap::from([(rid, vec![sample(rid, 3900, Some(600)), latest])]),
+			&std::collections::HashMap::from([(rid, taken)]),
+			ts(4500),
+			20,
+		);
+
+		assert_eq!(rows.len(), 1);
+		assert!(matches!(rows[0].status, RunStatus::InProgress));
+		assert_eq!(rows[0].run_id, Some(rid));
+		assert_eq!(rows[0].snapshot_taken_at, Some(taken));
+		let live = rows[0].progress.as_ref().expect("progress attached");
+		assert_eq!(live.bytes_uploaded, Some(700));
+		assert_eq!(live.bytes_per_second, Some(1.0));
+		assert_eq!(live.seconds_since_observed, 500);
+	}
+
+	/// An in-flight run that has reported nothing must still render — as a run in
+	/// progress with unknown figures, not as one stalled at zero.
+	#[test]
+	fn in_flight_row_without_progress_has_none() {
+		let d = Uuid::from_u128(9);
+		let rid = Uuid::from_u128(77);
+
+		let rows = build_recent_runs_with_progress(
+			vec![],
+			vec![issuance_for(1, d, BackupPurpose::Backup, 1000, 8000, rid)],
+			&device_map(d, 9),
+			&no_sizes(),
+			&Default::default(),
+			&Default::default(),
+			&Default::default(),
+			ts(4500),
+			20,
+		);
+
+		assert_eq!(rows.len(), 1);
+		assert!(matches!(rows[0].status, RunStatus::InProgress));
+		assert!(rows[0].progress.is_none());
+		assert_eq!(rows[0].snapshot_taken_at, None);
+	}
+
+	/// An issuance from a client that predates run correlation has no id to match
+	/// progress by, so it shows as in flight with no figures rather than picking up
+	/// some other run's.
+	#[test]
+	fn in_flight_row_without_a_run_id_matches_no_progress() {
+		let d = Uuid::from_u128(9);
+		let other = Uuid::from_u128(77);
+
+		let rows = build_recent_runs_with_progress(
+			vec![],
+			vec![issuance(1, d, BackupPurpose::Backup, 1000, 8000)],
+			&device_map(d, 9),
+			&no_sizes(),
+			&std::collections::HashMap::from([(other, sample(other, 4000, Some(700)))]),
+			&Default::default(),
+			&std::collections::HashMap::from([(other, ts(500))]),
+			ts(4500),
+			20,
+		);
+
+		assert_eq!(rows.len(), 1);
+		assert!(rows[0].run_id.is_none());
+		assert!(rows[0].progress.is_none());
+		assert_eq!(rows[0].snapshot_taken_at, None);
+	}
+
+	/// A reported run's figures live on the row itself; the live view is over.
+	#[test]
+	fn reported_row_has_no_live_progress_but_keeps_the_freeze_moment() {
+		let d = Uuid::from_u128(9);
+		let mut r = run(10, d, BackupPurpose::Backup, 4000);
+		r.snapshot_taken_at = Some(ts(500));
+
+		let rows = build_recent_runs(
+			vec![r],
+			vec![],
+			&device_map(d, 9),
+			&no_sizes(),
+			ts(5000),
+			20,
+		);
+
+		assert_eq!(rows.len(), 1);
+		assert!(matches!(rows[0].status, RunStatus::Reported));
+		assert!(rows[0].progress.is_none());
+		assert_eq!(rows[0].snapshot_taken_at, Some(ts(500)));
+		assert_eq!(rows[0].run_id, Some(Uuid::from_u128(10)));
+	}
 }
 
 /// Fetch a group's config or 404 — used by the mutation handlers that require
