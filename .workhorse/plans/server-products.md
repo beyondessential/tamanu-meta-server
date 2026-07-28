@@ -56,46 +56,46 @@ A follow-up plan handles the cleanup migration (`kind = 'standalone'` where
 
 ## Types
 
-- [ ] New `crates/commons-types/src/server/product.rs`, modelled on the
+- [x] New `crates/commons-types/src/server/product.rs`, modelled on the
       existing `kind.rs`: `Product { Tamanu, Senaite, Canopy }` with
       `Default = Tamanu`, `Display`, `FromStr`, `TryFrom<String>`, diesel
       `FromSql`/`ToSql` over `Text`, `Serialize`/`Deserialize` lowercase,
       and `utoipa::ToSchema`
-- [ ] `VersionTracking { Tracked, Reported, None }` in the same module
-- [ ] `Product::caps() -> Caps` as a `const fn`, with
+- [x] `VersionTracking { Tracked, Reported, None }` in the same module
+- [x] `Product::caps() -> Caps` as a `const fn`, with
       `Caps { version_tracking: VersionTracking, public_listing: bool }`
-- [ ] `Product::kinds() -> &'static [ServerKind]` and
+- [x] `Product::kinds() -> &'static [ServerKind]` and
       `Product::default_kind()`, so the edit endpoint and the UI agree on
       which kinds a product offers without restating the mapping
-- [ ] `kind.rs`: replace the `Canopy` variant with `Standalone`; `Display`
+- [x] `kind.rs`: replace the `Canopy` variant with `Standalone`; `Display`
       writes `"standalone"`; `from_str` accepts `"standalone"` and keeps
       `"canopy"` as a legacy alias
-- [ ] Export `product` from `crates/commons-types/src/server.rs`
+- [x] Export `product` from `crates/commons-types/src/server.rs`
 
 ## Database crate
 
-- [ ] `servers.rs`: `product: Product` on `Server` (diesel
+- [x] `servers.rs`: `product: Product` on `Server` (diesel
       `deserialize_as`/`serialize_as = String`, as `kind` does), plus
       `NewServer.product` and `PartialServer.product`. Update the
       `test_server_serialization` expected JSON
-- [ ] `servers.rs` `search_central` (~:645): add an explicit
+- [x] `servers.rs` `search_central` (~:645): add an explicit
       `product = tamanu` filter alongside the existing `kind = central`.
       Today the kind filter excludes SENAITE incidentally; make it hold on
       purpose
-- [ ] `servers.rs` `tags_for_device` (~:764): emit `canopy:product`
+- [x] `servers.rs` `tags_for_device` (~:764): emit `canopy:product`
       alongside `canopy:kind` and `canopy:rank`. Without it a Canopy
       instance's agent loses information it gets today, since its
       `canopy:kind` goes from `canopy` to `standalone`
-- [ ] `server_groups.rs` `kind_priority` (~:33): `Central` 0, `Facility` 1,
+- [x] `server_groups.rs` `kind_priority` (~:33): `Central` 0, `Facility` 1,
       `Standalone` 2 — drop the `Canopy` arm
-- [ ] `server_groups.rs` `recompute_version` (~:390): filter members to
+- [x] `server_groups.rs` `recompute_version` (~:390): filter members to
       `caps().version_tracking == Tracked` *before* the `min_by`; no such
       member ⇒ `(None, None)`. The `statuses` trigger needs no change, it
       only fires on `NEW.version IS NOT NULL`
-- [ ] New `ServerGroup::member_products` (or equivalent): the distinct
+- [x] New `ServerGroup::member_products` (or equivalent): the distinct
       products among a group's live members, for the billing resolution
       below
-- [ ] `reported_detail.rs` `production_versions` (~:161): join `servers` and
+- [x] `reported_detail.rs` `production_versions` (~:161): join `servers` and
       restrict to products whose tracking is `Tracked`
 
 ## Billing attribution

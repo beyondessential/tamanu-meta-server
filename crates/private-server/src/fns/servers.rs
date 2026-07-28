@@ -56,8 +56,11 @@ pub struct ServerDetailData {
 	/// server is ungrouped or alone in its group. Each entry carries its
 	/// own `up` / `health` so the UI can render a status dot per sibling.
 	pub siblings: Vec<ServerInfo>,
-	/// The server's effective `billing.*` labels — i.e. its group's
-	/// (product/deployment/stage). Empty when the server is ungrouped.
+	/// The server's own effective `billing.*` labels
+	/// (product/deployment/stage) — the ones canopy hands the server's device,
+	/// carrying its own product and rank rather than its group's. Empty when
+	/// the server is ungrouped, there being no deployment to attribute to.
+	// spec: APP#billing-attribution
 	pub billing_labels: Vec<super::server_groups::BillingTag>,
 	/// Whether the server is known to run Munin, from the most recent source
 	/// to report the flag. The UI offers a Munin link only when this is true.
@@ -700,8 +703,21 @@ pub async fn get_detail(
 		Vec::new()
 	};
 
+	// This server's own attribution, not its group's: for a server whose
+	// product or rank differs from the group's, the page would otherwise show
+	// labels the device is never handed.
+	// spec: APP#billing-attribution
 	let billing_labels = match group.as_ref() {
-		Some(g) => super::server_groups::group_billing_labels(&mut conn, g).await?,
+		Some(g) => commons_servers::backup_jobs::BillingLabels::for_server(
+			&g.tags,
+			&g.name,
+			server.product,
+			server.rank,
+		)
+		.into_tags()
+		.into_iter()
+		.map(|(key, value)| super::server_groups::BillingTag { key, value })
+		.collect(),
 		None => Vec::new(),
 	};
 
