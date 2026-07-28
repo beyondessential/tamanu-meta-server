@@ -24,7 +24,7 @@ axum = "0.8.9"
 axum-test = "21.0.0"
 # bestool-kopia's SigV4 re-signing proxy (S3P spec). The proxy feature uses the
 # workspace's `aws-lc-rs` rustls provider.
-bestool-kopia = { version = "0.4.0", features = ["proxy"] }
+bestool-kopia = { version = "0.5.0", features = ["proxy"] }
 clap = "4.6.1"
 diesel = "2.3.9"
 diesel-async = "0.9.0"
