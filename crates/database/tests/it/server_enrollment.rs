@@ -1,6 +1,6 @@
 //! Model-level tests for server archival and enrollment-token lifecycle.
 
-use commons_types::server::{TagMap, kind::ServerKind};
+use commons_types::server::{TagMap, kind::ServerKind, product::Product};
 use database::{
 	Device, DeviceKey, pg_duration::PgDuration, server_enrollment_tokens::ServerEnrollmentToken,
 	servers::Server, url_field::UrlField,
@@ -13,6 +13,7 @@ fn new_server(host: &str) -> Server {
 		id: Uuid::new_v4(),
 		name: Some("t".into()),
 		host: Some(UrlField(host.parse().unwrap())),
+		product: Product::Tamanu,
 		kind: ServerKind::Central,
 		rank: None,
 		device_id: None,

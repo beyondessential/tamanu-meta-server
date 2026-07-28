@@ -1,6 +1,6 @@
 //! Model-level tests for the per-server restore window.
 
-use commons_types::server::{TagMap, kind::ServerKind};
+use commons_types::server::{TagMap, kind::ServerKind, product::Product};
 use database::{pg_duration::PgDuration, servers::Server, url_field::UrlField};
 use jiff::{SignedDuration, Timestamp};
 use uuid::Uuid;
@@ -10,6 +10,7 @@ fn new_server() -> Server {
 		id: Uuid::new_v4(),
 		name: Some("t".into()),
 		host: Some(UrlField("https://restore.example/".parse().unwrap())),
+		product: Product::Tamanu,
 		kind: ServerKind::Central,
 		rank: None,
 		device_id: None,

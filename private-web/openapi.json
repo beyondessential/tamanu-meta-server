@@ -1722,6 +1722,41 @@
         }
       }
     },
+    "/api/commons/products": {
+      "post": {
+        "tags": [
+          "commons"
+        ],
+        "summary": "Describe every product canopy monitors.",
+        "description": "The operator UI reads this to decide what to present for a server — which\nroles to offer, whether a version applies and whether it can be graded,\nwhether the public-name field is meaningful — rather than restating the\nmapping client-side, where it would drift as products are added.",
+        "operationId": "products",
+        "responses": {
+          "200": {
+            "description": "Every product, its capabilities, and the roles it defines.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProductInfo"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/commons/public_url": {
       "post": {
         "tags": [
@@ -5438,7 +5473,7 @@
           "servers"
         ],
         "summary": "Update a server's fields.",
-        "description": "Applies a partial update — only the fields present in `data` are\nchanged. Moving a previously-ungrouped server into a group, or toggling\n`is_monitored`, re-evaluates the server's open issues so incidents catch\nup with the new state. Returns 400 if the update is rejected (e.g. an\ninvalid host value).",
+        "description": "Applies a partial update — only the fields present in `data` are\nchanged. Moving a previously-ungrouped server into a group, or toggling\n`is_monitored`, re-evaluates the server's open issues so incidents catch\nup with the new state. Returns 400 if the update is rejected (e.g. an\ninvalid host value, or a role the target product doesn't define).",
         "operationId": "server_update",
         "requestBody": {
           "content": {
@@ -7196,7 +7231,7 @@
       },
       "BillingTag": {
         "type": "object",
-        "description": "One effective billing label attributed to a group's cloud resources.\n\nLabels are computed from the group's configuration: explicit `billing.*`\ntags on the group are honoured verbatim; otherwise the product defaults to\n`tamanu`, the deployment to the group name in lower-kebab-case, and the\nstage to the group's highest-ranked live member (for example `prod`). The\nstage label is omitted entirely when the group has no ranked members.",
+        "description": "One effective billing label attributed to a group's cloud resources.\n\nLabels are computed from the group's configuration: explicit `billing.*`\ntags on the group are honoured verbatim; otherwise the product comes from\nthe one its live members agree on, the deployment from the group name in\nlower-kebab-case, and the stage from the group's highest-ranked live member\n(for example `prod`). A label with nothing to attribute to is omitted\nentirely: the stage when the group has no ranked members, and the product\nwhen its members span products.",
         "required": [
           "key",
           "value"
@@ -7209,6 +7244,24 @@
           "value": {
             "type": "string",
             "description": "Label value."
+          }
+        }
+      },
+      "Caps": {
+        "type": "object",
+        "description": "What canopy does for a product's servers.\n\nReachability, health checks and backups are deliberately absent: checks\nare graded by the source that reports them, and backup types are\nadvertised per-server by the agent, so both already work for any product.",
+        "required": [
+          "version_tracking",
+          "public_listing"
+        ],
+        "properties": {
+          "public_listing": {
+            "type": "boolean",
+            "description": "Whether this product's servers can be listed for end-user-facing\nclients."
+          },
+          "version_tracking": {
+            "$ref": "#/components/schemas/VersionTracking",
+            "description": "How this product's application version is treated."
           }
         }
       },
@@ -7847,7 +7900,7 @@
           },
           "kind": {
             "$ref": "#/components/schemas/ServerKind",
-            "description": "The kind of deployment this server represents."
+            "description": "The server's role within its product's topology. Rejected when the\nproduct does not define it."
           },
           "name": {
             "type": [
@@ -7862,6 +7915,10 @@
               "null"
             ],
             "description": "Free-text operator notes about the server."
+          },
+          "product": {
+            "$ref": "#/components/schemas/Product",
+            "description": "The application this server runs. Defaults to tamanu."
           },
           "public_name": {
             "type": [
@@ -8262,6 +8319,7 @@
           "up",
           "health",
           "operators",
+          "product",
           "kind"
         ],
         "properties": {
@@ -8276,7 +8334,7 @@
           },
           "kind": {
             "$ref": "#/components/schemas/ServerKind",
-            "description": "The server's kind (central, facility, or canopy)."
+            "description": "The server's role within its product's topology (for Tamanu, central\nor facility; standalone for a product with no internal roles)."
           },
           "name": {
             "type": "string",
@@ -8288,6 +8346,10 @@
               "$ref": "#/components/schemas/OperatorPresence"
             },
             "description": "People currently connected to this server, from its latest status\nupdate. Always empty unless the server is actively reporting (`up`\nor `blip`) — a stale report can't be trusted to reflect who is\nconnected right now."
+          },
+          "product": {
+            "$ref": "#/components/schemas/Product",
+            "description": "The application the server runs, presented alongside its role."
           },
           "rank": {
             "oneOf": [
@@ -8312,6 +8374,7 @@
         "required": [
           "server_id",
           "server_name",
+          "product",
           "kind",
           "detail",
           "checks"
@@ -8349,7 +8412,7 @@
           },
           "kind": {
             "$ref": "#/components/schemas/ServerKind",
-            "description": "The kind of deployment the server represents."
+            "description": "The server's role within its product's topology."
           },
           "nodejs": {
             "type": [
@@ -8371,6 +8434,10 @@
               "null"
             ],
             "description": "Reported database engine version."
+          },
+          "product": {
+            "$ref": "#/components/schemas/Product",
+            "description": "The application the server runs. The fleet view reads it to keep the\napplication-version spread to servers that have one to report."
           },
           "rank": {
             "oneOf": [
@@ -10196,6 +10263,7 @@
               "description": "A server in the fleet inventory: its identity, classification, network\naddress, monitoring configuration, and (when requested by the endpoint)\ncurrent reachability/health.",
               "required": [
                 "id",
+                "product",
                 "kind",
                 "display_host",
                 "is_monitored",
@@ -10288,7 +10356,7 @@
                 },
                 "kind": {
                   "$ref": "#/components/schemas/ServerKind",
-                  "description": "The kind of deployment this server represents."
+                  "description": "The server's role within its product's topology."
                 },
                 "name": {
                   "type": [
@@ -10300,6 +10368,10 @@
                 "notes": {
                   "type": "string",
                   "description": "Free-text operator notes about the server."
+                },
+                "product": {
+                  "$ref": "#/components/schemas/Product",
+                  "description": "The application this server runs. Decides which of canopy's\nper-server features apply to it."
                 },
                 "public_name": {
                   "type": [
@@ -10627,6 +10699,46 @@
             "format": "uri",
             "description": "A URI reference identifying the problem type. Stable across\noccurrences of the same error, so callers can match on it.",
             "example": "/errors/resource-not-found"
+          }
+        }
+      },
+      "Product": {
+        "type": "string",
+        "description": "Which application a server runs.\n\nThe set is closed and defined here rather than configured, because each\nproduct's handling — what canopy tracks for it, what it presents — is\nbuilt in. See [`Product::caps`].",
+        "enum": [
+          "tamanu",
+          "senaite",
+          "canopy"
+        ]
+      },
+      "ProductInfo": {
+        "type": "object",
+        "description": "One product canopy monitors, with what canopy does for its servers and the\nroles it defines.",
+        "required": [
+          "product",
+          "caps",
+          "kinds",
+          "default_kind"
+        ],
+        "properties": {
+          "caps": {
+            "$ref": "#/components/schemas/Caps",
+            "description": "What canopy does for this product's servers."
+          },
+          "default_kind": {
+            "$ref": "#/components/schemas/ServerKind",
+            "description": "The role a server of this product takes when none is chosen."
+          },
+          "kinds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServerKind"
+            },
+            "description": "The roles this product defines, in the order they rank when choosing a\ngroup's canonical member."
+          },
+          "product": {
+            "$ref": "#/components/schemas/Product",
+            "description": "The product itself."
           }
         }
       },
@@ -12081,7 +12193,7 @@
               },
               {
                 "$ref": "#/components/schemas/ServerKind",
-                "description": "New deployment kind for the server. Omit to leave unchanged."
+                "description": "New role for the server within its product's topology. Omit to leave\nunchanged. Rejected when the product does not define it."
               }
             ]
           },
@@ -12098,6 +12210,17 @@
               "null"
             ],
             "description": "New free-text notes for the server. Omit to leave unchanged."
+          },
+          "product": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Product",
+                "description": "New application for the server. Omit to leave unchanged. Changing it\nto a product that does not define the server's kind moves the kind to\nthe new product's default, unless this request sets one too."
+              }
+            ]
           },
           "public_name": {
             "type": [
@@ -12148,7 +12271,7 @@
             "items": {
               "$ref": "#/components/schemas/BillingTag"
             },
-            "description": "The server's effective `billing.*` labels — i.e. its group's\n(product/deployment/stage). Empty when the server is ungrouped."
+            "description": "The server's own effective `billing.*` labels\n(product/deployment/stage) — the ones canopy hands the server's device,\ncarrying its own product and rank rather than its group's. Empty when\nthe server is ungrouped, there being no deployment to attribute to."
           },
           "checks": {
             "$ref": "#/components/schemas/ConsolidatedChecks",
@@ -12481,6 +12604,7 @@
         "description": "A server in the fleet inventory: its identity, classification, network\naddress, monitoring configuration, and (when requested by the endpoint)\ncurrent reachability/health.",
         "required": [
           "id",
+          "product",
           "kind",
           "display_host",
           "is_monitored",
@@ -12573,7 +12697,7 @@
           },
           "kind": {
             "$ref": "#/components/schemas/ServerKind",
-            "description": "The kind of deployment this server represents."
+            "description": "The server's role within its product's topology."
           },
           "name": {
             "type": [
@@ -12585,6 +12709,10 @@
           "notes": {
             "type": "string",
             "description": "Free-text operator notes about the server."
+          },
+          "product": {
+            "$ref": "#/components/schemas/Product",
+            "description": "The application this server runs. Decides which of canopy's\nper-server features apply to it."
           },
           "public_name": {
             "type": [
@@ -12631,11 +12759,11 @@
       },
       "ServerKind": {
         "type": "string",
-        "description": "What kind of server this is within a deployment.",
+        "description": "A server's role relative to the other servers of its product.\n\nWhich kinds are available depends on the server's product; see\n[`Product::kinds`](super::product::Product::kinds).",
         "enum": [
           "central",
           "facility",
-          "canopy"
+          "standalone"
         ]
       },
       "ServerLastStatusData": {
@@ -12644,6 +12772,7 @@
         "required": [
           "id",
           "created_at",
+          "product",
           "source",
           "extra",
           "operators"
@@ -12706,6 +12835,10 @@
               "null"
             ],
             "description": "PostgreSQL version the server reported, if any."
+          },
+          "product": {
+            "$ref": "#/components/schemas/Product",
+            "description": "The application the server runs. Travels with the version so a\nconsumer can tell a product with no version from one that has yet to\nreport one."
           },
           "source": {
             "type": "string",
@@ -13314,6 +13447,7 @@
           "id",
           "created_at",
           "server_id",
+          "product",
           "extra",
           "operators",
           "checks"
@@ -13387,6 +13521,10 @@
               "null"
             ],
             "description": "Reported database engine version."
+          },
+          "product": {
+            "$ref": "#/components/schemas/Product",
+            "description": "The application the server runs. Travels with the version so a\nconsumer can tell a product with no version from one that has yet to\nreport one."
           },
           "server_id": {
             "type": "string",
@@ -14024,6 +14162,15 @@
             "description": "Exact version string to look up (e.g. `\"1.2.3\"`)."
           }
         }
+      },
+      "VersionTracking": {
+        "type": "string",
+        "description": "How canopy treats a product's application version.",
+        "enum": [
+          "tracked",
+          "reported",
+          "absent"
+        ]
       }
     },
     "securitySchemes": {

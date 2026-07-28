@@ -12,6 +12,7 @@ import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { useApi } from "./api";
 import AdminProbeBanner from "./components/AdminProbeBanner";
 import { AdminProvider } from "./hooks/useIsAdmin";
+import { ProductsProvider } from "./hooks/useProducts";
 import { useReloadInterval } from "./hooks/useReloadInterval";
 import Admins from "./routes/Admins";
 import BackupConfig from "./routes/BackupConfig";
@@ -100,6 +101,7 @@ export default function App() {
 
 	return (
 		<AdminProvider>
+		<ProductsProvider>
 		<Box>
 			<AppBar position="static" color="default" elevation={1}>
 				<Toolbar variant="dense" sx={{ gap: 2 }}>
@@ -255,6 +257,7 @@ export default function App() {
 				</Routes>
 			</Container>
 		</Box>
+		</ProductsProvider>
 		</AdminProvider>
 	);
 }

@@ -29,8 +29,9 @@ import { Link as RouterLink } from "react-router-dom";
 import { useApi } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { useReloadInterval } from "../hooks/useReloadInterval";
+import { useIsVersionTracked } from "../hooks/useProducts";
 import { valueComparator } from "../lib/valueOrder";
-import type { FleetServerDetailData } from "../types";
+import type { FleetServerDetailData, Product } from "../types";
 
 /// How many distinct values a distribution card shows before collapsing the
 /// rest. A field like `uptimeSecs` is near-unique across the fleet, and a
@@ -92,6 +93,25 @@ const FIGURES: Figure[] = [
 	{ key: "nodejs", label: "Node.js", card: true, pick: (s) => s.nodejs },
 	{ key: "timezone", label: "Timezone", card: true, pick: (s) => s.timezone },
 ];
+
+/// The fields whose spread covers only the servers whose product canopy holds
+/// a release train for. A server that has no application version to report is
+/// absent from these spreads rather than counted among those reporting nothing
+/// — it isn't a server that failed to report, it's a server with nothing to
+/// report. Every other field, including the database-engine and bestool
+/// versions, still covers the whole fleet.
+// spec: APP#versions
+const VERSION_TRACKED_FIELDS = new Set(["release", "version"]);
+
+/// Narrow a server list to the ones a field's spread covers.
+function coveredBy(
+	field: string,
+	servers: FleetServerDetailData[],
+	isVersionTracked: (product: Product) => boolean,
+): FleetServerDetailData[] {
+	if (!VERSION_TRACKED_FIELDS.has(field)) return servers;
+	return servers.filter((s) => isVersionTracked(s.product));
+}
 
 /// The name to present a field under: a figure's own label, or the field
 /// name as an operator typed it.
@@ -216,6 +236,7 @@ export default function FleetFigures() {
 	usePageTitle("Fleet figures");
 	const tick = useReloadInterval(60_000, "canopy-data-changed");
 	const result = useApi("statuses", "fleet_detail", {}, [tick]);
+	const isVersionTracked = useIsVersionTracked();
 
 	const servers = result.status === "ok" ? result.data : [];
 
@@ -266,14 +287,21 @@ export default function FleetFigures() {
 					},
 				}}
 			>
-				{FIGURES.filter((figure) => figure.card).map((figure) => (
-					<DistributionCard
-						key={figure.key}
-						label={figure.label}
-						groups={distribution(servers, figure.pick)}
-						total={servers.length}
-					/>
-				))}
+				{FIGURES.filter((figure) => figure.card).map((figure) => {
+					// Each card's total is the population it actually covers, so
+					// the version cards read against the servers that have a
+					// version rather than the whole fleet.
+					// spec: APP#versions
+					const covered = coveredBy(figure.key, servers, isVersionTracked);
+					return (
+						<DistributionCard
+							key={figure.key}
+							label={figure.label}
+							groups={distribution(covered, figure.pick)}
+							total={covered.length}
+						/>
+					);
+				})}
 			</Box>
 
 			<LookupCard servers={servers} keys={reportedKeys} />
@@ -439,9 +467,16 @@ function LookupCard({
 	keys: string[];
 }) {
 	const [field, setField] = useState<string | null>(null);
+	const isVersionTracked = useIsVersionTracked();
 	const groups = useMemo(
-		() => (field === null ? [] : distribution(servers, picker(field))),
-		[servers, field],
+		() =>
+			field === null
+				? []
+				: distribution(
+						coveredBy(field, servers, isVersionTracked),
+						picker(field),
+					),
+		[servers, field, isVersionTracked],
 	);
 	// The figures the page doesn't lead with — the exact versions behind the
 	// coarse groupings, mostly — are only reachable here and in the crossing.
@@ -513,13 +548,23 @@ function CrossTab({
 	const [cell, setCell] = useState<string | null>(null);
 	const [sort, setSort] = useState<SortMode>("popularity");
 
+	const isVersionTracked = useIsVersionTracked();
 	const { rows, cols, counts } = useMemo(() => {
 		const pickRow = picker(rowField);
 		const pickCol = picker(colField);
-		const rowGroups = orderGroups(distribution(servers, pickRow), sort);
-		const colGroups = orderGroups(distribution(servers, pickCol), sort);
+		// A server absent from either axis is dropped from the table rather
+		// than placed in an unreported row, so a crossing never implies it
+		// failed to report a figure it doesn't have.
+		// spec: APP#versions
+		const covered = coveredBy(
+			colField,
+			coveredBy(rowField, servers, isVersionTracked),
+			isVersionTracked,
+		);
+		const rowGroups = orderGroups(distribution(covered, pickRow), sort);
+		const colGroups = orderGroups(distribution(covered, pickCol), sort);
 		const counts = new Map<string, FleetServerDetailData[]>();
-		for (const server of servers) {
+		for (const server of covered) {
 			const key = `${bucket(pickRow(server))} ${bucket(pickCol(server))}`;
 			const existing = counts.get(key);
 			if (existing) existing.push(server);
@@ -530,7 +575,7 @@ function CrossTab({
 			cols: colGroups.map((g) => g.value),
 			counts,
 		};
-	}, [servers, rowField, colField, sort]);
+	}, [servers, rowField, colField, sort, isVersionTracked]);
 
 	const label = (value: string | null) => value ?? "not reported";
 

@@ -65,6 +65,9 @@ import { BackupProcessingChip } from "../components/BackupProcessingChip";
 import { BackupLiveProgress } from "../components/BackupLiveProgress";
 import TimezoneTooltip from "../components/TimezoneTooltip";
 import VersionIndicator from "../components/VersionIndicator";
+import ServerProductChip from "../components/ServerProductChip";
+import { useProductCaps } from "../hooks/useProducts";
+import { PRODUCT_LABELS } from "../types";
 import { HealthLegend, StatusLegend, VersionLegend } from "../components/Legends";
 import ServerKindChip from "../components/ServerKindChip";
 import ServerRankChip from "../components/ServerRankChip";
@@ -277,6 +280,7 @@ function Header({
 				useFlexGap
 			>
 				{data.server.rank && <ServerRankChip rank={data.server.rank} />}
+				<ServerProductChip product={data.server.product} />
 				<ServerKindChip kind={data.server.kind} />
 				<Typography variant="h4" component="h1" sx={{ ml: 1 }}>
 					<SiblingDotStrip
@@ -1422,6 +1426,7 @@ function SilenceScopeRow({
 }
 
 function StatusInfoFields({ status }: { status: ServerLastStatusData }) {
+	const tracking = useProductCaps(status.product)?.version_tracking;
 	return (
 		<>
 			<Stack spacing={0.25}>
@@ -1442,15 +1447,22 @@ function StatusInfoFields({ status }: { status: ServerLastStatusData }) {
 					</Typography>
 				</InfoItem>
 			)}
-			<Stack spacing={0.25}>
-				<Typography variant="caption" color="text.secondary">
-					Tamanu
-				</Typography>
-				<VersionIndicator
-					version={status.version}
-					distance={status.version_distance}
-				/>
-			</Stack>
+			{/* A product with no application version shows no version block at
+			    all — the caption included, since an empty one reads as a
+			    reporting failure rather than an absence.
+			    spec: APP#versions */}
+			{tracking !== undefined && tracking !== "absent" && (
+				<Stack spacing={0.25}>
+					<Typography variant="caption" color="text.secondary">
+						{PRODUCT_LABELS[status.product]}
+					</Typography>
+					<VersionIndicator
+						version={status.version}
+						tracking={tracking}
+						distance={status.version_distance}
+					/>
+				</Stack>
+			)}
 			{status.postgres && (
 				<InfoItem
 					label="PostgreSQL"

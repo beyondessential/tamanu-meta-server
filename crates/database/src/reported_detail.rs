@@ -12,7 +12,10 @@
 //! record of what stands.
 
 use commons_errors::{AppError, Result};
-use commons_types::{server::rank::ServerRank, version::VersionStr};
+use commons_types::{
+	server::{product::Product, rank::ServerRank},
+	version::VersionStr,
+};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
@@ -164,6 +167,11 @@ impl ReportedDetail {
 		let rows: Vec<Option<VersionStr>> = detail::table
 			.inner_join(servers::table.on(servers::id.eq(detail::server_id)))
 			.filter(servers::rank.eq(ServerRank::Production))
+			// A release branch only means something for a product canopy holds
+			// a release train for. Others would each contribute a branch of
+			// their own to a count of what the fleet is running.
+			// spec: APP#versions
+			.filter(servers::product.eq_any(Product::stored_values_where(Product::tracks_versions)))
 			.filter(servers::deleted_at.is_null())
 			.filter(detail::version.is_not_null())
 			.filter(detail::reported_at.ge(diesel::dsl::sql(ACTIVE_LOOKBACK_SQL)))

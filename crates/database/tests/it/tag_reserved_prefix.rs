@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use commons_errors::AppError;
-use commons_types::server::{TagMap, kind::ServerKind};
+use commons_types::server::{TagMap, kind::ServerKind, product::Product};
 use database::{
 	pg_duration::PgDuration,
 	server_groups::{NewServerGroup, PartialServerGroup, ServerGroup},
@@ -26,6 +26,7 @@ fn new_server(host: &str) -> Server {
 		id: Uuid::new_v4(),
 		name: Some("t".into()),
 		host: Some(UrlField(host.parse().unwrap())),
+		product: Product::Tamanu,
 		kind: ServerKind::Central,
 		rank: None,
 		device_id: None,
@@ -70,6 +71,7 @@ async fn server_update_rejects_reserved_tag_keys() {
 		let updates = PartialServer {
 			id: server.id,
 			name: None,
+			product: None,
 			kind: None,
 			rank: None,
 			host: None,

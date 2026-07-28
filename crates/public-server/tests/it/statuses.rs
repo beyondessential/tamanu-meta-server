@@ -243,14 +243,14 @@ async fn submit_status() {
 
 			// The response carries only the return-path fields; the stored
 			// status record is not echoed back. Tags for this bare ungrouped
-			// server are just the synthetic `canopy:kind`.
+			// server are just the synthetic `canopy:product` and `canopy:kind`.
 			let body: serde_json::Value = response.json();
 			assert_eq!(
 				body,
 				serde_json::json!({
 					"backup_now": [],
 					"check_severities": {},
-					"tags": {"canopy:kind": "facility"},
+					"tags": {"canopy:product": "tamanu", "canopy:kind": "facility"},
 				}),
 			);
 

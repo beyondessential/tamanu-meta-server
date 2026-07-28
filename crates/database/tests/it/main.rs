@@ -32,6 +32,7 @@ mod self_alerts;
 mod server_enrollment;
 mod server_group_archival;
 mod server_group_version_cache;
+mod server_products;
 mod server_restore_window;
 mod silenced_health_checks;
 mod slack_outbox_enqueue;

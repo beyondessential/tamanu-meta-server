@@ -8,7 +8,7 @@ use commons_types::{
 	Uuid,
 	device::DeviceRole,
 	geo::GeoPoint,
-	server::{TagMap, kind::ServerKind, rank::ServerRank},
+	server::{TagMap, kind::ServerKind, product::Product, rank::ServerRank},
 	status::{HealthState, ShortStatus},
 	version::VersionStr,
 };
@@ -56,8 +56,11 @@ pub struct ServerDetailData {
 	/// server is ungrouped or alone in its group. Each entry carries its
 	/// own `up` / `health` so the UI can render a status dot per sibling.
 	pub siblings: Vec<ServerInfo>,
-	/// The server's effective `billing.*` labels — i.e. its group's
-	/// (product/deployment/stage). Empty when the server is ungrouped.
+	/// The server's own effective `billing.*` labels
+	/// (product/deployment/stage) — the ones canopy hands the server's device,
+	/// carrying its own product and rank rather than its group's. Empty when
+	/// the server is ungrouped, there being no deployment to attribute to.
+	// spec: APP#billing-attribution
 	pub billing_labels: Vec<super::server_groups::BillingTag>,
 	/// Whether the server is known to run Munin, from the most recent source
 	/// to report the flag. The UI offers a Munin link only when this is true.
@@ -74,7 +77,11 @@ pub struct ServerInfo {
 	pub id: Uuid,
 	/// Operator-assigned name for the server, if any.
 	pub name: Option<String>,
-	/// The kind of deployment this server represents.
+	/// The application this server runs. Decides which of canopy's
+	/// per-server features apply to it.
+	// spec: APP#product-and-kind
+	pub product: Product,
+	/// The server's role within its product's topology.
 	pub kind: ServerKind,
 	/// Where this server sits in its deployment's promotion order (e.g.
 	/// production vs. staging), if applicable.
@@ -137,6 +144,11 @@ pub struct ServerLastStatusData {
 	pub id: Uuid,
 	/// When this status was reported.
 	pub created_at: Timestamp,
+	/// The application the server runs. Travels with the version so a
+	/// consumer can tell a product with no version from one that has yet to
+	/// report one.
+	// spec: APP#versions
+	pub product: Product,
 	/// Software version the server reported running, if known.
 	pub version: Option<VersionStr>,
 	/// How many releases behind the latest known version this server's
@@ -175,7 +187,13 @@ pub struct ServerDataUpdate {
 	/// New name for the server. Omit to leave unchanged.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub name: Option<String>,
-	/// New deployment kind for the server. Omit to leave unchanged.
+	/// New application for the server. Omit to leave unchanged. Changing it
+	/// to a product that does not define the server's kind moves the kind to
+	/// the new product's default, unless this request sets one too.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub product: Option<Product>,
+	/// New role for the server within its product's topology. Omit to leave
+	/// unchanged. Rejected when the product does not define it.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub kind: Option<ServerKind>,
 	/// New promotion rank for the server. Omit to leave unchanged.
@@ -254,6 +272,7 @@ pub(super) fn server_to_info(s: Server) -> ServerInfo {
 	ServerInfo {
 		id: s.id,
 		name: s.name,
+		product: s.product,
 		kind: s.kind,
 		rank: s.rank,
 		host: s.host.as_ref().map(|h| h.0.to_string()),
@@ -637,13 +656,19 @@ pub async fn get_detail(
 		let nodejs = figures
 			.node_version()
 			.or_else(|| connection.and_then(|d| d.nodejs_version()));
+		// Grading a version means measuring it against a release train canopy
+		// holds, so both the distance and the embedded-browser floor apply only
+		// to a product that has one. A canopy instance reports its own build
+		// version and would otherwise be measured against Tamanu's releases.
+		// spec: APP#versions
+		let graded = server.product.tracks_versions();
 		let version_distance = latest_version
 			.as_ref()
+			.filter(|_| graded)
 			.and_then(|lv| st.distance_from_version(lv));
-		let min_chrome_version = if let Some(ref version) = st.version {
-			compute_min_chrome_version(&mut conn, version).await
-		} else {
-			None
+		let min_chrome_version = match &st.version {
+			Some(version) if graded => compute_min_chrome_version(&mut conn, version).await,
+			_ => None,
 		};
 		let mut operators = st.operators();
 		super::statuses::enrich_operators(&mut conn, operators.iter_mut()).await?;
@@ -651,7 +676,11 @@ pub async fn get_detail(
 		Some(ServerLastStatusData {
 			id: st.id,
 			created_at: st.created_at,
-			version: st.version.clone(),
+			product: server.product,
+			// A product with no application version presents none, as against
+			// the `unknown` a versioned server shows before it has reported.
+			// spec: APP#versions
+			version: st.version.clone().filter(|_| server.product.has_versions()),
 			version_distance,
 			min_chrome_version,
 			platform: figures.platform(),
@@ -689,8 +718,21 @@ pub async fn get_detail(
 		Vec::new()
 	};
 
+	// This server's own attribution, not its group's: for a server whose
+	// product or rank differs from the group's, the page would otherwise show
+	// labels the device is never handed.
+	// spec: APP#billing-attribution
 	let billing_labels = match group.as_ref() {
-		Some(g) => super::server_groups::group_billing_labels(&mut conn, g).await?,
+		Some(g) => commons_servers::backup_jobs::BillingLabels::for_server(
+			&g.tags,
+			&g.name,
+			server.product,
+			server.rank,
+		)
+		.into_tags()
+		.into_iter()
+		.map(|(key, value)| super::server_groups::BillingTag { key, value })
+		.collect(),
 		None => Vec::new(),
 	};
 
@@ -720,13 +762,53 @@ pub struct ServerUpdateArgs {
 	pub data: ServerDataUpdate,
 }
 
+/// Settle the product/kind pair an update leaves behind.
+///
+/// A product defines which roles exist, so the two can't move independently:
+/// a kind the target product doesn't define is a bad request, and a product
+/// change that leaves the stored kind undefined carries the server to the new
+/// product's default role rather than stranding it on a role its product
+/// doesn't have.
+///
+/// Reads the stored server only when the answer depends on it.
+// spec: APP#product-and-kind
+async fn settle_kind(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	server_id: Uuid,
+	product: Option<Product>,
+	kind: Option<ServerKind>,
+) -> Result<Option<ServerKind>> {
+	let target = match product {
+		Some(product) => product,
+		None => match kind {
+			// Nothing to check: neither half of the pair is moving.
+			None => return Ok(None),
+			// The stored product has to define the requested kind.
+			Some(_) => Server::get_by_id(conn, server_id).await?.product,
+		},
+	};
+
+	match kind {
+		Some(kind) if !target.defines_kind(kind) => Err(AppError::BadRequest(format!(
+			"{target} servers have no {kind} role"
+		))),
+		Some(kind) => Ok(Some(kind)),
+		// A product change with no kind: keep the stored kind when the new
+		// product defines it, else move to that product's default.
+		None => {
+			let current = Server::get_by_id(conn, server_id).await?;
+			Ok((!target.defines_kind(current.kind)).then(|| target.default_kind()))
+		}
+	}
+}
+
 /// Update a server's fields.
 ///
 /// Applies a partial update — only the fields present in `data` are
 /// changed. Moving a previously-ungrouped server into a group, or toggling
 /// `is_monitored`, re-evaluates the server's open issues so incidents catch
 /// up with the new state. Returns 400 if the update is rejected (e.g. an
-/// invalid host value).
+/// invalid host value, or a role the target product doesn't define).
 #[utoipa::path(
 	post,
 	path = "/update",
@@ -759,10 +841,13 @@ pub async fn update(
 	};
 	let new_group_id = args.data.group_id;
 
+	let kind = settle_kind(&mut conn, args.server_id, args.data.product, args.data.kind).await?;
+
 	let update_data = PartialServer {
 		id: args.server_id,
 		name: args.data.name,
-		kind: args.data.kind,
+		product: args.data.product,
+		kind,
 		rank: args.data.rank,
 		// `Some(Some(url))` sets, `Some(None)` clears, `None` leaves unchanged.
 		// The form always sends `host`; an empty string clears it.
@@ -813,7 +898,11 @@ pub struct CreateServerArgs {
 	/// URL for the server, if known. Can be added or changed later.
 	#[serde(default)]
 	pub host: Option<String>,
-	/// The kind of deployment this server represents.
+	/// The application this server runs. Defaults to tamanu.
+	#[serde(default)]
+	pub product: Product,
+	/// The server's role within its product's topology. Rejected when the
+	/// product does not define it.
 	pub kind: ServerKind,
 	/// Where this server sits in its deployment's promotion order (e.g.
 	/// production vs. staging), if applicable.
@@ -907,10 +996,21 @@ pub async fn create(
 		None
 	};
 
+	// A role its product doesn't define would leave the server misclassified
+	// from the moment it exists.
+	// spec: APP#product-and-kind
+	if !args.product.defines_kind(args.kind) {
+		return Err(AppError::BadRequest(format!(
+			"{} servers have no {} role",
+			args.product, args.kind
+		)));
+	}
+
 	let server = Server {
 		id: Uuid::new_v4(),
 		name: args.name,
 		host,
+		product: args.product,
 		kind: args.kind,
 		rank: args.rank,
 		device_id,
@@ -1236,6 +1336,7 @@ pub async fn attach_tailscale_device(
 		PartialServer {
 			id: args.server_id,
 			name: None,
+			product: None,
 			kind: None,
 			rank: None,
 			host: None,

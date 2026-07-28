@@ -1,7 +1,7 @@
 use commons_errors::{AppError, Result};
 use commons_types::{
 	geo::GeoPoint,
-	server::{RESERVED_TAG_PREFIX, TagMap, kind::ServerKind, rank::ServerRank},
+	server::{RESERVED_TAG_PREFIX, TagMap, kind::ServerKind, product::Product, rank::ServerRank},
 };
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -60,7 +60,13 @@ pub struct Server {
 	#[diesel(treat_none_as_default_value = false)]
 	pub host: Option<UrlField>,
 
-	/// The server's role, for example central or facility.
+	/// The application this server runs, for example tamanu or senaite.
+	/// Decides which of canopy's per-server features apply to it at all.
+	// spec: APP#product-and-kind
+	#[diesel(deserialize_as = String, serialize_as = String)]
+	pub product: Product,
+	/// The server's role within its product's topology, for example central
+	/// or facility. Which roles are available depends on the product.
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub kind: ServerKind,
 	/// The server's environment tier, for example production, test, or dev.
@@ -650,8 +656,14 @@ impl Server {
 		use crate::schema::servers::dsl::*;
 		let search_pattern = format!("%{}%", query);
 
+		// Both halves of eligibility, stated rather than implied: only a
+		// product canopy lists publicly, and only its central servers. The
+		// kind filter alone would exclude other products today, but by
+		// accident of their having no central role rather than on purpose.
+		// spec: APP#public-listing
 		let mut query_builder = servers
 			.select(Self::as_select())
+			.filter(product.eq_any(Product::stored_values_where(|p| p.caps().public_listing)))
 			.filter(kind.eq(ServerKind::Central.to_string()))
 			.filter(public_name.is_not_null())
 			.filter(deleted_at.is_null())
@@ -755,6 +767,7 @@ impl Server {
 	/// read-only tags describing the server itself, under the reserved
 	/// [`RESERVED_TAG_PREFIX`] namespace:
 	///
+	/// - `canopy:product` — the server's [`Product`] (always present).
 	/// - `canopy:kind` — the server's [`ServerKind`] (always present).
 	/// - `canopy:rank` — the server's [`ServerRank`], only when one is set.
 	/// - `canopy:group-id` / `canopy:group-name` — only when grouped.
@@ -772,6 +785,10 @@ impl Server {
 			None => self.tags.clone(),
 		};
 
+		tags.0.insert(
+			format!("{RESERVED_TAG_PREFIX}product"),
+			self.product.to_string(),
+		);
 		tags.0
 			.insert(format!("{RESERVED_TAG_PREFIX}kind"), self.kind.to_string());
 		if let Some(rank) = self.rank {
@@ -807,6 +824,7 @@ fn test_server_serialization() {
 	let server = Server {
 		id: Uuid::nil(),
 		name: Some("Test Server".to_string()),
+		product: Product::Tamanu,
 		kind: ServerKind::Central,
 		rank: Some(ServerRank::Production),
 		host: Some(UrlField("https://example.com/".parse().unwrap())),
@@ -832,6 +850,7 @@ fn test_server_serialization() {
   "id": "00000000-0000-0000-0000-000000000000",
   "name": "Test Server",
   "host": "https://example.com",
+  "product": "tamanu",
   "kind": "central",
   "rank": "production",
   "device_id": "00000000-0000-0000-0000-000000000000",
@@ -854,7 +873,11 @@ pub struct NewServer {
 	/// The server's URL, if known up front.
 	#[serde(default)]
 	pub host: Option<UrlField>,
-	/// The server's role, for example central or facility.
+	/// The application this server runs. Defaults to tamanu.
+	#[serde(default)]
+	pub product: Product,
+	/// The server's role within its product's topology, for example central
+	/// or facility.
 	pub kind: ServerKind,
 	/// The server's environment tier, for example production, test, or dev.
 	pub rank: Option<ServerRank>,
@@ -870,6 +893,7 @@ impl From<NewServer> for Server {
 		Server {
 			id: Uuid::new_v4(),
 			name: server.name,
+			product: server.product,
 			kind: server.kind,
 			rank: server.rank,
 			host: server.host,
@@ -903,6 +927,11 @@ pub struct PartialServer {
 	pub id: Uuid,
 	/// New display name for the server.
 	pub name: Option<String>,
+	/// New application for the server. When this changes to a product that
+	/// does not define the server's current kind, the caller settles the kind
+	/// too — the endpoint moves it to the new product's default.
+	#[diesel(deserialize_as = String, serialize_as = String)]
+	pub product: Option<Product>,
 	/// New role for the server, for example central or facility.
 	pub kind: Option<ServerKind>,
 	/// New environment tier for the server, for example production, test,
