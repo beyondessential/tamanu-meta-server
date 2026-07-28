@@ -103,96 +103,101 @@ A follow-up plan handles the cleanup migration (`kind = 'standalone'` where
 `BillingLabels` (`commons-servers/src/backup_jobs.rs:236`) hardcodes
 `product: "tamanu"`. Three call sites, behaving differently:
 
-- [ ] `BillingLabels.product` becomes `Option<String>`, omitted by
+- [x] `BillingLabels.product` becomes `Option<String>`, omitted by
       `into_tags` when `None` — the same treatment `stage` already gets, and
       for the same reason
-- [ ] `from_group` takes the group's resolved product: `Some(p)` when its
+- [x] `from_group` takes the group's resolved product: `Some(p)` when its
       live members agree on one, `None` when they span products. An explicit
       `billing.product` group tag still wins verbatim
-- [ ] A server-scoped constructor for the per-server case, carrying the
+- [x] A server-scoped constructor for the per-server case, carrying the
       server's own product and own rank
-- [ ] `public-server/src/tags.rs:93` (`effective_tags_for_server`) uses it,
+- [x] `public-server/src/tags.rs:93` (`effective_tags_for_server`) uses it,
       so a SENAITE box reports `billing.product: senaite`. Attribution stays
       inside the existing `if let Some(group_id)` — an ungrouped server
       carries none
-- [ ] `private-server/src/fns/servers.rs:693`: the server detail view
+- [x] `private-server/src/fns/servers.rs:693`: the server detail view
       currently renders the *group's* labels. Switch it to the server's own,
       so the page matches what the device is actually handed
-- [ ] `backup_bucket_billing_tags` keeps forcing `"backups"` — verify the
+- [x] `backup_bucket_billing_tags` keeps forcing `"backups"` — verify the
       `Option` change doesn't let a group's product leak into bucket tags
 
 ## Private server
 
-- [ ] `fns/servers.rs`: `product` through create, update and detail
+- [x] `fns/servers.rs`: `product` through create, update and detail
       responses. Reject an update whose `kind` isn't in the new `product`'s
       `kinds()`, and when `product` changes without an explicit `kind`, move
       the server to the new product's `default_kind()`
-- [ ] `fns/servers.rs`: keep a stored `public_name` when a server stops
+- [x] `fns/servers.rs`: keep a stored `public_name` when a server stops
       being eligible rather than clearing it
-- [ ] `fns/statuses.rs:242`: compute `version_distance` only for `Tracked`
+- [x] `fns/statuses.rs:242`: compute `version_distance` only for `Tracked`
       products. `Reported` sends the version with no distance; `None` sends
       no version
-- [ ] `fns/statuses.rs:960` (`FIG#fleet-spread`): add `product` to the
+- [x] `fns/statuses.rs:960` (`FIG#fleet-spread`): add `product` to the
       per-server fleet row so the frontend can exclude non-tracked servers
       from the version axis
-- [ ] `fns/server_groups.rs:115` (`group_billing_labels`): resolve the
+- [x] `fns/server_groups.rs:115` (`group_billing_labels`): resolve the
       group's product via `member_products`
-- [ ] `canopy-mcp/src/servers.rs`: `product` as a filter and a returned
+- [x] `canopy-mcp/src/servers.rs`: `product` as a filter and a returned
       field on find-servers; product counts in the fleet summary
-- [ ] `canopy-mcp/src/lib.rs:73` and `versions.rs`: descriptions still say
+- [x] `canopy-mcp/src/lib.rs:73` and `versions.rs`: descriptions still say
       "Tamanu version". Accurate for the version catalogue, which is
       Tamanu's; reword the *server* descriptions that now span products
 
 ## Frontend
 
-- [ ] `types.ts`: re-export `Product` and the capability shape from the
+- [x] `types.ts`: re-export `Product` and the capability shape from the
       regenerated `api-types.ts`
-- [ ] New `ServerProductChip.tsx` beside `ServerKindChip.tsx`
-- [ ] `ServerCreate.tsx` / `ServerEdit.tsx`: a Product select; narrow the
+- [x] New `ServerProductChip.tsx` beside `ServerKindChip.tsx`
+- [x] `ServerCreate.tsx` / `ServerEdit.tsx`: a Product select; narrow the
       Kind options to the chosen product's kinds (fixing an existing gap —
       the hardcoded `central`/`facility` menu means `canopy` isn't
       selectable at all today); gate the public-name field on the product's
       `public_listing` as well as `kind === "central"`
-- [ ] `ServerDetail.tsx:280`: product chip beside the kind chip
-- [ ] `VersionIndicator.tsx`: keep `version ?? "unknown"` for `Tracked`,
+- [x] `ServerDetail.tsx:280`: product chip beside the kind chip
+- [x] `VersionIndicator.tsx`: keep `version ?? "unknown"` for `Tracked`,
       render the bare version for `Reported`, render nothing for `None`.
       The unknown state stays for a tracked product that hasn't reported —
       it means "not learnt yet", which is not the same as "has no version"
-- [ ] `ServerDetail.tsx`, `StatusSnapshot.tsx`, `ServerShorty.tsx`, group
+- [x] `ServerDetail.tsx`, `StatusSnapshot.tsx`, `ServerShorty.tsx`, group
       cards: suppress distance, available-updates and known-issues for
       anything but `Tracked`
-- [ ] `FleetFigures.tsx:44`: exclude non-`Tracked` servers from the
+- [x] `FleetFigures.tsx:44`: exclude non-`Tracked` servers from the
       application-version spread and from any crossing using it as an axis —
       absent from the spread, not counted among the unreported. Leave the
       Postgres, runtime and bestool version spreads covering every server
-- [ ] `Servers.tsx`: product filter alongside kind and rank
+- [x] ~~`Servers.tsx`: product filter alongside kind and rank~~ — **drifted.**
+      `Servers.tsx` is a tab shell, and no list view filters by kind or rank
+      either, so there was no filter to sit alongside. Product is instead
+      *presented* on every list row via `ServerShorty`'s chip, and filtering
+      stays where it already existed: the listing API and MCP's find-servers.
+      `APP` was corrected to stop implying an operator-facing filter
 
 ## Generated files
 
-- [ ] `just gen-openapi` — regenerates `private-web/openapi.json` and
+- [x] `just gen-openapi` — regenerates `private-web/openapi.json` and
       `private-web/src/api-types.ts`
-- [ ] The public-server has its own committed `openapi.json` with a drift
+- [x] The public-server has its own committed `openapi.json` with a drift
       test; regenerate it too, since `tags.rs` and the server shape change
-- [ ] `just typecheck` from the repo root (not bare `tsc`)
+- [x] `just typecheck` from the repo root (not bare `tsc`)
 
 ## Testing
 
-- [ ] `database`: the backfill lands `product = 'canopy'` on the
+- [x] `database`: the backfill lands `product = 'canopy'` on the
       `kind = 'canopy'` row and leaves `kind` alone
-- [ ] `database`: `recompute_version` skips non-tracked members; a mixed
+- [x] `database`: `recompute_version` skips non-tracked members; a mixed
       group keeps its Tamanu headline; an all-SENAITE group has none
-- [ ] `database`: `production_versions` excludes non-tracked products
-- [ ] `database`: `tags_for_device` includes `canopy:product`
-- [ ] `database`: `search_central` excludes a SENAITE server that has a
+- [x] `database`: `production_versions` excludes non-tracked products
+- [x] `database`: `tags_for_device` includes `canopy:product`
+- [x] `database`: `search_central` excludes a SENAITE server that has a
       public name and a central kind set directly
-- [ ] `commons-servers` unit: `BillingLabels` omits the product for a mixed
+- [x] `commons-servers` unit: `BillingLabels` omits the product for a mixed
       group, carries it for a single-product group, and an explicit tag wins
-- [ ] `public-server`: the tags endpoint returns the server's own
+- [x] `public-server`: the tags endpoint returns the server's own
       `billing.product`; an ungrouped server gets no billing labels
-- [ ] `private-server`: create and update round-trip `product`; a
+- [x] `private-server`: create and update round-trip `product`; a
       product change moves an incompatible kind to the new default; no
       `version_distance` for `Reported` or `None`
-- [ ] Playwright (`private-web/e2e/`, extend `seed.ts` for `product`):
+- [x] Playwright (`private-web/e2e/`, extend `seed.ts` for `product`):
       a SENAITE server shows no version affordance; a Canopy server shows
       its version with no distance chip; the product select narrows the kind
       options; a mixed group shows its Tamanu headline version; the servers

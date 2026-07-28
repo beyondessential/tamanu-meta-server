@@ -22,6 +22,7 @@ mod operator_presence;
 mod private_statuses;
 mod provision_credential;
 mod restore_replicas;
+mod server_products;
 mod server_version_distance;
 mod tagged_device_guard;
 mod tailnet_device_auth;
