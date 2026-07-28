@@ -113,13 +113,15 @@ async fn tags_endpoint_returns_server_tags_when_ungrouped() {
 			response.assert_status_ok();
 			let tags: HashMap<String, String> = response.json();
 			assert_eq!(tags.get("role"), Some(&"primary".to_string()));
-			// Synthetic kind tag is always present; ungrouped, so no group tags.
+			// Synthetic product and kind tags are always present; ungrouped, so
+			// no group tags.
+			assert_eq!(tags.get("canopy:product"), Some(&"tamanu".to_string()));
 			assert_eq!(tags.get("canopy:kind"), Some(&"central".to_string()));
 			assert_eq!(tags.get("canopy:group-id"), None);
 			assert_eq!(tags.get("canopy:group-name"), None);
 			// No rank set on this server, so no synthetic rank tag.
 			assert_eq!(tags.get("canopy:rank"), None);
-			assert_eq!(tags.len(), 2);
+			assert_eq!(tags.len(), 3);
 		},
 	)
 	.await

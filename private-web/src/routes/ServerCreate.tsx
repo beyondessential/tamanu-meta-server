@@ -15,7 +15,14 @@ import { useNavigate, useParams } from "react-router-dom";
 import { callApi, useApi, useApiAction } from "../api";
 import TagsEditor from "../components/TagsEditor";
 import { usePageTitle } from "../hooks/usePageTitle";
+import {
+	useProductCaps,
+	useProductKinds,
+	useProducts,
+} from "../hooks/useProducts";
+import { PRODUCT_LABELS } from "../types";
 import type {
+	Product,
 	ServerGroup,
 	ServerKind,
 	ServerRank,
@@ -44,7 +51,12 @@ export default function ServerCreate() {
 
 	const [name, setName] = useState("");
 	const [host, setHost] = useState("");
+	const [product, setProduct] = useState<Product>("tamanu");
 	const [kind, setKind] = useState<ServerKind>("facility");
+	const products = useProducts();
+	const kinds = useProductKinds(product);
+	const caps = useProductCaps(product);
+	const canListPublicly = caps?.public_listing === true && kind === "central";
 	const [rank, setRank] = useState<ServerRank | "">("");
 	const [publicName, setPublicName] = useState("");
 	const [isMonitored, setIsMonitored] = useState(true);
@@ -63,9 +75,14 @@ export default function ServerCreate() {
 		const data: Record<string, unknown> = {
 			name: name.trim(),
 			host: host.trim(),
+			product,
 			kind,
 			rank: rank === "" ? null : rank,
-			public_name: publicName.trim() === "" ? null : publicName.trim(),
+			// Only a product/kind combination that can be listed carries a
+			// public name; the field isn't offered otherwise.
+			// spec: APP#public-listing
+			public_name:
+				canListPublicly && publicName.trim() !== "" ? publicName.trim() : null,
 			group_id: groupId,
 			tailscale_identifier:
 				tailscaleIdentifier.trim() === "" ? null : tailscaleIdentifier.trim(),
@@ -110,13 +127,44 @@ export default function ServerCreate() {
 				/>
 				<TextField
 					select
+					label="Product"
+					value={product}
+					onChange={(e) => {
+						const next = e.target.value as Product;
+						setProduct(next);
+						// A role its new product doesn't define would leave the
+						// server misclassified, so follow the product.
+						// spec: APP#product-and-kind
+						const info = products.find((p) => p.product === next);
+						if (info && !info.kinds.includes(kind)) {
+							setKind(info.default_kind);
+						}
+					}}
+					disabled={action.pending}
+				>
+					{products.map((p) => (
+						<MenuItem key={p.product} value={p.product}>
+							{PRODUCT_LABELS[p.product]}
+						</MenuItem>
+					))}
+				</TextField>
+				<TextField
+					select
 					label="Kind"
 					value={kind}
 					onChange={(e) => setKind(e.target.value as ServerKind)}
-					disabled={action.pending}
+					disabled={action.pending || kinds.length < 2}
+					helperText={
+						kinds.length < 2
+							? `${PRODUCT_LABELS[product]} servers have one role`
+							: undefined
+					}
 				>
-					<MenuItem value="central">central</MenuItem>
-					<MenuItem value="facility">facility</MenuItem>
+					{kinds.map((k) => (
+						<MenuItem key={k} value={k}>
+							{k}
+						</MenuItem>
+					))}
 				</TextField>
 				<TextField
 					select
@@ -174,7 +222,7 @@ export default function ServerCreate() {
 					/>
 				</Stack>
 
-				{kind === "central" && (
+				{canListPublicly && (
 					<TextField
 						label="Name in Tamanu Mobile app"
 						value={publicName}

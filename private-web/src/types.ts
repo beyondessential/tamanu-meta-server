@@ -74,6 +74,10 @@ export type Solidify<T> = T extends readonly unknown[]
 export type ShortStatus = Solidify<Schemas["ShortStatus"]>;
 export type HealthState = Solidify<Schemas["HealthState"]>;
 export type ServerKind = Solidify<Schemas["ServerKind"]>;
+export type Product = Solidify<Schemas["Product"]>;
+export type VersionTracking = Solidify<Schemas["VersionTracking"]>;
+export type Caps = Solidify<Schemas["Caps"]>;
+export type ProductInfo = Solidify<Schemas["ProductInfo"]>;
 export type ServerRank = Solidify<Schemas["ServerRank"]>;
 export type VersionStatus = Solidify<Schemas["VersionStatus"]>;
 export type DeviceRole = Solidify<Schemas["DeviceRole"]>;
@@ -215,10 +219,22 @@ export const SERVER_RANK_ORDER: ServerRank[] = [
 	"dev",
 ];
 
+/// Human-readable product names. The wire values are lowercase identifiers;
+/// these are how a product is written in the UI.
+export const PRODUCT_LABELS: Record<Product, string> = {
+	tamanu: "Tamanu",
+	senaite: "SENAITE",
+	canopy: "Canopy",
+};
+
 /// Display order for server kinds — centrals first, then facilities,
-/// then canopy's own. Used as a tiebreak within a single rank in
+/// then standalone. Used as a tiebreak within a single rank in
 /// status-dot lists / group detail views.
-export const SERVER_KIND_ORDER: ServerKind[] = ["central", "facility", "canopy"];
+export const SERVER_KIND_ORDER: ServerKind[] = [
+	"central",
+	"facility",
+	"standalone",
+];
 
 /// Sort key combining rank index (with `null` ranks pushed last) and
 /// kind index. Stable per-rank ordering matches what the UI grouping

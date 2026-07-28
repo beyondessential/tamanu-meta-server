@@ -2,6 +2,12 @@ use axum::Json;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
+use commons_types::server::{
+	kind::ServerKind,
+	product::{Caps, Product},
+};
+use serde::Serialize;
+use utoipa::ToSchema;
 
 use crate::state::AppState;
 
@@ -10,6 +16,53 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(public_url))
 		.routes(routes!(server_versions_url))
 		.routes(routes!(is_current_user_admin))
+		.routes(routes!(products))
+}
+
+/// One product canopy monitors, with what canopy does for its servers and the
+/// roles it defines.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ProductInfo {
+	/// The product itself.
+	pub product: Product,
+	/// What canopy does for this product's servers.
+	pub caps: Caps,
+	/// The roles this product defines, in the order they rank when choosing a
+	/// group's canonical member.
+	pub kinds: Vec<ServerKind>,
+	/// The role a server of this product takes when none is chosen.
+	pub default_kind: ServerKind,
+}
+
+/// Describe every product canopy monitors.
+///
+/// The operator UI reads this to decide what to present for a server — which
+/// roles to offer, whether a version applies and whether it can be graded,
+/// whether the public-name field is meaningful — rather than restating the
+/// mapping client-side, where it would drift as products are added.
+// spec: APP#capabilities
+#[utoipa::path(
+	post,
+	path = "/products",
+	tag = "commons",
+	responses(
+		(status = 200, description = "Every product, its capabilities, and the roles it defines.", body = Vec<ProductInfo>),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn products() -> Result<Json<Vec<ProductInfo>>> {
+	Ok(Json(
+		Product::ALL
+			.iter()
+			.copied()
+			.map(|product| ProductInfo {
+				product,
+				caps: product.caps(),
+				kinds: product.kinds().to_vec(),
+				default_kind: product.default_kind(),
+			})
+			.collect(),
+	))
 }
 
 /// Get the configured public API base URL.

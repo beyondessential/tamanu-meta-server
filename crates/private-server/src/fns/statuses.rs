@@ -584,6 +584,11 @@ pub struct StatusSnapshotData {
 	pub server_id: Uuid,
 	/// Id of the device that sent this status push, if known.
 	pub device_id: Option<Uuid>,
+	/// The application the server runs. Travels with the version so a
+	/// consumer can tell a product with no version from one that has yet to
+	/// report one.
+	// spec: APP#versions
+	pub product: Product,
 	/// Software version reported in this push.
 	pub version: Option<VersionStr>,
 	/// How many releases behind the latest published version this push's
@@ -728,6 +733,7 @@ pub async fn snapshot(
 		created_at: status.created_at,
 		server_id: status.server_id,
 		device_id: status.device_id,
+		product: server.product,
 		// A product with no application version presents none, as against the
 		// `unknown` a versioned server shows before it has reported one.
 		// spec: APP#versions

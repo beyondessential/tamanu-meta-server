@@ -849,6 +849,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/commons/products": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Describe every product canopy monitors.
+         * @description The operator UI reads this to decide what to present for a server — which
+         *     roles to offer, whether a version applies and whether it can be graded,
+         *     whether the public-name field is meaningful — rather than restating the
+         *     mapping client-side, where it would drift as products are added.
+         */
+        post: operations["products"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/commons/public_url": {
         parameters: {
             query?: never;
@@ -2745,7 +2768,7 @@ export interface paths {
          *     changed. Moving a previously-ungrouped server into a group, or toggling
          *     `is_monitored`, re-evaluates the server's open issues so incidents catch
          *     up with the new state. Returns 400 if the update is rejected (e.g. an
-         *     invalid host value).
+         *     invalid host value, or a role the target product doesn't define).
          */
         post: operations["server_update"];
         delete?: never;
@@ -3797,16 +3820,34 @@ export interface components {
          * @description One effective billing label attributed to a group's cloud resources.
          *
          *     Labels are computed from the group's configuration: explicit `billing.*`
-         *     tags on the group are honoured verbatim; otherwise the product defaults to
-         *     `tamanu`, the deployment to the group name in lower-kebab-case, and the
-         *     stage to the group's highest-ranked live member (for example `prod`). The
-         *     stage label is omitted entirely when the group has no ranked members.
+         *     tags on the group are honoured verbatim; otherwise the product comes from
+         *     the one its live members agree on, the deployment from the group name in
+         *     lower-kebab-case, and the stage from the group's highest-ranked live member
+         *     (for example `prod`). A label with nothing to attribute to is omitted
+         *     entirely: the stage when the group has no ranked members, and the product
+         *     when its members span products.
          */
         BillingTag: {
             /** @description Label key, for example `billing.product`. */
             key: string;
             /** @description Label value. */
             value: string;
+        };
+        /**
+         * @description What canopy does for a product's servers.
+         *
+         *     Reachability, health checks and backups are deliberately absent: checks
+         *     are graded by the source that reports them, and backup types are
+         *     advertised per-server by the agent, so both already work for any product.
+         */
+        Caps: {
+            /**
+             * @description Whether this product's servers can be listed for end-user-facing
+             *     clients.
+             */
+            public_listing: boolean;
+            /** @description How this product's application version is treated. */
+            version_tracking: components["schemas"]["VersionTracking"];
         };
         /** @description Request body for [`check_detail`]. */
         CheckDetailArgs: {
@@ -4217,12 +4258,17 @@ export interface components {
              *     true.
              */
             is_monitored?: boolean | null;
-            /** @description The kind of deployment this server represents. */
+            /**
+             * @description The server's role within its product's topology. Rejected when the
+             *     product does not define it.
+             */
             kind: components["schemas"]["ServerKind"];
             /** @description Name for the server, if any. */
             name?: string | null;
             /** @description Free-text operator notes about the server. */
             notes?: string | null;
+            /** @description The application this server runs. Defaults to tamanu. */
+            product?: components["schemas"]["Product"];
             /**
              * @description Name to list the server under in the public mobile-app server list.
              *     Omit to keep it unlisted.
@@ -4465,7 +4511,10 @@ export interface components {
              * @description Unique identifier of the server.
              */
             id: string;
-            /** @description The server's kind (central, facility, or canopy). */
+            /**
+             * @description The server's role within its product's topology (for Tamanu, central
+             *     or facility; standalone for a product with no internal roles).
+             */
             kind: components["schemas"]["ServerKind"];
             /** @description Name of the server. */
             name: string;
@@ -4476,6 +4525,8 @@ export interface components {
              *     connected right now.
              */
             operators: components["schemas"]["OperatorPresence"][];
+            /** @description The application the server runs, presented alongside its role. */
+            product: components["schemas"]["Product"];
             rank?: null | components["schemas"]["ServerRank"];
             /**
              * @description Reachability of the server, based on how recently it last reported a
@@ -4509,7 +4560,7 @@ export interface components {
             group_id?: string | null;
             /** @description Display name of that group, if any. */
             group_name?: string | null;
-            /** @description The kind of deployment the server represents. */
+            /** @description The server's role within its product's topology. */
             kind: components["schemas"]["ServerKind"];
             /** @description Reported runtime version. */
             nodejs?: string | null;
@@ -4517,6 +4568,11 @@ export interface components {
             platform?: string | null;
             /** @description Reported database engine version. */
             postgres?: string | null;
+            /**
+             * @description The application the server runs. The fleet view reads it to keep the
+             *     application-version spread to servers that have one to report.
+             */
+            product: components["schemas"]["Product"];
             rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: uuid
@@ -5747,12 +5803,17 @@ export interface components {
                  *     incidents.
                  */
                 is_monitored: boolean;
-                /** @description The kind of deployment this server represents. */
+                /** @description The server's role within its product's topology. */
                 kind: components["schemas"]["ServerKind"];
                 /** @description Operator-assigned name for the server, if any. */
                 name?: string | null;
                 /** @description Free-text operator notes about the server. */
                 notes: string;
+                /**
+                 * @description The application this server runs. Decides which of canopy's
+                 *     per-server features apply to it.
+                 */
+                product: components["schemas"]["Product"];
                 /**
                  * @description Name this server appears under in the public mobile-app server list.
                  *     `None` means the server is not listed publicly.
@@ -5950,6 +6011,32 @@ export interface components {
              * @example /errors/resource-not-found
              */
             type: string;
+        };
+        /**
+         * @description Which application a server runs.
+         *
+         *     The set is closed and defined here rather than configured, because each
+         *     product's handling — what canopy tracks for it, what it presents — is
+         *     built in. See [`Product::caps`].
+         * @enum {string}
+         */
+        Product: "tamanu" | "senaite" | "canopy";
+        /**
+         * @description One product canopy monitors, with what canopy does for its servers and the
+         *     roles it defines.
+         */
+        ProductInfo: {
+            /** @description What canopy does for this product's servers. */
+            caps: components["schemas"]["Caps"];
+            /** @description The role a server of this product takes when none is chosen. */
+            default_kind: components["schemas"]["ServerKind"];
+            /**
+             * @description The roles this product defines, in the order they rank when choosing a
+             *     group's canonical member.
+             */
+            kinds: components["schemas"]["ServerKind"][];
+            /** @description The product itself. */
+            product: components["schemas"]["Product"];
         };
         /** @description Request to mint a new device credential. */
         ProvisionArgs: {
@@ -6931,6 +7018,7 @@ export interface components {
             name?: string | null;
             /** @description New free-text notes for the server. Omit to leave unchanged. */
             notes?: string | null;
+            product?: null | components["schemas"]["Product"];
             /**
              * @description New public-facing name for the server, or `null` to unlist it. Omit
              *     to leave unchanged.
@@ -6945,8 +7033,10 @@ export interface components {
          */
         ServerDetailData: {
             /**
-             * @description The server's effective `billing.*` labels — i.e. its group's
-             *     (product/deployment/stage). Empty when the server is ungrouped.
+             * @description The server's own effective `billing.*` labels
+             *     (product/deployment/stage) — the ones canopy hands the server's device,
+             *     carrying its own product and rank rather than its group's. Empty when
+             *     the server is ungrouped, there being no deployment to attribute to.
              */
             billing_labels: components["schemas"]["BillingTag"][];
             /**
@@ -7200,12 +7290,17 @@ export interface components {
              *     incidents.
              */
             is_monitored: boolean;
-            /** @description The kind of deployment this server represents. */
+            /** @description The server's role within its product's topology. */
             kind: components["schemas"]["ServerKind"];
             /** @description Operator-assigned name for the server, if any. */
             name?: string | null;
             /** @description Free-text operator notes about the server. */
             notes: string;
+            /**
+             * @description The application this server runs. Decides which of canopy's
+             *     per-server features apply to it.
+             */
+            product: components["schemas"]["Product"];
             /**
              * @description Name this server appears under in the public mobile-app server list.
              *     `None` means the server is not listed publicly.
@@ -7223,10 +7318,13 @@ export interface components {
             up?: null | components["schemas"]["ShortStatus"];
         };
         /**
-         * @description What kind of server this is within a deployment.
+         * @description A server's role relative to the other servers of its product.
+         *
+         *     Which kinds are available depends on the server's product; see
+         *     [`Product::kinds`](super::product::Product::kinds).
          * @enum {string}
          */
-        ServerKind: "central" | "facility" | "canopy";
+        ServerKind: "central" | "facility" | "standalone";
         /**
          * @description The server's most recently reported status push: version/host info plus
          *     health.
@@ -7267,6 +7365,12 @@ export interface components {
             platform?: string | null;
             /** @description PostgreSQL version the server reported, if any. */
             postgres?: string | null;
+            /**
+             * @description The application the server runs. Travels with the version so a
+             *     consumer can tell a product with no version from one that has yet to
+             *     report one.
+             */
+            product: components["schemas"]["Product"];
             /** @description The source that pushed this status (e.g. `alertd`). */
             source: string;
             /** @description Timezone the server reported, if any. */
@@ -7696,6 +7800,12 @@ export interface components {
             /** @description Reported database engine version. */
             postgres?: string | null;
             /**
+             * @description The application the server runs. Travels with the version so a
+             *     consumer can tell a product with no version from one that has yet to
+             *     report one.
+             */
+            product: components["schemas"]["Product"];
+            /**
              * Format: uuid
              * @description Id of the server this status was reported by.
              */
@@ -8083,6 +8193,11 @@ export interface components {
             /** @description Exact version string to look up (e.g. `"1.2.3"`). */
             version: string;
         };
+        /**
+         * @description How canopy treats a product's application version.
+         * @enum {string}
+         */
+        VersionTracking: "tracked" | "reported" | "absent";
     };
     responses: never;
     parameters: never;
@@ -9258,6 +9373,34 @@ export interface operations {
                 };
             };
             /** @description The caller's admin status could not be determined. Distinct from a `false` answer: retry rather than treating the caller as a non-admin. */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    products: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every product, its capabilities, and the roles it defines. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProductInfo"][];
+                };
+            };
             500: {
                 headers: {
                     [name: string]: unknown;

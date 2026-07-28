@@ -144,6 +144,11 @@ pub struct ServerLastStatusData {
 	pub id: Uuid,
 	/// When this status was reported.
 	pub created_at: Timestamp,
+	/// The application the server runs. Travels with the version so a
+	/// consumer can tell a product with no version from one that has yet to
+	/// report one.
+	// spec: APP#versions
+	pub product: Product,
 	/// Software version the server reported running, if known.
 	pub version: Option<VersionStr>,
 	/// How many releases behind the latest known version this server's
@@ -651,13 +656,19 @@ pub async fn get_detail(
 		let nodejs = figures
 			.node_version()
 			.or_else(|| connection.and_then(|d| d.nodejs_version()));
+		// Grading a version means measuring it against a release train canopy
+		// holds, so both the distance and the embedded-browser floor apply only
+		// to a product that has one. A canopy instance reports its own build
+		// version and would otherwise be measured against Tamanu's releases.
+		// spec: APP#versions
+		let graded = server.product.tracks_versions();
 		let version_distance = latest_version
 			.as_ref()
+			.filter(|_| graded)
 			.and_then(|lv| st.distance_from_version(lv));
-		let min_chrome_version = if let Some(ref version) = st.version {
-			compute_min_chrome_version(&mut conn, version).await
-		} else {
-			None
+		let min_chrome_version = match &st.version {
+			Some(version) if graded => compute_min_chrome_version(&mut conn, version).await,
+			_ => None,
 		};
 		let mut operators = st.operators();
 		super::statuses::enrich_operators(&mut conn, operators.iter_mut()).await?;
@@ -665,7 +676,11 @@ pub async fn get_detail(
 		Some(ServerLastStatusData {
 			id: st.id,
 			created_at: st.created_at,
-			version: st.version.clone(),
+			product: server.product,
+			// A product with no application version presents none, as against
+			// the `unknown` a versioned server shows before it has reported.
+			// spec: APP#versions
+			version: st.version.clone().filter(|_| server.product.has_versions()),
 			version_distance,
 			min_chrome_version,
 			platform: figures.platform(),

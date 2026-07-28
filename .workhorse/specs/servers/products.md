@@ -24,7 +24,8 @@ Changing a server's product to one that does not define that server's current ki
 
 Group membership carries no product constraint, so a deployment's servers stay in one group whatever application each of them runs.
 
-A server's product is presented wherever its kind is, and an operator can narrow a server listing by product as by kind or rank.
+A server's product is presented wherever its kind is, so a server is classified the same way in a listing as on its own page.
+The interfaces that filter a server listing by kind or rank filter by product on the same footing (see [MCP](../private-server/mcp.md)).
 Product and kind both appear among the reserved read-only tags in the effective tags Canopy returns to a server's sources (see [STA](../public-server/statuses.md)), so an agent can read the classification Canopy holds for the server it reports on.
 
 ## Capabilities
