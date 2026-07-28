@@ -947,3 +947,200 @@ async fn delete_group_wide_recovers_alerts_on_every_server() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn delete_detaches_reports_rather_than_being_blocked_by_them() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let server = insert_server(&mut conn, group).await;
+		let r = RestoreReplica::create(
+			&mut conn,
+			new_replica(
+				consumer,
+				group,
+				Some(server),
+				RestoreIntent::from("verify"),
+				"n",
+			),
+		)
+		.await
+		.expect("create");
+
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			NewBackupRestoreCheck {
+				replica_id: Some(r.id),
+				..new_check(
+					consumer,
+					group,
+					server,
+					RestoreIntent::from("verify"),
+					RunOutcome::Success,
+					true,
+				)
+			},
+		)
+		.await
+		.expect("record report");
+
+		// A reported-on declaration is no harder to retire than one that never
+		// was: the report's reference is cleared instead of pinning the row.
+		RestoreReplica::delete(&mut conn, r.id)
+			.await
+			.expect("a declaration with restore-health history deletes");
+
+		let checks = BackupRestoreCheck::list_recent_for_group(&mut conn, group, 10)
+			.await
+			.expect("list checks");
+		assert_eq!(checks.len(), 1, "the report is retained");
+		assert_eq!(
+			checks[0].replica_id, None,
+			"the retained report no longer names a declaration"
+		);
+		assert_eq!(checks[0].server_id, Some(server));
+		assert_eq!(checks[0].intent, RestoreIntent::from("verify"));
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn name_is_unique_per_consumer() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let other_consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+
+		let first = RestoreReplica::create(
+			&mut conn,
+			new_replica(
+				consumer,
+				group,
+				None,
+				RestoreIntent::from("verify"),
+				"daily",
+			),
+		)
+		.await
+		.expect("create");
+
+		// A different intent is a different scope, so the scope indexes allow
+		// it — but reusing the name would leave the consumer with two replicas
+		// it can't tell apart.
+		let dup = RestoreReplica::create(
+			&mut conn,
+			new_replica(
+				consumer,
+				group,
+				None,
+				RestoreIntent::from("standby"),
+				"daily",
+			),
+		)
+		.await;
+		assert!(matches!(dup, Err(AppError::Conflict(_))), "got {dup:?}");
+
+		// Surrounding whitespace doesn't buy a way around it.
+		let padded = RestoreReplica::create(
+			&mut conn,
+			new_replica(
+				consumer,
+				group,
+				None,
+				RestoreIntent::from("standby"),
+				"  daily  ",
+			),
+		)
+		.await;
+		assert!(
+			matches!(padded, Err(AppError::Conflict(_))),
+			"got {padded:?}"
+		);
+
+		// Another consumer's declarations are named independently.
+		RestoreReplica::create(
+			&mut conn,
+			new_replica(
+				other_consumer,
+				group,
+				None,
+				RestoreIntent::from("verify"),
+				"daily",
+			),
+		)
+		.await
+		.expect("a different consumer may reuse the name");
+
+		// Renaming onto a sibling's name is refused the same way.
+		let second = RestoreReplica::create(
+			&mut conn,
+			new_replica(
+				consumer,
+				group,
+				None,
+				RestoreIntent::from("standby"),
+				"weekly",
+			),
+		)
+		.await
+		.expect("create second");
+		let clash = RestoreReplica::update(
+			&mut conn,
+			second.id,
+			RestoreReplicaUpdate {
+				name: first.name.clone(),
+				..update_from(&second)
+			},
+		)
+		.await;
+		assert!(matches!(clash, Err(AppError::Conflict(_))), "got {clash:?}");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn blank_name_is_rejected() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+
+		let blank = RestoreReplica::create(
+			&mut conn,
+			new_replica(consumer, group, None, RestoreIntent::from("verify"), "   "),
+		)
+		.await;
+		assert!(
+			matches!(blank, Err(AppError::BadRequest(_))),
+			"got {blank:?}"
+		);
+
+		let r = RestoreReplica::create(
+			&mut conn,
+			new_replica(
+				consumer,
+				group,
+				None,
+				RestoreIntent::from("verify"),
+				"  padded  ",
+			),
+		)
+		.await
+		.expect("create");
+		assert_eq!(r.name, "padded", "the stored name is trimmed");
+
+		let blanked = RestoreReplica::update(
+			&mut conn,
+			r.id,
+			RestoreReplicaUpdate {
+				name: "".into(),
+				..update_from(&r)
+			},
+		)
+		.await;
+		assert!(
+			matches!(blanked, Err(AppError::BadRequest(_))),
+			"got {blanked:?}"
+		);
+	})
+	.await;
+}

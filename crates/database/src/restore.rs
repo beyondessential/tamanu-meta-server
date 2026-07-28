@@ -112,11 +112,42 @@ pub struct RestoreReplicaUpdate {
 	pub enabled: bool,
 }
 
+/// Normalise an operator-supplied declaration name: surrounding whitespace is
+/// insignificant, and a name that is blank once trimmed is rejected. Names are
+/// unique per consumer, so leaving the whitespace on would let a near-identical
+/// name slip past the index.
+fn normalize_name(name: String) -> Result<String> {
+	let trimmed = name.trim();
+	if trimmed.is_empty() {
+		return Err(AppError::BadRequest(
+			"restore replica name cannot be empty".into(),
+		));
+	}
+	Ok(trimmed.to_owned())
+}
+
+/// Turn a unique violation into a `409` that names the collision actually hit —
+/// a declaration's scope and its name are separately unique, and the operator
+/// needs to know which one to change.
+fn unique_violation(info: &dyn diesel::result::DatabaseErrorInformation) -> AppError {
+	match info.constraint_name() {
+		Some("restore_replicas_consumer_name") => {
+			AppError::Conflict("this consumer already has a restore replica with that name".into())
+		}
+		_ => AppError::Conflict("a matching restore replica is already declared".into()),
+	}
+}
+
 impl RestoreReplica {
 	/// Create a declaration. A duplicate `(consumer, group, type, intent,
-	/// server)` scope maps to `409`.
+	/// server)` scope, or a name already used by another of the consumer's
+	/// declarations, maps to `409`.
 	pub async fn create(db: &mut AsyncPgConnection, new: NewRestoreReplica) -> Result<Self> {
 		use crate::schema::restore_replicas::dsl;
+		let new = NewRestoreReplica {
+			name: normalize_name(new.name)?,
+			..new
+		};
 		match diesel::insert_into(dsl::restore_replicas)
 			.values(new)
 			.returning(Self::as_select())
@@ -124,9 +155,9 @@ impl RestoreReplica {
 			.await
 		{
 			Ok(row) => Ok(row),
-			Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => Err(
-				AppError::Conflict("a matching restore replica is already declared".into()),
-			),
+			Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, info)) => {
+				Err(unique_violation(&*info))
+			}
 			Err(e) => Err(AppError::from(e)),
 		}
 	}
@@ -185,7 +216,8 @@ impl RestoreReplica {
 
 	/// Edit every field of a declaration, including its scope. A scope change
 	/// that collides with another declaration's `(consumer, group, type,
-	/// intent, server)` maps to `409`, same as [`Self::create`]. If the scope
+	/// intent, server)`, or a name already used by another of the consumer's
+	/// declarations, maps to `409`, same as [`Self::create`]. If the scope
 	/// (group, server, or type/intent) moves, any active restore-verification
 	/// alert keyed to the *old* scope is recovered — the overdue sweep only
 	/// walks current declarations, so a stale key would otherwise never clear.
@@ -197,6 +229,7 @@ impl RestoreReplica {
 		use crate::schema::restore_replicas::dsl;
 
 		let existing = Self::get(db, id).await?;
+		let name = normalize_name(update.name)?;
 
 		let result = match diesel::update(dsl::restore_replicas.filter(dsl::id.eq(id)))
 			.set((
@@ -205,7 +238,7 @@ impl RestoreReplica {
 				dsl::server_id.eq(update.server_id),
 				dsl::type_.eq(update.r#type),
 				dsl::intent.eq(update.intent),
-				dsl::name.eq(update.name),
+				dsl::name.eq(name),
 				dsl::overdue_after.eq(update.overdue_after),
 				dsl::params.eq(update.params),
 				dsl::enabled.eq(update.enabled),
@@ -215,10 +248,8 @@ impl RestoreReplica {
 			.await
 		{
 			Ok(row) => row,
-			Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => {
-				return Err(AppError::Conflict(
-					"a matching restore replica is already declared".into(),
-				));
+			Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, info)) => {
+				return Err(unique_violation(&*info));
 			}
 			Err(DieselError::NotFound) => {
 				return Err(AppError::DatabaseQuery(DieselError::NotFound));
@@ -249,6 +280,11 @@ impl RestoreReplica {
 	/// walks current declarations, so an alert left behind by a deleted one
 	/// would otherwise never clear. Runs in a single transaction so a failure
 	/// partway can't leave the row deleted with its alerts unrecovered.
+	///
+	/// Restore-health reports the declaration collected are retained: the FK
+	/// from `backup_restore_checks` is `ON DELETE SET NULL`, so each report
+	/// survives with its group, server, type, and intent, no longer attached to
+	/// a declaration.
 	pub async fn delete(db: &mut AsyncPgConnection, id: Uuid) -> Result<()> {
 		db.transaction::<_, AppError, _>(async |conn| {
 			use crate::schema::restore_replicas::dsl;

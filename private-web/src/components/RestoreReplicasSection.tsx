@@ -681,14 +681,16 @@ function CreateReplicaDialog({
 		setParamValues({});
 	}, [intent]);
 
-	// Suggest a name from the group and (if picked) server, until the operator
-	// types their own.
+	// Suggest a name from the group, (if picked) server, and intent, until the
+	// operator types their own. The intent is part of it because names are
+	// unique per consumer: without it, declaring a second intent for the same
+	// server would suggest a name already taken.
 	const selectedServer = servers.find((s) => s.id === serverId);
 	const serverName = selectedServer
 		? (selectedServer.name ?? selectedServer.display_host ?? selectedServer.id)
 		: "";
 	const suggestedName = kebabCase(
-		[groupName, serverName].filter(Boolean).join("-"),
+		[groupName, serverName, intent].filter(Boolean).join("-"),
 	);
 	useEffect(() => {
 		if (!nameEdited) setName(suggestedName);
