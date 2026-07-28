@@ -179,3 +179,143 @@ async fn products_endpoint_describes_every_product() {
 	})
 	.await
 }
+
+/// A public name already set survives the server becoming ineligible to be
+/// listed: reclassification shouldn't destroy operator data, and the name takes
+/// effect again if the server becomes eligible once more.
+#[tokio::test(flavor = "multi_thread")]
+async fn public_name_survives_losing_eligibility() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		let response = private
+			.post("/api/servers/create")
+			.json(&json!({
+				"kind": "central",
+				"public_name": "Island Central",
+			}))
+			.await;
+		response.assert_status_ok();
+		let id: String = response.json();
+		let server_id: uuid::Uuid = id.parse().unwrap();
+
+		// Reclassifying to SENAITE makes it ineligible: no public listing, and
+		// the role moves to standalone.
+		let response = private
+			.post("/api/servers/update")
+			.json(&json!({
+				"server_id": id,
+				"data": { "product": "senaite" },
+			}))
+			.await;
+		response.assert_status_ok();
+
+		let server = Server::get_by_id(&mut conn, server_id).await.unwrap();
+		assert_eq!(server.product, Product::Senaite);
+		assert_eq!(
+			server.public_name.as_deref(),
+			Some("Island Central"),
+			"the stored name is kept rather than cleared"
+		);
+		// It is nonetheless not listed while ineligible.
+		let listed = Server::search_central(&mut conn, "Island", 50)
+			.await
+			.unwrap();
+		assert!(listed.is_empty(), "ineligible servers are not offered");
+
+		// Back to Tamanu central, and the name takes effect again.
+		let response = private
+			.post("/api/servers/update")
+			.json(&json!({
+				"server_id": id,
+				"data": { "product": "tamanu", "kind": "central", "name": "Island Central" },
+			}))
+			.await;
+		response.assert_status_ok();
+
+		let listed = Server::search_central(&mut conn, "Island", 50)
+			.await
+			.unwrap();
+		assert_eq!(
+			listed
+				.into_iter()
+				.filter_map(|s| s.public_name)
+				.collect::<Vec<_>>(),
+			vec!["Island Central".to_string()],
+		);
+	})
+	.await
+}
+
+/// The server detail view renders the server's *own* billing labels, so the page
+/// agrees with what canopy hands that server's device. Rendering its group's
+/// would show a SENAITE server in a Tamanu group an attribution it never gets.
+#[tokio::test(flavor = "multi_thread")]
+async fn detail_billing_labels_are_the_servers_own() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		let group = private
+			.post("/api/server_groups/create")
+			.json(&json!({ "name": "Pacific" }))
+			.await;
+		group.assert_status_ok();
+		let group_body: serde_json::Value = group.json();
+		let group_id = group_body["id"].as_str().unwrap().to_string();
+
+		// A production Tamanu member, so the group's highest rank is production
+		// and its members span products.
+		let response = private
+			.post("/api/servers/create")
+			.json(&json!({
+				"kind": "central",
+				"rank": "production",
+				"group_id": group_id,
+			}))
+			.await;
+		response.assert_status_ok();
+
+		let response = private
+			.post("/api/servers/create")
+			.json(&json!({
+				"product": "senaite",
+				"kind": "standalone",
+				"rank": "clone",
+				"group_id": group_id,
+			}))
+			.await;
+		response.assert_status_ok();
+		let lims_id: String = response.json();
+
+		let response = private
+			.post("/api/servers/get_detail")
+			.json(&json!({ "server_id": lims_id }))
+			.await;
+		response.assert_status_ok();
+		let body: serde_json::Value = response.json();
+		let labels: std::collections::HashMap<String, String> = body["billing_labels"]
+			.as_array()
+			.expect("billing labels")
+			.iter()
+			.map(|t| {
+				(
+					t["key"].as_str().unwrap().to_string(),
+					t["value"].as_str().unwrap().to_string(),
+				)
+			})
+			.collect();
+
+		assert_eq!(
+			labels.get("billing.product").map(String::as_str),
+			Some("senaite")
+		);
+		// Its own rank, not the group's highest.
+		assert_eq!(
+			labels.get("billing.stage").map(String::as_str),
+			Some("clone")
+		);
+		// The deployment still comes from the group.
+		assert_eq!(
+			labels.get("billing.deployment").map(String::as_str),
+			Some("pacific")
+		);
+		let _ = &mut conn;
+	})
+	.await
+}

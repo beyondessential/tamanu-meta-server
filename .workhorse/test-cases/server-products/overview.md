@@ -24,7 +24,7 @@ shared figures without borrowing from a member that has nothing to give.
 - [x] A Tamanu server that has not reported a version presents "unknown", because there is a version to learn — verifies spec: APP
 - [x] A SENAITE server presents no version affordance at all, label included: there is nothing to learn, so an "unknown" would read as a reporting failure — verifies spec: APP
 - [x] A product whose version canopy does not track presents the bare version with no distance and no catalogue link — verifies spec: APP
-- [ ] A canopy instance's own reported build version presents ungraded end-to-end in the UI, rather than being measured against Tamanu's releases — verifies spec: APP
+- [x] A canopy instance's own reported build version presents ungraded end-to-end in the UI, rather than being measured against Tamanu's releases — verifies spec: APP
 
 ## Group figures across products
 
@@ -37,14 +37,14 @@ shared figures without borrowing from a member that has nothing to give.
 - [x] The production-version summary counts only servers whose product has a tracked release train, so an untracked product does not contribute a release branch of its own — verifies spec: APP
 - [x] The application-version spread covers only servers that have a version, and a server without one is absent from it rather than counted among those reporting nothing — verifies spec: APP
 - [x] The database-engine spread still covers the whole fleet, that figure having nothing to do with which product a server runs — verifies spec: APP
-- [ ] A crossing with the application version as one axis drops an uncovered server from both axes rather than placing it in the unreported row — verifies spec: APP
+- [x] A crossing with the application version as one axis drops an uncovered server from both axes rather than placing it in the unreported row — verifies spec: APP
 
 ## Public listing
 
 - [x] The public mobile-app listing excludes a product canopy does not list publicly, even when that server has been given a central role and a public name — verifies spec: APP
 - [x] The public-name field is offered only for a product and role that can be listed — verifies spec: APP
 - [x] Choosing a product that cannot be listed takes the public-name field away — verifies spec: APP
-- [ ] A public name already set survives the server losing eligibility, and takes effect again if it regains it — verifies spec: APP
+- [x] A public name already set survives the server losing eligibility, and takes effect again if it regains it — verifies spec: APP
 
 ## Billing attribution
 
@@ -55,4 +55,4 @@ shared figures without borrowing from a member that has nothing to give.
 - [x] A group whose members span products attributes no product, rather than charging shared cost to one of several — verifies spec: APP
 - [x] An explicit billing product set on a group is honoured as given, so a mixed group can be attributed by hand — verifies spec: APP
 - [x] Backup storage attributes to canopy's own backup product whatever product label the group carries — verifies spec: APP
-- [ ] The server detail view renders the server's own labels rather than its group's, so the page agrees with what the device is handed — verifies spec: APP
+- [x] The server detail view renders the server's own labels rather than its group's, so the page agrees with what the device is handed — verifies spec: APP

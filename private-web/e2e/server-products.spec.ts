@@ -195,4 +195,71 @@ test.describe("server products", () => {
 		const postgres = page.getByRole("group", { name: "PostgreSQL major" });
 		await expect(postgres.getByRole("button", { name: "16: 1" })).toBeVisible();
 	});
+
+	test("a canopy instance presents its own version ungraded", async ({
+		page,
+		sql,
+	}) => {
+		await seedVersion(sql, { major: 2, minor: 34, patch: 1, status: "published" });
+		const server = await seedServer(sql, {
+			name: "canopy-self",
+			product: "canopy",
+		});
+		// A canopy instance reports its own build version, which is nowhere near
+		// Tamanu's release numbering.
+		await seedStatus(sql, { serverId: server.id, version: "1.8.0" });
+
+		await page.goto(`/servers/${server.id}`);
+
+		// The version it reports is presented...
+		await expect(page.getByText("1.8.0")).toBeVisible();
+		// ...but graded against nothing: no distance from Tamanu's latest release,
+		// and no link into a catalogue that doesn't describe it.
+		await expect(
+			page.getByRole("link", { name: /versions behind/ }),
+		).toHaveCount(0);
+		await expect(page.getByRole("link", { name: /1\.8\.0/ })).toHaveCount(0);
+	});
+
+	test("a crossing on the application version drops uncovered servers from both axes", async ({
+		page,
+		sql,
+	}) => {
+		await seedVersion(sql, { major: 2, minor: 34, patch: 1, status: "published" });
+		const central = await seedServer(sql, {
+			name: "cross-central",
+			product: "tamanu",
+			kind: "central",
+		});
+		const lims = await seedServer(sql, {
+			name: "cross-lims",
+			product: "senaite",
+		});
+		await seedStatus(sql, {
+			serverId: central.id,
+			version: "2.34.1",
+			extra: { pgVersion: "PostgreSQL 16.2" },
+		});
+		// Distinct database major, so its presence or absence in the crossing is
+		// unambiguous.
+		await seedStatus(sql, {
+			serverId: lims.id,
+			version: null,
+			extra: { pgVersion: "PostgreSQL 13.12" },
+		});
+
+		await page.goto("/servers/figures");
+
+		// The crossing opens on the coarse version figures: database major
+		// against release.
+		const crossTab = page.getByRole("group", { name: "Cross two fields" });
+		await expect(crossTab.getByRole("rowheader").first()).toHaveText("16");
+		// The SENAITE server is dropped from the table entirely rather than
+		// occupying an unreported column, so its database major never appears as
+		// a row of its own.
+		await expect(crossTab.getByRole("rowheader", { name: "13" })).toHaveCount(0);
+		await expect(
+			crossTab.getByRole("columnheader", { name: "not reported" }),
+		).toHaveCount(0);
+	});
 });
