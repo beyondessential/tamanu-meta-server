@@ -40,14 +40,14 @@ an old binary unable to read the canopy self-server row at all. Instead
 `"canopy"` parses as `Standalone` (the same aliasing `kind.rs` already does
 for `"tamanu sync server"`), and a later release normalises the leftovers.
 
-- [ ] `just migration add_server_product` — `ALTER TABLE servers ADD COLUMN
+- [x] `just migration add_server_product` — `ALTER TABLE servers ADD COLUMN
       product TEXT NOT NULL DEFAULT 'tamanu'`, plus
       `CREATE INDEX servers_product ON servers (product)`
-- [ ] Backfill in the same migration: `UPDATE servers SET product = 'canopy'
+- [x] Backfill in the same migration: `UPDATE servers SET product = 'canopy'
       WHERE kind = 'canopy'`. Leave `kind` untouched
-- [ ] No `CHECK` constraint on `product`, matching how `kind` is stored, so
+- [x] No `CHECK` constraint on `product`, matching how `kind` is stored, so
       adding a product stays code-only
-- [ ] After `just migrate`, scrub the regenerated `schema.rs` against `main`
+- [x] After `just migrate`, scrub the regenerated `schema.rs` against `main`
       — keep only the `servers.product` line, drop any other branch's
       migrations that leaked in from the dev database
 
