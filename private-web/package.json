@@ -19,8 +19,8 @@
 		"@mui/icons-material": "^9.2.0",
 		"@mui/material": "^9.2.0",
 		"@uiw/react-codemirror": "^4.25.11",
-		"react": "^19.2.7",
-		"react-dom": "^19.2.7",
+		"react": "^19.2.8",
+		"react-dom": "^19.2.8",
 		"react-markdown": "^10.1.0",
 		"react-router-dom": "^7.18.1",
 		"rehype-raw": "^7.0.0",
@@ -43,7 +43,7 @@
 		"openapi-typescript": "^7.13.0",
 		"pg": "^8.22.0",
 		"typescript": "^7.0.2",
-		"vite": "^8.1.4",
+		"vite": "^8.1.5",
 		"vitest": "^4.1.10"
 	}
 }
