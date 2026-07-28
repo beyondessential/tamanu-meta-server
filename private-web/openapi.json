@@ -4158,7 +4158,7 @@
           "restore_replicas"
         ],
         "summary": "Declare a managed restore replica.",
-        "description": "Creates a declaration instructing the chosen consumer to maintain a\nrestored replica of the given backup type for the given intent, and\nrecords the calling operator as its creator. The overdue bound is a\nhuman-friendly duration string (e.g. `2h 30m`); `duration` and `bytes`\nparameter values likewise accept human-unit strings (e.g. `20Gi`), which\nare resolved to raw seconds/bytes before validation against the consumer's\nadvertised schema for the intent and stored raw. If the intent is not\ncurrently advertised, the values are accepted as-is and the declaration is\ncreated with a gap. Requires the caller to be on the admin allow-list.\nResponds 400 if the overdue bound or a parameter value fails to parse or\nvalidate, and 409 if a matching declaration already exists.",
+        "description": "Creates a declaration instructing the chosen consumer to maintain a\nrestored replica of the given backup type for the given intent, and\nrecords the calling operator as its creator. The overdue bound is a\nhuman-friendly duration string (e.g. `2h 30m`); `duration` and `bytes`\nparameter values likewise accept human-unit strings (e.g. `20Gi`), which\nare resolved to raw seconds/bytes before validation against the consumer's\nadvertised schema for the intent and stored raw. If the intent is not\ncurrently advertised, the values are accepted as-is and the declaration is\ncreated with a gap. The name must be unique among the consumer's\ndeclarations. Requires the caller to be on the admin allow-list. Responds\n400 if the name is blank or the overdue bound or a parameter value fails to\nparse or validate, and 409 if a matching declaration already exists or the\nconsumer already has a declaration with that name.",
         "operationId": "restore_replicas_create",
         "requestBody": {
           "content": {
@@ -4182,7 +4182,7 @@
             }
           },
           "409": {
-            "description": "A matching declaration already exists.",
+            "description": "A matching declaration already exists, or the consumer already has one with that name.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4205,7 +4205,7 @@
           "restore_replicas"
         ],
         "summary": "Delete a restore replica declaration.",
-        "description": "Removes the declaration: the consumer stops being asked to maintain the\nreplica and loses the backup access the declaration granted. Any active\nrestore-verification alert for the declaration's scope is recovered, since\nnothing tracks that scope any more. Requires the caller to be on the admin\nallow-list. Responds 404 if the declaration does not exist.",
+        "description": "Removes the declaration: the consumer stops being asked to maintain the\nreplica and loses the backup access the declaration granted. Any active\nrestore-verification alert for the declaration's scope is recovered, since\nnothing tracks that scope any more. The restore-health reports it collected\nare retained, detached from the deleted declaration. Requires the caller to\nbe on the admin allow-list. Responds 404 if the declaration does not exist.",
         "operationId": "restore_replicas_delete",
         "requestBody": {
           "content": {
@@ -4285,7 +4285,7 @@
           "restore_replicas"
         ],
         "summary": "Update a restore replica declaration.",
-        "description": "Replaces every field, including scope: the consumer, group, server,\nbackup type, and intent can be retargeted in the same call as the name,\noverdue bound, parameter values, and enabled flag. The overdue bound and\n`duration`/`bytes` parameter values accept human-unit strings (e.g.\n`2h 30m`, `20Gi`), resolved to raw seconds/bytes and validated against the\n*new* consumer+intent's advertised parameter schema; as with `create`, an\nintent the new consumer doesn't currently advertise is accepted and the\nvalues pass through unvalidated, leaving the declaration with a gap. If\nthe scope changes, any active restore-verification alert for the\ndeclaration's old scope is recovered. Requires the caller to be on the\nadmin allow-list. Responds 400 if the overdue bound or a parameter value\nfails to parse or validate, 404 if the declaration does not exist, and 409\nif the new scope collides with another declaration.",
+        "description": "Replaces every field, including scope: the consumer, group, server,\nbackup type, and intent can be retargeted in the same call as the name,\noverdue bound, parameter values, and enabled flag. The overdue bound and\n`duration`/`bytes` parameter values accept human-unit strings (e.g.\n`2h 30m`, `20Gi`), resolved to raw seconds/bytes and validated against the\n*new* consumer+intent's advertised parameter schema; as with `create`, an\nintent the new consumer doesn't currently advertise is accepted and the\nvalues pass through unvalidated, leaving the declaration with a gap. If\nthe scope changes, any active restore-verification alert for the\ndeclaration's old scope is recovered. The name must be unique among the\nconsumer's declarations. Requires the caller to be on the admin allow-list.\nResponds 400 if the name is blank or the overdue bound or a parameter value\nfails to parse or validate, 404 if the declaration does not exist, and 409\nif the new scope or name collides with another declaration.",
         "operationId": "restore_replicas_update",
         "requestBody": {
           "content": {
@@ -4319,7 +4319,7 @@
             }
           },
           "409": {
-            "description": "The new scope collides with another declaration.",
+            "description": "The new scope or name collides with another declaration.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11421,7 +11421,7 @@
           },
           "name": {
             "type": "string",
-            "description": "Display name for the declaration."
+            "description": "Display name for the declaration, unique among the consumer's\ndeclarations."
           },
           "overdue_after": {
             "type": [
@@ -11500,7 +11500,7 @@
           },
           "name": {
             "type": "string",
-            "description": "New display name for the declaration."
+            "description": "New display name for the declaration, unique among the consumer's\ndeclarations."
           },
           "overdue_after": {
             "type": [

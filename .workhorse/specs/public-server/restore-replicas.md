@@ -114,18 +114,22 @@ Each declaration carries:
 - the **type** of backup to restore;
 - a **server** within the group, or all servers in the group when none is named;
 - an **intent** the chosen consumer advertises;
-- a human-readable **name**;
+- a human-readable **name**, distinct from every other declaration assigned to the same consumer;
 - **parameter values** for the intent's schema, defaulted where the schema provides one;
 - an **overdue bound**: the maximum time a replica may go without meeting its intent's health expectation before Canopy considers it overdue, interpreted per the intent's semantics (see [Alerting](#alerting));
 - whether the declaration is **enabled**.
 
 A declaration's intent must be one the chosen consumer advertises (see [Consumer capabilities](#consumer-capabilities)); a declaration whose intent is unadvertised is a gap, surfaced to the operator and never dispatched.
 
+The name identifies the replica to the consumer that maintains it and to the operator reading the list, so a consumer's declarations must not share one.
+Two declarations that differ only by intent are a distinct scope but still need distinct names, and Canopy refuses the second rather than accepting an ambiguous pair.
+
 A declaration scoped to a whole group expands to one replica per current server in that group.
 Servers joining or leaving a group change what the consumer is asked to maintain, with no per-server operator action.
 
 Declarations are managed through the operator interface (create, edit, enable/disable, delete) and are audited.
 Deleting a declaration stops the consumer being asked to maintain that replica and revokes its authorization for that `(group, type)` if no other declaration covers it; recorded restore-health history is retained.
+The reports it collected survive the deletion, keeping the group, server, type, and intent they concern but no longer naming a declaration, so a declaration that has been reported on is no harder to retire than one that never was.
 
 ## The worklist
 

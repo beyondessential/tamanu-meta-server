@@ -2088,9 +2088,11 @@ export interface paths {
          *     are resolved to raw seconds/bytes before validation against the consumer's
          *     advertised schema for the intent and stored raw. If the intent is not
          *     currently advertised, the values are accepted as-is and the declaration is
-         *     created with a gap. Requires the caller to be on the admin allow-list.
-         *     Responds 400 if the overdue bound or a parameter value fails to parse or
-         *     validate, and 409 if a matching declaration already exists.
+         *     created with a gap. The name must be unique among the consumer's
+         *     declarations. Requires the caller to be on the admin allow-list. Responds
+         *     400 if the name is blank or the overdue bound or a parameter value fails to
+         *     parse or validate, and 409 if a matching declaration already exists or the
+         *     consumer already has a declaration with that name.
          */
         post: operations["restore_replicas_create"];
         delete?: never;
@@ -2113,8 +2115,9 @@ export interface paths {
          * @description Removes the declaration: the consumer stops being asked to maintain the
          *     replica and loses the backup access the declaration granted. Any active
          *     restore-verification alert for the declaration's scope is recovered, since
-         *     nothing tracks that scope any more. Requires the caller to be on the admin
-         *     allow-list. Responds 404 if the declaration does not exist.
+         *     nothing tracks that scope any more. The restore-health reports it collected
+         *     are retained, detached from the deleted declaration. Requires the caller to
+         *     be on the admin allow-list. Responds 404 if the declaration does not exist.
          */
         post: operations["restore_replicas_delete"];
         delete?: never;
@@ -2165,10 +2168,11 @@ export interface paths {
          *     intent the new consumer doesn't currently advertise is accepted and the
          *     values pass through unvalidated, leaving the declaration with a gap. If
          *     the scope changes, any active restore-verification alert for the
-         *     declaration's old scope is recovered. Requires the caller to be on the
-         *     admin allow-list. Responds 400 if the overdue bound or a parameter value
+         *     declaration's old scope is recovered. The name must be unique among the
+         *     consumer's declarations. Requires the caller to be on the admin allow-list.
+         *     Responds 400 if the name is blank or the overdue bound or a parameter value
          *     fails to parse or validate, 404 if the declaration does not exist, and 409
-         *     if the new scope collides with another declaration.
+         *     if the new scope or name collides with another declaration.
          */
         post: operations["restore_replicas_update"];
         delete?: never;
@@ -6472,7 +6476,10 @@ export interface components {
              *     identifier from the consumer's advertised intents, e.g. `verify`.
              */
             intent: string;
-            /** @description Display name for the declaration. */
+            /**
+             * @description Display name for the declaration, unique among the consumer's
+             *     declarations.
+             */
             name: string;
             /**
              * @description Overdue bound as a human-friendly duration (jiff's "friendly" format,
@@ -6535,7 +6542,10 @@ export interface components {
              *     identifier from the consumer's advertised intents, e.g. `verify`.
              */
             intent: string;
-            /** @description New display name for the declaration. */
+            /**
+             * @description New display name for the declaration, unique among the consumer's
+             *     declarations.
+             */
             name: string;
             /**
              * @description New overdue bound as a human-friendly duration (jiff's "friendly"
@@ -10916,7 +10926,7 @@ export interface operations {
                     "application/json": components["schemas"]["RestoreReplicaView"];
                 };
             };
-            /** @description A matching declaration already exists. */
+            /** @description A matching declaration already exists, or the consumer already has one with that name. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -11008,7 +11018,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
-            /** @description The new scope collides with another declaration. */
+            /** @description The new scope or name collides with another declaration. */
             409: {
                 headers: {
                     [name: string]: unknown;
