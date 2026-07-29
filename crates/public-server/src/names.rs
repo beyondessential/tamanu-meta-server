@@ -303,6 +303,7 @@ pub struct RegisterNameArgs {
 /// What Canopy holds for a registered name.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct RegisteredName {
+	/// The name, as Canopy normalised it.
 	pub name: String,
 	/// The addresses Canopy will publish.
 	#[schema(value_type = Vec<String>)]
@@ -388,6 +389,7 @@ pub struct RequestCertificateArgs {
 /// Where a certificate request stands, and the chain once there is one.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct CertificateResponse {
+	/// The name the certificate is (or will be) for, as Canopy normalised it.
 	pub name: String,
 	/// `pending`, `issued`, `failed`, or `revoked`.
 	pub state: String,

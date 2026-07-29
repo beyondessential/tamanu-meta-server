@@ -12,6 +12,7 @@ use tower_http::{
 };
 use tracing::Span;
 
+pub mod acme;
 pub mod backup_jobs;
 pub mod backup_secrets;
 pub mod csr;
