@@ -47,7 +47,7 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, server_reported_detail, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, recovery_vault_writes RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, server_reported_detail, issues, device_keys, servers, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, recovery_vault_writes RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" server with it;
 	// self-alerts attach to that row, so put it back. `kind = 'canopy'` is the
@@ -140,6 +140,11 @@ export async function seedServer(
 		isMonitored?: boolean;
 		/** Threshold in seconds; defaults to 600 (10 min). Must be > 0. */
 		alertWhenDownFor?: number;
+		/** Whether the server may manage its own DNS records / obtain its own
+		 * TLS certificates under its group's domains. Both off by default, as
+		 * they are for a real server. */
+		mayManageDns?: boolean;
+		mayManageTls?: boolean;
 	} = {},
 ): Promise<SeededServer> {
 	const id = randomUUID();
@@ -153,8 +158,8 @@ export async function seedServer(
 	const isMonitored = opts.isMonitored ?? false;
 	const alertWhenDownFor = opts.alertWhenDownFor ?? 600;
 	await sql.query(
-		`INSERT INTO servers (id, name, host, product, kind, rank, group_id, device_id, is_monitored, alert_when_down_for, notes, tags)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)`,
+		`INSERT INTO servers (id, name, host, product, kind, rank, group_id, device_id, is_monitored, alert_when_down_for, notes, tags, may_manage_dns, may_manage_tls)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14)`,
 		[
 			id,
 			name,
@@ -168,6 +173,8 @@ export async function seedServer(
 			alertWhenDownFor,
 			opts.notes ?? "",
 			JSON.stringify(opts.tags ?? {}),
+			opts.mayManageDns ?? false,
+			opts.mayManageTls ?? false,
 		],
 	);
 	return { id, name, host, product, kind, rank };
@@ -1140,4 +1147,19 @@ export async function seedRecoveryVaultWrite(
 		 VALUES (NOW() - make_interval(secs => $1), $2)`,
 		[opts.writtenAgoSecs ?? 0, opts.bytes ?? 4096],
 	);
+}
+
+/** Seed a `server_group_domains` row: a domain the group controls. Claims must
+ * not overlap, so give each seeded group its own name. */
+export async function seedServerGroupDomain(
+	sql: Sql,
+	opts: { groupId: string; domain: string; createdBy?: string },
+): Promise<{ id: string; domain: string }> {
+	const id = randomUUID();
+	await sql.query(
+		`INSERT INTO server_group_domains (id, group_id, domain, created_by)
+		 VALUES ($1, $2, $3, $4)`,
+		[id, opts.groupId, opts.domain, opts.createdBy ?? null],
+	);
+	return { id, domain: opts.domain };
 }

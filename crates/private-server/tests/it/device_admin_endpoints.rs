@@ -45,6 +45,7 @@ async fn private_with_directory(url: &str, directory: TailnetDirectory) -> TestS
 			),
 			recovery_recipients: None,
 			recovery_challenge: std::sync::Arc::new(std::sync::Mutex::new(None)),
+			dns_zones: Vec::new(),
 		})
 		.unwrap(),
 		ClientIpSource::RightmostForwarded,

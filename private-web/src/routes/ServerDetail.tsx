@@ -804,6 +804,10 @@ function InfoSection({
 						value={renderLocation(server)}
 					/>
 				)}
+				<InfoItem
+					label="Name management"
+					value={nameManagementLabel(server)}
+				/>
 			</Stack>
 			<ChecksTable
 				checks={checks}
@@ -1518,6 +1522,15 @@ function InfoItem({
 function renderLocation(server: ServerInfo): string {
 	if (!server.cloud) return "On premise";
 	return "Cloud";
+}
+
+/// What this server is trusted to do with names under its group's domains.
+// spec: DOM#permission-for-a-server-to-manage-its-own-names
+function nameManagementLabel(server: ServerInfo): string {
+	if (server.may_manage_dns && server.may_manage_tls) return "DNS and TLS";
+	if (server.may_manage_dns) return "DNS only";
+	if (server.may_manage_tls) return "TLS only";
+	return "Not permitted";
 }
 
 function SiblingServers({

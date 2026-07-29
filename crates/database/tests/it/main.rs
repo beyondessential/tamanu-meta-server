@@ -29,6 +29,7 @@ mod restore;
 mod scope;
 mod scoped_check_policies;
 mod self_alerts;
+mod server_domains;
 mod server_enrollment;
 mod server_group_archival;
 mod server_group_version_cache;

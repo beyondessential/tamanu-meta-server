@@ -2592,6 +2592,173 @@
         ]
       }
     },
+    "/api/domains/claim": {
+      "post": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Claim a domain for a group.",
+        "description": "The group then controls the domain and every name beneath it, and no other\ngroup can claim a name overlapping it. Requires the caller to be on the\nadmin allow-list. Responds 400 if the name is not a valid domain of at least\ntwo labels or does not sit within one of Canopy's managed zones, and 409 if\nit overlaps a domain already claimed — by this group or another.",
+        "operationId": "domains_claim",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DomainClaimArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupDomainView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The domain overlaps one already claimed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/domains/for_group": {
+      "post": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "List the domains a group controls.",
+        "description": "Each carries the managed zone it resolves to, or null for a claim no\nconfigured zone matches.",
+        "operationId": "domains_for_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GroupDomainView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/domains/release": {
+      "post": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Release a claimed domain.",
+        "description": "The group loses control of the domain and every name beneath it, and the\nname becomes claimable again. Requires the caller to be on the admin\nallow-list. Responds 404 if there is no such claim.",
+        "operationId": "domains_release",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DomainIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/domains/zones": {
+      "post": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "List the managed DNS zones Canopy is configured with.",
+        "description": "An operator claiming a domain for a group needs these to know which names\nare claimable at all: a claim has to sit at or under one of these apexes.\nAn empty list means Canopy has been given no zones, so no domain can be\nclaimed until its deployment configuration provides one.",
+        "operationId": "domains_zones",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ManagedZoneView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
     "/api/healthchecks/decommission": {
       "post": {
         "tags": [
@@ -8223,6 +8390,39 @@
           }
         }
       },
+      "DomainClaimArgs": {
+        "type": "object",
+        "description": "Fields needed to claim a domain for a group.",
+        "required": [
+          "server_group_id",
+          "domain"
+        ],
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "The domain to claim. Case and a trailing dot are not significant. An\ninternationalised domain is claimed in its ASCII-compatible (punycode)\nspelling."
+          },
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group to give control of the domain."
+          }
+        }
+      },
+      "DomainIdArgs": {
+        "type": "object",
+        "description": "Identifies a claim.",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The claim to release."
+          }
+        }
+      },
       "DutyBucket": {
         "type": "object",
         "description": "One hour-of-week bucket of the degradation profile.",
@@ -8567,6 +8767,50 @@
             "type": "string",
             "format": "uuid",
             "description": "Id of the server group to fetch details for."
+          }
+        }
+      },
+      "GroupDomainView": {
+        "type": "object",
+        "description": "A domain a group controls, with the managed zone it resolves to.",
+        "required": [
+          "id",
+          "group_id",
+          "domain",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "When it was claimed."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Login of the operator who claimed it, if recorded."
+          },
+          "domain": {
+            "type": "string",
+            "description": "The domain, normalised to lower case without a trailing dot."
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group that controls the domain."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier of the claim."
+          },
+          "zone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Apex of the managed zone this domain resolves to — the longest\nconfigured apex it sits within. Null when no configured zone covers it,\nwhich means the zone has left Canopy's configuration since the claim was\nmade: the claim stands and still excludes others, but Canopy will act on\nno name beneath it until the zone is restored or the claim released."
           }
         }
       },
@@ -9944,6 +10188,24 @@
           "full"
         ]
       },
+      "ManagedZoneView": {
+        "type": "object",
+        "description": "A DNS zone Canopy can write records in.\n\nZones come from Canopy's deployment configuration rather than from operator\nstate: they are what the infrastructure has granted Canopy write access to,\nand they bound which domains a group can be given.",
+        "required": [
+          "apex",
+          "provider_zone_id"
+        ],
+        "properties": {
+          "apex": {
+            "type": "string",
+            "description": "The zone's apex domain, for example `tamanu.app`."
+          },
+          "provider_zone_id": {
+            "type": "string",
+            "description": "The identifier the DNS provider knows this zone by."
+          }
+        }
+      },
       "McpTokenView": {
         "type": "object",
         "description": "Metadata about an MCP access token. Never includes the secret value\nitself — that's only ever returned once, at minting time.",
@@ -10270,7 +10532,9 @@
                 "alert_when_down_for",
                 "notes",
                 "tags",
-                "archived"
+                "archived",
+                "may_manage_dns",
+                "may_manage_tls"
               ],
               "properties": {
                 "alert_when_down_for": {
@@ -10357,6 +10621,14 @@
                 "kind": {
                   "$ref": "#/components/schemas/ServerKind",
                   "description": "The server's role within its product's topology."
+                },
+                "may_manage_dns": {
+                  "type": "boolean",
+                  "description": "Whether the server may manage its own DNS records for names under its\ngroup's domains."
+                },
+                "may_manage_tls": {
+                  "type": "boolean",
+                  "description": "Whether the server may obtain TLS certificates for names under its\ngroup's domains."
                 },
                 "name": {
                   "type": [
@@ -12197,6 +12469,20 @@
               }
             ]
           },
+          "may_manage_dns": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether this server may manage its own DNS records for names under its\ngroup's domains. Omit to leave unchanged."
+          },
+          "may_manage_tls": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether this server may obtain TLS certificates for names under its\ngroup's domains. Omit to leave unchanged."
+          },
           "name": {
             "type": [
               "string",
@@ -12611,7 +12897,9 @@
           "alert_when_down_for",
           "notes",
           "tags",
-          "archived"
+          "archived",
+          "may_manage_dns",
+          "may_manage_tls"
         ],
         "properties": {
           "alert_when_down_for": {
@@ -12698,6 +12986,14 @@
           "kind": {
             "$ref": "#/components/schemas/ServerKind",
             "description": "The server's role within its product's topology."
+          },
+          "may_manage_dns": {
+            "type": "boolean",
+            "description": "Whether the server may manage its own DNS records for names under its\ngroup's domains."
+          },
+          "may_manage_tls": {
+            "type": "boolean",
+            "description": "Whether the server may obtain TLS certificates for names under its\ngroup's domains."
           },
           "name": {
             "type": [
@@ -14208,6 +14504,10 @@
     {
       "name": "devices",
       "description": "Device registry, trust, and key management."
+    },
+    {
+      "name": "domains",
+      "description": "Managed DNS zones and the domains each group controls."
     },
     {
       "name": "healthchecks",

@@ -86,6 +86,8 @@ function EditForm({ info }: { info: ServerInfo }) {
 	const [lon, setLon] = useState<string>(info.geolocation?.lon?.toString() ?? "");
 	const [notes, setNotes] = useState<string>(info.notes ?? "");
 	const [tags, setTags] = useState<TagMap>(info.tags ?? {});
+	const [mayManageDns, setMayManageDns] = useState(info.may_manage_dns);
+	const [mayManageTls, setMayManageTls] = useState(info.may_manage_tls);
 
 	const onSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -116,6 +118,8 @@ function EditForm({ info }: { info: ServerInfo }) {
 			),
 			notes,
 			tags,
+			may_manage_dns: mayManageDns,
+			may_manage_tls: mayManageTls,
 		};
 		try {
 			await action.call({ server_id: info.id, data });
@@ -294,6 +298,36 @@ function EditForm({ info }: { info: ServerInfo }) {
 					it for critical servers that should page promptly. The value is
 					preserved while monitoring is off.
 				</Typography>
+
+				<Stack spacing={1}>
+					<Typography variant="subtitle1">Name management</Typography>
+					<FormControlLabel
+						control={
+							<Checkbox
+								checked={mayManageDns}
+								onChange={(e) => setMayManageDns(e.target.checked)}
+								disabled={action.pending}
+							/>
+						}
+						label="May manage its own DNS records"
+					/>
+					<FormControlLabel
+						control={
+							<Checkbox
+								checked={mayManageTls}
+								onChange={(e) => setMayManageTls(e.target.checked)}
+								disabled={action.pending}
+							/>
+						}
+						label="May obtain its own TLS certificates"
+					/>
+					<Typography variant="caption" color="text.secondary">
+						Both apply only to names under the domains this server's group
+						controls, and are off until granted: a server without the grant
+						it needs is refused. Revoking stops further changes and leaves
+						records and certificates already in place.
+					</Typography>
+				</Stack>
 
 				<TextField
 					label="Notes"

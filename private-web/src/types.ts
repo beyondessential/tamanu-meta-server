@@ -187,6 +187,9 @@ export type ServerBackupCapabilityView = Solidify<
 export type RestoreWindowRow = Solidify<Schemas["RestoreWindowRow"]>;
 export type RestoreWindowView = Solidify<Schemas["RestoreWindowView"]>;
 
+export type ManagedZoneView = Solidify<Schemas["ManagedZoneView"]>;
+export type GroupDomainView = Solidify<Schemas["GroupDomainView"]>;
+
 // `mode`/`status` arrive as plain strings on the wire (the Rust enums use a
 // custom Text serializer, so utoipa emits `string`). Narrow them in the UI so
 // switch/label maps are exhaustive.

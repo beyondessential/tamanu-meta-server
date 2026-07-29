@@ -266,6 +266,9 @@ where
 				),
 				recovery_recipients: None,
 				recovery_challenge: std::sync::Arc::new(std::sync::Mutex::new(None)),
+				// This harness is for the tailnet-auth paths; no test on it
+				// touches group domains.
+				dns_zones: Vec::new(),
 			})
 			.unwrap(),
 			ClientIpSource::RightmostForwarded,
