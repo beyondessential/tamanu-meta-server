@@ -505,3 +505,82 @@ async fn an_untried_candidate_goes_overdue_and_a_tested_one_does_not() {
 	})
 	.await
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_shows_where_each_server_stands() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn).await;
+		let tested = insert_server(&mut conn, group).await;
+		let untested = insert_server(&mut conn, group).await;
+		let current = insert_server(&mut conn, group).await;
+		let target = insert_version(&mut conn, 63).await;
+
+		let behind: commons_types::version::VersionStr = "2.62.0".parse().expect("parse");
+		let newest: commons_types::version::VersionStr = "2.63.0".parse().expect("parse");
+		for (server, running) in [
+			(tested, &behind),
+			(untested, &behind),
+			// Already on the newest published version, so nothing to test.
+			(current, &newest),
+		] {
+			database::reported_detail::ReportedDetail::record(
+				&mut conn,
+				server,
+				"test",
+				&serde_json::json!({}),
+				Some(running),
+			)
+			.await
+			.expect("report version");
+		}
+
+		let mut failing = report(consumer, group, tested, RunOutcome::Success);
+		failing.snapshot_id = Some("snap-1".into());
+		MigrationTest::record(
+			&mut conn,
+			failing,
+			NewMigrationTest {
+				target_version_id: target.id,
+				total_elapsed: secs(3600),
+				failed_migration: Some("backfillNoteTypeIds".into()),
+				data_bytes_before: 200,
+				data_bytes_after: 260,
+				timings: vec![],
+			},
+		)
+		.await
+		.expect("record failure");
+
+		let verdicts = database::migration_tests::verdicts_for_group(&mut conn, group)
+			.await
+			.expect("verdicts");
+
+		assert_eq!(verdicts.len(), 2, "the up-to-date server has no row");
+		let by_server: std::collections::HashMap<Uuid, _> =
+			verdicts.into_iter().map(|v| (v.server_id, v)).collect();
+
+		let failed = &by_server[&tested];
+		assert_eq!(failed.verdict, database::migration_tests::Verdict::Failed);
+		assert_eq!(failed.target_version, "2.63.0");
+		let latest = failed.latest.as_ref().expect("a test was reported");
+		assert_eq!(latest.snapshot_id.as_deref(), Some("snap-1"));
+		assert_eq!(
+			latest.failed_migration.as_deref(),
+			Some("backfillNoteTypeIds")
+		);
+		assert_eq!(
+			latest.data_bytes_after - latest.data_bytes_before,
+			60,
+			"growth is readable from the verdict"
+		);
+
+		let pending = &by_server[&untested];
+		assert_eq!(
+			pending.verdict,
+			database::migration_tests::Verdict::NotTested
+		);
+		assert!(pending.latest.is_none());
+	})
+	.await
+}

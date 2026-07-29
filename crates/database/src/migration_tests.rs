@@ -13,6 +13,7 @@ use commons_types::{
 };
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -138,6 +139,43 @@ pub struct NewMigrationTest {
 	pub timings: Vec<(String, PgDuration)>,
 }
 
+/// One joined row behind [`latest_test`].
+#[derive(Queryable)]
+struct LatestRow {
+	outcome: RunOutcome,
+	failed_migration: Option<String>,
+	snapshot_id: Option<String>,
+	#[diesel(deserialize_as = jiff_diesel::Timestamp)]
+	reported_at: Timestamp,
+	total_elapsed: PgDuration,
+	data_bytes_before: i64,
+	data_bytes_after: i64,
+}
+
+/// The most recent test of one (server, version) pair.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LatestTest {
+	pub verdict: Verdict,
+	pub failed_migration: Option<String>,
+	pub snapshot_id: Option<String>,
+	pub reported_at: Timestamp,
+	pub total_elapsed: PgDuration,
+	pub data_bytes_before: i64,
+	pub data_bytes_after: i64,
+}
+
+/// Where one of a group's servers stands against the version it would take
+/// next.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GroupVerdict {
+	pub server_id: Uuid,
+	pub target_version_id: Uuid,
+	pub target_version: String,
+	pub verdict: Verdict,
+	/// The test the verdict came from, absent when there has not been one.
+	pub latest: Option<LatestTest>,
+}
+
 /// Where a (server, version) pair stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -230,6 +268,48 @@ impl MigrationTest {
 	}
 }
 
+/// The most recent test of `server` against `version`, with the report context
+/// that says when it was and what it ran against.
+// spec: RST#verdicts
+pub async fn latest_test(
+	db: &mut AsyncPgConnection,
+	server_id: Uuid,
+	target_version_id: Uuid,
+) -> Result<Option<LatestTest>> {
+	use crate::schema::{backup_restore_checks, migration_tests};
+
+	let row: Option<LatestRow> = migration_tests::table
+		.inner_join(backup_restore_checks::table)
+		.select((
+			backup_restore_checks::outcome,
+			migration_tests::failed_migration,
+			backup_restore_checks::snapshot_id,
+			backup_restore_checks::reported_at,
+			migration_tests::total_elapsed,
+			migration_tests::data_bytes_before,
+			migration_tests::data_bytes_after,
+		))
+		.filter(migration_tests::target_version_id.eq(target_version_id))
+		.filter(backup_restore_checks::server_id.eq(server_id))
+		.order(backup_restore_checks::reported_at.desc())
+		.first(db)
+		.await
+		.optional()?;
+
+	Ok(row.map(|row| LatestTest {
+		verdict: match (row.outcome, &row.failed_migration) {
+			(RunOutcome::Success, None) => Verdict::Passed,
+			_ => Verdict::Failed,
+		},
+		failed_migration: row.failed_migration,
+		snapshot_id: row.snapshot_id,
+		reported_at: row.reported_at,
+		total_elapsed: row.total_elapsed,
+		data_bytes_before: row.data_bytes_before,
+		data_bytes_after: row.data_bytes_after,
+	}))
+}
+
 /// Where `server` stands against `version`, from its most recent test.
 ///
 /// A pass means every migration applied. Anything else is a failure, including
@@ -240,26 +320,9 @@ pub async fn verdict(
 	server_id: Uuid,
 	target_version_id: Uuid,
 ) -> Result<Verdict> {
-	use crate::schema::{backup_restore_checks, migration_tests};
-
-	let latest: Option<(RunOutcome, Option<String>)> = migration_tests::table
-		.inner_join(backup_restore_checks::table)
-		.select((
-			backup_restore_checks::outcome,
-			migration_tests::failed_migration,
-		))
-		.filter(migration_tests::target_version_id.eq(target_version_id))
-		.filter(backup_restore_checks::server_id.eq(server_id))
-		.order(backup_restore_checks::reported_at.desc())
-		.first(db)
-		.await
-		.optional()?;
-
-	Ok(match latest {
-		None => Verdict::NotTested,
-		Some((RunOutcome::Success, None)) => Verdict::Passed,
-		Some(_) => Verdict::Failed,
-	})
+	Ok(latest_test(db, server_id, target_version_id)
+		.await?
+		.map_or(Verdict::NotTested, |test| test.verdict))
 }
 
 /// Whether `server` already has a verdict for this snapshot and target version.
@@ -370,4 +433,36 @@ async fn file_outcome(
 	}
 
 	Ok(())
+}
+
+/// Where every server in `group` stands against the version it would take next.
+///
+/// One row per server that has a candidate at all: a server on the newest
+/// version, running another product, or yet to report one has nothing to be
+/// tested against and so nothing to show.
+// spec: RST#verdicts
+pub async fn verdicts_for_group(
+	db: &mut AsyncPgConnection,
+	group_id: Uuid,
+) -> Result<Vec<GroupVerdict>> {
+	let mut out = Vec::new();
+
+	for server in Server::list_live_in_group(db, group_id).await? {
+		let Some(version) = candidate_for(db, &server).await? else {
+			continue;
+		};
+		let latest = latest_test(db, server.id, version.id).await?;
+
+		out.push(GroupVerdict {
+			server_id: server.id,
+			target_version_id: version.id,
+			target_version: version.as_semver().to_string(),
+			verdict: latest
+				.as_ref()
+				.map_or(Verdict::NotTested, |test| test.verdict),
+			latest,
+		});
+	}
+
+	Ok(out)
 }
