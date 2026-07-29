@@ -509,6 +509,26 @@ diesel::table! {
 }
 
 diesel::table! {
+	server_certificates (id) {
+		id -> Uuid,
+		server_id -> Uuid,
+		name -> Text,
+		key_fingerprint -> Text,
+		csr -> Bytea,
+		state -> Text,
+		chain -> Nullable<Text>,
+		not_after -> Nullable<Timestamptz>,
+		issued_at -> Nullable<Timestamptz>,
+		renewing -> Bool,
+		attempts -> Int4,
+		next_attempt_at -> Timestamptz,
+		last_error -> Nullable<Text>,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	server_group_domains (id) {
 		id -> Uuid,
 		group_id -> Uuid,
@@ -542,6 +562,20 @@ diesel::table! {
 		extra -> Jsonb,
 		version -> Nullable<Text>,
 		reported_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
+	server_names (id) {
+		id -> Uuid,
+		server_id -> Uuid,
+		name -> Text,
+		addresses -> Array<Nullable<Inet>>,
+		published_addresses -> Array<Nullable<Inet>>,
+		published_at -> Nullable<Timestamptz>,
+		last_error -> Nullable<Text>,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
 	}
 }
 
@@ -710,7 +744,9 @@ diesel::joinable!(server_enrollment_challenges -> servers (server_id));
 diesel::joinable!(server_enrollment_tokens -> servers (server_id));
 diesel::joinable!(server_group_backup_config -> server_groups (group_id));
 diesel::joinable!(server_group_backup_schedule -> server_groups (group_id));
+diesel::joinable!(server_certificates -> servers (server_id));
 diesel::joinable!(server_group_domains -> server_groups (group_id));
+diesel::joinable!(server_names -> servers (server_id));
 diesel::joinable!(server_reported_detail -> servers (server_id));
 diesel::joinable!(servers -> devices (device_id));
 diesel::joinable!(slack_outbox -> incident_notes (note_id));
@@ -756,9 +792,11 @@ diesel::allow_tables_to_appear_in_same_query!(
 	server_enrollment_challenges,
 	server_enrollment_tokens,
 	server_group_backup_config,
+	server_certificates,
 	server_group_backup_schedule,
 	server_group_domains,
 	server_groups,
+	server_names,
 	server_reported_detail,
 	servers,
 	slack_outbox,

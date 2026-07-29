@@ -22,10 +22,12 @@ pub mod reported_detail;
 pub mod restore;
 pub mod schema;
 pub mod self_alerts;
+pub mod server_certificates;
 pub mod server_domains;
 pub mod server_enrollment_challenges;
 pub mod server_enrollment_tokens;
 pub mod server_groups;
+pub mod server_names;
 pub mod servers;
 pub mod silenced_refs;
 pub mod slack_outbox;
@@ -59,7 +61,9 @@ pub use restore::{
 	BackupRestoreCheck, NewBackupRestoreCheck, NewRestoreReplica, RestoreConsumerCapability,
 	RestoreReplica, RestoreReplicaUpdate,
 };
+pub use server_certificates::{OrderState, ServerCertificate};
 pub use server_domains::ServerGroupDomain;
+pub use server_names::ServerName;
 
 pub type Db = Pool<AsyncPgConnection>;
 

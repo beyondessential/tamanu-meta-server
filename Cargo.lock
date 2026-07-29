@@ -1666,6 +1666,8 @@ name = "commons-servers"
 version = "6.6.6"
 dependencies = [
  "age",
+ "aws-config",
+ "aws-credential-types",
  "aws-sdk-route53",
  "axum",
  "axum-client-ip",
