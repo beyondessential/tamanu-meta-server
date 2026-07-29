@@ -689,3 +689,74 @@ async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
 	)
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reported_migration_test_lands_and_settles_the_entry() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let server = make_server(&mut conn, group).await;
+			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
+			report_version(&mut conn, server, "2.62.0").await;
+			let newest = publish_version(&mut conn, 63, 2).await;
+			declare_replica(&mut conn, device_id, group, "migrate").await;
+			register_migrate_intent(&public, &cert).await;
+
+			let dispatched: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("mtls-certificate", &cert)
+				.await
+				.json();
+			assert_eq!(dispatched.len(), 1, "got {dispatched:?}");
+			let entry = &dispatched[0];
+
+			// Report it back the way a consumer would, echoing the entry.
+			public
+				.post("/restore-verification")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"replica_id": entry["replica_id"],
+					"group": group,
+					"server_id": server,
+					"type": "tamanu-postgres",
+					"intent": "migrate",
+					"snapshot_id": entry["snapshot_id"],
+					"outcome": "success",
+					"replica_healthy": true,
+					"postgres_version": "18",
+					"observed_at": "2026-07-30T00:00:00Z",
+					"migration": {
+						"target_version_id": entry["target_version_id"],
+						"total_elapsed_seconds": 900,
+						"data_bytes_before": 200_000_000_000i64,
+						"data_bytes_after": 260_000_000_000i64,
+						"timings": [
+							{"name": "addIndexToFhirJobs", "elapsed_seconds": 12},
+							{"name": "backfillNoteTypeIds", "elapsed_seconds": 880},
+						],
+					},
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			// The verdict is readable, and the timings survived the round trip.
+			assert_eq!(
+				database::migration_tests::verdict(&mut conn, server, newest)
+					.await
+					.expect("verdict"),
+				database::migration_tests::Verdict::Passed
+			);
+
+			// And the pair is settled, so it is not dispatched again.
+			let after: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("mtls-certificate", &cert)
+				.await
+				.json();
+			assert!(after.is_empty(), "got {after:?}");
+		},
+	)
+	.await;
+}

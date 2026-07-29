@@ -25,7 +25,8 @@ use commons_types::backup::{
 use database::{
 	Db,
 	backups::{BackupRun, NewBackupCredentialIssuance, ServerGroupBackupConfig},
-	migration_tests,
+	migration_tests::{self, MigrationTest, NewMigrationTest},
+	pg_duration::PgDuration,
 	reported_detail::ReportedDetail,
 	restore::{
 		BackupRestoreCheck, NewBackupRestoreCheck, RestoreConsumerCapability, RestoreReplica,
@@ -33,7 +34,7 @@ use database::{
 	servers::Server,
 	versions::Version,
 };
-use jiff::Timestamp;
+use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use utoipa::ToSchema;
@@ -594,6 +595,37 @@ pub struct VerificationArgs {
 	/// The field is optional only so older clients don't break; it WILL be made
 	/// mandatory in future.
 	pub run_id: Option<Uuid>,
+	/// What the migrations did, for a report under a `migrate` intent. Omit for
+	/// every other intent.
+	pub migration: Option<MigrationArgs>,
+}
+
+/// How the target version's migrations went against the restored replica.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct MigrationArgs {
+	/// The version whose migrations were applied, taken from the worklist
+	/// entry's `target_version_id`.
+	pub target_version_id: Uuid,
+	/// Whole seconds the whole migration run took.
+	pub total_elapsed_seconds: i64,
+	/// The migration that failed, when one did.
+	pub failed_migration: Option<String>,
+	/// Size of the data before the migrations ran.
+	pub data_bytes_before: i64,
+	/// Size of the data after they ran. The growth between the two is what shows
+	/// a migration that backfills heavily.
+	pub data_bytes_after: i64,
+	/// One entry per migration that ran, in the order they ran.
+	pub timings: Vec<MigrationTimingArgs>,
+}
+
+/// How long one migration took.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct MigrationTimingArgs {
+	/// The migration's name, as the migration runner reports it.
+	pub name: String,
+	/// Whole seconds it took.
+	pub elapsed_seconds: i64,
 }
 
 /// Report the outcome of a restore attempt and the replica's health.
@@ -634,30 +666,57 @@ async fn verification(
 		});
 	}
 
-	BackupRestoreCheck::record_report(
-		&mut conn,
-		NewBackupRestoreCheck {
-			replica_id: args.replica_id,
-			consumer_device_id,
-			group_id: args.group,
-			server_id: Some(args.server_id),
-			r#type: args.r#type,
-			intent: args.intent,
-			snapshot_id: args.snapshot_id,
-			outcome: args.outcome,
-			error: args.error,
-			replica_healthy: args.replica_healthy,
-			postgres_version: args.postgres_version,
-			observed_at: args.observed_at,
-			s3_sent_raw_bytes: args.s3_sent_raw_bytes,
-			s3_sent_payload_bytes: args.s3_sent_payload_bytes,
-			s3_received_raw_bytes: args.s3_received_raw_bytes,
-			s3_received_payload_bytes: args.s3_received_payload_bytes,
-			health_details: args.health_details,
-			run_id: args.run_id,
-		},
-	)
-	.await?;
+	let report = NewBackupRestoreCheck {
+		replica_id: args.replica_id,
+		consumer_device_id,
+		group_id: args.group,
+		server_id: Some(args.server_id),
+		r#type: args.r#type,
+		intent: args.intent,
+		snapshot_id: args.snapshot_id,
+		outcome: args.outcome,
+		error: args.error,
+		replica_healthy: args.replica_healthy,
+		postgres_version: args.postgres_version,
+		observed_at: args.observed_at,
+		s3_sent_raw_bytes: args.s3_sent_raw_bytes,
+		s3_sent_payload_bytes: args.s3_sent_payload_bytes,
+		s3_received_raw_bytes: args.s3_received_raw_bytes,
+		s3_received_payload_bytes: args.s3_received_payload_bytes,
+		health_details: args.health_details,
+		run_id: args.run_id,
+	};
+
+	match args.migration {
+		Some(migration) => {
+			MigrationTest::record(&mut conn, report, migration.into()).await?;
+		}
+		None => {
+			BackupRestoreCheck::record_report(&mut conn, report).await?;
+		}
+	}
 
 	Ok(StatusCode::NO_CONTENT)
+}
+
+impl From<MigrationArgs> for NewMigrationTest {
+	fn from(args: MigrationArgs) -> Self {
+		Self {
+			target_version_id: args.target_version_id,
+			total_elapsed: PgDuration(SignedDuration::from_secs(args.total_elapsed_seconds)),
+			failed_migration: args.failed_migration,
+			data_bytes_before: args.data_bytes_before,
+			data_bytes_after: args.data_bytes_after,
+			timings: args
+				.timings
+				.into_iter()
+				.map(|timing| {
+					(
+						timing.name,
+						PgDuration(SignedDuration::from_secs(timing.elapsed_seconds)),
+					)
+				})
+				.collect(),
+		}
+	}
 }
