@@ -774,6 +774,7 @@ function InfoSection({
 				<HealthIndicator
 					health={health}
 					up={up}
+					monitored={server.is_monitored !== false}
 					operators={status.operators}
 				/>
 			)}
@@ -854,10 +855,12 @@ function InfoSection({
 function HealthIndicator({
 	health,
 	up,
+	monitored,
 	operators,
 }: {
 	health: HealthState;
 	up: ShortStatus;
+	monitored: boolean;
 	operators: OperatorPresence[];
 }) {
 	const reporting = up === "up" || up === "blip";
@@ -868,7 +871,7 @@ function HealthIndicator({
 			useFlexGap
 			sx={{ mb: 1.5, alignItems: "center", flexWrap: "wrap" }}
 		>
-			<HealthChip health={health} stale={!reporting} />
+			<HealthChip health={health} stale={!reporting} monitored={monitored} />
 			{reporting && operators.length > 0 && (
 				<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 					<OperatorAvatars operators={operators} size={24} />
@@ -1598,6 +1601,7 @@ function SiblingServers({
 									<StatusDot
 										up={sib.up ?? "gone"}
 										health={sib.health ?? undefined}
+										monitored={sib.is_monitored !== false}
 									/>
 									<MuiLink
 										component={RouterLink}
@@ -2101,6 +2105,7 @@ function SiblingDotStrip({
 							key={m.entry.id}
 							up={(m.entry.up as ShortStatus | undefined) ?? "gone"}
 							health={(m.entry.health as HealthState | undefined) ?? undefined}
+							monitored={m.entry.is_monitored !== false}
 							title={m.entry.name ?? ""}
 							dim={!m.focused}
 							size="0.8em"

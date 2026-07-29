@@ -188,6 +188,6 @@ Server-targeted checks on a server that is not monitored are recorded and presen
 Canopy's own per-server determinations are made for unmonitored servers just as for monitored ones, so an unmonitored server that has gone away still presents as unreachable and unhealthy — it simply raises nothing.
 Group and Canopy-wide checks are not subject to any server's monitoring gate.
 
-Because an unmonitored server can present as failing while nothing is being alerted on, every surface that presents its health or its reachability marks it as unmonitored.
+Because an unmonitored server can present as failing while nothing is being alerted on, every surface presenting its health or reachability as they currently stand marks it as unmonitored.
 Its health is presented muted and accompanied by a silenced indicator explaining that alerting is off for the server, and its status indicator is struck through with a diagonal cut, so the distinction survives at the size of a single dot.
 The status legend names the mark.

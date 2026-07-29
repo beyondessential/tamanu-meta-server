@@ -90,6 +90,24 @@ fn recovery_recipients_from_env() -> Option<Recipients> {
 	}
 }
 
+/// Put canopy's own always-present checks in the catalog at startup, so
+/// the reachability check presents (and can be silenced) on a fleet where
+/// nothing has ever gone wrong. Best-effort: a database that isn't up yet
+/// shouldn't stop the server from starting, and the monitor registers the
+/// same row the first time it files.
+async fn seed_own_checks(db: &database::Db) {
+	let seeded = match db.get().await {
+		Ok(mut conn) => database::check_policies::CheckPolicy::seed_own_checks(&mut conn).await,
+		Err(err) => {
+			tracing::warn!("seeding canopy's own checks: no database connection: {err}");
+			return;
+		}
+	};
+	if let Err(err) = seeded {
+		tracing::warn!("seeding canopy's own checks failed: {err}");
+	}
+}
+
 impl AppState {
 	pub async fn init() -> Result<Self> {
 		let ro_pool = if let Ok(url) = std::env::var("RO_DATABASE_URL") {
@@ -113,6 +131,7 @@ impl AppState {
 
 		let db = database::init();
 		let db_read = database::init_ro().unwrap_or_else(|| db.clone());
+		seed_own_checks(&db).await;
 
 		Ok(Self {
 			db,
@@ -134,6 +153,7 @@ impl AppState {
 	#[cfg(debug_assertions)]
 	pub async fn from_db_url(url: &str) -> Result<Self> {
 		let db = database::init_to(url);
+		seed_own_checks(&db).await;
 		Ok(Self {
 			db_read: db.clone(),
 			db,

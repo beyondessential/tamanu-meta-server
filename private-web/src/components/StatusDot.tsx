@@ -20,6 +20,13 @@ const HEALTH_OUTLINE: Record<HealthState, string | null> = {
 
 const REACHABLE: ReadonlySet<ShortStatus> = new Set(["up", "blip"]);
 
+// Diagonal cut for unmonitored servers. A mask punches the band out of the
+// dot rather than painting over it, so the surface behind shows through
+// whatever it is — these dots sit on plain paper, on operator-tinted group
+// cards, and on hover backgrounds.
+const UNMONITORED_MASK =
+	"linear-gradient(135deg, #000 0 42%, transparent 42% 58%, #000 58% 100%)";
+
 interface StatusDotProps {
 	up: ShortStatus;
 	/** Server's self-reported health from its most recent status push.
@@ -30,6 +37,12 @@ interface StatusDotProps {
 	dim?: boolean;
 	/** Size relative to the surrounding font size. Defaults to "1em". */
 	size?: string;
+	/** Whether canopy alerts on this server. Unmonitored servers are cut
+	 * through with a diagonal so a red dot doesn't read as "someone is
+	 * being paged about this" — their checks are determined and shown as
+	 * normal but raise nothing. Defaults to monitored. */
+	// spec: CHK#monitoring-gate
+	monitored?: boolean;
 }
 
 export default function StatusDot({
@@ -38,6 +51,7 @@ export default function StatusDot({
 	title,
 	dim,
 	size = "1em",
+	monitored = true,
 }: StatusDotProps) {
 	const outlineColor =
 		health && REACHABLE.has(up) ? HEALTH_OUTLINE[health] : null;
@@ -65,11 +79,16 @@ export default function StatusDot({
 				outline: outlineColor ? "0.2em solid" : "none",
 				outlineColor,
 				outlineOffset: outlineColor ? "-0.2em" : 0,
+				maskImage: monitored ? undefined : UNMONITORED_MASK,
+				WebkitMaskImage: monitored ? undefined : UNMONITORED_MASK,
 			}}
 		/>
 	);
-	if (title) {
-		return <Tooltip title={title}>{dot}</Tooltip>;
+	const tooltip = monitored
+		? title
+		: [title, "unmonitored"].filter(Boolean).join(" · ");
+	if (tooltip) {
+		return <Tooltip title={tooltip}>{dot}</Tooltip>;
 	}
 	return dot;
 }

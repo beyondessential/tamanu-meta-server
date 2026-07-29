@@ -462,6 +462,7 @@ export function RankedDotStrip({ members }: { members: FacilityServerStatus[] })
 					<StatusDot
 						up={m.up}
 						health={m.health}
+						monitored={m.is_monitored}
 						title={`${m.name}: ${m.up}${
 							m.health !== "healthy" ? ` (${m.health})` : ""
 						}`}

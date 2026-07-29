@@ -43,7 +43,11 @@ export default function ServerShorty({ server }: { server: ServerInfo }) {
 			}}
 		>
 			{server.up && (
-				<StatusDot up={server.up} health={server.health ?? undefined} />
+				<StatusDot
+					up={server.up}
+					health={server.health ?? undefined}
+					monitored={!unmonitored}
+				/>
 			)}
 			<MuiLink
 				component={RouterLink}
