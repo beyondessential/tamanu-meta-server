@@ -2993,6 +2993,43 @@
         ]
       }
     },
+    "/api/domains/grant_availability": {
+      "post": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Whether granting a server name management would mean anything yet.",
+        "description": "The two grants are only ever exercised over names beneath a domain the\nserver's group controls, so offering them where no domain is controlled — or\nwhere the deployment has no zones at all — presents a control that cannot do\nanything. The rule lives here rather than in the UI so there is one answer\nto it.",
+        "operationId": "domains_grant_availability",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MaybeGroupIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantAvailabilityView"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
     "/api/domains/release": {
       "post": {
         "tags": [
@@ -9270,6 +9307,27 @@
           }
         }
       },
+      "GrantAvailabilityView": {
+        "type": "object",
+        "description": "Where a group stands with respect to granting its servers name management.",
+        "required": [
+          "state",
+          "group_domains"
+        ],
+        "properties": {
+          "group_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The domains this group controls, so the UI can name what a grant would\ncover. Empty unless `state` is `available`."
+          },
+          "state": {
+            "type": "string",
+            "description": "What an operator can do with the two grants right now:\n\n- `unconfigured` — Canopy has no managed zones and no group anywhere\n  controls a domain, so name management is not in use in this deployment.\n  Granting it would do nothing and there is nothing an operator can do\n  about that from here; it becomes available once the infrastructure\n  provides a zone.\n- `no_group_domain` — name management is in use, but this group controls no\n  domain, so a grant would authorise the server over no name. Claim a\n  domain for the group first.\n- `available` — the group controls at least one domain, and a grant takes\n  effect over the names beneath it."
+          }
+        }
+      },
       "GroupDetail": {
         "type": "object",
         "description": "A server group together with its member servers and billing labels.",
@@ -10746,6 +10804,20 @@
           "provider_zone_id": {
             "type": "string",
             "description": "The identifier the DNS provider knows this zone by."
+          }
+        }
+      },
+      "MaybeGroupIdArgs": {
+        "type": "object",
+        "description": "Identifies a group, or none.",
+        "properties": {
+          "server_group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The group to ask about. Null for a server with no group, which can hold\nno domain and so no useful grant."
           }
         }
       },

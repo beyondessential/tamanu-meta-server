@@ -257,3 +257,124 @@ async fn with_no_zones_configured_nothing_can_be_claimed() {
 	})
 	.await;
 }
+
+// ── Whether the grants are worth offering ───────────────────────────────────
+
+#[tokio::test(flavor = "multi_thread")]
+async fn grant_availability_reports_unconfigured_with_no_zones_and_no_claims() {
+	configure_zones("");
+
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "fiji").await;
+
+		let resp = private
+			.post("/api/domains/grant_availability")
+			.json(&serde_json::json!({"server_group_id": group}))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		assert_eq!(
+			body["state"], "unconfigured",
+			"nothing configured and nothing claimed: the feature is not in use here"
+		);
+		assert_eq!(body["group_domains"].as_array().expect("array").len(), 0);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn grant_availability_reports_no_group_domain_once_zones_are_configured() {
+	configure_zones("tamanu.app=Z1ABC");
+
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "fiji").await;
+
+		let resp = private
+			.post("/api/domains/grant_availability")
+			.json(&serde_json::json!({"server_group_id": group}))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		assert_eq!(
+			body["state"], "no_group_domain",
+			"the feature exists, but this group controls nothing to grant over"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn grant_availability_names_the_domains_once_the_group_controls_one() {
+	configure_zones("tamanu.app=Z1ABC");
+
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "fiji").await;
+		private
+			.post("/api/domains/claim")
+			.json(&serde_json::json!({
+				"server_group_id": group,
+				"domain": "fiji.tamanu.app",
+			}))
+			.await
+			.assert_status_ok();
+
+		let resp = private
+			.post("/api/domains/grant_availability")
+			.json(&serde_json::json!({"server_group_id": group}))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		assert_eq!(body["state"], "available");
+		assert_eq!(body["group_domains"][0], "fiji.tamanu.app");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn grant_availability_stays_in_use_for_a_claim_whose_zone_was_withdrawn() {
+	// A claim outlives the zone it was made against, so "no zones" alone does not
+	// mean the feature is unused — an operator still has claims to tidy up.
+	configure_zones("");
+
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "fiji").await;
+		let other = insert_group(&mut conn, "samoa").await;
+		conn.batch_execute(&format!(
+			"INSERT INTO server_group_domains (group_id, domain) \
+			 VALUES ('{other}', 'samoa.tamanu.app')"
+		))
+		.await
+		.expect("insert claim");
+
+		let resp = private
+			.post("/api/domains/grant_availability")
+			.json(&serde_json::json!({"server_group_id": group}))
+			.await;
+		resp.assert_status_ok();
+		assert_eq!(
+			resp.json::<serde_json::Value>()["state"],
+			"no_group_domain",
+			"another group's claim keeps the feature in use fleet-wide"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn grant_availability_handles_a_server_with_no_group() {
+	configure_zones("tamanu.app=Z1ABC");
+
+	commons_tests::server::run(async move |_conn, _public, private| {
+		let resp = private
+			.post("/api/domains/grant_availability")
+			.json(&serde_json::json!({"server_group_id": null}))
+			.await;
+		resp.assert_status_ok();
+		assert_eq!(
+			resp.json::<serde_json::Value>()["state"],
+			"no_group_domain",
+			"a domain is controlled by a group, so an ungrouped server has none"
+		);
+	})
+	.await;
+}

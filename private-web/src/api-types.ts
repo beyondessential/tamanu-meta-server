@@ -1525,6 +1525,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/domains/grant_availability": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Whether granting a server name management would mean anything yet.
+         * @description The two grants are only ever exercised over names beneath a domain the
+         *     server's group controls, so offering them where no domain is controlled — or
+         *     where the deployment has no zones at all — presents a control that cannot do
+         *     anything. The rule lives here rather than in the UI so there is one answer
+         *     to it.
+         */
+        post: operations["domains_grant_availability"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/domains/release": {
         parameters: {
             query?: never;
@@ -5036,6 +5060,29 @@ export interface components {
              */
             incident_id: string;
         };
+        /** @description Where a group stands with respect to granting its servers name management. */
+        GrantAvailabilityView: {
+            /**
+             * @description The domains this group controls, so the UI can name what a grant would
+             *     cover. Empty unless `state` is `available`.
+             */
+            group_domains: string[];
+            /**
+             * @description What an operator can do with the two grants right now:
+             *
+             *     - `unconfigured` — Canopy has no managed zones and no group anywhere
+             *       controls a domain, so name management is not in use in this deployment.
+             *       Granting it would do nothing and there is nothing an operator can do
+             *       about that from here; it becomes available once the infrastructure
+             *       provides a zone.
+             *     - `no_group_domain` — name management is in use, but this group controls no
+             *       domain, so a grant would authorise the server over no name. Claim a
+             *       domain for the group first.
+             *     - `available` — the group controls at least one domain, and a grant takes
+             *       effect over the names beneath it.
+             */
+            state: string;
+        };
         /** @description A server group together with its member servers and billing labels. */
         GroupDetail: {
             /** @description The group's effective `billing.*` labels (product/deployment/stage). */
@@ -6028,6 +6075,15 @@ export interface components {
             apex: string;
             /** @description The identifier the DNS provider knows this zone by. */
             provider_zone_id: string;
+        };
+        /** @description Identifies a group, or none. */
+        MaybeGroupIdArgs: {
+            /**
+             * Format: uuid
+             * @description The group to ask about. Null for a server with no group, which can hold
+             *     no domain and so no useful grant.
+             */
+            server_group_id?: string | null;
         };
         /**
          * @description Metadata about an MCP access token. Never includes the secret value
@@ -10839,6 +10895,29 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GroupDomainView"][];
+                };
+            };
+        };
+    };
+    domains_grant_availability: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MaybeGroupIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GrantAvailabilityView"];
                 };
             };
         };
