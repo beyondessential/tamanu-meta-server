@@ -6,10 +6,11 @@ id: RST
 
 Canopy is the control plane for a fleet's *managed restore replicas*: standing replicas that Canopy decides should exist and keeps restored from the latest backups, driven through a restore consumer.
 An external restore consumer — first-party infrastructure that restores backups into working Postgres replicas — is driven entirely by Canopy: Canopy declares which replicas should exist, hands out the snapshot to restore and short-lived read-only credentials for each, and records the restorability of every replica as the strongest backup-health signal.
+A replica restored from real data is also the substrate for testing a Tamanu version's schema migrations before that version reaches the deployment, so the same machinery carries both a backup-health signal and a version-readiness one.
 
 ## Scope
 
-This spec covers *managed* restore replicas only: the standing replicas Canopy decides should exist and keeps current, and the restore-health signal they produce.
+This spec covers *managed* restore replicas only: the standing replicas Canopy decides should exist and keeps current, the restore-health signal they produce, and the pre-upgrade migration testing they carry.
 
 It does not cover an operator restoring a backup by hand.
 An operator performing disaster recovery or an ad-hoc restore selects a specific snapshot for a specific server and restores it through that server's own device tooling and credentials — the existing per-server restore path, unchanged by this spec.
@@ -92,6 +93,7 @@ The recognised semantics are:
 - **once** — a given snapshot is dispatched to the intent at most once.
   Canopy omits a replica from the worklist once the intent has a healthy report for that replica's current snapshot, and reinstates it only when a newer snapshot exists.
   Without `once`, the intent is always pointed at the latest snapshot and manages its own refresh.
+  An intent whose result depends on more than the snapshot keys `once` to that wider input as well, and may treat a failure as settled rather than retryable (see [Pre-upgrade migration testing](#pre-upgrade-migration-testing)).
 - **url** — the intent's health report carries a link to the running replica within its attached health data, which Canopy surfaces to operators.
 
 ### Parameters
@@ -201,6 +203,62 @@ Reports are retained indefinitely as an audit trail.
 Canopy derives each restore's duration from the interval between its first credential issuance and its report.
 A restore for which credentials were issued but no report has arrived is shown as in progress while the credentials remain valid, otherwise as a restore whose outcome is unknown; this surfaces in-flight and terminated-without-report restores in the operator view, including those under intents that produce no health report.
 
+## Pre-upgrade migration testing
+
+An intent may apply a Tamanu version's schema migrations to the replica it restores, so a version's effect on a deployment's real data is known ahead of an upgrade window rather than discovered inside one.
+
+An upgrade applies schema migrations to the live database with the deployment down for the duration.
+A migration that fails against real data, and one that succeeds but runs far longer than the window allowed for, are both properties of that deployment's data rather than of the migration alone, so neither shows against a small or synthetic database.
+Canopy knows the version each server reports running and the upgrade path it would be served, and already holds the authority over replicas made from real backups, so it is where the question can be posed ahead of the window.
+
+### Candidate versions
+
+Canopy decides which versions are tested against which servers, rather than an operator naming each pair.
+
+A published version is a candidate for a server when that server could upgrade to it: the version is newer than the one the server reports running, and it lies on the upgrade path Canopy would serve that server.
+Where that path passes through several versions of one minor series, only the newest of the series is a candidate, because that is the version an upgrade applies.
+
+An operator may also nominate a version for a group or a server, including a version not yet published, so a release candidate is tested against the largest deployments' data before it ships.
+A nomination ends when the operator withdraws it.
+
+A server with no successful backup of a restorable type has no candidates, because there is nothing to restore and migrate.
+
+### Dispatching a migration test
+
+A migration-testing entry carries the target version alongside the snapshot, and a reference to that version's migrations in the same form Canopy publishes a version's artefacts to devices, so a consumer obtains them the way a server being upgraded does.
+
+`once` is keyed to the pair of snapshot and target version: an entry is omitted once that pair has a verdict, and reinstated when either a newer snapshot or a new candidate version appears.
+A failed verdict settles that pair rather than leaving it retryable.
+A restore can fail for transient reasons and is worth retrying, but a migration failing against a fixed snapshot fails the same way every time, and a retry costs a full restore for an answer already held.
+
+### What a migration test reports
+
+Beyond the fields every report carries, a migration-testing report carries:
+
+- the **target version** whose migrations were applied;
+- whether **every migration applied**, or which one failed and the error it produced;
+- the **total elapsed time** of the migration run;
+- the **elapsed time of each migration** that ran;
+- the **size of the data** the migrations ran against.
+
+Per-migration timings are a primary result rather than diagnostic detail.
+A version whose migrations all apply but whose slowest migration takes hours against a large deployment is a finding, and a report carries enough detail to name the migration to attend to.
+Recording the data size alongside the timings is what lets a duration be read against the volume that produced it, and compared across deployments of different sizes.
+
+### Verdicts
+
+Canopy derives a verdict for each candidate pair of server and version: not yet tested, passed, or failed.
+Verdicts are presented per group, as the set of versions tested against that group's servers, so whether a version is safe for a deployment is answered in one place instead of by assembling reports.
+
+A verdict names the snapshot it was reached against and when that was, because a pass against a month-old snapshot is a weaker statement than one against last night's.
+A newer test of the same pair supersedes the previous verdict, and the superseded reports remain.
+
+### Version readiness
+
+A failed migration test marks its target version as carrying a known issue, which removes that version from those considered ready to roll out, and records the server and the failing migration so whoever picks it up knows which deployment's data provoked it.
+This is the gate an operator-filed known issue uses, so a failure found automatically and one found by hand have the same effect on a rollout.
+Clearing the issue is an operator action, and a later passing test does not clear it, because whether the resolution is a change to the migration, a change to the data, or an accepted limitation is a judgement.
+
 ## Alerting
 
 A failed or overdue restore-health report raises a restore-verification check on the affected server, subject to the same monitoring and incident gates as any other of that server's checks.
@@ -213,9 +271,18 @@ For an intent carrying `once`, the expectation is measured against the latest sn
 For an intent without `once`, it is measured against wall-clock time since the last healthy report.
 Overdue applies only to intents carrying `check`.
 
+A failed migration test against a published candidate version raises a migration-test check on the affected server, under the same gates, because that server is on the upgrade path to the version that failed.
+The check names the target version as well as the type and intent, so a failure against one candidate version does not mask a pass against another.
+
+A failed test against a nominated version that is not yet published raises no check on the server.
+The server lent its data; nothing running on it is at risk from a version that has not shipped.
+That failure lands on the version's readiness instead, for whoever owns the release.
+
 ## Out of scope
 
-- How a consumer provisions, runs, names, or tears down a replica.
+- How a consumer provisions, runs, names, or tears down a replica, or how it applies migrations to one.
 - A consumer's runtime placement, storage sizing, or scheduling.
+- Producing reporting schemas, or any other artefact, from a migrated replica.
+- Deciding or scheduling when a deployment upgrades: verdicts inform that decision without making it.
 - Scoping object-storage credentials below the granularity of a group's repo: one repo holds all of a group's servers' snapshots, so credentials are necessarily group-wide while targeting and reporting are per-server.
 - Longer-lived or non-chained credentials: a consumer refreshes within a restore, so the per-issuance lifetime is not a constraint.
