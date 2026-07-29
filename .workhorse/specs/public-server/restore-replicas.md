@@ -239,11 +239,14 @@ Beyond the fields every report carries, a migration-testing report carries:
 - whether **every migration applied**, or which one failed and the error it produced;
 - the **total elapsed time** of the migration run;
 - the **elapsed time of each migration** that ran;
-- the **size of the data** the migrations ran against.
+- the **size of the data**, both before the migrations ran and after.
 
 Per-migration timings are a primary result rather than diagnostic detail.
 A version whose migrations all apply but whose slowest migration takes hours against a large deployment is a finding, and a report carries enough detail to name the migration to attend to.
-Recording the data size alongside the timings is what lets a duration be read against the volume that produced it, and compared across deployments of different sizes.
+
+The size before the run is what lets a duration be read against the volume that produced it, and compared across deployments of different sizes.
+The growth between the two figures is its own finding: a migration that backfills a large table leaves the deployment needing disk it was not provisioned for, and every deployment that has yet to run it will grow the same way in proportion to its own data.
+Growth is also a second reason a window overruns, since the write volume that produces it is time the deployment spends down.
 
 ### Verdicts
 
