@@ -20,6 +20,12 @@ pub struct FacilityServerStatus {
 	pub up: ShortStatus,
 	/// The server's self-reported health.
 	pub health: HealthState,
+	/// Whether canopy alerts on this server's checks. An unmonitored
+	/// server's reachability and health are determined and presented as
+	/// normal, but raise nothing — so consumers mark it, rather than
+	/// showing a failure that nobody is being paged about.
+	// spec: CHK#monitoring-gate
+	pub is_monitored: bool,
 	/// People currently connected to this server, from its latest status
 	/// update. Always empty unless the server is actively reporting (`up`
 	/// or `blip`) — a stale report can't be trusted to reflect who is

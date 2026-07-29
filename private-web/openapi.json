@@ -8518,6 +8518,7 @@
           "name",
           "up",
           "health",
+          "is_monitored",
           "operators",
           "product",
           "kind"
@@ -8531,6 +8532,10 @@
             "type": "string",
             "format": "uuid",
             "description": "Unique identifier of the server."
+          },
+          "is_monitored": {
+            "type": "boolean",
+            "description": "Whether canopy alerts on this server's checks. An unmonitored\nserver's reachability and health are determined and presented as\nnormal, but raise nothing — so consumers mark it, rather than\nshowing a failure that nobody is being paged about."
           },
           "kind": {
             "$ref": "#/components/schemas/ServerKind",

@@ -263,6 +263,7 @@ pub async fn group_details(
 				name: s.name.clone().unwrap_or_default(),
 				up,
 				health: member_health.get(&s.id).copied().unwrap_or_default(),
+				is_monitored: s.is_monitored,
 				operators,
 				rank: s.rank,
 				product: s.product,

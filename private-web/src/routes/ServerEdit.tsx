@@ -21,7 +21,7 @@ import {
 	useProductKinds,
 	useProducts,
 } from "../hooks/useProducts";
-import { PRODUCT_LABELS } from "../types";
+import { PRODUCT_LABELS, REACHABILITY_CHECK } from "../types";
 import type {
 	Product,
 	ServerGroup,
@@ -49,16 +49,50 @@ export default function ServerEdit() {
 		{ server_id: id },
 		[id],
 	);
+	// The unreachability toggle *is* the server-scoped silence on canopy's
+	// reachability check, so the form can't render until we know whether one
+	// exists — a wrong initial value would be written back on save.
+	const silences = useApi(
+		"silenced_refs",
+		"list_for_server",
+		{ server_id: id },
+		[id],
+	);
 
-	if (info.status === "loading" || info.status === "idle") return <LinearProgress />;
+	if (
+		info.status === "loading" ||
+		info.status === "idle" ||
+		silences.status === "loading" ||
+		silences.status === "idle"
+	)
+		return <LinearProgress />;
 	if (info.status === "error")
 		return <Alert severity="error">{info.error.message}</Alert>;
-	return <EditForm info={info.data} />;
+	if (silences.status === "error")
+		return <Alert severity="error">{silences.error.message}</Alert>;
+	return (
+		<EditForm
+			info={info.data}
+			reachabilitySilenced={silences.data.some(
+				(s) =>
+					s.source === REACHABILITY_CHECK.source &&
+					s.ref === REACHABILITY_CHECK.ref,
+			)}
+		/>
+	);
 }
 
-function EditForm({ info }: { info: ServerInfo }) {
+function EditForm({
+	info,
+	reachabilitySilenced,
+}: {
+	info: ServerInfo;
+	reachabilitySilenced: boolean;
+}) {
 	const navigate = useNavigate();
 	const action = useApiAction("servers", "update");
+	const silence = useApiAction("silenced_refs", "silence_server");
+	const unsilence = useApiAction("silenced_refs", "unsilence_server");
 
 	const [name, setName] = useState(info.name ?? "");
 	const [host, setHost] = useState(info.host ?? "");
@@ -74,6 +108,14 @@ function EditForm({ info }: { info: ServerInfo }) {
 	// (always-positive) threshold to use when monitored. Stored separately
 	// so muting doesn't lose the chosen threshold. UI works in minutes.
 	const [isMonitored, setIsMonitored] = useState(info.is_monitored);
+	// Off means "alert on everything else, just not this server going away".
+	// Stored as the server-scoped silence on canopy's reachability check, the
+	// same one the check itself offers, so the two surfaces are one state.
+	// spec: CHK#operator-controls
+	const alertsWhenUnreachableInitially = !reachabilitySilenced;
+	const [alertWhenUnreachable, setAlertWhenUnreachable] = useState(
+		alertsWhenUnreachableInitially,
+	);
 	const [alertWhenDownMinutes, setAlertWhenDownMinutes] = useState<string>(
 		Math.max(1, Math.round(info.alert_when_down_for / 60)).toString(),
 	);
@@ -88,6 +130,9 @@ function EditForm({ info }: { info: ServerInfo }) {
 	const [tags, setTags] = useState<TagMap>(info.tags ?? {});
 	const [mayManageDns, setMayManageDns] = useState(info.may_manage_dns);
 	const [mayManageTls, setMayManageTls] = useState(info.may_manage_tls);
+
+	const pending = action.pending || silence.pending || unsilence.pending;
+	const error = action.error ?? silence.error ?? unsilence.error;
 
 	const onSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -123,9 +168,19 @@ function EditForm({ info }: { info: ServerInfo }) {
 		};
 		try {
 			await action.call({ server_id: info.id, data });
+			if (alertWhenUnreachable !== alertsWhenUnreachableInitially) {
+				const ref = {
+					server_id: info.id,
+					source: REACHABILITY_CHECK.source,
+					ref: REACHABILITY_CHECK.ref,
+				};
+				await (alertWhenUnreachable
+					? unsilence.call(ref)
+					: silence.call(ref));
+			}
 			navigate(`/servers/${info.id}`);
 		} catch {
-			/* surfaced via action.error */
+			/* surfaced via the actions' errors */
 		}
 	};
 
@@ -140,14 +195,14 @@ function EditForm({ info }: { info: ServerInfo }) {
 					label="Name"
 					value={name}
 					onChange={(e) => setName(e.target.value)}
-					disabled={action.pending}
+					disabled={pending}
 					required
 				/>
 				<TextField
 					label="URL"
 					value={host}
 					onChange={(e) => setHost(e.target.value)}
-					disabled={action.pending}
+					disabled={pending}
 				/>
 				<TextField
 					select
@@ -165,7 +220,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 							setKind(info.default_kind);
 						}
 					}}
-					disabled={action.pending}
+					disabled={pending}
 				>
 					{products.map((p) => (
 						<MenuItem key={p.product} value={p.product}>
@@ -178,7 +233,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 					label="Kind"
 					value={kind}
 					onChange={(e) => setKind(e.target.value as ServerKind)}
-					disabled={action.pending || kinds.length < 2}
+					disabled={pending || kinds.length < 2}
 					helperText={
 						kinds.length < 2
 							? `${PRODUCT_LABELS[product]} servers have one role`
@@ -196,7 +251,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 					label="Rank"
 					value={rank}
 					onChange={(e) => setRank(e.target.value as ServerRank | "")}
-					disabled={action.pending}
+					disabled={pending}
 				>
 					{RANK_OPTIONS.map((o) => (
 						<MenuItem key={o.value} value={o.value}>
@@ -209,13 +264,13 @@ function EditForm({ info }: { info: ServerInfo }) {
 					placeholder="UUID"
 					value={deviceId}
 					onChange={(e) => setDeviceId(e.target.value)}
-					disabled={action.pending}
+					disabled={pending}
 				/>
 
 				<GroupControl
 					currentGroupId={groupId}
 					onChange={setGroupId}
-					disabled={action.pending}
+					disabled={pending}
 					required
 				/>
 
@@ -225,7 +280,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 						label="Location"
 						value={cloud}
 						onChange={(e) => setCloud(e.target.value as "" | "true" | "false")}
-						disabled={action.pending}
+						disabled={pending}
 						sx={{ minWidth: 180 }}
 					>
 						<MenuItem value="">unknown</MenuItem>
@@ -236,14 +291,14 @@ function EditForm({ info }: { info: ServerInfo }) {
 						label="Latitude"
 						value={lat}
 						onChange={(e) => setLat(e.target.value)}
-						disabled={action.pending}
+						disabled={pending}
 						sx={{ flex: 1 }}
 					/>
 					<TextField
 						label="Longitude"
 						value={lon}
 						onChange={(e) => setLon(e.target.value)}
-						disabled={action.pending}
+						disabled={pending}
 						sx={{ flex: 1 }}
 					/>
 				</Stack>
@@ -253,7 +308,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 						label="Name in Tamanu Mobile app"
 						value={publicName}
 						onChange={(e) => setPublicName(e.target.value)}
-						disabled={action.pending}
+						disabled={pending}
 						helperText="Leave empty to hide this server from the public mobile-app list."
 					/>
 				)}
@@ -263,16 +318,34 @@ function EditForm({ info }: { info: ServerInfo }) {
 						<Checkbox
 							checked={isMonitored}
 							onChange={(e) => setIsMonitored(e.target.checked)}
-							disabled={action.pending}
+							disabled={pending}
 						/>
 					}
 					label="Monitor this server"
 				/>
 				<Typography variant="caption" color="text.secondary">
-					When off, canopy stops watching this server: reachability sweeps
-					skip it and its events/issues no longer trigger or join incidents.
-					Existing issues are kept for the record. Use this for test
-					environments and ad-hoc demos that are expected to be down.
+					When off, no check on this server alerts: its checks are still
+					determined and shown, and its health and reachability are marked
+					as unmonitored wherever they appear, but nothing triggers or joins
+					an incident. Use this for test environments and ad-hoc demos that
+					are expected to be down.
+				</Typography>
+
+				<FormControlLabel
+					control={
+						<Checkbox
+							checked={alertWhenUnreachable}
+							onChange={(e) => setAlertWhenUnreachable(e.target.checked)}
+							disabled={pending}
+						/>
+					}
+					label="Alert when this server is unreachable"
+				/>
+				<Typography variant="caption" color="text.secondary">
+					When off, every other check alerts as normal and only the server
+					going away is quiet. This is the same as silencing the
+					reachability check on this server, and either place reflects the
+					other.
 				</Typography>
 
 				<Stack
@@ -288,7 +361,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 						type="number"
 						value={alertWhenDownMinutes}
 						onChange={(e) => setAlertWhenDownMinutes(e.target.value)}
-						disabled={action.pending || !isMonitored}
+						disabled={pending || !isMonitored || !alertWhenUnreachable}
 						slotProps={{ htmlInput: { min: 1, step: 1 } }}
 						sx={{ width: 140 }}
 					/>
@@ -296,7 +369,7 @@ function EditForm({ info }: { info: ServerInfo }) {
 				<Typography variant="caption" color="text.secondary">
 					Raise this for flappy servers (so brief blips don't fire) or lower
 					it for critical servers that should page promptly. The value is
-					preserved while monitoring is off.
+					preserved while either switch above is off.
 				</Typography>
 
 				<Stack spacing={1}>
@@ -335,33 +408,31 @@ function EditForm({ info }: { info: ServerInfo }) {
 					minRows={3}
 					value={notes}
 					onChange={(e) => setNotes(e.target.value)}
-					disabled={action.pending}
+					disabled={pending}
 					helperText="Operator notes shown on the server's detail page. Plain text."
 				/>
 
 				<Stack spacing={1}>
 					<Typography variant="subtitle1">Tags</Typography>
-					<TagsEditor value={tags} onChange={setTags} disabled={action.pending} />
+					<TagsEditor value={tags} onChange={setTags} disabled={pending} />
 				</Stack>
 
-				{action.error && (
-					<Alert severity="error">{action.error.message}</Alert>
-				)}
+				{error && <Alert severity="error">{error.message}</Alert>}
 
 				<Stack direction="row" spacing={1}>
 					<Button
 						type="submit"
 						variant="contained"
-						disabled={action.pending || !groupId || !name.trim()}
+						disabled={pending || !groupId || !name.trim()}
 					>
-						{action.pending ? "Saving…" : "Save"}
+						{pending ? "Saving…" : "Save"}
 					</Button>
 					<Button
 						type="button"
 						variant="outlined"
 						color="error"
 						onClick={() => navigate(`/servers/${info.id}`)}
-						disabled={action.pending}
+						disabled={pending}
 					>
 						Cancel
 					</Button>

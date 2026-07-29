@@ -4628,6 +4628,13 @@ export interface components {
              */
             id: string;
             /**
+             * @description Whether canopy alerts on this server's checks. An unmonitored
+             *     server's reachability and health are determined and presented as
+             *     normal, but raise nothing — so consumers mark it, rather than
+             *     showing a failure that nobody is being paged about.
+             */
+            is_monitored: boolean;
+            /**
              * @description The server's role within its product's topology (for Tamanu, central
              *     or facility; standalone for a product with no internal roles).
              */
