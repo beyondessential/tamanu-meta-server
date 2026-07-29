@@ -2504,11 +2504,15 @@ async fn submit_status_result_all_kinds_upsert_catalog() {
 				#[diesel(sql_type = sql_types::Text)]
 				check_name: String,
 			}
-			let rows: Vec<NameRow> =
-				sql_query("SELECT check_name FROM check_policies ORDER BY check_name")
-					.get_results(&mut conn)
-					.await
-					.expect("list catalog");
+			// Reported checks only: canopy's own checks are catalogued at
+			// startup and aren't what this push is being judged on.
+			let rows: Vec<NameRow> = sql_query(
+				"SELECT check_name FROM check_policies WHERE source <> 'canopy' \
+				 ORDER BY check_name",
+			)
+			.get_results(&mut conn)
+			.await
+			.expect("list catalog");
 			let names: Vec<&str> = rows.iter().map(|r| r.check_name.as_str()).collect();
 			assert_eq!(names, vec!["a_passed", "b_skipped", "c_broken"]);
 		},

@@ -396,6 +396,28 @@ export function healthcheckNameFromRef(
 	return ref.slice(prefix.length);
 }
 
+/// Sources canopy reserves for its own conditions. They file at bare
+/// refs; every other source's checks are namespaced under `health/`.
+export const RESERVED_SOURCES = ["canopy", "manual"];
+
+/// The silence ref for a check, which is what the silence endpoints and
+/// the silence listings speak. Mirrors `database::silenced_refs`: bare
+/// for the reserved sources, `health/`-prefixed for reported checks.
+/// Building it by hand gets the reserved sources wrong, and a mismatched
+/// ref silently fails to match an existing silence.
+export function silenceRef(source: string, check: string): string {
+	return RESERVED_SOURCES.includes(source) ? check : `health/${check}`;
+}
+
+/// Canopy's per-server reachability check, with the ref its silence is
+/// keyed by. The server form's "alert when unreachable" switch and the
+/// check's own silence button both write this one silence.
+export const REACHABILITY_CHECK = {
+	source: "canopy",
+	check: "reachability",
+	ref: silenceRef("canopy", "reachability"),
+} as const;
+
 /// One person connected somewhere in a server group, with the names of
 /// the member servers they're on. Produced by [`aggregateOperators`].
 export type AggregatedOperator = {

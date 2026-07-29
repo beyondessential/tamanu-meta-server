@@ -350,6 +350,29 @@ impl CheckPolicy {
 		Ok(())
 	}
 
+	/// Register the canopy checks that exist for every server regardless of
+	/// whether anything has gone wrong, so their catalog row — policy,
+	/// documentation, liveness — is there from the start rather than
+	/// appearing the first time some server degrades.
+	///
+	/// Today that's reachability alone: it is presented for every server
+	/// whether or not a reporter has ever gone quiet (see
+	/// [`crate::issues::consolidated_checks_latest`]), and that presentation
+	/// is gated on a live catalog row. Idempotent, so it's safe to call on
+	/// every startup; operator edits to the policy or documentation stick.
+	// spec: CHK#reachability
+	pub async fn seed_own_checks(db: &mut AsyncPgConnection) -> Result<()> {
+		Self::register(
+			db,
+			crate::statuses::CANOPY_SOURCE,
+			crate::statuses::REACHABILITY_REF,
+			CheckResult::Failed,
+			false,
+			Some(crate::statuses::REACHABILITY_DOC),
+		)
+		.await
+	}
+
 	/// Apply the `(source, check_name)` policy to an `observed` result:
 	/// if the entry has a `rules` ladder and a branch matches the
 	/// supplied evaluation context, that branch's result wins (any

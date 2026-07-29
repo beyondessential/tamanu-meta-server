@@ -20,7 +20,7 @@ import {
 	useProductKinds,
 	useProducts,
 } from "../hooks/useProducts";
-import { PRODUCT_LABELS } from "../types";
+import { PRODUCT_LABELS, REACHABILITY_CHECK } from "../types";
 import type {
 	Product,
 	ServerGroup,
@@ -48,6 +48,7 @@ export default function ServerCreate() {
 	// group to default-select.
 	const { id: presetGroupId } = useParams<{ id?: string }>();
 	const action = useApiAction("servers", "create");
+	const silence = useApiAction("silenced_refs", "silence_server");
 
 	const [name, setName] = useState("");
 	const [host, setHost] = useState("");
@@ -60,6 +61,12 @@ export default function ServerCreate() {
 	const [rank, setRank] = useState<ServerRank | "">("");
 	const [publicName, setPublicName] = useState("");
 	const [isMonitored, setIsMonitored] = useState(true);
+	// Off means "alert on everything else, just not this server going away".
+	// Written as the server-scoped silence on canopy's reachability check,
+	// the same one the check itself offers — so it can only be applied once
+	// the server exists.
+	// spec: CHK#operator-controls
+	const [alertWhenUnreachable, setAlertWhenUnreachable] = useState(true);
 	const [alertWhenDownMinutes, setAlertWhenDownMinutes] = useState("10");
 	const [groupId, setGroupId] = useState<string | null>(presetGroupId ?? null);
 	const [tailscaleIdentifier, setTailscaleIdentifier] = useState("");
@@ -68,6 +75,9 @@ export default function ServerCreate() {
 	const [lon, setLon] = useState("");
 	const [notes, setNotes] = useState("");
 	const [tags, setTags] = useState<TagMap>({});
+
+	const pending = action.pending || silence.pending;
+	const error = action.error ?? silence.error;
 
 	const onSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -99,9 +109,16 @@ export default function ServerCreate() {
 		};
 		try {
 			const serverId = await action.call(data);
+			if (!alertWhenUnreachable) {
+				await silence.call({
+					server_id: serverId,
+					source: REACHABILITY_CHECK.source,
+					ref: REACHABILITY_CHECK.ref,
+				});
+			}
 			navigate(`/servers/${serverId}`);
 		} catch {
-			/* surfaced via action.error */
+			/* surfaced via the actions' errors */
 		}
 	};
 
@@ -116,14 +133,14 @@ export default function ServerCreate() {
 					label="Name"
 					value={name}
 					onChange={(e) => setName(e.target.value)}
-					disabled={action.pending}
+					disabled={pending}
 					required
 				/>
 				<TextField
 					label="URL"
 					value={host}
 					onChange={(e) => setHost(e.target.value)}
-					disabled={action.pending}
+					disabled={pending}
 				/>
 				<TextField
 					select
@@ -140,7 +157,7 @@ export default function ServerCreate() {
 							setKind(info.default_kind);
 						}
 					}}
-					disabled={action.pending}
+					disabled={pending}
 				>
 					{products.map((p) => (
 						<MenuItem key={p.product} value={p.product}>
@@ -153,7 +170,7 @@ export default function ServerCreate() {
 					label="Kind"
 					value={kind}
 					onChange={(e) => setKind(e.target.value as ServerKind)}
-					disabled={action.pending || kinds.length < 2}
+					disabled={pending || kinds.length < 2}
 					helperText={
 						kinds.length < 2
 							? `${PRODUCT_LABELS[product]} servers have one role`
@@ -171,7 +188,7 @@ export default function ServerCreate() {
 					label="Rank"
 					value={rank}
 					onChange={(e) => setRank(e.target.value as ServerRank | "")}
-					disabled={action.pending}
+					disabled={pending}
 				>
 					{RANK_OPTIONS.map((o) => (
 						<MenuItem key={o.value} value={o.value}>
@@ -183,13 +200,13 @@ export default function ServerCreate() {
 				<TailscaleIdentityField
 					value={tailscaleIdentifier}
 					onChange={setTailscaleIdentifier}
-					disabled={action.pending}
+					disabled={pending}
 				/>
 
 				<GroupControl
 					currentGroupId={groupId}
 					onChange={setGroupId}
-					disabled={action.pending}
+					disabled={pending}
 					required
 				/>
 
@@ -199,7 +216,7 @@ export default function ServerCreate() {
 						label="Location"
 						value={cloud}
 						onChange={(e) => setCloud(e.target.value as "" | "true" | "false")}
-						disabled={action.pending}
+						disabled={pending}
 						sx={{ minWidth: 180 }}
 					>
 						<MenuItem value="">unknown</MenuItem>
@@ -210,14 +227,14 @@ export default function ServerCreate() {
 						label="Latitude"
 						value={lat}
 						onChange={(e) => setLat(e.target.value)}
-						disabled={action.pending}
+						disabled={pending}
 						sx={{ flex: 1 }}
 					/>
 					<TextField
 						label="Longitude"
 						value={lon}
 						onChange={(e) => setLon(e.target.value)}
-						disabled={action.pending}
+						disabled={pending}
 						sx={{ flex: 1 }}
 					/>
 				</Stack>
@@ -227,7 +244,7 @@ export default function ServerCreate() {
 						label="Name in Tamanu Mobile app"
 						value={publicName}
 						onChange={(e) => setPublicName(e.target.value)}
-						disabled={action.pending}
+						disabled={pending}
 						helperText="Leave empty to hide this server from the public mobile-app list."
 					/>
 				)}
@@ -237,16 +254,34 @@ export default function ServerCreate() {
 						<Checkbox
 							checked={isMonitored}
 							onChange={(e) => setIsMonitored(e.target.checked)}
-							disabled={action.pending}
+							disabled={pending}
 						/>
 					}
 					label="Monitor this server"
 				/>
 				<Typography variant="caption" color="text.secondary">
-					When off, canopy stops watching this server: reachability sweeps
-					skip it and its events/issues no longer trigger or join incidents.
-					Use this for test environments and ad-hoc demos that are expected
-					to be down.
+					When off, no check on this server alerts: its checks are still
+					determined and shown, and its health and reachability are marked
+					as unmonitored wherever they appear, but nothing triggers or joins
+					an incident. Use this for test environments and ad-hoc demos that
+					are expected to be down.
+				</Typography>
+
+				<FormControlLabel
+					control={
+						<Checkbox
+							checked={alertWhenUnreachable}
+							onChange={(e) => setAlertWhenUnreachable(e.target.checked)}
+							disabled={pending}
+						/>
+					}
+					label="Alert when this server is unreachable"
+				/>
+				<Typography variant="caption" color="text.secondary">
+					When off, every other check alerts as normal and only the server
+					going away is quiet. This is the same as silencing the
+					reachability check on this server, and either place reflects the
+					other.
 				</Typography>
 
 				<Stack
@@ -262,7 +297,7 @@ export default function ServerCreate() {
 						type="number"
 						value={alertWhenDownMinutes}
 						onChange={(e) => setAlertWhenDownMinutes(e.target.value)}
-						disabled={action.pending || !isMonitored}
+						disabled={pending || !isMonitored || !alertWhenUnreachable}
 						slotProps={{ htmlInput: { min: 1, step: 1 } }}
 						sx={{ width: 140 }}
 					/>
@@ -274,33 +309,31 @@ export default function ServerCreate() {
 					minRows={3}
 					value={notes}
 					onChange={(e) => setNotes(e.target.value)}
-					disabled={action.pending}
+					disabled={pending}
 					helperText="Operator notes shown on the server's detail page. Plain text."
 				/>
 
 				<Stack spacing={1}>
 					<Typography variant="subtitle1">Tags</Typography>
-					<TagsEditor value={tags} onChange={setTags} disabled={action.pending} />
+					<TagsEditor value={tags} onChange={setTags} disabled={pending} />
 				</Stack>
 
-				{action.error && (
-					<Alert severity="error">{action.error.message}</Alert>
-				)}
+				{error && <Alert severity="error">{error.message}</Alert>}
 
 				<Stack direction="row" spacing={1}>
 					<Button
 						type="submit"
 						variant="contained"
-						disabled={action.pending || !groupId || !name.trim()}
+						disabled={pending || !groupId || !name.trim()}
 					>
-						{action.pending ? "Creating…" : "Create server"}
+						{pending ? "Creating…" : "Create server"}
 					</Button>
 					<Button
 						type="button"
 						variant="outlined"
 						color="error"
 						onClick={() => navigate(-1)}
-						disabled={action.pending}
+						disabled={pending}
 					>
 						Cancel
 					</Button>

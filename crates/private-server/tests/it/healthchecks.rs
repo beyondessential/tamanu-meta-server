@@ -24,9 +24,11 @@ async fn list_returns_catalog_rows_with_pending_review_flag() {
 		response.assert_status_ok();
 
 		let body: Vec<serde_json::Value> = response.json();
-		assert_eq!(body.len(), 2);
+		// The two seeded rows, plus canopy's own reachability check, which
+		// the server catalogues at startup so it exists before anything has
+		// gone wrong. Ordered by source then check_name.
+		assert_eq!(body.len(), 3);
 
-		// Ordered by source then check_name.
 		assert_eq!(body[0]["source"], "alertd");
 		assert_eq!(body[0]["check_name"], "disk_space");
 		assert_eq!(body[0]["ceiling"], "warning");
@@ -37,6 +39,13 @@ async fn list_returns_catalog_rows_with_pending_review_flag() {
 		assert_eq!(body[1]["ceiling"], "failed");
 		assert_eq!(body[1]["pending_review"], false);
 		assert_eq!(body[1]["reviewed_by"], "alice@example.com");
+
+		// Canopy's own checks register already reviewed, at the policy their
+		// condition warrants rather than the default warning ceiling.
+		assert_eq!(body[2]["source"], "canopy");
+		assert_eq!(body[2]["check_name"], "reachability");
+		assert_eq!(body[2]["ceiling"], "failed");
+		assert_eq!(body[2]["pending_review"], false);
 	})
 	.await
 }

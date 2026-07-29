@@ -47,6 +47,57 @@ async fn insert_server_full(
 	row.id
 }
 
+/// Insert a server in a group, so incident membership is actually on the
+/// table: the incident flow is skipped outright for ungrouped servers, and
+/// a gate assertion against one would pass for the wrong reason.
+async fn insert_grouped_server(
+	conn: &mut diesel_async::AsyncPgConnection,
+	host: &str,
+	alert_when_down_for_secs: i64,
+	is_monitored: bool,
+) -> Uuid {
+	let group: RowId = sql_query("INSERT INTO server_groups (name) VALUES ('sweep') RETURNING id")
+		.get_result(conn)
+		.await
+		.expect("insert group");
+	let row: RowId = sql_query(
+		r#"
+			INSERT INTO servers (host, alert_when_down_for, is_monitored, group_id)
+			VALUES ($1, ($2 || ' seconds')::INTERVAL, $3, $4)
+			RETURNING id
+		"#,
+	)
+	.bind::<sql_types::Text, _>(host)
+	.bind::<sql_types::Text, _>(alert_when_down_for_secs.to_string())
+	.bind::<sql_types::Bool, _>(is_monitored)
+	.bind::<sql_types::Uuid, _>(group.id)
+	.get_result(conn)
+	.await
+	.expect("insert server");
+	row.id
+}
+
+/// Count open (`left_at IS NULL`) incident links for a server's reachability
+/// check.
+async fn open_incident_links(conn: &mut diesel_async::AsyncPgConnection, server_id: Uuid) -> i64 {
+	#[derive(QueryableByName)]
+	struct CountRow {
+		#[diesel(sql_type = sql_types::BigInt)]
+		n: i64,
+	}
+	sql_query(
+		"SELECT COUNT(*) AS n FROM incident_issues ii \
+		 JOIN issues i ON i.id = ii.issue_id \
+		 WHERE i.server_id = $1 AND i.\"ref\" = $2 AND ii.left_at IS NULL",
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Text, _>(REACHABILITY_REF)
+	.get_result::<CountRow>(conn)
+	.await
+	.expect("count incident links")
+	.n
+}
+
 async fn insert_status_at(
 	conn: &mut diesel_async::AsyncPgConnection,
 	server_id: Uuid,
@@ -163,16 +214,39 @@ async fn sweep_files_when_no_status_ever() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn sweep_skips_unmonitored_server() {
+async fn sweep_files_for_unmonitored_server_without_alerting() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		// is_monitored = false: never file regardless of how stale the status
-		// is. The threshold is preserved so flipping monitoring back on
-		// resumes with the chosen value.
-		let id = insert_server_full(&mut conn, "http://silenced.invalid/", 600, false).await;
+		// is_monitored = false doesn't change what's true about the server:
+		// its reachability is determined and recorded like everyone else's,
+		// so an operator can see it's away. The monitoring gate is what
+		// keeps the filing out of incidents.
+		let id = insert_grouped_server(&mut conn, "http://silenced.invalid/", 600, false).await;
 		insert_status_at(&mut conn, id, 120).await;
 		let filed = Status::sweep_staleness(&mut conn).await.expect("sweep");
-		assert_eq!(filed, 0);
-		assert!(issue_for(&mut conn, id).await.is_none());
+		assert_eq!(filed, 1);
+		let issue = issue_for(&mut conn, id).await.expect("issue exists");
+		assert_eq!(issue.effective_result, Some(CheckResult::Failed));
+		assert!(issue.active);
+		assert_eq!(
+			open_incident_links(&mut conn, id).await,
+			0,
+			"an unmonitored server's reachability must not join an incident",
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sweep_opens_an_incident_for_a_monitored_server() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		// The counterpart to the unmonitored case: same filing, same group,
+		// and here it does reach an incident — so that test's zero is the
+		// monitoring gate rather than something else swallowing it.
+		let id = insert_grouped_server(&mut conn, "http://watched.invalid/", 600, true).await;
+		insert_status_at(&mut conn, id, 120).await;
+		let filed = Status::sweep_staleness(&mut conn).await.expect("sweep");
+		assert_eq!(filed, 1);
+		assert_eq!(open_incident_links(&mut conn, id).await, 1);
 	})
 	.await
 }
