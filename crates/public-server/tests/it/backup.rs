@@ -559,6 +559,7 @@ fn public_server_with_sts(url: &str, sts: aws_sdk_sts::Client) -> TestServer {
 		rate_limiter: Default::default(),
 		sts: Some(sts),
 		kube: None,
+		dns_zones: Vec::new(),
 	};
 	let app = router(
 		axum::Router::from(public_server::routes().with_state(state)),

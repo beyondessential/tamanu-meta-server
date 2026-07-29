@@ -251,6 +251,15 @@ diesel::table! {
 }
 
 diesel::table! {
+	compromised_keys (key_fingerprint) {
+		key_fingerprint -> Text,
+		certificate_id -> Nullable<Uuid>,
+		noted_by -> Nullable<Text>,
+		noted_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	device_connections (id, created_at) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -509,6 +518,31 @@ diesel::table! {
 }
 
 diesel::table! {
+	server_certificates (id) {
+		id -> Uuid,
+		server_id -> Uuid,
+		name -> Text,
+		key_fingerprint -> Text,
+		csr -> Bytea,
+		state -> Text,
+		chain -> Nullable<Text>,
+		not_after -> Nullable<Timestamptz>,
+		issued_at -> Nullable<Timestamptz>,
+		renewing -> Bool,
+		attempts -> Int4,
+		next_attempt_at -> Timestamptz,
+		last_error -> Nullable<Text>,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+		profile -> Nullable<Text>,
+		renew_after -> Nullable<Timestamptz>,
+		revoked_at -> Nullable<Timestamptz>,
+		revoked_by -> Nullable<Text>,
+		revocation_reason -> Nullable<Text>,
+	}
+}
+
+diesel::table! {
 	server_group_domains (id) {
 		id -> Uuid,
 		group_id -> Uuid,
@@ -546,6 +580,20 @@ diesel::table! {
 }
 
 diesel::table! {
+	server_names (id) {
+		id -> Uuid,
+		server_id -> Uuid,
+		name -> Text,
+		addresses -> Array<Nullable<Inet>>,
+		published_addresses -> Array<Nullable<Inet>>,
+		published_at -> Nullable<Timestamptz>,
+		last_error -> Nullable<Text>,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	servers (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -570,6 +618,10 @@ diesel::table! {
 		product -> Text,
 		may_manage_dns -> Bool,
 		may_manage_tls -> Bool,
+		certificate_profile -> Nullable<Text>,
+		name_management_paused_at -> Nullable<Timestamptz>,
+		name_management_paused_by -> Nullable<Text>,
+		name_management_pause_reason -> Nullable<Text>,
 	}
 }
 
@@ -710,7 +762,10 @@ diesel::joinable!(server_enrollment_challenges -> servers (server_id));
 diesel::joinable!(server_enrollment_tokens -> servers (server_id));
 diesel::joinable!(server_group_backup_config -> server_groups (group_id));
 diesel::joinable!(server_group_backup_schedule -> server_groups (group_id));
+diesel::joinable!(compromised_keys -> server_certificates (certificate_id));
+diesel::joinable!(server_certificates -> servers (server_id));
 diesel::joinable!(server_group_domains -> server_groups (group_id));
+diesel::joinable!(server_names -> servers (server_id));
 diesel::joinable!(server_reported_detail -> servers (server_id));
 diesel::joinable!(servers -> devices (device_id));
 diesel::joinable!(slack_outbox -> incident_notes (note_id));
@@ -737,6 +792,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	check_stability,
 	check_stability_backfill,
 	chrome_releases,
+	compromised_keys,
 	device_connections,
 	device_keys,
 	device_server_associations,
@@ -756,9 +812,11 @@ diesel::allow_tables_to_appear_in_same_query!(
 	server_enrollment_challenges,
 	server_enrollment_tokens,
 	server_group_backup_config,
+	server_certificates,
 	server_group_backup_schedule,
 	server_group_domains,
 	server_groups,
+	server_names,
 	server_reported_detail,
 	servers,
 	slack_outbox,

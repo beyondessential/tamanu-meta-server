@@ -430,6 +430,187 @@
         }
       }
     },
+    "/certificates/request": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Ask for a certificate, and collect it once there is one.",
+        "description": "The same call does both, and is safe to repeat: a name and key Canopy already\nholds a certificate for is answered from what it holds rather than ordering\nagain, so a server that lost its local copy costs the authority nothing. A\nrequest naming a different key opens a new order.\n\nProving control of a name through DNS takes far longer than any client waits\nmid-handshake, so a first request records the order and answers `pending`;\ncall again to collect. A server is expected to hold a certificate before it\nneeds one rather than to obtain one while a client waits.",
+        "operationId": "certificate_request",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestCertificateArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The order as it stands, with the chain if there is one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The signing request is unparseable, unsigned, asks for another name, or carries a name besides the one requested.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The server lacks the TLS grant, or the name is not within its group's domains.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The server is paused, no managed zone covers the name, or the key was revoked as compromised and will not be certified again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The device is not attached to any live server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "mtls-certificate": []
+          }
+        ]
+      }
+    },
+    "/names/entitlements": {
+      "get": {
+        "tags": [
+          "names"
+        ],
+        "summary": "What this server may act on, and what it already holds.",
+        "description": "Answers the boundary rather than making an agent discover it by being\nrefused: the domains its group controls, the grants it holds, whether it is\npaused, and the names and certificates it already has. Enough to request a\ncertificate before anything asks for one, and to renew before expiry.\n\nA server with no grants, or whose group controls no domain, gets an empty\nanswer rather than an error — asking what one may do is not a privileged act.\nThe same content rides on the response to a status push.",
+        "operationId": "name_entitlements",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Entitlements"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The device is not attached to any live server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "mtls-certificate": []
+          }
+        ]
+      }
+    },
+    "/names/register": {
+      "post": {
+        "tags": [
+          "names"
+        ],
+        "summary": "Register the addresses a name should resolve to.",
+        "description": "Replaces whatever addresses were registered for the name; an empty list\nwithdraws it. Canopy publishes what it is told — it does not verify that an\naddress is really this server's, the grant being the trust boundary.\n\nPublishing happens in the background, so the response says what Canopy will\npublish and what it has published so far rather than waiting for the zone.",
+        "operationId": "name_register",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterNameArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisteredName"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The server lacks the DNS grant, or the name is not within its group's domains.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The server is paused, another server holds the name, or no managed zone covers it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The device is not attached to any live server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "mtls-certificate": []
+          }
+        ]
+      }
+    },
     "/restore-capabilities": {
       "post": {
         "tags": [
@@ -1448,6 +1629,67 @@
           }
         }
       },
+      "CertificateResponse": {
+        "type": "object",
+        "description": "Where a certificate request stands, and the chain once there is one.",
+        "required": [
+          "name",
+          "state",
+          "usable",
+          "revoked",
+          "key_must_be_replaced"
+        ],
+        "properties": {
+          "chain": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The chain, PEM, once Canopy holds one — including while a renewal is\nunder way, the chain in hand staying valid until the new one lands."
+          },
+          "key_must_be_replaced": {
+            "type": "boolean",
+            "description": "Whether the key must be replaced before asking again, rather than just the\ncertificate."
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the last attempt failed, if one did. Present while Canopy is still\nretrying."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name the certificate is (or will be) for, as Canopy normalised it."
+          },
+          "not_after": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When it expires."
+          },
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The profile it was issued under, if the authority named one."
+          },
+          "revoked": {
+            "type": "boolean",
+            "description": "Whether an operator revoked it. Stop serving it and ask again."
+          },
+          "state": {
+            "type": "string",
+            "description": "`pending`, `issued`, `failed`, or `revoked`."
+          },
+          "usable": {
+            "type": "boolean",
+            "description": "Whether the chain can be served now."
+          }
+        }
+      },
       "CheckResult": {
         "type": "string",
         "description": "Outcome of a single health check reported in a server's status update.\n\nOlder reports may send a plain pass/fail flag instead of one of these\noutcomes; when that happens a passing flag is treated as `passed` and a\nfailing flag as `failed`.",
@@ -1554,6 +1796,53 @@
           }
         }
       },
+      "Entitlements": {
+        "type": "object",
+        "description": "What a server is entitled to do with names, and what it already holds.",
+        "required": [
+          "may_manage_dns",
+          "may_manage_tls",
+          "paused",
+          "domains",
+          "registered_names",
+          "certificates"
+        ],
+        "properties": {
+          "certificates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeldCertificate"
+            },
+            "description": "The certificates Canopy holds for this server."
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The domains this server's group controls. Any name at or beneath one of\nthese is a name this server may act on — which is what lets an agent\nrequest a certificate before anything asks for one."
+          },
+          "may_manage_dns": {
+            "type": "boolean",
+            "description": "Whether this server may manage its own DNS records."
+          },
+          "may_manage_tls": {
+            "type": "boolean",
+            "description": "Whether this server may obtain its own TLS certificates."
+          },
+          "paused": {
+            "type": "boolean",
+            "description": "Whether Canopy is currently making no new changes on this server's\nbehalf. While true, requests are refused and an agent should wait."
+          },
+          "registered_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The names this server has registered addresses for."
+          }
+        }
+      },
       "HealthCheck": {
         "allOf": [
           {
@@ -1592,6 +1881,53 @@
           }
         ],
         "description": "One health-check result within a status push."
+      },
+      "HeldCertificate": {
+        "type": "object",
+        "description": "A certificate Canopy holds for the asking server, as the server needs to see\nit: enough to decide whether to renew, and nothing about anyone else.",
+        "required": [
+          "name",
+          "key_fingerprint",
+          "usable",
+          "revoked",
+          "key_must_be_replaced"
+        ],
+        "properties": {
+          "key_fingerprint": {
+            "type": "string",
+            "description": "Hex SHA-256 of the certified key's subject public key info, so an agent\ncan tell whether this covers a key it still holds."
+          },
+          "key_must_be_replaced": {
+            "type": "boolean",
+            "description": "Whether the key itself is condemned, not just the certificate — the key\npair has to be replaced before asking again."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name it covers."
+          },
+          "not_after": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When it expires."
+          },
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The profile it was issued under, if the authority named one."
+          },
+          "revoked": {
+            "type": "boolean",
+            "description": "Whether an operator has revoked it. Stop serving it."
+          },
+          "usable": {
+            "type": "boolean",
+            "description": "Whether it can still be served: not revoked, not expired. True even while\na renewal is under way, the chain in hand staying valid until the new one\nlands."
+          }
+        }
       },
       "IntentDescriptor": {
         "type": "object",
@@ -1845,6 +2181,68 @@
           }
         }
       },
+      "RegisterNameArgs": {
+        "type": "object",
+        "description": "The name a server should be reachable at, and where.",
+        "required": [
+          "name",
+          "addresses"
+        ],
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Every external address this server is reachable at. IPv4 addresses become\nA records and IPv6 addresses AAAA records, replacing whatever was\nregistered before. An empty list withdraws the name."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name to publish records at. Must sit within a domain this server's\ngroup controls."
+          }
+        }
+      },
+      "RegisteredName": {
+        "type": "object",
+        "description": "What Canopy holds for a registered name.",
+        "required": [
+          "name",
+          "addresses",
+          "published_addresses",
+          "published"
+        ],
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The addresses Canopy will publish."
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the last publish attempt failed, if it did."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name, as Canopy normalised it."
+          },
+          "published": {
+            "type": "boolean",
+            "description": "Whether the zone has caught up with what was asked for."
+          },
+          "published_addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The addresses Canopy has published so far. Differs from `addresses` until\nthe change has been reconciled into the zone."
+          }
+        }
+      },
       "ReportArgs": {
         "type": "object",
         "description": "Report of a completed backup or restore run.",
@@ -1933,6 +2331,24 @@
           "type": {
             "type": "string",
             "description": "The backup type that ran (e.g. `tamanu-postgres`)."
+          }
+        }
+      },
+      "RequestCertificateArgs": {
+        "type": "object",
+        "description": "A request to certify a key for a name.",
+        "required": [
+          "name",
+          "csr"
+        ],
+        "properties": {
+          "csr": {
+            "type": "string",
+            "description": "The certificate signing request, DER, base64. Must ask for exactly `name`\nand nothing else — a request carrying any other name is refused rather\nthan trimmed."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name to certify. Must sit within a domain this server's group\ncontrols."
           }
         }
       },
@@ -2100,6 +2516,7 @@
         "required": [
           "backup_now",
           "check_severities",
+          "names",
           "tags"
         ],
         "properties": {
@@ -2119,6 +2536,10 @@
             "propertyNames": {
               "type": "string"
             }
+          },
+          "names": {
+            "$ref": "#/components/schemas/Entitlements",
+            "description": "What this server is entitled to do with names: the domains its group\ncontrols, the grants it holds, whether it is paused, and the names and\ncertificates it already has. A server-wide fact, so returned to every\nsource — an agent already reporting status learns of a new domain or a\nnewly granted permission without asking separately. Identical to what\n`GET /names/entitlements` returns. Clients that predate this field can\nsafely ignore it."
           },
           "tags": {
             "$ref": "#/components/schemas/TagMap",
@@ -2488,6 +2909,14 @@
     {
       "name": "bestool",
       "description": "Bestool SQL snippet read API."
+    },
+    {
+      "name": "certificates",
+      "description": "TLS certificates for a server's own names: requesting one for a signing request, and collecting it once Canopy has obtained it."
+    },
+    {
+      "name": "names",
+      "description": "Public names a server may act on: what it is entitled to, and the addresses to publish for them."
     },
     {
       "name": "restore",

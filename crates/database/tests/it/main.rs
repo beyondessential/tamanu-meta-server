@@ -6,6 +6,7 @@
 mod backfill_registered_at_migration;
 mod backup_detection;
 mod backups;
+mod certificate_alerts;
 mod check_liveness;
 mod check_policies;
 mod check_policy_rules;
@@ -29,6 +30,7 @@ mod restore;
 mod scope;
 mod scoped_check_policies;
 mod self_alerts;
+mod server_certificates;
 mod server_domains;
 mod server_enrollment;
 mod server_group_archival;

@@ -28,6 +28,10 @@ fn new_server() -> Server {
 		restore_allowed_by: None,
 		may_manage_dns: false,
 		may_manage_tls: false,
+		certificate_profile: None,
+		name_management_paused_at: None,
+		name_management_paused_by: None,
+		name_management_pause_reason: None,
 	}
 }
 

@@ -188,6 +188,22 @@ impl ServerGroupDomain {
 			.map_err(AppError::from)
 	}
 
+	/// Whether any group anywhere controls a domain.
+	///
+	/// The question behind it is whether this deployment uses name management at
+	/// all: a claim can only be made against a configured zone, but one made
+	/// before a zone was withdrawn outlives it, so "no zones" alone is not the
+	/// same as "not in use".
+	// spec: DOM#permission-for-a-server-to-manage-its-own-names
+	pub async fn any_claimed(db: &mut AsyncPgConnection) -> Result<bool> {
+		use crate::schema::server_group_domains::dsl;
+		use diesel::dsl::{exists, select};
+		select(exists(dsl::server_group_domains.select(dsl::id)))
+			.get_result(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn get(db: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {
 		use crate::schema::server_group_domains::dsl;
 		dsl::server_group_domains

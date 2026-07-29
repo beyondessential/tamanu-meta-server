@@ -95,23 +95,13 @@ A server whose group controls no domain is likewise refused, but for want of a d
 Revoking a grant takes effect on the server's next request.
 It stops the server making further changes and leaves the records and certificates already in place, since withdrawing a live deployment's address records on a change of permission would take that deployment off the air.
 
-## Server-registered names and addresses
+## What a server may reach
 
-A server permitted to manage its DNS registers a name it should be reachable at, along with the external addresses it is reachable at, and Canopy publishes that name's address records.
+A group's domains bound what its servers can act on: a server manages names at or beneath one of its own group's domains, and nothing else.
+A name within another group's domain, or within no group's domain, is refused, and refused the same way in both cases — a server learns that its group does not control the name, never that another group does.
 
-The name must lie within one of the server's own group's domains.
-A name within another group's domain, or within no group's domain, is refused, so the group domain is the boundary of what a server can reach.
-
-Canopy publishes the IPv4 addresses given as A records and the IPv6 addresses as AAAA records, at the name registered, in the managed zone that name resolves to.
-Registering replaces the addresses previously registered for that name, so a server announces a change of address by registering again, and a registration that names no addresses at all is a request to withdraw the name.
-
-Canopy changes only the records it created itself.
-Because zones are shared, a name in a managed zone may be served by records Canopy knows nothing about, and Canopy neither rewrites nor removes those.
-
-A name is registered by one server at a time: while a registration stands, another server registering the same name is refused, so two members of a group cannot fight over one name.
-
-Canopy does not check that a registered address is really the server's.
-The permission is the trust boundary: a server permitted to manage its DNS can point a name under its group's domains at any address, and a server not permitted to can point nothing anywhere.
+The group domain is therefore the whole of the authorisation: the grants say whether a server may act, and the group's domains say where.
+What a server does with that — publishing the addresses its name resolves to, obtaining a certificate for it — is [CRT](../public-server/certificates.md).
 
 ## Presentation
 

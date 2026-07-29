@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use axum::extract::FromRef;
 use bestool_postgres::pool::PgPool;
 use commons_errors::Result;
+use commons_servers::acme::Acme;
 use commons_servers::recovery_vault::Recipients;
 use commons_servers::tailnet_directory::{TailnetDirectory, TailnetDirectoryConfig};
 use commons_types::dns::ManagedZone;
@@ -59,6 +60,59 @@ pub struct AppState {
 	// spec: DOM#managed-zones
 	#[from_ref(skip)]
 	pub dns_zones: Vec<ManagedZone>,
+	/// Canopy's account at the certificate authority, where one is configured.
+	/// The admin server needs it for two things only: the profiles the authority
+	/// advertises, and revoking a certificate on an operator's say-so. Everything
+	/// else about issuance is the domains pod's.
+	///
+	/// `None` where no account key is configured, or where the account could not
+	/// be reached at startup — in which case revocation reports that rather than
+	/// pretending to have worked.
+	// spec: CRT#revocation
+	#[from_ref(skip)]
+	pub acme: Option<Acme>,
+	/// The authority's directory URL as configured, kept even when the account
+	/// could not be built: an operator looking at a broken authority wants to see
+	/// which one Canopy was trying to use.
+	#[from_ref(skip)]
+	pub acme_directory: Option<String>,
+}
+
+/// Environment variable that swaps in the in-process fake certificate authority,
+/// for the e2e binary. Debug-only, like [`crate::backup_probe::FAKE_ENV`].
+pub const FAKE_ACME_ENV: &str = "CANOPY_FAKE_ACME";
+
+/// Build Canopy's ACME account, logging (not failing) a configuration that does
+/// not work: the admin server should still come up, and the settings panel
+/// surfaces the problem. Returns the configured directory URL either way.
+async fn acme_from_env() -> (Option<Acme>, Option<String>) {
+	if std::env::var_os(FAKE_ACME_ENV).is_some() {
+		// Debug-only. The fake authority signs with a throwaway root, so a
+		// release build must never be able to serve one: a certificate nothing
+		// trusts, presented as valid, is worse than none.
+		#[cfg(debug_assertions)]
+		{
+			tracing::warn!("{FAKE_ACME_ENV} set; using the in-process fake certificate authority");
+			return (
+				Some(Acme::fake()),
+				Some("https://acme.test.invalid/directory".into()),
+			);
+		}
+		#[cfg(not(debug_assertions))]
+		tracing::error!(
+			"{FAKE_ACME_ENV} is set but IGNORED: the fake certificate authority is debug-only and \
+			 is never used in release builds"
+		);
+	}
+
+	let directory = std::env::var("CANOPY_ACME_DIRECTORY").ok();
+	match Acme::from_env().await {
+		Ok(acme) => (acme, directory),
+		Err(err) => {
+			tracing::warn!("Canopy's certificate authority account is unusable: {err}");
+			(None, directory)
+		}
+	}
 }
 
 /// Read the managed DNS zones from the environment, logging (not failing) a
@@ -129,6 +183,8 @@ impl AppState {
 		let aws = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
 		let sts = Some(aws_sdk_sts::Client::new(&aws));
 
+		let (acme, acme_directory) = acme_from_env().await;
+
 		let db = database::init();
 		let db_read = database::init_ro().unwrap_or_else(|| db.clone());
 		seed_own_checks(&db).await;
@@ -144,6 +200,8 @@ impl AppState {
 			recovery_recipients: recovery_recipients_from_env(),
 			recovery_challenge: Arc::new(Mutex::new(None)),
 			dns_zones: dns_zones_from_env(),
+			acme,
+			acme_directory,
 		})
 	}
 
@@ -172,6 +230,11 @@ impl AppState {
 			recovery_recipients: recovery_recipients_from_env(),
 			recovery_challenge: Arc::new(Mutex::new(None)),
 			dns_zones: dns_zones_from_env(),
+			// A fake authority in tests and the e2e fixture: it advertises profiles
+			// and accepts revocations, so both paths are exercisable without a
+			// network.
+			acme: Some(Acme::fake()),
+			acme_directory: Some("https://acme.test.invalid/directory".into()),
 		})
 	}
 }

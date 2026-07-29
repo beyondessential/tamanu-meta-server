@@ -244,12 +244,24 @@ async fn submit_status() {
 			// The response carries only the return-path fields; the stored
 			// status record is not echoed back. Tags for this bare ungrouped
 			// server are just the synthetic `canopy:product` and `canopy:kind`.
+			// `names` is present but empty throughout: this server holds neither
+			// grant and its group controls no domain, so it is entitled to nothing
+			// — which is a fact worth stating on every push rather than an absence
+			// the server has to infer.
 			let body: serde_json::Value = response.json();
 			assert_eq!(
 				body,
 				serde_json::json!({
 					"backup_now": [],
 					"check_severities": {},
+					"names": {
+						"may_manage_dns": false,
+						"may_manage_tls": false,
+						"paused": false,
+						"domains": [],
+						"registered_names": [],
+						"certificates": [],
+					},
 					"tags": {"canopy:product": "tamanu", "canopy:kind": "facility"},
 				}),
 			);

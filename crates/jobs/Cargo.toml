@@ -43,3 +43,4 @@ aws-sdk-s3 = { workspace = true, features = ["test-util"] }
 aws-smithy-mocks.workspace = true
 commons-tests = { path = "../commons-tests" }
 diesel = { workspace = true }
+uuid = { version = "1.23.1", features = ["v4"] }
