@@ -120,9 +120,14 @@ Revocation exists for the day something has gone wrong, so it is reachable where
 It cannot be undone: a revoked certificate stays revoked, and the remedy is a new one.
 
 Canopy stops renewing a revoked certificate and records who revoked it, when, and the reason given.
-A server collecting a certificate it holds locally is told that it has been revoked, so it stops serving it rather than serving something clients will reject, and knows to ask for a replacement.
 
-Where the reason given is that the key is compromised, the compromised key is not certified again: a later request naming that same key is refused, and the server has to generate a new one.
+A server collecting a certificate it holds locally is told that it has been revoked, so it stops serving something clients will reject, and is told separately whether the key it holds is condemned along with it.
+The two are different instructions: any revocation means ask for a replacement, but only a compromised key means the key pair has to be discarded first.
+Everything else can be re-requested with the key the server already holds.
+
+Where the reason given is that the key is compromised, that key is not certified again — for any name, by any server, since a leaked key is leaked whoever asks next.
+A request naming it is refused distinguishably from every other refusal, so an agent can generate a fresh key and ask again on the strength of the refusal alone, without a human reading it and without waiting for an operator to intervene on the server.
+Recovering from a leaked key is exactly the moment when nobody has attention to spare, so it is the moment the machinery has to work unattended.
 Any other reason leaves the key usable, since a certificate superseded or a deployment retired says nothing about the key itself.
 
 ### When issuance fails

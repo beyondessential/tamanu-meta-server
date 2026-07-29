@@ -711,6 +711,11 @@ async fn revoking_stops_renewal_and_unholds_the_certificate() {
 		assert_eq!(after.revoked_by.as_deref(), Some("op@example.test"));
 		assert_eq!(after.revocation_reason.as_deref(), Some("superseded"));
 		assert!(after.renew_after.is_none(), "nothing left to renew");
+		assert!(after.is_revoked());
+		assert!(
+			!after.requires_new_key(),
+			"superseded condemns the certificate, not the key"
+		);
 
 		assert!(
 			ServerCertificate::start_renewals(&mut conn)
@@ -757,13 +762,15 @@ async fn a_key_revoked_as_compromised_is_never_certified_again() {
 		.await
 		.expect("revoke");
 
-		// The same key, for the same name: refused.
+		// The same key, for the same name: refused — and refused with its own
+		// problem type, so an agent can rotate the key on the type alone rather
+		// than parsing the message.
 		let err = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
 			.await
 			.expect_err("a compromised key must not be certified again");
 		assert!(
-			matches!(err, commons_errors::AppError::BadRequest(_)),
-			"got {err:?}"
+			matches!(err, commons_errors::AppError::CertificateKeyCompromised(_)),
+			"an agent has to be able to act on this without reading prose; got {err:?}"
 		);
 
 		// And for any other name, by anyone: a leaked key is leaked whoever asks.
@@ -813,6 +820,47 @@ async fn revoking_for_another_reason_leaves_the_key_usable() {
 			.expect("the key is still usable");
 		assert_eq!(again.id, cert.id);
 		assert_eq!(again.order_state(), OrderState::Pending);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_key_compromise_revocation_tells_the_server_to_replace_the_key() {
+	TestDb::run(async |mut conn, _url| {
+		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
+		let cert = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+			.await
+			.expect("request");
+		ServerCertificate::record_issued(
+			&mut conn,
+			cert.id,
+			"chain",
+			Timestamp::now() + SignedDuration::from_hours(48),
+			None,
+			None,
+		)
+		.await
+		.expect("issued");
+		ServerCertificate::record_revoked(
+			&mut conn,
+			cert.id,
+			RevocationReason::KeyCompromise,
+			Some("op@example.test"),
+		)
+		.await
+		.expect("revoke");
+
+		// What a collecting server reads: stop serving this, and the key itself
+		// is condemned — not just the certificate.
+		let after = ServerCertificate::get(&mut conn, cert.id)
+			.await
+			.expect("get");
+		assert!(after.is_revoked());
+		assert!(
+			after.requires_new_key(),
+			"a compromised key has to be discarded, not reused"
+		);
+		assert!(!after.is_current(), "it must not be served");
 	})
 	.await;
 }

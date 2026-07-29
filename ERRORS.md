@@ -120,6 +120,18 @@ a way the operator can resolve (e.g. importing a ticket whose
 canonical URL is already claimed by a different server id). Body
 content explains the conflict.
 
+## Certificate key compromised
+
+Issued when a certificate is requested for a key that was revoked
+as compromised. Canopy will never certify that key again, for any
+name or server, so retrying with it cannot succeed.
+
+Distinct from a plain conflict so a client can act on it
+unattended: the remedy is always the same — generate a fresh key
+pair, submit a new signing request for it, and discard the old
+key. Body content names the key and the certificate whose
+revocation barred it.
+
 ## Auth: tailnet identity missing
 
 Issued on the private-server's `/public/...` mount when the

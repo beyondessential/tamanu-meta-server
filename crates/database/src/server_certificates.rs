@@ -215,6 +215,23 @@ impl ServerCertificate {
 			&& self.not_after.is_some_and(|at| at > Timestamp::now())
 	}
 
+	/// Whether this certificate was revoked in a way that condemns the key as
+	/// well as the certificate.
+	///
+	/// A server collecting this needs the distinction: any revocation means stop
+	/// serving the certificate, but only a compromised key means the key pair
+	/// itself has to be replaced before asking again. Everything else can be
+	/// re-requested with the key already held.
+	// spec: CRT#revocation
+	pub fn requires_new_key(&self) -> bool {
+		self.revocation_reason.as_deref() == Some(RevocationReason::KeyCompromise.as_str())
+	}
+
+	/// Whether an operator has revoked this certificate.
+	pub fn is_revoked(&self) -> bool {
+		self.order_state() == OrderState::Revoked
+	}
+
 	/// This certificate's whole life, from issuance to expiry. `None` for one not
 	/// issued yet.
 	pub fn lifetime(&self) -> Option<SignedDuration> {
@@ -270,11 +287,13 @@ impl ServerCertificate {
 		let name = normalize_domain(name)?;
 
 		// A key revoked for compromise is never certified again, whatever asks
-		// for it: the server has to generate a new one.
+		// for it: the server has to generate a new one. Its own error type, not a
+		// generic refusal, so an agent can rotate the key on the problem type
+		// alone rather than parsing the sentence.
 		if is_key_compromised(db, key_fingerprint).await? {
-			return Err(AppError::BadRequest(format!(
-				"the key in this request was revoked as compromised and will not be certified \
-				 again; generate a new key for {name}"
+			return Err(AppError::CertificateKeyCompromised(format!(
+				"key {key_fingerprint} will not be certified again; generate a fresh key pair, \
+				 submit a new signing request for {name}, and discard the old key"
 			)));
 		}
 

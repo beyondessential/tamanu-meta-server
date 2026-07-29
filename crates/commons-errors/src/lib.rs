@@ -131,6 +131,15 @@ pub enum AppError {
 	#[error("conflict: {0}")]
 	Conflict(String),
 
+	/// A certificate was requested for a key that was revoked as compromised, so
+	/// Canopy will never certify it again. Its own problem type rather than a
+	/// generic conflict because the caller can act on it without a human: the
+	/// remedy is always to generate a fresh key and ask again, and an agent
+	/// should not have to read English prose to work that out. Maps to 409.
+	// spec: CRT#revocation
+	#[error("the key in this request was revoked as compromised: {0}")]
+	CertificateKeyCompromised(String),
+
 	/// Deliberately opaque failure for the public enrollment endpoints. Every
 	/// pre-completion reason (unknown/archived server, invalid/expired/consumed
 	/// token, bad/expired/used challenge nonce, bad signature) collapses to this
@@ -217,6 +226,7 @@ impl AppError {
 			Self::AuthTokenNotValid => StatusCode::UNAUTHORIZED,
 			Self::BadRequest(_) => StatusCode::BAD_REQUEST,
 			Self::Conflict(_) => StatusCode::CONFLICT,
+			Self::CertificateKeyCompromised(_) => StatusCode::CONFLICT,
 			Self::EnrollmentFailed => StatusCode::FORBIDDEN,
 			Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
 			Self::Upstream(_) => StatusCode::BAD_GATEWAY,
@@ -271,6 +281,7 @@ impl AppError {
 						Self::AuthTokenNotValid => "auth-token-not-valid",
 						Self::BadRequest(_) => "bad-request",
 						Self::Conflict(_) => "conflict",
+						Self::CertificateKeyCompromised(_) => "certificate-key-compromised",
 						Self::EnrollmentFailed => "enrollment-failed",
 						Self::RateLimited => "rate-limited",
 						Self::Upstream(_) => "upstream",
