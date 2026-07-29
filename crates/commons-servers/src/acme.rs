@@ -261,10 +261,10 @@ impl Acme {
 		// Set separately because finding-or-creating from a key carries no contact.
 		// A contact the authority won't take is worth reporting but not worth
 		// refusing to issue over.
-		if let Ok(contact) = std::env::var("CANOPY_ACME_CONTACT") {
-			if let Err(err) = account.update_contacts(&[contact.as_str()]).await {
-				warn!("the authority would not record the configured contact: {err}");
-			}
+		if let Ok(contact) = std::env::var("CANOPY_ACME_CONTACT")
+			&& let Err(err) = account.update_contacts(&[contact.as_str()]).await
+		{
+			warn!("the authority would not record the configured contact: {err}");
 		}
 
 		info!(
@@ -519,7 +519,8 @@ impl Acme {
 				.await
 				.map_err(|e| Failure::from_acme("the authority would not check the record", e))?;
 		}
-		drop(authorizations);
+		// Ends the borrow of `order`, which `poll_ready` needs mutably.
+		let _ = authorizations;
 
 		match order
 			.poll_ready(&RetryPolicy::default().timeout(AUTHORISATION_TIMEOUT))

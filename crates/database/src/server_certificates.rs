@@ -643,13 +643,17 @@ impl ServerCertificate {
 	pub async fn lapsing_under_pause(db: &mut AsyncPgConnection) -> Result<Vec<PausedLapse>> {
 		use crate::schema::{server_certificates, servers};
 
-		let held: Vec<(
-			Self,
+		/// `(certificate, group, server name, paused at, pause reason)` — the
+		/// columns the report needs from either side of the join.
+		type PausedRow = (
+			ServerCertificate,
 			Option<Uuid>,
 			Option<String>,
 			jiff_diesel::NullableTimestamp,
 			Option<String>,
-		)> = server_certificates::table
+		);
+
+		let held: Vec<PausedRow> = server_certificates::table
 			.inner_join(servers::table)
 			.filter(server_certificates::state.eq(OrderState::Issued.as_str()))
 			.filter(servers::deleted_at.is_null())

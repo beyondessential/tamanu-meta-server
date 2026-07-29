@@ -398,11 +398,11 @@ pub async fn authority(State(state): State<AppState>) -> Result<Json<AuthorityVi
 	// pod is what actually talks to the authority, and it reports what it finds.
 	let mut problem = None;
 	for r#ref in [CA_UNREACHABLE_REF, CA_ACCOUNT_REF, CA_THROTTLED_REF] {
-		if let Some(issue) = current(&mut conn, r#ref).await? {
-			if issue.active {
-				problem = Some(issue.message);
-				break;
-			}
+		if let Some(issue) = current(&mut conn, r#ref).await?
+			&& issue.active
+		{
+			problem = Some(issue.message);
+			break;
 		}
 	}
 
