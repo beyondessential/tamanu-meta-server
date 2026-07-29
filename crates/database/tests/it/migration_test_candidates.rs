@@ -1,13 +1,13 @@
-//! Candidate derivation: which versions a server is asked to be tested
-//! against. One per minor series, newest patch, within the server's major,
-//! and only for Tamanu servers that have reported a version.
+//! Candidate derivation: which version a server is asked to be tested against.
+//! The newest published one it could upgrade to, within its major, and only for
+//! Tamanu servers that have reported a version.
 
 use commons_types::{
 	server::product::Product,
 	version::{VersionStatus, VersionStr},
 };
 use database::{
-	migration_tests::{Candidate, candidates, upgrade_path},
+	migration_tests::{Candidate, candidates, upgrade_target},
 	reported_detail::ReportedDetail,
 	versions::{NewVersion, Version},
 };
@@ -77,29 +77,36 @@ async fn insert_server(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn newest_patch_of_each_minor_ahead_of_the_server() {
+async fn the_newest_published_version_ahead_of_the_server() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let behind = publish(&mut conn, 2, 61, 0).await;
-		let same_minor_older = publish(&mut conn, 2, 62, 1).await;
-		let same_minor_newest = publish(&mut conn, 2, 62, 4).await;
-		let next_minor_older = publish(&mut conn, 2, 63, 0).await;
-		let next_minor_newest = publish(&mut conn, 2, 63, 2).await;
-		let other_major = publish(&mut conn, 3, 0, 0).await;
+		publish(&mut conn, 2, 61, 0).await;
+		publish(&mut conn, 2, 62, 1).await;
+		publish(&mut conn, 2, 62, 4).await;
+		publish(&mut conn, 2, 63, 0).await;
+		let newest = publish(&mut conn, 2, 63, 2).await;
+		publish(&mut conn, 3, 0, 0).await;
 
 		let versions = Version::get_all(&mut conn).await.expect("versions");
-		let path = upgrade_path(&reported("2.62.0"), &versions);
 
 		assert_eq!(
-			path,
-			vec![same_minor_newest.id, next_minor_newest.id],
-			"one entry per minor, each the newest patch"
+			upgrade_target(&reported("2.62.0"), &versions),
+			Some(newest.id),
+			"the newest patch of the newest minor, and nothing outside the major"
 		);
-		assert!(!path.contains(&behind.id), "already past it");
-		assert!(!path.contains(&same_minor_older.id), "superseded patch");
-		assert!(!path.contains(&next_minor_older.id), "superseded patch");
-		assert!(
-			!path.contains(&other_major.id),
-			"the path stays within the major"
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_newer_patch_of_the_current_minor_counts() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let patch = publish(&mut conn, 2, 62, 4).await;
+		let versions = Version::get_all(&mut conn).await.expect("versions");
+
+		assert_eq!(
+			upgrade_target(&reported("2.62.0"), &versions),
+			Some(patch.id),
+			"a patch upgrade is still an upgrade worth testing"
 		);
 	})
 	.await
@@ -111,7 +118,7 @@ async fn a_server_on_the_newest_version_has_no_candidates() {
 		publish(&mut conn, 2, 62, 0).await;
 		let versions = Version::get_all(&mut conn).await.expect("versions");
 
-		assert!(upgrade_path(&reported("2.62.0"), &versions).is_empty());
+		assert!(upgrade_target(&reported("2.62.0"), &versions).is_none());
 	})
 	.await
 }
@@ -124,8 +131,9 @@ async fn drafts_are_not_candidates_on_their_own() {
 		let all = Version::get_all_including_drafts(&mut conn)
 			.await
 			.expect("versions");
-		assert!(
-			!upgrade_path(&reported("2.62.0"), &all).contains(&draft.id),
+		assert_ne!(
+			upgrade_target(&reported("2.62.0"), &all),
+			Some(draft.id),
 			"an unpublished version has no artefacts to fetch, so nothing to test"
 		);
 	})

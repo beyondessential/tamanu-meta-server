@@ -215,8 +215,15 @@ Canopy knows the version each server reports running and the upgrade path it wou
 
 Canopy decides which versions are tested against which servers, rather than an operator naming each pair.
 
-A published version is a candidate for a server when that server could upgrade to it: the version is newer than the one the server reports running, and it lies on the upgrade path Canopy would serve that server.
-Where that path passes through several versions of one minor series, only the newest of the series is a candidate, because that is the version an upgrade applies.
+A server's candidate is the newest published version it could upgrade to: newer than the version it reports running, and on the upgrade path Canopy would serve it.
+
+One candidate, not one per version along the path.
+Migrations are applied to the restored snapshot in sequence, so a run targeting the newest version applies every migration between the snapshot's version and that one, and exercises the whole chain an upgrade would.
+
+Which minor a deployment moves to is a decision Canopy has no part in, and testing every minor ahead of a server would cost a full restore each to cover the ones it does not choose.
+It does not need to: coverage accumulates on its own.
+Snapshots arrive daily and releases far less often, so every version is tested against a deployment's data while it is the newest, and a deployment that later settles on an older minor already has a result from when that version was current.
+Where a chain does break, the failing migration named in the report identifies the step without a second run.
 
 Only a published version is a candidate, because a version's migrations reach a consumer as its published artefacts, and an unpublished version has none to fetch.
 Publication is what makes a version testable and what makes it reachable by a server, so the two arrive together.
@@ -280,6 +287,11 @@ Overdue applies only to intents carrying `check`.
 
 A failed migration test raises a migration-test check on the affected server, under the same gates, because that server is on the upgrade path to the version that failed.
 The check names the target version as well as the type and intent, so a failure against one candidate version does not mask a pass against another.
+
+The check is a warning rather than a failure, and does not escalate.
+Nothing is wrong with the live server: it is running the version it always was, serving patients, and the finding is about a version it has not taken yet.
+Treating it as a failure would open an incident against a healthy deployment and put a migration problem in front of whoever is on call for outages, when the people who need it are the ones deciding whether that version ships.
+The version's readiness is where the finding does its work.
 
 ## Out of scope
 
