@@ -218,10 +218,13 @@ Canopy decides which versions are tested against which servers, rather than an o
 A published version is a candidate for a server when that server could upgrade to it: the version is newer than the one the server reports running, and it lies on the upgrade path Canopy would serve that server.
 Where that path passes through several versions of one minor series, only the newest of the series is a candidate, because that is the version an upgrade applies.
 
-An operator may also nominate a version for a group or a server, including a version not yet published, so a release candidate is tested against the largest deployments' data before it ships.
-A nomination ends when the operator withdraws it.
+Only a published version is a candidate, because a version's migrations reach a consumer as its published artefacts, and an unpublished version has none to fetch.
+Publication is what makes a version testable and what makes it reachable by a server, so the two arrive together.
 
 A server with no successful backup of a restorable type has no candidates, because there is nothing to restore and migrate.
+
+Testing therefore sits between a version being available and a deployment being told to take it.
+That window is where the answer is still cheap: the fleet is not moving yet, and a version found to break a deployment's data can be held back before anyone schedules its upgrade.
 
 ### Dispatching a migration test
 
@@ -274,12 +277,8 @@ For an intent carrying `once`, the expectation is measured against the latest sn
 For an intent without `once`, it is measured against wall-clock time since the last healthy report.
 Overdue applies only to intents carrying `check`.
 
-A failed migration test against a published candidate version raises a migration-test check on the affected server, under the same gates, because that server is on the upgrade path to the version that failed.
+A failed migration test raises a migration-test check on the affected server, under the same gates, because that server is on the upgrade path to the version that failed.
 The check names the target version as well as the type and intent, so a failure against one candidate version does not mask a pass against another.
-
-A failed test against a nominated version that is not yet published raises no check on the server.
-The server lent its data; nothing running on it is at risk from a version that has not shipped.
-That failure lands on the version's readiness instead, for whoever owns the release.
 
 ## Out of scope
 

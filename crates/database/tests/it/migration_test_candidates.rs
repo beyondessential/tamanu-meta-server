@@ -126,7 +126,7 @@ async fn drafts_are_not_candidates_on_their_own() {
 			.expect("versions");
 		assert!(
 			!upgrade_path(&reported("2.62.0"), &all).contains(&draft.id),
-			"an unpublished version reaches a server only by nomination"
+			"an unpublished version has no artefacts to fetch, so nothing to test"
 		);
 	})
 	.await
