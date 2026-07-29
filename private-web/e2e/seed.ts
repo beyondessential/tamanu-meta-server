@@ -62,6 +62,13 @@ export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
 		"INSERT INTO source_policies (source, reachability) VALUES ('tamanu', 'quiet')",
 	);
+	// And the catalog row the server registers at startup for canopy's own
+	// reachability check: every server presents a passing reachability, and
+	// that presentation is gated on this row existing.
+	await sql.query(
+		"INSERT INTO check_policies (source, check_name, ceiling, reviewed_at, reviewed_by) \
+		 VALUES ('canopy', 'reachability', 'failed', NOW(), 'canopy')",
+	);
 }
 
 export interface SeededServerGroup {
