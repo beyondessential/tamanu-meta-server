@@ -63,6 +63,34 @@ impl VersionKnownIssue {
 			.map_err(AppError::from)
 	}
 
+	/// Whether an unresolved issue already blames `server_id` for this exact
+	/// version.
+	///
+	/// Snapshots arrive daily, so a version that fails against a deployment
+	/// fails again on tomorrow's data. One issue per version and server is the
+	/// finding; a second is noise.
+	pub async fn unresolved_for_server(
+		db: &mut AsyncPgConnection,
+		version: (i32, i32, i32),
+		server_id: Uuid,
+	) -> Result<bool> {
+		use crate::schema::version_known_issues::dsl;
+
+		let existing: Option<Uuid> = dsl::version_known_issues
+			.select(dsl::id)
+			.filter(dsl::min_major.eq(version.0))
+			.filter(dsl::min_minor.eq(version.1))
+			.filter(dsl::min_patch.eq(version.2))
+			.filter(dsl::server_id.eq(server_id))
+			.filter(dsl::resolved_at.is_null())
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)?;
+
+		Ok(existing.is_some())
+	}
+
 	/// All known issues whose minor branch matches the given (major, minor)
 	/// — ordered newest first. Used by the version-detail UI to show
 	/// every issue ever raised against this minor, including ones already

@@ -71,6 +71,7 @@ pub const PREFLIGHT_OBJECT_LOCK: &str = "preflight-object-lock";
 /// restorability check. Group-scoped, `Error`. Routed through the same
 /// group-level helper.
 pub const RESTORE_VERIFICATION: &str = "restore-verification";
+pub const MIGRATION_TEST: &str = "migration-test";
 
 // --- shipped documentation (seeded into the catalog on first filing) ---
 
@@ -217,3 +218,15 @@ The managed restore replica for this (server, type, intent) reported a failed or
 ## Solve
 
 Check the restore consumer's report detail: restore errors point at the snapshot or credentials, staleness at the consumer itself.";
+
+pub const MIGRATION_TEST_DOC: &str = "## Description
+
+A candidate version's schema migrations were applied to a restore replica of this server's data, and one of them failed. The server itself is unaffected: it is still running the version it was, and the finding is about a version it has not taken.
+
+## Results
+
+- **warn**: the migrations did not complete against this deployment's data. The version carries a known issue and is held back from rollout.
+
+## Solve
+
+Read the failing migration named in the report detail. The fix belongs to the migration or to the deployment's data, and the version stays unready until someone resolves the known issue against it.";

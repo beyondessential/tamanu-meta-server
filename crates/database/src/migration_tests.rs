@@ -6,8 +6,9 @@
 
 use commons_errors::Result;
 use commons_types::{
-	backup::RunOutcome,
+	backup::{BackupType, RestoreIntent, RunOutcome},
 	server::product::Product,
+	status::CheckResult,
 	version::{VersionStatus, VersionStr},
 };
 use diesel::prelude::*;
@@ -16,8 +17,15 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-	pg_duration::PgDuration, reported_detail::ReportedDetail, restore::BackupRestoreCheck,
-	restore::NewBackupRestoreCheck, servers::Server, versions::Version,
+	backup::refs,
+	issues::{CheckFiling, Scope, file_check},
+	pg_duration::PgDuration,
+	reported_detail::ReportedDetail,
+	restore::BackupRestoreCheck,
+	restore::NewBackupRestoreCheck,
+	servers::Server,
+	version_known_issues::VersionKnownIssue,
+	versions::Version,
 };
 
 /// A version a server could upgrade to, so one to test against that server's
@@ -134,6 +142,12 @@ impl MigrationTest {
 		report: NewBackupRestoreCheck,
 		test: NewMigrationTest,
 	) -> Result<i64> {
+		let server_id = report.server_id;
+		let r#type = report.r#type.clone();
+		let intent = report.intent.clone();
+		let target_version_id = test.target_version_id;
+		let failed_migration = test.failed_migration.clone();
+
 		let check_id = BackupRestoreCheck::record_report(db, report).await?;
 
 		diesel::insert_into(crate::schema::migration_tests::table)
@@ -166,6 +180,20 @@ impl MigrationTest {
 				.values(timings)
 				.execute(db)
 				.await?;
+		}
+
+		// A report with no server is recorded but has nobody to hold the finding
+		// against, matching how restore-health treats one.
+		if let Some(server_id) = server_id {
+			file_outcome(
+				db,
+				server_id,
+				&r#type,
+				&intent,
+				target_version_id,
+				failed_migration.as_deref(),
+			)
+			.await?;
 		}
 
 		Ok(check_id)
@@ -245,4 +273,87 @@ pub async fn has_verdict(
 		.optional()?;
 
 	Ok(existing.is_some())
+}
+
+/// Raise or recover the server's migration-test check, and hold the target
+/// version back when its migrations failed.
+///
+/// A warning that does not escalate. The server is running the version it
+/// always was and is serving patients; the finding is about a version it has
+/// not taken, so it belongs to whoever decides whether that version ships
+/// rather than to whoever is on call for outages.
+// spec: RST#alerting
+async fn file_outcome(
+	db: &mut AsyncPgConnection,
+	server_id: Uuid,
+	r#type: &BackupType,
+	intent: &RestoreIntent,
+	target_version_id: Uuid,
+	failed_migration: Option<&str>,
+) -> Result<()> {
+	let version = Version::get_by_id(db, target_version_id).await?;
+	let semver = version.as_semver();
+	// Named per (type, intent) like restore-verification, so the catalog holds
+	// one policy rather than one per release. The version rides in the detail.
+	let r#ref = format!("{}:{}:{}", refs::MIGRATION_TEST, r#type, intent);
+
+	let Some(migration) = failed_migration else {
+		file_check(
+			db,
+			CheckFiling {
+				source: crate::statuses::CANOPY_SOURCE,
+				scope: Scope::Server(server_id),
+				device_id: None,
+				check: &r#ref,
+				observed: CheckResult::Passed,
+				title: None,
+				message: &format!("Migrations for {semver} applied against server {server_id}"),
+				detail: Some(serde_json::json!({ "target_version": semver.to_string() })),
+				default_ceiling: CheckResult::Warning,
+				default_escalates: false,
+				documentation: Some(refs::MIGRATION_TEST_DOC),
+			},
+		)
+		.await?;
+		return Ok(());
+	};
+
+	file_check(
+		db,
+		CheckFiling {
+			source: crate::statuses::CANOPY_SOURCE,
+			scope: Scope::Server(server_id),
+			device_id: None,
+			check: &r#ref,
+			observed: CheckResult::Warning,
+			title: Some("migration test failed"),
+			message: &format!(
+				"Migration {migration} failed applying {semver} to a replica of server {server_id}"
+			),
+			detail: Some(serde_json::json!({
+				"target_version": semver.to_string(),
+				"failed_migration": migration,
+				"type": r#type.to_string(),
+				"intent": intent.to_string(),
+			})),
+			default_ceiling: CheckResult::Warning,
+			default_escalates: false,
+			documentation: Some(refs::MIGRATION_TEST_DOC),
+		},
+	)
+	.await?;
+
+	let affected = (version.major, version.minor, version.patch);
+	if !VersionKnownIssue::unresolved_for_server(db, affected, server_id).await? {
+		VersionKnownIssue::add(
+			db,
+			affected,
+			refs::MIGRATION_TEST,
+			&format!("Migration {migration} failed against server {server_id}'s data."),
+			Some(server_id),
+		)
+		.await?;
+	}
+
+	Ok(())
 }

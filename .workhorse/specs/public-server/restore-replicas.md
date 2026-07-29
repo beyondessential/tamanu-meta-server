@@ -259,6 +259,10 @@ Beyond the fields every report carries, a migration-testing report carries:
 - the **elapsed time of each migration** that ran;
 - the **size of the data**, both before the migrations ran and after.
 
+The report's outcome and replica health describe the restore, and the named failing migration describes the migrations.
+A restore that succeeded into a healthy replica whose migrations then failed reports a healthy restore and names the migration that failed.
+Keeping the two apart is what lets restore health and version readiness stay separate signals: the backup restored, so the backup is fine, and the finding belongs to the version.
+
 Per-migration timings are a primary result rather than diagnostic detail.
 A version whose migrations all apply but whose slowest migration takes hours against a large deployment is a finding, and a report carries enough detail to name the migration to attend to.
 
@@ -293,7 +297,8 @@ For an intent without `once`, it is measured against wall-clock time since the l
 Overdue applies only to intents carrying `check`.
 
 A failed migration test raises a migration-test check on the affected server, under the same gates, because that server is on the upgrade path to the version that failed.
-The check names the target version as well as the type and intent, so a failure against one candidate version does not mask a pass against another.
+The check is named for the type and intent, as restore-verification is, and carries the target version in its detail rather than its name.
+A server has one candidate at a time, so there is no second version whose result the first could mask, and a name per version would spawn a catalog policy per release.
 
 The check is a warning rather than a failure, and does not escalate.
 Nothing is wrong with the live server: it is running the version it always was, serving patients, and the finding is about a version it has not taken yet.

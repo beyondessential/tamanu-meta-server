@@ -650,8 +650,9 @@ async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
 					r#type: commons_types::backup::BackupType::TamanuPostgres,
 					intent: commons_types::backup::RestoreIntent::from("migrate"),
 					snapshot_id: Some("snap-1".into()),
-					outcome: commons_types::backup::RunOutcome::Failure,
-					error: Some("migration failed".into()),
+					// The restore itself was fine; only the migration failed.
+					outcome: commons_types::backup::RunOutcome::Success,
+					error: None,
 					replica_healthy: true,
 					postgres_version: Some("18".into()),
 					observed_at: jiff::Timestamp::now(),
