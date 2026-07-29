@@ -119,6 +119,9 @@ where
 			rate_limiter: Default::default(),
 			sts: None,
 			kube: None,
+			// From the environment, so a test can configure zones before building
+			// the server the way the real edge does.
+			dns_zones: commons_types::dns::ManagedZone::list_from_env().unwrap_or_default(),
 		};
 		let public_router = router(
 			axum::Router::from(public_server::routes().with_state(public_state.clone()))
@@ -246,6 +249,9 @@ where
 			rate_limiter: Default::default(),
 			sts: None,
 			kube: None,
+			// From the environment, so a test can configure zones before building
+			// the server the way the real edge does.
+			dns_zones: commons_types::dns::ManagedZone::list_from_env().unwrap_or_default(),
 		};
 		let public_router = router(
 			axum::Router::from(public_server::routes().with_state(public_state.clone()))

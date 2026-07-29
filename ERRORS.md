@@ -147,6 +147,17 @@ content says when the pause was set and why.
 Revoking a certificate pauses its server automatically, so this is
 the refusal an agent meets while an operator is investigating.
 
+## Name not entitled
+
+Issued when a server asks Canopy to act on a name that is not
+within any domain its own group controls.
+
+Reported identically whether the name is unclaimed or controlled by
+a different group, so the endpoint cannot be used to discover other
+deployments' names. Distinct from a withheld grant so a client can
+tell "this name is not yours" from "you may not manage names at
+all".
+
 ## Auth: tailnet identity missing
 
 Issued on the private-server's `/public/...` mount when the

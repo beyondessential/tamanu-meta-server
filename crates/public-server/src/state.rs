@@ -42,6 +42,25 @@ pub struct AppState {
 	/// Kube client for reading repo-password Secrets in canopy's namespace.
 	/// `None` in tests / non-cluster runs ⇒ `GET /backup-target` returns 502.
 	pub kube: Option<BackupSecrets>,
+	/// The DNS zones Canopy may write records in, from its deployment
+	/// configuration. Empty when none are configured, in which case no name can
+	/// be acted on — read once at startup, so a change takes effect on restart.
+	// spec: CRT
+	pub dns_zones: Vec<commons_types::dns::ManagedZone>,
+}
+
+/// Read the managed DNS zones from the environment, logging (not failing) a
+/// malformed list: the edge should still come up, and the name endpoints report
+/// the misconfiguration as "no zone covers this name".
+// spec: CRT
+fn dns_zones_from_env() -> Vec<commons_types::dns::ManagedZone> {
+	match commons_types::dns::ManagedZone::list_from_env() {
+		Ok(zones) => zones,
+		Err(e) => {
+			tracing::warn!("ignoring malformed {}: {e}", commons_types::dns::ZONES_ENV);
+			Vec::new()
+		}
+	}
 }
 
 impl AppState {
@@ -117,6 +136,7 @@ impl AppState {
 			rate_limiter: crate::ratelimit::RateLimiter::default(),
 			sts: None,
 			kube: None,
+			dns_zones: dns_zones_from_env(),
 		})
 	}
 
@@ -149,6 +169,14 @@ impl FromRef<AppState> for crate::ratelimit::RateLimiter {
 impl FromRef<AppState> for Db {
 	fn from_ref(state: &AppState) -> Self {
 		state.db.clone()
+	}
+}
+
+/// So a handler can take just the zone list, the way it takes just the pool.
+// spec: CRT
+impl FromRef<AppState> for Vec<commons_types::dns::ManagedZone> {
+	fn from_ref(state: &AppState) -> Self {
+		state.dns_zones.clone()
 	}
 }
 

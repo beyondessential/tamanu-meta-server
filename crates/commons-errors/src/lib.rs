@@ -149,6 +149,14 @@ pub enum AppError {
 	#[error("name management is paused for this server: {0}")]
 	NameManagementPaused(String),
 
+	/// The name asked about is not within any domain the caller's group controls.
+	/// Reported the same whether the name is unclaimed or held by another group,
+	/// so the endpoint is not a directory of other deployments' names. Its own
+	/// problem type so an agent can tell it from a withheld grant. Maps to 403.
+	// spec: CRT#identity-and-authorisation
+	#[error("not entitled to this name: {0}")]
+	NameNotEntitled(String),
+
 	/// Deliberately opaque failure for the public enrollment endpoints. Every
 	/// pre-completion reason (unknown/archived server, invalid/expired/consumed
 	/// token, bad/expired/used challenge nonce, bad signature) collapses to this
@@ -237,6 +245,7 @@ impl AppError {
 			Self::Conflict(_) => StatusCode::CONFLICT,
 			Self::CertificateKeyCompromised(_) => StatusCode::CONFLICT,
 			Self::NameManagementPaused(_) => StatusCode::CONFLICT,
+			Self::NameNotEntitled(_) => StatusCode::FORBIDDEN,
 			Self::EnrollmentFailed => StatusCode::FORBIDDEN,
 			Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
 			Self::Upstream(_) => StatusCode::BAD_GATEWAY,
@@ -293,6 +302,7 @@ impl AppError {
 						Self::Conflict(_) => "conflict",
 						Self::CertificateKeyCompromised(_) => "certificate-key-compromised",
 						Self::NameManagementPaused(_) => "name-management-paused",
+						Self::NameNotEntitled(_) => "name-not-entitled",
 						Self::EnrollmentFailed => "enrollment-failed",
 						Self::RateLimited => "rate-limited",
 						Self::Upstream(_) => "upstream",
