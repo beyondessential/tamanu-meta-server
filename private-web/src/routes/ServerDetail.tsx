@@ -82,6 +82,7 @@ import {
 	compareServersByRankThenKind,
 	groupServersByRank,
 	healthcheckPath,
+	silenceRef,
 	type CheckResult,
 	type ConsolidatedCheck,
 	type ConsolidatedChecks,
@@ -982,8 +983,9 @@ function ChecksTableBody({
 				{visible.map((entry) => {
 					// Match the silence refs to this entry's own source — a
 					// silence on another source's same-named check is a
-					// different check.
-					const refName = `health/${entry.check}`;
+					// different check, and canopy's own checks are silenced
+					// at a bare ref rather than under `health/`.
+					const refName = silenceRef(entry.source, entry.check);
 					const serverSilence =
 						serverSilences.find(
 							(s) => s.source === entry.source && s.ref === refName,
@@ -1270,7 +1272,7 @@ function SilenceCheckButton({
 		silenceGroup.error ??
 		unsilenceServer.error ??
 		unsilenceGroup.error;
-	const refName = `health/${check}`;
+	const refName = silenceRef(source, check);
 	const silenced = !!serverSilence || !!groupSilence;
 	const handle = async (fn: () => Promise<unknown>) => {
 		try {
