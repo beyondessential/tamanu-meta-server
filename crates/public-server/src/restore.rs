@@ -27,12 +27,10 @@ use database::{
 	backups::{BackupRun, NewBackupCredentialIssuance, ServerGroupBackupConfig},
 	migration_tests::{self, MigrationTest, NewMigrationTest},
 	pg_duration::PgDuration,
-	reported_detail::ReportedDetail,
 	restore::{
 		BackupRestoreCheck, NewBackupRestoreCheck, RestoreConsumerCapability, RestoreReplica,
 	},
 	servers::Server,
-	versions::Version,
 };
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -159,40 +157,6 @@ pub struct WorklistEntry {
 	pub target_version_id: Option<Uuid>,
 }
 
-/// The version a `migrate` entry for `server` should target, with its semver
-/// for the consumer to resolve artefacts by.
-///
-/// `None` when the server runs another product, has never reported a version,
-/// or is already on the newest published one.
-// spec: RST#candidate-versions
-async fn migration_target(
-	conn: &mut diesel_async::AsyncPgConnection,
-	server: &Server,
-) -> Result<Option<(Uuid, commons_types::version::VersionStr)>> {
-	if server.product != commons_types::server::product::Product::Tamanu {
-		return Ok(None);
-	}
-
-	let Some(reported) = ReportedDetail::last_version(conn, server.id).await? else {
-		return Ok(None);
-	};
-
-	let versions = Version::get_all(conn).await?;
-	let Some(version_id) = migration_tests::upgrade_target(&reported, &versions) else {
-		return Ok(None);
-	};
-
-	let target = versions
-		.iter()
-		.find(|version| version.id == version_id)
-		.expect("upgrade_target returns one of the versions it was given");
-
-	Ok(Some((
-		version_id,
-		commons_types::version::VersionStr(target.as_semver()),
-	)))
-}
-
 /// Fetch the full set of replicas this device should maintain.
 ///
 /// Returns the device's complete desired state, computed fresh on every call:
@@ -308,8 +272,8 @@ async fn worklist(
 			// A `migrate` intent needs a version to migrate to, so a server with
 			// no candidate contributes nothing rather than an entry naming none.
 			let target = if migrates {
-				match migration_target(&mut conn, &server).await? {
-					Some(target) => Some(target),
+				match migration_tests::candidate_for(&mut conn, &server).await? {
+					Some(version) => Some((version.id, version.as_semver())),
 					None => continue,
 				}
 			} else {

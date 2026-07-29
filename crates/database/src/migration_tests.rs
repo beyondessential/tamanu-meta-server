@@ -59,28 +59,42 @@ pub fn upgrade_target(reported: &VersionStr, versions: &[Version]) -> Option<Uui
 		.map(|version| version.id)
 }
 
-/// Every candidate across the fleet, at most one per server.
+/// The version `server` should be tested against, if any.
 ///
 /// Tamanu servers only: the migrations under test are Tamanu's, so no other
-/// product's server has an upgrade path through them.
+/// product's server has an upgrade path through them. `None` also when the
+/// server has never reported a version, or is already on the newest published
+/// one.
+// spec: RST#candidate-versions
+pub async fn candidate_for(db: &mut AsyncPgConnection, server: &Server) -> Result<Option<Version>> {
+	if server.product != Product::Tamanu {
+		return Ok(None);
+	}
+
+	let Some(reported) = ReportedDetail::last_version(db, server.id).await? else {
+		return Ok(None);
+	};
+
+	let versions = Version::get_all(db).await?;
+	let Some(version_id) = upgrade_target(&reported, &versions) else {
+		return Ok(None);
+	};
+
+	Ok(versions
+		.into_iter()
+		.find(|version| version.id == version_id))
+}
+
+/// Every candidate across the fleet, at most one per server.
 // spec: RST#candidate-versions
 pub async fn candidates(db: &mut AsyncPgConnection) -> Result<Vec<Candidate>> {
-	let versions = Version::get_all(db).await?;
 	let mut candidates = Vec::new();
 
 	for server in Server::get_all(db, 0, None).await? {
-		if server.product != Product::Tamanu {
-			continue;
-		}
-
-		let Some(reported) = ReportedDetail::last_version(db, server.id).await? else {
-			continue;
-		};
-
-		if let Some(version_id) = upgrade_target(&reported, &versions) {
+		if let Some(version) = candidate_for(db, &server).await? {
 			candidates.push(Candidate {
 				server_id: server.id,
-				version_id,
+				version_id: version.id,
 			});
 		}
 	}

@@ -391,3 +391,117 @@ async fn a_later_pass_recovers_the_check() {
 	})
 	.await
 }
+
+/// A `migrate` declaration plus the capability that advertises it, so the
+/// overdue sweep has something to walk.
+async fn declare_migrate(
+	conn: &mut AsyncPgConnection,
+	consumer: Uuid,
+	group: Uuid,
+	overdue_seconds: i64,
+) {
+	sql_query(
+		"INSERT INTO restore_consumer_capabilities (consumer_device_id, intent, description, semantics, params)
+		 VALUES ($1, 'migrate', '', '[\"check\",\"once\",\"migrate\"]'::jsonb, '[]'::jsonb)",
+	)
+	.bind::<sql_types::Uuid, _>(consumer)
+	.execute(conn)
+	.await
+	.expect("register capability");
+
+	sql_query(
+		"INSERT INTO restore_replicas
+		 (consumer_device_id, group_id, type, intent, name, overdue_after, params)
+		 VALUES ($1, $2, 'tamanu-postgres', 'migrate', 'kamaka-migrate', make_interval(secs => $3), '{}'::jsonb)",
+	)
+	.bind::<sql_types::Uuid, _>(consumer)
+	.bind::<sql_types::Uuid, _>(group)
+	.bind::<sql_types::Double, _>(overdue_seconds as f64)
+	.execute(conn)
+	.await
+	.expect("declare replica");
+}
+
+/// A successful backup run, which is the snapshot a migration test would use.
+async fn record_snapshot(
+	conn: &mut AsyncPgConnection,
+	consumer: Uuid,
+	group: Uuid,
+	server: Uuid,
+	snapshot: &str,
+	age_seconds: i64,
+) {
+	sql_query(
+		"INSERT INTO backup_runs
+		 (id, device_id, group_id, server_id, type, purpose, outcome, snapshot_id, reported_at)
+		 VALUES (gen_random_uuid(), $1, $2, $3, 'tamanu-postgres', 'backup', 'success', $4,
+		         NOW() - make_interval(secs => $5))",
+	)
+	.bind::<sql_types::Uuid, _>(consumer)
+	.bind::<sql_types::Uuid, _>(group)
+	.bind::<sql_types::Uuid, _>(server)
+	.bind::<sql_types::Text, _>(snapshot)
+	.bind::<sql_types::Double, _>(age_seconds as f64)
+	.execute(conn)
+	.await
+	.expect("record backup run");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_untried_candidate_goes_overdue_and_a_tested_one_does_not() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn).await;
+		let server = insert_server(&mut conn, group).await;
+		let target = insert_version(&mut conn, 63).await;
+		let running: commons_types::version::VersionStr = "2.62.0".parse().expect("parse");
+		database::reported_detail::ReportedDetail::record(
+			&mut conn,
+			server,
+			"test",
+			&serde_json::json!({}),
+			Some(&running),
+		)
+		.await
+		.expect("report version");
+		declare_migrate(&mut conn, consumer, group, 3600).await;
+		record_snapshot(&mut conn, consumer, group, server, "snap-old", 7200).await;
+
+		let filed = database::restore::sweep_overdue(&mut conn)
+			.await
+			.expect("sweep");
+		assert_eq!(filed, 1, "the candidate has gone untried past the bound");
+		let check = migration_check(&mut conn, server)
+			.await
+			.expect("a check was filed");
+		assert_eq!(check.observed.as_deref(), Some("warning"));
+		assert!(!check.escalates);
+
+		// Once it has a verdict for that snapshot, it is no longer overdue.
+		let mut passing = report(consumer, group, server, RunOutcome::Success);
+		passing.snapshot_id = Some("snap-old".into());
+		MigrationTest::record(
+			&mut conn,
+			passing,
+			NewMigrationTest {
+				target_version_id: target.id,
+				total_elapsed: secs(10),
+				failed_migration: None,
+				data_bytes_before: 1,
+				data_bytes_after: 1,
+				timings: vec![],
+			},
+		)
+		.await
+		.expect("record pass");
+
+		assert_eq!(
+			database::restore::sweep_overdue(&mut conn)
+				.await
+				.expect("sweep"),
+			0,
+			"a tried pair is not overdue"
+		);
+	})
+	.await
+}
