@@ -191,6 +191,33 @@ impl ServerName {
 			.collect())
 	}
 
+	/// Registrations whose last publish attempt failed and which still have not
+	/// caught up — the per-server alert's work list.
+	///
+	/// A row that failed and has since published is not here: `record_published`
+	/// clears the error, so the query needs no notion of how old a failure is.
+	/// Paused servers are excluded for the same reason they are excluded from the
+	/// reconcile — Canopy was told to stop changing their records, so nothing being
+	/// changed is the intended outcome.
+	// spec: CRT#addresses
+	pub async fn failing_to_publish(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		use crate::schema::{server_names, servers};
+		let rows: Vec<Self> = server_names::table
+			.inner_join(servers::table)
+			.filter(servers::deleted_at.is_null())
+			.filter(servers::name_management_paused_at.is_null())
+			.filter(server_names::last_error.is_not_null())
+			.select(Self::as_select())
+			.order(server_names::name.asc())
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(rows
+			.into_iter()
+			.filter(|row| !row.is_reconciled())
+			.collect())
+	}
+
 	/// Record that the published records now match `addresses`.
 	pub async fn record_published(
 		db: &mut AsyncPgConnection,

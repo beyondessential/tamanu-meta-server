@@ -7,7 +7,7 @@
 //! that a challenge record is taken back down, and that a name Canopy has no
 //! business acting on is left alone.
 
-use commons_servers::acme::Acme;
+use commons_servers::acme::{Acme, Fault};
 use commons_servers::dns_provider::{DnsProvider, RecordChange, RecordKind};
 use commons_tests::db::TestDb;
 use commons_types::dns::ManagedZone;
@@ -291,10 +291,11 @@ async fn an_order_becomes_a_certificate_the_server_can_collect() {
 				.expect("request");
 		assert_eq!(order.order_state(), OrderState::Pending);
 
-		let obtained = work_orders(&pool, &dns, &acme, &zones())
+		let round = work_orders(&pool, &dns, &acme, &zones())
 			.await
 			.expect("work orders");
-		assert_eq!(obtained, 1);
+		assert_eq!(round.issued, 1);
+		assert_eq!(round.fault, None, "nothing to report against Canopy");
 		assert_eq!(acme.signed(), vec!["a.fiji.tamanu.app"]);
 
 		let after = ServerCertificate::get(&mut conn, order.id)
@@ -357,11 +358,14 @@ async fn a_failing_authority_backs_the_order_off_rather_than_giving_up() {
 				.await
 				.expect("request");
 
+		let round = work_orders(&pool, &dns, &acme, &zones())
+			.await
+			.expect("work orders");
+		assert_eq!(round.issued, 0);
 		assert_eq!(
-			work_orders(&pool, &dns, &acme, &zones())
-				.await
-				.expect("work orders"),
-			0
+			round.fault,
+			Some(Fault::Order),
+			"an authority that is up but unhappy is this order's problem, not the fleet's"
 		);
 
 		let after = ServerCertificate::get(&mut conn, order.id)
@@ -402,7 +406,8 @@ async fn a_failing_authority_backs_the_order_off_rather_than_giving_up() {
 		assert_eq!(
 			work_orders(&pool, &dns, &acme, &zones())
 				.await
-				.expect("work orders"),
+				.expect("work orders")
+				.issued,
 			1
 		);
 	})
@@ -689,4 +694,176 @@ async fn a_name_no_configured_zone_covers_keeps_its_order_waiting() {
 		assert!(acme.signed().is_empty());
 	})
 	.await;
+}
+
+// ── Whose fault it is ───────────────────────────────────────────────────────
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unreachable_authority_is_reported_as_canopys_own_problem() {
+	TestDb::run(async |mut conn, url| {
+		let pool = database::init_to(&url);
+		let acme = Acme::fake();
+		acme.fail_with_fault(Fault::Unreachable, "connection refused");
+		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
+		let order =
+			ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+				.await
+				.expect("request");
+
+		let round = work_orders(&pool, &DnsProvider::fake(), &acme, &zones())
+			.await
+			.expect("work orders");
+		assert_eq!(round.fault, Some(Fault::Unreachable));
+		assert!(round.fault.is_some_and(Fault::is_canopys));
+
+		// Still recorded against the order too: an operator looking at the server
+		// wants to know why its certificate has not arrived.
+		let after = ServerCertificate::get(&mut conn, order.id)
+			.await
+			.expect("read");
+		assert!(
+			after
+				.last_error
+				.as_deref()
+				.is_some_and(|e| e.contains("connection refused")),
+			"got {:?}",
+			after.last_error
+		);
+		assert_eq!(after.order_state(), OrderState::Pending, "not given up on");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_throttled_round_abandons_the_rest_rather_than_spending_the_allowance() {
+	TestDb::run(async |mut conn, url| {
+		let pool = database::init_to(&url);
+		let acme = Acme::fake();
+		acme.fail_with_fault(Fault::Throttled, "too many certificates already issued");
+		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
+		// More orders than the concurrency limit, so there is a queue to abandon.
+		for index in 0..12 {
+			let key =
+				format!("{index:02}00000000000000000000000000000000000000000000000000000000000000");
+			ServerCertificate::request(
+				&mut conn,
+				server,
+				&format!("n{index}.fiji.tamanu.app"),
+				&key[..64],
+				b"csr",
+			)
+			.await
+			.expect("request");
+		}
+
+		let round = work_orders(&pool, &DnsProvider::fake(), &acme, &zones())
+			.await
+			.expect("work orders");
+		assert_eq!(round.fault, Some(Fault::Throttled));
+
+		// The queue behind the first refusal is dropped: those limits are shared
+		// across every group in the zone, so asking harder is the one thing not to
+		// do. Some orders are already in flight when the first refusal lands, so
+		// the assertion is that most were spared rather than exactly one attempted.
+		let attempted = count_attempted(&mut conn, server).await;
+		assert!(
+			attempted < 12,
+			"expected the queue to be abandoned, but all {attempted} were attempted"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_round_that_goes_through_says_nothing_is_wrong_with_the_authority() {
+	TestDb::run(async |mut conn, url| {
+		let pool = database::init_to(&url);
+		let acme = Acme::fake();
+		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
+		ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+			.await
+			.expect("request");
+
+		let round = work_orders(&pool, &DnsProvider::fake(), &acme, &zones())
+			.await
+			.expect("work orders");
+		assert_eq!(round.fault, None);
+
+		// Which is what the self-alerting reads to recover all three conditions.
+		database::self_alerts::sweep_certificate_authority(&mut conn, round.fault, None)
+			.await
+			.expect("authority sweep");
+		for r#ref in [
+			database::self_alerts::CA_UNREACHABLE_REF,
+			database::self_alerts::CA_ACCOUNT_REF,
+			database::self_alerts::CA_THROTTLED_REF,
+		] {
+			let current = database::self_alerts::current(&mut conn, r#ref)
+				.await
+				.expect("read");
+			assert!(
+				current.is_none_or(|issue| !issue.active),
+				"{ref} should not be standing"
+			);
+		}
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_three_authority_conditions_are_reported_apart() {
+	TestDb::run(async |mut conn, _url| {
+		use database::self_alerts::{
+			CA_ACCOUNT_REF, CA_THROTTLED_REF, CA_UNREACHABLE_REF, current,
+			sweep_certificate_authority,
+		};
+
+		for (fault, expected) in [
+			(Fault::Unreachable, CA_UNREACHABLE_REF),
+			(Fault::Account, CA_ACCOUNT_REF),
+			(Fault::Throttled, CA_THROTTLED_REF),
+		] {
+			sweep_certificate_authority(&mut conn, Some(fault), Some("the authority said no"))
+				.await
+				.expect("sweep");
+
+			for r#ref in [CA_UNREACHABLE_REF, CA_ACCOUNT_REF, CA_THROTTLED_REF] {
+				let standing = current(&mut conn, r#ref)
+					.await
+					.expect("read")
+					.is_some_and(|issue| issue.active);
+				assert_eq!(
+					standing,
+					r#ref == expected,
+					"{fault:?} should raise {expected} and nothing else, but {ref} is \
+					 standing={standing}"
+				);
+			}
+		}
+
+		// And an order that failed on its own merits says the authority is fine.
+		sweep_certificate_authority(&mut conn, Some(Fault::Order), None)
+			.await
+			.expect("sweep");
+		for r#ref in [CA_UNREACHABLE_REF, CA_ACCOUNT_REF, CA_THROTTLED_REF] {
+			assert!(
+				current(&mut conn, r#ref)
+					.await
+					.expect("read")
+					.is_none_or(|issue| !issue.active),
+				"{ref} should have recovered"
+			);
+		}
+	})
+	.await;
+}
+
+/// How many of a server's orders have been attempted at least once.
+async fn count_attempted(conn: &mut AsyncPgConnection, server_id: Uuid) -> usize {
+	ServerCertificate::for_server(conn, server_id)
+		.await
+		.expect("read certificates")
+		.into_iter()
+		.filter(|cert| cert.attempts > 0)
+		.count()
 }

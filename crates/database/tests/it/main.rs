@@ -6,6 +6,7 @@
 mod backfill_registered_at_migration;
 mod backup_detection;
 mod backups;
+mod certificate_alerts;
 mod check_liveness;
 mod check_policies;
 mod check_policy_rules;

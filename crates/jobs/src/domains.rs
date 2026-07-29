@@ -26,7 +26,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use commons_errors::{AppError, Result};
-use commons_servers::acme::Acme;
+use commons_servers::acme::{Acme, Failure, Fault};
 use commons_servers::dns_provider::{DnsProvider, RecordKind, RecordSet};
 use commons_types::dns::{ManagedZone, is_within, match_zone};
 use database::server_certificates::ServerCertificate;
@@ -138,35 +138,87 @@ pub async fn work_orders(
 	dns: &DnsProvider,
 	acme: &Acme,
 	zones: &[ManagedZone],
-) -> Result<usize> {
+) -> Result<Round> {
 	let claimed = {
 		let mut db = pool.get().await?;
 		ServerCertificate::claim_due(&mut db, ORDER_BATCH).await?
 	};
 	if claimed.is_empty() {
-		return Ok(0);
+		return Ok(Round::default());
 	}
 
-	let worked = futures::stream::iter(claimed)
-		.map(|cert| async move {
-			// Its own connection, so one order waiting on the authority does not
-			// hold a connection the others need.
-			let mut db = match pool.get().await {
-				Ok(db) => db,
-				Err(err) => {
-					error!(name = %cert.name, "no database connection to work the order: {err}");
-					return false;
+	// Set as soon as the authority says it is being asked too fast. Every order
+	// still queued behind it is abandoned for this round rather than worked:
+	// those limits are shared across every group in the zone, so spending what is
+	// left retrying a name that has just failed is the one thing not to do.
+	// spec: CRT#when-issuance-fails
+	let throttled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+	let outcomes: Vec<Option<Fault>> = futures::stream::iter(claimed)
+		.map(|cert| {
+			let throttled = throttled.clone();
+			async move {
+				if throttled.load(std::sync::atomic::Ordering::Relaxed) {
+					debug!(name = %cert.name, "skipped: the authority is throttling us");
+					return Skipped;
 				}
-			};
-			work_order(&mut db, dns, acme, zones, cert).await
+				// Its own connection, so one order waiting on the authority does not
+				// hold a connection the others need.
+				let mut db = match pool.get().await {
+					Ok(db) => db,
+					Err(err) => {
+						error!(name = %cert.name, "no database connection to work the order: {err}");
+						return Skipped;
+					}
+				};
+				let outcome = work_order(&mut db, dns, acme, zones, cert).await;
+				if outcome == Faulted(Some(Fault::Throttled)) {
+					throttled.store(true, std::sync::atomic::Ordering::Relaxed);
+				}
+				outcome
+			}
 		})
 		.buffer_unordered(ORDER_CONCURRENCY)
-		.filter(|worked| std::future::ready(*worked))
-		.count()
+		.filter_map(|outcome| {
+			std::future::ready(match outcome {
+				Issued => Some(None),
+				Faulted(fault) => Some(fault),
+				Skipped => None,
+			})
+		})
+		.collect()
 		.await;
 
-	Ok(worked)
+	Ok(Round {
+		issued: outcomes.iter().filter(|fault| fault.is_none()).count(),
+		// The worst thing the round hit, which is what the fleet-wide alerting
+		// reports. A round with one throttled order and ten ordinary refusals is
+		// a throttled round.
+		fault: outcomes.iter().flatten().copied().max(),
+	})
 }
+
+/// What one round of order work saw.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Round {
+	/// Certificates obtained.
+	pub issued: usize,
+	/// The most serious fault the round hit, if any. `None` means every order
+	/// either succeeded or was not worked, which is what recovers the fleet-wide
+	/// authority alerts.
+	pub fault: Option<Fault>,
+}
+
+/// How one order ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OrderOutcome {
+	Issued,
+	/// Failed or stopped, with whose fault it was where the authority was involved.
+	Faulted(Option<Fault>),
+	/// Not attempted, so it says nothing about the authority either way.
+	Skipped,
+}
+use OrderOutcome::{Faulted, Issued, Skipped};
 
 /// Work one order to a conclusion, recording whichever conclusion it reached.
 /// Returns whether a certificate came out of it.
@@ -177,21 +229,25 @@ async fn work_order(
 	acme: &Acme,
 	zones: &[ManagedZone],
 	cert: ServerCertificate,
-) -> bool {
+) -> OrderOutcome {
 	match attempt_order(db, dns, acme, zones, &cert).await {
-		Ok(Outcome::Issued) => true,
-		Ok(Outcome::Stopped) => false,
-		Err(err) => {
-			let message = err.to_string();
+		Ok(Outcome::Issued) => Issued,
+		Ok(Outcome::Stopped) => Skipped,
+		Err(failure) => {
 			warn!(
 				name = %cert.name,
 				renewing = cert.renewing,
-				"certificate order failed, will retry: {message}"
+				fault = ?failure.fault,
+				"certificate order failed, will retry: {failure}"
 			);
-			if let Err(err) = ServerCertificate::record_failure(db, cert.id, &message).await {
+			// Recorded against the order whoever's fault it is: an operator looking
+			// at the server wants to know why its certificate has not arrived, even
+			// when the answer is that Canopy cannot issue at all.
+			if let Err(err) = ServerCertificate::record_failure(db, cert.id, &failure.message).await
+			{
 				error!(name = %cert.name, "could not record the failure: {err}");
 			}
-			false
+			Faulted(Some(failure.fault))
 		}
 	}
 }
@@ -208,7 +264,7 @@ async fn attempt_order(
 	acme: &Acme,
 	zones: &[ManagedZone],
 	cert: &ServerCertificate,
-) -> Result<Outcome> {
+) -> std::result::Result<Outcome, Failure> {
 	// Still wanted? A grant revoked, a domain released, or a group changed all
 	// mean Canopy stops here — an order is worked on a server's behalf, and the
 	// authorisation for it is asked afresh rather than remembered from when the
@@ -246,10 +302,10 @@ async fn attempt_order(
 	// order keeps its place and recovers when the configuration does.
 	// spec: DOM#when-the-zone-configuration-changes
 	let zone = match_zone(&cert.name, zones).ok_or_else(|| {
-		AppError::Conflict(format!(
+		Failure::from(AppError::Conflict(format!(
 			"no configured DNS zone covers {}, so Canopy cannot prove control of it",
 			cert.name
-		))
+		)))
 	})?;
 
 	// A profile the authority has withdrawn is reported as unavailable rather
@@ -259,7 +315,7 @@ async fn attempt_order(
 	if let Some(profile) = profile {
 		let offered = acme.profiles();
 		if !offered.iter().any(|name| name == profile) {
-			return Err(AppError::Conflict(format!(
+			return Err(Failure::from(AppError::Conflict(format!(
 				"the authority no longer offers the {profile:?} profile this server is set to \
 				 (it offers {})",
 				if offered.is_empty() {
@@ -267,7 +323,7 @@ async fn attempt_order(
 				} else {
 					offered.join(", ")
 				}
-			)));
+			))));
 		}
 	}
 

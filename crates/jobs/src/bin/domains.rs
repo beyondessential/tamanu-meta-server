@@ -3,12 +3,14 @@
 //! authority without a pod.
 // spec: CRT
 
+use std::time::Duration;
+
 use clap::Parser;
-use commons_servers::acme::Acme;
+use commons_servers::acme::{Acme, Fault};
 use commons_servers::dns_provider::DnsProvider;
 use commons_types::dns::ManagedZone;
 use jobs::domains::{
-	RENEWAL_INTERVAL, WORK_INTERVAL, reconcile_addresses, start_renewals, work_orders,
+	RENEWAL_INTERVAL, Round, WORK_INTERVAL, reconcile_addresses, start_renewals, work_orders,
 };
 use lloggs::{LoggingArgs, PreArgs};
 use miette::IntoDiagnostic;
@@ -16,7 +18,28 @@ use tokio::{
 	task::{self, JoinHandle},
 	time::sleep,
 };
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
+
+/// How long to leave the authority alone after it says Canopy is asking too
+/// fast. Long enough for a rolling window to move on, short enough that a
+/// renewal due today still gets several attempts.
+// spec: CRT#when-issuance-fails
+const THROTTLED_COOLDOWN: Duration = Duration::from_secs(600);
+
+/// Report whether Canopy can issue at all, from what the round saw.
+async fn report_authority_health(pool: &database::Db, round: Round) {
+	let Ok(mut db) = pool.get().await else {
+		error!("no database connection to report authority health");
+		return;
+	};
+	// The order's own recorded error is the detail; this alert only needs to say
+	// which condition it is, since the fix is per-condition rather than per-name.
+	if let Err(err) =
+		database::self_alerts::sweep_certificate_authority(&mut db, round.fault, None).await
+	{
+		error!("certificate authority self-alert sweep failed: {err}");
+	}
+}
 
 pub fn spawn() -> JoinHandle<()> {
 	let pool = database::init();
@@ -108,8 +131,27 @@ pub fn spawn() -> JoinHandle<()> {
 
 			if let Some(acme) = &acme {
 				match work_orders(&pool, dns, acme, &zones).await {
-					Ok(0) => {}
-					Ok(n) => debug!("obtained {n} certificate(s)"),
+					Ok(round) => {
+						if round.issued > 0 {
+							debug!("obtained {} certificate(s)", round.issued);
+						}
+						// Whether Canopy can issue at all is Canopy's to report, and
+						// separately from any one server's certificate. A round that
+						// hit nothing recovers all three conditions.
+						// spec: CRT#when-issuance-fails
+						report_authority_health(&pool, round).await;
+
+						// A throttled round is followed by a pause, not by the next
+						// tick: the limits are shared across every group in the zone,
+						// so continuing to ask is how the rest of the allowance goes.
+						if round.fault == Some(Fault::Throttled) {
+							warn!(
+								"the authority is throttling us; holding off orders for {}s",
+								THROTTLED_COOLDOWN.as_secs()
+							);
+							sleep(THROTTLED_COOLDOWN).await;
+						}
+					}
 					Err(err) => error!("certificate sweep failed: {err}"),
 				}
 			}

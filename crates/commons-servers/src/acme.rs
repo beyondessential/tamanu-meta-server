@@ -37,6 +37,90 @@ const AUTHORISATION_TIMEOUT: Duration = Duration::from_secs(180);
 /// Signing is prompt; this is a backstop, not a budget.
 const FINALISE_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// Whose problem a failed conversation with the authority is. The type is shared
+/// with the alerting, which decides what to report from it; the classification
+/// below is this module's, because only here is the authority's own error visible.
+pub use commons_types::acme::AuthorityFault as Fault;
+
+/// Read the authority's error for whose problem it is.
+// spec: CRT#when-issuance-fails
+fn fault_of(error: &instant_acme::Error) -> Fault {
+	use instant_acme::Error;
+	match error {
+		Error::Api(problem) => match problem.r#type.as_deref() {
+			Some(t) if t.ends_with(":rateLimited") => Fault::Throttled,
+			Some(t)
+				if t.ends_with(":accountDoesNotExist")
+					|| t.ends_with(":unauthorized")
+					|| t.ends_with(":userActionRequired") =>
+			{
+				Fault::Account
+			}
+			_ => Fault::Order,
+		},
+		// A request that got no answer and one that got it too late are the same
+		// thing from Canopy's side, and call for the same response. `Hyper` is the
+		// transport error in practice, instant-acme's default client being enabled.
+		Error::Http(_) | Error::InvalidUri(_) | Error::Timeout(_) | Error::Hyper(_) => {
+			Fault::Unreachable
+		}
+		// A key Canopy cannot use is an account Canopy cannot use.
+		Error::Crypto | Error::KeyRejected => Fault::Account,
+		_ => Fault::Order,
+	}
+}
+
+/// A failed conversation with the authority, carrying whose problem it is.
+#[derive(Debug, Clone)]
+pub struct Failure {
+	pub fault: Fault,
+	pub message: String,
+}
+
+impl Failure {
+	/// A failure of this order alone.
+	fn order(message: impl Into<String>) -> Self {
+		Self {
+			fault: Fault::Order,
+			message: message.into(),
+		}
+	}
+
+	/// Classify an error from the ACME client, keeping `context` as the sentence
+	/// an operator reads.
+	fn from_acme(context: &str, error: instant_acme::Error) -> Self {
+		Self {
+			fault: fault_of(&error),
+			message: format!("{context}: {error}"),
+		}
+	}
+}
+
+impl std::fmt::Display for Failure {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str(&self.message)
+	}
+}
+
+impl std::error::Error for Failure {}
+
+impl From<Failure> for AppError {
+	fn from(failure: Failure) -> Self {
+		AppError::Upstream(failure.message)
+	}
+}
+
+impl From<AppError> for Failure {
+	/// A Canopy-side error inside an order — a zone write, an unreadable chain —
+	/// is that order's problem and not the authority's.
+	fn from(error: AppError) -> Self {
+		Self::order(error.to_string())
+	}
+}
+
+/// The result of a conversation with the authority.
+pub type AcmeResult<T> = std::result::Result<T, Failure>;
+
 /// What Canopy got back from an authority, and what it wants to remember.
 #[derive(Debug, Clone)]
 pub struct Issued {
@@ -106,8 +190,9 @@ pub struct FakeCa {
 	pub issued: Vec<String>,
 	/// The chains it has been asked to revoke.
 	pub revoked: Vec<String>,
-	/// When set, every order and revocation fails with this message.
-	pub fail_with: Option<String>,
+	/// When set, every order and revocation fails with this message, blamed on
+	/// this fault.
+	pub fail_with: Option<(Fault, String)>,
 	/// How long the certificates it signs live. Adjustable so a test can hold one
 	/// that is already in its renewal window.
 	pub lifetime: Duration,
@@ -151,27 +236,27 @@ impl Acme {
 	///   Let's Encrypt production.
 	/// - `CANOPY_ACME_CONTACT`: a contact URI (`mailto:…`) the authority can reach
 	///   an operator at.
-	pub async fn from_env() -> Result<Option<Self>> {
+	pub async fn from_env() -> AcmeResult<Option<Self>> {
 		let Ok(key_pem) = std::env::var("CANOPY_ACME_ACCOUNT_KEY") else {
 			return Ok(None);
 		};
 		let directory = std::env::var("CANOPY_ACME_DIRECTORY")
 			.unwrap_or_else(|_| LetsEncrypt::Production.url().to_string());
 
-		let pkcs8 = PrivatePkcs8KeyDer::from_pem_slice(key_pem.as_bytes()).map_err(|e| {
-			AppError::BadRequest(format!(
-				"CANOPY_ACME_ACCOUNT_KEY is not a PKCS#8 PEM private key: {e}"
-			))
-		})?;
+		let pkcs8 =
+			PrivatePkcs8KeyDer::from_pem_slice(key_pem.as_bytes()).map_err(|e| Failure {
+				fault: Fault::Account,
+				message: format!("CANOPY_ACME_ACCOUNT_KEY is not a PKCS#8 PEM private key: {e}"),
+			})?;
 		let key = instant_acme::Key::from_pkcs8_der(pkcs8.clone_key())
-			.map_err(|e| AppError::BadRequest(format!("ACME account key unusable: {e}")))?;
+			.map_err(|e| Failure::from_acme("the ACME account key is unusable", e))?;
 
 		let builder = Account::builder()
-			.map_err(|e| AppError::Upstream(format!("could not build an ACME client: {e}")))?;
+			.map_err(|e| Failure::from_acme("could not build an ACME client", e))?;
 		let (account, _credentials) = builder
 			.create_from_key((key, PrivateKeyDer::Pkcs8(pkcs8)), directory.clone())
 			.await
-			.map_err(|e| AppError::Upstream(format!("could not use the ACME account: {e}")))?;
+			.map_err(|e| Failure::from_acme("could not use the ACME account", e))?;
 
 		// Set separately because finding-or-creating from a key carries no contact.
 		// A contact the authority won't take is worth reporting but not worth
@@ -196,10 +281,18 @@ impl Acme {
 		Self::Fake(Arc::new(Mutex::new(FakeCa::default())))
 	}
 
-	/// Make an [`Acme::Fake`] fail every order, to exercise retry and alerting.
+	/// Make an [`Acme::Fake`] fail every order as this order's own problem, to
+	/// exercise retry and the per-server alerting.
 	pub fn fail_with(&self, message: impl Into<String>) {
+		self.fail_with_fault(Fault::Order, message);
+	}
+
+	/// Make an [`Acme::Fake`] fail every order and blame `fault` — for the
+	/// fleet-wide paths, where what is being tested is that Canopy reports the
+	/// authority rather than the server that happened to ask.
+	pub fn fail_with_fault(&self, fault: Fault, message: impl Into<String>) {
 		if let Self::Fake(state) = self {
-			state.lock().expect("fake ca lock").fail_with = Some(message.into());
+			state.lock().expect("fake ca lock").fail_with = Some((fault, message.into()));
 		}
 	}
 
@@ -269,7 +362,7 @@ impl Acme {
 		csr_der: &[u8],
 		profile: Option<&str>,
 		replacing: Option<&str>,
-	) -> Result<Issued> {
+	) -> AcmeResult<Issued> {
 		match self {
 			Self::Fake(state) => Self::obtain_fake(state, dns, zone, name, profile).await,
 			Self::Real(account) => {
@@ -282,13 +375,16 @@ impl Acme {
 	/// account obtained it, which is authority enough; the server's key is not
 	/// needed and is not asked for.
 	// spec: CRT#revocation
-	pub async fn revoke(&self, chain_pem: &str, reason: RevokeFor) -> Result<()> {
+	pub async fn revoke(&self, chain_pem: &str, reason: RevokeFor) -> AcmeResult<()> {
 		let leaf = leaf_der(chain_pem)?;
 		match self {
 			Self::Fake(state) => {
 				let mut state = state.lock().expect("fake ca lock");
-				if let Some(message) = &state.fail_with {
-					return Err(AppError::Upstream(format!("fake ca: {message}")));
+				if let Some((fault, message)) = &state.fail_with {
+					return Err(Failure {
+						fault: *fault,
+						message: format!("fake ca: {message}"),
+					});
 				}
 				state.revoked.push(chain_pem.to_string());
 				Ok(())
@@ -300,9 +396,7 @@ impl Acme {
 				})
 				.await
 				.map_err(|e| {
-					AppError::Upstream(format!(
-						"the authority would not revoke the certificate: {e}"
-					))
+					Failure::from_acme("the authority would not revoke the certificate", e)
 				}),
 		}
 	}
@@ -316,7 +410,7 @@ impl Acme {
 		csr_der: &[u8],
 		profile: Option<&str>,
 		replacing: Option<&str>,
-	) -> Result<Issued> {
+	) -> AcmeResult<Issued> {
 		let identifiers = [Identifier::Dns(name.to_string())];
 		let mut new_order = NewOrder::new(&identifiers);
 		if let Some(profile) = profile {
@@ -333,9 +427,10 @@ impl Acme {
 		}
 
 		let mut order = account.new_order(&new_order).await.map_err(|e| {
-			AppError::Upstream(format!(
-				"the authority would not open an order for {name}: {e}"
-			))
+			Failure::from_acme(
+				&format!("the authority would not open an order for {name}"),
+				e,
+			)
 		})?;
 
 		// Whatever happens next, take back down every record put up: a TXT left at
@@ -356,13 +451,11 @@ impl Acme {
 		order
 			.finalize_csr(csr_der)
 			.await
-			.map_err(|e| AppError::Upstream(format!("the authority refused the request: {e}")))?;
+			.map_err(|e| Failure::from_acme("the authority refused the request", e))?;
 		let chain = order
 			.poll_certificate(&RetryPolicy::default().timeout(FINALISE_TIMEOUT))
 			.await
-			.map_err(|e| {
-				AppError::Upstream(format!("the authority did not produce a certificate: {e}"))
-			})?;
+			.map_err(|e| Failure::from_acme("the authority did not produce a certificate", e))?;
 
 		let not_after = leaf_expiry(&chain)?;
 		let renew_after = renewal_window(account, &chain).await;
@@ -387,11 +480,11 @@ impl Acme {
 		zone: &ManagedZone,
 		order: &mut instant_acme::Order,
 		published: &mut Vec<RecordSet>,
-	) -> Result<()> {
+	) -> AcmeResult<()> {
 		let mut authorizations = order.authorizations();
 		while let Some(handle) = authorizations.next().await {
-			let mut handle = handle
-				.map_err(|e| AppError::Upstream(format!("could not read an authorisation: {e}")))?;
+			let mut handle =
+				handle.map_err(|e| Failure::from_acme("could not read an authorisation", e))?;
 			// Already proved, within the authority's reuse window: nothing to
 			// publish and nothing to ask it to look at.
 			if handle.status == AuthorizationStatus::Valid {
@@ -399,16 +492,15 @@ impl Acme {
 			}
 
 			let mut challenge = handle.challenge(ChallengeType::Dns01).ok_or_else(|| {
-				AppError::Upstream(
+				Failure::order(
 					"the authority offered no DNS-01 challenge, which is the only kind Canopy can \
-					 answer"
-						.into(),
+					 answer",
 				)
 			})?;
 			let subject = match challenge.identifier().identifier {
 				Identifier::Dns(name) => name.clone(),
 				other => {
-					return Err(AppError::Upstream(format!(
+					return Err(Failure::order(format!(
 						"the authority asked Canopy to prove control of {other:?}, which is not a \
 						 name it can publish a record for"
 					)));
@@ -421,20 +513,20 @@ impl Acme {
 			// the two still gets cleaned up.
 			published.push(set);
 
-			challenge.set_ready().await.map_err(|e| {
-				AppError::Upstream(format!("the authority would not check the record: {e}"))
-			})?;
+			challenge
+				.set_ready()
+				.await
+				.map_err(|e| Failure::from_acme("the authority would not check the record", e))?;
 		}
 		drop(authorizations);
 
 		match order
 			.poll_ready(&RetryPolicy::default().timeout(AUTHORISATION_TIMEOUT))
 			.await
-			.map_err(|e| {
-				AppError::Upstream(format!("the authority did not validate the name: {e}"))
-			})? {
+			.map_err(|e| Failure::from_acme("the authority did not validate the name", e))?
+		{
 			OrderStatus::Ready | OrderStatus::Valid => Ok(()),
-			other => Err(AppError::Upstream(format!(
+			other => Err(Failure::order(format!(
 				"the authority left the order {other:?} rather than ready to sign"
 			))),
 		}
@@ -449,7 +541,7 @@ impl Acme {
 		zone: &ManagedZone,
 		name: &str,
 		profile: Option<&str>,
-	) -> Result<Issued> {
+	) -> AcmeResult<Issued> {
 		let (fail, lifetime, renew_after) = {
 			let state = state.lock().expect("fake ca lock");
 			(state.fail_with.clone(), state.lifetime, state.renew_after)
@@ -460,8 +552,11 @@ impl Acme {
 		let set = RecordSet::challenge(name, "fake-challenge-value");
 		dns.upsert(zone, &set).await?;
 		let result = match fail {
-			Some(message) => Err(AppError::Upstream(format!("fake ca: {message}"))),
-			None => self_signed(name, lifetime),
+			Some((fault, message)) => Err(Failure {
+				fault,
+				message: format!("fake ca: {message}"),
+			}),
+			None => self_signed(name, lifetime).map_err(Failure::from),
 		};
 		dns.delete(zone, &set).await?;
 		let (chain, not_after) = result?;

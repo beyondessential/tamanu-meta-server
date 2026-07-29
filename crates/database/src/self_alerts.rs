@@ -10,6 +10,7 @@
 //! [`crate::issues::raise_global_event`]).
 
 use commons_errors::Result;
+use commons_types::acme::AuthorityFault;
 use commons_types::dns::ManagedZone;
 use commons_types::status::CheckResult;
 use diesel_async::AsyncPgConnection;
@@ -71,6 +72,235 @@ Claims are never dropped for this: the group keeps the domain, and it keeps excl
 ## Solve
 
 Compare the zone list in Canopy's deployment configuration against the domains reported in the alert message. Restore the missing zone if its removal was accidental; if it was deliberate, release the claims on each group's page. A configuration that does not parse is reported with the parse error — fix the entry and restart.";
+
+/// Canopy cannot reach the certificate authority at all.
+// spec: CRT#when-issuance-fails
+pub const CA_UNREACHABLE_REF: &str = "certificate-authority-unreachable";
+
+pub const CA_UNREACHABLE_DOC: &str = "## Description
+
+Canopy could not reach the certificate authority it is configured to use. No certificate can be obtained or renewed while this stands, for any server in any group.
+
+Requests already accepted are not lost: they stay pending and are worked when the authority comes back. What is at risk is anything whose renewal falls due in the meantime.
+
+## Results
+
+- **fail** — the authority did not answer. Recovers on the next successful conversation with it.
+
+## Solve
+
+Check the authority's own status page, then Canopy's egress: the domains pod needs outbound HTTPS to the directory URL it is configured with. A directory URL that is wrong rather than unreachable shows up here too, so check it against the authority's documentation.";
+
+/// Canopy reached the authority but its account there is not usable.
+// spec: CRT#when-issuance-fails
+pub const CA_ACCOUNT_REF: &str = "certificate-authority-account";
+
+pub const CA_ACCOUNT_DOC: &str = "## Description
+
+Canopy reached the certificate authority, and the authority will not act on Canopy's account. Reported apart from being unreachable because the fix is different: this is a credential or a terms-of-service problem, not a network one.
+
+No certificate can be obtained or renewed while this stands, for any server in any group.
+
+## Results
+
+- **fail** — the authority rejected Canopy's account, its key, or asked for an action to be taken on it. Recovers on the next successful conversation.
+
+## Solve
+
+Check the account key Canopy is configured with against the account registered at the authority, and whether the authority is asking for terms to be re-accepted or a contact to be verified. A key that does not match any account at the authority produces this, as does one that has been deactivated.";
+
+/// The authority's rate limits are exhausted.
+// spec: CRT#when-issuance-fails
+pub const CA_THROTTLED_REF: &str = "certificate-authority-throttled";
+
+pub const CA_THROTTLED_DOC: &str = "## Description
+
+The certificate authority has told Canopy it is issuing too fast. Those limits are shared across every group whose domain sits in the same zone, so running them down is a fleet-wide fault rather than one group's — and retrying hard would spend what is left of the allowance on whichever name happened to fail last.
+
+So Canopy stops working orders for a while rather than continuing to ask. Nothing is lost; issuance is slower until the allowance recovers.
+
+## Results
+
+- **fail** — the authority refused an order for rate limiting. Recovers once orders are going through again.
+
+## Solve
+
+Usually this resolves itself as the authority's window rolls forward. If it does not, look for a name being ordered repeatedly — a server asking for a certificate it cannot use, or a request loop — since one name failing over and over is the usual way an allowance is spent. The authority's documentation lists which limit applies.";
+
+/// Raise or recover the three fleet-wide authority alerts from what the last
+/// round of orders saw.
+///
+/// `fault` is the most serious thing the round hit, or `None` where the round
+/// went through — which is also what recovers all three, since a certificate
+/// obtained is proof the authority is reachable, the account works, and there is
+/// allowance left. Passing `AuthorityFault::Order` recovers them too: an order
+/// that failed on its own merits says the authority is fine.
+///
+/// The three are mutually exclusive by construction — one round reports one
+/// condition — so raising any of them recovers the other two.
+// spec: CRT#when-issuance-fails
+pub async fn sweep_certificate_authority(
+	conn: &mut AsyncPgConnection,
+	fault: Option<AuthorityFault>,
+	detail: Option<&str>,
+) -> Result<()> {
+	/// Ref, documentation, and headline for each fleet-wide authority condition.
+	const CONDITIONS: [(AuthorityFault, &str, &str, &str); 3] = [
+		(
+			AuthorityFault::Unreachable,
+			CA_UNREACHABLE_REF,
+			CA_UNREACHABLE_DOC,
+			"Certificate authority unreachable",
+		),
+		(
+			AuthorityFault::Account,
+			CA_ACCOUNT_REF,
+			CA_ACCOUNT_DOC,
+			"Certificate authority will not accept Canopy's account",
+		),
+		(
+			AuthorityFault::Throttled,
+			CA_THROTTLED_REF,
+			CA_THROTTLED_DOC,
+			"Certificate authority rate limits exhausted",
+		),
+	];
+
+	for (condition, r#ref, doc, title) in CONDITIONS {
+		if fault == Some(condition) {
+			raise(
+				conn,
+				r#ref,
+				CheckResult::Failed,
+				CheckResult::Failed,
+				// Escalating: nothing in the fleet can obtain a certificate, and the
+				// people who can fix it are not the ones watching a group's incidents.
+				true,
+				Some(doc),
+				title,
+				detail.unwrap_or(title),
+			)
+			.await?;
+		} else {
+			recover(
+				conn,
+				r#ref,
+				"the certificate authority is answering normally",
+			)
+			.await?;
+		}
+	}
+
+	Ok(())
+}
+
+/// A server has been paused long enough that a certificate has gone stale
+/// underneath the pause. Coalescing: one alert lists every server and name.
+/// Recovers when every paused server's certificates are current again — which in
+/// practice means the pause was lifted, since nothing renews under one.
+// spec: CRT#pausing-a-server
+pub const FORGOTTEN_PAUSE_REF: &str = "name-management-pause-forgotten";
+
+pub const FORGOTTEN_PAUSE_DOC: &str = "## Description
+
+Pausing a server stops Canopy doing anything new on its behalf, including renewing its certificates. That is the point of a pause — but it also suppresses the per-server alerting that would otherwise chase a certificate running out, so a pause nobody remembers is exactly how certificates quietly expire.
+
+This alert is that forgetting, reported against Canopy rather than against the deployment: only an operator can lift a pause, and Canopy never lifts one itself however much is expiring underneath it.
+
+A certificate for a name the server is no longer entitled to is not counted: Canopy stopped renewing that on purpose, and the pause is not why it is running out.
+
+## Results
+
+- **warn** — a paused server holds a certificate past the point Canopy would have renewed it. There is still room to recover by lifting the pause.
+- **fail** — a paused server holds a certificate that has expired. Whatever it serves on that name is now being rejected by clients.
+
+## Solve
+
+Look at each server named in the alert. Finish whatever the pause was for — the recorded reason is on the server's page — and unpause it; Canopy then works the renewals that fell due while it was paused. If the pause is no longer needed at all, lifting it is the whole fix. If the deployment is gone for good, archive the server or release the group's claim on the domain instead, which stops the certificates being Canopy's business.";
+
+/// Evaluate the forgotten-pause condition and raise or recover the coalescing
+/// [`FORGOTTEN_PAUSE_REF`] self-alert.
+///
+/// Severity splits on whether anything has actually run out: a certificate past
+/// renewal under a pause is a nudge, and one that has expired is a fault, because
+/// only the second means something has already stopped working.
+// spec: CRT#pausing-a-server
+pub async fn sweep_forgotten_pauses(conn: &mut AsyncPgConnection) -> Result<Option<Issue>> {
+	let lapsing = crate::server_certificates::ServerCertificate::lapsing_under_pause(conn).await?;
+
+	if lapsing.is_empty() {
+		return recover(
+			conn,
+			FORGOTTEN_PAUSE_REF,
+			"no paused server is holding a certificate that has gone stale",
+		)
+		.await;
+	}
+
+	let mut servers: Vec<&str> = lapsing.iter().map(|l| l.server_name.as_str()).collect();
+	servers.sort_unstable();
+	servers.dedup();
+
+	let expired = lapsing.iter().filter(|l| l.expired).count();
+	let listed: Vec<String> = lapsing
+		.iter()
+		.map(|lapse| {
+			let state = if lapse.expired { "expired" } else { "overdue" };
+			match (lapse.not_after, lapse.pause_reason.as_deref()) {
+				(Some(at), Some(reason)) => {
+					format!(
+						"{} on {} ({state} {at}; paused: {reason})",
+						lapse.name, lapse.server_name
+					)
+				}
+				(Some(at), None) => {
+					format!("{} on {} ({state} {at})", lapse.name, lapse.server_name)
+				}
+				(None, _) => format!("{} on {} ({state})", lapse.name, lapse.server_name),
+			}
+		})
+		.collect();
+
+	let (observed, message) = if expired > 0 {
+		(
+			CheckResult::Failed,
+			format!(
+				"{expired} certificate(s) have expired under a pause across {} server(s), and {} \
+				 more are overdue for renewal{}",
+				servers.len(),
+				lapsing.len() - expired,
+				list_suffix(&listed),
+			),
+		)
+	} else {
+		(
+			CheckResult::Warning,
+			format!(
+				"{} certificate(s) are past renewal under a pause across {} server(s), and nothing \
+				 renews while a server is paused{}",
+				lapsing.len(),
+				servers.len(),
+				list_suffix(&listed),
+			),
+		)
+	};
+
+	// Ceiling at `fail` whatever this raise carries, so an overdue certificate
+	// that later expires isn't capped at warning by the policy the first sighting
+	// seeded.
+	raise(
+		conn,
+		FORGOTTEN_PAUSE_REF,
+		observed,
+		CheckResult::Failed,
+		false,
+		Some(FORGOTTEN_PAUSE_DOC),
+		"Certificates lapsing under a forgotten pause",
+		&message,
+	)
+	.await
+	.map(Some)
+}
 
 /// Evaluate the fleet-wide check-liveness condition and raise or recover
 /// the coalescing [`STALE_CHECKS_REF`] self-alert. Runs after liveness is

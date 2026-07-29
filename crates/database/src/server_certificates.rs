@@ -190,6 +190,21 @@ impl RevocationReason {
 	}
 }
 
+/// One certificate going stale under a paused server, with enough of the pause
+/// to say who has forgotten what.
+#[derive(Debug, Clone)]
+pub struct PausedLapse {
+	pub server_id: Uuid,
+	pub server_name: String,
+	/// The name the certificate covers.
+	pub name: String,
+	pub not_after: Option<Timestamp>,
+	/// Whether it has run out already, as against merely being past renewal.
+	pub expired: bool,
+	pub paused_at: Option<Timestamp>,
+	pub pause_reason: Option<String>,
+}
+
 /// How urgently a held certificate needs attention, judged against its own
 /// lifetime so the same reading applies to a six-day certificate and a
 /// ninety-day one.
@@ -608,6 +623,89 @@ impl ServerCertificate {
 			}
 		}
 		out.sort_by_key(|(cert, _)| cert.not_after);
+		Ok(out)
+	}
+
+	/// Certificates lapsing underneath a pause: past the point Canopy would have
+	/// renewed them, or expired outright, on a server it has been told to stop
+	/// acting for.
+	///
+	/// This is the other half of [`Self::at_risk`], which deliberately skips paused
+	/// servers. A pause suppresses the per-server alerting that would chase a
+	/// certificate running out, so the forgetting is what has to become visible —
+	/// and against Canopy rather than the deployment, since nobody on that
+	/// deployment can lift a pause.
+	///
+	/// Entitlement is filtered the same way: a name the server is no longer
+	/// entitled to raises nothing however far past expiry it is, because Canopy
+	/// stopped renewing it on purpose.
+	// spec: CRT#pausing-a-server
+	pub async fn lapsing_under_pause(db: &mut AsyncPgConnection) -> Result<Vec<PausedLapse>> {
+		use crate::schema::{server_certificates, servers};
+
+		let held: Vec<(
+			Self,
+			Option<Uuid>,
+			Option<String>,
+			jiff_diesel::NullableTimestamp,
+			Option<String>,
+		)> = server_certificates::table
+			.inner_join(servers::table)
+			.filter(server_certificates::state.eq(OrderState::Issued.as_str()))
+			.filter(servers::deleted_at.is_null())
+			.filter(servers::may_manage_tls.eq(true))
+			.filter(servers::name_management_paused_at.is_not_null())
+			.select((
+				Self::as_select(),
+				servers::group_id,
+				servers::name,
+				servers::name_management_paused_at,
+				servers::name_management_pause_reason,
+			))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		if held.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		let claims = crate::server_domains::ServerGroupDomain::list_all(db).await?;
+		let now = Timestamp::now();
+
+		let mut out = Vec::new();
+		for (cert, group_id, server_name, paused_at, pause_reason) in held {
+			let paused_at: Option<Timestamp> = paused_at.into();
+			// Past renewal is the interesting line here, not `risk()`: what wants
+			// reporting is that Canopy would have acted by now and did not, which
+			// happens well before the certificate is in trouble.
+			let overdue = cert.renew_after.is_some_and(|at| at <= now);
+			let expired = cert.not_after.is_some_and(|at| at <= now);
+			if !overdue && !expired {
+				continue;
+			}
+			let entitled = group_id.is_some_and(|group| {
+				claims.iter().any(|claim| {
+					claim.group_id == group
+						&& commons_types::dns::is_within(&cert.name, &claim.domain)
+				})
+			});
+			if !entitled {
+				continue;
+			}
+			out.push(PausedLapse {
+				server_id: cert.server_id,
+				// A server with no name of its own is named by its id, which is what
+				// the rest of the UI falls back to.
+				server_name: server_name.unwrap_or_else(|| cert.server_id.to_string()),
+				name: cert.name.clone(),
+				not_after: cert.not_after,
+				expired,
+				paused_at,
+				pause_reason,
+			});
+		}
+		out.sort_by_key(|lapse| lapse.not_after);
 		Ok(out)
 	}
 
