@@ -42,3 +42,4 @@ The response to a push carries only what the pushing source needs; a source is s
 - Each check in the push is answered with the policy applied to it (see [CHK](../monitoring/checks.md), "Policy"), so a source sees how its reports are graded and can stop running checks whose policy is `skipped`.
 - Whether the server should start a backup now is returned only to the source that runs backups (`alertd`).
 - The server's effective tags, a server-wide fact, are returned to every source.
+- The names the server is entitled to act on, likewise a server-wide fact, are returned to every source, so an agent learns of a new domain or a newly granted permission from a push it was making anyway (see [CRT](certificates.md), "What a server may act on").
