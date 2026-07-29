@@ -117,5 +117,6 @@ The permission is the trust boundary: a server permitted to manage its DNS can p
 
 A group presents the domains it controls, each with the managed zone it resolves to, and flags a claim no configured zone covers.
 The configured managed zones are shown to operators, so an operator claiming a domain can see which names are available to be claimed.
+A group with no domains in a Canopy configured with no zones presents nothing at all, so a deployment that has not been given zones carries no standing notice about a feature it is not using.
 
 A server presents whether it may manage its own DNS and whether it may obtain its own certificates, alongside the other permissions an operator holds over it, and an operator grants and revokes each there.

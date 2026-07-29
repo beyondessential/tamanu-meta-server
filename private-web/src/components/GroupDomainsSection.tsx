@@ -57,10 +57,16 @@ export default function GroupDomainsSection({ groupId }: { groupId: string }) {
 	const rows = domains.data;
 	const zoneList = zones.status === "ok" ? zones.data : [];
 
-
 	// Nothing claimed and nothing an operator can do about it: stay out of the
 	// way rather than showing an empty box to every reader.
 	if (rows.length === 0 && !isAdmin) return null;
+
+	// Nothing claimed and no zone to claim into: the feature isn't in use here,
+	// so say nothing at all rather than sitting a standing warning on every
+	// group page of a deployment that hasn't been given zones yet.
+	// spec: DOM#when-the-zone-configuration-changes
+	if (rows.length === 0 && zones.status === "ok" && zoneList.length === 0)
+		return null;
 
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
