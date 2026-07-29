@@ -221,7 +221,8 @@ Where that path passes through several versions of one minor series, only the ne
 Only a published version is a candidate, because a version's migrations reach a consumer as its published artefacts, and an unpublished version has none to fetch.
 Publication is what makes a version testable and what makes it reachable by a server, so the two arrive together.
 
-A server with no successful backup of a restorable type has no candidates, because there is nothing to restore and migrate.
+Only a server running Tamanu has candidates, because the migrations under test are Tamanu's and no other product's server has an upgrade path through them.
+A server with no successful backup of a restorable type has no candidates either, because there is nothing to restore and migrate.
 
 Testing therefore sits between a version being available and a deployment being told to take it.
 That window is where the answer is still cheap: the fleet is not moving yet, and a version found to break a deployment's data can be held back before anyone schedules its upgrade.
