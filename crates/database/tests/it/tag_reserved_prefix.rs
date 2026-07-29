@@ -42,6 +42,8 @@ fn new_server(host: &str) -> Server {
 		registered_at: None,
 		restore_allowed_until: None,
 		restore_allowed_by: None,
+		may_manage_dns: false,
+		may_manage_tls: false,
 	}
 }
 
@@ -84,6 +86,8 @@ async fn server_update_rejects_reserved_tag_keys() {
 			alert_when_down_for: None,
 			notes: None,
 			tags: Some(reserved_tags()),
+			may_manage_dns: None,
+			may_manage_tls: None,
 		};
 		assert_bad_request(Server::update(&mut conn, server.id, updates).await);
 	})

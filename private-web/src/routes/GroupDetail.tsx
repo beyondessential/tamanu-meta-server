@@ -15,6 +15,7 @@ import EditIcon from "@mui/icons-material/Edit";
 import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
+import GroupDomainsSection from "../components/GroupDomainsSection";
 import { OperatorAvatar, connectedFor } from "../components/OperatorAvatars";
 import ServerShorty from "../components/ServerShorty";
 import SilencedRefsSection from "../components/SilencedRefsSection";
@@ -236,6 +237,8 @@ export default function GroupDetail() {
 			</Box>
 
 			<BackupsCard groupId={group.id} isAdmin={admin} />
+
+			<GroupDomainsSection groupId={group.id} />
 
 			<SilencedRefsSection scope="group" id={group.id} />
 		</Stack>

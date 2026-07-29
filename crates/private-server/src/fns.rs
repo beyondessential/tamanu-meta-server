@@ -6,6 +6,7 @@ pub mod backups;
 pub mod bestool;
 pub mod commons;
 pub mod devices;
+pub mod domains;
 pub mod healthchecks;
 pub mod incidents;
 pub mod issues;
@@ -55,6 +56,7 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 			.nest("/bestool", bestool::routes())
 			.nest("/commons", commons::routes())
 			.nest("/devices", devices::routes())
+			.nest("/domains", domains::routes())
 			.nest("/healthchecks", healthchecks::routes())
 			.nest("/incidents", incidents::routes())
 			.nest("/issues", issues::routes())

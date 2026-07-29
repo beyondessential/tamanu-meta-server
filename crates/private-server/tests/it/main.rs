@@ -9,6 +9,7 @@ mod create_server;
 mod device_admin_endpoints;
 mod device_keys;
 mod devices;
+mod domains;
 mod endpoints;
 mod enrollment_ticket;
 mod group_card_version;

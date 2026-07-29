@@ -1310,6 +1310,96 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/domains/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Claim a domain for a group.
+         * @description The group then controls the domain and every name beneath it, and no other
+         *     group can claim a name overlapping it. Requires the caller to be on the
+         *     admin allow-list. Responds 400 if the name is not a valid domain of at least
+         *     two labels or does not sit within one of Canopy's managed zones, and 409 if
+         *     it overlaps a domain already claimed — by this group or another.
+         */
+        post: operations["domains_claim"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/domains/for_group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List the domains a group controls.
+         * @description Each carries the managed zone it resolves to, or null for a claim no
+         *     configured zone matches.
+         */
+        post: operations["domains_for_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/domains/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Release a claimed domain.
+         * @description The group loses control of the domain and every name beneath it, and the
+         *     name becomes claimable again. Requires the caller to be on the admin
+         *     allow-list. Responds 404 if there is no such claim.
+         */
+        post: operations["domains_release"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/domains/zones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List the managed DNS zones Canopy is configured with.
+         * @description An operator claiming a domain for a group needs these to know which names
+         *     are claimable at all: a claim has to sit at or under one of these apexes.
+         *     An empty list means Canopy has been given no zones, so no domain can be
+         *     claimed until its deployment configuration provides one.
+         */
+        post: operations["domains_zones"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/healthchecks/decommission": {
         parameters: {
             query?: never;
@@ -4439,6 +4529,28 @@ export interface components {
              */
             query: string;
         };
+        /** @description Fields needed to claim a domain for a group. */
+        DomainClaimArgs: {
+            /**
+             * @description The domain to claim. Case and a trailing dot are not significant. An
+             *     internationalised domain is claimed in its ASCII-compatible (punycode)
+             *     spelling.
+             */
+            domain: string;
+            /**
+             * Format: uuid
+             * @description The group to give control of the domain.
+             */
+            server_group_id: string;
+        };
+        /** @description Identifies a claim. */
+        DomainIdArgs: {
+            /**
+             * Format: uuid
+             * @description The claim to release.
+             */
+            id: string;
+        };
         /** @description One hour-of-week bucket of the degradation profile. */
         DutyBucket: {
             /**
@@ -4638,6 +4750,33 @@ export interface components {
              * @description Id of the server group to fetch details for.
              */
             server_group_id: string;
+        };
+        /** @description A domain a group controls, with the managed zone it resolves to. */
+        GroupDomainView: {
+            /** @description When it was claimed. */
+            created_at: string;
+            /** @description Login of the operator who claimed it, if recorded. */
+            created_by?: string | null;
+            /** @description The domain, normalised to lower case without a trailing dot. */
+            domain: string;
+            /**
+             * Format: uuid
+             * @description The group that controls the domain.
+             */
+            group_id: string;
+            /**
+             * Format: uuid
+             * @description Unique identifier of the claim.
+             */
+            id: string;
+            /**
+             * @description Apex of the managed zone this domain resolves to — the longest
+             *     configured apex it sits within. Null when no configured zone covers it,
+             *     which means the zone has left Canopy's configuration since the claim was
+             *     made: the claim stands and still excludes others, but Canopy will act on
+             *     no name beneath it until the zone is restored or the claim released.
+             */
+            zone?: string | null;
         };
         /** @description Identifies the server group to operate on. */
         GroupIdArgs: {
@@ -5573,6 +5712,19 @@ export interface components {
          */
         MaintenanceKind: "quick" | "full";
         /**
+         * @description A DNS zone Canopy can write records in.
+         *
+         *     Zones come from Canopy's deployment configuration rather than from operator
+         *     state: they are what the infrastructure has granted Canopy write access to,
+         *     and they bound which domains a group can be given.
+         */
+        ManagedZoneView: {
+            /** @description The zone's apex domain, for example `tamanu.app`. */
+            apex: string;
+            /** @description The identifier the DNS provider knows this zone by. */
+            provider_zone_id: string;
+        };
+        /**
          * @description Metadata about an MCP access token. Never includes the secret value
          *     itself — that's only ever returned once, at minting time.
          */
@@ -5809,6 +5961,16 @@ export interface components {
                 is_monitored: boolean;
                 /** @description The server's role within its product's topology. */
                 kind: components["schemas"]["ServerKind"];
+                /**
+                 * @description Whether the server may manage its own DNS records for names under its
+                 *     group's domains.
+                 */
+                may_manage_dns: boolean;
+                /**
+                 * @description Whether the server may obtain TLS certificates for names under its
+                 *     group's domains.
+                 */
+                may_manage_tls: boolean;
                 /** @description Operator-assigned name for the server, if any. */
                 name?: string | null;
                 /** @description Free-text operator notes about the server. */
@@ -7024,6 +7186,16 @@ export interface components {
              */
             is_monitored?: boolean | null;
             kind?: null | components["schemas"]["ServerKind"];
+            /**
+             * @description Whether this server may manage its own DNS records for names under its
+             *     group's domains. Omit to leave unchanged.
+             */
+            may_manage_dns?: boolean | null;
+            /**
+             * @description Whether this server may obtain TLS certificates for names under its
+             *     group's domains. Omit to leave unchanged.
+             */
+            may_manage_tls?: boolean | null;
             /** @description New name for the server. Omit to leave unchanged. */
             name?: string | null;
             /** @description New free-text notes for the server. Omit to leave unchanged. */
@@ -7302,6 +7474,16 @@ export interface components {
             is_monitored: boolean;
             /** @description The server's role within its product's topology. */
             kind: components["schemas"]["ServerKind"];
+            /**
+             * @description Whether the server may manage its own DNS records for names under its
+             *     group's domains.
+             */
+            may_manage_dns: boolean;
+            /**
+             * @description Whether the server may obtain TLS certificates for names under its
+             *     group's domains.
+             */
+            may_manage_tls: boolean;
             /** @description Operator-assigned name for the server, if any. */
             name?: string | null;
             /** @description Free-text operator notes about the server. */
@@ -9978,6 +10160,117 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    domains_claim: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DomainClaimArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupDomainView"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The domain overlaps one already claimed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    domains_for_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupDomainView"][];
+                };
+            };
+        };
+    };
+    domains_release: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DomainIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    domains_zones: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedZoneView"][];
                 };
             };
         };

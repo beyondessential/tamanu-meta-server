@@ -146,6 +146,17 @@ pub struct Server {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	#[diesel(treat_none_as_default_value = false)]
 	pub restore_allowed_by: Option<String>,
+	/// Whether this server may manage its own DNS records for names under its
+	/// group's domains. Withheld by default: a server without it is
+	/// authenticated and refused. Unlike the restore window this is a standing
+	/// grant, records needing maintenance for as long as the server lives.
+	// spec: DOM#permission-for-a-server-to-manage-its-own-names
+	pub may_manage_dns: bool,
+	/// Whether this server may obtain TLS certificates for names under its
+	/// group's domains. Separate from `may_manage_dns`: a deployment whose
+	/// records are managed elsewhere may still want its certificates here.
+	// spec: DOM#permission-for-a-server-to-manage-its-own-names
+	pub may_manage_tls: bool,
 }
 
 impl Server {
@@ -841,6 +852,8 @@ fn test_server_serialization() {
 		registered_at: None,
 		restore_allowed_until: None,
 		restore_allowed_by: None,
+		may_manage_dns: false,
+		may_manage_tls: false,
 	};
 
 	let serialized = serde_json::to_string_pretty(&server).unwrap();
@@ -858,7 +871,9 @@ fn test_server_serialization() {
   "is_monitored": true,
   "alert_when_down_for": 600,
   "notes": "",
-  "tags": {}
+  "tags": {},
+  "may_manage_dns": false,
+  "may_manage_tls": false
 }"#
 	);
 }
@@ -910,6 +925,8 @@ impl From<NewServer> for Server {
 			registered_at: None,
 			restore_allowed_until: None,
 			restore_allowed_by: None,
+			may_manage_dns: false,
+			may_manage_tls: false,
 		}
 	}
 }
@@ -963,4 +980,10 @@ pub struct PartialServer {
 	/// New set of key/value tags for the server. This replaces the whole
 	/// tag set.
 	pub tags: Option<TagMap>,
+	/// Whether the server may manage its own DNS records under its group's
+	/// domains.
+	pub may_manage_dns: Option<bool>,
+	/// Whether the server may obtain TLS certificates for names under its
+	/// group's domains.
+	pub may_manage_tls: Option<bool>,
 }

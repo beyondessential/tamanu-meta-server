@@ -5,6 +5,7 @@ use bestool_postgres::pool::PgPool;
 use commons_errors::Result;
 use commons_servers::recovery_vault::Recipients;
 use commons_servers::tailnet_directory::{TailnetDirectory, TailnetDirectoryConfig};
+use commons_types::dns::ManagedZone;
 use database::Db;
 use public_server::state::BackupSecrets;
 
@@ -51,6 +52,26 @@ pub struct AppState {
 	pub recovery_recipients: Option<Recipients>,
 	/// The single in-flight recovery verification challenge, if any.
 	pub recovery_challenge: RecoveryChallengeStore,
+	/// The DNS zones Canopy may write records in, from its deployment
+	/// configuration. Empty when none are configured, in which case no group
+	/// domain can be claimed — read once at startup, so a configuration change
+	/// takes effect on restart.
+	// spec: DOM#managed-zones
+	#[from_ref(skip)]
+	pub dns_zones: Vec<ManagedZone>,
+}
+
+/// Read the managed DNS zones from the environment, logging (not failing) a
+/// malformed list: the admin server should still come up, and the domain
+/// endpoints surface the misconfiguration as "no zones configured".
+fn dns_zones_from_env() -> Vec<ManagedZone> {
+	match ManagedZone::list_from_env() {
+		Ok(zones) => zones,
+		Err(e) => {
+			tracing::warn!("ignoring malformed {}: {e}", commons_types::dns::ZONES_ENV);
+			Vec::new()
+		}
+	}
 }
 
 /// Read the recovery recipients from the environment, logging (not failing) a malformed
@@ -103,6 +124,7 @@ impl AppState {
 			prober,
 			recovery_recipients: recovery_recipients_from_env(),
 			recovery_challenge: Arc::new(Mutex::new(None)),
+			dns_zones: dns_zones_from_env(),
 		})
 	}
 
@@ -129,6 +151,7 @@ impl AppState {
 			// Read from env so the e2e fixture can exercise the recovery ceremony.
 			recovery_recipients: recovery_recipients_from_env(),
 			recovery_challenge: Arc::new(Mutex::new(None)),
+			dns_zones: dns_zones_from_env(),
 		})
 	}
 }

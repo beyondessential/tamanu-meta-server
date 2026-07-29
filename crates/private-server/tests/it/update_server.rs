@@ -398,3 +398,65 @@ async fn update_server_sets_new_device_id() {
 	})
 	.await
 }
+
+/// The per-server name-management grants (DOM) are withheld at creation and
+/// carried by the ordinary update path, one independently of the other.
+#[tokio::test(flavor = "multi_thread")]
+async fn update_server_name_management_grants() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		let id = "44444444-4444-4444-4444-444444444444";
+		conn.batch_execute(&format!(
+			"INSERT INTO servers (id, name, host, rank, kind) VALUES
+			('{id}', 'DNS Server', 'https://dns.example.com', 'production', 'central')"
+		))
+		.await
+		.unwrap();
+
+		let server = Server::get_by_id(&mut conn, id.parse().unwrap())
+			.await
+			.unwrap();
+		assert!(!server.may_manage_dns, "withheld until granted");
+		assert!(!server.may_manage_tls, "withheld until granted");
+
+		private
+			.post("/api/servers/update")
+			.json(&json!({"server_id": id, "data": {"may_manage_dns": true}}))
+			.await
+			.assert_status_ok();
+
+		let server = Server::get_by_id(&mut conn, id.parse().unwrap())
+			.await
+			.unwrap();
+		assert!(server.may_manage_dns);
+		assert!(!server.may_manage_tls, "granting DNS must not grant TLS");
+
+		// An update touching neither leaves both alone.
+		private
+			.post("/api/servers/update")
+			.json(&json!({"server_id": id, "data": {"name": "Renamed"}}))
+			.await
+			.assert_status_ok();
+		let server = Server::get_by_id(&mut conn, id.parse().unwrap())
+			.await
+			.unwrap();
+		assert!(
+			server.may_manage_dns,
+			"an unrelated update must not revoke it"
+		);
+
+		// Revoked again.
+		private
+			.post("/api/servers/update")
+			.json(
+				&json!({"server_id": id, "data": {"may_manage_dns": false, "may_manage_tls": true}}),
+			)
+			.await
+			.assert_status_ok();
+		let server = Server::get_by_id(&mut conn, id.parse().unwrap())
+			.await
+			.unwrap();
+		assert!(!server.may_manage_dns);
+		assert!(server.may_manage_tls);
+	})
+	.await
+}

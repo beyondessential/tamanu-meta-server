@@ -509,6 +509,17 @@ diesel::table! {
 }
 
 diesel::table! {
+	server_group_domains (id) {
+		id -> Uuid,
+		group_id -> Uuid,
+		domain -> Text,
+		created_by -> Nullable<Text>,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	server_groups (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -557,6 +568,8 @@ diesel::table! {
 		restore_allowed_until -> Nullable<Timestamptz>,
 		restore_allowed_by -> Nullable<Text>,
 		product -> Text,
+		may_manage_dns -> Bool,
+		may_manage_tls -> Bool,
 	}
 }
 
@@ -697,6 +710,7 @@ diesel::joinable!(server_enrollment_challenges -> servers (server_id));
 diesel::joinable!(server_enrollment_tokens -> servers (server_id));
 diesel::joinable!(server_group_backup_config -> server_groups (group_id));
 diesel::joinable!(server_group_backup_schedule -> server_groups (group_id));
+diesel::joinable!(server_group_domains -> server_groups (group_id));
 diesel::joinable!(server_reported_detail -> servers (server_id));
 diesel::joinable!(servers -> devices (device_id));
 diesel::joinable!(slack_outbox -> incident_notes (note_id));
@@ -743,6 +757,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	server_enrollment_tokens,
 	server_group_backup_config,
 	server_group_backup_schedule,
+	server_group_domains,
 	server_groups,
 	server_reported_detail,
 	servers,

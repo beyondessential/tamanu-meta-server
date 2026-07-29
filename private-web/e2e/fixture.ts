@@ -204,6 +204,10 @@ export async function startStack(opts: StartOptions = {}): Promise<StackHandle> 
 				// full decrypt round-trip is covered by the Rust endpoint tests.
 				CANOPY_RECOVERY_VAULT_KEYS:
 					"age1uy3nqmdxf4lc3sc4p32c2cp9dlqwk868gjh002gysullrgvp0cjsdg03dn",
+				// Two managed DNS zones so the group-domains UI has something to
+				// claim into; the nested one is there for the longest-apex-wins
+				// case.
+				CANOPY_DNS_ZONES: "tamanu.app=Z1E2E, demo.tamanu.app=Z2E2E",
 				// Needed by mint_enrollment to build the ticket's api_url; the
 				// setup-instructions flow auto-mints on an unregistered server.
 				PUBLIC_URL: process.env.PUBLIC_URL ?? "https://api.e2e.invalid",

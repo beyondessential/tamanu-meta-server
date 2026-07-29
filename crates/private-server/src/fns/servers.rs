@@ -134,6 +134,12 @@ pub struct ServerInfo {
 	/// omitted-vs-present semantics as `up`.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub health: Option<HealthState>,
+	/// Whether the server may manage its own DNS records for names under its
+	/// group's domains.
+	pub may_manage_dns: bool,
+	/// Whether the server may obtain TLS certificates for names under its
+	/// group's domains.
+	pub may_manage_tls: bool,
 }
 
 /// The server's most recently reported status push: version/host info plus
@@ -258,6 +264,14 @@ pub struct ServerDataUpdate {
 	/// unchanged.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub tags: Option<TagMap>,
+	/// Whether this server may manage its own DNS records for names under its
+	/// group's domains. Omit to leave unchanged.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub may_manage_dns: Option<bool>,
+	/// Whether this server may obtain TLS certificates for names under its
+	/// group's domains. Omit to leave unchanged.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub may_manage_tls: Option<bool>,
 }
 
 fn deserialize_some<'de, T, D>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
@@ -293,6 +307,8 @@ pub(super) fn server_to_info(s: Server) -> ServerInfo {
 		archived: s.deleted_at.is_some(),
 		up: None,
 		health: None,
+		may_manage_dns: s.may_manage_dns,
+		may_manage_tls: s.may_manage_tls,
 	}
 }
 
@@ -868,6 +884,8 @@ pub async fn update(
 			.map(|s| database::pg_duration::PgDuration(jiff::SignedDuration::from_secs(s))),
 		notes: args.data.notes,
 		tags: args.data.tags,
+		may_manage_dns: args.data.may_manage_dns,
+		may_manage_tls: args.data.may_manage_tls,
 	};
 	Server::update(&mut conn, args.server_id, update_data).await?;
 
@@ -1028,6 +1046,10 @@ pub async fn create(
 		registered_at: None,
 		restore_allowed_until: None,
 		restore_allowed_by: None,
+		// Granted afterwards, deliberately: a server is not trusted with its
+		// own names by the act of being created.
+		may_manage_dns: false,
+		may_manage_tls: false,
 	};
 
 	let created = Server::create(&mut conn, server).await?;
@@ -1349,6 +1371,8 @@ pub async fn attach_tailscale_device(
 			alert_when_down_for: None,
 			notes: None,
 			tags: None,
+			may_manage_dns: None,
+			may_manage_tls: None,
 		},
 	)
 	.await?;

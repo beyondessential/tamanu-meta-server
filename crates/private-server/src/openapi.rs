@@ -21,6 +21,7 @@ use utoipa::{
 		(name = "bestool", description = "Bestool SQL snippet library."),
 		(name = "commons", description = "Shared configuration and identity helpers."),
 		(name = "devices", description = "Device registry, trust, and key management."),
+		(name = "domains", description = "Managed DNS zones and the domains each group controls."),
 		(name = "healthchecks", description = "Healthcheck catalog: severities, conditional rules, and sample data."),
 		(name = "incidents", description = "Operational incidents (groups of issues against a server)."),
 		(name = "issues", description = "Per-server issues raised from device events."),
