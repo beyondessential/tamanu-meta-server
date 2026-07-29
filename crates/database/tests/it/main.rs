@@ -22,6 +22,7 @@ mod incident_reeval_queue;
 mod incident_result_semantics;
 mod incident_stats;
 mod mcp_tokens;
+mod migration_test_candidates;
 mod reachability_sweep;
 mod recovery_vault;
 mod reported_detail;
