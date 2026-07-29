@@ -605,7 +605,7 @@ impl BackupRestoreCheck {
 	pub async fn record_report(
 		db: &mut AsyncPgConnection,
 		new: NewBackupRestoreCheck,
-	) -> Result<()> {
+	) -> Result<i64> {
 		use crate::schema::backup_restore_checks::dsl;
 
 		let healthy = new.outcome == RunOutcome::Success && new.replica_healthy;
@@ -615,9 +615,10 @@ impl BackupRestoreCheck {
 		let error = new.error.clone();
 		let snapshot_id = new.snapshot_id.clone();
 
-		diesel::insert_into(dsl::backup_restore_checks)
+		let check_id: i64 = diesel::insert_into(dsl::backup_restore_checks)
 			.values(new)
-			.execute(db)
+			.returning(dsl::id)
+			.get_result(db)
 			.await?;
 
 		// Restore-health is attributed per server; a report without one is
@@ -676,7 +677,7 @@ impl BackupRestoreCheck {
 				.await?;
 			}
 		}
-		Ok(())
+		Ok(check_id)
 	}
 
 	/// Recent reports for a group, newest first — the operator restore-health
