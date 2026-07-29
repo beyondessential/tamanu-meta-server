@@ -34,6 +34,9 @@ pub struct VersionKnownIssue {
 	pub max_major: Option<i32>,
 	pub max_minor: Option<i32>,
 	pub max_patch: Option<i32>,
+	/// Provenance, not scope: the server whose data provoked the issue, where
+	/// one did. The issue itself covers the version range regardless.
+	pub server_id: Option<Uuid>,
 }
 
 impl VersionKnownIssue {
@@ -42,6 +45,7 @@ impl VersionKnownIssue {
 		min: (i32, i32, i32),
 		author: &str,
 		description: &str,
+		server_id: Option<Uuid>,
 	) -> Result<Self> {
 		use crate::schema::version_known_issues;
 		diesel::insert_into(version_known_issues::table)
@@ -51,6 +55,7 @@ impl VersionKnownIssue {
 				version_known_issues::min_patch.eq(min.2),
 				version_known_issues::author.eq(author),
 				version_known_issues::description.eq(description),
+				version_known_issues::server_id.eq(server_id),
 			))
 			.returning(Self::as_select())
 			.get_result(db)

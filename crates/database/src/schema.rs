@@ -649,6 +649,7 @@ diesel::table! {
 		max_major -> Nullable<Int4>,
 		max_minor -> Nullable<Int4>,
 		max_patch -> Nullable<Int4>,
+		server_id -> Nullable<Uuid>,
 	}
 }
 
@@ -718,6 +719,7 @@ diesel::joinable!(slack_outbox -> incidents (incident_id));
 diesel::joinable!(slack_outbox -> issues (issue_id));
 diesel::joinable!(statuses -> devices (device_id));
 diesel::joinable!(statuses -> servers (server_id));
+diesel::joinable!(version_known_issues -> servers (server_id));
 diesel::joinable!(versions -> devices (device_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
