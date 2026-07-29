@@ -23,6 +23,7 @@ use commons_servers::{
 	tailnet_directory::{TailnetDirectory, TailnetDirectoryConfig},
 	tailnet_sweeps,
 };
+use commons_types::dns::ManagedZone;
 use database::{issues::reconcile_open_incidents, statuses::Status};
 use lloggs::{LoggingArgs, PreArgs};
 use miette::IntoDiagnostic;
@@ -228,6 +229,26 @@ pub fn spawn() -> JoinHandle<()> {
 				Ok(0) => {}
 				Ok(n) => debug!("filed {n} mcp token-expiry events"),
 				Err(err) => error!("mcp token-expiry sweep failed: {err}"),
+			}
+
+			// Group domains left outside Canopy's configured DNS zones — a zone
+			// dropped from the configuration, or a configuration that no longer
+			// parses. Read fresh each pass so restoring the configuration (and
+			// restarting this pod) recovers the alert.
+			// spec: DOM#when-the-zone-configuration-changes
+			let (zones, zone_error) = match ManagedZone::list_from_env() {
+				Ok(zones) => (zones, None),
+				Err(err) => (Vec::new(), Some(err.to_string())),
+			};
+			match database::self_alerts::sweep_dns_zone_coverage(
+				&mut db,
+				&zones,
+				zone_error.as_deref(),
+			)
+			.await
+			{
+				Ok(_) => {}
+				Err(err) => error!("dns zone coverage sweep failed: {err}"),
 			}
 		}
 	})

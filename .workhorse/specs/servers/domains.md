@@ -55,12 +55,31 @@ A name is claimed in the form DNS uses, so an internationalised domain is claime
 A claim is refused when the name is not a syntactically valid domain name of at least two labels.
 
 Releasing a domain ends the group's control of it and of every name beneath it.
-
-Removing a zone from Canopy's configuration does not remove the claims within it.
-Such a claim is kept and reported as unmatched: Canopy will act on no name beneath it, though it still holds its exclusivity against other claims, since the claim itself has not been given up.
-An operator resolves an unmatched claim by restoring the zone to the configuration or by releasing the claim.
+Releasing is the only way a claim goes away: nothing Canopy observes about its own configuration ever drops one.
 
 Archiving a group keeps its domains, so restoring the group restores its control of them.
+
+## When the zone configuration changes
+
+A claim outlives the zone that admitted it.
+Removing a zone from Canopy's configuration — or breaking the configuration outright — leaves every claim inside it standing, still excluding other groups from overlapping it, and still the group's to release.
+What stops is Canopy acting: no name beneath an uncovered claim resolves to a zone, so Canopy publishes and renews nothing there.
+Canopy holds the claim rather than dropping it because a claim is an operator's decision about a deployment, and a configuration Canopy cannot read is no evidence that the decision was withdrawn — inferring release from it would silently hand a live deployment's names to whoever asked next.
+
+Because the configuration is the only thing that changed, and it is a Canopy-level fault rather than any one group's, Canopy reports the shortfall as a self-alert against itself rather than as an issue on the affected groups (see [SELF](../private-server/self-alerts.md)).
+One alert covers every uncovered claim at once and names each domain with the group holding it, so an operator sees the whole blast radius in one place instead of visiting each group.
+The alert distinguishes what happened, because the two cases are fixed differently:
+
+- Some claims are uncovered while other zones remain configured, which is what removing one zone of several looks like.
+  This is a warning: the rest of the fleet is unaffected, and an operator either restores the zone or releases the claims that no longer belong.
+- The configuration cannot be read, or names no zones at all while domains stand claimed.
+  This is a failure: Canopy can act on no group's names, so it reports the parse error where there is one, and says it is treating itself as having no zones.
+
+A configuration that names no zones while nothing is claimed raises nothing, that being the feature simply not in use rather than a fault.
+An archived group's uncovered claims raise nothing either, a deployment that has been put away not being something to call an operator about.
+
+The alert recovers on its own once every live group's claims sit within a configured zone again, whether that came about by restoring the zone or by releasing the claims.
+A group's own page flags each of its uncovered claims besides, so an operator arriving from the alert sees which of that group's domains are the problem.
 
 ## Permission for a server to manage its own names
 
@@ -96,7 +115,7 @@ The permission is the trust boundary: a server permitted to manage its DNS can p
 
 ## Presentation
 
-A group presents the domains it controls, each with the managed zone it resolves to, and flags a claim no configured zone matches.
+A group presents the domains it controls, each with the managed zone it resolves to, and flags a claim no configured zone covers.
 The configured managed zones are shown to operators, so an operator claiming a domain can see which names are available to be claimed.
 
 A server presents whether it may manage its own DNS and whether it may obtain its own certificates, alongside the other permissions an operator holds over it, and an operator grants and revokes each there.

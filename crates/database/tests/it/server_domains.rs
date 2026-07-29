@@ -273,3 +273,166 @@ async fn a_claim_survives_its_zone_leaving_the_configuration() {
 	})
 	.await;
 }
+
+/// The DNS-zone-coverage self-alert (DOM): a claim outliving its zone is kept
+/// and reported, warning when only some claims are uncovered and failing when
+/// Canopy can read no zones at all.
+mod coverage_alert {
+	use super::*;
+	use commons_types::status::CheckResult;
+	use database::self_alerts::{self, DNS_ZONE_COVERAGE_REF};
+
+	async fn current_result(conn: &mut AsyncPgConnection) -> Option<CheckResult> {
+		self_alerts::current(conn, DNS_ZONE_COVERAGE_REF)
+			.await
+			.expect("current")
+			.filter(|issue| issue.active)
+			.and_then(|issue| issue.effective_result)
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn covered_claims_raise_nothing() {
+		TestDb::run(async |mut conn, _url| {
+			let group = insert_group(&mut conn, "fiji").await;
+			ServerGroupDomain::claim(&mut conn, group, "fiji.tamanu.app", None, &zones())
+				.await
+				.expect("claim");
+
+			self_alerts::sweep_dns_zone_coverage(&mut conn, &zones(), None)
+				.await
+				.expect("sweep");
+			assert!(current_result(&mut conn).await.is_none());
+		})
+		.await;
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn no_zones_and_no_claims_is_not_a_fault() {
+		TestDb::run(async |mut conn, _url| {
+			// The feature simply isn't in use.
+			self_alerts::sweep_dns_zone_coverage(&mut conn, &[], None)
+				.await
+				.expect("sweep");
+			assert!(current_result(&mut conn).await.is_none());
+		})
+		.await;
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn dropping_one_zone_of_several_warns_and_keeps_the_claim() {
+		TestDb::run(async |mut conn, _url| {
+			let group = insert_group(&mut conn, "fiji").await;
+			let claim =
+				ServerGroupDomain::claim(&mut conn, group, "fiji.senaite.app", None, &zones())
+					.await
+					.expect("claim");
+
+			// `senaite.app` leaves the configuration; `tamanu.app` stays.
+			let narrowed = ManagedZone::parse_list("tamanu.app=Z1", None).expect("parse");
+			self_alerts::sweep_dns_zone_coverage(&mut conn, &narrowed, None)
+				.await
+				.expect("sweep");
+
+			assert_eq!(current_result(&mut conn).await, Some(CheckResult::Warning));
+
+			// The claim itself is untouched, and still excludes other groups.
+			let listed = ServerGroupDomain::list_for_group(&mut conn, group)
+				.await
+				.expect("list");
+			assert_eq!(listed.len(), 1);
+			assert_eq!(listed[0].id, claim.id);
+
+			// Restoring the zone recovers the alert on its own.
+			self_alerts::sweep_dns_zone_coverage(&mut conn, &zones(), None)
+				.await
+				.expect("sweep");
+			assert!(current_result(&mut conn).await.is_none());
+		})
+		.await;
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn losing_every_zone_fails_rather_than_warns() {
+		TestDb::run(async |mut conn, _url| {
+			let group = insert_group(&mut conn, "fiji").await;
+			ServerGroupDomain::claim(&mut conn, group, "fiji.tamanu.app", None, &zones())
+				.await
+				.expect("claim");
+
+			self_alerts::sweep_dns_zone_coverage(&mut conn, &[], None)
+				.await
+				.expect("sweep");
+			assert_eq!(current_result(&mut conn).await, Some(CheckResult::Failed));
+		})
+		.await;
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn an_unreadable_configuration_fails_and_reports_the_error() {
+		TestDb::run(async |mut conn, _url| {
+			let issue = self_alerts::sweep_dns_zone_coverage(
+				&mut conn,
+				&[],
+				Some("managed zone \"tamanu.app\" has no provider zone id"),
+			)
+			.await
+			.expect("sweep")
+			.expect("an alert even with nothing claimed");
+
+			assert_eq!(issue.effective_result, Some(CheckResult::Failed));
+			assert!(
+				issue.message.contains("no provider zone id"),
+				"the parse error belongs in the message: {}",
+				issue.message
+			);
+		})
+		.await;
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn a_warning_can_still_escalate_to_a_failure() {
+		TestDb::run(async |mut conn, _url| {
+			let group = insert_group(&mut conn, "fiji").await;
+			ServerGroupDomain::claim(&mut conn, group, "fiji.senaite.app", None, &zones())
+				.await
+				.expect("claim");
+
+			// Warn first, so the catalog entry is seeded by that sighting...
+			let narrowed = ManagedZone::parse_list("tamanu.app=Z1", None).expect("parse");
+			self_alerts::sweep_dns_zone_coverage(&mut conn, &narrowed, None)
+				.await
+				.expect("sweep");
+			assert_eq!(current_result(&mut conn).await, Some(CheckResult::Warning));
+
+			// ...then lose everything: the seeded ceiling must not cap this at
+			// warning.
+			self_alerts::sweep_dns_zone_coverage(&mut conn, &[], None)
+				.await
+				.expect("sweep");
+			assert_eq!(current_result(&mut conn).await, Some(CheckResult::Failed));
+		})
+		.await;
+	}
+
+	#[tokio::test(flavor = "multi_thread")]
+	async fn an_archived_groups_uncovered_claim_is_left_alone() {
+		TestDb::run(async |mut conn, _url| {
+			let group = insert_group(&mut conn, "put-away").await;
+			ServerGroupDomain::claim(&mut conn, group, "old.senaite.app", None, &zones())
+				.await
+				.expect("claim");
+			sql_query("UPDATE server_groups SET deleted_at = now() WHERE id = $1")
+				.bind::<sql_types::Uuid, _>(group)
+				.execute(&mut conn)
+				.await
+				.expect("archive group");
+
+			let narrowed = ManagedZone::parse_list("tamanu.app=Z1", None).expect("parse");
+			self_alerts::sweep_dns_zone_coverage(&mut conn, &narrowed, None)
+				.await
+				.expect("sweep");
+			assert!(current_result(&mut conn).await.is_none());
+		})
+		.await;
+	}
+}

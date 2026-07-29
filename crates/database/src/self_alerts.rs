@@ -10,6 +10,7 @@
 //! [`crate::issues::raise_global_event`]).
 
 use commons_errors::Result;
+use commons_types::dns::ManagedZone;
 use commons_types::status::CheckResult;
 use diesel_async::AsyncPgConnection;
 
@@ -48,6 +49,28 @@ One or more catalogued healthchecks have not been reported by any server in the 
 ## Solve
 
 Review the checks listed in the operator UI's healthcheck settings and decommission the ones that are gone for good; a decommissioned check's stale issues are cleared fleet-wide.";
+
+/// Canopy's configured DNS zones don't cover the domains groups have been
+/// given — either the configuration is unreadable, or a zone has left it while
+/// claims inside it stand. Coalescing: one alert lists every affected group.
+/// Recovers when every live group's claims sit in a configured zone again.
+// spec: DOM#when-the-zone-configuration-changes
+pub const DNS_ZONE_COVERAGE_REF: &str = "dns-zone-coverage";
+
+pub const DNS_ZONE_COVERAGE_DOC: &str = "## Description
+
+Canopy holds the DNS zones it may write records in as deployment configuration, and a group domain is only actionable while a configured zone covers it. This alert means at least one group is now depending on a domain Canopy cannot reach — usually a zone removed from the configuration while its claims stood, or a configuration that no longer parses.
+
+Claims are never dropped for this: the group keeps the domain, and it keeps excluding other groups from overlapping it. What stops is Canopy acting on any name beneath it.
+
+## Results
+
+- **warn** — some claims fall outside the configured zones while others are covered, which is what removing one zone of several looks like. Either restore the zone to the configuration or release the claims that no longer belong.
+- **fail** — the configuration is unreadable, or there are no zones at all while domains stand claimed. Canopy can serve no DNS or TLS for any group until it is fixed.
+
+## Solve
+
+Compare the zone list in Canopy's deployment configuration against the domains reported in the alert message. Restore the missing zone if its removal was accidental; if it was deliberate, release the claims on each group's page. A configuration that does not parse is reported with the parse error — fix the entry and restart.";
 
 /// Evaluate the fleet-wide check-liveness condition and raise or recover
 /// the coalescing [`STALE_CHECKS_REF`] self-alert. Runs after liveness is
@@ -88,6 +111,109 @@ pub async fn sweep_stale_healthchecks(conn: &mut AsyncPgConnection) -> Result<Op
 	)
 	.await
 	.map(Some)
+}
+
+/// Evaluate the DNS zone coverage condition and raise or recover the coalescing
+/// [`DNS_ZONE_COVERAGE_REF`] self-alert.
+///
+/// `zones` is what Canopy managed to read from its configuration, and
+/// `config_error` is why it read nothing when the configuration was present but
+/// unparseable. The two carry different messages and different severity, because
+/// one is a Canopy fault and the other is a tidy-up after a deliberate change.
+///
+/// A deployment with no zones configured and nothing claimed is not a problem:
+/// that is the feature simply not in use.
+// spec: DOM#when-the-zone-configuration-changes
+pub async fn sweep_dns_zone_coverage(
+	conn: &mut AsyncPgConnection,
+	zones: &[ManagedZone],
+	config_error: Option<&str>,
+) -> Result<Option<Issue>> {
+	let unzoned = crate::server_domains::ServerGroupDomain::unzoned(conn, zones).await?;
+
+	if unzoned.is_empty() && config_error.is_none() {
+		return recover(
+			conn,
+			DNS_ZONE_COVERAGE_REF,
+			"every claimed group domain sits within a configured DNS zone",
+		)
+		.await;
+	}
+
+	let mut groups: Vec<&str> = unzoned.iter().map(|d| d.group_name.as_str()).collect();
+	groups.sort_unstable();
+	groups.dedup();
+	let listed: Vec<String> = unzoned
+		.iter()
+		.map(|d| format!("{} ({})", d.domain, d.group_name))
+		.collect();
+
+	let (observed, message) = if let Some(error) = config_error {
+		(
+			CheckResult::Failed,
+			format!(
+				"Canopy's managed DNS zone configuration could not be read ({error}), so it is \
+				 acting as though it has no zones. {} claimed domain(s) across {} group(s) are \
+				 unusable until it is fixed{}",
+				unzoned.len(),
+				groups.len(),
+				list_suffix(&listed),
+			),
+		)
+	} else if zones.is_empty() {
+		(
+			CheckResult::Failed,
+			format!(
+				"Canopy has no managed DNS zones configured, but {} domain(s) across {} group(s) \
+				 stand claimed{}",
+				unzoned.len(),
+				groups.len(),
+				list_suffix(&listed),
+			),
+		)
+	} else {
+		(
+			CheckResult::Warning,
+			format!(
+				"{} claimed domain(s) across {} group(s) fall outside every configured DNS zone \
+				 ({}){}",
+				unzoned.len(),
+				groups.len(),
+				zones
+					.iter()
+					.map(|z| z.apex.as_str())
+					.collect::<Vec<_>>()
+					.join(", "),
+				list_suffix(&listed),
+			),
+		)
+	};
+
+	// The ceiling registers as `fail` whatever severity this raise carries, so a
+	// warning that later becomes a fault isn't capped at warning by the policy
+	// the first sighting seeded.
+	raise(
+		conn,
+		DNS_ZONE_COVERAGE_REF,
+		observed,
+		CheckResult::Failed,
+		false,
+		Some(DNS_ZONE_COVERAGE_DOC),
+		"Group domains outside Canopy's DNS zones",
+		&message,
+	)
+	.await
+	.map(Some)
+}
+
+/// `": a, b, c"`, or nothing at all for an empty list — a broken configuration
+/// with no claims yet has nothing to name.
+fn list_suffix(listed: &[String]) -> String {
+	if listed.is_empty() {
+		String::new()
+	} else {
+		format!(": {}", listed.join(", "))
+	}
 }
 
 /// Raise (or re-affirm) a self-alert: file the coalescing canopy-wide

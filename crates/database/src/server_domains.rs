@@ -47,6 +47,14 @@ pub struct ServerGroupDomain {
 	pub updated_at: Timestamp,
 }
 
+/// A claim no configured zone covers, with its group named for reporting.
+#[derive(Debug, Clone, Serialize)]
+pub struct UnzonedDomain {
+	pub group_id: Uuid,
+	pub group_name: String,
+	pub domain: String,
+}
+
 impl ServerGroupDomain {
 	/// Claim `domain` for a group.
 	///
@@ -127,6 +135,46 @@ impl ServerGroupDomain {
 			.load(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// Every live group's claims that no configured zone covers, by domain —
+	/// the deployments now depending on a domain outside Canopy's reach.
+	///
+	/// Zone matching is longest-suffix against a list that lives in
+	/// configuration rather than in the database, so the filtering happens here
+	/// rather than in SQL. The claim table is small (one row per domain a group
+	/// controls) and this runs on the monitor's sweep cadence.
+	///
+	/// Archived groups are left out: their claims are kept, but a deployment
+	/// that has been put away is not something to alert an operator about.
+	pub async fn unzoned(
+		db: &mut AsyncPgConnection,
+		zones: &[ManagedZone],
+	) -> Result<Vec<UnzonedDomain>> {
+		use crate::schema::{server_group_domains, server_groups};
+
+		let rows: Vec<(Uuid, String, String)> = server_group_domains::table
+			.inner_join(server_groups::table)
+			.filter(server_groups::deleted_at.is_null())
+			.select((
+				server_group_domains::group_id,
+				server_groups::name,
+				server_group_domains::domain,
+			))
+			.order(server_group_domains::domain.asc())
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(rows
+			.into_iter()
+			.filter(|(_, _, domain)| match_zone(domain, zones).is_none())
+			.map(|(group_id, group_name, domain)| UnzonedDomain {
+				group_id,
+				group_name,
+				domain,
+			})
+			.collect())
 	}
 
 	/// Every claim in the fleet, by domain.
