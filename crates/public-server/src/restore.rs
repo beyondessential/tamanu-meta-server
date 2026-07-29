@@ -25,10 +25,13 @@ use commons_types::backup::{
 use database::{
 	Db,
 	backups::{BackupRun, NewBackupCredentialIssuance, ServerGroupBackupConfig},
+	migration_tests,
+	reported_detail::ReportedDetail,
 	restore::{
 		BackupRestoreCheck, NewBackupRestoreCheck, RestoreConsumerCapability, RestoreReplica,
 	},
 	servers::Server,
+	versions::Version,
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -147,6 +150,46 @@ pub struct WorklistEntry {
 	pub prefix: String,
 	/// AWS region of the bucket.
 	pub region: String,
+	/// For a `migrate` intent, the version whose schema migrations to apply
+	/// after restoring. Obtain them from that version's published artefacts, the
+	/// same way a server being upgraded does. `null` for every other intent.
+	pub target_version: Option<String>,
+	/// Identifier of that version. Echo it back in the migration-test report.
+	pub target_version_id: Option<Uuid>,
+}
+
+/// The version a `migrate` entry for `server` should target, with its semver
+/// for the consumer to resolve artefacts by.
+///
+/// `None` when the server runs another product, has never reported a version,
+/// or is already on the newest published one.
+// spec: RST#candidate-versions
+async fn migration_target(
+	conn: &mut diesel_async::AsyncPgConnection,
+	server: &Server,
+) -> Result<Option<(Uuid, commons_types::version::VersionStr)>> {
+	if server.product != commons_types::server::product::Product::Tamanu {
+		return Ok(None);
+	}
+
+	let Some(reported) = ReportedDetail::last_version(conn, server.id).await? else {
+		return Ok(None);
+	};
+
+	let versions = Version::get_all(conn).await?;
+	let Some(version_id) = migration_tests::upgrade_target(&reported, &versions) else {
+		return Ok(None);
+	};
+
+	let target = versions
+		.iter()
+		.find(|version| version.id == version_id)
+		.expect("upgrade_target returns one of the versions it was given");
+
+	Ok(Some((
+		version_id,
+		commons_types::version::VersionStr(target.as_semver()),
+	)))
 }
 
 /// Fetch the full set of replicas this device should maintain.
@@ -248,6 +291,7 @@ async fn worklist(
 		// The descriptor governs the intent's semantics and parameter resolution.
 		let descriptor = &descriptors[&d.intent];
 		let once = descriptor.has_semantic(semantics::ONCE);
+		let migrates = descriptor.has_semantic(semantics::MIGRATE);
 		let replica_values: ParamValues =
 			serde_json::from_value(d.params.clone()).unwrap_or_default();
 		let params = resolve_params(&descriptor.params, &replica_values);
@@ -259,15 +303,35 @@ async fn worklist(
 				continue;
 			}
 			let latest = snapshots.get(&(server.id, d.r#type.clone()));
-			// A `once` intent drops off the worklist once the latest snapshot has
-			// a healthy report; it reappears only when a newer snapshot exists.
+
+			// A `migrate` intent needs a version to migrate to, so a server with
+			// no candidate contributes nothing rather than an entry naming none.
+			let target = if migrates {
+				match migration_target(&mut conn, &server).await? {
+					Some(target) => Some(target),
+					None => continue,
+				}
+			} else {
+				None
+			};
+
+			// A `once` intent drops off the worklist once its work is settled for
+			// the latest snapshot, and reappears only when a newer one exists. For
+			// a `migrate` intent that settling is keyed to the target version too,
+			// and a failure settles it as firmly as a pass.
 			if once {
-				let key = (server.id, d.r#type.clone(), d.intent.clone());
-				let already = matches!(
-					(verified.get(&key), latest.and_then(|r| r.snapshot_id.as_ref())),
-					(Some(v), Some(s)) if v == s
-				);
-				if already {
+				let settled = match (&target, latest.and_then(|r| r.snapshot_id.as_ref())) {
+					(Some((version_id, _)), Some(snapshot)) => {
+						migration_tests::has_verdict(&mut conn, server.id, snapshot, *version_id)
+							.await?
+					}
+					(Some(_), None) => false,
+					(None, snapshot) => {
+						let key = (server.id, d.r#type.clone(), d.intent.clone());
+						matches!((verified.get(&key), snapshot), (Some(v), Some(s)) if v == s)
+					}
+				};
+				if settled {
 					continue;
 				}
 			}
@@ -286,6 +350,8 @@ async fn worklist(
 				bucket: cfg.bucket.clone(),
 				prefix: cfg.prefix.clone(),
 				region: region.clone(),
+				target_version: target.as_ref().map(|(_, version)| version.to_string()),
+				target_version_id: target.as_ref().map(|(version_id, _)| *version_id),
 			});
 		}
 	}

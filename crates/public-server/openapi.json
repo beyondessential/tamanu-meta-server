@@ -2450,6 +2450,21 @@
             "type": "string",
             "description": "Kind of storage backend. Always `\"s3\"`."
           },
+          "target_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "For a `migrate` intent, the version whose schema migrations to apply\nafter restoring. Obtain them from that version's published artefacts, the\nsame way a server being upgraded does. `null` for every other intent."
+          },
+          "target_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Identifier of that version. Echo it back in the migration-test report."
+          },
           "type": {
             "type": "string",
             "description": "The backup type to restore (e.g. `tamanu-postgres`)."

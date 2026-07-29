@@ -219,3 +219,30 @@ pub async fn verdict(
 		Some(_) => Verdict::Failed,
 	})
 }
+
+/// Whether `server` already has a verdict for this snapshot and target version.
+///
+/// A failure counts. A migration failing against a fixed snapshot fails the
+/// same way every time, so re-dispatching it would spend a full restore on an
+/// answer already held.
+// spec: RST#dispatching-a-migration-test
+pub async fn has_verdict(
+	db: &mut AsyncPgConnection,
+	server_id: Uuid,
+	snapshot_id: &str,
+	target_version_id: Uuid,
+) -> Result<bool> {
+	use crate::schema::{backup_restore_checks, migration_tests};
+
+	let existing: Option<i64> = migration_tests::table
+		.inner_join(backup_restore_checks::table)
+		.select(migration_tests::check_id)
+		.filter(migration_tests::target_version_id.eq(target_version_id))
+		.filter(backup_restore_checks::server_id.eq(server_id))
+		.filter(backup_restore_checks::snapshot_id.eq(snapshot_id))
+		.first(db)
+		.await
+		.optional()?;
+
+	Ok(existing.is_some())
+}
