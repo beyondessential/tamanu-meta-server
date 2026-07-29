@@ -95,6 +95,9 @@ The recognised semantics are:
   Without `once`, the intent is always pointed at the latest snapshot and manages its own refresh.
   An intent whose result depends on more than the snapshot keys `once` to that wider input as well, and may treat a failure as settled rather than retryable (see [Pre-upgrade migration testing](#pre-upgrade-migration-testing)).
 - **url** — the intent's health report carries a link to the running replica within its attached health data, which Canopy surfaces to operators.
+- **migrate** — the intent applies a Tamanu version's schema migrations to the replica it restores.
+  Canopy names a target version on each of the intent's worklist entries and withholds an entry from a server that has no candidate version.
+  `once` for such an intent is keyed to the snapshot and the target version together (see [Pre-upgrade migration testing](#pre-upgrade-migration-testing)).
 
 ### Parameters
 
@@ -205,7 +208,7 @@ A restore for which credentials were issued but no report has arrived is shown a
 
 ## Pre-upgrade migration testing
 
-An intent may apply a Tamanu version's schema migrations to the replica it restores, so a version's effect on a deployment's real data is known ahead of an upgrade window rather than discovered inside one.
+An intent carrying the `migrate` semantic applies a Tamanu version's schema migrations to the replica it restores, so a version's effect on a deployment's real data is known ahead of an upgrade window rather than discovered inside one.
 
 An upgrade applies schema migrations to the live database with the deployment down for the duration.
 A migration that fails against real data, and one that succeeds but runs far longer than the window allowed for, are both properties of that deployment's data rather than of the migration alone, so neither shows against a small or synthetic database.
@@ -236,7 +239,11 @@ That window is where the answer is still cheap: the fleet is not moving yet, and
 
 ### Dispatching a migration test
 
-A migration-testing entry carries the target version alongside the snapshot, and a reference to that version's migrations in the same form Canopy publishes a version's artefacts to devices, so a consumer obtains them the way a server being upgraded does.
+An entry for a `migrate` intent names the target version alongside the snapshot.
+A consumer obtains that version's migrations from its published artefacts, the same way a server being upgraded does, so naming the version is the whole reference it needs.
+
+A server with no candidate version contributes no entry, whatever its declaration says.
+There is nothing to migrate to, and an entry naming no version would ask a consumer to restore a database for no reason.
 
 `once` is keyed to the pair of snapshot and target version: an entry is omitted once that pair has a verdict, and reinstated when either a newer snapshot or a new candidate version appears.
 A failed verdict settles that pair rather than leaving it retryable.

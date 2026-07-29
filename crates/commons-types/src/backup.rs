@@ -387,6 +387,11 @@ pub mod semantics {
 	/// The intent's health report carries a link to the running replica within
 	/// its health data, which Canopy surfaces to operators.
 	pub const URL: &str = "url";
+	/// The intent applies a Tamanu version's schema migrations to the replica it
+	/// restores: Canopy names a target version on the worklist entry, withholds
+	/// an entry from a server with no candidate version, and keys `once` to the
+	/// snapshot and target version together.
+	pub const MIGRATE: &str = "migrate";
 }
 
 /// The data type of a restore-replica configuration parameter, which
