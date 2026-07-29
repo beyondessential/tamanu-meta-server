@@ -376,7 +376,6 @@ impl Acme {
 	/// needed and is not asked for.
 	// spec: CRT#revocation
 	pub async fn revoke(&self, chain_pem: &str, reason: RevokeFor) -> AcmeResult<()> {
-		let leaf = leaf_der(chain_pem)?;
 		match self {
 			Self::Fake(state) => {
 				let mut state = state.lock().expect("fake ca lock");
@@ -389,9 +388,11 @@ impl Acme {
 				state.revoked.push(chain_pem.to_string());
 				Ok(())
 			}
+			// Only the real path parses the chain, because only it has to: the
+			// authority is told which certificate by its bytes.
 			Self::Real(account) => account
 				.revoke(&RevocationRequest {
-					certificate: &leaf,
+					certificate: &leaf_der(chain_pem)?,
 					reason: Some(reason.as_acme()),
 				})
 				.await

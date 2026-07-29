@@ -1690,6 +1690,310 @@
         ]
       }
     },
+    "/api/certificates/authority": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "The authority, its profiles, and whether Canopy's account with it is usable.",
+        "description": "Presented to operators because a misconfiguration of issuance shows up here\nrather than on any one server.",
+        "operationId": "certificates_authority",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorityView"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/certificates/for_group": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "The names in use under each domain a group controls, and which of them hold a\ncurrent certificate.",
+        "description": "So that whether a deployment's names are healthy is answerable from the\ngroup's page, without visiting each of its servers.",
+        "operationId": "certificates_for_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DomainHealthView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/certificates/for_server": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Everything a server's page needs about its names and certificates.",
+        "description": "One call rather than several, because the parts are read together and a\nhalf-loaded panel would show a certificate without the pause that explains\nwhy it is not renewing.",
+        "operationId": "certificates_for_server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerNamesView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/certificates/pause": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Pause a server: Canopy makes no new changes on its behalf.",
+        "description": "Nothing already in place is withdrawn — records published stand, certificates\nheld stay held and collectable until they expire, and the deployment keeps\nworking exactly as it did. What stops is Canopy doing anything *new*.\n\nA second pause leaves the first in place, so the original reason and time are\nnot overwritten by a later one.",
+        "operationId": "certificates_pause",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PauseArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/certificates/resume": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Lift a server's pause. Work resumes where it left off.",
+        "description": "Only an operator can do this: Canopy never lifts a pause itself, however long\nit has been in place and however much is expiring under it.",
+        "operationId": "certificates_resume",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/certificates/revoke": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Revoke a certificate Canopy holds.",
+        "description": "Canopy holds the account that obtained it, which is authority enough; the\nserver's private key is not needed and is not asked for. The authority is told\nfirst and Canopy records the revocation only once it has accepted, so the two\nnever disagree — a 502 means nothing was revoked and the operator can try\nagain.\n\nRevoking pauses the server, without being asked. Revocation and re-issuance\nwould otherwise chase each other: a key revoked as compromised has its\nreplacement requested within minutes by an agent doing exactly what it was\nbuilt to do, and if the key leaked because the host was compromised, that\nreplacement hands the same attacker a fresh certificate.\n\nCannot be undone: a revoked certificate stays revoked, and the remedy is a new\none.",
+        "operationId": "certificates_revoke",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CertificateRevokeArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "There is no chain to revoke, or it is revoked already.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The authority would not accept the revocation; nothing was changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/certificates/set_profile": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Set the profile a server's certificates are requested under.",
+        "description": "Lifetime is a property of how a deployment is run rather than of Canopy, so it\nis an operator's choice per server: a cloud deployment whose issuance is\nexercised constantly can carry a short lifetime where an on-premises one that\nmay be offline for days cannot. Takes effect on the next issuance or renewal;\na certificate already held keeps the lifetime it was issued with.\n\nResponds 409 for a profile the authority does not advertise.",
+        "operationId": "certificates_set_profile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetProfileArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The authority does not offer that profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/commons/is_current_user_admin": {
       "post": {
         "tags": [
@@ -6936,6 +7240,41 @@
           }
         }
       },
+      "AuthorityView": {
+        "type": "object",
+        "description": "The certificate authority Canopy is configured to use, and whether it works.",
+        "required": [
+          "profiles",
+          "account_usable"
+        ],
+        "properties": {
+          "account_usable": {
+            "type": "boolean",
+            "description": "Whether Canopy holds a usable account at the authority. False where none\nis configured, or where the last attempt to use it failed."
+          },
+          "directory": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The authority's directory URL, or null where none is configured — in\nwhich case Canopy issues no certificates at all."
+          },
+          "problem": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What is currently wrong, where anything is: the message from the standing\nself-alert, so the settings panel says the same thing as the alerting."
+          },
+          "profiles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The profiles the authority advertises, as it names them. Empty means it\nadvertises none, so asking for one would be refused."
+          }
+        }
+      },
       "BTreeMap": {
         "type": "object",
         "additionalProperties": {
@@ -7429,6 +7768,132 @@
           "version_tracking": {
             "$ref": "#/components/schemas/VersionTracking",
             "description": "How this product's application version is treated."
+          }
+        }
+      },
+      "CertificateRevokeArgs": {
+        "type": "object",
+        "description": "Which certificate to revoke, and why.",
+        "required": [
+          "id",
+          "reason"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The certificate to revoke."
+          },
+          "reason": {
+            "$ref": "#/components/schemas/RevocationReason",
+            "description": "The reason to give the authority. `key_compromise` additionally bars that\nkey from ever being certified again, for any name by any server."
+          }
+        }
+      },
+      "CertificateView": {
+        "type": "object",
+        "description": "A certificate Canopy holds for a server, or an order in flight.",
+        "required": [
+          "id",
+          "name",
+          "state",
+          "renewing",
+          "collectable",
+          "risk",
+          "attempts",
+          "key_fingerprint"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Failed attempts since the last success."
+          },
+          "collectable": {
+            "type": "boolean",
+            "description": "Whether the server can collect this certificate right now."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier of the certificate."
+          },
+          "issued_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When it was issued."
+          },
+          "key_fingerprint": {
+            "type": "string",
+            "description": "Hex SHA-256 of the certified key, so an operator can tell two\ncertificates for the same name apart."
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the last attempt failed, if it did."
+          },
+          "name": {
+            "type": "string",
+            "description": "The single name it covers."
+          },
+          "not_after": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When it expires. Null for an order that has produced nothing yet."
+          },
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The profile it was issued under — the authority's name for a lifetime.\nNull for one the authority offered no profile for."
+          },
+          "remaining_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How long is left, in seconds. Negative once expired, null before\nissuance — given alongside the instant so the UI need not compute it and\nthe two cannot disagree."
+          },
+          "renewing": {
+            "type": "boolean",
+            "description": "Whether the order in flight is extending a certificate that already\nissued, which tells a stalled renewal apart from one that never came up."
+          },
+          "revocation_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The reason given for revocation."
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When an operator revoked it."
+          },
+          "revoked_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who revoked it."
+          },
+          "risk": {
+            "type": "string",
+            "description": "How urgently it needs attention: `none`, `at_risk`, or `critical`,\njudged against its own lifetime."
+          },
+          "state": {
+            "type": "string",
+            "description": "`pending`, `issued`, `failed`, or `revoked`."
           }
         }
       },
@@ -8409,6 +8874,27 @@
           }
         }
       },
+      "DomainHealthView": {
+        "type": "object",
+        "description": "The names in use beneath one of a group's domains.",
+        "required": [
+          "domain",
+          "names"
+        ],
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "The claimed domain these names sit beneath."
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DomainNameView"
+            },
+            "description": "The names in use beneath it, by name."
+          }
+        }
+      },
       "DomainIdArgs": {
         "type": "object",
         "description": "Identifies a claim.",
@@ -8420,6 +8906,58 @@
             "type": "string",
             "format": "uuid",
             "description": "The claim to release."
+          }
+        }
+      },
+      "DomainNameView": {
+        "type": "object",
+        "description": "One name in use beneath a group's domain, with whether it is covered.",
+        "required": [
+          "name",
+          "server_id",
+          "certificate"
+        ],
+        "properties": {
+          "certificate": {
+            "type": "boolean",
+            "description": "Whether a certificate Canopy holds for it is current and collectable."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name."
+          },
+          "not_after": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When the certificate expires."
+          },
+          "published": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the address records Canopy publishes for it are up to date. Null\nwhere the name has no registration — a certificate obtained for a name\nwhose addresses the server publishes itself."
+          },
+          "risk": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "How urgently that certificate needs attention: `none`, `at_risk`, or\n`critical`. Null where there is no certificate."
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The server that registered it or holds its certificate."
+          },
+          "server_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "That server's name, for display."
           }
         }
       },
@@ -10371,6 +10909,67 @@
           }
         }
       },
+      "NameView": {
+        "type": "object",
+        "description": "A name a server has registered, and how far Canopy has got with it.",
+        "required": [
+          "id",
+          "name",
+          "addresses",
+          "published_addresses",
+          "published"
+        ],
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The addresses the server asked to be reachable at."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier of the registration."
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the last publish attempt failed, if it did."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name, normalised."
+          },
+          "published": {
+            "type": "boolean",
+            "description": "Whether the zone has caught up with what the server asked for."
+          },
+          "published_addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The addresses Canopy has actually published. Differs from `addresses`\nwhile a change is waiting to be reconciled."
+          },
+          "published_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When Canopy last published this name's records."
+          },
+          "zone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Apex of the managed zone covering this name, or null where no configured\nzone does — in which case Canopy can publish nothing for it."
+          }
+        }
+      },
       "OperatorPresence": {
         "type": "object",
         "description": "One person currently connected to a server, identified by their\nTailscale login.\n\nOnly sessions that could be tied to an authenticated Tailscale identity\nare reported here — local console access and other unauthenticated\nsessions don't produce one of these. A person with several simultaneous\nsessions appears once.",
@@ -10832,6 +11431,25 @@
                 "description": "New set of key/value tags shared by every server in the group. This\nreplaces the whole tag set."
               }
             ]
+          }
+        }
+      },
+      "PauseArgs": {
+        "type": "object",
+        "description": "Why a server is being paused.",
+        "required": [
+          "server_id",
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "Why, recorded so whoever finds the pause later knows what it was for."
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The server to pause."
           }
         }
       },
@@ -11999,6 +12617,16 @@
             "description": "Number of most-recent weekly backups to keep. Must be at least 4 unless\nthe retention floor is bypassed."
           }
         }
+      },
+      "RevocationReason": {
+        "type": "string",
+        "description": "Why a certificate was revoked. The names are the RFC 5280 reasons an\nauthority accepts; Canopy offers the few an operator would actually reach\nfor rather than the whole set.",
+        "enum": [
+          "unspecified",
+          "key_compromise",
+          "superseded",
+          "cessation_of_operation"
+        ]
       },
       "RevokeArgs": {
         "type": "object",
@@ -13209,6 +13837,81 @@
           }
         }
       },
+      "ServerNamesView": {
+        "type": "object",
+        "description": "What a server's page shows about its names and certificates.",
+        "required": [
+          "may_manage_dns",
+          "may_manage_tls",
+          "paused",
+          "domains",
+          "names",
+          "certificates"
+        ],
+        "properties": {
+          "certificate_profile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The profile this server's certificates are requested under. Null means\nthe authority's own default, which is its longest-lived."
+          },
+          "certificates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CertificateView"
+            },
+            "description": "Every certificate Canopy holds or has an order in flight for, newest\nfirst. A name may appear more than once — a key rotation leaves the\nprevious certificate behind until it expires."
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The domains this server's group controls, so the UI can say which names\nare available to it at all."
+          },
+          "may_manage_dns": {
+            "type": "boolean",
+            "description": "Whether an operator has allowed this server to manage its own DNS."
+          },
+          "may_manage_tls": {
+            "type": "boolean",
+            "description": "Whether an operator has allowed this server to obtain its own\ncertificates."
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameView"
+            },
+            "description": "The public names this server has registered, by name."
+          },
+          "pause_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it was set."
+          },
+          "paused": {
+            "type": "boolean",
+            "description": "Whether Canopy has been told to stop doing anything new for this server."
+          },
+          "paused_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When the pause was set."
+          },
+          "paused_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who set it."
+          }
+        }
+      },
       "ServerRank": {
         "type": "string",
         "description": "The environment tier of a server, from `production` down to `dev`.",
@@ -13311,6 +14014,27 @@
           "type": {
             "type": "string",
             "description": "Backup type to enable or disable."
+          }
+        }
+      },
+      "SetProfileArgs": {
+        "type": "object",
+        "description": "The profile a server's certificates are requested under.",
+        "required": [
+          "server_id"
+        ],
+        "properties": {
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The profile, as the authority names it, or null for the authority's own\ndefault — its longest-lived, which is what a server takes until an\noperator says otherwise."
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The server to set."
           }
         }
       },
@@ -14501,6 +15225,10 @@
     {
       "name": "bestool",
       "description": "Bestool SQL snippet library."
+    },
+    {
+      "name": "certificates",
+      "description": "TLS certificates and public names: what each server holds, the pause and profile that govern them, and revocation."
     },
     {
       "name": "commons",

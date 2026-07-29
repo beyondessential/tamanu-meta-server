@@ -208,6 +208,10 @@ export async function startStack(opts: StartOptions = {}): Promise<StackHandle> 
 				// claim into; the nested one is there for the longest-apex-wins
 				// case.
 				CANOPY_DNS_ZONES: "tamanu.app=Z1E2E, demo.tamanu.app=Z2E2E",
+				// The in-process fake authority: advertises profiles and accepts
+				// revocations, so the certificate UI is exercisable without a
+				// network. Debug-only in the binary.
+				CANOPY_FAKE_ACME: "1",
 				// Needed by mint_enrollment to build the ticket's api_url; the
 				// setup-instructions flow auto-mints on an unregistered server.
 				PUBLIC_URL: process.env.PUBLIC_URL ?? "https://api.e2e.invalid",

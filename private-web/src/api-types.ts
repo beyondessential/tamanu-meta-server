@@ -821,6 +821,176 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/certificates/authority": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The authority, its profiles, and whether Canopy's account with it is usable.
+         * @description Presented to operators because a misconfiguration of issuance shows up here
+         *     rather than on any one server.
+         */
+        post: operations["certificates_authority"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/certificates/for_group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The names in use under each domain a group controls, and which of them hold a
+         *     current certificate.
+         * @description So that whether a deployment's names are healthy is answerable from the
+         *     group's page, without visiting each of its servers.
+         */
+        post: operations["certificates_for_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/certificates/for_server": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Everything a server's page needs about its names and certificates.
+         * @description One call rather than several, because the parts are read together and a
+         *     half-loaded panel would show a certificate without the pause that explains
+         *     why it is not renewing.
+         */
+        post: operations["certificates_for_server"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/certificates/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pause a server: Canopy makes no new changes on its behalf.
+         * @description Nothing already in place is withdrawn — records published stand, certificates
+         *     held stay held and collectable until they expire, and the deployment keeps
+         *     working exactly as it did. What stops is Canopy doing anything *new*.
+         *
+         *     A second pause leaves the first in place, so the original reason and time are
+         *     not overwritten by a later one.
+         */
+        post: operations["certificates_pause"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/certificates/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Lift a server's pause. Work resumes where it left off.
+         * @description Only an operator can do this: Canopy never lifts a pause itself, however long
+         *     it has been in place and however much is expiring under it.
+         */
+        post: operations["certificates_resume"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/certificates/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke a certificate Canopy holds.
+         * @description Canopy holds the account that obtained it, which is authority enough; the
+         *     server's private key is not needed and is not asked for. The authority is told
+         *     first and Canopy records the revocation only once it has accepted, so the two
+         *     never disagree — a 502 means nothing was revoked and the operator can try
+         *     again.
+         *
+         *     Revoking pauses the server, without being asked. Revocation and re-issuance
+         *     would otherwise chase each other: a key revoked as compromised has its
+         *     replacement requested within minutes by an agent doing exactly what it was
+         *     built to do, and if the key leaked because the host was compromised, that
+         *     replacement hands the same attacker a fresh certificate.
+         *
+         *     Cannot be undone: a revoked certificate stays revoked, and the remedy is a new
+         *     one.
+         */
+        post: operations["certificates_revoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/certificates/set_profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set the profile a server's certificates are requested under.
+         * @description Lifetime is a property of how a deployment is run rather than of Canopy, so it
+         *     is an operator's choice per server: a cloud deployment whose issuance is
+         *     exercised constantly can carry a short lifetime where an on-premises one that
+         *     may be offline for days cannot. Takes effect on the next issuance or renewal;
+         *     a certificate already held keeps the lifetime it was issued with.
+         *
+         *     Responds 409 for a profile the authority does not advertise.
+         */
+        post: operations["certificates_set_profile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/commons/is_current_user_admin": {
         parameters: {
             query?: never;
@@ -3604,6 +3774,29 @@ export interface components {
              */
             server_id: string;
         };
+        /** @description The certificate authority Canopy is configured to use, and whether it works. */
+        AuthorityView: {
+            /**
+             * @description Whether Canopy holds a usable account at the authority. False where none
+             *     is configured, or where the last attempt to use it failed.
+             */
+            account_usable: boolean;
+            /**
+             * @description The authority's directory URL, or null where none is configured — in
+             *     which case Canopy issues no certificates at all.
+             */
+            directory?: string | null;
+            /**
+             * @description What is currently wrong, where anything is: the message from the standing
+             *     self-alert, so the settings panel says the same thing as the alerting.
+             */
+            problem?: string | null;
+            /**
+             * @description The profiles the authority advertises, as it names them. Empty means it
+             *     advertises none, so asking for one would be refused.
+             */
+            profiles: string[];
+        };
         BTreeMap: {
             [key: string]: {
                 /**
@@ -3942,6 +4135,77 @@ export interface components {
             public_listing: boolean;
             /** @description How this product's application version is treated. */
             version_tracking: components["schemas"]["VersionTracking"];
+        };
+        /** @description Which certificate to revoke, and why. */
+        CertificateRevokeArgs: {
+            /**
+             * Format: uuid
+             * @description The certificate to revoke.
+             */
+            id: string;
+            /**
+             * @description The reason to give the authority. `key_compromise` additionally bars that
+             *     key from ever being certified again, for any name by any server.
+             */
+            reason: components["schemas"]["RevocationReason"];
+        };
+        /** @description A certificate Canopy holds for a server, or an order in flight. */
+        CertificateView: {
+            /**
+             * Format: int32
+             * @description Failed attempts since the last success.
+             */
+            attempts: number;
+            /** @description Whether the server can collect this certificate right now. */
+            collectable: boolean;
+            /**
+             * Format: uuid
+             * @description Unique identifier of the certificate.
+             */
+            id: string;
+            /** @description When it was issued. */
+            issued_at?: string | null;
+            /**
+             * @description Hex SHA-256 of the certified key, so an operator can tell two
+             *     certificates for the same name apart.
+             */
+            key_fingerprint: string;
+            /** @description Why the last attempt failed, if it did. */
+            last_error?: string | null;
+            /** @description The single name it covers. */
+            name: string;
+            /** @description When it expires. Null for an order that has produced nothing yet. */
+            not_after?: string | null;
+            /**
+             * @description The profile it was issued under — the authority's name for a lifetime.
+             *     Null for one the authority offered no profile for.
+             */
+            profile?: string | null;
+            /**
+             * Format: int64
+             * @description How long is left, in seconds. Negative once expired, null before
+             *     issuance — given alongside the instant so the UI need not compute it and
+             *     the two cannot disagree.
+             */
+            remaining_seconds?: number | null;
+            /**
+             * @description Whether the order in flight is extending a certificate that already
+             *     issued, which tells a stalled renewal apart from one that never came up.
+             */
+            renewing: boolean;
+            /** @description The reason given for revocation. */
+            revocation_reason?: string | null;
+            /** @description When an operator revoked it. */
+            revoked_at?: string | null;
+            /** @description Who revoked it. */
+            revoked_by?: string | null;
+            /**
+             * @description How urgently it needs attention: `none`, `at_risk`, or `critical`,
+             *     judged against its own lifetime.
+             */
+            risk: string;
+            /** @description `pending`, `issued`, `failed`, or `revoked`. */
+            state: string;
         };
         /** @description Request body for [`check_detail`]. */
         CheckDetailArgs: {
@@ -4543,6 +4807,13 @@ export interface components {
              */
             server_group_id: string;
         };
+        /** @description The names in use beneath one of a group's domains. */
+        DomainHealthView: {
+            /** @description The claimed domain these names sit beneath. */
+            domain: string;
+            /** @description The names in use beneath it, by name. */
+            names: components["schemas"]["DomainNameView"][];
+        };
         /** @description Identifies a claim. */
         DomainIdArgs: {
             /**
@@ -4550,6 +4821,33 @@ export interface components {
              * @description The claim to release.
              */
             id: string;
+        };
+        /** @description One name in use beneath a group's domain, with whether it is covered. */
+        DomainNameView: {
+            /** @description Whether a certificate Canopy holds for it is current and collectable. */
+            certificate: boolean;
+            /** @description The name. */
+            name: string;
+            /** @description When the certificate expires. */
+            not_after?: string | null;
+            /**
+             * @description Whether the address records Canopy publishes for it are up to date. Null
+             *     where the name has no registration — a certificate obtained for a name
+             *     whose addresses the server publishes itself.
+             */
+            published?: boolean | null;
+            /**
+             * @description How urgently that certificate needs attention: `none`, `at_risk`, or
+             *     `critical`. Null where there is no certificate.
+             */
+            risk?: string | null;
+            /**
+             * Format: uuid
+             * @description The server that registered it or holds its certificate.
+             */
+            server_id: string;
+            /** @description That server's name, for display. */
+            server_name?: string | null;
         };
         /** @description One hour-of-week bucket of the degradation profile. */
         DutyBucket: {
@@ -5850,6 +6148,34 @@ export interface components {
             /** @description Metadata about the newly minted token. */
             token: components["schemas"]["McpTokenView"];
         };
+        /** @description A name a server has registered, and how far Canopy has got with it. */
+        NameView: {
+            /** @description The addresses the server asked to be reachable at. */
+            addresses: string[];
+            /**
+             * Format: uuid
+             * @description Unique identifier of the registration.
+             */
+            id: string;
+            /** @description Why the last publish attempt failed, if it did. */
+            last_error?: string | null;
+            /** @description The name, normalised. */
+            name: string;
+            /** @description Whether the zone has caught up with what the server asked for. */
+            published: boolean;
+            /**
+             * @description The addresses Canopy has actually published. Differs from `addresses`
+             *     while a change is waiting to be reconciled.
+             */
+            published_addresses: string[];
+            /** @description When Canopy last published this name's records. */
+            published_at?: string | null;
+            /**
+             * @description Apex of the managed zone covering this name, or null where no configured
+             *     zone does — in which case Canopy can publish nothing for it.
+             */
+            zone?: string | null;
+        };
         /**
          * @description One person currently connected to a server, identified by their
          *     Tailscale login.
@@ -6079,6 +6405,16 @@ export interface components {
              */
             slack_open_delay?: number | null;
             tags?: null | components["schemas"]["TagMap"];
+        };
+        /** @description Why a server is being paused. */
+        PauseArgs: {
+            /** @description Why, recorded so whoever finds the pause later knows what it was for. */
+            reason: string;
+            /**
+             * Format: uuid
+             * @description The server to pause.
+             */
+            server_id: string;
         };
         /** @description A pending one-off backup or restore request. */
         PendingRequestRow: {
@@ -6890,6 +7226,13 @@ export interface components {
              */
             keep_weekly: number;
         };
+        /**
+         * @description Why a certificate was revoked. The names are the RFC 5280 reasons an
+         *     authority accepts; Canopy offers the few an operator would actually reach
+         *     for rather than the whole set.
+         * @enum {string}
+         */
+        RevocationReason: "unspecified" | "key_compromise" | "superseded" | "cessation_of_operation";
         /** @description Request body for revoking an MCP access token. */
         RevokeArgs: {
             /**
@@ -7596,6 +7939,42 @@ export interface components {
              */
             offset: number;
         };
+        /** @description What a server's page shows about its names and certificates. */
+        ServerNamesView: {
+            /**
+             * @description The profile this server's certificates are requested under. Null means
+             *     the authority's own default, which is its longest-lived.
+             */
+            certificate_profile?: string | null;
+            /**
+             * @description Every certificate Canopy holds or has an order in flight for, newest
+             *     first. A name may appear more than once — a key rotation leaves the
+             *     previous certificate behind until it expires.
+             */
+            certificates: components["schemas"]["CertificateView"][];
+            /**
+             * @description The domains this server's group controls, so the UI can say which names
+             *     are available to it at all.
+             */
+            domains: string[];
+            /** @description Whether an operator has allowed this server to manage its own DNS. */
+            may_manage_dns: boolean;
+            /**
+             * @description Whether an operator has allowed this server to obtain its own
+             *     certificates.
+             */
+            may_manage_tls: boolean;
+            /** @description The public names this server has registered, by name. */
+            names: components["schemas"]["NameView"][];
+            /** @description Why it was set. */
+            pause_reason?: string | null;
+            /** @description Whether Canopy has been told to stop doing anything new for this server. */
+            paused: boolean;
+            /** @description When the pause was set. */
+            paused_at?: string | null;
+            /** @description Who set it. */
+            paused_by?: string | null;
+        };
         /**
          * @description The environment tier of a server, from `production` down to `dev`.
          * @enum {string}
@@ -7656,6 +8035,20 @@ export interface components {
             server_id: string;
             /** @description Backup type to enable or disable. */
             type: string;
+        };
+        /** @description The profile a server's certificates are requested under. */
+        SetProfileArgs: {
+            /**
+             * @description The profile, as the authority names it, or null for the authority's own
+             *     default — its longest-lived, which is what a server takes until an
+             *     operator says otherwise.
+             */
+            profile?: string | null;
+            /**
+             * Format: uuid
+             * @description The server to set.
+             */
+            server_id: string;
         };
         /**
          * @description Request to set (or override) the schedule and retention for one backup
@@ -9544,6 +9937,222 @@ export interface operations {
                 };
             };
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    certificates_authority: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthorityView"];
+                };
+            };
+        };
+    };
+    certificates_for_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GroupIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DomainHealthView"][];
+                };
+            };
+        };
+    };
+    certificates_for_server: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerNamesView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    certificates_pause: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PauseArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    certificates_resume: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    certificates_revoke: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CertificateRevokeArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description There is no chain to revoke, or it is revoked already. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The authority would not accept the revocation; nothing was changed. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    certificates_set_profile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetProfileArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The authority does not offer that profile. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

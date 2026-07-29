@@ -19,6 +19,7 @@ import BackupConfig from "./routes/BackupConfig";
 import BackupDefaults from "./routes/BackupDefaults";
 import RecoveryVault from "./routes/RecoveryVault";
 import BackupPanel from "./routes/BackupPanel";
+import CertificateAuthority from "./routes/CertificateAuthority";
 import McpTokens from "./routes/McpTokens";
 import RestoreConsumers from "./routes/RestoreConsumers";
 import SelfAlerts from "./routes/SelfAlerts";
@@ -236,6 +237,10 @@ export default function App() {
 						/>
 						<Route path="restore-consumers" element={<RestoreConsumers />} />
 						<Route path="mcp-tokens" element={<McpTokens />} />
+						<Route
+							path="certificate-authority"
+							element={<CertificateAuthority />}
+						/>
 					</Route>
 					<Route path="/devices" element={<Devices />}>
 						<Route index element={<DevicesSearch />} />

@@ -1088,29 +1088,20 @@ async fn a_paused_server_raises_no_expiry_alert_but_the_pause_is_reportable() {
 			"a paused server's expiry is the expected consequence, not a failure"
 		);
 
-		// The pause itself is what becomes reportable, once it is old enough that
-		// something has lapsed under it — otherwise a forgotten pause is how
-		// certificates quietly expire.
-		assert!(
-			Server::paused_longer_than(&mut conn, SignedDuration::from_hours(1))
-				.await
-				.expect("paused")
-				.is_empty(),
-			"a pause set just now is not yet forgotten"
-		);
-		sql_query(
-			"UPDATE servers SET name_management_paused_at = now() - interval '30 days' \
-			 WHERE id = $1",
-		)
-		.bind::<sql_types::Uuid, _>(server)
-		.execute(&mut conn)
-		.await
-		.expect("age the pause");
-		let forgotten = Server::paused_longer_than(&mut conn, SignedDuration::from_hours(14 * 24))
+		// The pause itself is what becomes reportable, because something has lapsed
+		// under it — otherwise a forgotten pause is how certificates quietly
+		// expire. The alerting reads this list; what it does with it is covered in
+		// `certificate_alerts`.
+		let lapsing = ServerCertificate::lapsing_under_pause(&mut conn)
 			.await
-			.expect("paused");
-		assert_eq!(forgotten.len(), 1);
-		assert_eq!(forgotten[0].id, server);
+			.expect("lapsing");
+		assert_eq!(lapsing.len(), 1);
+		assert_eq!(lapsing[0].server_id, server);
+		assert!(lapsing[0].expired);
+		assert_eq!(
+			lapsing[0].pause_reason.as_deref(),
+			Some("investigating a leak")
+		);
 	})
 	.await;
 }

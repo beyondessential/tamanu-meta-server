@@ -56,6 +56,7 @@ import HealthChip from "../components/HealthChip";
 import IncidentsLink from "../components/IncidentsLink";
 import OperatorAvatars from "../components/OperatorAvatars";
 import ManualEventButton from "../components/ManualEventButton";
+import ServerCertificatesSection from "../components/ServerCertificatesSection";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import StatusDot from "../components/StatusDot";
 import TailnetIdentitySection from "../components/TailnetIdentitySection";
@@ -210,6 +211,7 @@ export default function ServerDetail() {
 					tags={data.server.tags}
 				/>
 			)}
+			<ServerCertificatesSection serverId={data.server.id} />
 			<AdvancedIdentitySection
 				host={data.server.display_host}
 				serverId={data.server.id}

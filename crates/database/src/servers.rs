@@ -530,28 +530,29 @@ impl Server {
 		Ok(())
 	}
 
-	/// Servers paused for at least `older_than` — the forgotten-pause report. A
-	/// pause nobody has come back to is how certificates quietly expire, so the
-	/// age of the pause is what gets surfaced rather than the expiry it causes.
-	// spec: CRT#pausing-a-server
-	pub async fn paused_longer_than(
+	/// Set (or clear) the profile this server's certificates are requested under.
+	///
+	/// `None` means the authority's own default, which is its longest-lived: a
+	/// short lifetime is something adopted deliberately for a server rather than a
+	/// default anyone inherits. Takes effect on the next issuance or renewal; a
+	/// certificate already held keeps the lifetime it was issued with.
+	// spec: CRT#lifetime
+	pub async fn set_certificate_profile(
 		db: &mut AsyncPgConnection,
-		older_than: SignedDuration,
-	) -> Result<Vec<Self>> {
+		server_id: Uuid,
+		profile: Option<&str>,
+	) -> Result<()> {
 		use crate::schema::servers::dsl;
-		let cutoff = Timestamp::now() - older_than;
-		dsl::servers
-			.select(Self::as_select())
+		let updated = diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
 			.filter(dsl::deleted_at.is_null())
-			.filter(dsl::name_management_paused_at.is_not_null())
-			.filter(
-				dsl::name_management_paused_at
-					.le(jiff_diesel::NullableTimestamp::from(Some(cutoff))),
-			)
-			.order(dsl::name_management_paused_at.asc())
-			.load(db)
+			.set(dsl::certificate_profile.eq(profile))
+			.execute(db)
 			.await
-			.map_err(AppError::from)
+			.map_err(AppError::from)?;
+		if updated == 0 {
+			return Err(AppError::DatabaseQuery(diesel::result::Error::NotFound));
+		}
+		Ok(())
 	}
 
 	pub async fn allow_restore(
