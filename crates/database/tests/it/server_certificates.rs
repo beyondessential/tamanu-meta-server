@@ -3,9 +3,10 @@
 //! renewal, and the queries the alerts read.
 
 use commons_tests::db::TestDb;
+use commons_types::dns::ManagedZone;
 use database::diesel_async::AsyncPgConnection;
-use database::server_certificates::{OrderState, RENEW_BEFORE};
-use database::{ServerCertificate, ServerName};
+use database::server_certificates::{OrderState, RevocationReason, Risk, default_renew_after};
+use database::{ServerCertificate, ServerGroupDomain, ServerName};
 use diesel::{sql_query, sql_types};
 use diesel_async::RunQueryDsl;
 use jiff::{SignedDuration, Timestamp};
@@ -236,9 +237,16 @@ async fn a_repeat_request_is_answered_from_the_held_certificate() {
 			.await
 			.expect("request");
 		let expiry = Timestamp::now() + SignedDuration::from_hours(90 * 24);
-		ServerCertificate::record_issued(&mut conn, order.id, "-----BEGIN...", expiry)
-			.await
-			.expect("issued");
+		ServerCertificate::record_issued(
+			&mut conn,
+			order.id,
+			"-----BEGIN...",
+			expiry,
+			Some("classic"),
+			None,
+		)
+		.await
+		.expect("issued");
 
 		let again = ServerCertificate::request(&mut conn, server, "a.tamanu.app", KEY_A, b"csr")
 			.await
@@ -266,7 +274,7 @@ async fn an_expired_certificate_is_ordered_again_on_request() {
 			.await
 			.expect("request");
 		let past = Timestamp::now() - SignedDuration::from_hours(1);
-		ServerCertificate::record_issued(&mut conn, order.id, "chain", past)
+		ServerCertificate::record_issued(&mut conn, order.id, "chain", past, None, None)
 			.await
 			.expect("issued");
 
@@ -325,10 +333,11 @@ async fn a_failed_attempt_backs_off_and_stays_pending() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn renewal_picks_up_certificates_near_expiry_and_reuses_the_request() {
+async fn renewal_follows_the_stored_window_and_reuses_the_request() {
 	TestDb::run(async |mut conn, _url| {
 		let server = insert_server(&mut conn, "central").await;
 
+		// Due: the authority named a window that has already opened.
 		let soon =
 			ServerCertificate::request(&mut conn, server, "soon.tamanu.app", KEY_A, b"csr-1")
 				.await
@@ -337,11 +346,14 @@ async fn renewal_picks_up_certificates_near_expiry_and_reuses_the_request() {
 			&mut conn,
 			soon.id,
 			"chain",
-			Timestamp::now() + RENEW_BEFORE - SignedDuration::from_hours(1),
+			Timestamp::now() + SignedDuration::from_hours(48),
+			Some("shortlived"),
+			Some(Timestamp::now() - SignedDuration::from_hours(1)),
 		)
 		.await
 		.expect("issued");
 
+		// Not due: a long-lived certificate issued just now.
 		let later =
 			ServerCertificate::request(&mut conn, server, "later.tamanu.app", KEY_B, b"csr-2")
 				.await
@@ -350,7 +362,9 @@ async fn renewal_picks_up_certificates_near_expiry_and_reuses_the_request() {
 			&mut conn,
 			later.id,
 			"chain",
-			Timestamp::now() + RENEW_BEFORE + SignedDuration::from_hours(48),
+			Timestamp::now() + SignedDuration::from_hours(90 * 24),
+			Some("classic"),
+			None,
 		)
 		.await
 		.expect("issued");
@@ -358,7 +372,7 @@ async fn renewal_picks_up_certificates_near_expiry_and_reuses_the_request() {
 		let started = ServerCertificate::start_renewals(&mut conn)
 			.await
 			.expect("start renewals");
-		assert_eq!(started.len(), 1, "only the one inside the window");
+		assert_eq!(started.len(), 1, "only the one whose window has opened");
 		assert_eq!(started[0].id, soon.id);
 		assert!(started[0].renewing);
 		assert_eq!(
@@ -380,23 +394,220 @@ async fn renewal_picks_up_certificates_near_expiry_and_reuses_the_request() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_alert_queries_separate_expiring_from_never_issued() {
-	TestDb::run(async |mut conn, _url| {
-		let server = insert_server(&mut conn, "central").await;
+async fn the_renewal_window_scales_with_the_lifetime() {
+	// A fixed window cannot serve both: it would leave a six-day certificate
+	// permanently overdue, or renew a ninety-day one hundreds of times.
+	let issued = Timestamp::now();
 
-		let expiring =
-			ServerCertificate::request(&mut conn, server, "expiring.tamanu.app", KEY_A, b"csr-1")
+	let long = default_renew_after(issued, issued + SignedDuration::from_hours(90 * 24));
+	let long_remaining: SignedDuration = (issued + SignedDuration::from_hours(90 * 24) - long)
+		.try_into()
+		.expect("duration");
+	assert_eq!(long_remaining.as_hours(), 30 * 24, "a third of ninety days");
+
+	let short = default_renew_after(issued, issued + SignedDuration::from_hours(6 * 24));
+	let short_remaining: SignedDuration = (issued + SignedDuration::from_hours(6 * 24) - short)
+		.try_into()
+		.expect("duration");
+	assert_eq!(short_remaining.as_hours(), 2 * 24, "a third of six days");
+
+	// Already spent: renew at once rather than at some point in the past.
+	assert_eq!(default_renew_after(issued, issued), issued);
+	assert_eq!(
+		default_renew_after(issued, issued - SignedDuration::from_hours(1)),
+		issued
+	);
+}
+
+/// A server with the TLS grant, in a group that controls `domain`.
+async fn entitled_server(conn: &mut AsyncPgConnection, domain: &str) -> Uuid {
+	let group = sql_query("INSERT INTO server_groups (name) VALUES ($1) RETURNING id")
+		.bind::<sql_types::Text, _>(format!("group-{}", Uuid::new_v4()))
+		.get_result::<RowId>(conn)
+		.await
+		.expect("insert group")
+		.id;
+	let zones = ManagedZone::parse_list("tamanu.app=Z1", None).expect("zones");
+	ServerGroupDomain::claim(conn, group, domain, None, &zones)
+		.await
+		.expect("claim domain");
+
+	let host = format!("https://{}.example.invalid", Uuid::new_v4());
+	sql_query(
+		"INSERT INTO servers (name, host, kind, group_id, may_manage_tls) \
+		 VALUES ($1, $2, 'central', $3, true) RETURNING id",
+	)
+	.bind::<sql_types::Text, _>("entitled")
+	.bind::<sql_types::Text, _>(host)
+	.bind::<sql_types::Uuid, _>(group)
+	.get_result::<RowId>(conn)
+	.await
+	.expect("insert server")
+	.id
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn risk_is_judged_against_the_certificates_own_lifetime() {
+	TestDb::run(async |mut conn, _url| {
+		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
+
+		// Two days left. Comfortable on a ninety-day life, critical on a six-day
+		// one — the same reading has to mean different things.
+		let long =
+			ServerCertificate::request(&mut conn, server, "long.fiji.tamanu.app", KEY_A, b"c1")
 				.await
 				.expect("request");
-		ServerCertificate::record_issued(
-			&mut conn,
-			expiring.id,
-			"chain",
-			Timestamp::now() + SignedDuration::from_hours(24),
+		sql_query(
+			"UPDATE server_certificates SET state = 'issued', chain = 'x', \
+			 issued_at = now() - interval '88 days', not_after = now() + interval '2 days' \
+			 WHERE id = $1",
 		)
+		.bind::<sql_types::Uuid, _>(long.id)
+		.execute(&mut conn)
 		.await
-		.expect("issued");
+		.expect("age the long one");
 
+		let short =
+			ServerCertificate::request(&mut conn, server, "short.fiji.tamanu.app", KEY_B, b"c2")
+				.await
+				.expect("request");
+		sql_query(
+			"UPDATE server_certificates SET state = 'issued', chain = 'x', \
+			 issued_at = now() - interval '4 days', not_after = now() + interval '2 days' \
+			 WHERE id = $1",
+		)
+		.bind::<sql_types::Uuid, _>(short.id)
+		.execute(&mut conn)
+		.await
+		.expect("age the short one");
+
+		let risks = ServerCertificate::at_risk(&mut conn)
+			.await
+			.expect("at risk");
+		let by_id: std::collections::HashMap<Uuid, Risk> =
+			risks.iter().map(|(cert, risk)| (cert.id, *risk)).collect();
+
+		// 2 of 90 days left: well past even the critical fraction.
+		assert_eq!(by_id.get(&long.id), Some(&Risk::Critical));
+		// 2 of 6 days left: exactly the renewal point, so at risk but recoverable.
+		assert_eq!(by_id.get(&short.id), Some(&Risk::AtRisk));
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_expired_certificate_for_an_unentitled_name_raises_nothing() {
+	TestDb::run(async |mut conn, _url| {
+		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
+		let cert = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+			.await
+			.expect("request");
+		sql_query(
+			"UPDATE server_certificates SET state = 'issued', chain = 'x', \
+			 issued_at = now() - interval '91 days', not_after = now() - interval '1 day' \
+			 WHERE id = $1",
+		)
+		.bind::<sql_types::Uuid, _>(cert.id)
+		.execute(&mut conn)
+		.await
+		.expect("expire it");
+
+		// Entitled and expired: reported.
+		let risks = ServerCertificate::at_risk(&mut conn)
+			.await
+			.expect("at risk");
+		assert_eq!(risks.len(), 1);
+		assert_eq!(risks[0].1, Risk::Critical);
+
+		// The group releases the domain. Canopy stopped renewing, so running out
+		// is the intended outcome and there is nothing to report.
+		sql_query("DELETE FROM server_group_domains")
+			.execute(&mut conn)
+			.await
+			.expect("release the domain");
+		assert!(
+			ServerCertificate::at_risk(&mut conn)
+				.await
+				.expect("at risk")
+				.is_empty(),
+			"an unentitled name must leave no alert behind"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn revoking_the_grant_or_archiving_the_server_silences_the_alert() {
+	TestDb::run(async |mut conn, _url| {
+		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
+		let cert = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+			.await
+			.expect("request");
+		sql_query(
+			"UPDATE server_certificates SET state = 'issued', chain = 'x', \
+			 issued_at = now() - interval '91 days', not_after = now() - interval '1 day' \
+			 WHERE id = $1",
+		)
+		.bind::<sql_types::Uuid, _>(cert.id)
+		.execute(&mut conn)
+		.await
+		.expect("expire it");
+		assert_eq!(
+			ServerCertificate::at_risk(&mut conn)
+				.await
+				.expect("at risk")
+				.len(),
+			1
+		);
+
+		sql_query("UPDATE servers SET may_manage_tls = false WHERE id = $1")
+			.bind::<sql_types::Uuid, _>(server)
+			.execute(&mut conn)
+			.await
+			.expect("revoke");
+		assert!(
+			ServerCertificate::at_risk(&mut conn)
+				.await
+				.expect("at risk")
+				.is_empty(),
+			"a revoked grant stops renewal, so expiry is expected"
+		);
+
+		// Granted again, and it is back in scope: entitlement is asked now, not
+		// remembered from when renewal stopped.
+		sql_query("UPDATE servers SET may_manage_tls = true WHERE id = $1")
+			.bind::<sql_types::Uuid, _>(server)
+			.execute(&mut conn)
+			.await
+			.expect("re-grant");
+		assert_eq!(
+			ServerCertificate::at_risk(&mut conn)
+				.await
+				.expect("at risk")
+				.len(),
+			1
+		);
+
+		sql_query("UPDATE servers SET deleted_at = now() WHERE id = $1")
+			.bind::<sql_types::Uuid, _>(server)
+			.execute(&mut conn)
+			.await
+			.expect("archive");
+		assert!(
+			ServerCertificate::at_risk(&mut conn)
+				.await
+				.expect("at risk")
+				.is_empty(),
+			"an archived server is not something to alert about"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_first_issuance_that_keeps_failing_is_told_apart() {
+	TestDb::run(async |mut conn, _url| {
+		let server = insert_server(&mut conn, "central").await;
 		let never =
 			ServerCertificate::request(&mut conn, server, "never.tamanu.app", KEY_B, b"csr-2")
 				.await
@@ -406,12 +617,6 @@ async fn the_alert_queries_separate_expiring_from_never_issued() {
 				.await
 				.expect("fail");
 		}
-
-		let soon = ServerCertificate::expiring_within(&mut conn, SignedDuration::from_hours(48))
-			.await
-			.expect("expiring");
-		assert_eq!(soon.len(), 1);
-		assert_eq!(soon[0].id, expiring.id);
 
 		let stuck = ServerCertificate::stuck_first_issuances(&mut conn, 3)
 			.await
@@ -448,6 +653,166 @@ async fn stopping_an_order_takes_it_out_of_the_work_list() {
 			after.last_error.as_deref(),
 			Some("the group released the domain")
 		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn revoking_stops_renewal_and_unholds_the_certificate() {
+	TestDb::run(async |mut conn, _url| {
+		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
+		let cert = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+			.await
+			.expect("request");
+		ServerCertificate::record_issued(
+			&mut conn,
+			cert.id,
+			"chain",
+			Timestamp::now() + SignedDuration::from_hours(48),
+			Some("classic"),
+			Some(Timestamp::now() - SignedDuration::from_hours(1)),
+		)
+		.await
+		.expect("issued");
+		// Due for renewal, until it isn't.
+		assert_eq!(
+			ServerCertificate::start_renewals(&mut conn)
+				.await
+				.expect("renewals")
+				.len(),
+			1
+		);
+		ServerCertificate::record_issued(
+			&mut conn,
+			cert.id,
+			"chain",
+			Timestamp::now() + SignedDuration::from_hours(48),
+			Some("classic"),
+			Some(Timestamp::now() - SignedDuration::from_hours(1)),
+		)
+		.await
+		.expect("reissued");
+
+		ServerCertificate::record_revoked(
+			&mut conn,
+			cert.id,
+			RevocationReason::Superseded,
+			Some("op@example.test"),
+		)
+		.await
+		.expect("revoke");
+
+		let after = ServerCertificate::get(&mut conn, cert.id)
+			.await
+			.expect("get");
+		assert_eq!(after.order_state(), OrderState::Revoked);
+		assert!(!after.is_current(), "a revoked certificate is not held");
+		assert!(after.revoked_at.is_some());
+		assert_eq!(after.revoked_by.as_deref(), Some("op@example.test"));
+		assert_eq!(after.revocation_reason.as_deref(), Some("superseded"));
+		assert!(after.renew_after.is_none(), "nothing left to renew");
+
+		assert!(
+			ServerCertificate::start_renewals(&mut conn)
+				.await
+				.expect("renewals")
+				.is_empty(),
+			"a revoked certificate is not renewed"
+		);
+		assert!(
+			ServerCertificate::at_risk(&mut conn)
+				.await
+				.expect("at risk")
+				.is_empty(),
+			"a revoked certificate is not an expiry to chase"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_key_revoked_as_compromised_is_never_certified_again() {
+	TestDb::run(async |mut conn, _url| {
+		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
+		let cert = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+			.await
+			.expect("request");
+		ServerCertificate::record_issued(
+			&mut conn,
+			cert.id,
+			"chain",
+			Timestamp::now() + SignedDuration::from_hours(48),
+			None,
+			None,
+		)
+		.await
+		.expect("issued");
+
+		ServerCertificate::record_revoked(
+			&mut conn,
+			cert.id,
+			RevocationReason::KeyCompromise,
+			Some("op@example.test"),
+		)
+		.await
+		.expect("revoke");
+
+		// The same key, for the same name: refused.
+		let err = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+			.await
+			.expect_err("a compromised key must not be certified again");
+		assert!(
+			matches!(err, commons_errors::AppError::BadRequest(_)),
+			"got {err:?}"
+		);
+
+		// And for any other name, by anyone: a leaked key is leaked whoever asks.
+		let other = insert_server(&mut conn, "other").await;
+		ServerCertificate::request(&mut conn, other, "b.fiji.tamanu.app", KEY_A, b"c")
+			.await
+			.expect_err("still barred for another name and server");
+
+		// A fresh key is fine.
+		ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_B, b"c2")
+			.await
+			.expect("a new key is certifiable");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn revoking_for_another_reason_leaves_the_key_usable() {
+	TestDb::run(async |mut conn, _url| {
+		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
+		let cert = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+			.await
+			.expect("request");
+		ServerCertificate::record_issued(
+			&mut conn,
+			cert.id,
+			"chain",
+			Timestamp::now() + SignedDuration::from_hours(48),
+			None,
+			None,
+		)
+		.await
+		.expect("issued");
+		ServerCertificate::record_revoked(
+			&mut conn,
+			cert.id,
+			RevocationReason::CessationOfOperation,
+			None,
+		)
+		.await
+		.expect("revoke");
+
+		// A certificate retired says nothing about the key, so asking again
+		// re-opens the order rather than being refused.
+		let again = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+			.await
+			.expect("the key is still usable");
+		assert_eq!(again.id, cert.id);
+		assert_eq!(again.order_state(), OrderState::Pending);
 	})
 	.await;
 }

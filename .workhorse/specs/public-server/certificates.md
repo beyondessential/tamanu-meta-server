@@ -90,25 +90,66 @@ It keeps no private key, having never held one.
 
 Holding the chain is what lets Canopy answer a repeat request without a fresh order, renew before expiry without being asked, and report a certificate that is running out.
 
+### Lifetime
+
+An authority may offer certificates of more than one lifetime, named as profiles, and a server's certificates are requested under one of them.
+The profiles on offer are whatever the authority advertises, so Canopy presents that set rather than a list of its own, and a profile the authority has withdrawn is reported as unavailable instead of being requested and refused.
+
+A server's profile is an operator's choice per server, because lifetime is a property of how a deployment is run rather than of Canopy: a cloud deployment whose issuance is exercised constantly can carry a short lifetime, where an on-premises one that may be offline for days cannot.
+Every server takes the longest profile the authority offers until an operator says otherwise, so a short lifetime is something adopted deliberately for a server rather than a default anyone inherits.
+
 ### Renewal
 
 Canopy renews a certificate it holds before it expires, without being asked, and the renewed chain becomes collectable the same way the first one did.
 A server that collects periodically therefore stays current without tracking expiry itself, and one that asks again gets whatever is newest.
 
+When to renew comes from the authority when it will say: an authority that publishes renewal information is asked when it would like this certificate replaced, and Canopy renews in the window it names.
+Failing that, Canopy renews after a fixed fraction of the certificate's own life has passed.
+Neither is a fixed interval, because a fixed interval cannot serve both lifetimes: a window measured in weeks would leave a certificate that lives days permanently overdue, and one measured in hours would renew a long-lived certificate hundreds of times over.
+Where the authority accounts for a renewal as replacing a particular certificate, Canopy tells it which, so a renewal is not mistaken for an additional certificate.
+
 Renewal stops when the certificate is no longer wanted: a name whose group has released the domain it sits under is not renewed, nor is a certificate for a server whose grant has been revoked or that has been archived.
 A grant revoked does not withdraw the certificate already issued — it cannot be recalled once it exists — but it does end the renewals that would extend it.
+
+### Revocation
+
+An operator can revoke a certificate Canopy holds, saying why.
+Canopy holds the account that obtained it, which is authority enough to revoke it — the server's private key is not needed and is not asked for.
+
+Revocation exists for the day something has gone wrong, so it is reachable where the certificate is presented rather than filed away as a maintenance procedure, and it is destructive enough to confirm before it happens.
+It cannot be undone: a revoked certificate stays revoked, and the remedy is a new one.
+
+Canopy stops renewing a revoked certificate and records who revoked it, when, and the reason given.
+A server collecting a certificate it holds locally is told that it has been revoked, so it stops serving it rather than serving something clients will reject, and knows to ask for a replacement.
+
+Where the reason given is that the key is compromised, the compromised key is not certified again: a later request naming that same key is refused, and the server has to generate a new one.
+Any other reason leaves the key usable, since a certificate superseded or a deployment retired says nothing about the key itself.
 
 ### When issuance fails
 
 An order that fails is retried, with the interval between attempts growing, because most failures are the authority being briefly unavailable or a record not yet visible.
 
-A certificate approaching expiry that has not been renewed is Canopy failing at something it took responsibility for, so it is reported as a self-alert against Canopy rather than as an issue on the server (see [SELF](../private-server/self-alerts.md)).
-It names the certificates concerned and how long each has left, escalating as the remaining life shortens, and clears when they are renewed.
-A first-time order that keeps failing is reported the same way, distinguished from a renewal so an operator can tell a deployment that never came up from one about to go dark.
+A certificate that is running out is a fact about the server that serves it, so it is filed against that server like any other check: it joins that server's group's incident and reaches the people who run the deployment (see [CHK](../monitoring/checks.md)).
+It warns while there is still room to recover and fails as the remaining life runs down, and both thresholds are fractions of the certificate's own lifetime rather than fixed durations — otherwise the same alert would fire far too late for a short-lived certificate and far too early for a long-lived one.
+A certificate that has expired outright fails regardless.
 
-The authority's own rate limits are shared across every group whose domain sits in the same zone, so exhausting them is a fleet-wide fault rather than one group's: Canopy reports being throttled, and does not consume the remaining budget retrying a name that has just failed.
+Except that a certificate for a name the server is no longer entitled to raises nothing at all, however far past expiry it is.
+Its group may have released the domain it sat under, the server's grant may have been revoked, or the server may have been archived — and in each case Canopy deliberately stopped renewing it, so its running out is the intended outcome rather than a failure to report.
+Alerting on it would mean every deliberate withdrawal left an alert behind that no action could clear, which teaches an operator to ignore the alert that matters.
+Whether the name is still entitled is asked when the alert is evaluated rather than remembered from when renewal stopped, so a domain reclaimed by its group brings its certificates back into scope.
+
+An order that has never produced a certificate is distinguished from one extending a certificate that already exists, so an operator can tell a deployment that never came up from one about to go dark.
+
+Canopy's own inability to issue is not any one server's fault and is reported against Canopy instead (see [SELF](../private-server/self-alerts.md)): an authority that cannot be reached, an account Canopy cannot use, and the authority's rate limits being exhausted.
+Those limits are shared across every group whose domain sits in the same zone, so running them down is a fleet-wide fault rather than one group's: Canopy reports being throttled, and does not consume what remains retrying a name that has just failed.
+Reporting the two apart matters because they call for different people — a server's certificate running out is that deployment's problem to notice, and Canopy being unable to issue at all is Canopy's.
 
 ## Presentation
 
-A server presents the certificates Canopy holds for it, each with the name it covers and when it expires, and a request that has not yet produced one presents as pending or as failed with the reason.
-An operator can see, per group, which names have certificates and which are overdue, without going to the servers themselves.
+A server presents the names it has registered — with the addresses published for each, and whether the zone has caught up with what it asked for — and the certificates Canopy holds for it, each with the name it covers, the profile it was issued under, and when it expires, given both as an instant and as how long is left.
+A request that has not yet produced a certificate presents as pending, or as failed with the reason.
+An operator sets the server's profile where its other permissions are set.
+
+A group presents, under each domain it controls, the names in use beneath it and which of them hold a current certificate, so whether a deployment's names are healthy is answerable without visiting each of its servers.
+
+The authority Canopy is configured to use is presented to operators along with the profiles it advertises and whether Canopy's account with it is usable, since that is where a misconfiguration of issuance shows up rather than on any one server.

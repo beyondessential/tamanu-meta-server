@@ -19,10 +19,22 @@ use jiff::{SignedDuration, Timestamp};
 use serde::Serialize;
 use uuid::Uuid;
 
-/// How long before expiry Canopy starts trying to renew. A third of a typical
-/// ninety-day life, so there is room for many failed attempts before anything is
-/// at risk.
-pub const RENEW_BEFORE: SignedDuration = SignedDuration::from_hours(30 * 24);
+/// The fraction of a certificate's life still remaining when Canopy starts
+/// trying to renew, used when the authority publishes no renewal information of
+/// its own.
+///
+/// A fraction rather than a duration because no duration serves both lifetimes
+/// an authority may offer: a window measured in weeks leaves a certificate that
+/// lives six days permanently overdue, and one measured in hours renews a
+/// ninety-day certificate hundreds of times over. At a third, a ninety-day
+/// certificate renews with thirty days spare and a six-day one with two — in both
+/// cases room for many failed attempts before anything is at risk.
+const RENEW_AT_FRACTION_REMAINING: i64 = 3;
+
+/// The fraction of remaining life at which an unrenewed certificate stops being
+/// a warning and becomes a failure: half of the renewal window having passed
+/// without success.
+const CRITICAL_AT_FRACTION_REMAINING: i64 = 6;
 
 /// The longest Canopy waits between attempts at an order. Failures are usually
 /// the authority being briefly unavailable or a record not yet visible, so the
@@ -42,6 +54,9 @@ pub enum OrderState {
 	Issued,
 	/// Given up on for now; the reason is on the row.
 	Failed,
+	/// Revoked by an operator. Not renewed, not collected, not held: a revoked
+	/// certificate is not a certificate any more.
+	Revoked,
 }
 
 impl OrderState {
@@ -50,6 +65,7 @@ impl OrderState {
 			Self::Pending => "pending",
 			Self::Issued => "issued",
 			Self::Failed => "failed",
+			Self::Revoked => "revoked",
 		}
 	}
 
@@ -57,6 +73,7 @@ impl OrderState {
 		match raw {
 			"issued" => Self::Issued,
 			"failed" => Self::Failed,
+			"revoked" => Self::Revoked,
 			_ => Self::Pending,
 		}
 	}
@@ -112,6 +129,78 @@ pub struct ServerCertificate {
 	pub created_at: Timestamp,
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub updated_at: Timestamp,
+	/// The profile the certificate was issued under, which is the authority's
+	/// name for a lifetime. `None` for one issued before Canopy asked for a
+	/// profile, or where the authority offers none.
+	pub profile: Option<String>,
+	/// When to next consider renewing: from the authority's own renewal
+	/// information where it publishes any, otherwise a fraction of this
+	/// certificate's life. `None` until something has been issued.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(
+		deserialize_as = jiff_diesel::NullableTimestamp,
+		serialize_as = jiff_diesel::NullableTimestamp,
+		treat_none_as_default_value = false
+	)]
+	pub renew_after: Option<Timestamp>,
+	/// When an operator revoked this certificate.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(
+		deserialize_as = jiff_diesel::NullableTimestamp,
+		serialize_as = jiff_diesel::NullableTimestamp,
+		treat_none_as_default_value = false
+	)]
+	pub revoked_at: Option<Timestamp>,
+	/// Who revoked it.
+	pub revoked_by: Option<String>,
+	/// The reason given, by name.
+	pub revocation_reason: Option<String>,
+}
+
+/// Why a certificate was revoked. The names are the RFC 5280 reasons an
+/// authority accepts; Canopy offers the few an operator would actually reach
+/// for rather than the whole set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RevocationReason {
+	/// No reason given.
+	Unspecified,
+	/// The private key is known to be exposed. Additionally bars that key from
+	/// ever being certified again.
+	KeyCompromise,
+	/// Replaced by another certificate.
+	Superseded,
+	/// The name is no longer in service.
+	CessationOfOperation,
+}
+
+impl RevocationReason {
+	pub fn as_str(self) -> &'static str {
+		match self {
+			Self::Unspecified => "unspecified",
+			Self::KeyCompromise => "key_compromise",
+			Self::Superseded => "superseded",
+			Self::CessationOfOperation => "cessation_of_operation",
+		}
+	}
+
+	/// Whether this reason means the key itself must never be certified again.
+	pub fn bars_the_key(self) -> bool {
+		matches!(self, Self::KeyCompromise)
+	}
+}
+
+/// How urgently a held certificate needs attention, judged against its own
+/// lifetime so the same reading applies to a six-day certificate and a
+/// ninety-day one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Risk {
+	/// Comfortably current.
+	None,
+	/// Past the point Canopy meant to renew, with room left to recover.
+	AtRisk,
+	/// Most of the renewal window gone, or expired outright.
+	Critical,
 }
 
 impl ServerCertificate {
@@ -124,6 +213,42 @@ impl ServerCertificate {
 		self.order_state() == OrderState::Issued
 			&& self.chain.is_some()
 			&& self.not_after.is_some_and(|at| at > Timestamp::now())
+	}
+
+	/// This certificate's whole life, from issuance to expiry. `None` for one not
+	/// issued yet.
+	pub fn lifetime(&self) -> Option<SignedDuration> {
+		let (issued, expires) = (self.issued_at?, self.not_after?);
+		(expires - issued).try_into().ok()
+	}
+
+	/// How much of this certificate's life is left. Negative once expired.
+	pub fn remaining(&self) -> Option<SignedDuration> {
+		(self.not_after? - Timestamp::now()).try_into().ok()
+	}
+
+	/// How urgently this certificate needs attention, as a fraction of its own
+	/// lifetime rather than an absolute duration — so a six-day certificate isn't
+	/// judged by a ninety-day certificate's standards.
+	///
+	/// An order with nothing issued yet carries no risk of its own: whether it is
+	/// overdue is the order queue's business.
+	pub fn risk(&self) -> Risk {
+		let (Some(lifetime), Some(remaining)) = (self.lifetime(), self.remaining()) else {
+			return Risk::None;
+		};
+		if remaining.is_zero() || remaining.is_negative() {
+			return Risk::Critical;
+		}
+		let critical_at = lifetime / CRITICAL_AT_FRACTION_REMAINING as i32;
+		let at_risk_at = lifetime / RENEW_AT_FRACTION_REMAINING as i32;
+		if remaining <= critical_at {
+			Risk::Critical
+		} else if remaining <= at_risk_at {
+			Risk::AtRisk
+		} else {
+			Risk::None
+		}
 	}
 
 	/// Ask for a certificate for `name` covering the key in `csr`.
@@ -143,6 +268,15 @@ impl ServerCertificate {
 		use crate::schema::server_certificates::dsl;
 
 		let name = normalize_domain(name)?;
+
+		// A key revoked for compromise is never certified again, whatever asks
+		// for it: the server has to generate a new one.
+		if is_key_compromised(db, key_fingerprint).await? {
+			return Err(AppError::BadRequest(format!(
+				"the key in this request was revoked as compromised and will not be certified \
+				 again; generate a new key for {name}"
+			)));
+		}
 
 		if let Some(existing) = Self::for_name_and_key(db, &name, key_fingerprint).await? {
 			return match existing.order_state() {
@@ -241,19 +375,30 @@ impl ServerCertificate {
 	}
 
 	/// Record a certificate obtained, clearing the order.
+	///
+	/// `renew_after` is when the authority would like it replaced, where it says;
+	/// `None` falls back to a fraction of the certificate's own life.
 	pub async fn record_issued(
 		db: &mut AsyncPgConnection,
 		id: Uuid,
 		chain: &str,
 		not_after: Timestamp,
+		profile: Option<&str>,
+		renew_after: Option<Timestamp>,
 	) -> Result<()> {
 		use crate::schema::server_certificates::dsl;
+
+		let issued_at = Timestamp::now();
+		let renew_after = renew_after.unwrap_or_else(|| default_renew_after(issued_at, not_after));
+
 		diesel::update(dsl::server_certificates.filter(dsl::id.eq(id)))
 			.set((
 				dsl::state.eq(OrderState::Issued.as_str()),
 				dsl::chain.eq(Some(chain)),
 				dsl::not_after.eq(jiff_diesel::NullableTimestamp::from(Some(not_after))),
-				dsl::issued_at.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))),
+				dsl::issued_at.eq(jiff_diesel::NullableTimestamp::from(Some(issued_at))),
+				dsl::profile.eq(profile),
+				dsl::renew_after.eq(jiff_diesel::NullableTimestamp::from(Some(renew_after))),
 				dsl::renewing.eq(false),
 				dsl::attempts.eq(0),
 				dsl::last_error.eq::<Option<String>>(None),
@@ -287,17 +432,18 @@ impl ServerCertificate {
 		Ok(())
 	}
 
-	/// Certificates close enough to expiry to renew, and not already being
-	/// worked. Marks each pending so the worker picks it up, and returns them.
+	/// Certificates the authority (or, failing that, their own lifetime) says it
+	/// is time to renew. Marks each pending so the worker picks it up, and
+	/// returns them.
 	pub async fn start_renewals(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::schema::server_certificates::dsl;
 
-		let horizon = Timestamp::now() + RENEW_BEFORE;
+		let now = Timestamp::now();
 		let due: Vec<Uuid> = dsl::server_certificates
 			.select(dsl::id)
 			.filter(dsl::state.eq(OrderState::Issued.as_str()))
-			.filter(dsl::not_after.is_not_null())
-			.filter(dsl::not_after.le(jiff_diesel::NullableTimestamp::from(Some(horizon))))
+			.filter(dsl::renew_after.is_not_null())
+			.filter(dsl::renew_after.le(jiff_diesel::NullableTimestamp::from(Some(now))))
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
@@ -324,22 +470,63 @@ impl ServerCertificate {
 			.map_err(AppError::from)
 	}
 
-	/// Certificates expiring within `window` that Canopy has not managed to
-	/// renew — what the expiry alert reports.
-	pub async fn expiring_within(
-		db: &mut AsyncPgConnection,
-		window: SignedDuration,
-	) -> Result<Vec<Self>> {
-		use crate::schema::server_certificates::dsl;
-		let horizon = Timestamp::now() + window;
-		dsl::server_certificates
-			.select(Self::as_select())
-			.filter(dsl::not_after.is_not_null())
-			.filter(dsl::not_after.le(jiff_diesel::NullableTimestamp::from(Some(horizon))))
-			.order(dsl::not_after.asc())
+	/// Held certificates whose remaining life has run down far enough to report,
+	/// each with how urgently — the per-server alert's work list.
+	///
+	/// Only certificates for names the server is *still entitled to* are
+	/// returned. A group that released the domain, a grant revoked, or a server
+	/// archived all stop Canopy renewing, so the certificate running out is the
+	/// intended outcome rather than a failure; reporting it would leave an alert
+	/// behind that no action could clear. Entitlement is asked here rather than
+	/// remembered from when renewal stopped, so a domain reclaimed by its group
+	/// brings its certificates back into scope.
+	// spec: CRT#when-issuance-fails
+	pub async fn at_risk(db: &mut AsyncPgConnection) -> Result<Vec<(Self, Risk)>> {
+		use crate::schema::{server_certificates, servers};
+
+		let held: Vec<(Self, Option<Uuid>, bool)> = server_certificates::table
+			.inner_join(servers::table)
+			.filter(server_certificates::state.eq(OrderState::Issued.as_str()))
+			.filter(servers::deleted_at.is_null())
+			.filter(servers::may_manage_tls.eq(true))
+			.select((
+				Self::as_select(),
+				servers::group_id,
+				servers::may_manage_tls,
+			))
 			.load(db)
 			.await
-			.map_err(AppError::from)
+			.map_err(AppError::from)?;
+
+		if held.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		// One read of every claim, then match in memory: the alternative is a
+		// suffix join per certificate, and the claim table has one row per domain
+		// a group controls.
+		let claims = crate::server_domains::ServerGroupDomain::list_all(db).await?;
+
+		let mut out = Vec::new();
+		for (cert, group_id, _) in held {
+			let risk = cert.risk();
+			if risk == Risk::None {
+				continue;
+			}
+			// The name has to still sit under a domain the server's own group
+			// controls.
+			let entitled = group_id.is_some_and(|group| {
+				claims.iter().any(|claim| {
+					claim.group_id == group
+						&& commons_types::dns::is_within(&cert.name, &claim.domain)
+				})
+			});
+			if entitled {
+				out.push((cert, risk));
+			}
+		}
+		out.sort_by_key(|(cert, _)| cert.not_after);
+		Ok(out)
 	}
 
 	/// Orders that have never produced a certificate and have failed repeatedly
@@ -359,6 +546,61 @@ impl ServerCertificate {
 			.map_err(AppError::from)
 	}
 
+	/// Record a certificate as revoked, once the authority has accepted it.
+	///
+	/// Revoking stops renewal and stops the certificate being collected: it is no
+	/// longer something Canopy holds. Where the reason is that the key is
+	/// compromised, that key is barred from ever being certified again — for any
+	/// name, by any server, since a leaked key is leaked whoever asks next.
+	///
+	/// Not reversible: the remedy for a mistaken revocation is a new certificate.
+	// spec: CRT#revocation
+	pub async fn record_revoked(
+		db: &mut AsyncPgConnection,
+		id: Uuid,
+		reason: RevocationReason,
+		revoked_by: Option<&str>,
+	) -> Result<()> {
+		use crate::schema::{compromised_keys, server_certificates::dsl};
+		use diesel_async::AsyncConnection;
+
+		let cert = Self::get(db, id).await?;
+		let by = revoked_by.map(str::to_string);
+
+		db.transaction::<_, AppError, _>(async |conn| {
+			diesel::update(dsl::server_certificates.filter(dsl::id.eq(id)))
+				.set((
+					dsl::state.eq(OrderState::Revoked.as_str()),
+					dsl::revoked_at
+						.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))),
+					dsl::revoked_by.eq(by.as_deref()),
+					dsl::revocation_reason.eq(reason.as_str()),
+					// Nothing to renew any more.
+					dsl::renew_after.eq(jiff_diesel::NullableTimestamp::from(None)),
+				))
+				.execute(conn)
+				.await
+				.map_err(AppError::from)?;
+
+			if reason.bars_the_key() {
+				diesel::insert_into(compromised_keys::table)
+					.values((
+						compromised_keys::key_fingerprint.eq(&cert.key_fingerprint),
+						compromised_keys::certificate_id.eq(Some(id)),
+						compromised_keys::noted_by.eq(by.as_deref()),
+					))
+					// Already barred by an earlier revocation: still barred.
+					.on_conflict(compromised_keys::key_fingerprint)
+					.do_nothing()
+					.execute(conn)
+					.await
+					.map_err(AppError::from)?;
+			}
+			Ok(())
+		})
+		.await
+	}
+
 	/// Stop working an order and stop renewing what it produced — the name is no
 	/// longer the group's, or the server may no longer hold it.
 	pub async fn stop(db: &mut AsyncPgConnection, id: Uuid, reason: &str) -> Result<()> {
@@ -372,6 +614,35 @@ impl ServerCertificate {
 			.await?;
 		Ok(())
 	}
+}
+
+/// Whether this key has been revoked as compromised, and so must never be
+/// certified again.
+pub async fn is_key_compromised(db: &mut AsyncPgConnection, key_fingerprint: &str) -> Result<bool> {
+	use crate::schema::compromised_keys::dsl;
+	let found: Option<String> = dsl::compromised_keys
+		.select(dsl::key_fingerprint)
+		.filter(dsl::key_fingerprint.eq(key_fingerprint))
+		.first(db)
+		.await
+		.optional()
+		.map_err(AppError::from)?;
+	Ok(found.is_some())
+}
+
+/// When to renew a certificate whose authority publishes no renewal information
+/// of its own: once all but a fraction of its life has passed.
+pub fn default_renew_after(issued_at: Timestamp, not_after: Timestamp) -> Timestamp {
+	let Ok(lifetime): std::result::Result<SignedDuration, _> = (not_after - issued_at).try_into()
+	else {
+		return issued_at;
+	};
+	// A certificate whose expiry is not after its issuance is already spent;
+	// renewing it immediately is the only sensible reading.
+	if lifetime.is_negative() || lifetime.is_zero() {
+		return issued_at;
+	}
+	not_after - lifetime / RENEW_AT_FRACTION_REMAINING as i32
 }
 
 /// Doubling backoff from [`BASE_BACKOFF`], capped at [`MAX_BACKOFF`].

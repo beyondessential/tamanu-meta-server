@@ -61,7 +61,7 @@ pub use restore::{
 	BackupRestoreCheck, NewBackupRestoreCheck, NewRestoreReplica, RestoreConsumerCapability,
 	RestoreReplica, RestoreReplicaUpdate,
 };
-pub use server_certificates::{OrderState, ServerCertificate};
+pub use server_certificates::{OrderState, RevocationReason, Risk, ServerCertificate};
 pub use server_domains::ServerGroupDomain;
 pub use server_names::ServerName;
 
