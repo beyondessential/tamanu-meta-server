@@ -232,6 +232,21 @@ impl ServerCertificate {
 		self.order_state() == OrderState::Revoked
 	}
 
+	/// Whether a server can still be served this chain.
+	///
+	/// Deliberately not the same question as [`Self::is_current`]. A renewal in
+	/// flight puts the row back to pending while the chain it holds is still
+	/// perfectly valid, and the server must keep being given it — otherwise an
+	/// agent polling mid-renewal is told it has nothing and stops serving TLS on a
+	/// name whose certificate has weeks left. What disqualifies a chain is being
+	/// revoked or being expired, not there being newer work under way.
+	// spec: CRT#fulfilment-is-not-immediate
+	pub fn is_collectable(&self) -> bool {
+		!self.is_revoked()
+			&& self.chain.is_some()
+			&& self.not_after.is_some_and(|at| at > Timestamp::now())
+	}
+
 	/// This certificate's whole life, from issuance to expiry. `None` for one not
 	/// issued yet.
 	pub fn lifetime(&self) -> Option<SignedDuration> {
@@ -378,14 +393,45 @@ impl ServerCertificate {
 
 	/// Orders due to be attempted, soonest first. Claimed with `SKIP LOCKED` so
 	/// two workers never drive the same order.
+	///
+	/// Skips paused servers: while a server is paused Canopy makes no new changes
+	/// on its behalf, so its orders sit where they are and resume when the pause
+	/// lifts.
+	// spec: CRT#pausing-a-server
 	pub async fn claim_due(db: &mut AsyncPgConnection, limit: i64) -> Result<Vec<Self>> {
-		use crate::schema::server_certificates::dsl;
-		dsl::server_certificates
-			.select(Self::as_select())
-			.filter(dsl::state.eq(OrderState::Pending.as_str()))
-			.filter(dsl::next_attempt_at.le(jiff_diesel::Timestamp::from(Timestamp::now())))
-			.order(dsl::next_attempt_at.asc())
+		use crate::schema::{server_certificates, servers};
+
+		let now = jiff_diesel::Timestamp::from(Timestamp::now());
+
+		// Two steps on purpose. The eligibility question spans `servers` (is it
+		// paused? archived?), but the lock belongs on the certificate rows alone:
+		// `FOR UPDATE` over the join would lock server rows too, and an unrelated
+		// edit to a server would then block a worker claiming its orders.
+		let candidates: Vec<Uuid> = server_certificates::table
+			.inner_join(servers::table)
+			.filter(server_certificates::state.eq(OrderState::Pending.as_str()))
+			.filter(server_certificates::next_attempt_at.le(now))
+			.filter(servers::deleted_at.is_null())
+			.filter(servers::name_management_paused_at.is_null())
+			.select(server_certificates::id)
+			.order(server_certificates::next_attempt_at.asc())
 			.limit(limit)
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		if candidates.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		// Re-apply the row-local filters: a candidate may have been worked by
+		// another worker between the two statements.
+		server_certificates::table
+			.filter(server_certificates::id.eq_any(candidates))
+			.filter(server_certificates::state.eq(OrderState::Pending.as_str()))
+			.filter(server_certificates::next_attempt_at.le(now))
+			.select(Self::as_select())
+			.order(server_certificates::next_attempt_at.asc())
 			.for_update()
 			.skip_locked()
 			.load(db)
@@ -458,14 +504,26 @@ impl ServerCertificate {
 		use crate::schema::server_certificates::dsl;
 
 		let now = Timestamp::now();
-		let due: Vec<Uuid> = dsl::server_certificates
-			.select(dsl::id)
-			.filter(dsl::state.eq(OrderState::Issued.as_str()))
-			.filter(dsl::renew_after.is_not_null())
-			.filter(dsl::renew_after.le(jiff_diesel::NullableTimestamp::from(Some(now))))
-			.load(db)
-			.await
-			.map_err(AppError::from)?;
+		// Paused servers are skipped: their renewals fall due again when the
+		// pause lifts.
+		// spec: CRT#pausing-a-server
+		let due: Vec<Uuid> = {
+			use crate::schema::{server_certificates, servers};
+			server_certificates::table
+				.inner_join(servers::table)
+				.filter(server_certificates::state.eq(OrderState::Issued.as_str()))
+				.filter(server_certificates::renew_after.is_not_null())
+				.filter(
+					server_certificates::renew_after
+						.le(jiff_diesel::NullableTimestamp::from(Some(now))),
+				)
+				.filter(servers::deleted_at.is_null())
+				.filter(servers::name_management_paused_at.is_null())
+				.select(server_certificates::id)
+				.load(db)
+				.await
+				.map_err(AppError::from)?
+		};
 
 		if due.is_empty() {
 			return Ok(Vec::new());
@@ -508,6 +566,11 @@ impl ServerCertificate {
 			.filter(server_certificates::state.eq(OrderState::Issued.as_str()))
 			.filter(servers::deleted_at.is_null())
 			.filter(servers::may_manage_tls.eq(true))
+			// A paused server raises nothing: Canopy was told to stop acting on
+			// its behalf, so a certificate running down is the expected
+			// consequence. The pause is what gets reported instead.
+			// spec: CRT#pausing-a-server
+			.filter(servers::name_management_paused_at.is_null())
 			.select((
 				Self::as_select(),
 				servers::group_id,
@@ -600,6 +663,23 @@ impl ServerCertificate {
 				.execute(conn)
 				.await
 				.map_err(AppError::from)?;
+
+			// Stop the machinery rather than merely redirecting it: an agent would
+			// otherwise request a replacement within minutes, and if the key leaked
+			// because the host was compromised that hands the same attacker a
+			// fresh certificate. An operator decides when to start again.
+			// spec: CRT#pausing-a-server
+			crate::servers::Server::pause_name_management(
+				conn,
+				cert.server_id,
+				by.as_deref(),
+				&format!(
+					"certificate for {} revoked ({})",
+					cert.name,
+					reason.as_str()
+				),
+			)
+			.await?;
 
 			if reason.bars_the_key() {
 				diesel::insert_into(compromised_keys::table)

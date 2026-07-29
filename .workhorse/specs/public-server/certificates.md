@@ -46,6 +46,29 @@ Both carry the same content, the standalone form being for an agent that wants i
 
 A server with no grants, or whose group controls no domain, is told so plainly: the answer is empty rather than an error, since asking what one may do is not itself a privileged act.
 
+## Pausing a server
+
+A server can be paused, and while it is, Canopy makes no new changes on its behalf: no certificate is ordered or renewed for it, and no address record of its is changed.
+
+Pausing withdraws nothing already in place.
+The records published stand, the certificates held stay held and collectable until they expire, and the deployment keeps working exactly as it did — a pause being for looking into something, and taking a deployment off the air not being a neutral act to perform while looking.
+What stops is Canopy doing anything *new* on that server's behalf.
+
+Revoking one of a server's certificates pauses that server, without being asked.
+Revocation and re-issuance would otherwise chase each other: a key revoked as compromised has its replacement requested within minutes by an agent doing exactly what it was built to do, and if the key leaked because the host was compromised, that replacement hands the same attacker a fresh certificate.
+So revoking stops the machinery rather than merely redirecting it, and an operator decides when it is safe to start again.
+An operator can also pause a server for any other reason, recording why.
+
+Unpausing is an operator's alone: Canopy never lifts a pause itself, however long it has been in place and however much is expiring under it.
+Work resumes where it left off — orders already recorded are worked, renewals fall due again, and address changes waiting to be published are published.
+
+A request from a paused server is refused distinguishably, so an agent can tell being paused apart from being unentitled or misconfigured, and wait rather than hammer.
+A pause is not a permission: it says *not now*, where a grant withheld says *not you*.
+
+Because a pause suppresses the alerting that would otherwise chase a certificate running out, the pause itself has to be what is visible.
+A paused server presents as paused wherever its certificates are presented, with who paused it, when, and why.
+And a pause old enough that something has lapsed underneath it is reported against Canopy, since a pause everyone has forgotten is how certificates quietly expire; what wants surfacing is the forgetting rather than the expiry it caused.
+
 ## Addresses
 
 A server registers the name it should be reachable at together with the external addresses it is reachable at, and Canopy publishes the address records: the IPv4 addresses as A records, the IPv6 addresses as AAAA records, at that name, in the managed zone the name resolves to.
@@ -138,6 +161,8 @@ A certificate that is running out is a fact about the server that serves it, so 
 It warns while there is still room to recover and fails as the remaining life runs down, and both thresholds are fractions of the certificate's own lifetime rather than fixed durations — otherwise the same alert would fire far too late for a short-lived certificate and far too early for a long-lived one.
 A certificate that has expired outright fails regardless.
 
+A paused server raises none of this either, for the same reason: Canopy has been told to stop acting on its behalf, so a certificate running down is the expected consequence rather than a failure. What is reported instead is the pause, and eventually the pause having been forgotten.
+
 Except that a certificate for a name the server is no longer entitled to raises nothing at all, however far past expiry it is.
 Its group may have released the domain it sat under, the server's grant may have been revoked, or the server may have been archived — and in each case Canopy deliberately stopped renewing it, so its running out is the intended outcome rather than a failure to report.
 Alerting on it would mean every deliberate withdrawal left an alert behind that no action could clear, which teaches an operator to ignore the alert that matters.
@@ -153,7 +178,7 @@ Reporting the two apart matters because they call for different people — a ser
 
 A server presents the names it has registered — with the addresses published for each, and whether the zone has caught up with what it asked for — and the certificates Canopy holds for it, each with the name it covers, the profile it was issued under, and when it expires, given both as an instant and as how long is left.
 A request that has not yet produced a certificate presents as pending, or as failed with the reason.
-An operator sets the server's profile where its other permissions are set.
+An operator sets the server's profile where its other permissions are set, and pauses or unpauses it from the same place, a pause showing who set it, when, and why.
 
 A group presents, under each domain it controls, the names in use beneath it and which of them hold a current certificate, so whether a deployment's names are healthy is answerable without visiting each of its servers.
 

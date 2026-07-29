@@ -864,3 +864,339 @@ async fn a_key_compromise_revocation_tells_the_server_to_replace_the_key() {
 	})
 	.await;
 }
+
+// ── Pausing ─────────────────────────────────────────────────────────────────
+
+use database::servers::Server;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn revoking_pauses_the_server_so_reissuance_cannot_chase_it() {
+	TestDb::run(async |mut conn, _url| {
+		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
+		let cert = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+			.await
+			.expect("request");
+		ServerCertificate::record_issued(
+			&mut conn,
+			cert.id,
+			"chain",
+			Timestamp::now() + SignedDuration::from_hours(48),
+			None,
+			None,
+		)
+		.await
+		.expect("issued");
+
+		assert!(
+			!Server::get_by_id(&mut conn, server)
+				.await
+				.expect("get")
+				.name_management_paused(),
+			"not paused to start with"
+		);
+
+		ServerCertificate::record_revoked(
+			&mut conn,
+			cert.id,
+			RevocationReason::KeyCompromise,
+			Some("op@example.test"),
+		)
+		.await
+		.expect("revoke");
+
+		let after = Server::get_by_id(&mut conn, server).await.expect("get");
+		assert!(after.name_management_paused(), "revoking pauses the server");
+		assert_eq!(
+			after.name_management_paused_by.as_deref(),
+			Some("op@example.test")
+		);
+		assert!(
+			after
+				.name_management_pause_reason
+				.as_deref()
+				.is_some_and(|r| r.contains("revoked")),
+			"the reason should say what happened: {:?}",
+			after.name_management_pause_reason
+		);
+
+		// The whole point: a fresh key on a paused server gets no new order
+		// worked, so the attacker who took the old key gets nothing.
+		ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_B, b"c2")
+			.await
+			.expect("recording the request is fine");
+		assert!(
+			ServerCertificate::claim_due(&mut conn, 10)
+				.await
+				.expect("due")
+				.is_empty(),
+			"no order is worked while the server is paused"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pause_stops_every_kind_of_work_and_withdraws_nothing() {
+	TestDb::run(async |mut conn, _url| {
+		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
+
+		// An address change waiting to be published, and a renewal falling due.
+		let name =
+			ServerName::register(&mut conn, server, "a.fiji.tamanu.app", &[addr("192.0.2.1")])
+				.await
+				.expect("register");
+		let cert = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+			.await
+			.expect("request");
+		ServerCertificate::record_issued(
+			&mut conn,
+			cert.id,
+			"chain",
+			Timestamp::now() + SignedDuration::from_hours(48),
+			None,
+			Some(Timestamp::now() - SignedDuration::from_hours(1)),
+		)
+		.await
+		.expect("issued");
+
+		// Unpaused: all three queues have work.
+		assert_eq!(
+			ServerName::needing_publish(&mut conn, 10)
+				.await
+				.expect("names")
+				.len(),
+			1
+		);
+		assert_eq!(
+			ServerCertificate::start_renewals(&mut conn)
+				.await
+				.expect("renew")
+				.len(),
+			1
+		);
+		assert_eq!(
+			ServerCertificate::claim_due(&mut conn, 10)
+				.await
+				.expect("due")
+				.len(),
+			1
+		);
+
+		Server::pause_name_management(&mut conn, server, Some("op@example.test"), "investigating")
+			.await
+			.expect("pause");
+
+		assert!(
+			ServerName::needing_publish(&mut conn, 10)
+				.await
+				.expect("names")
+				.is_empty(),
+			"no record changes while paused"
+		);
+		assert!(
+			ServerCertificate::start_renewals(&mut conn)
+				.await
+				.expect("renew")
+				.is_empty(),
+			"no renewals while paused"
+		);
+		assert!(
+			ServerCertificate::claim_due(&mut conn, 10)
+				.await
+				.expect("due")
+				.is_empty(),
+			"no orders worked while paused"
+		);
+
+		// But nothing was withdrawn: the registration and the certificate stand.
+		let held = ServerCertificate::get(&mut conn, cert.id)
+			.await
+			.expect("get");
+		// A renewal is in flight, so the row is pending again — but the chain it
+		// holds is untouched and the server must still be served it, or an agent
+		// polling mid-renewal would stop serving TLS on a name with weeks left.
+		assert!(
+			held.is_collectable(),
+			"the chain stands and stays collectable while a renewal is under way"
+		);
+		assert!(held.chain.is_some());
+		assert!(
+			ServerName::for_name(&mut conn, "a.fiji.tamanu.app")
+				.await
+				.expect("read")
+				.is_some(),
+			"the registration stands"
+		);
+		assert_eq!(name.wanted(), vec![addr("192.0.2.1")]);
+
+		// Resuming picks the work back up where it left off.
+		Server::resume_name_management(&mut conn, server)
+			.await
+			.expect("resume");
+		assert_eq!(
+			ServerName::needing_publish(&mut conn, 10)
+				.await
+				.expect("names")
+				.len(),
+			1
+		);
+		assert_eq!(
+			ServerCertificate::claim_due(&mut conn, 10)
+				.await
+				.expect("due")
+				.len(),
+			1
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_paused_server_raises_no_expiry_alert_but_the_pause_is_reportable() {
+	TestDb::run(async |mut conn, _url| {
+		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
+		let cert = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+			.await
+			.expect("request");
+		sql_query(
+			"UPDATE server_certificates SET state = 'issued', chain = 'x', \
+			 issued_at = now() - interval '91 days', not_after = now() - interval '1 day' \
+			 WHERE id = $1",
+		)
+		.bind::<sql_types::Uuid, _>(cert.id)
+		.execute(&mut conn)
+		.await
+		.expect("expire it");
+
+		assert_eq!(
+			ServerCertificate::at_risk(&mut conn)
+				.await
+				.expect("at risk")
+				.len(),
+			1,
+			"expired and entitled: reported"
+		);
+
+		Server::pause_name_management(&mut conn, server, None, "investigating a leak")
+			.await
+			.expect("pause");
+		assert!(
+			ServerCertificate::at_risk(&mut conn)
+				.await
+				.expect("at risk")
+				.is_empty(),
+			"a paused server's expiry is the expected consequence, not a failure"
+		);
+
+		// The pause itself is what becomes reportable, once it is old enough that
+		// something has lapsed under it — otherwise a forgotten pause is how
+		// certificates quietly expire.
+		assert!(
+			Server::paused_longer_than(&mut conn, SignedDuration::from_hours(1))
+				.await
+				.expect("paused")
+				.is_empty(),
+			"a pause set just now is not yet forgotten"
+		);
+		sql_query(
+			"UPDATE servers SET name_management_paused_at = now() - interval '30 days' \
+			 WHERE id = $1",
+		)
+		.bind::<sql_types::Uuid, _>(server)
+		.execute(&mut conn)
+		.await
+		.expect("age the pause");
+		let forgotten = Server::paused_longer_than(&mut conn, SignedDuration::from_hours(14 * 24))
+			.await
+			.expect("paused");
+		assert_eq!(forgotten.len(), 1);
+		assert_eq!(forgotten[0].id, server);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn pausing_again_keeps_the_original_pause() {
+	TestDb::run(async |mut conn, _url| {
+		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
+		Server::pause_name_management(
+			&mut conn,
+			server,
+			Some("first@example.test"),
+			"the real reason",
+		)
+		.await
+		.expect("pause");
+		Server::pause_name_management(
+			&mut conn,
+			server,
+			Some("second@example.test"),
+			"something else",
+		)
+		.await
+		.expect("pause again");
+
+		let after = Server::get_by_id(&mut conn, server).await.expect("get");
+		assert_eq!(
+			after.name_management_paused_by.as_deref(),
+			Some("first@example.test"),
+			"the pause being investigated is the one that stopped the work"
+		);
+		assert_eq!(
+			after.name_management_pause_reason.as_deref(),
+			Some("the real reason")
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_renewal_in_flight_does_not_stop_the_old_chain_being_collectable() {
+	TestDb::run(async |mut conn, _url| {
+		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
+		let cert = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+			.await
+			.expect("request");
+		ServerCertificate::record_issued(
+			&mut conn,
+			cert.id,
+			"chain",
+			Timestamp::now() + SignedDuration::from_hours(48),
+			None,
+			Some(Timestamp::now() - SignedDuration::from_hours(1)),
+		)
+		.await
+		.expect("issued");
+
+		ServerCertificate::start_renewals(&mut conn)
+			.await
+			.expect("renew");
+
+		let during = ServerCertificate::get(&mut conn, cert.id)
+			.await
+			.expect("get");
+		assert_eq!(
+			during.order_state(),
+			OrderState::Pending,
+			"renewal under way"
+		);
+		assert!(!during.is_current(), "not `issued` while the renewal runs");
+		assert!(
+			during.is_collectable(),
+			"but the chain is still valid, so the server must still be served it"
+		);
+
+		// Revoked or expired are the things that actually disqualify a chain.
+		ServerCertificate::record_revoked(&mut conn, cert.id, RevocationReason::Superseded, None)
+			.await
+			.expect("revoke");
+		assert!(
+			!ServerCertificate::get(&mut conn, cert.id)
+				.await
+				.expect("get")
+				.is_collectable(),
+			"a revoked chain must not be served"
+		);
+	})
+	.await;
+}

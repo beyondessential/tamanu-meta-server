@@ -619,6 +619,9 @@ diesel::table! {
 		may_manage_dns -> Bool,
 		may_manage_tls -> Bool,
 		certificate_profile -> Nullable<Text>,
+		name_management_paused_at -> Nullable<Timestamptz>,
+		name_management_paused_by -> Nullable<Text>,
+		name_management_pause_reason -> Nullable<Text>,
 	}
 }
 

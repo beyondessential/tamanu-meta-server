@@ -132,6 +132,21 @@ pair, submit a new signing request for it, and discard the old
 key. Body content names the key and the certificate whose
 revocation barred it.
 
+## Name management paused
+
+Issued when a paused server asks Canopy to act on its behalf —
+publish an address record, or obtain a certificate. Canopy makes no
+new changes for a paused server, though nothing already in place is
+withdrawn.
+
+Distinct from a withheld grant so a client can tell *not now* from
+*not you*: a pause is expected to lift, so the client should wait
+and try later rather than treat the refusal as permanent. Body
+content says when the pause was set and why.
+
+Revoking a certificate pauses its server automatically, so this is
+the refusal an agent meets while an operator is investigating.
+
 ## Auth: tailnet identity missing
 
 Issued on the private-server's `/public/...` mount when the

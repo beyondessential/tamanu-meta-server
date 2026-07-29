@@ -140,6 +140,15 @@ pub enum AppError {
 	#[error("the key in this request was revoked as compromised: {0}")]
 	CertificateKeyCompromised(String),
 
+	/// The server's name management is paused, so Canopy is making no new changes
+	/// on its behalf. Its own problem type so an agent can tell *not now* apart
+	/// from *not you* — a withheld grant is permanent until an operator grants it,
+	/// where a pause is expected to lift — and back off instead of hammering.
+	/// Maps to 409.
+	// spec: CRT#pausing-a-server
+	#[error("name management is paused for this server: {0}")]
+	NameManagementPaused(String),
+
 	/// Deliberately opaque failure for the public enrollment endpoints. Every
 	/// pre-completion reason (unknown/archived server, invalid/expired/consumed
 	/// token, bad/expired/used challenge nonce, bad signature) collapses to this
@@ -227,6 +236,7 @@ impl AppError {
 			Self::BadRequest(_) => StatusCode::BAD_REQUEST,
 			Self::Conflict(_) => StatusCode::CONFLICT,
 			Self::CertificateKeyCompromised(_) => StatusCode::CONFLICT,
+			Self::NameManagementPaused(_) => StatusCode::CONFLICT,
 			Self::EnrollmentFailed => StatusCode::FORBIDDEN,
 			Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
 			Self::Upstream(_) => StatusCode::BAD_GATEWAY,
@@ -282,6 +292,7 @@ impl AppError {
 						Self::BadRequest(_) => "bad-request",
 						Self::Conflict(_) => "conflict",
 						Self::CertificateKeyCompromised(_) => "certificate-key-compromised",
+						Self::NameManagementPaused(_) => "name-management-paused",
 						Self::EnrollmentFailed => "enrollment-failed",
 						Self::RateLimited => "rate-limited",
 						Self::Upstream(_) => "upstream",

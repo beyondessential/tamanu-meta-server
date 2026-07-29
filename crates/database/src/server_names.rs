@@ -167,11 +167,18 @@ impl ServerName {
 
 	/// Registrations whose published state doesn't match what was asked for —
 	/// the reconcile's work list, oldest change first so nothing starves.
+	///
+	/// Skips paused servers: while a server is paused Canopy changes no record of
+	/// its, though everything already published stays published.
+	// spec: CRT#pausing-a-server
 	pub async fn needing_publish(db: &mut AsyncPgConnection, limit: i64) -> Result<Vec<Self>> {
-		use crate::schema::server_names::dsl;
-		let rows: Vec<Self> = dsl::server_names
+		use crate::schema::{server_names, servers};
+		let rows: Vec<Self> = server_names::table
+			.inner_join(servers::table)
+			.filter(servers::deleted_at.is_null())
+			.filter(servers::name_management_paused_at.is_null())
 			.select(Self::as_select())
-			.order(dsl::updated_at.asc())
+			.order(server_names::updated_at.asc())
 			.limit(limit)
 			.load(db)
 			.await

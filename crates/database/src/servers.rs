@@ -157,6 +157,37 @@ pub struct Server {
 	/// records are managed elsewhere may still want its certificates here.
 	// spec: DOM#permission-for-a-server-to-manage-its-own-names
 	pub may_manage_tls: bool,
+	/// The certificate profile — the authority's name for a lifetime — this
+	/// server's certificates are requested under. `None` means the longest the
+	/// authority offers, which is every server until an operator says otherwise:
+	/// a short lifetime is adopted deliberately rather than inherited.
+	// spec: CRT#lifetime
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(treat_none_as_default_value = false)]
+	pub certificate_profile: Option<String>,
+	/// When this server's name management was paused. While set, Canopy makes no
+	/// new changes on its behalf — nothing ordered, renewed, or republished —
+	/// though nothing already in place is withdrawn.
+	///
+	/// Set automatically when one of the server's certificates is revoked, so
+	/// revocation and re-issuance don't chase each other. Only an operator lifts
+	/// it.
+	// spec: CRT#pausing-a-server
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(
+		deserialize_as = jiff_diesel::NullableTimestamp,
+		serialize_as = jiff_diesel::NullableTimestamp,
+		treat_none_as_default_value = false
+	)]
+	pub name_management_paused_at: Option<Timestamp>,
+	/// Who paused it. `None` when Canopy paused it itself on a revocation.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(treat_none_as_default_value = false)]
+	pub name_management_paused_by: Option<String>,
+	/// Why it was paused.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(treat_none_as_default_value = false)]
+	pub name_management_pause_reason: Option<String>,
 }
 
 impl Server {
@@ -445,6 +476,84 @@ impl Server {
 	/// already-open window resets the expiry. Returns the new expiry so callers
 	/// can echo it back to the operator. `allowed_by` is the operator's identity
 	/// (Tailscale login) for audit.
+	/// Pause Canopy acting on this server's behalf: no certificate ordered or
+	/// renewed, no address record changed. Nothing already in place is withdrawn.
+	///
+	/// Pausing an already-paused server leaves the original pause standing, so the
+	/// recorded reason and age stay those of the pause that first stopped the
+	/// work — which is the one an operator is investigating.
+	// spec: CRT#pausing-a-server
+	/// Whether Canopy is currently making no new changes on this server's behalf.
+	pub fn name_management_paused(&self) -> bool {
+		self.name_management_paused_at.is_some()
+	}
+
+	pub async fn pause_name_management(
+		db: &mut AsyncPgConnection,
+		server_id: Uuid,
+		paused_by: Option<&str>,
+		reason: &str,
+	) -> Result<()> {
+		use crate::schema::servers::dsl;
+		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+			.filter(dsl::name_management_paused_at.is_null())
+			.set((
+				dsl::name_management_paused_at
+					.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))),
+				dsl::name_management_paused_by.eq(paused_by),
+				dsl::name_management_pause_reason.eq(Some(reason)),
+			))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
+	}
+
+	/// Lift a pause, so the work resumes where it left off.
+	///
+	/// Only ever called for an operator: Canopy pauses itself on a revocation but
+	/// never un-pauses itself, however long the pause has stood and however much
+	/// is expiring under it. Deciding it is safe to start again is a judgement
+	/// Canopy is not in a position to make.
+	// spec: CRT#pausing-a-server
+	pub async fn resume_name_management(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<()> {
+		use crate::schema::servers::dsl;
+		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+			.set((
+				dsl::name_management_paused_at.eq(jiff_diesel::NullableTimestamp::from(None)),
+				dsl::name_management_paused_by.eq::<Option<String>>(None),
+				dsl::name_management_pause_reason.eq::<Option<String>>(None),
+			))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
+	}
+
+	/// Servers paused for at least `older_than` — the forgotten-pause report. A
+	/// pause nobody has come back to is how certificates quietly expire, so the
+	/// age of the pause is what gets surfaced rather than the expiry it causes.
+	// spec: CRT#pausing-a-server
+	pub async fn paused_longer_than(
+		db: &mut AsyncPgConnection,
+		older_than: SignedDuration,
+	) -> Result<Vec<Self>> {
+		use crate::schema::servers::dsl;
+		let cutoff = Timestamp::now() - older_than;
+		dsl::servers
+			.select(Self::as_select())
+			.filter(dsl::deleted_at.is_null())
+			.filter(dsl::name_management_paused_at.is_not_null())
+			.filter(
+				dsl::name_management_paused_at
+					.le(jiff_diesel::NullableTimestamp::from(Some(cutoff))),
+			)
+			.order(dsl::name_management_paused_at.asc())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn allow_restore(
 		db: &mut AsyncPgConnection,
 		server_id: Uuid,
@@ -854,6 +963,10 @@ fn test_server_serialization() {
 		restore_allowed_by: None,
 		may_manage_dns: false,
 		may_manage_tls: false,
+		certificate_profile: None,
+		name_management_paused_at: None,
+		name_management_paused_by: None,
+		name_management_pause_reason: None,
 	};
 
 	let serialized = serde_json::to_string_pretty(&server).unwrap();
@@ -927,6 +1040,10 @@ impl From<NewServer> for Server {
 			restore_allowed_by: None,
 			may_manage_dns: false,
 			may_manage_tls: false,
+			certificate_profile: None,
+			name_management_paused_at: None,
+			name_management_paused_by: None,
+			name_management_pause_reason: None,
 		}
 	}
 }
