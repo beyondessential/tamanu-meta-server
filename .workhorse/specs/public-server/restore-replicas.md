@@ -218,7 +218,8 @@ Canopy knows the version each server reports running and the upgrade path it wou
 
 Canopy decides which versions are tested against which servers, rather than an operator naming each pair.
 
-A server's candidate is the newest published version it could upgrade to: newer than the version it reports running, and on the upgrade path Canopy would serve it.
+A server's candidate is the version its group plans to move to, when a plan is open (see [UPG](../private-server/upgrade-plans.md)).
+Without a plan it is the newest published version the server could upgrade to: newer than the version it reports running, and on the upgrade path Canopy would serve it.
 
 One candidate, not one per version along the path.
 Migrations are applied to the restored snapshot in sequence, so a run targeting the newest version applies every migration between the snapshot's version and that one, and exercises the whole chain an upgrade would.
