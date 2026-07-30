@@ -3928,6 +3928,16 @@ export interface components {
              */
             server_id: string;
         };
+        /**
+         * @description Whether a restore attempt is under way for a group, for showing beside a
+         *     verdict.
+         *
+         *     Group-level, because credentials are issued per `(group, type)`: RST scopes
+         *     them that way since one repo holds all of a group's snapshots, so this is the
+         *     finest granularity the signal honestly has.
+         * @enum {string}
+         */
+        AttemptState: "in_flight" | "ended_without_report";
         /** @description The certificate authority Canopy is configured to use, and whether it works. */
         AuthorityView: {
             /**
@@ -6694,6 +6704,7 @@ export interface components {
         };
         /** @description One row of the planned-upgrades view. */
         PlannedUpgrade: {
+            attempt?: null | components["schemas"]["AttemptState"];
             /** @description The version the group runs now, where it has reported one. */
             current_version?: string | null;
             /**

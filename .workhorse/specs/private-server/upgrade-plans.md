@@ -63,6 +63,7 @@ A plan changes what is tested, so changing one invalidates nothing already recor
 Canopy presents planned upgrades across the fleet in one view, so the question "what is moving, and when" is answered without reading each group.
 
 For each group with an open plan it shows the target version, the version the group is on now, the planned date where there is one, and the pre-upgrade verdict for that target, so an operator sees both the intent and whether the deployment's data survives it.
+Where an attempt is under way it shows that too, since a restore takes hours and a verdict of not-yet-tested otherwise looks the same whether the pipeline is working or has stopped.
 Groups with no plan are shown too: an unplanned deployment several minors behind is the thing this view exists to surface.
 
 A plan whose date has passed without being met is presented as late.

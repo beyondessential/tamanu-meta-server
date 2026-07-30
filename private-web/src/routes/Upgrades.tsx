@@ -91,7 +91,14 @@ export default function Upgrades() {
 									<TableCell>{row.current_version ?? "unknown"}</TableCell>
 									<TableCell>{row.target_version}</TableCell>
 									<TableCell>
-										<VerdictChip verdict={row.verdict} />
+										<Stack
+											direction="row"
+											spacing={0.5}
+											sx={{ alignItems: "center" }}
+										>
+											<VerdictChip verdict={row.verdict} />
+											<AttemptChip attempt={row.attempt} />
+										</Stack>
 									</TableCell>
 									<TableCell>
 										<PlannedFor
@@ -171,6 +178,35 @@ function VerdictChip({ verdict }: { verdict: string | null | undefined }) {
 		);
 	}
 	return <Chip size="small" variant="outlined" label="not yet tested" />;
+}
+
+/// An attempt under way, beside the verdict rather than replacing it: a row can
+/// read as failed with a fresh attempt already running.
+function AttemptChip({
+	attempt,
+}: {
+	attempt: "in_flight" | "ended_without_report" | null | undefined;
+}) {
+	if (attempt === "in_flight") {
+		return (
+			<Tooltip title="a restore is under way; a verdict lands when it reports">
+				<Chip size="small" color="info" variant="outlined" label="testing" />
+			</Tooltip>
+		);
+	}
+	if (attempt === "ended_without_report") {
+		return (
+			<Tooltip title="a restore ran and never reported how it went, so the pipeline may be stuck">
+				<Chip
+					size="small"
+					color="warning"
+					variant="outlined"
+					label="no report"
+				/>
+			</Tooltip>
+		);
+	}
+	return null;
 }
 
 function PlannedFor({ date, late }: { date: string | null; late: boolean }) {

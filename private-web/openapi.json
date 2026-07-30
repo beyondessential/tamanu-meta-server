@@ -7624,6 +7624,14 @@
           }
         }
       },
+      "AttemptState": {
+        "type": "string",
+        "description": "Whether a restore attempt is under way for a group, for showing beside a\nverdict.\n\nGroup-level, because credentials are issued per `(group, type)`: RST scopes\nthem that way since one repo holds all of a group's snapshots, so this is the\nfinest granularity the signal honestly has.",
+        "enum": [
+          "in_flight",
+          "ended_without_report"
+        ]
+      },
       "AuthorityView": {
         "type": "object",
         "description": "The certificate authority Canopy is configured to use, and whether it works.",
@@ -12042,6 +12050,17 @@
           "late"
         ],
         "properties": {
+          "attempt": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AttemptState",
+                "description": "Whether a restore attempt is under way, carried beside the verdict rather\nthan folded into it: a restore takes hours, so a group mid-test would\notherwise read as untested for the whole window."
+              }
+            ]
+          },
           "current_version": {
             "type": [
               "string",

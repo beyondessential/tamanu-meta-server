@@ -286,6 +286,13 @@ Verdicts are presented per group, as the set of versions tested against that gro
 A verdict names the snapshot it was reached against and when that was, because a pass against a month-old snapshot is a weaker statement than one against last night's.
 A newer test of the same pair supersedes the previous verdict, and the superseded reports remain.
 
+Whether an attempt is under way is carried beside the verdict rather than folded into it.
+A restore takes hours, so a group with a test running would otherwise read as untested for the whole window, and a consumer that has quietly stopped would look the same as one that has not started.
+An attempt is in flight while credentials have been issued and not yet expired with no report, and is a run that ended without reporting once they have, exactly as [Restore-health reporting](#restore-health-reporting) already derives for restores.
+
+Keeping the two apart is what lets a pair read as failed with a fresh attempt already running.
+Folding the attempt into the verdict would overwrite the answer with the activity and lose the finding.
+
 ### Version readiness
 
 A failed migration test marks its target version as carrying a known issue, which removes that version from those considered ready to roll out, and records the server and the failing migration so whoever picks it up knows which deployment's data provoked it.

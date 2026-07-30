@@ -40,6 +40,10 @@ pub struct PlannedUpgrade {
 	/// its servers: any failure makes the group a failure, since one server
 	/// whose data breaks is enough to stop the upgrade. `null` without a plan.
 	pub verdict: Option<String>,
+	/// Whether a restore attempt is under way, carried beside the verdict rather
+	/// than folded into it: a restore takes hours, so a group mid-test would
+	/// otherwise read as untested for the whole window.
+	pub attempt: Option<crate::fns::migration_tests::AttemptState>,
 }
 
 /// Planned upgrades across the fleet.
@@ -68,6 +72,7 @@ pub async fn fleet(
 	// Late is judged against the server's own day; nothing depends on it beyond
 	// presentation.
 	let today = Zoned::now().date();
+	let now_ts = jiff::Timestamp::now();
 
 	let mut out = Vec::new();
 	for group in database::server_groups::ServerGroup::list_all(&mut conn).await? {
@@ -96,6 +101,13 @@ pub async fn fleet(
 			}
 		};
 
+		let attempt = match &plan {
+			None => None,
+			Some(_) => {
+				crate::fns::migration_tests::attempt_state(&mut conn, group.id, now_ts).await?
+			}
+		};
+
 		out.push(PlannedUpgrade {
 			group_id: group.id,
 			group_name: group.name,
@@ -104,6 +116,7 @@ pub async fn fleet(
 			target_version: target,
 			late,
 			verdict,
+			attempt,
 		});
 	}
 
