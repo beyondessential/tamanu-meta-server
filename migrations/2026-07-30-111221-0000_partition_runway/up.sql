@@ -125,6 +125,11 @@ $$;
 -- is the exclusive upper bound of its last partition, so a table covered to
 -- tomorrow has one day of runway. DEFAULT partitions carry no bound and are
 -- ignored here.
+--
+-- Partitions are joined outer, so a partitioned table that has none at all is
+-- still a row — the worst case there is, and it would read as healthy if it
+-- were simply absent. With no bound to measure from, its runway is reported as
+-- a day already gone.
 CREATE OR REPLACE FUNCTION partition_runway()
 RETURNS TABLE(parent TEXT, partitions BIGINT, covered_to DATE, days_remaining INTEGER)
 LANGUAGE sql
@@ -132,14 +137,17 @@ STABLE
 AS $$
     SELECT
         p.relname::TEXT,
-        COUNT(*)::BIGINT,
+        COUNT(c.oid)::BIGINT,
         MAX(SUBSTRING(pg_get_expr(c.relpartbound, c.oid) FROM 'TO \(''(\d{4}-\d{2}-\d{2})'))::DATE,
-        (MAX(SUBSTRING(pg_get_expr(c.relpartbound, c.oid) FROM 'TO \(''(\d{4}-\d{2}-\d{2})'))::DATE
-            - CURRENT_DATE)::INTEGER
+        COALESCE(
+            MAX(SUBSTRING(pg_get_expr(c.relpartbound, c.oid) FROM 'TO \(''(\d{4}-\d{2}-\d{2})'))::DATE
+                - CURRENT_DATE,
+            -1
+        )::INTEGER
     FROM pg_class p
     JOIN pg_namespace n ON n.oid = p.relnamespace
-    JOIN pg_inherits i ON i.inhparent = p.oid
-    JOIN pg_class c ON c.oid = i.inhrelid
+    LEFT JOIN pg_inherits i ON i.inhparent = p.oid
+    LEFT JOIN pg_class c ON c.oid = i.inhrelid
     WHERE p.relkind = 'p' AND n.nspname = 'public'
     GROUP BY p.relname;
 $$;
