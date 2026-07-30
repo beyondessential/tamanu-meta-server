@@ -3533,6 +3533,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/upgrade_plans/targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The versions a group could be planned onto: published, and ahead of what it
+         *     runs.
+         * @description Offering only valid targets is what keeps the operator from picking one
+         *     `record` would refuse.
+         */
+        post: operations["upgrade_plans_targets"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/upgrade_plans/withdraw": {
         parameters: {
             query?: never;
@@ -6660,6 +6682,16 @@ export interface components {
             /** @description Backup type requested. */
             type: string;
         };
+        /** @description A version a group could be planned onto. */
+        PlannableVersion: {
+            /**
+             * Format: uuid
+             * @description The version's identifier, for `record`.
+             */
+            id: string;
+            /** @description Its semver. */
+            version: string;
+        };
         /** @description One row of the planned-upgrades view. */
         PlannedUpgrade: {
             /** @description The version the group runs now, where it has reported one. */
@@ -6679,6 +6711,12 @@ export interface components {
             plan?: null | components["schemas"]["UpgradePlan"];
             /** @description The plan's target as semver. */
             target_version?: string | null;
+            /**
+             * @description Where the group's data stands against the planned version, rolled up from
+             *     its servers: any failure makes the group a failure, since one server
+             *     whose data breaks is enough to stop the upgrade. `null` without a plan.
+             */
+            verdict?: string | null;
         };
         /**
          * @description Request body for reading one group's plans. Named apart from the
@@ -13790,6 +13828,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    upgrade_plans_targets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlansForGroupArgs"];
+            };
+        };
+        responses: {
+            /** @description Plannable versions, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlannableVersion"][];
                 };
             };
             401: {

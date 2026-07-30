@@ -6907,6 +6907,66 @@
         ]
       }
     },
+    "/api/upgrade_plans/targets": {
+      "post": {
+        "tags": [
+          "upgrade_plans"
+        ],
+        "summary": "The versions a group could be planned onto: published, and ahead of what it\nruns.",
+        "description": "Offering only valid targets is what keeps the operator from picking one\n`record` would refuse.",
+        "operationId": "upgrade_plans_targets",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlansForGroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Plannable versions, newest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PlannableVersion"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/upgrade_plans/withdraw": {
       "post": {
         "tags": [
@@ -11954,6 +12014,25 @@
           }
         }
       },
+      "PlannableVersion": {
+        "type": "object",
+        "description": "A version a group could be planned onto.",
+        "required": [
+          "id",
+          "version"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The version's identifier, for `record`."
+          },
+          "version": {
+            "type": "string",
+            "description": "Its semver."
+          }
+        }
+      },
       "PlannedUpgrade": {
         "type": "object",
         "description": "One row of the planned-upgrades view.",
@@ -12000,6 +12079,13 @@
               "null"
             ],
             "description": "The plan's target as semver."
+          },
+          "verdict": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the group's data stands against the planned version, rolled up from\nits servers: any failure makes the group a failure, since one server\nwhose data breaks is enough to stop the upgrade. `null` without a plan."
           }
         }
       },

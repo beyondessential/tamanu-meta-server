@@ -14,6 +14,7 @@ use crate::state::AppState;
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(fleet))
+		.routes(routes!(targets))
 		.routes(routes!(for_group))
 		.routes(routes!(record))
 		.routes(routes!(withdraw))
@@ -35,6 +36,10 @@ pub struct PlannedUpgrade {
 	/// Whether the planned date has passed without the upgrade happening.
 	/// Presentational: a slipping upgrade is normal operational reality.
 	pub late: bool,
+	/// Where the group's data stands against the planned version, rolled up from
+	/// its servers: any failure makes the group a failure, since one server
+	/// whose data breaks is enough to stop the upgrade. `null` without a plan.
+	pub verdict: Option<String>,
 }
 
 /// Planned upgrades across the fleet.
@@ -79,6 +84,18 @@ pub async fn fleet(
 			.as_ref()
 			.is_some_and(|plan| database::upgrade_plans::is_late(plan, today));
 
+		// The plan says where the group is going; the verdict says whether its
+		// data survives getting there. Pairing them is what makes this view
+		// worth reading.
+		let verdict = match &plan {
+			None => None,
+			Some(_) => {
+				let per_server =
+					database::migration_tests::verdicts_for_group(&mut conn, group.id).await?;
+				Some(roll_up(&per_server).to_owned())
+			}
+		};
+
 		out.push(PlannedUpgrade {
 			group_id: group.id,
 			group_name: group.name,
@@ -86,10 +103,30 @@ pub async fn fleet(
 			plan,
 			target_version: target,
 			late,
+			verdict,
 		});
 	}
 
 	Ok(Json(out))
+}
+
+/// The group's standing against its planned version: the worst of its servers'.
+///
+/// One server whose data breaks the migrations is enough to stop the upgrade, so
+/// a failure anywhere is the group's answer.
+fn roll_up(per_server: &[database::migration_tests::GroupVerdict]) -> &'static str {
+	use database::migration_tests::Verdict;
+
+	if per_server.is_empty() {
+		return "nottested";
+	}
+	if per_server.iter().any(|v| v.verdict == Verdict::Failed) {
+		return "failed";
+	}
+	if per_server.iter().any(|v| v.verdict == Verdict::NotTested) {
+		return "nottested";
+	}
+	"passed"
 }
 
 /// Request body for reading one group's plans. Named apart from the
@@ -127,6 +164,62 @@ pub async fn for_group(
 	Ok(Json(
 		UpgradePlan::history_for_group(&mut conn, args.group_id).await?,
 	))
+}
+
+/// A version a group could be planned onto.
+#[derive(Serialize, ToSchema)]
+pub struct PlannableVersion {
+	/// The version's identifier, for `record`.
+	pub id: Uuid,
+	/// Its semver.
+	pub version: String,
+}
+
+/// The versions a group could be planned onto: published, and ahead of what it
+/// runs.
+///
+/// Offering only valid targets is what keeps the operator from picking one
+/// `record` would refuse.
+// spec: UPG#a-plan
+#[utoipa::path(
+	post,
+	path = "/targets",
+	operation_id = "upgrade_plans_targets",
+	tag = "upgrade_plans",
+	security(("tailscale-admin" = [])),
+	request_body = PlansForGroupArgs,
+	responses(
+		(status = 200, description = "Plannable versions, newest first.", body = Vec<PlannableVersion>),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn targets(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<PlansForGroupArgs>,
+) -> Result<Json<Vec<PlannableVersion>>> {
+	let mut conn = state.db.get().await?;
+	let running = database::server_groups::ServerGroup::get_by_id(&mut conn, args.group_id)
+		.await?
+		.effective_version;
+
+	let mut out: Vec<PlannableVersion> = database::versions::Version::get_all(&mut conn)
+		.await?
+		.into_iter()
+		.filter(|version| {
+			running
+				.as_ref()
+				.is_none_or(|running| version.as_semver() > running.0)
+		})
+		.map(|version| PlannableVersion {
+			id: version.id,
+			version: version.as_semver().to_string(),
+		})
+		.collect();
+	// get_all is already newest-first; keep that for the picker.
+	out.truncate(50);
+	Ok(Json(out))
 }
 
 /// Request body for recording where a group is going.

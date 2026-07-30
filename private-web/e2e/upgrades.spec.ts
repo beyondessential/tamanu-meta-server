@@ -40,6 +40,9 @@ test.describe("upgrades dashboard", () => {
 		await expect(plannedRow).toContainText("2.61.0");
 		await expect(plannedRow).toContainText("site can absorb 2.61 only");
 		await expect(plannedRow).toContainText("late");
+		// The plan says where it is going; the verdict says whether the data
+		// survives getting there. Untested until a consumer reports.
+		await expect(plannedRow).toContainText("not yet tested");
 
 		// The deployment with nothing recorded is the one this view exists to
 		// surface, so it is listed rather than omitted.
