@@ -224,7 +224,7 @@ Without a plan it is the newest published version the server could upgrade to: n
 One candidate, not one per version along the path.
 Migrations are applied to the restored snapshot in sequence, so a run targeting the newest version applies every migration between the snapshot's version and that one, and exercises the whole chain an upgrade would.
 
-Which minor a deployment moves to is a decision Canopy has no part in, and testing every minor ahead of a server would cost a full restore each to cover the ones it does not choose.
+Which minor a deployment moves to is not something Canopy can derive, and testing every minor ahead of a server would cost a full restore each to cover the ones it does not choose.
 It does not need to: coverage accumulates on its own.
 Snapshots arrive daily and releases far less often, so every version is tested against a deployment's data while it is the newest, and a deployment that later settles on an older minor already has a result from when that version was current.
 Where a chain does break, the failing migration named in the report identifies the step without a second run.

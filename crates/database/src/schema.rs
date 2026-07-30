@@ -707,6 +707,20 @@ diesel::table! {
 }
 
 diesel::table! {
+	upgrade_plans (id) {
+		id -> Uuid,
+		group_id -> Uuid,
+		target_version_id -> Uuid,
+		planned_for -> Nullable<Date>,
+		note -> Nullable<Text>,
+		created_by -> Nullable<Text>,
+		created_at -> Timestamptz,
+		met_at -> Nullable<Timestamptz>,
+		superseded_at -> Nullable<Timestamptz>,
+	}
+}
+
+diesel::table! {
 	version_known_issues (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -797,6 +811,8 @@ diesel::joinable!(slack_outbox -> incidents (incident_id));
 diesel::joinable!(slack_outbox -> issues (issue_id));
 diesel::joinable!(statuses -> devices (device_id));
 diesel::joinable!(statuses -> servers (server_id));
+diesel::joinable!(upgrade_plans -> server_groups (group_id));
+diesel::joinable!(upgrade_plans -> versions (target_version_id));
 diesel::joinable!(version_known_issues -> servers (server_id));
 diesel::joinable!(versions -> devices (device_id));
 
@@ -851,6 +867,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	sql_playground_history,
 	statuses,
 	tailscale_users,
+	upgrade_plans,
 	version_known_issues,
 	versions,
 );

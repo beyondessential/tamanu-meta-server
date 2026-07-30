@@ -62,6 +62,9 @@ pub fn upgrade_target(reported: &VersionStr, versions: &[Version]) -> Option<Uui
 
 /// The version `server` should be tested against, if any.
 ///
+/// Its group's planned target where there is one (see [`crate::upgrade_plans`]),
+/// otherwise the newest published version it could upgrade to.
+///
 /// Tamanu servers only: the migrations under test are Tamanu's, so no other
 /// product's server has an upgrade path through them. `None` also when the
 /// server has never reported a version, or is already on the newest published
@@ -70,6 +73,15 @@ pub fn upgrade_target(reported: &VersionStr, versions: &[Version]) -> Option<Uui
 pub async fn candidate_for(db: &mut AsyncPgConnection, server: &Server) -> Result<Option<Version>> {
 	if server.product != Product::Tamanu {
 		return Ok(None);
+	}
+
+	// Where the deployment says it is going beats where Canopy would guess: a
+	// group deliberately moving to an older minor is held against that minor,
+	// and no restore is spent on a version nobody intends to apply.
+	if let Some(group_id) = server.group_id
+		&& let Some(planned) = crate::upgrade_plans::planned_target(db, group_id).await?
+	{
+		return Ok(Some(planned));
 	}
 
 	let Some(reported) = ReportedDetail::last_version(db, server.id).await? else {
