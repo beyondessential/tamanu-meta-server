@@ -17,6 +17,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(targets))
 		.routes(routes!(for_group))
 		.routes(routes!(record))
+		.routes(routes!(amend))
 		.routes(routes!(withdraw))
 }
 
@@ -288,6 +289,54 @@ pub async fn record(
 		&admin.0.login,
 	)
 	.await?;
+	Ok(Json(plan))
+}
+
+/// Request body for amending an open plan.
+#[derive(Deserialize, ToSchema)]
+pub struct AmendArgs {
+	/// The plan to amend.
+	pub id: Uuid,
+	/// The day it is expected to happen, as `YYYY-MM-DD`. Cleared when absent.
+	#[schema(value_type = Option<String>)]
+	pub planned_for: Option<Date>,
+	/// Anything the next reader needs to know. Cleared when absent.
+	pub note: Option<String>,
+}
+
+/// Amend an open plan's date and note.
+///
+/// The same plan better described, so it keeps its place in the history rather
+/// than being replaced. Moving a group to a different version is a new plan:
+/// record that instead.
+// spec: UPG#a-plan
+#[utoipa::path(
+	post,
+	path = "/amend",
+	operation_id = "upgrade_plans_amend",
+	tag = "upgrade_plans",
+	security(("tailscale-admin" = [])),
+	request_body = AmendArgs,
+	responses(
+		(status = 200, description = "The amended plan.", body = UpgradePlan),
+		(status = 400, description = "The plan has been met or replaced, so it is history.", body = ProblemDetailsSchema),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn amend(
+	State(state): State<AppState>,
+	admin: TailscaleAdmin,
+	Json(args): Json<AmendArgs>,
+) -> Result<Json<UpgradePlan>> {
+	let mut conn = state.db.get().await?;
+	let note = args
+		.note
+		.as_deref()
+		.map(str::trim)
+		.filter(|n| !n.is_empty());
+	let plan =
+		UpgradePlan::amend(&mut conn, args.id, args.planned_for, note, &admin.0.login).await?;
 	Ok(Json(plan))
 }
 

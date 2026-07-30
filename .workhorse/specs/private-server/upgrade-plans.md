@@ -35,6 +35,11 @@ An operator records, per group:
 A group has at most one open plan.
 A group moves to one place next, so a second plan replaces the first rather than queueing behind it, and the replaced plan is retained as history.
 
+An open plan's date and note can be amended, and an amendment records who made it and when.
+A corrected date or a reworded note is the same plan better described, so it stays one plan rather than entering the history as a second.
+Changing the target is not an amendment: where a deployment is going is what the history exists to record, so a new target replaces the plan as any other second plan would.
+A plan that has been met or replaced is history and is no longer amendable.
+
 Plans are managed through the operator interface and are audited.
 Deleting a plan says the deployment is no longer going there; it does not say the upgrade happened.
 

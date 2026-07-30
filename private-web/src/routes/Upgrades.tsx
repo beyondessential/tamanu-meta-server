@@ -1,8 +1,13 @@
 import DeleteIcon from "@mui/icons-material/Delete";
+import EditIcon from "@mui/icons-material/Edit";
 import {
 	Alert,
 	Button,
 	Chip,
+	Dialog,
+	DialogActions,
+	DialogContent,
+	DialogTitle,
 	IconButton,
 	LinearProgress,
 	MenuItem,
@@ -109,6 +114,14 @@ export default function Upgrades() {
 									<TableCell>{row.plan?.note ?? ""}</TableCell>
 									{isAdmin && (
 										<TableCell align="right">
+											<EditPlan
+												planId={row.plan?.id ?? ""}
+												groupName={row.group_name}
+												targetVersion={row.target_version ?? ""}
+												plannedFor={row.plan?.planned_for ?? null}
+												note={row.plan?.note ?? null}
+												onAmended={() => setTick((t) => t + 1)}
+											/>
 											<WithdrawPlan
 												planId={row.plan?.id ?? ""}
 												groupName={row.group_name}
@@ -338,6 +351,106 @@ function RecordPlan({
 				</Alert>
 			)}
 		</Paper>
+	);
+}
+
+/// Amend an open plan's date and note. The target is deliberately absent:
+/// moving a deployment somewhere else is a new plan, not a correction to this
+/// one, so it goes through the record form.
+// spec: UPG#a-plan
+function EditPlan({
+	planId,
+	groupName,
+	targetVersion,
+	plannedFor,
+	note,
+	onAmended,
+}: {
+	planId: string;
+	groupName: string;
+	targetVersion: string;
+	plannedFor: string | null;
+	note: string | null;
+	onAmended: () => void;
+}) {
+	const [open, setOpen] = useState(false);
+	const [date, setDate] = useState("");
+	const [text, setText] = useState("");
+	const amend = useApiAction("upgrade_plans", "amend");
+
+	// Re-read the plan on each open so a row refreshed underneath doesn't leave
+	// the form showing what it held last time.
+	const start = () => {
+		setDate(plannedFor ?? "");
+		setText(note ?? "");
+		setOpen(true);
+	};
+
+	const save = async () => {
+		await amend.call({
+			id: planId,
+			planned_for: date || null,
+			note: text || null,
+		});
+		setOpen(false);
+		onAmended();
+	};
+
+	return (
+		<>
+			<IconButton
+				size="small"
+				aria-label={`Edit ${groupName}'s plan`}
+				onClick={start}
+				disabled={!planId}
+			>
+				<EditIcon fontSize="small" />
+			</IconButton>
+			<Dialog
+				open={open}
+				onClose={() => setOpen(false)}
+				fullWidth
+				maxWidth="sm"
+				data-testid="edit-plan"
+			>
+				<DialogTitle>
+					{groupName} &rarr; {targetVersion}
+				</DialogTitle>
+				<DialogContent>
+					<Stack spacing={2} sx={{ mt: 1 }}>
+						<TextField
+							size="small"
+							type="date"
+							label="Planned for"
+							value={date}
+							onChange={(e) => setDate(e.target.value)}
+							slotProps={{ inputLabel: { shrink: true } }}
+						/>
+						<TextField
+							size="small"
+							label="Note"
+							value={text}
+							onChange={(e) => setText(e.target.value)}
+							multiline
+							minRows={2}
+						/>
+						<Typography variant="body2" color="text.secondary">
+							To move {groupName} to a different version, record a new plan
+							instead. This one is kept as history.
+						</Typography>
+						{amend.error && (
+							<Alert severity="error">{amend.error.message}</Alert>
+						)}
+					</Stack>
+				</DialogContent>
+				<DialogActions>
+					<Button onClick={() => setOpen(false)}>Cancel</Button>
+					<Button variant="contained" onClick={save} disabled={amend.pending}>
+						Save
+					</Button>
+				</DialogActions>
+			</Dialog>
+		</>
 	);
 }
 

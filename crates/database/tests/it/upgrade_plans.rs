@@ -243,3 +243,149 @@ async fn a_date_that_has_passed_reads_as_late() {
 	})
 	.await
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn amending_a_plan_keeps_it_the_same_plan() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, _server) = group_running(&mut conn, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+
+		let plan = UpgradePlan::record(
+			&mut conn,
+			group,
+			target.id,
+			Some(date(2026, 7, 1)),
+			Some("waiting on the site"),
+			"a@example.com",
+		)
+		.await
+		.expect("plan");
+
+		let amended = UpgradePlan::amend(
+			&mut conn,
+			plan.id,
+			Some(date(2026, 8, 14)),
+			Some("site confirmed the window"),
+			"b@example.com",
+		)
+		.await
+		.expect("amend");
+
+		assert_eq!(amended.id, plan.id, "the same plan, better described");
+		assert_eq!(
+			amended.target_version_id, target.id,
+			"the target is untouched"
+		);
+		assert_eq!(amended.planned_for, Some(date(2026, 8, 14)));
+		assert_eq!(amended.note.as_deref(), Some("site confirmed the window"));
+		assert_eq!(amended.amended_by.as_deref(), Some("b@example.com"));
+		assert!(amended.amended_at.is_some());
+		assert_eq!(
+			amended.created_by.as_deref(),
+			Some("a@example.com"),
+			"who recorded it is not overwritten by who amended it"
+		);
+		assert!(
+			amended.superseded_at.is_none(),
+			"an amendment is not a replacement"
+		);
+
+		let history = UpgradePlan::history_for_group(&mut conn, group)
+			.await
+			.expect("history");
+		assert_eq!(history.len(), 1, "amending does not add to the history");
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn amending_can_clear_the_date_and_note() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, _server) = group_running(&mut conn, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+
+		let plan = UpgradePlan::record(
+			&mut conn,
+			group,
+			target.id,
+			Some(date(2026, 7, 1)),
+			Some("waiting on the site"),
+			"a@example.com",
+		)
+		.await
+		.expect("plan");
+
+		let amended = UpgradePlan::amend(&mut conn, plan.id, None, None, "b@example.com")
+			.await
+			.expect("amend");
+
+		assert!(
+			amended.planned_for.is_none(),
+			"a date that is no longer expected can be taken off"
+		);
+		assert!(amended.note.is_none());
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_replaced_plan_is_not_amendable() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, _server) = group_running(&mut conn, "2.60.0").await;
+		let first = publish(&mut conn, 61, 0).await;
+		let second = publish(&mut conn, 62, 0).await;
+
+		let replaced = UpgradePlan::record(&mut conn, group, first.id, None, None, "a@example.com")
+			.await
+			.expect("first plan");
+		UpgradePlan::record(&mut conn, group, second.id, None, None, "a@example.com")
+			.await
+			.expect("second plan");
+
+		let refused = UpgradePlan::amend(
+			&mut conn,
+			replaced.id,
+			Some(date(2026, 8, 1)),
+			None,
+			"b@example.com",
+		)
+		.await;
+		assert!(
+			refused.is_err(),
+			"a replaced plan is history and stands as it was"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_met_plan_is_not_amendable() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, _server) = group_running(&mut conn, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+		let plan = UpgradePlan::record(&mut conn, group, target.id, None, None, "a@example.com")
+			.await
+			.expect("plan");
+
+		sql_query("UPDATE server_groups SET effective_version = '2.61.0' WHERE id = $1")
+			.bind::<sql_types::Uuid, _>(group)
+			.execute(&mut conn)
+			.await
+			.expect("arrive");
+		close_met_plans(&mut conn).await.expect("sweep");
+
+		let refused = UpgradePlan::amend(
+			&mut conn,
+			plan.id,
+			Some(date(2026, 8, 1)),
+			None,
+			"b@example.com",
+		)
+		.await;
+		assert!(
+			refused.is_err(),
+			"the upgrade happened; the record of it stands as it was"
+		);
+	})
+	.await
+}

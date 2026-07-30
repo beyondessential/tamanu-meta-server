@@ -46,6 +46,12 @@ pub struct UpgradePlan {
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
 	#[schema(value_type = Option<String>)]
 	pub superseded_at: Option<Timestamp>,
+	/// The operator who last amended the date or note, where one has.
+	pub amended_by: Option<String>,
+	/// When it was last amended.
+	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
+	#[schema(value_type = Option<String>)]
+	pub amended_at: Option<Timestamp>,
 }
 
 impl UpgradePlan {
@@ -160,6 +166,38 @@ impl UpgradePlan {
 			.load(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// Amend an open plan's date and note.
+	///
+	/// The same plan better described, so it is not superseded and does not
+	/// enter the history as a second plan. Changing where a deployment is going
+	/// is a replacement instead, so the target is not amendable here.
+	// spec: UPG#a-plan
+	pub async fn amend(
+		db: &mut AsyncPgConnection,
+		id: Uuid,
+		planned_for: Option<Date>,
+		note: Option<&str>,
+		amended_by: &str,
+	) -> Result<Self> {
+		use crate::schema::upgrade_plans::dsl;
+
+		diesel::update(dsl::upgrade_plans)
+			.filter(dsl::id.eq(id))
+			.filter(dsl::met_at.is_null())
+			.filter(dsl::superseded_at.is_null())
+			.set((
+				dsl::planned_for.eq(planned_for.map(jiff_diesel::Date::from)),
+				dsl::note.eq(note),
+				dsl::amended_by.eq(amended_by),
+				dsl::amended_at.eq(diesel::dsl::now),
+			))
+			.returning(Self::as_select())
+			.get_result(db)
+			.await
+			.optional()?
+			.ok_or_else(|| AppError::BadRequest("only an open plan can be amended".into()))
 	}
 
 	/// Withdraw a plan: the deployment is no longer going there.

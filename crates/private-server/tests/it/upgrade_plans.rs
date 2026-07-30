@@ -145,3 +145,105 @@ async fn an_attempt_in_flight_shows_beside_the_verdict() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn amend_changes_the_date_and_note_without_replacing_the_plan() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
+				('cccccccc-0000-0000-0000-0000000000f1', 2, 61, 0, 'x', 'published');
+			INSERT INTO server_groups (id, name, effective_version) VALUES
+				('cccccccc-0000-0000-0000-000000000001', 'kamaka', '2.60.0');",
+		)
+		.await
+		.unwrap();
+
+		let recorded: Value = private
+			.post("/api/upgrade_plans/record")
+			.json(&json!({
+				"group_id": GROUP,
+				"target_version_id": "cccccccc-0000-0000-0000-0000000000f1",
+				"planned_for": "2020-01-01",
+				"note": "waiting on the site",
+			}))
+			.await
+			.json();
+
+		let resp = private
+			.post("/api/upgrade_plans/amend")
+			.json(&json!({
+				"id": recorded["id"],
+				"planned_for": "2020-02-02",
+				"note": "site confirmed the window",
+			}))
+			.await;
+		resp.assert_status_ok();
+		let amended: Value = resp.json();
+		assert_eq!(amended["id"], recorded["id"], "the same plan");
+		assert_eq!(amended["planned_for"], "2020-02-02");
+		assert_eq!(amended["note"], "site confirmed the window");
+		assert_eq!(
+			amended["target_version_id"], recorded["target_version_id"],
+			"amending does not move the deployment somewhere else"
+		);
+		assert!(amended["superseded_at"].is_null());
+		assert!(!amended["amended_at"].is_null());
+
+		let fleet: Vec<Value> = private
+			.post("/api/upgrade_plans/fleet")
+			.json(&json!({}))
+			.await
+			.json();
+		let row = fleet
+			.iter()
+			.find(|row| row["group_id"] == GROUP)
+			.expect("the planned group");
+		assert_eq!(row["plan"]["note"], "site confirmed the window");
+		assert_eq!(
+			row["target_version"], "2.61.0",
+			"still going to the same place"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn amending_a_withdrawn_plan_is_refused() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
+				('cccccccc-0000-0000-0000-0000000000f1', 2, 61, 0, 'x', 'published'),
+				('cccccccc-0000-0000-0000-0000000000f2', 2, 63, 0, 'x', 'published');
+			INSERT INTO server_groups (id, name, effective_version) VALUES
+				('cccccccc-0000-0000-0000-000000000001', 'kamaka', '2.60.0');",
+		)
+		.await
+		.unwrap();
+
+		let first: Value = private
+			.post("/api/upgrade_plans/record")
+			.json(&json!({
+				"group_id": GROUP,
+				"target_version_id": "cccccccc-0000-0000-0000-0000000000f1",
+			}))
+			.await
+			.json();
+
+		// Recording a second plan replaces the first, which is then history.
+		private
+			.post("/api/upgrade_plans/record")
+			.json(&json!({
+				"group_id": GROUP,
+				"target_version_id": "cccccccc-0000-0000-0000-0000000000f2",
+			}))
+			.await
+			.assert_status_ok();
+
+		private
+			.post("/api/upgrade_plans/amend")
+			.json(&json!({ "id": first["id"], "note": "too late" }))
+			.await
+			.assert_status_bad_request();
+	})
+	.await;
+}

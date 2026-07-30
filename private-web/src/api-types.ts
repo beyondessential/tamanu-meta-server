@@ -3469,6 +3469,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/upgrade_plans/amend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Amend an open plan's date and note.
+         * @description The same plan better described, so it keeps its place in the history rather
+         *     than being replaced. Moving a group to a different version is a new plan:
+         *     record that instead.
+         */
+        post: operations["upgrade_plans_amend"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/upgrade_plans/fleet": {
         parameters: {
             query?: never;
@@ -3852,6 +3874,18 @@ export interface components {
              *     release line.
              */
             version_id: string;
+        };
+        /** @description Request body for amending an open plan. */
+        AmendArgs: {
+            /**
+             * Format: uuid
+             * @description The plan to amend.
+             */
+            id: string;
+            /** @description Anything the next reader needs to know. Cleared when absent. */
+            note?: string | null;
+            /** @description The day it is expected to happen, as `YYYY-MM-DD`. Cleared when absent. */
+            planned_for?: string | null;
         };
         /**
          * @description A downloadable artifact (for example an installer) associated with a
@@ -8948,6 +8982,10 @@ export interface components {
         };
         /** @description A group's recorded intention to move to a version. */
         UpgradePlan: {
+            /** @description When it was last amended. */
+            amended_at?: string | null;
+            /** @description The operator who last amended the date or note, where one has. */
+            amended_by?: string | null;
             /** @description When it was recorded. */
             created_at: string;
             /** @description The operator who recorded it. */
@@ -13725,6 +13763,55 @@ export interface operations {
                 };
             };
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    upgrade_plans_amend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AmendArgs"];
+            };
+        };
+        responses: {
+            /** @description The amended plan. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpgradePlan"];
+                };
+            };
+            /** @description The plan has been met or replaced, so it is history. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
