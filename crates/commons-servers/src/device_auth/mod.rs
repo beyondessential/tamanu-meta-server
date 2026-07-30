@@ -31,6 +31,8 @@ use database::{
 	devices::{Device, NewDeviceConnection},
 };
 
+use tracing::warn;
+
 use crate::tailnet_directory::TailnetDirectory;
 
 pub mod keygen;
@@ -129,13 +131,23 @@ where
 		let client_ip: Option<ClientIp> = parts.extract().await.ok();
 		let ip = client_ip.map_or(IpAddr::V6(Ipv6Addr::UNSPECIFIED), |c| c.0);
 
-		NewDeviceConnection {
+		// Recording the connection is part of accepting the request, not a
+		// condition of it: the caller authenticated, and history it can't
+		// influence must not decide that for it. Connection history is stored
+		// in weekly ranges, so an unprovisioned week would otherwise fail this
+		// insert and with it every authenticated request on both mounts — a
+		// full device-API outage caused by an audit-trail write.
+		// spec: HST#recording-a-connection
+		if let Err(err) = (NewDeviceConnection {
 			device_id: device.id,
 			ip: ip.into(),
 			user_agent,
-		}
+		})
 		.create(&mut db)
-		.await?;
+		.await
+		{
+			warn!(device_id = %device.id, "failed to record device connection: {err}");
+		}
 
 		Ok(Self(device, method))
 	}

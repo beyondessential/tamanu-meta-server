@@ -25,6 +25,7 @@ use commons_servers::{
 };
 use commons_types::dns::ManagedZone;
 use database::{issues::reconcile_open_incidents, statuses::Status};
+use diesel_async::AsyncPgConnection;
 use lloggs::{LoggingArgs, PreArgs};
 use miette::IntoDiagnostic;
 use tokio::{
@@ -94,6 +95,28 @@ async fn backfill_stability_on_startup(pool: &database::Db) {
 	}
 }
 
+/// Provision the histories' weekly ranges ahead of now.
+///
+/// Never fatal, and deliberately quiet in the steady state: once the runway is
+/// full a pass reports nothing and this logs nothing. A pass that fails is
+/// retried on the next tick, and one that keeps failing is what the runway
+/// self-alert exists to surface — so failures are logged, not propagated.
+// spec: HST#provisioning-ahead
+async fn ensure_partition_runway(db: &mut AsyncPgConnection) {
+	match database::partitions::ensure_runway(db, database::partitions::WEEKS_AHEAD).await {
+		Ok(acted) => {
+			for week in acted {
+				if week.failed() {
+					warn!("partition provisioning: {} {}", week.partition, week.action);
+				} else {
+					info!("partition provisioning: {} {}", week.partition, week.action);
+				}
+			}
+		}
+		Err(err) => error!("partition provisioning failed: {err}"),
+	}
+}
+
 /// How often the deferred incident-reeval worker drains its queue. Short so
 /// incidents open/close promptly after a status push; work is coalesced per
 /// server, so a tight cadence is cheap.
@@ -107,6 +130,16 @@ pub fn spawn() -> JoinHandle<()> {
 	let pool = database::init();
 	task::spawn(async move {
 		reconcile_on_startup(&pool).await;
+
+		// Ahead of the loop, which doesn't reach its first sweep for a minute:
+		// a pod starting up into a week with no range provisioned shouldn't
+		// spend that minute rejecting writes.
+		// spec: HST#provisioning-ahead
+		match pool.get().await {
+			Ok(mut db) => ensure_partition_runway(&mut db).await,
+			Err(err) => warn!("partition provisioning: no database connection at startup: {err}"),
+		}
+
 		let backfill_pool = pool.clone();
 		task::spawn(async move { backfill_stability_on_startup(&backfill_pool).await });
 
@@ -178,6 +211,20 @@ pub fn spawn() -> JoinHandle<()> {
 				Ok(0) => {}
 				Ok(n) => debug!("re-animated {n} decommissioned check(s)"),
 				Err(err) => error!("check liveness reconcile failed: {err}"),
+			}
+
+			// Keep the histories' weekly ranges provisioned ahead of us, and
+			// alert on the runway. Canopy's own job rather than an external
+			// schedule's: this pod is already long-running and retries, and a
+			// failure here surfaces as a self-alert instead of a job status
+			// nothing watches. Idempotent, so it costs a handful of catalog
+			// lookups per pass once the runway is full.
+			// spec: HST
+			ensure_partition_runway(&mut db).await;
+
+			match database::self_alerts::sweep_partition_runway(&mut db).await {
+				Ok(_) => {}
+				Err(err) => error!("history runway self-alert sweep failed: {err}"),
 			}
 
 			// Canopy-wide warning for checks gone quiet across the whole

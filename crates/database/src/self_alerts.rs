@@ -51,6 +51,29 @@ One or more catalogued healthchecks have not been reported by any server in the 
 
 Review the checks listed in the operator UI's healthcheck settings and decommission the ones that are gone for good; a decommissioned check's stale issues are cleared fleet-wide.";
 
+/// A history has nearly run out of the weekly range it is written into.
+/// Coalescing: one alert covers every short history. Recovers once all of
+/// them are provisioned ahead again.
+// spec: HST#running-short
+pub const PARTITION_RUNWAY_REF: &str = "history-partition-runway";
+
+pub const PARTITION_RUNWAY_DOC: &str = "## Description
+
+Status and connection history are stored in weekly ranges, and a write only lands if a range covering its timestamp exists. Canopy provisions ranges ahead of itself while it runs, so this alert means that provisioning has stopped happening — and there is a deadline attached, because a history with no range left cannot be written at all.
+
+What breaks at the deadline is writing, not reading: status pushes and connection records start failing while queries over existing history keep working.
+
+## Results
+
+- **warn** — less than two weeks of range remain.
+- **fail** — less than one week remains.
+
+Both recover on the next successful provisioning pass, which needs nothing but a working monitor pod and a database that accepts DDL.
+
+## Solve
+
+The monitor pod provisions ranges every minute, so a runway that keeps shrinking means those passes are failing: check its logs for the week it could not provision and why. A permissions change on the database role, or a lock it cannot get, are the usual causes. Provisioning by hand is `SELECT ensure_weekly_partitions('statuses', 4)` (and the same for `device_connections`), which is idempotent and safe to run at any time.";
+
 /// Canopy's configured DNS zones don't cover the domains groups have been
 /// given — either the configuration is unreadable, or a zone has left it while
 /// claims inside it stand. Coalescing: one alert lists every affected group.
@@ -337,6 +360,65 @@ pub async fn sweep_stale_healthchecks(conn: &mut AsyncPgConnection) -> Result<Op
 		false,
 		Some(STALE_CHECKS_DOC),
 		"Healthchecks gone quiet",
+		&message,
+	)
+	.await
+	.map(Some)
+}
+
+/// Evaluate the history-runway condition and raise or recover the coalescing
+/// [`PARTITION_RUNWAY_REF`] self-alert.
+///
+/// Reads the runway rather than the outcome of provisioning: a pass that fails
+/// is only a problem while it keeps failing, and the runway is what says whether
+/// it has been failing long enough to matter. That also covers the case where no
+/// pass is running at all.
+// spec: HST#running-short
+pub async fn sweep_partition_runway(conn: &mut AsyncPgConnection) -> Result<Option<Issue>> {
+	use crate::partitions;
+
+	let histories = partitions::runway(conn).await?;
+	let short: Vec<&partitions::Runway> = histories.iter().filter(|r| r.short()).collect();
+
+	if short.is_empty() {
+		return recover(
+			conn,
+			PARTITION_RUNWAY_REF,
+			"every history has weekly range provisioned ahead",
+		)
+		.await;
+	}
+
+	let listed = short
+		.iter()
+		.map(|r| match &r.covered_to {
+			Some(covered_to) => format!(
+				"{} covered to {covered_to} ({} day(s) left)",
+				r.parent, r.days_remaining
+			),
+			None => format!("{} has no range at all", r.parent),
+		})
+		.collect::<Vec<_>>()
+		.join(", ");
+	let message = format!(
+		"{} history(ies) short of weekly range: {listed}",
+		short.len()
+	);
+
+	let observed = if short.iter().any(|r| r.critical()) {
+		CheckResult::Failed
+	} else {
+		CheckResult::Warning
+	};
+
+	raise(
+		conn,
+		PARTITION_RUNWAY_REF,
+		observed,
+		CheckResult::Failed,
+		true,
+		Some(PARTITION_RUNWAY_DOC),
+		"History storage running out of range",
 		&message,
 	)
 	.await
