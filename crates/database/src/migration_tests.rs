@@ -153,31 +153,44 @@ struct LatestRow {
 }
 
 /// The most recent test of one (server, version) pair.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct LatestTest {
+	/// Whether the migrations applied.
 	pub verdict: Verdict,
+	/// The migration that failed, when one did.
 	pub failed_migration: Option<String>,
+	/// The snapshot the verdict was reached against.
 	pub snapshot_id: Option<String>,
+	/// When the consumer reported it.
+	#[schema(value_type = String)]
 	pub reported_at: Timestamp,
+	/// Whole seconds the migration run took.
+	#[schema(value_type = i64)]
 	pub total_elapsed: PgDuration,
+	/// Size of the data the migrations ran against.
 	pub data_bytes_before: i64,
+	/// Size of it afterwards; the growth is what a heavy backfill shows up as.
 	pub data_bytes_after: i64,
 }
 
 /// Where one of a group's servers stands against the version it would take
 /// next.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct GroupVerdict {
+	/// The server the verdict is about.
 	pub server_id: Uuid,
+	/// The version it would take next.
 	pub target_version_id: Uuid,
+	/// That version, as semver.
 	pub target_version: String,
+	/// Where it stands against that version.
 	pub verdict: Verdict,
 	/// The test the verdict came from, absent when there has not been one.
 	pub latest: Option<LatestTest>,
 }
 
 /// Where a (server, version) pair stands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Verdict {
 	NotTested,

@@ -2131,6 +2131,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/migration_tests/for_group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Where each of a group's servers stands against the version it would take
+         *     next.
+         * @description One entry per server that has a candidate version. A server already on the
+         *     newest published version, running another product, or yet to report a
+         *     version has nothing to be tested against and is absent.
+         */
+        post: operations["migration_tests_for_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/restore_replicas/checks": {
         parameters: {
             query?: never;
@@ -4708,6 +4731,14 @@ export interface components {
             timezone?: string | null;
             version?: null | components["schemas"]["VersionStr"];
         };
+        /** @description Request body for reading a group's migration-test verdicts. */
+        ForGroupArgs: {
+            /**
+             * Format: uuid
+             * @description The group to report on.
+             */
+            group_id: string;
+        };
         /** @description A geographic coordinate, used to place a server on a map. */
         GeoPoint: {
             /**
@@ -4849,6 +4880,27 @@ export interface components {
             next_run_at?: string | null;
             /** @description Backup type this schedule and retention apply to. */
             type: string;
+        };
+        /**
+         * @description Where one of a group's servers stands against the version it would take
+         *     next.
+         */
+        GroupVerdict: {
+            latest?: null | components["schemas"]["LatestTest"];
+            /**
+             * Format: uuid
+             * @description The server the verdict is about.
+             */
+            server_id: string;
+            /** @description That version, as semver. */
+            target_version: string;
+            /**
+             * Format: uuid
+             * @description The version it would take next.
+             */
+            target_version_id: string;
+            /** @description Where it stands against that version. */
+            verdict: components["schemas"]["Verdict"];
         };
         /**
          * @description A server's self-reported health, derived from the outcomes of its own
@@ -5554,6 +5606,32 @@ export interface components {
             resolved_at?: string | null;
             /** @description Login of the operator who resolved this issue, if any. */
             resolved_by?: string | null;
+        };
+        /** @description The most recent test of one (server, version) pair. */
+        LatestTest: {
+            /**
+             * Format: int64
+             * @description Size of it afterwards; the growth is what a heavy backfill shows up as.
+             */
+            data_bytes_after: number;
+            /**
+             * Format: int64
+             * @description Size of the data the migrations ran against.
+             */
+            data_bytes_before: number;
+            /** @description The migration that failed, when one did. */
+            failed_migration?: string | null;
+            /** @description When the consumer reported it. */
+            reported_at: string;
+            /** @description The snapshot the verdict was reached against. */
+            snapshot_id?: string | null;
+            /**
+             * Format: int64
+             * @description Whole seconds the migration run took.
+             */
+            total_elapsed: number;
+            /** @description Whether the migrations applied. */
+            verdict: components["schemas"]["Verdict"];
         };
         /** @description Filters for listing open incidents. */
         ListActiveArgs: {
@@ -8279,6 +8357,11 @@ export interface components {
             target_role_arn: string;
         };
         Value: unknown;
+        /**
+         * @description Where a (server, version) pair stands.
+         * @enum {string}
+         */
+        Verdict: "nottested" | "passed" | "failed";
         /** @description A single released (or draft) software version. */
         VersionData: {
             /**
@@ -11297,6 +11380,46 @@ export interface operations {
                 };
             };
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    migration_tests_for_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ForGroupArgs"];
+            };
+        };
+        responses: {
+            /** @description Verdicts, one per server with a candidate. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GroupVerdict"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
