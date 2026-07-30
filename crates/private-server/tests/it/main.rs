@@ -31,5 +31,6 @@ mod tailnet_device_auth;
 mod tailnet_key_expiry_sweep;
 mod tailscale_header;
 mod update_server;
+mod upgrade_plans;
 mod version_known_issues;
 mod versions;

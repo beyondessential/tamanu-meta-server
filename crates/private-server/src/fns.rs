@@ -20,6 +20,7 @@ pub mod servers;
 pub mod silenced_refs;
 pub mod sql;
 pub mod statuses;
+pub mod upgrade_plans;
 pub mod versions;
 
 /// A single page of a paginated list response.
@@ -72,6 +73,7 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 			.nest("/silenced_refs", silenced_refs::routes())
 			.nest("/sql", sql::routes())
 			.nest("/statuses", statuses::routes())
+			.nest("/upgrade_plans", upgrade_plans::routes())
 			.nest("/versions", versions::routes()),
 	)
 }

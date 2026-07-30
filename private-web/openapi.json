@@ -6730,6 +6730,233 @@
         }
       }
     },
+    "/api/upgrade_plans/fleet": {
+      "post": {
+        "tags": [
+          "upgrade_plans"
+        ],
+        "summary": "Planned upgrades across the fleet.",
+        "description": "Every live group, whether or not it has a plan. A group several minors\nbehind with no plan is the thing this view exists to surface, so it is listed\nrather than omitted.",
+        "operationId": "upgrade_plans_fleet",
+        "responses": {
+          "200": {
+            "description": "One row per live group.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PlannedUpgrade"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/upgrade_plans/for_group": {
+      "post": {
+        "tags": [
+          "upgrade_plans"
+        ],
+        "summary": "A group's plan and the plans it has had before.",
+        "description": "The history is the record of what a deployment planned, when for, and when\nit landed.",
+        "operationId": "upgrade_plans_for_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlansForGroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Every plan the group has had, newest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UpgradePlan"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/upgrade_plans/record": {
+      "post": {
+        "tags": [
+          "upgrade_plans"
+        ],
+        "summary": "Record where a group is going, retiring any plan it already had.",
+        "description": "A group goes one place next, so this replaces rather than queues. The target\nmust be published and ahead of what the group runs.",
+        "operationId": "upgrade_plans_record",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The recorded plan.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpgradePlan"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The target is unpublished, or not ahead of the group.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/upgrade_plans/withdraw": {
+      "post": {
+        "tags": [
+          "upgrade_plans"
+        ],
+        "summary": "Withdraw a plan: the deployment is no longer going there.",
+        "description": "This does not say the upgrade happened. Canopy closes a met plan on its own\nonce the group reports the target.",
+        "operationId": "upgrade_plans_withdraw",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WithdrawArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Withdrawn (idempotent)."
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/versions/add_known_issue": {
       "post": {
         "tags": [
@@ -11727,6 +11954,69 @@
           }
         }
       },
+      "PlannedUpgrade": {
+        "type": "object",
+        "description": "One row of the planned-upgrades view.",
+        "required": [
+          "group_id",
+          "group_name",
+          "late"
+        ],
+        "properties": {
+          "current_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The version the group runs now, where it has reported one."
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group this concerns."
+          },
+          "group_name": {
+            "type": "string",
+            "description": "Its name, so the view reads without a second lookup."
+          },
+          "late": {
+            "type": "boolean",
+            "description": "Whether the planned date has passed without the upgrade happening.\nPresentational: a slipping upgrade is normal operational reality."
+          },
+          "plan": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UpgradePlan",
+                "description": "The plan, absent for a group with none."
+              }
+            ]
+          },
+          "target_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The plan's target as semver."
+          }
+        }
+      },
+      "PlansForGroupArgs": {
+        "type": "object",
+        "description": "Request body for reading one group's plans. Named apart from the\nmigration-test one because utoipa keys component schemas by short name.",
+        "required": [
+          "group_id"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group to read."
+          }
+        }
+      },
       "ProbeArgs": {
         "type": "object",
         "description": "Request to inspect a bucket/prefix before configuring backups on it.",
@@ -12114,6 +12404,40 @@
           "type": {
             "type": "string",
             "description": "The backup type that ran."
+          }
+        }
+      },
+      "RecordArgs": {
+        "type": "object",
+        "description": "Request body for recording where a group is going.",
+        "required": [
+          "group_id",
+          "target_version_id"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group that intends to move."
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Anything the next reader needs to know. Optional."
+          },
+          "planned_for": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The day it is expected to happen, as `YYYY-MM-DD`. Optional."
+          },
+          "target_version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The published version it intends to move to."
           }
         }
       },
@@ -15212,6 +15536,72 @@
           }
         }
       },
+      "UpgradePlan": {
+        "type": "object",
+        "description": "A group's recorded intention to move to a version.",
+        "required": [
+          "id",
+          "group_id",
+          "target_version_id",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "When it was recorded."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The operator who recorded it."
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group that intends to move."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for this plan."
+          },
+          "met_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When the group's reported version reached the target."
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Whatever the operator needs the next reader to know."
+          },
+          "planned_for": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The day the upgrade is expected, where one is known."
+          },
+          "superseded_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When a newer plan replaced this one."
+          },
+          "target_version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The version it intends to move to."
+          }
+        }
+      },
       "UpsertBackupConfigArgs": {
         "type": "object",
         "description": "Request to declaratively create or update a group's backup configuration,\nfor automated/infrastructure-as-code callers. Always creates the\nrepository with an automatically generated passphrase; importing an\nexisting repository is only supported through the interactive setup\nwizard. `bucket`/`prefix` identify the configuration and are immutable\nafter creation; the role ARNs and region are reconciled to the request on\nevery call. Schedule and retention are not configurable here — see the\n`/backups/set_schedule` endpoint.",
@@ -15442,6 +15832,20 @@
           "reported",
           "absent"
         ]
+      },
+      "WithdrawArgs": {
+        "type": "object",
+        "description": "Request body for withdrawing a plan.",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The plan to withdraw."
+          }
+        }
       }
     },
     "securitySchemes": {
@@ -15503,6 +15907,10 @@
     {
       "name": "mcp_tokens",
       "description": "Bearer tokens for the public MCP mount."
+    },
+    {
+      "name": "upgrade_plans",
+      "description": "Where each deployment is going: the version a group intends to move to, and when."
     },
     {
       "name": "migration_tests",

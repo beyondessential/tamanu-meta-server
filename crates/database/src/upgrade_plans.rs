@@ -20,6 +20,7 @@ use crate::{server_groups::ServerGroup, versions::Version};
 #[diesel(table_name = crate::schema::upgrade_plans)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct UpgradePlan {
+	/// Unique identifier for this plan.
 	pub id: Uuid,
 	/// The group that intends to move.
 	pub group_id: Uuid,
@@ -33,6 +34,7 @@ pub struct UpgradePlan {
 	pub note: Option<String>,
 	/// The operator who recorded it.
 	pub created_by: Option<String>,
+	/// When it was recorded.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	#[schema(value_type = String)]
 	pub created_at: Timestamp,
