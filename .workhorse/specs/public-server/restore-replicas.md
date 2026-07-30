@@ -239,6 +239,13 @@ That window is where the answer is still cheap: the fleet is not moving yet, and
 
 ### Dispatching a migration test
 
+`migrate` rides on an intent rather than being one, and that is the point.
+An intent that already restores a snapshot to prove it restorable can apply the migrations to that same replica, so one restore answers both questions: the backup is good, and the next version's migrations survive this deployment's data.
+A consumer that advertises `check`, `once` and `migrate` together reports the replica's health and the migrations' outcome from a single run, and the two land as separate signals from the one report.
+
+Declaring a migrate-only intent alongside a verifying one is possible and costs a second full restore of the same snapshot.
+That is worth paying only when the two need different cadences or overdue bounds, because a restore is the expensive part and the migrations are cheap next to it.
+
 An entry for a `migrate` intent names the target version alongside the snapshot.
 A consumer obtains that version's migrations from its published artefacts, the same way a server being upgraded does, so naming the version is the whole reference it needs.
 

@@ -584,3 +584,64 @@ async fn a_group_shows_where_each_server_stands() {
 	})
 	.await
 }
+
+async fn restore_check(conn: &mut AsyncPgConnection, server: Uuid) -> Option<FiledCheck> {
+	sql_query(
+		"SELECT i.observed_result AS observed, i.effective_result AS effective, i.escalates
+		 FROM issues i
+		 WHERE i.server_id = $1 AND i.ref LIKE 'restore-verification:%' AND i.active = true",
+	)
+	.bind::<sql_types::Uuid, _>(server)
+	.get_result(conn)
+	.await
+	.optional()
+	.expect("read restore check")
+}
+
+/// One restore, two answers. A `migrate` semantic riding on a verifying intent
+/// means a single report says both "the backup restores" and "this version's
+/// migrations do not survive the data", and those must not contaminate each
+/// other: the backup is fine, the version is not.
+#[tokio::test(flavor = "multi_thread")]
+async fn one_report_keeps_backup_health_and_version_readiness_apart() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn).await;
+		let server = insert_server(&mut conn, group).await;
+		let target = insert_version(&mut conn, 63).await;
+
+		// The restore succeeded into a healthy replica; the migrations then failed.
+		MigrationTest::record(
+			&mut conn,
+			report(consumer, group, server, RunOutcome::Success),
+			NewMigrationTest {
+				target_version_id: target.id,
+				total_elapsed: secs(45),
+				failed_migration: Some("backfillNoteTypeIds".into()),
+				data_bytes_before: 10,
+				data_bytes_after: 10,
+				timings: vec![],
+			},
+		)
+		.await
+		.expect("record");
+
+		assert!(
+			restore_check(&mut conn, server).await.is_none(),
+			"the backup restored, so restore-health raises nothing"
+		);
+
+		let migration = migration_check(&mut conn, server)
+			.await
+			.expect("the migration finding stands on its own");
+		assert_eq!(migration.observed.as_deref(), Some("warning"));
+
+		assert!(
+			!VersionKnownIssue::version_is_ready(&mut conn, 2, 63, 0)
+				.await
+				.expect("readiness"),
+			"and it is the version that is held back, not the server"
+		);
+	})
+	.await
+}

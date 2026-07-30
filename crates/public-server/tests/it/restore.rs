@@ -545,12 +545,15 @@ async fn report_version(conn: &mut AsyncPgConnection, server_id: Uuid, version: 
 	.expect("report version");
 }
 
+/// One intent that both verifies the restore and applies the migrations: the
+/// `migrate` semantic rides on the verifying intent so a single restore answers
+/// both questions.
 async fn register_migrate_intent(public: &axum_test::TestServer, cert: &str) {
 	public
 		.post("/restore-capabilities")
 		.add_header("mtls-certificate", cert)
 		.json(&serde_json::json!({
-			"intents": [{"intent": "migrate", "semantics": ["check", "once", "migrate"]}]
+			"intents": [{"intent": "verify", "semantics": ["check", "once", "migrate"]}]
 		}))
 		.await
 		.assert_status(http::StatusCode::NO_CONTENT);
@@ -568,7 +571,7 @@ async fn a_migrate_entry_names_the_newest_version_the_server_could_take() {
 			report_version(&mut conn, server, "2.62.0").await;
 			publish_version(&mut conn, 62, 0).await;
 			let newest = publish_version(&mut conn, 63, 2).await;
-			declare_replica(&mut conn, device_id, group, "migrate").await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
 			register_migrate_intent(&public, &cert).await;
 
 			let resp = public
@@ -598,7 +601,7 @@ async fn a_server_already_on_the_newest_version_gets_no_migrate_entry() {
 			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
 			report_version(&mut conn, server, "2.63.2").await;
 			publish_version(&mut conn, 63, 2).await;
-			declare_replica(&mut conn, device_id, group, "migrate").await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
 			register_migrate_intent(&public, &cert).await;
 
 			let resp = public
@@ -628,7 +631,7 @@ async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
 			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
 			report_version(&mut conn, server, "2.62.0").await;
 			let newest = publish_version(&mut conn, 63, 2).await;
-			declare_replica(&mut conn, device_id, group, "migrate").await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
 			register_migrate_intent(&public, &cert).await;
 
 			let before: Vec<serde_json::Value> = public
@@ -648,7 +651,7 @@ async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
 					group_id: group,
 					server_id: Some(server),
 					r#type: commons_types::backup::BackupType::TamanuPostgres,
-					intent: commons_types::backup::RestoreIntent::from("migrate"),
+					intent: commons_types::backup::RestoreIntent::from("verify"),
 					snapshot_id: Some("snap-1".into()),
 					// The restore itself was fine; only the migration failed.
 					outcome: commons_types::backup::RunOutcome::Success,
@@ -702,7 +705,7 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
 			report_version(&mut conn, server, "2.62.0").await;
 			let newest = publish_version(&mut conn, 63, 2).await;
-			declare_replica(&mut conn, device_id, group, "migrate").await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
 			register_migrate_intent(&public, &cert).await;
 
 			let dispatched: Vec<serde_json::Value> = public
@@ -722,7 +725,7 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 					"group": group,
 					"server_id": server,
 					"type": "tamanu-postgres",
-					"intent": "migrate",
+					"intent": "verify",
 					"snapshot_id": entry["snapshot_id"],
 					"outcome": "success",
 					"replica_healthy": true,
