@@ -213,7 +213,16 @@ impl MigrationTest {
 		let target_version_id = test.target_version_id;
 		let failed_migration = test.failed_migration.clone();
 
+		let restore_failed = report.outcome != RunOutcome::Success;
+
 		let check_id = BackupRestoreCheck::record_report(db, report).await?;
+
+		// A failed restore with no named migration says nothing about the
+		// version: the migrations never ran. Restore-health already raises on
+		// the failure, and leaving no result keeps the pair retryable.
+		if restore_failed && failed_migration.is_none() {
+			return Ok(check_id);
+		}
 
 		diesel::insert_into(crate::schema::migration_tests::table)
 			.values((

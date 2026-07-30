@@ -868,8 +868,15 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 			// whether the candidate version has been tried against the latest
 			// snapshot, not whether the replica restored.
 			if migrates {
-				if let Some(filed_one) =
-					sweep_migration_overdue(db, &d, &server, now, overdue_after).await?
+				if let Some(filed_one) = sweep_migration_overdue(
+					db,
+					&d,
+					&server,
+					&latest_snapshot_cache[&d.group_id],
+					now,
+					overdue_after,
+				)
+				.await?
 				{
 					filed += filed_one;
 				}
@@ -954,14 +961,13 @@ async fn sweep_migration_overdue(
 	db: &mut AsyncPgConnection,
 	declaration: &RestoreReplica,
 	server: &crate::servers::Server,
+	latest: &HashMap<(Uuid, BackupType), BackupRun>,
 	now: Timestamp,
 	overdue_after: PgDuration,
 ) -> Result<Option<usize>> {
 	let Some(version) = crate::migration_tests::candidate_for(db, server).await? else {
 		return Ok(None);
 	};
-	let latest =
-		BackupRun::latest_success_by_server_type_for_group(db, declaration.group_id).await?;
 	let Some(run) = latest.get(&(server.id, declaration.r#type.clone())) else {
 		return Ok(None);
 	};

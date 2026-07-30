@@ -645,3 +645,43 @@ async fn one_report_keeps_backup_health_and_version_readiness_apart() {
 	})
 	.await
 }
+
+/// A restore that failed before migrating says nothing about the version: no
+/// verdict lands, the pair stays retryable, and no check files either way.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_restore_leaves_the_version_unjudged() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn).await;
+		let server = insert_server(&mut conn, group).await;
+		let target = insert_version(&mut conn, 63).await;
+
+		MigrationTest::record(
+			&mut conn,
+			report(consumer, group, server, RunOutcome::Failure),
+			NewMigrationTest {
+				target_version_id: target.id,
+				total_elapsed: secs(0),
+				failed_migration: None,
+				data_bytes_before: 0,
+				data_bytes_after: 0,
+				timings: vec![],
+			},
+		)
+		.await
+		.expect("record");
+
+		assert_eq!(
+			database::migration_tests::verdict(&mut conn, server, target.id)
+				.await
+				.expect("verdict"),
+			database::migration_tests::Verdict::NotTested,
+			"retryable: the migrations never ran"
+		);
+		assert!(
+			migration_check(&mut conn, server).await.is_none(),
+			"neither a pass nor a warning is filed"
+		);
+	})
+	.await
+}
