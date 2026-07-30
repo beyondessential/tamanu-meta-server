@@ -250,6 +250,25 @@ pub fn spawn() -> JoinHandle<()> {
 				Ok(_) => {}
 				Err(err) => error!("dns zone coverage sweep failed: {err}"),
 			}
+
+			// Names and certificates: what a deployment is responsible for, filed
+			// against its server. All DB-only reads over what the domains pod
+			// recorded, so they ride this loop rather than that one — and they keep
+			// reporting when the domains pod is the thing that is down.
+			// spec: CRT#when-issuance-fails
+			match database::certificate_alerts::sweep(&mut db).await {
+				Ok(0) => {}
+				Ok(n) => debug!("filed {n} certificate/name events"),
+				Err(err) => error!("certificate alert sweep failed: {err}"),
+			}
+
+			// And the pause nobody remembers, which is Canopy's to report because
+			// only an operator can lift one.
+			// spec: CRT#pausing-a-server
+			match database::self_alerts::sweep_forgotten_pauses(&mut db).await {
+				Ok(_) => {}
+				Err(err) => error!("forgotten-pause self-alert sweep failed: {err}"),
+			}
 		}
 	})
 }

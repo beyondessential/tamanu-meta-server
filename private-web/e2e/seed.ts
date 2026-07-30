@@ -47,7 +47,7 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, server_reported_detail, issues, device_keys, servers, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, recovery_vault_writes RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, server_reported_detail, issues, device_keys, servers, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, recovery_vault_writes, server_names, server_certificates, compromised_keys RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" server with it;
 	// self-alerts attach to that row, so put it back. `kind = 'canopy'` is the
@@ -1221,4 +1221,107 @@ export async function seedServerGroupDomain(
 		[id, opts.groupId, opts.domain, opts.createdBy ?? null],
 	);
 	return { id, domain: opts.domain };
+}
+
+/** Seed a `server_names` row: a public name a server registered, with the
+ * addresses it asked for and (optionally) the ones Canopy has published. Leave
+ * `publishedAddresses` unset for a registration the zone has not caught up with. */
+export async function seedServerName(
+	sql: Sql,
+	opts: {
+		serverId: string;
+		name: string;
+		addresses: string[];
+		publishedAddresses?: string[];
+		lastError?: string;
+	},
+): Promise<{ id: string; name: string }> {
+	const id = randomUUID();
+	const toInet = (addresses: string[]) =>
+		`{${addresses.map((a) => `"${a}"`).join(",")}}`;
+	await sql.query(
+		`INSERT INTO server_names
+		   (id, server_id, name, addresses, published_addresses, published_at, last_error)
+		 VALUES ($1, $2, $3, $4::inet[], $5::inet[], $6, $7)`,
+		[
+			id,
+			opts.serverId,
+			opts.name,
+			toInet(opts.addresses),
+			toInet(opts.publishedAddresses ?? []),
+			opts.publishedAddresses && opts.publishedAddresses.length > 0
+				? new Date()
+				: null,
+			opts.lastError ?? null,
+		],
+	);
+	return { id, name: opts.name };
+}
+
+/** Seed a `server_certificates` row.
+ *
+ * `expiresInDays` and `lifetimeDays` place the certificate anywhere in its life,
+ * which is what drives the risk grading — that is a fraction of each
+ * certificate's own lifetime rather than a fixed duration, so both are needed. */
+export async function seedServerCertificate(
+	sql: Sql,
+	opts: {
+		serverId: string;
+		name: string;
+		state?: "pending" | "issued" | "failed" | "revoked";
+		keyFingerprint?: string;
+		profile?: string;
+		expiresInDays?: number;
+		lifetimeDays?: number;
+		renewing?: boolean;
+		attempts?: number;
+		lastError?: string;
+		revokedBy?: string;
+		revocationReason?: string;
+	},
+): Promise<{ id: string; name: string }> {
+	const id = randomUUID();
+	const state = opts.state ?? "issued";
+	const issued = state === "issued" || state === "revoked";
+	const lifetimeDays = opts.lifetimeDays ?? 90;
+	const expiresInDays = opts.expiresInDays ?? 80;
+	const notAfter = issued
+		? new Date(Date.now() + expiresInDays * 86400_000)
+		: null;
+	const issuedAt = issued
+		? new Date(Date.now() - (lifetimeDays - expiresInDays) * 86400_000)
+		: null;
+	await sql.query(
+		`INSERT INTO server_certificates
+		   (id, server_id, name, key_fingerprint, csr, state, chain, not_after,
+		    issued_at, renewing, attempts, last_error, profile, renew_after,
+		    revoked_at, revoked_by, revocation_reason)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+		[
+			id,
+			opts.serverId,
+			opts.name,
+			opts.keyFingerprint ?? randomUUID().replace(/-/g, "").repeat(2).slice(0, 64),
+			Buffer.from("csr"),
+			state,
+			issued ? "-----BEGIN CERTIFICATE-----\n" : null,
+			notAfter,
+			issuedAt,
+			opts.renewing ?? false,
+			opts.attempts ?? 0,
+			opts.lastError ?? null,
+			opts.profile ?? null,
+			// A third of the life left is where Canopy would renew, so this is what
+			// makes an aged certificate read as overdue rather than merely old.
+			issued
+				? new Date(
+						notAfter!.getTime() - (lifetimeDays / 3) * 86400_000,
+					)
+				: null,
+			state === "revoked" ? new Date() : null,
+			opts.revokedBy ?? null,
+			opts.revocationReason ?? null,
+		],
+	);
+	return { id, name: opts.name };
 }

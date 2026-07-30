@@ -93,6 +93,9 @@ async fn unknown_tailnet_node_is_rejected_without_creating_a_row() {
 				recovery_recipients: None,
 				recovery_challenge: std::sync::Arc::new(std::sync::Mutex::new(None)),
 				dns_zones: Vec::new(),
+				// Neither harness touches certificates.
+				acme: None,
+				acme_directory: None,
 			})
 			.unwrap(),
 			ClientIpSource::RightmostForwarded,

@@ -24,6 +24,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(zones))
 		.routes(routes!(for_group))
+		.routes(routes!(grant_availability))
 		.routes(routes!(claim))
 		.routes(routes!(release))
 }
@@ -125,6 +126,89 @@ pub async fn for_group(
 			.map(|row| to_view(row, &state.dns_zones))
 			.collect(),
 	))
+}
+
+/// Where a group stands with respect to granting its servers name management.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct GrantAvailabilityView {
+	/// What an operator can do with the two grants right now:
+	///
+	/// - `unconfigured` — Canopy has no managed zones and no group anywhere
+	///   controls a domain, so name management is not in use in this deployment.
+	///   Granting it would do nothing and there is nothing an operator can do
+	///   about that from here; it becomes available once the infrastructure
+	///   provides a zone.
+	/// - `no_group_domain` — name management is in use, but this group controls no
+	///   domain, so a grant would authorise the server over no name. Claim a
+	///   domain for the group first.
+	/// - `available` — the group controls at least one domain, and a grant takes
+	///   effect over the names beneath it.
+	pub state: String,
+	/// The domains this group controls, so the UI can name what a grant would
+	/// cover. Empty unless `state` is `available`.
+	pub group_domains: Vec<String>,
+}
+
+/// Identifies a group, or none.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct MaybeGroupIdArgs {
+	/// The group to ask about. Null for a server with no group, which can hold
+	/// no domain and so no useful grant.
+	pub server_group_id: Option<Uuid>,
+}
+
+/// Whether granting a server name management would mean anything yet.
+///
+/// The two grants are only ever exercised over names beneath a domain the
+/// server's group controls, so offering them where no domain is controlled — or
+/// where the deployment has no zones at all — presents a control that cannot do
+/// anything. The rule lives here rather than in the UI so there is one answer
+/// to it.
+// spec: DOM#permission-for-a-server-to-manage-its-own-names
+#[utoipa::path(
+	post,
+	path = "/grant_availability",
+	operation_id = "domains_grant_availability",
+	tag = "domains",
+	security(("tailscale-user" = [])),
+	request_body = MaybeGroupIdArgs,
+	responses((status = 200, body = GrantAvailabilityView)),
+)]
+pub async fn grant_availability(
+	State(state): State<AppState>,
+	Json(args): Json<MaybeGroupIdArgs>,
+) -> Result<Json<GrantAvailabilityView>> {
+	let mut conn = state.db_read.get().await?;
+
+	let group_domains: Vec<String> = match args.server_group_id {
+		Some(group) => ServerGroupDomain::list_for_group(&mut conn, group)
+			.await?
+			.into_iter()
+			.map(|claim| claim.domain)
+			.collect(),
+		None => Vec::new(),
+	};
+
+	if !group_domains.is_empty() {
+		return Ok(Json(GrantAvailabilityView {
+			state: "available".into(),
+			group_domains,
+		}));
+	}
+
+	// Nothing configured and nothing claimed anywhere: the feature is not in use
+	// here. Asked in that order because the zone list is already in memory.
+	let in_use = !state.dns_zones.is_empty() || ServerGroupDomain::any_claimed(&mut conn).await?;
+
+	Ok(Json(GrantAvailabilityView {
+		state: if in_use {
+			"no_group_domain"
+		} else {
+			"unconfigured"
+		}
+		.into(),
+		group_domains: Vec::new(),
+	}))
 }
 
 /// Fields needed to claim a domain for a group.

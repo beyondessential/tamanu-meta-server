@@ -56,6 +56,7 @@ import HealthChip from "../components/HealthChip";
 import IncidentsLink from "../components/IncidentsLink";
 import OperatorAvatars from "../components/OperatorAvatars";
 import ManualEventButton from "../components/ManualEventButton";
+import ServerCertificatesSection from "../components/ServerCertificatesSection";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import StatusDot from "../components/StatusDot";
 import TailnetIdentitySection from "../components/TailnetIdentitySection";
@@ -210,6 +211,7 @@ export default function ServerDetail() {
 					tags={data.server.tags}
 				/>
 			)}
+			<ServerCertificatesSection serverId={data.server.id} />
 			<AdvancedIdentitySection
 				host={data.server.display_host}
 				serverId={data.server.id}
@@ -806,10 +808,16 @@ function InfoSection({
 						value={renderLocation(server)}
 					/>
 				)}
-				<InfoItem
-					label="Name management"
-					value={nameManagementLabel(server)}
-				/>
+				{/* Only where something has been granted. "Not permitted" on every
+				    server in the fleet advertises a feature that a deployment
+				    without DNS zones does not have.
+				    spec: DOM#permission-for-a-server-to-manage-its-own-names */}
+				{(server.may_manage_dns || server.may_manage_tls) && (
+					<InfoItem
+						label="Name management"
+						value={nameManagementLabel(server)}
+					/>
+				)}
 			</Stack>
 			<ChecksTable
 				checks={checks}
@@ -1529,13 +1537,12 @@ function renderLocation(server: ServerInfo): string {
 	return "Cloud";
 }
 
-/// What this server is trusted to do with names under its group's domains.
+/// What this server is trusted to do with names under its group's domains. Only
+/// called where it is trusted with one of them, so there is no "none" reading.
 // spec: DOM#permission-for-a-server-to-manage-its-own-names
 function nameManagementLabel(server: ServerInfo): string {
 	if (server.may_manage_dns && server.may_manage_tls) return "DNS and TLS";
-	if (server.may_manage_dns) return "DNS only";
-	if (server.may_manage_tls) return "TLS only";
-	return "Not permitted";
+	return server.may_manage_dns ? "DNS only" : "TLS only";
 }
 
 function SiblingServers({

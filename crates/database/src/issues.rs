@@ -2666,6 +2666,28 @@ impl Issue {
 			.map_err(AppError::from)
 	}
 
+	/// Server ids carrying an active server-scoped issue with this
+	/// `(source, ref)`. The counterpart to
+	/// [`Self::active_group_ids_by_source_ref`], for the sweeps whose work list is
+	/// "what is wrong now" and which need "what was wrong last time" to know what
+	/// to close.
+	pub async fn active_server_ids_by_source_ref(
+		db: &mut AsyncPgConnection,
+		source: &str,
+		ref_: &str,
+	) -> Result<Vec<Uuid>> {
+		use crate::schema::issues::dsl;
+		dsl::issues
+			.filter(dsl::source.eq(source))
+			.filter(dsl::ref_.eq(ref_))
+			.filter(dsl::active.eq(true))
+			.filter(dsl::server_id.is_not_null())
+			.select(dsl::server_id.assume_not_null())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn list_by_source_ref(
 		db: &mut AsyncPgConnection,
 		source: &str,
