@@ -17,6 +17,7 @@ pub mod devices;
 pub mod issues;
 pub mod mcp_tokens;
 pub mod notes;
+pub mod partitions;
 pub mod pg_duration;
 pub mod recovery_vault;
 pub mod reported_detail;
