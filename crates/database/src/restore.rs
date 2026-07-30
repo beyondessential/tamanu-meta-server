@@ -605,7 +605,7 @@ impl BackupRestoreCheck {
 	pub async fn record_report(
 		db: &mut AsyncPgConnection,
 		new: NewBackupRestoreCheck,
-	) -> Result<()> {
+	) -> Result<i64> {
 		use crate::schema::backup_restore_checks::dsl;
 
 		let healthy = new.outcome == RunOutcome::Success && new.replica_healthy;
@@ -615,9 +615,10 @@ impl BackupRestoreCheck {
 		let error = new.error.clone();
 		let snapshot_id = new.snapshot_id.clone();
 
-		diesel::insert_into(dsl::backup_restore_checks)
+		let check_id: i64 = diesel::insert_into(dsl::backup_restore_checks)
 			.values(new)
-			.execute(db)
+			.returning(dsl::id)
+			.get_result(db)
 			.await?;
 
 		// Restore-health is attributed per server; a report without one is
@@ -676,7 +677,7 @@ impl BackupRestoreCheck {
 				.await?;
 			}
 		}
-		Ok(())
+		Ok(check_id)
 	}
 
 	/// Recent reports for a group, newest first — the operator restore-health
@@ -832,22 +833,19 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 			continue;
 		}
 		let once = descriptor.has_semantic(semantics::ONCE);
+		let migrates = descriptor.has_semantic(semantics::MIGRATE);
 
-		let servers = match d.server_id {
+		let servers: Vec<crate::servers::Server> = match d.server_id {
 			Some(sid) => {
 				let s = crate::servers::Server::get_by_id(db, sid).await.ok();
 				match s {
 					Some(s) if s.group_id == Some(d.group_id) && s.deleted_at.is_none() => {
-						vec![sid]
+						vec![s]
 					}
 					_ => vec![],
 				}
 			}
-			None => crate::servers::Server::list_live_in_group(db, d.group_id)
-				.await?
-				.into_iter()
-				.map(|s| s.id)
-				.collect(),
+			None => crate::servers::Server::list_live_in_group(db, d.group_id).await?,
 		};
 
 		if let Entry::Vacant(e) = healthy_cache.entry(d.group_id) {
@@ -863,7 +861,28 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 			);
 		}
 
-		for sid in servers {
+		for server in servers {
+			let sid = server.id;
+
+			// A `migrate` intent is overdue on its own terms: the question is
+			// whether the candidate version has been tried against the latest
+			// snapshot, not whether the replica restored.
+			if migrates {
+				if let Some(filed_one) = sweep_migration_overdue(
+					db,
+					&d,
+					&server,
+					&latest_snapshot_cache[&d.group_id],
+					now,
+					overdue_after,
+				)
+				.await?
+				{
+					filed += filed_one;
+				}
+				continue;
+			}
+
 			let key = (sid, d.r#type.clone(), d.intent.clone());
 			let overdue = if once {
 				// A `once` intent is overdue only when a snapshot exists to verify,
@@ -930,4 +949,70 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 	}
 
 	Ok(filed)
+}
+
+/// Whether a `migrate` declaration's server has left its candidate version
+/// untested past the bound, filing the migration-test check when it has.
+///
+/// Returns the number of checks filed, or `None` when the server has nothing to
+/// be overdue about: no candidate version, or no snapshot to migrate.
+// spec: RST#alerting
+async fn sweep_migration_overdue(
+	db: &mut AsyncPgConnection,
+	declaration: &RestoreReplica,
+	server: &crate::servers::Server,
+	latest: &HashMap<(Uuid, BackupType), BackupRun>,
+	now: Timestamp,
+	overdue_after: PgDuration,
+) -> Result<Option<usize>> {
+	let Some(version) = crate::migration_tests::candidate_for(db, server).await? else {
+		return Ok(None);
+	};
+	let Some(run) = latest.get(&(server.id, declaration.r#type.clone())) else {
+		return Ok(None);
+	};
+	let Some(snapshot_id) = run.snapshot_id.as_ref() else {
+		return Ok(None);
+	};
+
+	if crate::migration_tests::has_verdict(db, server.id, snapshot_id, version.id).await? {
+		return Ok(None);
+	}
+	// Measured from when the snapshot landed, which is when it became available
+	// to migrate, not how old the data inside it is.
+	if now.duration_since(run.reported_at) <= overdue_after.0 {
+		return Ok(None);
+	}
+
+	let semver = version.as_semver();
+	file_check(
+		db,
+		CheckFiling {
+			source: crate::statuses::CANOPY_SOURCE,
+			scope: Scope::Server(server.id),
+			device_id: None,
+			check: &format!(
+				"{}:{}:{}",
+				refs::MIGRATION_TEST, declaration.r#type, declaration.intent
+			),
+			observed: CheckResult::Warning,
+			title: Some("migration test overdue"),
+			message: &format!(
+				"Migrations for {semver} have not been tried against server {}'s latest snapshot within its overdue bound",
+				server.id
+			),
+			detail: Some(serde_json::json!({
+				"target_version": semver.to_string(),
+				"snapshot_id": snapshot_id,
+				"type": declaration.r#type.to_string(),
+				"intent": declaration.intent.to_string(),
+			})),
+			default_ceiling: CheckResult::Warning,
+			default_escalates: false,
+			documentation: Some(refs::MIGRATION_TEST_DOC),
+		},
+	)
+	.await?;
+
+	Ok(Some(1))
 }

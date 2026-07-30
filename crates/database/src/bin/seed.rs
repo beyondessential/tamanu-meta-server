@@ -290,6 +290,7 @@ async fn seed_known_issues(conn: &mut AsyncPgConnection) -> Result<()> {
 		(2, 11, 0),
 		"carol.releases@example.com",
 		"Report exports time out on large datasets; avoid 2.11.x in production.",
+		None,
 	)
 	.await?;
 
@@ -298,6 +299,7 @@ async fn seed_known_issues(conn: &mut AsyncPgConnection) -> Result<()> {
 		(2, 9, 0),
 		"carol.releases@example.com",
 		"Sync stalls when a facility reconnects after a long outage.",
+		None,
 	)
 	.await?;
 	VersionKnownIssue::resolve(

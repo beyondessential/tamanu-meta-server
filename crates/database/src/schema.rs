@@ -398,6 +398,26 @@ diesel::table! {
 }
 
 diesel::table! {
+	migration_tests (check_id) {
+		check_id -> Int8,
+		target_version_id -> Uuid,
+		total_elapsed -> Interval,
+		failed_migration -> Nullable<Text>,
+		data_bytes_before -> Int8,
+		data_bytes_after -> Int8,
+	}
+}
+
+diesel::table! {
+	migration_timings (check_id, ordinal) {
+		check_id -> Int8,
+		ordinal -> Int4,
+		name -> Text,
+		elapsed -> Interval,
+	}
+}
+
+diesel::table! {
 	recovery_vault_writes (id) {
 		id -> Uuid,
 		written_at -> Timestamptz,
@@ -701,6 +721,7 @@ diesel::table! {
 		max_major -> Nullable<Int4>,
 		max_minor -> Nullable<Int4>,
 		max_patch -> Nullable<Int4>,
+		server_id -> Nullable<Uuid>,
 	}
 }
 
@@ -750,6 +771,9 @@ diesel::joinable!(incidents -> server_groups (server_group_id));
 diesel::joinable!(issue_notes -> issues (issue_id));
 diesel::joinable!(issues -> devices (device_id));
 diesel::joinable!(issues -> server_groups (server_group_id));
+diesel::joinable!(migration_tests -> backup_restore_checks (check_id));
+diesel::joinable!(migration_tests -> versions (target_version_id));
+diesel::joinable!(migration_timings -> migration_tests (check_id));
 diesel::joinable!(issues -> servers (server_id));
 diesel::joinable!(restore_consumer_capabilities -> devices (consumer_device_id));
 diesel::joinable!(restore_replicas -> devices (consumer_device_id));
@@ -773,6 +797,7 @@ diesel::joinable!(slack_outbox -> incidents (incident_id));
 diesel::joinable!(slack_outbox -> issues (issue_id));
 diesel::joinable!(statuses -> devices (device_id));
 diesel::joinable!(statuses -> servers (server_id));
+diesel::joinable!(version_known_issues -> servers (server_id));
 diesel::joinable!(versions -> devices (device_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
@@ -784,6 +809,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	backup_repo_snapshots,
 	backup_repo_stats,
 	backup_requests,
+	backup_restore_checks,
 	backup_run_progress,
 	backup_runs,
 	backup_type_defaults,
@@ -804,6 +830,8 @@ diesel::allow_tables_to_appear_in_same_query!(
 	issue_notes,
 	issues,
 	mcp_tokens,
+	migration_tests,
+	migration_timings,
 	recovery_vault_writes,
 	restore_consumer_capabilities,
 	restore_replicas,

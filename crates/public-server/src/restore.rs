@@ -25,12 +25,14 @@ use commons_types::backup::{
 use database::{
 	Db,
 	backups::{BackupRun, NewBackupCredentialIssuance, ServerGroupBackupConfig},
+	migration_tests::{self, MigrationTest, NewMigrationTest},
+	pg_duration::PgDuration,
 	restore::{
 		BackupRestoreCheck, NewBackupRestoreCheck, RestoreConsumerCapability, RestoreReplica,
 	},
 	servers::Server,
 };
-use jiff::Timestamp;
+use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use utoipa::ToSchema;
@@ -147,6 +149,12 @@ pub struct WorklistEntry {
 	pub prefix: String,
 	/// AWS region of the bucket.
 	pub region: String,
+	/// For a `migrate` intent, the version whose schema migrations to apply
+	/// after restoring. Obtain them from that version's published artefacts, the
+	/// same way a server being upgraded does. `null` for every other intent.
+	pub target_version: Option<String>,
+	/// Identifier of that version. Echo it back in the migration-test report.
+	pub target_version_id: Option<Uuid>,
 }
 
 /// Fetch the full set of replicas this device should maintain.
@@ -248,6 +256,7 @@ async fn worklist(
 		// The descriptor governs the intent's semantics and parameter resolution.
 		let descriptor = &descriptors[&d.intent];
 		let once = descriptor.has_semantic(semantics::ONCE);
+		let migrates = descriptor.has_semantic(semantics::MIGRATE);
 		let replica_values: ParamValues =
 			serde_json::from_value(d.params.clone()).unwrap_or_default();
 		let params = resolve_params(&descriptor.params, &replica_values);
@@ -259,15 +268,35 @@ async fn worklist(
 				continue;
 			}
 			let latest = snapshots.get(&(server.id, d.r#type.clone()));
-			// A `once` intent drops off the worklist once the latest snapshot has
-			// a healthy report; it reappears only when a newer snapshot exists.
+
+			// A `migrate` intent needs a version to migrate to, so a server with
+			// no candidate contributes nothing rather than an entry naming none.
+			let target = if migrates {
+				match migration_tests::candidate_for(&mut conn, &server).await? {
+					Some(version) => Some((version.id, version.as_semver())),
+					None => continue,
+				}
+			} else {
+				None
+			};
+
+			// A `once` intent drops off the worklist once its work is settled for
+			// the latest snapshot, and reappears only when a newer one exists. For
+			// a `migrate` intent that settling is keyed to the target version too,
+			// and a failure settles it as firmly as a pass.
 			if once {
-				let key = (server.id, d.r#type.clone(), d.intent.clone());
-				let already = matches!(
-					(verified.get(&key), latest.and_then(|r| r.snapshot_id.as_ref())),
-					(Some(v), Some(s)) if v == s
-				);
-				if already {
+				let settled = match (&target, latest.and_then(|r| r.snapshot_id.as_ref())) {
+					(Some((version_id, _)), Some(snapshot)) => {
+						migration_tests::has_verdict(&mut conn, server.id, snapshot, *version_id)
+							.await?
+					}
+					(Some(_), None) => false,
+					(None, snapshot) => {
+						let key = (server.id, d.r#type.clone(), d.intent.clone());
+						matches!((verified.get(&key), snapshot), (Some(v), Some(s)) if v == s)
+					}
+				};
+				if settled {
 					continue;
 				}
 			}
@@ -286,6 +315,8 @@ async fn worklist(
 				bucket: cfg.bucket.clone(),
 				prefix: cfg.prefix.clone(),
 				region: region.clone(),
+				target_version: target.as_ref().map(|(_, version)| version.to_string()),
+				target_version_id: target.as_ref().map(|(version_id, _)| *version_id),
 			});
 		}
 	}
@@ -528,6 +559,37 @@ pub struct VerificationArgs {
 	/// The field is optional only so older clients don't break; it WILL be made
 	/// mandatory in future.
 	pub run_id: Option<Uuid>,
+	/// What the migrations did, for a report under a `migrate` intent. Omit for
+	/// every other intent.
+	pub migration: Option<MigrationArgs>,
+}
+
+/// How the target version's migrations went against the restored replica.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct MigrationArgs {
+	/// The version whose migrations were applied, taken from the worklist
+	/// entry's `target_version_id`.
+	pub target_version_id: Uuid,
+	/// Whole seconds the whole migration run took.
+	pub total_elapsed_seconds: i64,
+	/// The migration that failed, when one did.
+	pub failed_migration: Option<String>,
+	/// Size of the data before the migrations ran.
+	pub data_bytes_before: i64,
+	/// Size of the data after they ran. The growth between the two is what shows
+	/// a migration that backfills heavily.
+	pub data_bytes_after: i64,
+	/// One entry per migration that ran, in the order they ran.
+	pub timings: Vec<MigrationTimingArgs>,
+}
+
+/// How long one migration took.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct MigrationTimingArgs {
+	/// The migration's name, as the migration runner reports it.
+	pub name: String,
+	/// Whole seconds it took.
+	pub elapsed_seconds: i64,
 }
 
 /// Report the outcome of a restore attempt and the replica's health.
@@ -568,30 +630,57 @@ async fn verification(
 		});
 	}
 
-	BackupRestoreCheck::record_report(
-		&mut conn,
-		NewBackupRestoreCheck {
-			replica_id: args.replica_id,
-			consumer_device_id,
-			group_id: args.group,
-			server_id: Some(args.server_id),
-			r#type: args.r#type,
-			intent: args.intent,
-			snapshot_id: args.snapshot_id,
-			outcome: args.outcome,
-			error: args.error,
-			replica_healthy: args.replica_healthy,
-			postgres_version: args.postgres_version,
-			observed_at: args.observed_at,
-			s3_sent_raw_bytes: args.s3_sent_raw_bytes,
-			s3_sent_payload_bytes: args.s3_sent_payload_bytes,
-			s3_received_raw_bytes: args.s3_received_raw_bytes,
-			s3_received_payload_bytes: args.s3_received_payload_bytes,
-			health_details: args.health_details,
-			run_id: args.run_id,
-		},
-	)
-	.await?;
+	let report = NewBackupRestoreCheck {
+		replica_id: args.replica_id,
+		consumer_device_id,
+		group_id: args.group,
+		server_id: Some(args.server_id),
+		r#type: args.r#type,
+		intent: args.intent,
+		snapshot_id: args.snapshot_id,
+		outcome: args.outcome,
+		error: args.error,
+		replica_healthy: args.replica_healthy,
+		postgres_version: args.postgres_version,
+		observed_at: args.observed_at,
+		s3_sent_raw_bytes: args.s3_sent_raw_bytes,
+		s3_sent_payload_bytes: args.s3_sent_payload_bytes,
+		s3_received_raw_bytes: args.s3_received_raw_bytes,
+		s3_received_payload_bytes: args.s3_received_payload_bytes,
+		health_details: args.health_details,
+		run_id: args.run_id,
+	};
+
+	match args.migration {
+		Some(migration) => {
+			MigrationTest::record(&mut conn, report, migration.into()).await?;
+		}
+		None => {
+			BackupRestoreCheck::record_report(&mut conn, report).await?;
+		}
+	}
 
 	Ok(StatusCode::NO_CONTENT)
+}
+
+impl From<MigrationArgs> for NewMigrationTest {
+	fn from(args: MigrationArgs) -> Self {
+		Self {
+			target_version_id: args.target_version_id,
+			total_elapsed: PgDuration(SignedDuration::from_secs(args.total_elapsed_seconds)),
+			failed_migration: args.failed_migration,
+			data_bytes_before: args.data_bytes_before,
+			data_bytes_after: args.data_bytes_after,
+			timings: args
+				.timings
+				.into_iter()
+				.map(|timing| {
+					(
+						timing.name,
+						PgDuration(SignedDuration::from_secs(timing.elapsed_seconds)),
+					)
+				})
+				.collect(),
+		}
+	}
 }

@@ -1,0 +1,93 @@
+import { expect, test } from "./test-fixtures";
+import {
+	resetSeededTables,
+	seedDevice,
+	seedMigrationTest,
+	seedServer,
+	seedServerGroup,
+	seedStatus,
+	seedVersion,
+} from "./seed";
+
+test.describe("pre-upgrade migration tests on the group page", () => {
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("shows each server's verdict against the version it would take next", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await seedVersion(sql, { major: 2, minor: 62, patch: 0 });
+		const target = await seedVersion(sql, { major: 2, minor: 63, patch: 0 });
+
+		const failed = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+		});
+		const untested = await seedServer(sql, {
+			name: "kamaka-facility",
+			groupId: group.id,
+		});
+		for (const server of [failed, untested]) {
+			await seedStatus(sql, { serverId: server.id, version: "2.62.0" });
+		}
+
+		// One server has been tried and its migrations failed; the other has not
+		// been tried yet.
+		await seedMigrationTest(sql, {
+			consumerDeviceId: consumer.id,
+			groupId: group.id,
+			serverId: failed.id,
+			targetVersionId: target.id,
+			failedMigration: "backfillNoteTypeIds",
+			totalElapsedSecs: 5400,
+			dataBytesBefore: 200_000_000_000,
+			dataBytesAfter: 260_000_000_000,
+		});
+
+		await page.goto(`/groups/${group.id}`);
+
+		const section = page.getByTestId("migration-tests");
+		await expect(section).toBeVisible();
+		await expect(
+			section.getByRole("heading", { name: "Pre-upgrade migration tests" }),
+		).toBeVisible();
+
+		const failedRow = section
+			.getByTestId("migration-test-row")
+			.filter({ hasText: "kamaka-central" });
+		await expect(failedRow).toContainText("2.63.0");
+		await expect(failedRow).toContainText("failed");
+		// The window estimate and the growth a heavy backfill leaves behind are
+		// the numbers an operator schedules against.
+		await expect(failedRow).toContainText("1.5h");
+		await expect(failedRow).toContainText("30%");
+
+		const untestedRow = section
+			.getByTestId("migration-test-row")
+			.filter({ hasText: "kamaka-facility" });
+		await expect(untestedRow).toContainText("not yet tested");
+	});
+
+	test("says so when every server is already on the newest version", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "current" });
+		await seedVersion(sql, { major: 2, minor: 63, patch: 0 });
+		const server = await seedServer(sql, {
+			name: "up-to-date",
+			groupId: group.id,
+		});
+		await seedStatus(sql, { serverId: server.id, version: "2.63.0" });
+
+		await page.goto(`/groups/${group.id}`);
+
+		await expect(page.getByTestId("migration-tests")).toContainText(
+			"nothing to test against",
+		);
+	});
+});

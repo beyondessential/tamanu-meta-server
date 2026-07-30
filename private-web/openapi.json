@@ -4625,6 +4625,66 @@
         ]
       }
     },
+    "/api/migration_tests/for_group": {
+      "post": {
+        "tags": [
+          "migration_tests"
+        ],
+        "summary": "Where each of a group's servers stands against the version it would take\nnext.",
+        "description": "One entry per server that has a candidate version. A server already on the\nnewest published version, running another product, or yet to report a\nversion has nothing to be tested against and is absent.",
+        "operationId": "migration_tests_for_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForGroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Verdicts, one per server with a candidate.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GroupVerdict"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/restore_replicas/checks": {
       "post": {
         "tags": [
@@ -9259,6 +9319,20 @@
           }
         }
       },
+      "ForGroupArgs": {
+        "type": "object",
+        "description": "Request body for reading a group's migration-test verdicts.",
+        "required": [
+          "group_id"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group to report on."
+          }
+        }
+      },
       "GeoPoint": {
         "type": "object",
         "description": "A geographic coordinate, used to place a server on a map.",
@@ -9504,6 +9578,47 @@
           "type": {
             "type": "string",
             "description": "Backup type this schedule and retention apply to."
+          }
+        }
+      },
+      "GroupVerdict": {
+        "type": "object",
+        "description": "Where one of a group's servers stands against the version it would take\nnext.",
+        "required": [
+          "server_id",
+          "target_version_id",
+          "target_version",
+          "verdict"
+        ],
+        "properties": {
+          "latest": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LatestTest",
+                "description": "The test the verdict came from, absent when there has not been one."
+              }
+            ]
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The server the verdict is about."
+          },
+          "target_version": {
+            "type": "string",
+            "description": "That version, as semver."
+          },
+          "target_version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The version it would take next."
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/Verdict",
+            "description": "Where it stands against that version."
           }
         }
       },
@@ -10544,6 +10659,56 @@
               "null"
             ],
             "description": "Login of the operator who resolved this issue, if any."
+          }
+        }
+      },
+      "LatestTest": {
+        "type": "object",
+        "description": "The most recent test of one (server, version) pair.",
+        "required": [
+          "verdict",
+          "reported_at",
+          "total_elapsed",
+          "data_bytes_before",
+          "data_bytes_after"
+        ],
+        "properties": {
+          "data_bytes_after": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size of it afterwards; the growth is what a heavy backfill shows up as."
+          },
+          "data_bytes_before": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size of the data the migrations ran against."
+          },
+          "failed_migration": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The migration that failed, when one did."
+          },
+          "reported_at": {
+            "type": "string",
+            "description": "When the consumer reported it."
+          },
+          "snapshot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The snapshot the verdict was reached against."
+          },
+          "total_elapsed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Whole seconds the migration run took."
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/Verdict",
+            "description": "Whether the migrations applied."
           }
         }
       },
@@ -15088,6 +15253,15 @@
         }
       },
       "Value": {},
+      "Verdict": {
+        "type": "string",
+        "description": "Where a (server, version) pair stands.",
+        "enum": [
+          "nottested",
+          "passed",
+          "failed"
+        ]
+      },
       "VersionData": {
         "type": "object",
         "description": "A single released (or draft) software version.",
@@ -15329,6 +15503,10 @@
     {
       "name": "mcp_tokens",
       "description": "Bearer tokens for the public MCP mount."
+    },
+    {
+      "name": "migration_tests",
+      "description": "Where each server stands against the version it would take next."
     },
     {
       "name": "restore_replicas",

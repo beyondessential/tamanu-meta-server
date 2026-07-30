@@ -1960,6 +1960,72 @@
           }
         }
       },
+      "MigrationArgs": {
+        "type": "object",
+        "description": "How the target version's migrations went against the restored replica.",
+        "required": [
+          "target_version_id",
+          "total_elapsed_seconds",
+          "data_bytes_before",
+          "data_bytes_after",
+          "timings"
+        ],
+        "properties": {
+          "data_bytes_after": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size of the data after they ran. The growth between the two is what shows\na migration that backfills heavily."
+          },
+          "data_bytes_before": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size of the data before the migrations ran."
+          },
+          "failed_migration": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The migration that failed, when one did."
+          },
+          "target_version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The version whose migrations were applied, taken from the worklist\nentry's `target_version_id`."
+          },
+          "timings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MigrationTimingArgs"
+            },
+            "description": "One entry per migration that ran, in the order they ran."
+          },
+          "total_elapsed_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Whole seconds the whole migration run took."
+          }
+        }
+      },
+      "MigrationTimingArgs": {
+        "type": "object",
+        "description": "How long one migration took.",
+        "required": [
+          "name",
+          "elapsed_seconds"
+        ],
+        "properties": {
+          "elapsed_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Whole seconds it took."
+          },
+          "name": {
+            "type": "string",
+            "description": "The migration's name, as the migration runner reports it."
+          }
+        }
+      },
       "ParamType": {
         "type": "string",
         "description": "The data type of a restore-replica configuration parameter, which\ndetermines how its value is validated. `duration` and `bytes` values must\nbe non-negative integers (a count of seconds and of bytes, respectively);\n`integer` accepts any whole number, positive or negative; `boolean` is a\nJSON boolean; `text` is a JSON string.",
@@ -2591,6 +2657,17 @@
             "type": "string",
             "description": "The restore intent this attempt was performed under."
           },
+          "migration": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MigrationArgs",
+                "description": "What the migrations did, for a report under a `migrate` intent. Omit for\nevery other intent."
+              }
+            ]
+          },
           "observed_at": {
             "type": "string",
             "description": "When the restore result was observed, as an RFC 3339 timestamp."
@@ -2870,6 +2947,21 @@
           "storage": {
             "type": "string",
             "description": "Kind of storage backend. Always `\"s3\"`."
+          },
+          "target_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "For a `migrate` intent, the version whose schema migrations to apply\nafter restoring. Obtain them from that version's published artefacts, the\nsame way a server being upgraded does. `null` for every other intent."
+          },
+          "target_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Identifier of that version. Echo it back in the migration-test report."
           },
           "type": {
             "type": "string",

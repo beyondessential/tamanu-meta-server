@@ -17,6 +17,7 @@ mod health;
 mod healthchecks;
 mod issues;
 mod mcp;
+mod migration_tests;
 mod notes;
 mod openapi_spec;
 mod operator_presence;

@@ -738,6 +738,7 @@ pub async fn add_known_issue(
 		(v.major, v.minor, v.patch),
 		&admin.0.login,
 		description,
+		None,
 	)
 	.await?;
 	Ok(Json(KnownIssueData::from(row)))

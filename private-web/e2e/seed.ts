@@ -47,7 +47,7 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, server_reported_detail, issues, device_keys, servers, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, recovery_vault_writes, server_names, server_certificates, compromised_keys RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, server_reported_detail, issues, device_keys, servers, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, recovery_vault_writes, server_names, server_certificates, compromised_keys RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" server with it;
 	// self-alerts attach to that row, so put it back. `kind = 'canopy'` is the
@@ -1141,6 +1141,58 @@ export async function seedRestoreCheck(
 			opts.runId ?? null,
 		],
 	);
+}
+
+/** Seed a migration-test result: the restore-health report that carries the
+ * common fields, plus the migration outcome hung off it. A named
+ * `failedMigration` is what makes the verdict a failure. */
+export async function seedMigrationTest(
+	sql: Sql,
+	opts: {
+		consumerDeviceId: string;
+		groupId: string;
+		serverId: string;
+		targetVersionId: string;
+		snapshotId?: string;
+		failedMigration?: string | null;
+		totalElapsedSecs?: number;
+		dataBytesBefore?: number;
+		dataBytesAfter?: number;
+		timings?: Array<{ name: string; elapsedSecs: number }>;
+	},
+): Promise<void> {
+	const rows = await sql.query<{ id: string }>(
+		`INSERT INTO backup_restore_checks
+		 (consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome,
+		  replica_healthy, observed_at)
+		 VALUES ($1, $2, $3, 'tamanu-postgres', 'migrate', $4, 'success', true, NOW())
+		 RETURNING id`,
+		[opts.consumerDeviceId, opts.groupId, opts.serverId, opts.snapshotId ?? "snap-1"],
+	);
+	const checkId = rows[0]!.id;
+
+	await sql.query(
+		`INSERT INTO migration_tests
+		 (check_id, target_version_id, total_elapsed, failed_migration,
+		  data_bytes_before, data_bytes_after)
+		 VALUES ($1, $2, make_interval(secs => $3), $4, $5, $6)`,
+		[
+			checkId,
+			opts.targetVersionId,
+			opts.totalElapsedSecs ?? 60,
+			opts.failedMigration ?? null,
+			opts.dataBytesBefore ?? 0,
+			opts.dataBytesAfter ?? 0,
+		],
+	);
+
+	for (const [ordinal, timing] of (opts.timings ?? []).entries()) {
+		await sql.query(
+			`INSERT INTO migration_timings (check_id, ordinal, name, elapsed)
+			 VALUES ($1, $2, $3, make_interval(secs => $4))`,
+			[checkId, ordinal, timing.name, timing.elapsedSecs],
+		);
+	}
 }
 
 /** Seed a `recovery_vault_writes` row. `writtenAgoSecs` backdates the write;
