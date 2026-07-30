@@ -100,7 +100,15 @@ impl UpgradePlan {
 			.returning(Self::as_select())
 			.get_result(db)
 			.await
-			.map_err(AppError::from)
+			.map_err(|e| match e {
+				diesel::result::Error::DatabaseError(
+					diesel::result::DatabaseErrorKind::UniqueViolation,
+					_,
+				) => AppError::Conflict(
+					"another plan was recorded for this group at the same time".into(),
+				),
+				e => AppError::from(e),
+			})
 	}
 
 	/// The group's open plan, if it has one.
@@ -210,9 +218,13 @@ pub async fn planned_target(db: &mut AsyncPgConnection, group_id: Uuid) -> Resul
 	let Some(plan) = UpgradePlan::open_for_group(db, group_id).await? else {
 		return Ok(None);
 	};
-	Version::get_by_id(db, plan.target_version_id)
-		.await
-		.map(Some)
+	let target = Version::get_by_id(db, plan.target_version_id).await?;
+	// A target yanked after the plan was recorded has no artefacts to fetch, so
+	// it cannot steer testing; the plan stays open for the operator to revisit.
+	if target.status != commons_types::version::VersionStatus::Published {
+		return Ok(None);
+	}
+	Ok(Some(target))
 }
 
 /// Whether an open plan's date has passed without it being met.

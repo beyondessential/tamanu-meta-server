@@ -106,6 +106,15 @@ pub async fn attempt_state(
 
 	let (_starts, attempts) = crate::run_pairing::pair_issuances(issuances, &report_refs);
 
+	// A chain abandoned before the newest report is history, not the pipeline's
+	// current state: something has reported since, so showing it would nag about
+	// a run already superseded.
+	let newest_report = report_refs.iter().map(|r| r.reported_at).max();
+	let attempts: Vec<_> = attempts
+		.into_iter()
+		.filter(|a| newest_report.is_none_or(|newest| a.latest_expires > newest))
+		.collect();
+
 	// An in-flight attempt is the more useful of the two to report, since it
 	// says the pipeline is working right now.
 	let newest_in_flight = attempts

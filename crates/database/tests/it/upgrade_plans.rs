@@ -194,7 +194,8 @@ async fn canopy_closes_a_plan_once_the_group_arrives() {
 			.await
 			.expect("arrive");
 
-		assert_eq!(close_met_plans(&mut conn).await.expect("sweep"), 1);
+		// Through the periodic sweep, which is what runs in production.
+		database::backup::sweep(&mut conn).await.expect("sweep");
 		assert!(
 			UpgradePlan::open_for_group(&mut conn, group)
 				.await
