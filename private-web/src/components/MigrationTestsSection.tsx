@@ -13,9 +13,10 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
+import { Link as MuiLink } from "@mui/material";
+import { Link as RouterLink } from "react-router-dom";
 import { useApi } from "../api";
 import type { ServerInfo } from "../types";
-import ServerShorty from "./ServerShorty";
 import TimeAgo from "./TimeAgo";
 
 /// Where each of the group's servers stands against the version it would take
@@ -31,6 +32,7 @@ export default function MigrationTestsSection({
 	servers: ServerInfo[];
 }) {
 	const byId = new Map(servers.map((server) => [server.id, server]));
+	const nameOf = (id: string) => byId.get(id)?.name ?? id;
 	const verdicts = useApi(
 		"migration_tests",
 		"for_group",
@@ -82,14 +84,23 @@ export default function MigrationTestsSection({
 					</TableRow>
 				</TableHead>
 				<TableBody>
-					{verdicts.data.map((row) => (
+					{[...verdicts.data]
+						.sort(
+							(a, b) =>
+								VERDICT_ORDER[a.verdict] - VERDICT_ORDER[b.verdict] ||
+								nameOf(a.server_id).localeCompare(nameOf(b.server_id)),
+						)
+						.map((row) => (
 						<TableRow key={row.server_id} data-testid="migration-test-row">
 							<TableCell>
-								{byId.has(row.server_id) ? (
-									<ServerShorty server={byId.get(row.server_id)!} />
-								) : (
-									row.server_id
-								)}
+								<MuiLink
+									component={RouterLink}
+									to={`/servers/${row.server_id}`}
+									underline="hover"
+									color="text.primary"
+								>
+									{byId.get(row.server_id)?.name ?? row.server_id}
+								</MuiLink>
 							</TableCell>
 							<TableCell>{row.target_version}</TableCell>
 							<TableCell>
@@ -123,12 +134,19 @@ export default function MigrationTestsSection({
 								)}
 							</TableCell>
 						</TableRow>
-					))}
+						))}
 				</TableBody>
 			</Table>
 		</Paper>
 	);
 }
+
+/// Problems first: a passing server is the row an operator scrolls past.
+const VERDICT_ORDER: Record<string, number> = {
+	failed: 0,
+	nottested: 1,
+	passed: 2,
+};
 
 function SectionHeading() {
 	return (
