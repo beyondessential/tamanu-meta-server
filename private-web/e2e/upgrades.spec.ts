@@ -63,4 +63,37 @@ test.describe("upgrades dashboard", () => {
 			"No deployment has a recorded plan",
 		);
 	});
+
+	test("withdrawing a plan puts the deployment back to unplanned", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await sql.query(
+			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
+			[group.id],
+		);
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+		});
+
+		await page.goto("/upgrades");
+		await expect(
+			page.getByTestId("planned-upgrade-row").filter({ hasText: "kamaka" }),
+		).toBeVisible();
+
+		page.once("dialog", (dialog) => dialog.accept());
+		await page.getByRole("button", { name: "Withdraw kamaka's plan" }).click();
+
+		// Withdrawn, so it moves to the unplanned list and testing goes back to
+		// aiming at the newest version.
+		await expect(
+			page.getByTestId("unplanned-upgrade-row").filter({ hasText: "kamaka" }),
+		).toBeVisible();
+		await expect(page.getByTestId("planned-upgrades")).toContainText(
+			"No deployment has a recorded plan",
+		);
+	});
 });

@@ -1,7 +1,9 @@
+import DeleteIcon from "@mui/icons-material/Delete";
 import {
 	Alert,
 	Button,
 	Chip,
+	IconButton,
 	LinearProgress,
 	MenuItem,
 	Paper,
@@ -75,6 +77,7 @@ export default function Upgrades() {
 								<TableCell>Data survives it</TableCell>
 								<TableCell>Planned for</TableCell>
 								<TableCell>Note</TableCell>
+								{isAdmin && <TableCell />}
 							</TableRow>
 						</TableHead>
 						<TableBody>
@@ -97,6 +100,16 @@ export default function Upgrades() {
 										/>
 									</TableCell>
 									<TableCell>{row.plan?.note ?? ""}</TableCell>
+									{isAdmin && (
+										<TableCell align="right">
+											<WithdrawPlan
+												planId={row.plan?.id ?? ""}
+												groupName={row.group_name}
+												targetVersion={row.target_version ?? ""}
+												onWithdrawn={() => setTick((t) => t + 1)}
+											/>
+										</TableCell>
+									)}
 								</TableRow>
 							))}
 						</TableBody>
@@ -289,5 +302,47 @@ function RecordPlan({
 				</Alert>
 			)}
 		</Paper>
+	);
+}
+
+/// Withdraw a plan: the deployment is no longer going there. This does not say
+/// the upgrade happened; Canopy closes a met plan on its own.
+// spec: UPG#a-plan
+function WithdrawPlan({
+	planId,
+	groupName,
+	targetVersion,
+	onWithdrawn,
+}: {
+	planId: string;
+	groupName: string;
+	targetVersion: string;
+	onWithdrawn: () => void;
+}) {
+	const withdraw = useApiAction("upgrade_plans", "withdraw");
+	const onClick = async () => {
+		if (
+			!window.confirm(
+				`Withdraw ${groupName}'s plan to move to ${targetVersion}? Pre-upgrade testing goes back to aiming at the newest version.`,
+			)
+		)
+			return;
+		try {
+			await withdraw.call({ id: planId });
+			onWithdrawn();
+		} catch {
+			/* surfaced by the reload showing the plan still there */
+		}
+	};
+
+	return (
+		<IconButton
+			size="small"
+			aria-label={`Withdraw ${groupName}'s plan`}
+			onClick={onClick}
+			disabled={withdraw.pending || !planId}
+		>
+			<DeleteIcon fontSize="small" />
+		</IconButton>
 	);
 }
