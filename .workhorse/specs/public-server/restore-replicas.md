@@ -240,15 +240,15 @@ That window is where the answer is still cheap: the fleet is not moving yet, and
 
 ### Dispatching a migration test
 
-`migrate` is a semantic an intent opts into, and it belongs on an intent of its own rather than on one that verifies backups.
-Such an intent still answers both questions from the one restore, since it carries `check` too: the replica's health and the migrations' outcome land as separate signals from a single report.
+`migrate` is a semantic an intent opts into, and an intent carrying it carries no other purpose.
+It carries `check` alongside, so a single restore reports the replica's health and the migrations' outcome as two signals from one report.
 
-Two things make `migrate` wrong to add to an intent that already does something else.
-The withholding rule below stops an intent carrying `migrate` from being dispatched at all for a server with no candidate, so on a verifying intent it would silently stop verifying the backups of every such server: any non-Tamanu product, and any deployment already on the newest version it could move to.
-And a replica whose data has been migrated sits at a version its deployment is not running, so an intent that keeps a replica queryable must never migrate, or promoting a declaration to it would hand an operator a replica whose schema does not match production.
+An intent carrying `migrate` is withheld from a server with no candidate version.
+An intent that verifies backups therefore does not also migrate: it would go undispatched for every server without a candidate, leaving the backups of any non-Tamanu product, and of any deployment already on the newest version available to it, unverified.
+An intent that keeps a replica queryable does not migrate either: a migrated replica sits at a version its deployment is not running, so a declaration promoted to it would give an operator a schema that does not match production.
 
-The second restore this implies is cheaper than it sounds.
-A verifying intent restores once per snapshot, while a migrating intent's `once` is keyed to the snapshot and target version together, so it restores when a new candidate appears rather than on every snapshot.
+A verifying intent and a migrating intent restore the same snapshot separately.
+A verifying intent restores once per snapshot, and a migrating intent's `once` is keyed to the snapshot and target version together, so it restores when a new candidate version appears rather than on every snapshot.
 
 An entry for a `migrate` intent names the target version alongside the snapshot.
 A consumer obtains that version's migrations from its published artefacts, the same way a server being upgraded does, so naming the version is the whole reference it needs.
