@@ -7,6 +7,8 @@
 //! - read-only inspection scheduler ([`jobs::backup::inspection`]),
 //! - passphrase rotation loop ([`jobs::backup::rotation`]),
 //! - S3 CloudWatch metrics task ([`jobs::backup::s3_metrics`]),
+//! - progress-series pruning ([`jobs::backup::progress_prune`]) — fleet-wide, so
+//!   unlike the loops above it never contends with a group's own backup work,
 //! - recovery vault writer ([`jobs::backup::recovery_snapshot`]) — encrypts a state snapshot
 //!   to `age` recipients and writes it to object-locked S3. Its recipients are
 //!   mandatory, so the pod refuses to start if they're unset.
@@ -71,6 +73,7 @@ async fn main() -> miette::Result<()> {
 	let rotation = jobs::backup::rotation::spawn(worker.clone());
 	let s3_metrics = jobs::backup::s3_metrics::spawn();
 	let tag_reconcile = jobs::backup::tag_reconcile::spawn();
+	let progress_prune = jobs::backup::progress_prune::spawn();
 	let recovery_snapshot = jobs::backup::recovery_snapshot::spawn(worker, recovery_config);
 	tokio::try_join!(
 		preflight,
@@ -79,6 +82,7 @@ async fn main() -> miette::Result<()> {
 		rotation,
 		s3_metrics,
 		tag_reconcile,
+		progress_prune,
 		recovery_snapshot
 	)
 	.into_diagnostic()?;

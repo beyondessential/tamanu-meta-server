@@ -18,6 +18,8 @@ use utoipa::{Modify, OpenApi, openapi::security::SecurityScheme};
 		(name = "artifacts", description = "Per-version artifact registration by releaser devices."),
 		(name = "backup", description = "Device backup credential minting, target config, capability registration, and run reporting."),
 		(name = "bestool", description = "Bestool SQL snippet read API."),
+		(name = "certificates", description = "TLS certificates for a server's own names: requesting one for a signing request, and collecting it once Canopy has obtained it."),
+		(name = "names", description = "Public names a server may act on: what it is entitled to, and the addresses to publish for them."),
 		(name = "restore", description = "Managed restore replicas: consumer capability registration, worklist, and read-only restore credentials."),
 		(name = "servers", description = "Server registry — listing for the public, self-registration for server devices."),
 		(name = "statuses", description = "Heartbeat / status submissions from server devices."),

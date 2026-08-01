@@ -73,6 +73,10 @@ impl ServerHandler for CanopyMcp {
 			"Read-only access to the Canopy fleet: servers, groups, health/status, Tamanu \
 			 versions, backups, and incidents/issues. All data is live. Use find_* to locate \
 			 entities and get_* for detail; fleet_summary and find_backup_problems for triage.\n\n\
+			 Products: a server's `product` is the application it runs (tamanu, senaite, or \
+			 canopy itself), and its `kind` is its role within that product. The version tools \
+			 cover Tamanu's releases; a server whose product has no application version reports \
+			 none, which is not the same as a Tamanu server that has yet to report one.\n\n\
 			 Incidents: an incident groups the issues active for a group over a span of time. \
 			 find_incidents returns everything open in the window, including heavy sub-grace \
 			 flapping that was recorded but never surfaced. When summarizing or ranking, count \

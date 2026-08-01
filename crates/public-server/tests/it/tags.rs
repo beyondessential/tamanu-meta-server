@@ -113,13 +113,15 @@ async fn tags_endpoint_returns_server_tags_when_ungrouped() {
 			response.assert_status_ok();
 			let tags: HashMap<String, String> = response.json();
 			assert_eq!(tags.get("role"), Some(&"primary".to_string()));
-			// Synthetic kind tag is always present; ungrouped, so no group tags.
+			// Synthetic product and kind tags are always present; ungrouped, so
+			// no group tags.
+			assert_eq!(tags.get("canopy:product"), Some(&"tamanu".to_string()));
 			assert_eq!(tags.get("canopy:kind"), Some(&"central".to_string()));
 			assert_eq!(tags.get("canopy:group-id"), None);
 			assert_eq!(tags.get("canopy:group-name"), None);
 			// No rank set on this server, so no synthetic rank tag.
 			assert_eq!(tags.get("canopy:rank"), None);
-			assert_eq!(tags.len(), 2);
+			assert_eq!(tags.len(), 3);
 		},
 	)
 	.await
@@ -438,6 +440,96 @@ async fn tags_endpoint_412_when_device_has_no_server() {
 				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			response.assert_status(StatusCode::PRECONDITION_FAILED);
+		},
+	)
+	.await
+}
+
+/// A server's billing product is its own, not its group's: a SENAITE server
+/// sharing a group with Tamanu ones attributes its cloud cost to SENAITE, since
+/// charging it to the deployment's application would put the spend in the wrong
+/// place.
+// spec: APP#billing-attribution
+#[tokio::test(flavor = "multi_thread")]
+async fn tags_endpoint_billing_product_is_the_servers_own() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group_id = Uuid::new_v4();
+			let server_id = Uuid::new_v4();
+			sql_query("INSERT INTO server_groups (id, name) VALUES ($1, 'Pacific')")
+				.bind::<sql_types::Uuid, _>(group_id)
+				.execute(&mut conn)
+				.await
+				.unwrap();
+			// A Tamanu member alongside it, so the group genuinely spans products.
+			sql_query(
+				"INSERT INTO servers (id, host, kind, rank, group_id) \
+				 VALUES ($1, 'https://central.example.com', 'central', 'production', $2)",
+			)
+			.bind::<sql_types::Uuid, _>(Uuid::new_v4())
+			.bind::<sql_types::Uuid, _>(group_id)
+			.execute(&mut conn)
+			.await
+			.unwrap();
+			sql_query(
+				"INSERT INTO servers (id, host, product, kind, rank, device_id, group_id) \
+				 VALUES ($1, 'https://lims.example.com', 'senaite', 'standalone', 'clone', $2, $3)",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.bind::<sql_types::Uuid, _>(device_id)
+			.bind::<sql_types::Uuid, _>(group_id)
+			.execute(&mut conn)
+			.await
+			.unwrap();
+
+			let response = public
+				.get("/tags")
+				.add_header("mtls-certificate", &cert)
+				.await;
+			response.assert_status_ok();
+			let tags: HashMap<String, String> = response.json();
+			assert_eq!(tags.get("billing.product"), Some(&"senaite".to_string()));
+			// The deployment still comes from the group it belongs to...
+			assert_eq!(tags.get("billing.deployment"), Some(&"pacific".to_string()));
+			// ...and the stage from its own rank, not the group's highest.
+			assert_eq!(tags.get("billing.stage"), Some(&"clone".to_string()));
+		},
+	)
+	.await
+}
+
+/// Billing attribution needs a deployment to attribute to, so an ungrouped
+/// server carries no `billing.*` labels at all — not even the product it could
+/// name on its own.
+// spec: APP#billing-attribution
+#[tokio::test(flavor = "multi_thread")]
+async fn tags_endpoint_ungrouped_server_has_no_billing_product() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			sql_query(
+				"INSERT INTO servers (id, host, product, kind, device_id) \
+				 VALUES ($1, 'https://lone-lims.example.com', 'senaite', 'standalone', $2)",
+			)
+			.bind::<sql_types::Uuid, _>(Uuid::new_v4())
+			.bind::<sql_types::Uuid, _>(device_id)
+			.execute(&mut conn)
+			.await
+			.unwrap();
+
+			let response = public
+				.get("/tags")
+				.add_header("mtls-certificate", &cert)
+				.await;
+			response.assert_status_ok();
+			let tags: HashMap<String, String> = response.json();
+			assert_eq!(tags.get("billing.product"), None);
+			assert_eq!(tags.get("billing.deployment"), None);
+			assert_eq!(tags.get("billing.stage"), None);
+			// The classification tags are still there — those describe the
+			// server, not what its cost attributes to.
+			assert_eq!(tags.get("canopy:product"), Some(&"senaite".to_string()));
 		},
 	)
 	.await

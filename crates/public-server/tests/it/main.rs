@@ -12,6 +12,7 @@ mod error_scenarios;
 mod health;
 mod index;
 mod mcp;
+mod names;
 mod openapi_spec;
 mod password;
 mod restore;

@@ -560,6 +560,7 @@ fn public_server_with_sts(url: &str, sts: aws_sdk_sts::Client) -> TestServer {
 		rate_limiter: Default::default(),
 		sts: Some(sts),
 		kube: None,
+		dns_zones: Vec::new(),
 	};
 	let app = router(
 		axum::Router::from(public_server::routes().with_state(state)),
@@ -730,5 +731,494 @@ async fn credentials_restore_sends_session_policy() {
 			.unwrap();
 		assert_eq!(issuances[0].purpose, BackupPurpose::Restore);
 	})
+	.await;
+}
+
+// --- POST /backup-progress --------------------------------------------------
+
+#[tokio::test(flavor = "multi_thread")]
+async fn progress_unbound_device_is_412() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |_conn, cert, _device_id, public, _| {
+			let resp = public
+				.post("/backup-progress")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"run_id": Uuid::new_v4(),
+					"type": "tamanu-postgres",
+				}))
+				.await;
+			resp.assert_status(http::StatusCode::PRECONDITION_FAILED);
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn progress_ungrouped_server_is_409() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			make_server(&mut conn, device_id, None).await;
+			let resp = public
+				.post("/backup-progress")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"run_id": Uuid::new_v4(),
+					"type": "tamanu-postgres",
+				}))
+				.await;
+			resp.assert_status(http::StatusCode::CONFLICT);
+		},
+	)
+	.await;
+}
+
+/// The deliberate divergence from `/backup-credentials`: progress describes a run
+/// already under way, so a group whose config isn't ready (or has none at all)
+/// must not blind Canopy to it.
+#[tokio::test(flavor = "multi_thread")]
+async fn progress_accepted_without_ready_config_or_capability() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_server(&mut conn, device_id, Some(group)).await;
+			// No config row at all, and no registered capability.
+			let resp = public
+				.post("/backup-progress")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"run_id": Uuid::new_v4(),
+					"type": "tamanu-postgres",
+				}))
+				.await;
+			resp.assert_status(http::StatusCode::NO_CONTENT);
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn progress_records_counters_and_extra() {
+	use database::BackupRunProgress;
+
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			let server = make_server(&mut conn, device_id, Some(group)).await;
+			let run_id = Uuid::new_v4();
+
+			let resp = public
+				.post("/backup-progress")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"run_id": run_id,
+					"type": "tamanu-postgres",
+					"bytes_read": 1_000,
+					"bytes_uploaded": 700,
+					"bytes_estimated": 5_000,
+					"files_done": 3,
+					"current_path": "/var/lib/postgresql/base",
+					"s3_sent_raw_bytes": 730,
+					"s3_sent_payload_bytes": 700,
+					"extra": { "engineDetail": "whatever", "nested": { "n": 1 } },
+				}))
+				.await;
+			resp.assert_status(http::StatusCode::NO_CONTENT);
+
+			let sample = BackupRunProgress::latest_for_run(&mut conn, run_id)
+				.await
+				.unwrap()
+				.expect("sample recorded");
+			assert_eq!(sample.server_id, Some(server));
+			assert_eq!(sample.bytes_read, Some(1_000));
+			assert_eq!(sample.bytes_uploaded, Some(700));
+			assert_eq!(sample.bytes_estimated, Some(5_000));
+			assert_eq!(sample.files_done, Some(3));
+			assert_eq!(
+				sample.current_path.as_deref(),
+				Some("/var/lib/postgresql/base")
+			);
+			assert_eq!(sample.s3_sent_raw_bytes, Some(730));
+			// Unmeasured counters stay NULL rather than defaulting to zero, so the
+			// interface can tell "not reported" from "nothing moved".
+			assert_eq!(sample.bytes_hashed, None);
+			assert_eq!(sample.errors, None);
+			// Engine detail is stored verbatim, structure and all.
+			assert_eq!(sample.extra["engineDetail"], "whatever");
+			assert_eq!(sample.extra["nested"]["n"], 1);
+		},
+	)
+	.await;
+}
+
+/// A sample racing the completion report is telemetry arriving slightly late, not
+/// a client error — so it is stored rather than refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn progress_after_report_is_accepted() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_server(&mut conn, device_id, Some(group)).await;
+			let run_id = Uuid::new_v4();
+
+			public
+				.post("/backup-report")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"run_id": run_id,
+					"type": "tamanu-postgres",
+					"purpose": "backup",
+					"outcome": "success",
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			let resp = public
+				.post("/backup-progress")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"run_id": run_id,
+					"type": "tamanu-postgres",
+					"bytes_uploaded": 1,
+				}))
+				.await;
+			resp.assert_status(http::StatusCode::NO_CONTENT);
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn progress_rate_limit_is_429() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_server(&mut conn, device_id, Some(group)).await;
+			let run_id = Uuid::new_v4();
+
+			// The per-device budget is 60 per 5-minute window; the 61st trips it.
+			let mut statuses = Vec::new();
+			for _ in 0..61 {
+				let resp = public
+					.post("/backup-progress")
+					.add_header("mtls-certificate", &cert)
+					.json(&serde_json::json!({
+						"run_id": run_id,
+						"type": "tamanu-postgres",
+						"bytes_uploaded": 1,
+					}))
+					.await;
+				statuses.push(resp.status_code());
+			}
+
+			assert!(
+				statuses[..60]
+					.iter()
+					.all(|s| *s == http::StatusCode::NO_CONTENT),
+				"first 60 should be accepted, got {statuses:?}"
+			);
+			assert_eq!(statuses[60], http::StatusCode::TOO_MANY_REQUESTS);
+		},
+	)
+	.await;
+}
+
+// --- snapshot_taken_at and report backfill ---------------------------------
+
+#[tokio::test(flavor = "multi_thread")]
+async fn report_takes_snapshot_moment_from_progress() {
+	use database::BackupRun;
+
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_server(&mut conn, device_id, Some(group)).await;
+			let run_id = Uuid::new_v4();
+
+			// Announced on the first sample, as a device does, and omitted after.
+			public
+				.post("/backup-progress")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"run_id": run_id,
+					"type": "tamanu-postgres",
+					"snapshot_taken_at": "2026-07-01T04:12:00Z",
+					"bytes_uploaded": 10,
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+			public
+				.post("/backup-progress")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"run_id": run_id,
+					"type": "tamanu-postgres",
+					"bytes_uploaded": 200,
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			// The report says nothing about it — the value must still survive, and
+			// must come from the *first* sample even though the last one has NULL.
+			public
+				.post("/backup-report")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"run_id": run_id,
+					"type": "tamanu-postgres",
+					"purpose": "backup",
+					"outcome": "success",
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			let runs = BackupRun::list_for_group(&mut conn, group, 10)
+				.await
+				.unwrap();
+			let run = runs.iter().find(|r| r.id == run_id).expect("run recorded");
+			assert_eq!(
+				run.snapshot_taken_at.map(|t| t.to_string()),
+				Some("2026-07-01T04:12:00Z".to_string()),
+			);
+		},
+	)
+	.await;
+}
+
+/// Write-once, first value seen wins — so a moment already announced mid-run
+/// beats one the report repeats. This is the opposite precedence to the figures.
+#[tokio::test(flavor = "multi_thread")]
+async fn progress_snapshot_moment_beats_the_report() {
+	use database::BackupRun;
+
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_server(&mut conn, device_id, Some(group)).await;
+			let run_id = Uuid::new_v4();
+
+			public
+				.post("/backup-progress")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"run_id": run_id,
+					"type": "tamanu-postgres",
+					"snapshot_taken_at": "2026-07-01T04:12:00Z",
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			public
+				.post("/backup-report")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"run_id": run_id,
+					"type": "tamanu-postgres",
+					"purpose": "backup",
+					"outcome": "success",
+					"snapshot_taken_at": "2026-07-01T09:30:00Z",
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			let runs = BackupRun::list_for_group(&mut conn, group, 10)
+				.await
+				.unwrap();
+			let run = runs.iter().find(|r| r.id == run_id).expect("run recorded");
+			assert_eq!(
+				run.snapshot_taken_at.map(|t| t.to_string()),
+				Some("2026-07-01T04:12:00Z".to_string()),
+				"the earlier, first-seen moment must stand",
+			);
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn report_without_snapshot_moment_leaves_it_unset() {
+	use database::BackupRun;
+
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_server(&mut conn, device_id, Some(group)).await;
+			let run_id = Uuid::new_v4();
+
+			public
+				.post("/backup-report")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"run_id": run_id,
+					"type": "tamanu-postgres",
+					"purpose": "backup",
+					"outcome": "success",
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			let runs = BackupRun::list_for_group(&mut conn, group, 10)
+				.await
+				.unwrap();
+			let run = runs.iter().find(|r| r.id == run_id).expect("run recorded");
+			assert_eq!(run.snapshot_taken_at, None);
+		},
+	)
+	.await;
+}
+
+/// Counters are cumulative, so the last sample is a usable stand-in for a figure
+/// the report omits — which keeps a sparsely-reporting client's run from landing
+/// with nothing but NULLs.
+#[tokio::test(flavor = "multi_thread")]
+async fn report_backfills_omitted_figures_from_last_sample() {
+	use database::BackupRun;
+
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_server(&mut conn, device_id, Some(group)).await;
+			let run_id = Uuid::new_v4();
+
+			for uploaded in [100_i64, 900] {
+				public
+					.post("/backup-progress")
+					.add_header("mtls-certificate", &cert)
+					.json(&serde_json::json!({
+						"run_id": run_id,
+						"type": "tamanu-postgres",
+						"bytes_uploaded": uploaded,
+						"s3_sent_raw_bytes": uploaded + 30,
+						"s3_sent_payload_bytes": uploaded,
+						"s3_received_raw_bytes": 5,
+						"s3_received_payload_bytes": 4,
+					}))
+					.await
+					.assert_status(http::StatusCode::NO_CONTENT);
+			}
+
+			public
+				.post("/backup-report")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"run_id": run_id,
+					"type": "tamanu-postgres",
+					"purpose": "backup",
+					"outcome": "success",
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			let runs = BackupRun::list_for_group(&mut conn, group, 10)
+				.await
+				.unwrap();
+			let run = runs.iter().find(|r| r.id == run_id).expect("run recorded");
+			assert_eq!(
+				run.bytes_uploaded,
+				Some(900),
+				"from the last sample, not the first"
+			);
+			assert_eq!(run.s3_sent_raw_bytes, Some(930));
+			assert_eq!(run.s3_sent_payload_bytes, Some(900));
+			assert_eq!(run.s3_received_raw_bytes, Some(5));
+			assert_eq!(run.s3_received_payload_bytes, Some(4));
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn report_figures_win_over_progress() {
+	use database::BackupRun;
+
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_server(&mut conn, device_id, Some(group)).await;
+			let run_id = Uuid::new_v4();
+
+			public
+				.post("/backup-progress")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"run_id": run_id,
+					"type": "tamanu-postgres",
+					"bytes_uploaded": 900,
+					"s3_sent_raw_bytes": 930,
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			public
+				.post("/backup-report")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"run_id": run_id,
+					"type": "tamanu-postgres",
+					"purpose": "backup",
+					"outcome": "success",
+					"bytes_uploaded": 1_000,
+					"s3_sent_raw_bytes": 1_040,
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			let runs = BackupRun::list_for_group(&mut conn, group, 10)
+				.await
+				.unwrap();
+			let run = runs.iter().find(|r| r.id == run_id).expect("run recorded");
+			assert_eq!(run.bytes_uploaded, Some(1_000));
+			assert_eq!(run.s3_sent_raw_bytes, Some(1_040));
+		},
+	)
+	.await;
+}
+
+/// A run that reported no progress at all must be unaffected — the backfill is
+/// additive, not a rewrite of how reporting works.
+#[tokio::test(flavor = "multi_thread")]
+async fn report_without_any_progress_is_unchanged() {
+	use database::BackupRun;
+
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_server(&mut conn, device_id, Some(group)).await;
+			let run_id = Uuid::new_v4();
+
+			public
+				.post("/backup-report")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"run_id": run_id,
+					"type": "tamanu-postgres",
+					"purpose": "backup",
+					"outcome": "success",
+					"bytes_uploaded": 42,
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			let runs = BackupRun::list_for_group(&mut conn, group, 10)
+				.await
+				.unwrap();
+			let run = runs.iter().find(|r| r.id == run_id).expect("run recorded");
+			assert_eq!(run.bytes_uploaded, Some(42));
+			assert_eq!(run.s3_sent_raw_bytes, None);
+			assert_eq!(run.snapshot_taken_at, None);
+		},
+	)
 	.await;
 }

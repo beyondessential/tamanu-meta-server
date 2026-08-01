@@ -513,3 +513,254 @@ async fn restore_verification_records_and_raises_alert() {
 	)
 	.await;
 }
+
+/// A published version, so a server has something to be migration-tested
+/// against.
+async fn publish_version(conn: &mut AsyncPgConnection, minor: i32, patch: i32) -> Uuid {
+	let version_id = Uuid::new_v4();
+	sql_query(
+		"INSERT INTO versions (id, major, minor, patch, status, changelog)
+		 VALUES ($1, 2, $2, $3, 'published', '')",
+	)
+	.bind::<sql_types::Uuid, _>(version_id)
+	.bind::<sql_types::Integer, _>(minor)
+	.bind::<sql_types::Integer, _>(patch)
+	.execute(conn)
+	.await
+	.expect("publish version");
+	version_id
+}
+
+/// What the server reports itself as running, which is what a candidate is
+/// measured against.
+async fn report_version(conn: &mut AsyncPgConnection, server_id: Uuid, version: &str) {
+	sql_query(
+		"INSERT INTO server_reported_detail (server_id, source, extra, version)
+		 VALUES ($1, 'test', '{}'::jsonb, $2)",
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Text, _>(version)
+	.execute(conn)
+	.await
+	.expect("report version");
+}
+
+/// One intent that both verifies the restore and applies the migrations: the
+/// `migrate` semantic rides on the verifying intent so a single restore answers
+/// both questions.
+async fn register_migrate_intent(public: &axum_test::TestServer, cert: &str) {
+	public
+		.post("/restore-capabilities")
+		.add_header("mtls-certificate", cert)
+		.json(&serde_json::json!({
+			"intents": [{"intent": "verify", "semantics": ["check", "once", "migrate"]}]
+		}))
+		.await
+		.assert_status(http::StatusCode::NO_CONTENT);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_migrate_entry_names_the_newest_version_the_server_could_take() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let server = make_server(&mut conn, group).await;
+			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
+			report_version(&mut conn, server, "2.62.0").await;
+			publish_version(&mut conn, 62, 0).await;
+			let newest = publish_version(&mut conn, 63, 2).await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
+			register_migrate_intent(&public, &cert).await;
+
+			let resp = public
+				.get("/restore-worklist")
+				.add_header("mtls-certificate", &cert)
+				.await;
+			resp.assert_status_ok();
+			let entries: Vec<serde_json::Value> = resp.json();
+
+			assert_eq!(entries.len(), 1, "got {entries:?}");
+			assert_eq!(entries[0]["target_version"], "2.63.2");
+			assert_eq!(entries[0]["target_version_id"], newest.to_string());
+			assert_eq!(entries[0]["snapshot_id"], "snap-1");
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_already_on_the_newest_version_gets_no_migrate_entry() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let server = make_server(&mut conn, group).await;
+			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
+			report_version(&mut conn, server, "2.63.2").await;
+			publish_version(&mut conn, 63, 2).await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
+			register_migrate_intent(&public, &cert).await;
+
+			let resp = public
+				.get("/restore-worklist")
+				.add_header("mtls-certificate", &cert)
+				.await;
+			resp.assert_status_ok();
+			let entries: Vec<serde_json::Value> = resp.json();
+
+			assert!(
+				entries.is_empty(),
+				"nothing to migrate to, so no entry: got {entries:?}"
+			);
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let server = make_server(&mut conn, group).await;
+			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
+			report_version(&mut conn, server, "2.62.0").await;
+			let newest = publish_version(&mut conn, 63, 2).await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
+			register_migrate_intent(&public, &cert).await;
+
+			let before: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("mtls-certificate", &cert)
+				.await
+				.json();
+			assert_eq!(before.len(), 1, "dispatched once: got {before:?}");
+
+			// A failing migration is a settled answer for this snapshot: the
+			// same run against the same data would fail the same way.
+			database::migration_tests::MigrationTest::record(
+				&mut conn,
+				database::restore::NewBackupRestoreCheck {
+					replica_id: None,
+					consumer_device_id: device_id,
+					group_id: group,
+					server_id: Some(server),
+					r#type: commons_types::backup::BackupType::TamanuPostgres,
+					intent: commons_types::backup::RestoreIntent::from("verify"),
+					snapshot_id: Some("snap-1".into()),
+					// The restore itself was fine; only the migration failed.
+					outcome: commons_types::backup::RunOutcome::Success,
+					error: None,
+					replica_healthy: true,
+					postgres_version: Some("18".into()),
+					observed_at: jiff::Timestamp::now(),
+					s3_sent_raw_bytes: None,
+					s3_sent_payload_bytes: None,
+					s3_received_raw_bytes: None,
+					s3_received_payload_bytes: None,
+					health_details: None,
+					run_id: None,
+				},
+				database::migration_tests::NewMigrationTest {
+					target_version_id: newest,
+					total_elapsed: database::pg_duration::PgDuration(
+						jiff::SignedDuration::from_secs(30),
+					),
+					failed_migration: Some("backfillNoteTypeIds".into()),
+					data_bytes_before: 10,
+					data_bytes_after: 10,
+					timings: vec![],
+				},
+			)
+			.await
+			.expect("record failing test");
+
+			let after: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("mtls-certificate", &cert)
+				.await
+				.json();
+			assert!(
+				after.is_empty(),
+				"a failure settles the pair rather than retrying: got {after:?}"
+			);
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_reported_migration_test_lands_and_settles_the_entry() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let server = make_server(&mut conn, group).await;
+			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
+			report_version(&mut conn, server, "2.62.0").await;
+			let newest = publish_version(&mut conn, 63, 2).await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
+			register_migrate_intent(&public, &cert).await;
+
+			let dispatched: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("mtls-certificate", &cert)
+				.await
+				.json();
+			assert_eq!(dispatched.len(), 1, "got {dispatched:?}");
+			let entry = &dispatched[0];
+
+			// Report it back the way a consumer would, echoing the entry.
+			public
+				.post("/restore-verification")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"replica_id": entry["replica_id"],
+					"group": group,
+					"server_id": server,
+					"type": "tamanu-postgres",
+					"intent": "verify",
+					"snapshot_id": entry["snapshot_id"],
+					"outcome": "success",
+					"replica_healthy": true,
+					"postgres_version": "18",
+					"observed_at": "2026-07-30T00:00:00Z",
+					"migration": {
+						"target_version_id": entry["target_version_id"],
+						"total_elapsed_seconds": 900,
+						"data_bytes_before": 200_000_000_000i64,
+						"data_bytes_after": 260_000_000_000i64,
+						"timings": [
+							{"name": "addIndexToFhirJobs", "elapsed_seconds": 12},
+							{"name": "backfillNoteTypeIds", "elapsed_seconds": 880},
+						],
+					},
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			// The verdict is readable, and the timings survived the round trip.
+			assert_eq!(
+				database::migration_tests::verdict(&mut conn, server, newest)
+					.await
+					.expect("verdict"),
+				database::migration_tests::Verdict::Passed
+			);
+
+			// And the pair is settled, so it is not dispatched again.
+			let after: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("mtls-certificate", &cert)
+				.await
+				.json();
+			assert!(after.is_empty(), "got {after:?}");
+		},
+	)
+	.await;
+}

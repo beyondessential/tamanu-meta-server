@@ -3,14 +3,14 @@ import AddIcon from "@mui/icons-material/Add";
 import { Link as RouterLink } from "react-router-dom";
 import GroupShorty from "../components/GroupShorty";
 import { useApi } from "../api";
+import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 
 export default function GroupsList() {
 	usePageTitle("Server groups");
 	const groups = useApi("server_groups", "list", {}, []);
 	const counts = useApi("server_groups", "server_counts", {}, []);
-	const isAdmin = useApi("commons", "is_current_user_admin");
-	const admin = isAdmin.status === "ok" && isAdmin.data;
+	const admin = useIsAdmin() === true;
 
 	if (groups.status === "loading" || groups.status === "idle") {
 		return <LinearProgress />;

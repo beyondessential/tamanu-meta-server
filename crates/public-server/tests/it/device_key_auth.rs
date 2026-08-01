@@ -44,6 +44,59 @@ async fn device_key_authentication_works() {
 	.await;
 }
 
+/// Recording the connection is part of accepting an authenticated request, not
+/// a condition of it. Connection history is stored in weekly ranges, so a week
+/// with no range provisioned makes that insert fail — and it must not take
+/// every authenticated request on the device API with it.
+// spec: HST#recording-a-connection
+#[tokio::test(flavor = "multi_thread")]
+async fn authentication_survives_unwritable_connection_history() {
+	commons_tests::server::run_with_device_auth(
+		"releaser",
+		async |mut conn, cert, _device_id, public, _| {
+			conn.batch_execute(
+				"INSERT INTO versions (major, minor, patch, changelog, status) VALUES (1, 0, 0, 'Test version', 'published')",
+			)
+			.await
+			.unwrap();
+
+			// Drop the range today falls in, so there is nowhere for the
+			// connection record to go.
+			conn.batch_execute(
+				r#"
+					DO $$
+					DECLARE v_name TEXT;
+					BEGIN
+						SELECT c.relname INTO v_name
+						FROM pg_inherits i
+						JOIN pg_class c ON c.oid = i.inhrelid
+						JOIN pg_class p ON p.oid = i.inhparent
+						WHERE p.relname = 'device_connections'
+						  AND CURRENT_DATE >= SUBSTRING(pg_get_expr(c.relpartbound, c.oid) FROM 'FROM \(''(\d{4}-\d{2}-\d{2})')::date
+						  AND CURRENT_DATE <  SUBSTRING(pg_get_expr(c.relpartbound, c.oid) FROM 'TO \(''(\d{4}-\d{2}-\d{2})')::date;
+						IF v_name IS NULL THEN
+							RAISE EXCEPTION 'no current device_connections range to drop';
+						END IF;
+						EXECUTE FORMAT('DROP TABLE %I', v_name);
+					END;
+					$$;
+				"#,
+			)
+			.await
+			.unwrap();
+
+			let response = public
+				.post("/versions/1.0.1")
+				.add_header("mtls-certificate", &cert)
+				.text("changelog for 1.0.1")
+				.await;
+
+			response.assert_status_ok();
+		},
+	)
+	.await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn multiple_keys_per_device() {
 	commons_tests::server::run_with_device_auth(

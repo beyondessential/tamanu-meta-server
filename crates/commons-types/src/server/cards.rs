@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-	server::{kind::ServerKind, rank::ServerRank},
+	server::{kind::ServerKind, product::Product, rank::ServerRank},
 	status::{HealthState, OperatorPresence, ShortStatus},
 	version::VersionStr,
 };
@@ -20,6 +20,12 @@ pub struct FacilityServerStatus {
 	pub up: ShortStatus,
 	/// The server's self-reported health.
 	pub health: HealthState,
+	/// Whether canopy alerts on this server's checks. An unmonitored
+	/// server's reachability and health are determined and presented as
+	/// normal, but raise nothing — so consumers mark it, rather than
+	/// showing a failure that nobody is being paged about.
+	// spec: CHK#monitoring-gate
+	pub is_monitored: bool,
 	/// People currently connected to this server, from its latest status
 	/// update. Always empty unless the server is actively reporting (`up`
 	/// or `blip`) — a stale report can't be trusted to reflect who is
@@ -29,7 +35,11 @@ pub struct FacilityServerStatus {
 	/// rank (e.g. production before clone, demo, and so on) in a consistent
 	/// order.
 	pub rank: Option<ServerRank>,
-	/// The server's kind (central, facility, or canopy).
+	/// The application the server runs, presented alongside its role.
+	// spec: APP#product-and-kind
+	pub product: Product,
+	/// The server's role within its product's topology (for Tamanu, central
+	/// or facility; standalone for a product with no internal roles).
 	pub kind: ServerKind,
 }
 

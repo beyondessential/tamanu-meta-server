@@ -52,6 +52,12 @@ export function StatusLegend() {
 					</Typography>
 				</Stack>
 			))}
+			<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
+				<StatusDot up="down" monitored={false} />
+				<Typography variant="body2" color="text.secondary">
+					Cut through: unmonitored (state shown, nothing alerts)
+				</Typography>
+			</Stack>
 		</Stack>
 	);
 }

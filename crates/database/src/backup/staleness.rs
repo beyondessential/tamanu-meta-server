@@ -5,8 +5,12 @@
 //!
 //! The scanned set is every enabled `(server, type)` capability whose
 //! effective schedule has a non-NULL `expected_interval` and whose group's
-//! `server_group_backup_config.status = 'ready'`. Disabled / manual-only
-//! (NULL interval) / non-ready configs are simply not in the set, so
+//! `server_group_backup_config.status = 'ready'`. The effective schedule is
+//! the group's override row if it has one, else the type's canopy-wide
+//! `default_interval` — the same precedence the schedulers resolve with
+//! ([`crate::backups::effective_interval`]), so every pair that is commanded
+//! to back up is also monitored. Disabled / manual-only (an override row with
+//! a NULL interval) / non-ready configs are simply not in the set, so
 //! unauthorized or un-set-up devices never alert.
 
 use std::collections::HashMap;
@@ -109,16 +113,31 @@ impl ScanRow {
 }
 
 /// Raw scan-set row: `(server_id, group_id, is_monitored, device_id, type,
-/// expected_interval, config_created_at)`.
+/// has_schedule_override, override_interval, default_interval,
+/// config_created_at)`.
 type ScanBaseRow = (
 	Uuid,
 	Uuid,
 	bool,
 	Option<Uuid>,
 	String,
-	crate::pg_duration::PgDuration,
+	bool,
+	Option<crate::pg_duration::PgDuration>,
+	Option<crate::pg_duration::PgDuration>,
 	jiff_diesel::Timestamp,
 );
+
+/// A scan-set row with its effective interval resolved, before the success and
+/// anchor lookups are attached.
+struct ScanRowBase {
+	server_id: Uuid,
+	group_id: Uuid,
+	is_monitored: bool,
+	device_id: Option<Uuid>,
+	r#type: BackupType,
+	expected_interval: SignedDuration,
+	config_created_at: Timestamp,
+}
 
 /// Build the scan set: every enabled `(server, type)` capability in a
 /// `status='ready'` group whose effective schedule has a non-NULL
@@ -126,35 +145,76 @@ type ScanBaseRow = (
 /// and the `MIN(first_seen)` anchor.
 pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 	use crate::schema::{
-		device_server_associations as dsa, server_backup_capabilities as cap,
-		server_group_backup_config as cfg, server_group_backup_schedule as sched, servers,
+		backup_type_defaults as defaults, device_server_associations as dsa,
+		server_backup_capabilities as cap, server_group_backup_config as cfg,
+		server_group_backup_schedule as sched, servers,
 	};
 
-	// Join: servers -> their group's ready config -> enabled capability ->
-	// per-(group,type) schedule with a non-NULL interval.
+	// Join: servers -> their group's ready config -> enabled capability, with
+	// both interval sources left-joined. The effective interval is resolved in
+	// Rust below rather than in SQL, because "override row present but NULL"
+	// (manual-only) and "no override row" (inherit the default) have to stay
+	// distinguishable — a COALESCE would flatten them together.
 	let base: Vec<ScanBaseRow> = servers::table
 		.inner_join(cfg::table.on(cfg::group_id.nullable().eq(servers::group_id)))
 		.inner_join(cap::table.on(cap::server_id.eq(servers::id)))
-		.inner_join(
+		.left_join(
 			sched::table.on(sched::group_id
 				.eq(cfg::group_id)
 				.and(sched::type_.eq(cap::type_))),
 		)
+		.left_join(defaults::table.on(defaults::type_.eq(cap::type_)))
 		.filter(servers::deleted_at.is_null())
 		.filter(cfg::status.eq("ready"))
 		.filter(cap::enabled.eq(true))
-		.filter(sched::expected_interval.is_not_null())
 		.select((
 			servers::id,
 			cfg::group_id,
 			servers::is_monitored,
 			servers::device_id,
 			cap::type_,
-			sched::expected_interval.assume_not_null(),
+			sched::group_id.nullable().is_not_null(),
+			sched::expected_interval.nullable(),
+			defaults::default_interval.nullable(),
 			cfg::created_at,
 		))
 		.load(db)
 		.await?;
+
+	// Resolve each pair's effective interval, dropping the ones with none: an
+	// override row answers on its own (NULL = manual-only), otherwise the type
+	// default applies. Mirrors [`crate::backups::effective_interval`].
+	let base: Vec<ScanRowBase> = base
+		.into_iter()
+		.filter_map(
+			|(
+				server_id,
+				group_id,
+				is_monitored,
+				device_id,
+				ty,
+				has_override,
+				override_interval,
+				default_interval,
+				created_at,
+			)| {
+				let interval = if has_override {
+					override_interval
+				} else {
+					default_interval
+				}?;
+				Some(ScanRowBase {
+					server_id,
+					group_id,
+					is_monitored,
+					device_id,
+					r#type: BackupType::from(ty),
+					expected_interval: interval.0,
+					config_created_at: Timestamp::from(created_at),
+				})
+			},
+		)
+		.collect();
 
 	if base.is_empty() {
 		return Ok(Vec::new());
@@ -162,7 +222,7 @@ pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 
 	// Anchors: MIN(first_seen) per server over all its association rows.
 	let server_ids: Vec<Uuid> = {
-		let mut s: std::collections::HashSet<Uuid> = base.iter().map(|r| r.0).collect();
+		let mut s: std::collections::HashSet<Uuid> = base.iter().map(|r| r.server_id).collect();
 		s.drain().collect()
 	};
 	let assoc: Vec<(Uuid, Option<jiff_diesel::Timestamp>)> = dsa::table
@@ -178,7 +238,7 @@ pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 
 	// Latest success per (server, type), fetched per distinct group.
 	let group_ids: Vec<Uuid> = {
-		let mut s: std::collections::HashSet<Uuid> = base.iter().map(|r| r.1).collect();
+		let mut s: std::collections::HashSet<Uuid> = base.iter().map(|r| r.group_id).collect();
 		s.drain().collect()
 	};
 	let mut last_success: HashMap<(Uuid, BackupType), Timestamp> = HashMap::new();
@@ -186,29 +246,33 @@ pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 		let runs =
 			crate::backups::BackupRun::latest_success_by_server_type_for_group(db, gid).await?;
 		for ((sid, ty), run) in runs {
-			last_success.insert((sid, ty), run.reported_at);
+			// The data's own moment, not when its upload finished: a backup that
+			// took hours to transfer is as old as what it captured. `anchor` falls
+			// back to the report time for a client that reports no freeze moment,
+			// so this is a no-op for those. See `BackupRun::ANCHOR_SQL` for why the
+			// query above orders by the same expression.
+			last_success.insert((sid, ty), run.anchor());
 		}
 	}
 
 	Ok(base
 		.into_iter()
-		.map(
-			|(server_id, group_id, is_monitored, device_id, ty, interval, created_at)| {
-				let r#type = BackupType::from(ty);
-				let last_success_at = last_success.get(&(server_id, r#type.clone())).copied();
-				ScanRow {
-					server_id,
-					group_id,
-					device_id,
-					r#type,
-					is_monitored,
-					expected_interval: interval.0,
-					config_created_at: Timestamp::from(created_at),
-					min_first_seen: min_first_seen.get(&server_id).copied(),
-					last_success_at,
-				}
-			},
-		)
+		.map(|row| {
+			let last_success_at = last_success
+				.get(&(row.server_id, row.r#type.clone()))
+				.copied();
+			ScanRow {
+				server_id: row.server_id,
+				group_id: row.group_id,
+				device_id: row.device_id,
+				r#type: row.r#type,
+				is_monitored: row.is_monitored,
+				expected_interval: row.expected_interval,
+				config_created_at: row.config_created_at,
+				min_first_seen: min_first_seen.get(&row.server_id).copied(),
+				last_success_at,
+			}
+		})
 		.collect())
 }
 

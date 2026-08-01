@@ -25,6 +25,7 @@ A figure that has never been reported is omitted rather than presented empty.
 ## Figures
 
 The application version is presented with how far behind the latest published version it is, and with the minimum embedded browser version that release requires.
+Both accompany the version only for a server whose product has a tracked release train, and how much of the version figure a server presents at all follows from its product (see [APP](../servers/products.md)).
 
 The platform is the operating system the server runs, as the server reports it, qualified by the operating system version where the server reports one.
 A server that reports no operating system falls back to the family the reported database engine gives away, which distinguishes Windows from anything else but nothing finer.
@@ -43,6 +44,17 @@ The fleet view presents how each figure is spread across the fleet: for every di
 Servers reporting no value for a figure are counted together as a group of their own, so the size of the unreported population is visible rather than hidden by omission.
 The view covers every live server; archived servers and canopy itself are not part of the fleet.
 
+The spread of the application version, and any crossing with it as an axis, cover only the servers whose product has a tracked release train (see [APP](../servers/products.md)).
+A server excluded that way is absent from the spread rather than counted among those reporting no value, and a crossing drops it from both axes rather than placing it in the unreported row.
+
+Each version figure is spread at the grain the fleet moves in rather than at the grain it reports: the application's release branch, and the database engine's own major version.
+The exact versions those group are figures in their own right, available like any other field, so an operator who needs the patch level can still reach it.
+The view leads with the coarse groupings, since a spread over exact versions splits the fleet finer than an operator can act on.
+
+A spread can be ordered by its values instead of by how many servers report each, without changing which values a large spread collapses.
+The values compare as whatever they look like: as numbers where they are numbers, component by component where they are versions, and as text otherwise.
+The unreported group stays last in either order, being a population rather than a value.
+
 Beyond the figures, an operator can name any field a source reports and see its spread the same way.
 The fields the fleet currently reports are offered as suggestions, so an operator can find a field without knowing its name in advance.
 A field whose values are near-unique across the fleet presents its largest groups with the remainder collapsed, rather than a line per server.
@@ -54,10 +66,12 @@ Checks are named by check alone, though a check's identity is the source and the
 
 An operator can also cross two fields, presenting a table of one against the other: for each combination of values, how many servers report both, with the servers behind each combination available.
 Servers reporting no value for either field occupy their own row and column, so a combination is never silently dropped.
+The rows and columns order the same two ways a spread does, and the crossing opens on the coarse version figures against each other.
 
 ## Active versions
 
 The status view summarises which release branches the production fleet is actively running: how many distinct branches, which they are, and the range of exact versions across them.
+The summary covers the production servers whose product has a tracked release train (see [APP](../servers/products.md)).
 
 A production server counts once, at the version the most recent source to report one gave — a source reporting no version does not drop the server from the summary by having pushed last.
 Unlike the figures elsewhere, this summary is bounded by recency: a server that has not reported within the last week is not running anything as far as the summary is concerned, so a decommissioned server that was never archived stops inflating the count.

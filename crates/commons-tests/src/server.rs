@@ -141,6 +141,9 @@ where
 			rate_limiter: Default::default(),
 			sts: None,
 			kube: None,
+			// From the environment, so a test can configure zones before building
+			// the server the way the real edge does.
+			dns_zones: commons_types::dns::ManagedZone::list_from_env().unwrap_or_default(),
 		};
 		let public_router = router(
 			axum::Router::from(public_server::routes().with_state(public_state.clone()))
@@ -316,6 +319,9 @@ where
 			rate_limiter: Default::default(),
 			sts: None,
 			kube: None,
+			// From the environment, so a test can configure zones before building
+			// the server the way the real edge does.
+			dns_zones: commons_types::dns::ManagedZone::list_from_env().unwrap_or_default(),
 		};
 		let public_router = router(
 			axum::Router::from(public_server::routes().with_state(public_state.clone()))
@@ -337,6 +343,11 @@ where
 				),
 				recovery_recipients: None,
 				recovery_challenge: std::sync::Arc::new(std::sync::Mutex::new(None)),
+				// This harness is for the tailnet-auth paths; no test on it
+				// touches group domains or certificates.
+				dns_zones: Vec::new(),
+				acme: None,
+				acme_directory: None,
 			})
 			.unwrap(),
 			ClientIpSource::RightmostForwarded,

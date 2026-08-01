@@ -1,7 +1,13 @@
-import { seedCheckPolicy } from "./seed";
+import { resetSeededTables, seedCheckPolicy } from "./seed";
 import { expect, test } from "./test-fixtures";
 
 test.describe("Sources page", () => {
+	// Source policy outlives the test that sets it — the stack (and its
+	// database) is per worker, not per test.
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
 	test("the healthcheck catalog links out to the sources page", async ({
 		page,
 		sql,

@@ -1,5 +1,6 @@
 pub mod cards;
 pub mod kind;
+pub mod product;
 pub mod rank;
 pub mod tags;
 
