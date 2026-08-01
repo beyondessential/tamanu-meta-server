@@ -70,6 +70,26 @@ export type ApiState<T> =
 	| { status: "ok"; data: T }
 	| { status: "error"; error: Error };
 
+/**
+ * A stable string for "which entity is this query about": the module, the
+ * function, and the params by value.
+ *
+ * Deliberately *not* the `deps` array. Callers legitimately put a refetch
+ * nonce in `deps` (`[id, tick]`, bumped to force a reload of the same
+ * entity), and treating that as a new entity would blank the page — and
+ * unmount anything with local state inside it — on every manual refresh.
+ */
+function queryIdentity(
+	module: string,
+	fn: string,
+	params: Record<string, unknown>,
+): string {
+	const stable = Object.keys(params)
+		.sort()
+		.map((k) => [k, params[k]]);
+	return JSON.stringify([module, fn, stable]);
+}
+
 export function useApi<
 	M extends ApiModule,
 	F extends ApiFn<M>,
@@ -86,6 +106,9 @@ export function useApi<
 ): ApiState<T> & { reload: () => void } {
 	const [state, setState] = useState<ApiState<T>>({ status: "idle" });
 	const tick = useRef(0);
+	// Identity of the query whose data is currently on screen, so a refetch
+	// can be told apart from a switch to a different entity.
+	const shownIdentity = useRef<string | null>(null);
 	const skip = options.skip ?? false;
 
 	const run = useCallback(() => {
@@ -99,14 +122,22 @@ export function useApi<
 		const myTick = ++tick.current;
 		const controller = new AbortController();
 		// Keep prior data on screen during background refetches so the UI
-		// doesn't collapse to a loading placeholder on every reload tick.
-		// Only flip to `loading` when there's no prior data to show.
+		// doesn't collapse to a loading placeholder on every reload tick —
+		// but only when it's still the *same* query. Detail routes reuse the
+		// mounted component across /servers/A → /servers/B, so holding on to
+		// prior data across an identity change renders A's name, health and
+		// checks under B's URL, with no loading indicator to say otherwise.
+		const identity = queryIdentity(module, fn, params);
+		const sameQuery = shownIdentity.current === identity;
 		setState((prev) =>
-			prev.status === "ok" ? prev : { status: "loading" },
+			prev.status === "ok" && sameQuery ? prev : { status: "loading" },
 		);
 		callApi<M, F, T>(module, fn, params, controller.signal)
 			.then((data) => {
-				if (tick.current === myTick) setState({ status: "ok", data });
+				if (tick.current === myTick) {
+					shownIdentity.current = identity;
+					setState({ status: "ok", data });
+				}
 			})
 			.catch((error: unknown) => {
 				if (controller.signal.aborted) return;

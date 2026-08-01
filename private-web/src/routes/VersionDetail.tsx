@@ -80,6 +80,11 @@ export default function VersionDetail() {
 					<ReadyChip ready={v.ready} />
 				</Stack>
 				<StatusControl
+					// Remount per version: `selected` is seeded from
+					// `detail.status` once, so a reused instance would carry
+					// the previous version's status into the new one — and
+					// submitting would write it there.
+					key={versionStr}
 					detail={v}
 					versionStr={versionStr}
 					isAdmin={admin}
