@@ -94,8 +94,14 @@ impl Artifact {
 		// Sort by specificity to handle conflicts
 		Self::sort_by_specificity(&mut artifacts);
 
-		// Remove duplicates by platform+artifact_type, keeping the most specific one
-		artifacts.dedup_by_key(|a| (a.artifact_type.clone(), a.platform.clone()));
+		// Keep the first (most specific) artifact per platform+artifact_type.
+		// Not `dedup_by_key`: that only drops *consecutive* duplicates, and the
+		// specificity sort has just destroyed the adjacency the SQL `ORDER BY`
+		// gave us — every exact artifact now precedes every range one, so two
+		// artifacts of the same type+platform are only neighbours when they
+		// happen to be equally specific.
+		let mut seen = std::collections::HashSet::new();
+		artifacts.retain(|a| seen.insert((a.artifact_type.clone(), a.platform.clone())));
 
 		Ok(artifacts)
 	}
