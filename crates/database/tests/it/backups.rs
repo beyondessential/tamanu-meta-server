@@ -1467,6 +1467,89 @@ async fn schedule_upsert_and_get() {
 	.await;
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn effective_interval_precedence() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "g").await;
+		let pg = BackupType::TamanuPostgres;
+
+		BackupTypeDefault::upsert(
+			&mut conn,
+			NewBackupTypeDefault {
+				r#type: pg.clone(),
+				default_interval: Some(PgDuration(SignedDuration::from_hours(6))),
+				default_retention: retention(),
+				auto_enable: false,
+				allow_below_floor: false,
+			},
+		)
+		.await
+		.unwrap();
+
+		// No override row: inherit the type default.
+		assert_eq!(
+			database::backups::effective_interval(&mut conn, group_id, &pg)
+				.await
+				.unwrap(),
+			Some(PgDuration(SignedDuration::from_hours(6))),
+		);
+
+		// An override row with an interval wins over the default.
+		ServerGroupBackupSchedule::upsert(
+			&mut conn,
+			NewServerGroupBackupSchedule {
+				group_id,
+				r#type: pg.clone(),
+				expected_interval: Some(PgDuration(SignedDuration::from_hours(12))),
+				retention: None,
+				allow_below_floor: false,
+			},
+		)
+		.await
+		.unwrap();
+		assert_eq!(
+			database::backups::effective_interval(&mut conn, group_id, &pg)
+				.await
+				.unwrap(),
+			Some(PgDuration(SignedDuration::from_hours(12))),
+		);
+
+		// An override row with a NULL interval is manual-only: it does *not*
+		// fall through to the default, unlike the same row's NULL retention.
+		ServerGroupBackupSchedule::upsert(
+			&mut conn,
+			NewServerGroupBackupSchedule {
+				group_id,
+				r#type: pg.clone(),
+				expected_interval: None,
+				retention: None,
+				allow_below_floor: false,
+			},
+		)
+		.await
+		.unwrap();
+		assert_eq!(
+			database::backups::effective_interval(&mut conn, group_id, &pg)
+				.await
+				.unwrap(),
+			None,
+			"a present-but-NULL interval means manual-only",
+		);
+
+		// Deleting the override restores inheritance.
+		ServerGroupBackupSchedule::delete(&mut conn, group_id, &pg)
+			.await
+			.unwrap();
+		assert_eq!(
+			database::backups::effective_interval(&mut conn, group_id, &pg)
+				.await
+				.unwrap(),
+			Some(PgDuration(SignedDuration::from_hours(6))),
+		);
+	})
+	.await;
+}
+
 // --- requests ---------------------------------------------------------------
 
 #[tokio::test(flavor = "multi_thread")]

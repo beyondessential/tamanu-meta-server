@@ -776,6 +776,45 @@ async fn group_schedules_reports_next_run_from_last_success_plus_interval() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn group_schedules_reports_manual_only_override_as_no_schedule() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		let server_id = Uuid::new_v4();
+		// An override row with a NULL interval is manual-only, even though
+		// `tamanu-postgres` has a canopy-wide 6h default to inherit from.
+		conn.batch_execute(&format!(
+			"INSERT INTO servers (id, host, kind, group_id) VALUES \
+				('{server_id}', 'https://e.test', 'central', '{group_id}');
+			 INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES \
+				('{server_id}', 'tamanu-postgres', true);
+			 INSERT INTO server_group_backup_schedule (group_id, type, expected_interval) VALUES \
+				('{group_id}', 'tamanu-postgres', NULL);"
+		))
+		.await
+		.expect("seed manual-only override");
+
+		let resp = private
+			.post("/api/backups/group_schedules")
+			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		let row = body
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|r| r["type"] == "tamanu-postgres")
+			.expect("the overridden type appears in schedule/retention");
+		assert!(
+			row["effective_interval"].is_null(),
+			"manual-only must not resurrect the type default",
+		);
+		assert!(row["next_run_at"].is_null());
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn group_schedules_includes_disabled_declared_types() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;

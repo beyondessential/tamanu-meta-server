@@ -591,18 +591,15 @@ impl RestoreWindowView {
 }
 
 /// Effective scheduled interval (seconds) for a `(group, type)`: the per-group
-/// override if set, else the canopy-wide default. `None` = manual-only.
+/// override row if there is one (a NULL interval there being manual-only), else
+/// the canopy-wide default. `None` = manual-only.
 async fn effective_interval_secs(
 	conn: &mut AsyncPgConnection,
 	group_id: Uuid,
 	ty: &BackupType,
 ) -> Result<Option<i64>> {
-	let over = ServerGroupBackupSchedule::get(conn, group_id, ty).await?;
-	let def = BackupTypeDefault::get(conn, ty).await?;
-	Ok(over
-		.as_ref()
-		.and_then(|s| s.expected_interval)
-		.or_else(|| def.as_ref().and_then(|d| d.default_interval))
+	Ok(database::backups::effective_interval(conn, group_id, ty)
+		.await?
 		.map(|pg| pg.0.as_secs()))
 }
 
@@ -1377,11 +1374,13 @@ pub async fn group_schedules(
 	for ty in types {
 		let over = ServerGroupBackupSchedule::get(&mut conn, args.server_group_id, &ty).await?;
 		let def = BackupTypeDefault::get(&mut conn, &ty).await?;
-		let effective_interval = over
-			.as_ref()
-			.and_then(|s| s.expected_interval)
-			.or_else(|| def.as_ref().and_then(|d| d.default_interval))
-			.map(|pg| pg.0.as_secs());
+		// An override row decides alone (NULL interval = manual-only); only its
+		// absence inherits the type default. Same precedence as the schedulers.
+		let effective_interval = match over.as_ref() {
+			Some(over) => over.expected_interval,
+			None => def.as_ref().and_then(|d| d.default_interval),
+		}
+		.map(|pg| pg.0.as_secs());
 		let effective_retention = over
 			.as_ref()
 			.and_then(|s| s.retention.as_ref())

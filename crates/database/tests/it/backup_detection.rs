@@ -402,6 +402,77 @@ fn classify_restore_only_history_is_never() {
 }
 
 // ===========================================================================
+// Case 1b — the scan set resolves the effective interval like the schedulers
+// ===========================================================================
+
+/// The out-of-the-box path: no per-group override at all, so the pair inherits
+/// the canopy-wide `tamanu-postgres` default (6h, seeded by migration). The
+/// schedulers back this pair up on that cadence, so the scan must monitor it —
+/// skipping it would make every group without an explicit override an
+/// unmonitored backup blindspot.
+#[tokio::test(flavor = "multi_thread")]
+async fn scan_includes_pair_inheriting_the_type_default_interval() {
+	TestDb::run(|mut conn, _url| async move {
+		let pg = BackupType::TamanuPostgres;
+		let group_id = insert_group(&mut conn, "inherits-default").await;
+		let server_id = insert_server(&mut conn, group_id, true).await;
+
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
+		enable_capability(&mut conn, server_id, &pg).await;
+		// Deliberately no `server_group_backup_schedule` row.
+
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan");
+		let row = rows
+			.iter()
+			.find(|r| r.server_id == server_id && r.r#type == pg)
+			.expect("pair inheriting the type default is in the scan set");
+		assert_eq!(
+			row.expected_interval,
+			SignedDuration::from_hours(6),
+			"the inherited interval is the type default",
+		);
+	})
+	.await;
+}
+
+/// An override row with a NULL interval is manual-only, which the type default
+/// must not resurrect: no cadence means nothing to be stale against.
+#[tokio::test(flavor = "multi_thread")]
+async fn scan_excludes_pair_whose_override_makes_it_manual_only() {
+	TestDb::run(|mut conn, _url| async move {
+		let pg = BackupType::TamanuPostgres;
+		let group_id = insert_group(&mut conn, "manual-only").await;
+		let server_id = insert_server(&mut conn, group_id, true).await;
+
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
+		enable_capability(&mut conn, server_id, &pg).await;
+		ServerGroupBackupSchedule::upsert(
+			&mut conn,
+			NewServerGroupBackupSchedule {
+				group_id,
+				r#type: pg.clone(),
+				expected_interval: None,
+				retention: Some(retention()),
+				allow_below_floor: false,
+			},
+		)
+		.await
+		.expect("insert manual-only override");
+
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan");
+		assert!(
+			!rows.iter().any(|r| r.server_id == server_id),
+			"a manual-only pair has no cadence to be stale against",
+		);
+	})
+	.await;
+}
+
+// ===========================================================================
 // Case 2 — staleness::sweep files the right server-level events
 // ===========================================================================
 
