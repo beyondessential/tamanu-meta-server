@@ -168,6 +168,16 @@ pub struct ServerGroupBackupConfig {
 	pub force_full_maintenance_at: Option<Timestamp>,
 	/// Who requested the pending full-maintenance run, if any.
 	pub force_full_maintenance_by: Option<String>,
+	/// When the repository passphrase was last successfully rotated. `None`
+	/// means it hasn't been since the column was added — such a group is due
+	/// at its next rotation target. The rotation scheduler's cadence anchor.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(
+		deserialize_as = jiff_diesel::NullableTimestamp,
+		serialize_as = jiff_diesel::NullableTimestamp,
+		treat_none_as_default_value = false
+	)]
+	pub repo_password_rotated_at: Option<Timestamp>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -350,6 +360,20 @@ impl ServerGroupBackupConfig {
 				dsl::force_full_maintenance_at.eq(None::<jiff_diesel::Timestamp>),
 				dsl::force_full_maintenance_by.eq(None::<String>),
 			))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
+	}
+
+	/// Stamp a successful passphrase rotation, which is the rotation
+	/// scheduler's cadence anchor. `updated_at` is deliberately not touched —
+	/// this records work done, not a config edit.
+	pub async fn mark_passphrase_rotated(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<()> {
+		use crate::schema::server_group_backup_config::dsl;
+
+		diesel::update(dsl::server_group_backup_config.filter(dsl::group_id.eq(group_id)))
+			.set(dsl::repo_password_rotated_at.eq(now))
 			.execute(db)
 			.await
 			.map_err(AppError::from)?;

@@ -26,6 +26,7 @@ Beyond the cadence, an operator may request a one-off full maintenance run for a
 
 Canopy rotates each group's repo passphrase on a cadence, so a leaked passphrase is useful only until the next rotation rather than indefinitely.
 Rotation is crash-safe: an interrupted rotation is reconciled on the next attempt, and throughout it the repo stays openable with either the previous or the new passphrase — it is never left unopenable.
+Rotation contends with the rest of a group's background work for the one-operation-per-group interlock; losing it defers the rotation to the next opportunity within the same period rather than to the next period, so the cadence holds even when a group is persistently busy at its scheduled moment.
 Like maintenance, rotation is Canopy's to do; operators never run it.
 
 ## Recovery escrow

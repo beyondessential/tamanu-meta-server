@@ -505,6 +505,7 @@ mod tests {
 			placement: commons_types::backup::BackupPlacement::External,
 			force_full_maintenance_at: None,
 			force_full_maintenance_by: None,
+			repo_password_rotated_at: None,
 		}
 	}
 

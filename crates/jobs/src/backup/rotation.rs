@@ -16,7 +16,7 @@
 use std::{collections::BTreeMap, time::Duration};
 
 use anyhow::{Result, anyhow, bail};
-use commons_servers::{backup_jobs::slot_is_due, backup_secrets::generate_passphrase};
+use commons_servers::{backup_jobs::slot_deadline_due_in, backup_secrets::generate_passphrase};
 use database::{BackupConfigStatus, ServerGroupBackupConfig};
 use jiff::Timestamp;
 use tokio::{
@@ -30,6 +30,13 @@ use super::{
 	kopia::{self, KopiaEnv},
 	worker::Worker,
 };
+
+/// Slot space for rotation's cadence, keeping it off maintenance's second.
+/// The default rotation period is a week, the same window full maintenance
+/// uses, so an unseeded slot would be the identical second for every group —
+/// and maintenance, which holds the group's in-flight lock for minutes, would
+/// win it every time.
+const ROTATION_SLOT_DOMAIN: &str = "rotation";
 
 /// Committed passphrase key.
 const KEY_CURRENT: &str = "password";
@@ -118,6 +125,22 @@ pub async fn rotate_to(
 	.await?;
 	// 3. Promote: apply only `password=new`, which removes `password_next`.
 	put(worker, secret_ref, &[(KEY_CURRENT, new)]).await?;
+
+	// 4. Stamp the cadence anchor. Best-effort: the passphrase *has* rotated,
+	// so failing the whole op over the bookkeeping write would misreport it.
+	// The cost of a missed stamp is the group looking due again next tick.
+	match worker.pool.get().await {
+		Ok(mut db) => {
+			if let Err(e) =
+				ServerGroupBackupConfig::mark_passphrase_rotated(&mut db, config.group_id).await
+			{
+				warn!(group = %config.group_id, "passphrase rotated but stamping it failed: {e}");
+			}
+		}
+		Err(e) => {
+			warn!(group = %config.group_id, "passphrase rotated but stamping it failed: {e}")
+		}
+	}
 	Ok(())
 }
 
@@ -232,11 +255,6 @@ fn rotation_period() -> Duration {
 	Duration::from_secs(days * 24 * 3600)
 }
 
-fn secs_into(now: Timestamp, window: Duration) -> u64 {
-	let w = window.as_secs().max(1) as i64;
-	now.as_second().rem_euclid(w) as u64
-}
-
 /// Spawn a rotation op for a group (claims the shared per-group slot so it never
 /// races maintenance/inspection/init for the same group).
 fn spawn_rotate(worker: &Worker, config: ServerGroupBackupConfig) {
@@ -266,9 +284,18 @@ async fn tick(worker: &Worker) -> Result<(), String> {
 		if c.status != BackupConfigStatus::Ready || in_flight.contains(&c.group_id) {
 			continue;
 		}
-		// Deterministic per-group slot within the period (hash-jittered), so the
-		// fleet's rotations spread out and each group rotates ~once per period.
-		if slot_is_due(c.group_id, period, TICK, secs_into(now, period)) {
+		// Deterministic per-group slot within the period (hash-jittered) so the
+		// fleet's rotations spread out, drawn from rotation's own slot space so
+		// they don't land on the same second as maintenance's, and deadline-
+		// based so losing that second to another op defers the rotation by a
+		// tick rather than a whole period.
+		if slot_deadline_due_in(
+			ROTATION_SLOT_DOMAIN,
+			c.group_id,
+			period,
+			c.repo_password_rotated_at,
+			now,
+		) {
 			spawn_rotate(worker, c.clone());
 		}
 	}
