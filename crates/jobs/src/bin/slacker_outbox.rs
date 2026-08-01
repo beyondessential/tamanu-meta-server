@@ -208,6 +208,9 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 										kind = %row.kind,
 										incident_id = ?row.incident_id,
 										attempts = next_attempts,
+										retry_in = %database::slack_outbox::retry_backoff(
+											next_attempts
+										),
 										err = %err.msg,
 										response = ?err.body,
 										"slack delivery failed; will retry"
