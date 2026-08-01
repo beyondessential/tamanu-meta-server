@@ -91,7 +91,8 @@ test-e2e:
     cd private-web && {{ justfile_directory() }}/scripts/contain.sh {{ justfile_directory() }}/scripts/ramdisk-pg.sh npm run test:e2e
 
 # Frontend unit tests (vitest). No browser or database needed — this is the
-# fast lane for pure logic and hooks in private-web/src.
+# fast lane for pure logic in private-web/src/lib, such as the mirrors of Rust
+# evaluators that must not drift from their source of truth.
 test-web:
     cd private-web && npm run test
 
