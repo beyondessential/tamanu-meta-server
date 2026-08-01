@@ -168,6 +168,166 @@ async fn create_stores_valid_params_and_they_round_trip() {
 	.await;
 }
 
+/// Advertise an `analytics` intent that can redact, carrying the three
+/// masking parameters Canopy takes over.
+async fn advertise_redacting_analytics(conn: &mut AsyncPgConnection, consumer: Uuid) {
+	let descriptor: IntentDescriptor = serde_json::from_value(serde_json::json!({
+		"intent": "analytics",
+		"semantics": ["check", "url", "redact"],
+		"params": {
+			"anonymisation": {"type": "boolean", "default": true},
+			"redaction_manifest_url": {"type": "text"},
+			"redaction_version_query": {"type": "text"},
+			"redaction_version_fallback_to_base": {"type": "boolean", "default": false},
+		},
+	}))
+	.unwrap();
+	RestoreConsumerCapability::register(conn, consumer, &[descriptor])
+		.await
+		.expect("register caps");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_redacting_declaration_round_trips_its_flag() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group = insert_group(&mut conn).await;
+		let consumer = insert_consumer(&mut conn).await;
+		advertise_redacting_analytics(&mut conn, consumer).await;
+
+		private
+			.post("/api/restore_replicas/create")
+			.json(&serde_json::json!({
+				"consumer_device_id": consumer,
+				"group_id": group,
+				"type": "tamanu-postgres",
+				"intent": "analytics",
+				"name": "redacted-decl",
+				"redacts": true,
+			}))
+			.await
+			.assert_status_ok();
+
+		let rows: Vec<serde_json::Value> = private
+			.post("/api/restore_replicas/for_group")
+			.json(&serde_json::json!({ "server_group_id": group }))
+			.await
+			.json();
+		assert_eq!(rows.len(), 1, "got {rows:?}");
+		assert_eq!(rows[0]["redacts"], true);
+		assert_eq!(rows[0]["can_redact"], true);
+	})
+	.await;
+}
+
+/// The manifest parameters belong to Canopy for any intent that can redact,
+/// in both states: were an operator value kept, a declaration could redact
+/// with its flag off and the flag would stop answering on its own whether an
+/// unmasked replica is a finding.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_operator_cannot_set_the_masking_parameters() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group = insert_group(&mut conn).await;
+		let consumer = insert_consumer(&mut conn).await;
+		advertise_redacting_analytics(&mut conn, consumer).await;
+
+		private
+			.post("/api/restore_replicas/create")
+			.json(&serde_json::json!({
+				"consumer_device_id": consumer,
+				"group_id": group,
+				"type": "tamanu-postgres",
+				"intent": "analytics",
+				"name": "sneaky-decl",
+				"params": {
+					"anonymisation": false,
+					"redaction_manifest_url": "https://evil.example/manifest.json",
+				},
+			}))
+			.await
+			.assert_status_ok();
+
+		let stored = database::RestoreReplica::list_for_group(&mut conn, group)
+			.await
+			.expect("list replicas");
+		assert_eq!(
+			stored[0].params["anonymisation"], false,
+			"other params keep"
+		);
+		assert!(
+			stored[0].params.get("redaction_manifest_url").is_none(),
+			"canopy owns the manifest URL, so an operator value is dropped"
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_intent_that_cannot_redact_refuses_the_flag() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group = insert_group(&mut conn).await;
+		let consumer = insert_consumer(&mut conn).await;
+		advertise_verify(&mut conn, consumer).await;
+
+		private
+			.post("/api/restore_replicas/create")
+			.json(&serde_json::json!({
+				"consumer_device_id": consumer,
+				"group_id": group,
+				"type": "tamanu-postgres",
+				"intent": "verify",
+				"name": "cant-redact",
+				"redacts": true,
+			}))
+			.await
+			.assert_status_bad_request();
+	})
+	.await;
+}
+
+/// A server whose product publishes no manifest is withheld from the
+/// worklist, so the operator is shown which of the declaration's replicas
+/// aren't being restored and why.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_that_cannot_be_redacted_shows_as_a_gap() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group = insert_group(&mut conn).await;
+		let consumer = insert_consumer(&mut conn).await;
+		advertise_redacting_analytics(&mut conn, consumer).await;
+		let senaite = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO servers (id, name, host, kind, product, rank, group_id) VALUES
+				('{senaite}', 'lims', 'https://{senaite}.example.com', 'standalone',
+				 'senaite', 'production', '{group}')"
+		))
+		.await
+		.expect("insert senaite server");
+
+		private
+			.post("/api/restore_replicas/create")
+			.json(&serde_json::json!({
+				"consumer_device_id": consumer,
+				"group_id": group,
+				"type": "tamanu-postgres",
+				"intent": "analytics",
+				"name": "group-wide-redacted",
+				"redacts": true,
+			}))
+			.await
+			.assert_status_ok();
+
+		let rows: Vec<serde_json::Value> = private
+			.post("/api/restore_replicas/for_group")
+			.json(&serde_json::json!({ "server_group_id": group }))
+			.await
+			.json();
+		let gaps = rows[0]["redaction_gaps"].as_array().expect("gaps");
+		assert_eq!(gaps.len(), 1, "got {gaps:?}");
+		assert_eq!(gaps[0]["server_id"], senaite.to_string());
+		assert_eq!(gaps[0]["reason"], "product_has_no_manifest");
+	})
+	.await;
+}
+
 /// Declare a replica via the HTTP endpoint and return its id.
 async fn create_replica(
 	private: &commons_tests::axum_test::TestServer,
