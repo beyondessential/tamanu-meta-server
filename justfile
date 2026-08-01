@@ -90,6 +90,11 @@ test-e2e:
     scripts/contain.sh cargo build --bin private-server --bin migrate
     cd private-web && {{ justfile_directory() }}/scripts/contain.sh {{ justfile_directory() }}/scripts/ramdisk-pg.sh npm run test:e2e
 
+# Frontend unit tests (vitest). No browser or database needed — this is the
+# fast lane for pure logic and hooks in private-web/src.
+test-web:
+    cd private-web && npm run test
+
 # Same as `test-e2e` but launches Playwright's interactive UI runner.
 # Useful for stepping through failures and inspecting traces.
 test-e2e-ui:

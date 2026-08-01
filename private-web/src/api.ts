@@ -70,6 +70,14 @@ export type ApiState<T> =
 	| { status: "ok"; data: T }
 	| { status: "error"; error: Error };
 
+/** Element-wise `Object.is` comparison; `deps` arrays are new on each render. */
+function sameDeps(
+	a: ReadonlyArray<unknown>,
+	b: ReadonlyArray<unknown>,
+): boolean {
+	return a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
+}
+
 export function useApi<
 	M extends ApiModule,
 	F extends ApiFn<M>,
@@ -82,19 +90,30 @@ export function useApi<
 ): ApiState<T> & { reload: () => void } {
 	const [state, setState] = useState<ApiState<T>>({ status: "idle" });
 	const tick = useRef(0);
+	// The `deps` that produced the data currently on screen, so a background
+	// refetch can be told apart from a switch to a different entity.
+	const shownDeps = useRef<ReadonlyArray<unknown> | null>(null);
 
 	const run = useCallback(() => {
 		const myTick = ++tick.current;
 		const controller = new AbortController();
 		// Keep prior data on screen during background refetches so the UI
-		// doesn't collapse to a loading placeholder on every reload tick.
-		// Only flip to `loading` when there's no prior data to show.
+		// doesn't collapse to a loading placeholder on every reload tick —
+		// but only when it's the *same* query. Detail routes reuse the mounted
+		// component across /servers/A → /servers/B, so holding on to prior
+		// data across a deps change renders A's name, health and checks under
+		// B's URL, with no loading indicator to say otherwise.
+		const sameQuery =
+			shownDeps.current !== null && sameDeps(shownDeps.current, deps);
 		setState((prev) =>
-			prev.status === "ok" ? prev : { status: "loading" },
+			prev.status === "ok" && sameQuery ? prev : { status: "loading" },
 		);
 		callApi<M, F, T>(module, fn, params, controller.signal)
 			.then((data) => {
-				if (tick.current === myTick) setState({ status: "ok", data });
+				if (tick.current === myTick) {
+					shownDeps.current = deps;
+					setState({ status: "ok", data });
+				}
 			})
 			.catch((error: unknown) => {
 				if (controller.signal.aborted) return;
