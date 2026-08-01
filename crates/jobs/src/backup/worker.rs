@@ -8,13 +8,14 @@
 //! inspection + init).
 
 use std::{
-	collections::HashSet,
+	collections::{HashMap, HashSet},
 	sync::{Arc, Mutex},
 };
 
 use anyhow::{Result, anyhow};
 use commons_servers::backup_secrets::BackupSecrets;
 use database::Db;
+use jiff::{SignedDuration, Timestamp};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use uuid::Uuid;
 
@@ -87,6 +88,72 @@ impl Slots {
 	}
 }
 
+/// Wait after the first failure of a group's op, doubling with each
+/// consecutive failure.
+const BACKOFF_BASE: SignedDuration = SignedDuration::from_mins(15);
+/// Ceiling on the doubling, so a long-broken group still retries daily
+/// (in case someone fixed it out-of-band) without occupying a permit
+/// every tick.
+const BACKOFF_MAX: SignedDuration = SignedDuration::from_hours(12);
+
+/// Which scheduler an op belongs to. Backoff is tracked per (group, op) so
+/// a broken inspection doesn't hold back maintenance for the same group.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum OpKind {
+	Maintenance,
+	Inspection,
+}
+
+/// Wait required after `consecutive` back-to-back failures.
+fn backoff_for(consecutive: u32) -> SignedDuration {
+	BACKOFF_MAX.min(BACKOFF_BASE * 2i32.saturating_pow(consecutive.saturating_sub(1).min(16)))
+}
+
+/// Per-(group, op) retry backoff for failing kopia ops.
+///
+/// Both schedulers decide "is this due?" from the last *successful* run, so a
+/// group whose op fails every time — a wrong passphrase Secret, a deleted
+/// bucket, a revoked role — is re-spawned every tick forever. Each retry holds
+/// one of the worker's few concurrency permits for the op's (often slow)
+/// duration, so a handful of permanently-broken groups can occupy every permit
+/// and stall maintenance, inspection and init for the entire healthy fleet.
+/// `needs_init` avoids this by latching on `last_init_error`; nothing recorded
+/// an inspection failure at all, so this is tracked in-process.
+///
+/// In-process, so a restart clears it: at worst the first tick after a restart
+/// spends one retry per broken group, which is the same cost as a legitimate
+/// recovery check.
+#[derive(Clone, Default)]
+pub struct Backoffs {
+	state: Arc<Mutex<HashMap<(Uuid, OpKind), (u32, Timestamp)>>>,
+}
+
+impl Backoffs {
+	/// Whether this group's op is still inside its backoff window.
+	pub fn blocked(&self, group_id: Uuid, op: OpKind, now: Timestamp) -> bool {
+		self.state
+			.lock()
+			.unwrap()
+			.get(&(group_id, op))
+			.is_some_and(|(consecutive, last_failed)| {
+				now < *last_failed + backoff_for(*consecutive)
+			})
+	}
+
+	/// Record a failure, lengthening the next wait.
+	pub fn failed(&self, group_id: Uuid, op: OpKind, now: Timestamp) {
+		let mut state = self.state.lock().unwrap();
+		let entry = state.entry((group_id, op)).or_insert((0, now));
+		entry.0 = entry.0.saturating_add(1);
+		entry.1 = now;
+	}
+
+	/// Record a success, clearing any accumulated backoff.
+	pub fn succeeded(&self, group_id: Uuid, op: OpKind) {
+		self.state.lock().unwrap().remove(&(group_id, op));
+	}
+}
+
 /// Shared, cheaply-cloneable worker state for the maintenance + inspection
 /// loops.
 #[derive(Clone)]
@@ -96,6 +163,9 @@ pub struct Worker {
 	pub secrets: BackupSecrets,
 	pub cfg: Arc<Cfg>,
 	pub slots: Slots,
+	/// Retry backoff for ops that keep failing, so they can't monopolise the
+	/// concurrency permits.
+	pub backoffs: Backoffs,
 	/// Loopback endpoint that mints per-op maintenance-role creds for kopia.
 	pub creds: CredsServer,
 }
@@ -112,6 +182,7 @@ impl Worker {
 			secrets,
 			cfg: Arc::new(cfg),
 			slots: Slots::new(max),
+			backoffs: Backoffs::default(),
 			creds,
 		}
 	}
@@ -173,5 +244,79 @@ mod tests {
 			s.try_claim(Uuid::from_u128(3)).is_none(),
 			"third claim blocked by the concurrency cap"
 		);
+	}
+
+	#[test]
+	fn backoff_doubles_then_caps() {
+		assert_eq!(backoff_for(1), SignedDuration::from_mins(15));
+		assert_eq!(backoff_for(2), SignedDuration::from_mins(30));
+		assert_eq!(backoff_for(3), SignedDuration::from_hours(1));
+		assert_eq!(backoff_for(6), SignedDuration::from_hours(8));
+		// Capped, and no overflow panic however long a group stays broken.
+		assert_eq!(backoff_for(7), BACKOFF_MAX);
+		assert_eq!(backoff_for(1000), BACKOFF_MAX);
+		assert_eq!(backoff_for(u32::MAX), BACKOFF_MAX);
+	}
+
+	/// A group whose op always fails must not be re-spawned every tick: each
+	/// retry holds one of the few concurrency permits, so a handful of broken
+	/// groups can starve the healthy fleet.
+	#[test]
+	fn a_failing_op_is_blocked_until_its_backoff_elapses() {
+		let b = Backoffs::default();
+		let g = Uuid::from_u128(1);
+		let t0: Timestamp = "2026-01-01T00:00:00Z".parse().unwrap();
+
+		assert!(
+			!b.blocked(g, OpKind::Maintenance, t0),
+			"nothing has failed yet",
+		);
+
+		b.failed(g, OpKind::Maintenance, t0);
+		assert!(b.blocked(g, OpKind::Maintenance, t0 + SignedDuration::from_mins(1)));
+		assert!(b.blocked(g, OpKind::Maintenance, t0 + SignedDuration::from_mins(14)));
+		assert!(
+			!b.blocked(g, OpKind::Maintenance, t0 + SignedDuration::from_mins(16)),
+			"retried once the first backoff elapses",
+		);
+
+		// A second consecutive failure waits twice as long.
+		let t1 = t0 + SignedDuration::from_mins(16);
+		b.failed(g, OpKind::Maintenance, t1);
+		assert!(b.blocked(g, OpKind::Maintenance, t1 + SignedDuration::from_mins(29)));
+		assert!(!b.blocked(g, OpKind::Maintenance, t1 + SignedDuration::from_mins(31)));
+	}
+
+	#[test]
+	fn a_success_clears_the_backoff() {
+		let b = Backoffs::default();
+		let g = Uuid::from_u128(1);
+		let t0: Timestamp = "2026-01-01T00:00:00Z".parse().unwrap();
+		b.failed(g, OpKind::Maintenance, t0);
+		b.failed(g, OpKind::Maintenance, t0);
+		b.succeeded(g, OpKind::Maintenance);
+		assert!(!b.blocked(g, OpKind::Maintenance, t0));
+		// And the count resets, so the next failure waits the base again.
+		b.failed(g, OpKind::Maintenance, t0);
+		assert!(!b.blocked(g, OpKind::Maintenance, t0 + SignedDuration::from_mins(16)));
+	}
+
+	/// A broken inspection must not hold back maintenance for the same group.
+	#[test]
+	fn backoff_is_tracked_per_op() {
+		let b = Backoffs::default();
+		let g = Uuid::from_u128(1);
+		let t0: Timestamp = "2026-01-01T00:00:00Z".parse().unwrap();
+		b.failed(g, OpKind::Inspection, t0);
+		assert!(b.blocked(g, OpKind::Inspection, t0));
+		assert!(!b.blocked(g, OpKind::Maintenance, t0));
+	}
+
+	#[test]
+	fn backoff_is_tracked_per_group() {
+		let b = Backoffs::default();
+		let t0: Timestamp = "2026-01-01T00:00:00Z".parse().unwrap();
+		b.failed(Uuid::from_u128(1), OpKind::Maintenance, t0);
+		assert!(!b.blocked(Uuid::from_u128(2), OpKind::Maintenance, t0));
 	}
 }

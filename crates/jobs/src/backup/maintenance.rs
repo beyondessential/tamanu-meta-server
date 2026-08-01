@@ -38,7 +38,7 @@ use super::{
 	complete,
 	creds_server::ResolvedCreds,
 	kopia::{self, KopiaEnv, RetentionMap},
-	worker::Worker,
+	worker::{OpKind, Worker},
 };
 
 const TICK: Duration = Duration::from_secs(60);
@@ -303,6 +303,16 @@ fn spawn_maint(worker: &Worker, config: ServerGroupBackupConfig, kind: Maintenan
 		};
 
 		let result = run_maint_op(&worker, &config, kind).await;
+		// Feed the retry backoff before anything that can early-return, so a
+		// group whose op always fails can't keep re-spawning every tick and
+		// monopolising the concurrency permits.
+		if result.is_ok() {
+			worker.backoffs.succeeded(group_id, OpKind::Maintenance);
+		} else {
+			worker
+				.backoffs
+				.failed(group_id, OpKind::Maintenance, Timestamp::now());
+		}
 
 		let Ok(mut db) = worker.pool.get().await else {
 			error!(group = %group_id, run_id, "maintenance: failed to get db connection to record result");
@@ -457,6 +467,16 @@ async fn tick(worker: &Worker) -> Result<(), String> {
 		let Some(job_kind) = due_kind(c.group_id, last_quick, last_full, now) else {
 			continue;
 		};
+		// Due, but still cooling off from a run that failed: `due_kind` anchors
+		// on the last *successful* run, so without this a permanently-broken
+		// group is re-spawned on every tick forever.
+		if worker
+			.backoffs
+			.blocked(c.group_id, OpKind::Maintenance, now)
+		{
+			debug!(group = %c.group_id, "maintenance due but backing off after a failure");
+			continue;
+		}
 		let maint_kind = match job_kind {
 			JobKind::MaintFull => MaintenanceKind::Full,
 			_ => MaintenanceKind::Quick,
