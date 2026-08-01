@@ -1248,7 +1248,7 @@ async fn credentials_during_a_rotation_is_503() {
 
 			let resp = public
 				.post("/backup-credentials")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "type": "tamanu-postgres" }))
 				.await;
 			resp.assert_status(http::StatusCode::SERVICE_UNAVAILABLE);
@@ -1256,7 +1256,7 @@ async fn credentials_during_a_rotation_is_503() {
 			// And the passphrase itself is withheld on the same grounds.
 			let target = public
 				.get("/backup-target")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			target.assert_status(http::StatusCode::SERVICE_UNAVAILABLE);
 
@@ -1268,7 +1268,7 @@ async fn credentials_during_a_rotation_is_503() {
 			.expect("release");
 			let resp = public
 				.post("/backup-credentials")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "type": "tamanu-postgres" }))
 				.await;
 			assert_ne!(
