@@ -16,6 +16,7 @@ axum-client-ip = { version = "1.3.1", features = ["forwarded-header"] }
 axum-server-timing = "3.0.1"
 axum-test.workspace = true
 commons-servers = { path = "../commons-servers" }
+commons-types = { path = "../commons-types" }
 database = { path = "../database" }
 diesel.workspace = true
 diesel-async.workspace = true

@@ -112,11 +112,42 @@ pub struct RestoreReplicaUpdate {
 	pub enabled: bool,
 }
 
+/// Normalise an operator-supplied declaration name: surrounding whitespace is
+/// insignificant, and a name that is blank once trimmed is rejected. Names are
+/// unique per consumer, so leaving the whitespace on would let a near-identical
+/// name slip past the index.
+fn normalize_name(name: String) -> Result<String> {
+	let trimmed = name.trim();
+	if trimmed.is_empty() {
+		return Err(AppError::BadRequest(
+			"restore replica name cannot be empty".into(),
+		));
+	}
+	Ok(trimmed.to_owned())
+}
+
+/// Turn a unique violation into a `409` that names the collision actually hit —
+/// a declaration's scope and its name are separately unique, and the operator
+/// needs to know which one to change.
+fn unique_violation(info: &dyn diesel::result::DatabaseErrorInformation) -> AppError {
+	match info.constraint_name() {
+		Some("restore_replicas_consumer_name") => {
+			AppError::Conflict("this consumer already has a restore replica with that name".into())
+		}
+		_ => AppError::Conflict("a matching restore replica is already declared".into()),
+	}
+}
+
 impl RestoreReplica {
 	/// Create a declaration. A duplicate `(consumer, group, type, intent,
-	/// server)` scope maps to `409`.
+	/// server)` scope, or a name already used by another of the consumer's
+	/// declarations, maps to `409`.
 	pub async fn create(db: &mut AsyncPgConnection, new: NewRestoreReplica) -> Result<Self> {
 		use crate::schema::restore_replicas::dsl;
+		let new = NewRestoreReplica {
+			name: normalize_name(new.name)?,
+			..new
+		};
 		match diesel::insert_into(dsl::restore_replicas)
 			.values(new)
 			.returning(Self::as_select())
@@ -124,9 +155,9 @@ impl RestoreReplica {
 			.await
 		{
 			Ok(row) => Ok(row),
-			Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => Err(
-				AppError::Conflict("a matching restore replica is already declared".into()),
-			),
+			Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, info)) => {
+				Err(unique_violation(&*info))
+			}
 			Err(e) => Err(AppError::from(e)),
 		}
 	}
@@ -185,7 +216,8 @@ impl RestoreReplica {
 
 	/// Edit every field of a declaration, including its scope. A scope change
 	/// that collides with another declaration's `(consumer, group, type,
-	/// intent, server)` maps to `409`, same as [`Self::create`]. If the scope
+	/// intent, server)`, or a name already used by another of the consumer's
+	/// declarations, maps to `409`, same as [`Self::create`]. If the scope
 	/// (group, server, or type/intent) moves, any active restore-verification
 	/// alert keyed to the *old* scope is recovered — the overdue sweep only
 	/// walks current declarations, so a stale key would otherwise never clear.
@@ -197,6 +229,7 @@ impl RestoreReplica {
 		use crate::schema::restore_replicas::dsl;
 
 		let existing = Self::get(db, id).await?;
+		let name = normalize_name(update.name)?;
 
 		let result = match diesel::update(dsl::restore_replicas.filter(dsl::id.eq(id)))
 			.set((
@@ -205,7 +238,7 @@ impl RestoreReplica {
 				dsl::server_id.eq(update.server_id),
 				dsl::type_.eq(update.r#type),
 				dsl::intent.eq(update.intent),
-				dsl::name.eq(update.name),
+				dsl::name.eq(name),
 				dsl::overdue_after.eq(update.overdue_after),
 				dsl::params.eq(update.params),
 				dsl::enabled.eq(update.enabled),
@@ -215,10 +248,8 @@ impl RestoreReplica {
 			.await
 		{
 			Ok(row) => row,
-			Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => {
-				return Err(AppError::Conflict(
-					"a matching restore replica is already declared".into(),
-				));
+			Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, info)) => {
+				return Err(unique_violation(&*info));
 			}
 			Err(DieselError::NotFound) => {
 				return Err(AppError::DatabaseQuery(DieselError::NotFound));
@@ -249,6 +280,11 @@ impl RestoreReplica {
 	/// walks current declarations, so an alert left behind by a deleted one
 	/// would otherwise never clear. Runs in a single transaction so a failure
 	/// partway can't leave the row deleted with its alerts unrecovered.
+	///
+	/// Restore-health reports the declaration collected are retained: the FK
+	/// from `backup_restore_checks` is `ON DELETE SET NULL`, so each report
+	/// survives with its group, server, type, and intent, no longer attached to
+	/// a declaration.
 	pub async fn delete(db: &mut AsyncPgConnection, id: Uuid) -> Result<()> {
 		db.transaction::<_, AppError, _>(async |conn| {
 			use crate::schema::restore_replicas::dsl;
@@ -569,7 +605,7 @@ impl BackupRestoreCheck {
 	pub async fn record_report(
 		db: &mut AsyncPgConnection,
 		new: NewBackupRestoreCheck,
-	) -> Result<()> {
+	) -> Result<i64> {
 		use crate::schema::backup_restore_checks::dsl;
 
 		let healthy = new.outcome == RunOutcome::Success && new.replica_healthy;
@@ -579,9 +615,10 @@ impl BackupRestoreCheck {
 		let error = new.error.clone();
 		let snapshot_id = new.snapshot_id.clone();
 
-		diesel::insert_into(dsl::backup_restore_checks)
+		let check_id: i64 = diesel::insert_into(dsl::backup_restore_checks)
 			.values(new)
-			.execute(db)
+			.returning(dsl::id)
+			.get_result(db)
 			.await?;
 
 		// Restore-health is attributed per server; a report without one is
@@ -640,7 +677,7 @@ impl BackupRestoreCheck {
 				.await?;
 			}
 		}
-		Ok(())
+		Ok(check_id)
 	}
 
 	/// Recent reports for a group, newest first — the operator restore-health
@@ -796,22 +833,19 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 			continue;
 		}
 		let once = descriptor.has_semantic(semantics::ONCE);
+		let migrates = descriptor.has_semantic(semantics::MIGRATE);
 
-		let servers = match d.server_id {
+		let servers: Vec<crate::servers::Server> = match d.server_id {
 			Some(sid) => {
 				let s = crate::servers::Server::get_by_id(db, sid).await.ok();
 				match s {
 					Some(s) if s.group_id == Some(d.group_id) && s.deleted_at.is_none() => {
-						vec![sid]
+						vec![s]
 					}
 					_ => vec![],
 				}
 			}
-			None => crate::servers::Server::list_live_in_group(db, d.group_id)
-				.await?
-				.into_iter()
-				.map(|s| s.id)
-				.collect(),
+			None => crate::servers::Server::list_live_in_group(db, d.group_id).await?,
 		};
 
 		if let Entry::Vacant(e) = healthy_cache.entry(d.group_id) {
@@ -827,7 +861,28 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 			);
 		}
 
-		for sid in servers {
+		for server in servers {
+			let sid = server.id;
+
+			// A `migrate` intent is overdue on its own terms: the question is
+			// whether the candidate version has been tried against the latest
+			// snapshot, not whether the replica restored.
+			if migrates {
+				if let Some(filed_one) = sweep_migration_overdue(
+					db,
+					&d,
+					&server,
+					&latest_snapshot_cache[&d.group_id],
+					now,
+					overdue_after,
+				)
+				.await?
+				{
+					filed += filed_one;
+				}
+				continue;
+			}
+
 			let key = (sid, d.r#type.clone(), d.intent.clone());
 			let overdue = if once {
 				// A `once` intent is overdue only when a snapshot exists to verify,
@@ -840,6 +895,10 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 							(verified, run.snapshot_id.as_ref()),
 							(Some(v), Some(s)) if v == s
 						);
+						// Measured from the report, not `run.anchor()`: the question is
+						// how long this snapshot has gone unverified since it became
+						// available to verify, which is when it landed — not how old
+						// the data inside it is.
 						!already && now.duration_since(run.reported_at) > overdue_after.0
 					}
 				}
@@ -890,4 +949,70 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 	}
 
 	Ok(filed)
+}
+
+/// Whether a `migrate` declaration's server has left its candidate version
+/// untested past the bound, filing the migration-test check when it has.
+///
+/// Returns the number of checks filed, or `None` when the server has nothing to
+/// be overdue about: no candidate version, or no snapshot to migrate.
+// spec: RST#alerting
+async fn sweep_migration_overdue(
+	db: &mut AsyncPgConnection,
+	declaration: &RestoreReplica,
+	server: &crate::servers::Server,
+	latest: &HashMap<(Uuid, BackupType), BackupRun>,
+	now: Timestamp,
+	overdue_after: PgDuration,
+) -> Result<Option<usize>> {
+	let Some(version) = crate::migration_tests::candidate_for(db, server).await? else {
+		return Ok(None);
+	};
+	let Some(run) = latest.get(&(server.id, declaration.r#type.clone())) else {
+		return Ok(None);
+	};
+	let Some(snapshot_id) = run.snapshot_id.as_ref() else {
+		return Ok(None);
+	};
+
+	if crate::migration_tests::has_verdict(db, server.id, snapshot_id, version.id).await? {
+		return Ok(None);
+	}
+	// Measured from when the snapshot landed, which is when it became available
+	// to migrate, not how old the data inside it is.
+	if now.duration_since(run.reported_at) <= overdue_after.0 {
+		return Ok(None);
+	}
+
+	let semver = version.as_semver();
+	file_check(
+		db,
+		CheckFiling {
+			source: crate::statuses::CANOPY_SOURCE,
+			scope: Scope::Server(server.id),
+			device_id: None,
+			check: &format!(
+				"{}:{}:{}",
+				refs::MIGRATION_TEST, declaration.r#type, declaration.intent
+			),
+			observed: CheckResult::Warning,
+			title: Some("migration test overdue"),
+			message: &format!(
+				"Migrations for {semver} have not been tried against server {}'s latest snapshot within its overdue bound",
+				server.id
+			),
+			detail: Some(serde_json::json!({
+				"target_version": semver.to_string(),
+				"snapshot_id": snapshot_id,
+				"type": declaration.r#type.to_string(),
+				"intent": declaration.intent.to_string(),
+			})),
+			default_ceiling: CheckResult::Warning,
+			default_escalates: false,
+			documentation: Some(refs::MIGRATION_TEST_DOC),
+		},
+	)
+	.await?;
+
+	Ok(Some(1))
 }

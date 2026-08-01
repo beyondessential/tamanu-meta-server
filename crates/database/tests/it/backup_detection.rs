@@ -188,6 +188,7 @@ async fn insert_backup_success_aged(
 			s3_sent_payload_bytes: None,
 			s3_received_raw_bytes: None,
 			s3_received_payload_bytes: None,
+			snapshot_taken_at: None,
 		},
 	)
 	.await
@@ -399,6 +400,77 @@ fn classify_restore_only_history_is_never() {
 		StalenessVerdict::Never,
 		"restore-only history (no backup success) is never-backed-up",
 	);
+}
+
+// ===========================================================================
+// Case 1b — the scan set resolves the effective interval like the schedulers
+// ===========================================================================
+
+/// The out-of-the-box path: no per-group override at all, so the pair inherits
+/// the canopy-wide `tamanu-postgres` default (6h, seeded by migration). The
+/// schedulers back this pair up on that cadence, so the scan must monitor it —
+/// skipping it would make every group without an explicit override an
+/// unmonitored backup blindspot.
+#[tokio::test(flavor = "multi_thread")]
+async fn scan_includes_pair_inheriting_the_type_default_interval() {
+	TestDb::run(|mut conn, _url| async move {
+		let pg = BackupType::TamanuPostgres;
+		let group_id = insert_group(&mut conn, "inherits-default").await;
+		let server_id = insert_server(&mut conn, group_id, true).await;
+
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
+		enable_capability(&mut conn, server_id, &pg).await;
+		// Deliberately no `server_group_backup_schedule` row.
+
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan");
+		let row = rows
+			.iter()
+			.find(|r| r.server_id == server_id && r.r#type == pg)
+			.expect("pair inheriting the type default is in the scan set");
+		assert_eq!(
+			row.expected_interval,
+			SignedDuration::from_hours(6),
+			"the inherited interval is the type default",
+		);
+	})
+	.await;
+}
+
+/// An override row with a NULL interval is manual-only, which the type default
+/// must not resurrect: no cadence means nothing to be stale against.
+#[tokio::test(flavor = "multi_thread")]
+async fn scan_excludes_pair_whose_override_makes_it_manual_only() {
+	TestDb::run(|mut conn, _url| async move {
+		let pg = BackupType::TamanuPostgres;
+		let group_id = insert_group(&mut conn, "manual-only").await;
+		let server_id = insert_server(&mut conn, group_id, true).await;
+
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
+		enable_capability(&mut conn, server_id, &pg).await;
+		ServerGroupBackupSchedule::upsert(
+			&mut conn,
+			NewServerGroupBackupSchedule {
+				group_id,
+				r#type: pg.clone(),
+				expected_interval: None,
+				retention: Some(retention()),
+				allow_below_floor: false,
+			},
+		)
+		.await
+		.expect("insert manual-only override");
+
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan");
+		assert!(
+			!rows.iter().any(|r| r.server_id == server_id),
+			"a manual-only pair has no cadence to be stale against",
+		);
+	})
+	.await;
 }
 
 // ===========================================================================
@@ -656,6 +728,112 @@ async fn reconcile_files_missing_when_report_fresh_but_no_snapshot() {
 			group_issue_open_links(&mut conn, group_id, &mref).await,
 			1,
 			"reconcile-missing is group-level and opens an incident",
+		);
+	})
+	.await;
+}
+
+/// The case the "missing" verdict exists for: a device reports success while
+/// nothing lands in the repo, so the inspection job — which only writes rows
+/// for sources it actually finds — never creates a snapshot row for the pair.
+/// Inventory freshness has to come from the *group's* last inspection, not
+/// from the absent row, or the alert can never fire.
+#[tokio::test(flavor = "multi_thread")]
+async fn reconcile_files_missing_when_report_fresh_and_the_pair_has_no_snapshot_row() {
+	TestDb::run(|mut conn, _url| async move {
+		let pg = BackupType::TamanuPostgres;
+		let interval = SignedDuration::from_hours(12);
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id, true).await;
+		let other_id = insert_server(&mut conn, group_id, true).await;
+		let device_id = insert_device(&mut conn).await;
+
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
+		insert_schedule(&mut conn, group_id, &pg, interval).await;
+		enable_capability(&mut conn, server_id, &pg).await;
+
+		// Fresh report for our server...
+		insert_backup_success_aged(
+			&mut conn,
+			device_id,
+			group_id,
+			server_id,
+			&pg,
+			SignedDuration::from_hours(2),
+		)
+		.await;
+		// ...and the inspector ran recently, but only found another server's
+		// source — nothing for ours.
+		BackupRepoSnapshot::upsert(
+			&mut conn,
+			group_id,
+			&format!("canopy@{other_id}:/data"),
+			Some(other_id),
+			Some(&pg),
+			Some(Timestamp::now() - SignedDuration::from_hours(2)),
+		)
+		.await
+		.expect("upsert other server's snapshot");
+
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan");
+		database::backup::reconcile::sweep(&mut conn, &rows)
+			.await
+			.expect("reconcile sweep");
+
+		let mref = typed_ref(refs::RECONCILE_MISSING, &pg);
+		let issue = group_issue(&mut conn, group_id, &mref)
+			.await
+			.expect("reconcile-missing issue filed for the pair with no snapshot");
+		assert_eq!(issue.effective_result.as_deref(), Some("failed"));
+		assert!(issue.active);
+	})
+	.await;
+}
+
+/// The freshness guard still holds: a group the inspector has never run
+/// against has no inventory to conclude "nothing landed" from, so the missing
+/// verdict defers to the inspection job's own failure surfacing.
+#[tokio::test(flavor = "multi_thread")]
+async fn reconcile_skips_missing_when_the_group_was_never_inspected() {
+	TestDb::run(|mut conn, _url| async move {
+		let pg = BackupType::TamanuPostgres;
+		let interval = SignedDuration::from_hours(12);
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id, true).await;
+		let device_id = insert_device(&mut conn).await;
+
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
+		insert_schedule(&mut conn, group_id, &pg, interval).await;
+		enable_capability(&mut conn, server_id, &pg).await;
+		insert_backup_success_aged(
+			&mut conn,
+			device_id,
+			group_id,
+			server_id,
+			&pg,
+			SignedDuration::from_hours(2),
+		)
+		.await;
+		// No `backup_repo_snapshots` rows at all for the group.
+
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan");
+		database::backup::reconcile::sweep(&mut conn, &rows)
+			.await
+			.expect("reconcile sweep");
+
+		assert!(
+			group_issue(
+				&mut conn,
+				group_id,
+				&typed_ref(refs::RECONCILE_MISSING, &pg)
+			)
+			.await
+			.is_none(),
+			"an uninspected group must not be accused of losing backups",
 		);
 	})
 	.await;

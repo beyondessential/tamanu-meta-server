@@ -5,20 +5,29 @@ import { useApi } from "../api";
 import { useIsNotificationHeld } from "../hooks/useIsNotificationHeld";
 import { isIncidentLingering } from "../types";
 
-/** Server-detail header button into the incidents view. Any server id in
- * a group works — the backend resolves to the group root. Three states:
+/** Server-detail header button into the incidents view. Incidents are looked
+ * up by server (the backend resolves to the group root); issues are looked up
+ * by the server's group, which the caller must supply — `issues.list` matches
+ * `serverGroupId` against `servers.group_id` and does no server→group
+ * resolution of its own, so a server id there matches nothing at all. Three
+ * states:
  * - open incident exists → direct link to /incidents/:id (error-coloured;
  *   warning-coloured when the Slack notice is still inside the per-group
  *   cooldown window so the operator can tell at a glance that nobody else
  *   has been paged yet; info-coloured when the incident is lingering —
  *   every failure has recovered and it closes if things stay quiet)
  * - no open incident, but active issues → /incidents filtered to this group
- * - nothing active → same, with `showAll=1` so closed/inactive surface */
+ * - nothing active → same, with `showAll=1` so closed/inactive surface
+ *
+ * An ungrouped server has no group to filter by, so the issues query is
+ * skipped and the links fall back to the unfiltered incidents view. */
 export default function IncidentsLink({
 	serverId,
+	groupId,
 	refreshKey = 0,
 }: {
 	serverId: string;
+	groupId: string | null;
 	refreshKey?: number;
 }) {
 	const incidents = useApi(
@@ -35,10 +44,19 @@ export default function IncidentsLink({
 	const issues = useApi(
 		"issues",
 		"list",
-		{ activeOnly: true, serverGroupId: serverId, limit: 1 },
-		[serverId, refreshKey],
+		{ activeOnly: true, serverGroupId: groupId ?? undefined, limit: 1 },
+		[groupId, refreshKey],
+		{ skip: groupId === null },
 	);
 	const hasActive = issues.status === "ok" && issues.data.length > 0;
+
+	const incidentsHref = (showAll: boolean) => {
+		const params = new URLSearchParams();
+		if (groupId !== null) params.set("group", groupId);
+		if (showAll) params.set("showAll", "1");
+		const query = params.toString();
+		return query ? `/incidents?${query}` : "/incidents";
+	};
 
 	const heldUntilActive = useIsNotificationHeld(
 		openIncident?.notification_held_until ?? null,
@@ -67,7 +85,7 @@ export default function IncidentsLink({
 	if (hasActive) {
 		return (
 			<ActionButton
-				to={`/incidents?group=${serverId}`}
+				to={incidentsHref(false)}
 				icon={<OpenInNewIcon />}
 				label="Active issues"
 			/>
@@ -75,7 +93,7 @@ export default function IncidentsLink({
 	}
 	return (
 		<ActionButton
-			to={`/incidents?group=${serverId}&showAll=1`}
+			to={incidentsHref(true)}
 			icon={<OpenInNewIcon />}
 			label="Past issues"
 		/>

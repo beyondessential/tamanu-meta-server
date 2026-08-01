@@ -24,6 +24,8 @@ import HealthChip from "./HealthChip";
 import TimeAgo from "./TimeAgo";
 import TimezoneTooltip from "./TimezoneTooltip";
 import VersionIndicator from "./VersionIndicator";
+import { useProductCaps } from "../hooks/useProducts";
+import { PRODUCT_LABELS } from "../types";
 import {
 	CHECK_RESULT_INTENT,
 	type CheckResult,
@@ -120,14 +122,23 @@ function PanelBody({
 }
 
 function CuratedFields({ snap }: { snap: StatusSnapshotData }) {
+	const caps = useProductCaps(snap.product);
+	const tracking = caps?.version_tracking;
 	return (
 		<Stack direction="row" spacing={3} sx={{ flexWrap: "wrap" }} useFlexGap>
-			<Field label="Tamanu">
-				<VersionIndicator
-					version={snap.version}
-					distance={snap.version_distance}
-				/>
-			</Field>
+			{/* A product with no application version shows no version field at
+			    all — label included, since an empty "Version" reads as a
+			    reporting failure rather than an absence.
+			    spec: APP#versions */}
+			{tracking !== undefined && tracking !== "absent" && (
+				<Field label={PRODUCT_LABELS[snap.product]}>
+					<VersionIndicator
+						version={snap.version}
+						tracking={tracking}
+						distance={snap.version_distance}
+					/>
+				</Field>
+			)}
 			{snap.platform && <Field label="Platform" value={snap.platform} />}
 			{snap.timezone && (
 				<Field label="Timezone">

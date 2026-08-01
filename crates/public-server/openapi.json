@@ -225,6 +225,66 @@
         ]
       }
     },
+    "/backup-progress": {
+      "post": {
+        "tags": [
+          "backup"
+        ],
+        "summary": "Report progress for a run that is still in flight.",
+        "description": "Optional throughout: a run that never reports progress is recorded and\ndisplayed exactly as it is today. Reporting it lets Canopy show how far a\nlong-running backup has got, at what rate, and when it last heard from the\ndevice — which for a multi-hour backup is the difference between \"running\"\nand \"running, and moving\".\n\n**Every counter is cumulative from the start of the run**, not an interval\ndelta. Send totals-so-far each time. A dropped or repeated report then costs\nonly resolution, never the accuracy of a total, and the last report Canopy\nreceived can stand in for a figure the final report omits. Omit any counter\nyou do not measure rather than sending zero.\n\nCanopy timestamps each report on receipt, so no clock agreement is needed —\nexcept for `snapshot_taken_at`, which is necessarily the device's own claim\nabout its filesystem.\n\nUnlike `POST /backup-credentials`, this does not require the group's backup\nconfiguration to be ready or the type to be an enabled capability: it\ndescribes a run already under way, and refusing it would blind Canopy exactly\nwhen something is misconfigured.\n\nA refused report is never a reason to abandon a run — this is telemetry.\nReporting progress for a run that has already been reported complete is\naccepted rather than refused, so a report racing the completion is not an\nerror.\n\nErrors: 412 when the calling device is not bound to a live server; 409 when\nthe server is not in a group; 429 when reporting faster than Canopy accepts.",
+        "operationId": "report_backup_progress",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgressArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Progress recorded."
+          },
+          "409": {
+            "description": "Server is not in a group.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "Device is not bound to a live server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Reporting progress too frequently.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "server-device": []
+          }
+        ]
+      }
+    },
     "/backup-report": {
       "post": {
         "tags": [
@@ -368,6 +428,187 @@
             }
           }
         }
+      }
+    },
+    "/certificates/request": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Ask for a certificate, and collect it once there is one.",
+        "description": "The same call does both, and is safe to repeat: a name and key Canopy already\nholds a certificate for is answered from what it holds rather than ordering\nagain, so a server that lost its local copy costs the authority nothing. A\nrequest naming a different key opens a new order.\n\nProving control of a name through DNS takes far longer than any client waits\nmid-handshake, so a first request records the order and answers `pending`;\ncall again to collect. A server is expected to hold a certificate before it\nneeds one rather than to obtain one while a client waits.",
+        "operationId": "certificate_request",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestCertificateArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The order as it stands, with the chain if there is one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CertificateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The signing request is unparseable, unsigned, asks for another name, or carries a name besides the one requested.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The server lacks the TLS grant, or the name is not within its group's domains.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The server is paused, no managed zone covers the name, or the key was revoked as compromised and will not be certified again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The device is not attached to any live server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "mtls-certificate": []
+          }
+        ]
+      }
+    },
+    "/names/entitlements": {
+      "get": {
+        "tags": [
+          "names"
+        ],
+        "summary": "What this server may act on, and what it already holds.",
+        "description": "Answers the boundary rather than making an agent discover it by being\nrefused: the domains its group controls, the grants it holds, whether it is\npaused, and the names and certificates it already has. Enough to request a\ncertificate before anything asks for one, and to renew before expiry.\n\nA server with no grants, or whose group controls no domain, gets an empty\nanswer rather than an error — asking what one may do is not a privileged act.\nThe same content rides on the response to a status push.",
+        "operationId": "name_entitlements",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Entitlements"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The device is not attached to any live server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "mtls-certificate": []
+          }
+        ]
+      }
+    },
+    "/names/register": {
+      "post": {
+        "tags": [
+          "names"
+        ],
+        "summary": "Register the addresses a name should resolve to.",
+        "description": "Replaces whatever addresses were registered for the name; an empty list\nwithdraws it. Canopy publishes what it is told — it does not verify that an\naddress is really this server's, the grant being the trust boundary.\n\nPublishing happens in the background, so the response says what Canopy will\npublish and what it has published so far rather than waiting for the zone.",
+        "operationId": "name_register",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterNameArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisteredName"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The server lacks the DNS grant, or the name is not within its group's domains.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The server is paused, another server holds the name, or no managed zone covers it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "The device is not attached to any live server.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "mtls-certificate": []
+          }
+        ]
       }
     },
     "/restore-capabilities": {
@@ -1388,6 +1629,67 @@
           }
         }
       },
+      "CertificateResponse": {
+        "type": "object",
+        "description": "Where a certificate request stands, and the chain once there is one.",
+        "required": [
+          "name",
+          "state",
+          "usable",
+          "revoked",
+          "key_must_be_replaced"
+        ],
+        "properties": {
+          "chain": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The chain, PEM, once Canopy holds one — including while a renewal is\nunder way, the chain in hand staying valid until the new one lands."
+          },
+          "key_must_be_replaced": {
+            "type": "boolean",
+            "description": "Whether the key must be replaced before asking again, rather than just the\ncertificate."
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the last attempt failed, if one did. Present while Canopy is still\nretrying."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name the certificate is (or will be) for, as Canopy normalised it."
+          },
+          "not_after": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When it expires."
+          },
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The profile it was issued under, if the authority named one."
+          },
+          "revoked": {
+            "type": "boolean",
+            "description": "Whether an operator revoked it. Stop serving it and ask again."
+          },
+          "state": {
+            "type": "string",
+            "description": "`pending`, `issued`, `failed`, or `revoked`."
+          },
+          "usable": {
+            "type": "boolean",
+            "description": "Whether the chain can be served now."
+          }
+        }
+      },
       "CheckResult": {
         "type": "string",
         "description": "Outcome of a single health check reported in a server's status update.\n\nOlder reports may send a plain pass/fail flag instead of one of these\noutcomes; when that happens a passing flag is treated as `passed` and a\nfailing flag as `failed`.",
@@ -1494,6 +1796,53 @@
           }
         }
       },
+      "Entitlements": {
+        "type": "object",
+        "description": "What a server is entitled to do with names, and what it already holds.",
+        "required": [
+          "may_manage_dns",
+          "may_manage_tls",
+          "paused",
+          "domains",
+          "registered_names",
+          "certificates"
+        ],
+        "properties": {
+          "certificates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeldCertificate"
+            },
+            "description": "The certificates Canopy holds for this server."
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The domains this server's group controls. Any name at or beneath one of\nthese is a name this server may act on — which is what lets an agent\nrequest a certificate before anything asks for one."
+          },
+          "may_manage_dns": {
+            "type": "boolean",
+            "description": "Whether this server may manage its own DNS records."
+          },
+          "may_manage_tls": {
+            "type": "boolean",
+            "description": "Whether this server may obtain its own TLS certificates."
+          },
+          "paused": {
+            "type": "boolean",
+            "description": "Whether Canopy is currently making no new changes on this server's\nbehalf. While true, requests are refused and an agent should wait."
+          },
+          "registered_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The names this server has registered addresses for."
+          }
+        }
+      },
       "HealthCheck": {
         "allOf": [
           {
@@ -1533,6 +1882,53 @@
         ],
         "description": "One health-check result within a status push."
       },
+      "HeldCertificate": {
+        "type": "object",
+        "description": "A certificate Canopy holds for the asking server, as the server needs to see\nit: enough to decide whether to renew, and nothing about anyone else.",
+        "required": [
+          "name",
+          "key_fingerprint",
+          "usable",
+          "revoked",
+          "key_must_be_replaced"
+        ],
+        "properties": {
+          "key_fingerprint": {
+            "type": "string",
+            "description": "Hex SHA-256 of the certified key's subject public key info, so an agent\ncan tell whether this covers a key it still holds."
+          },
+          "key_must_be_replaced": {
+            "type": "boolean",
+            "description": "Whether the key itself is condemned, not just the certificate — the key\npair has to be replaced before asking again."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name it covers."
+          },
+          "not_after": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When it expires."
+          },
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The profile it was issued under, if the authority named one."
+          },
+          "revoked": {
+            "type": "boolean",
+            "description": "Whether an operator has revoked it. Stop serving it."
+          },
+          "usable": {
+            "type": "boolean",
+            "description": "Whether it can still be served: not revoked, not expired. True even while\na renewal is under way, the chain in hand staying valid until the new one\nlands."
+          }
+        }
+      },
       "IntentDescriptor": {
         "type": "object",
         "description": "One restore purpose a consumer advertises support for: the behaviours it\nopts into and the settings it accepts per replica.",
@@ -1561,6 +1957,72 @@
               "type": "string"
             },
             "description": "Behaviours this intent opts into. Recognised values are `check` (a\nhealth report is expected for each replica), `once` (a given snapshot\nis only ever dispatched to a replica once, rather than repeatedly\nuntil overdue), and `url` (a replica's health report includes a link\nto it). Unrecognised values are stored but have no effect."
+          }
+        }
+      },
+      "MigrationArgs": {
+        "type": "object",
+        "description": "How the target version's migrations went against the restored replica.",
+        "required": [
+          "target_version_id",
+          "total_elapsed_seconds",
+          "data_bytes_before",
+          "data_bytes_after",
+          "timings"
+        ],
+        "properties": {
+          "data_bytes_after": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size of the data after they ran. The growth between the two is what shows\na migration that backfills heavily."
+          },
+          "data_bytes_before": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size of the data before the migrations ran."
+          },
+          "failed_migration": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The migration that failed, when one did."
+          },
+          "target_version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The version whose migrations were applied, taken from the worklist\nentry's `target_version_id`."
+          },
+          "timings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MigrationTimingArgs"
+            },
+            "description": "One entry per migration that ran, in the order they ran."
+          },
+          "total_elapsed_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Whole seconds the whole migration run took."
+          }
+        }
+      },
+      "MigrationTimingArgs": {
+        "type": "object",
+        "description": "How long one migration took.",
+        "required": [
+          "name",
+          "elapsed_seconds"
+        ],
+        "properties": {
+          "elapsed_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Whole seconds it took."
+          },
+          "name": {
+            "type": "string",
+            "description": "The migration's name, as the migration runner reports it."
           }
         }
       },
@@ -1610,6 +2072,152 @@
           }
         }
       },
+      "ProgressArgs": {
+        "type": "object",
+        "description": "A progress sample from a run still in flight.",
+        "required": [
+          "run_id",
+          "type"
+        ],
+        "properties": {
+          "bytes_cached": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes found already present in the repository, and so not re-uploaded."
+          },
+          "bytes_estimated": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Total bytes this run currently expects to handle. May be revised upward."
+          },
+          "bytes_hashed": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes processed (hashed, compressed) so far."
+          },
+          "bytes_read": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Source bytes read so far."
+          },
+          "bytes_uploaded": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes uploaded to the repository so far."
+          },
+          "current_path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the run is working on right now, for display."
+          },
+          "errors": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Errors hit so far."
+          },
+          "extra": {
+            "type": "object",
+            "description": "Any further detail the backup engine emits. Canopy makes no commitment\nabout its shape: it is stored and shown verbatim, never interpreted."
+          },
+          "files_done": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Files finished so far."
+          },
+          "files_estimated": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Total files this run currently expects to handle."
+          },
+          "ignored_errors": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Errors hit and deliberately ignored so far."
+          },
+          "purpose": {
+            "$ref": "#/components/schemas/BackupPurpose",
+            "description": "Whether this is a `backup` or a `restore` run."
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The run-uuid the client minted for this run — the same one it passes to\n`POST /backup-credentials` and reports under at `POST /backup-report`."
+          },
+          "s3_received_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes of decoded object payload received from S3 so far."
+          },
+          "s3_received_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes of raw HTTP traffic received from S3 so far."
+          },
+          "s3_sent_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes of decoded object payload sent to S3 so far."
+          },
+          "s3_sent_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes of raw HTTP traffic sent to S3 so far, including protocol and\nsigning overhead."
+          },
+          "snapshot_taken_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this run froze the data it is backing up — the point in time the\nbackup represents, as opposed to when its upload finishes. Send it as soon\nas it is known (before any transfer starts). Recorded once per run: the\nfirst value Canopy sees stands, whether it arrives here or on the report."
+          },
+          "type": {
+            "type": "string",
+            "description": "The backup type being run (e.g. `tamanu-postgres`)."
+          }
+        }
+      },
       "PublicServer": {
         "type": "object",
         "description": "A publicly-listed central server that a client can connect to.",
@@ -1636,6 +2244,68 @@
                 "description": "The server's environment tier (production, clone, demo, test, or\ndev), if set. Used to order the listing and to let clients label\nnon-production entries."
               }
             ]
+          }
+        }
+      },
+      "RegisterNameArgs": {
+        "type": "object",
+        "description": "The name a server should be reachable at, and where.",
+        "required": [
+          "name",
+          "addresses"
+        ],
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Every external address this server is reachable at. IPv4 addresses become\nA records and IPv6 addresses AAAA records, replacing whatever was\nregistered before. An empty list withdraws the name."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name to publish records at. Must sit within a domain this server's\ngroup controls."
+          }
+        }
+      },
+      "RegisteredName": {
+        "type": "object",
+        "description": "What Canopy holds for a registered name.",
+        "required": [
+          "name",
+          "addresses",
+          "published_addresses",
+          "published"
+        ],
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The addresses Canopy will publish."
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the last publish attempt failed, if it did."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name, as Canopy normalised it."
+          },
+          "published": {
+            "type": "boolean",
+            "description": "Whether the zone has caught up with what was asked for."
+          },
+          "published_addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The addresses Canopy has published so far. Differs from `addresses` until\nthe change has been reconciled into the zone."
           }
         }
       },
@@ -1716,9 +2386,35 @@
             ],
             "description": "Identifier of the repository snapshot the run produced, for a\nsuccessful backup."
           },
+          "snapshot_taken_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this run froze the data it backed up — the point in time the backup\nrepresents, as opposed to when its upload finished. Often a filesystem-level\nsnapshot taken before the transfer, in which case it is not recoverable\nfrom the repository and only the device can report it. Recorded once per\nrun: if progress reports already carried it, that value stands."
+          },
           "type": {
             "type": "string",
             "description": "The backup type that ran (e.g. `tamanu-postgres`)."
+          }
+        }
+      },
+      "RequestCertificateArgs": {
+        "type": "object",
+        "description": "A request to certify a key for a name.",
+        "required": [
+          "name",
+          "csr"
+        ],
+        "properties": {
+          "csr": {
+            "type": "string",
+            "description": "The certificate signing request, DER, base64. Must ask for exactly `name`\nand nothing else — a request carrying any other name is refused rather\nthan trimmed."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name to certify. Must sit within a domain this server's group\ncontrols."
           }
         }
       },
@@ -1886,6 +2582,7 @@
         "required": [
           "backup_now",
           "check_severities",
+          "names",
           "tags"
         ],
         "properties": {
@@ -1905,6 +2602,10 @@
             "propertyNames": {
               "type": "string"
             }
+          },
+          "names": {
+            "$ref": "#/components/schemas/Entitlements",
+            "description": "What this server is entitled to do with names: the domains its group\ncontrols, the grants it holds, whether it is paused, and the names and\ncertificates it already has. A server-wide fact, so returned to every\nsource — an agent already reporting status learns of a new domain or a\nnewly granted permission without asking separately. Identical to what\n`GET /names/entitlements` returns. Clients that predate this field can\nsafely ignore it."
           },
           "tags": {
             "$ref": "#/components/schemas/TagMap",
@@ -1955,6 +2656,17 @@
           "intent": {
             "type": "string",
             "description": "The restore intent this attempt was performed under."
+          },
+          "migration": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MigrationArgs",
+                "description": "What the migrations did, for a report under a `migrate` intent. Omit for\nevery other intent."
+              }
+            ]
           },
           "observed_at": {
             "type": "string",
@@ -2236,6 +2948,21 @@
             "type": "string",
             "description": "Kind of storage backend. Always `\"s3\"`."
           },
+          "target_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "For a `migrate` intent, the version whose schema migrations to apply\nafter restoring. Obtain them from that version's published artefacts, the\nsame way a server being upgraded does. `null` for every other intent."
+          },
+          "target_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Identifier of that version. Echo it back in the migration-test report."
+          },
           "type": {
             "type": "string",
             "description": "The backup type to restore (e.g. `tamanu-postgres`)."
@@ -2274,6 +3001,14 @@
     {
       "name": "bestool",
       "description": "Bestool SQL snippet read API."
+    },
+    {
+      "name": "certificates",
+      "description": "TLS certificates for a server's own names: requesting one for a signing request, and collecting it once Canopy has obtained it."
+    },
+    {
+      "name": "names",
+      "description": "Public names a server may act on: what it is entitled to, and the addresses to publish for them."
     },
     {
       "name": "restore",

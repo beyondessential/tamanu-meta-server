@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use commons_types::{
 	Uuid,
-	server::{kind::ServerKind, rank::ServerRank},
+	server::{kind::ServerKind, product::Product, rank::ServerRank},
 	status::{HealthState, ShortStatus},
 	version::VersionStr,
 };
@@ -38,6 +38,8 @@ pub struct FindServersArgs {
 	pub kind: Option<String>,
 	/// Filter by rank: `production`, `clone`, `demo`, `test`, or `dev`.
 	pub rank: Option<String>,
+	/// Filter to one product (`tamanu`, `senaite`, `canopy`).
+	pub product: Option<String>,
 	/// Filter to one group's id.
 	pub group_id: Option<String>,
 	/// Include archived (soft-deleted) servers. Defaults to false.
@@ -57,6 +59,8 @@ pub(crate) struct ServerSummary {
 	id: Uuid,
 	name: Option<String>,
 	host: Option<String>,
+	/// The application the server runs.
+	product: Product,
 	kind: ServerKind,
 	rank: Option<ServerRank>,
 	group_id: Option<Uuid>,
@@ -65,7 +69,9 @@ pub(crate) struct ServerSummary {
 	archived: bool,
 	/// When the most recent status was received, if any.
 	last_seen: Option<Timestamp>,
-	/// Last known Tamanu version (retained even when long offline).
+	/// Last known application version, retained even when long offline.
+	/// Absent for a product that has no application version.
+	// spec: APP#versions
 	version: Option<VersionStr>,
 	reachability: ShortStatus,
 	health: HealthState,
@@ -116,6 +122,8 @@ struct ServerDetail {
 	id: Uuid,
 	name: Option<String>,
 	host: Option<String>,
+	/// The application the server runs.
+	product: Product,
 	kind: ServerKind,
 	rank: Option<ServerRank>,
 	cloud: Option<bool>,
@@ -138,14 +146,16 @@ struct ServerDetail {
 #[tool_router(router = servers_router, vis = "pub(crate)")]
 impl CanopyMcp {
 	#[tool(
-		description = "Find servers by name/host/id substring, optionally filtered by kind, rank, \
-		               or group. Returns compact records with last-seen, version, and health."
+		description = "Find servers by name/host/id substring, optionally filtered by product, \
+		               kind, rank, or group. Returns compact records with last-seen, version, and \
+		               health. A server whose product has no application version carries none."
 	)]
 	async fn find_servers(
 		&self,
 		Parameters(args): Parameters<FindServersArgs>,
 	) -> Result<CallToolResult, McpError> {
 		let mut conn = self.conn().await?;
+		let product = parse_opt::<Product>(&args.product, "product")?;
 		let kind = parse_opt::<ServerKind>(&args.kind, "kind")?;
 		let rank = parse_opt::<ServerRank>(&args.rank, "rank")?;
 		let group = parse_opt_uuid(&args.group_id, "group_id")?;
@@ -158,7 +168,8 @@ impl CanopyMcp {
 
 		let q = args.query.as_deref().map(str::to_lowercase);
 		servers.retain(|s| {
-			kind.as_ref().is_none_or(|k| &s.kind == k)
+			product.as_ref().is_none_or(|p| &s.product == p)
+				&& kind.as_ref().is_none_or(|k| &s.kind == k)
 				&& rank.as_ref().is_none_or(|r| s.rank.as_ref() == Some(r))
 				&& group
 					.as_ref()
@@ -249,7 +260,7 @@ impl CanopyMcp {
 			backups.push(BackupCapabilityOut {
 				r#type: cap.r#type.to_string(),
 				enabled: cap.enabled,
-				last_successful_backup_at: last.as_ref().map(|r| r.reported_at),
+				last_successful_backup_at: last.as_ref().map(|r| r.anchor()),
 				last_snapshot_id: last.and_then(|r| r.snapshot_id),
 			});
 		}
@@ -295,6 +306,7 @@ impl CanopyMcp {
 			id: server.id,
 			name: server.name.clone(),
 			host: server.host.as_ref().map(|h| h.0.to_string()),
+			product: server.product,
 			kind: server.kind,
 			rank: server.rank,
 			cloud: server.cloud,
@@ -329,6 +341,7 @@ pub(crate) fn summarize(
 		id: s.id,
 		name: s.name.clone(),
 		host: s.host.as_ref().map(|h| h.0.to_string()),
+		product: s.product,
 		kind: s.kind,
 		rank: s.rank,
 		group_id: s.group_id,
@@ -336,7 +349,12 @@ pub(crate) fn summarize(
 		is_monitored: s.is_monitored,
 		archived: s.deleted_at.is_some(),
 		last_seen: st.map(|s| s.created_at),
-		version: st.and_then(|s| s.version.clone()),
+		// A product with no application version carries none rather than a
+		// stale value from a status that predates its classification.
+		// spec: APP#versions
+		version: st
+			.and_then(|st| st.version.clone())
+			.filter(|_| s.product.has_versions()),
 		reachability: st.map_or(ShortStatus::Gone, |s| s.short_status()),
 		health,
 	}

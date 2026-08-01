@@ -10,21 +10,27 @@ pub mod artifacts;
 pub mod backup;
 pub mod backups;
 pub mod bestool_snippets;
+pub mod certificate_alerts;
 pub mod check_policies;
 pub mod chrome_releases;
 pub mod devices;
 pub mod issues;
 pub mod mcp_tokens;
+pub mod migration_tests;
 pub mod notes;
+pub mod partitions;
 pub mod pg_duration;
 pub mod recovery_vault;
 pub mod reported_detail;
 pub mod restore;
 pub mod schema;
 pub mod self_alerts;
+pub mod server_certificates;
+pub mod server_domains;
 pub mod server_enrollment_challenges;
 pub mod server_enrollment_tokens;
 pub mod server_groups;
+pub mod server_names;
 pub mod servers;
 pub mod silenced_refs;
 pub mod slack_outbox;
@@ -42,9 +48,10 @@ pub mod views;
 pub use backups::{
 	BackupCredentialIssuance, BackupMaintenanceRun, BackupMaintenanceRunFilters,
 	BackupRecoveryVerification, BackupRepoSnapshot, BackupRepoStats, BackupRequest, BackupRun,
-	BackupRunFilters, BackupTypeDefault, MaintenanceOutcomeFilter, NewBackupCredentialIssuance,
-	NewBackupRun, NewBackupTypeDefault, NewServerGroupBackupConfig, NewServerGroupBackupSchedule,
-	RetentionPolicy, ServerBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
+	BackupRunFilters, BackupRunProgress, BackupTypeDefault, MaintenanceOutcomeFilter,
+	NewBackupCredentialIssuance, NewBackupRun, NewBackupRunProgress, NewBackupTypeDefault,
+	NewServerGroupBackupConfig, NewServerGroupBackupSchedule, RetentionPolicy,
+	ServerBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
 };
 pub use bestool_snippets::{BestoolSnippet, NewBestoolSnippet};
 pub use commons_types::backup::{
@@ -57,6 +64,9 @@ pub use restore::{
 	BackupRestoreCheck, NewBackupRestoreCheck, NewRestoreReplica, RestoreConsumerCapability,
 	RestoreReplica, RestoreReplicaUpdate,
 };
+pub use server_certificates::{OrderState, RevocationReason, Risk, ServerCertificate};
+pub use server_domains::ServerGroupDomain;
+pub use server_names::ServerName;
 
 pub type Db = Pool<AsyncPgConnection>;
 

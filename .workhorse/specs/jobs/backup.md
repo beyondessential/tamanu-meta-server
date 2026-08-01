@@ -9,7 +9,7 @@ This is the autonomous half of the backup system: the work Canopy does on a cade
 
 ## Scope
 
-This spec covers Canopy's own background backup work: repo maintenance, inspection, storage metering, upstream preflight, and the detection and alerting that turn all of it into incidents.
+This spec covers Canopy's own background backup work: repo maintenance, inspection, storage metering, upstream preflight, housekeeping of the data devices report, and the detection and alerting that turn all of it into incidents.
 
 It does not cover the device contract (see [BAK](../public-server/backup.md)), the operator's configuration of a group (see [BKO](../private-server/backup.md)), or restore-health (the managed restore replicas spec, `RST`).
 
@@ -52,12 +52,17 @@ Canopy watches its own access to each group's storage, so a broken control plane
 It checks that its identity resolves, that it can assume each group's role and perform a read-only no-op, and that the bucket's object-lock is present and at least the required retention.
 Preflight only alerts; it never pulls Canopy out of service, because a failing check must not make a degraded situation worse.
 
+## Housekeeping
+
+Canopy prunes the in-flight progress series devices report (see [BAK](../public-server/backup.md)) once it ages past the period that series is retained for, so it stays bounded without operator involvement.
+Pruning is fleet-wide and independent of any group's maintenance, so it never waits on or delays a group's other backup work.
+
 ## Detection
 
 Canopy reconciles three sources — what a device reported, what credentials were issued, and what actually landed in the repo — and alerts on disagreement:
 
-- **staleness** — a server with a prior successful backup but none recent, or one that has never backed up though it has been expected long enough.
-- **reconcile** — a device reported a successful backup but no matching snapshot landed (the report is false or the upload didn't persist), or a fresh snapshot exists but no recent report (the reporting path is broken).
+- **staleness** — a server with a prior successful backup but none recent, or one that has never backed up though it has been expected long enough. Recency is the age of the *data*, measured from the moment the backup froze what it captured (see [BAK](../public-server/backup.md)), falling back to the run's report time when it reported no such moment. So a backup that took many hours to upload is aged from when it was taken, and a server whose data is a day old is not counted fresh because its upload finished minutes ago. Both which run counts as the latest success and how old that success is use the same measure, so a server's freshness never travels backwards as new runs arrive.
+- **reconcile** — a device reported a successful backup but no matching snapshot landed (the report is false or the upload didn't persist), or a fresh snapshot exists but no recent report (the reporting path is broken). These are measured from report times, not from when data was frozen, because they assert that the reporting path itself is working rather than anything about the age of the data.
 - **size** — a device reported a snapshot size that disagrees with the size the same snapshot occupies in the repo; only compared when both sizes are known and non-zero.
 - **maintenance** — a group whose maintenance is overdue, or whose most recent maintenance failed.
 

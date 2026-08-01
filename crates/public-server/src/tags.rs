@@ -79,18 +79,24 @@ pub async fn effective_tags_for_server(
 ) -> Result<TagMap> {
 	let mut merged = server.tags_for_device(conn).await?;
 
-	// Fill in the group's effective billing labels where the server doesn't
-	// already carry one, matching what canopy attributes to the group's cloud
+	// Fill in the effective billing labels where the server doesn't already
+	// carry one, matching what canopy attributes to the group's cloud
 	// resources. `merged` already holds server tags overlaid on group tags, so a
 	// stored `billing.*` tag (server's own first, then the group's) is honoured
-	// and only the missing labels fall back to computed values. `billing.stage`
-	// is computed from *this* server's own rank, not the group's highest — a
-	// rank=clone server must report `billing.stage=clone`, never the group's
-	// `prod`, so its cost attributes to the right stage.
+	// and only the missing labels fall back to computed values.
+	//
+	// Every computed label describes *this* server, not its group: the stage
+	// comes from the server's own rank, so a rank=clone server reports
+	// `billing.stage=clone` and never the group's `prod`; and the product comes
+	// from the server's own product, so a SENAITE server in a Tamanu group
+	// reports `billing.product=senaite`. Attribution needs a deployment to
+	// attribute to, so an ungrouped server carries none.
+	// spec: APP#billing-attribution
 	if let Some(group_id) = server.group_id {
 		let group = ServerGroup::get_by_id(conn, group_id).await?;
 		for (key, value) in
-			BillingLabels::from_group(&group.tags, &group.name, server.rank).into_tags()
+			BillingLabels::for_server(&group.tags, &group.name, server.product, server.rank)
+				.into_tags()
 		{
 			merged.0.entry(key).or_insert(value);
 		}

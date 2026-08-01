@@ -4,7 +4,7 @@ import type { ServerKind } from "../types";
 const COLORS: Record<ServerKind, "primary" | "info" | "default"> = {
 	central: "primary",
 	facility: "info",
-	canopy: "default",
+	standalone: "default",
 };
 
 export default function ServerKindChip({ kind }: { kind: ServerKind }) {

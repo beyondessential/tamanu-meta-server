@@ -145,11 +145,21 @@ test.describe("restore replicas", () => {
 			intents: ["verify"],
 		});
 		const groupId = await groupWithBackups(sql, "del-group");
-		await seedRestoreReplica(sql, {
+		const server = await seedServer(sql, { groupId, name: "del-srv" });
+		const replica = await seedRestoreReplica(sql, {
 			consumerDeviceId: consumer.id,
 			groupId,
 			intent: "verify",
 			name: "doomed",
+		});
+		// A declaration that has been reported on deletes like any other; its
+		// reports are kept, detached.
+		await seedRestoreCheck(sql, {
+			consumerDeviceId: consumer.id,
+			groupId,
+			serverId: server.id,
+			replicaId: replica.id,
+			snapshotId: "snap-1",
 		});
 
 		await page.goto(`/groups/${groupId}/backups`);
@@ -161,6 +171,12 @@ test.describe("restore replicas", () => {
 			"SELECT count(*) AS count FROM restore_replicas",
 		);
 		expect(Number(rows[0]!.count)).toBe(0);
+
+		const checks = await sql.query<{ replica_id: string | null }>(
+			"SELECT replica_id FROM backup_restore_checks",
+		);
+		expect(checks).toHaveLength(1);
+		expect(checks[0]!.replica_id).toBeNull();
 	});
 
 	test("toggling enabled flips the row in the database", async ({
@@ -297,19 +313,57 @@ test.describe("restore replicas", () => {
 		await page.getByRole("button", { name: /declare replica/i }).click();
 		const dialog = page.getByRole("dialog");
 
-		// Name defaults to the kebab-cased group name (whole-group scope).
-		await expect(dialog.getByLabel("Name")).toHaveValue("solo-group");
+		// Name defaults to the kebab-cased group name and intent (whole-group
+		// scope).
+		await expect(dialog.getByLabel("Name")).toHaveValue("solo-group-verify");
 		// Picking a server folds the server name into the default.
 		await dialog.getByLabel("Server").click();
 		await page.getByRole("option", { name: "srv-a" }).click();
-		await expect(dialog.getByLabel("Name")).toHaveValue("solo-group-srv-a");
+		await expect(dialog.getByLabel("Name")).toHaveValue(
+			"solo-group-srv-a-verify",
+		);
 
 		// The consumer was never picked, yet Declare succeeds — the sole consumer
 		// was auto-selected.
 		await dialog.getByRole("button", { name: /^declare$/i }).click();
 		await expect(
-			page.getByRole("row", { name: /solo-group-srv-a/ }),
+			page.getByRole("row", { name: /solo-group-srv-a-verify/ }),
 		).toBeVisible();
+	});
+
+	test("a name already used by the consumer is refused", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await seedRestoreConsumerCapability(sql, {
+			deviceId: consumer.id,
+			intents: ["verify", "analytics"],
+		});
+		const groupId = await groupWithBackups(sql, "dupe-group");
+		await seedRestoreReplica(sql, {
+			consumerDeviceId: consumer.id,
+			groupId,
+			intent: "verify",
+			name: "taken",
+		});
+
+		await page.goto(`/groups/${groupId}/backups`);
+		await page.getByRole("button", { name: /declare replica/i }).click();
+
+		// A different intent is a different scope, but the name is the consumer's
+		// already — the declaration is refused rather than silently duplicated.
+		const dialog = page.getByRole("dialog");
+		await dialog.getByLabel("Intent").click();
+		await page.getByRole("option", { name: "analytics" }).click();
+		await dialog.getByLabel("Name").fill("taken");
+		await dialog.getByRole("button", { name: /^declare$/i }).click();
+
+		await expect(dialog.getByRole("alert")).toContainText(/name/i);
+		const rows = await sql.query<{ name: string }>(
+			"SELECT name FROM restore_replicas WHERE name = 'taken'",
+		);
+		expect(rows).toHaveLength(1);
 	});
 
 	test("the intent dropdown offers only intents the consumer registered", async ({

@@ -4,12 +4,15 @@ use serde::{Deserialize, Serialize};
 pub mod admins;
 pub mod backups;
 pub mod bestool;
+pub mod certificates;
 pub mod commons;
 pub mod devices;
+pub mod domains;
 pub mod healthchecks;
 pub mod incidents;
 pub mod issues;
 pub mod mcp_tokens;
+pub mod migration_tests;
 pub mod restore_replicas;
 pub mod self_alerts;
 pub mod server_groups;
@@ -53,12 +56,15 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 			.nest("/admins", admins::routes())
 			.nest("/backups", backups::routes())
 			.nest("/bestool", bestool::routes())
+			.nest("/certificates", certificates::routes())
 			.nest("/commons", commons::routes())
 			.nest("/devices", devices::routes())
+			.nest("/domains", domains::routes())
 			.nest("/healthchecks", healthchecks::routes())
 			.nest("/incidents", incidents::routes())
 			.nest("/issues", issues::routes())
 			.nest("/mcp_tokens", mcp_tokens::routes())
+			.nest("/migration_tests", migration_tests::routes())
 			.nest("/restore_replicas", restore_replicas::routes())
 			.nest("/self_alerts", self_alerts::routes())
 			.nest("/server_groups", server_groups::routes())
