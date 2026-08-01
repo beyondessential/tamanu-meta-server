@@ -79,6 +79,10 @@ pub const PREFLIGHT_OBJECT_LOCK: &str = "preflight-object-lock";
 pub const RESTORE_VERIFICATION: &str = "restore-verification";
 pub const MIGRATION_TEST: &str = "migration-test";
 
+/// The masking manifest for a redacting replica did not fully apply.
+/// Server-scoped, `Warning`, does not escalate.
+pub const REDACTION: &str = "redaction";
+
 // --- shipped documentation (seeded into the catalog on first filing) ---
 
 pub const STALENESS_DOC: &str = "## Description
@@ -250,3 +254,18 @@ A candidate version's schema migrations were applied to a restore replica of thi
 ## Solve
 
 Read the failing migration named in the report detail. The fix belongs to the migration or to the deployment's data, and the version stays unready until someone resolves the known issue against it.";
+
+pub const REDACTION_DOC: &str = "## Description
+
+A replica of this server's data was declared to be served de-identified, and its masking manifest did not fully apply. The server itself is unaffected — this is about the copy, not the deployment.
+
+## Results
+
+- **warn (partial)** — the replica is live and most of its data is masked, but some columns could not be and are in the clear. The report detail carries how many; only the consumer's own logs name which.
+- **warn (failed)** — no masking took effect, so the replica was not switched over. It is still serving the data it was already serving, which grows staler until the redaction succeeds.
+
+## Solve
+
+For a partial redaction, treat the replica as carrying real data until the skipped columns are identified from the consumer's logs — a column is usually skipped because its masking doesn't fit its type, which is a fix to the manifest.
+
+For a failed one, the usual cause is the manifest being unreachable or not published for the version restored. Check that the version has a published manifest; a replica in this state stays on stale data indefinitely rather than serving anything unmasked.";

@@ -420,6 +420,30 @@ pub mod semantics {
 	pub const REDACT: &str = "redact";
 }
 
+/// The parameters Canopy owns on behalf of the `redact` semantic.
+///
+/// An operator declaring a redacting replica says only that it redacts;
+/// where its masking comes from is a property of the server's product, so
+/// Canopy resolves these into the worklist itself and never takes an
+/// operator's value for them.
+// spec: RST#the-masking-manifest
+pub mod redaction_params {
+	/// `text` — where the masking manifest for a version lives, with
+	/// `{version}` substituted by the consumer against the data it restored.
+	/// A value here is what turns redaction on for the consumer.
+	pub const MANIFEST_URL: &str = "redaction_manifest_url";
+	/// `text` — SQL reading the deployment's own version out of the restored
+	/// database, to substitute into the manifest URL.
+	pub const VERSION_QUERY: &str = "redaction_version_query";
+	/// `boolean` — whether to retry at the `major.minor.0` base version when
+	/// the versioned manifest URL 404s.
+	pub const VERSION_FALLBACK_TO_BASE: &str = "redaction_version_fallback_to_base";
+
+	/// Every parameter Canopy owns for `redact`, for stripping operator
+	/// values and for resolving the worklist's.
+	pub const ALL: &[&str] = &[MANIFEST_URL, VERSION_QUERY, VERSION_FALLBACK_TO_BASE];
+}
+
 /// The data type of a restore-replica configuration parameter, which
 /// determines how its value is validated. `duration` and `bytes` values must
 /// be non-negative integers (a count of seconds and of bytes, respectively);

@@ -63,6 +63,11 @@ fn new_check(
 		s3_received_payload_bytes: None,
 		health_details: None,
 		run_id: None,
+		redaction_outcome: None,
+		redaction_manifest_version: None,
+		redaction_columns_masked: None,
+		redaction_columns_skipped: None,
+		redaction_error: None,
 	}
 }
 
@@ -116,6 +121,7 @@ fn new_replica(
 		name: name.into(),
 		overdue_after: None,
 		params: serde_json::json!({}),
+		redacts: false,
 		created_by: Some("op@example.com".into()),
 	}
 }
@@ -132,6 +138,7 @@ fn update_from(r: &RestoreReplica) -> RestoreReplicaUpdate {
 		name: r.name.clone(),
 		overdue_after: r.overdue_after,
 		params: r.params.clone(),
+		redacts: r.redacts,
 		enabled: r.enabled,
 	}
 }

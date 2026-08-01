@@ -665,6 +665,11 @@ async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
 					s3_received_payload_bytes: None,
 					health_details: None,
 					run_id: None,
+					redaction_outcome: None,
+					redaction_manifest_version: None,
+					redaction_columns_masked: None,
+					redaction_columns_skipped: None,
+					redaction_error: None,
 				},
 				database::migration_tests::NewMigrationTest {
 					target_version_id: newest,

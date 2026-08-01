@@ -19,8 +19,8 @@ use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::device_auth::BackupRestoreDevice;
 use commons_types::backup::{
-	BackupPurpose, BackupType, IntentDescriptor, ParamValues, RestoreIntent, RunOutcome,
-	resolve_params, semantics,
+	BackupPurpose, BackupType, IntentDescriptor, ParamValues, RedactionOutcome, RestoreIntent,
+	RunOutcome, resolve_params, semantics,
 };
 use database::{
 	Db,
@@ -562,6 +562,31 @@ pub struct VerificationArgs {
 	/// What the migrations did, for a report under a `migrate` intent. Omit for
 	/// every other intent.
 	pub migration: Option<MigrationArgs>,
+	/// What the masking manifest did, for a replica that redacts. Omit for a
+	/// replica that doesn't.
+	pub redaction: Option<RedactionArgs>,
+}
+
+/// How the masking manifest went against the restored replica.
+///
+/// Reported when the redaction settles, which for a failure is before any
+/// switchover: the restore itself succeeded and is reported healthy, and the
+/// replica stays on the data it was already serving.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct RedactionArgs {
+	/// How far the manifest got: `complete`, `partial`, or `failed`.
+	#[schema(value_type = String)]
+	pub outcome: RedactionOutcome,
+	/// The version resolved into the manifest URL. Omit when the URL named no
+	/// version to resolve.
+	pub manifest_version: Option<String>,
+	/// How many columns the manifest masked.
+	pub columns_masked: Option<i64>,
+	/// How many columns the manifest named but could not mask. Non-zero is
+	/// what makes an outcome `partial`.
+	pub columns_skipped: Option<i64>,
+	/// Why the redaction failed, when it did.
+	pub error: Option<String>,
 }
 
 /// How the target version's migrations went against the restored replica.
@@ -649,6 +674,14 @@ async fn verification(
 		s3_received_payload_bytes: args.s3_received_payload_bytes,
 		health_details: args.health_details,
 		run_id: args.run_id,
+		redaction_outcome: args.redaction.as_ref().map(|r| r.outcome),
+		redaction_manifest_version: args
+			.redaction
+			.as_ref()
+			.and_then(|r| r.manifest_version.clone()),
+		redaction_columns_masked: args.redaction.as_ref().and_then(|r| r.columns_masked),
+		redaction_columns_skipped: args.redaction.as_ref().and_then(|r| r.columns_skipped),
+		redaction_error: args.redaction.as_ref().and_then(|r| r.error.clone()),
 	};
 
 	match args.migration {

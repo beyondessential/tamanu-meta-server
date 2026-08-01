@@ -19,12 +19,14 @@ use commons_types::{
 	Uuid,
 	backup::{
 		BackupPurpose, BackupType, IntentDescriptor, ParamValues, RestoreIntent, RunOutcome,
-		display_param_defaults, display_params, normalize_params, validate_params,
+		display_param_defaults, display_params, normalize_params, redaction_params, semantics,
+		validate_params,
 	},
 	units,
 };
 use database::diesel_async::AsyncPgConnection;
 use database::pg_duration::PgDuration;
+use database::restore::{self, RedactionGapReason};
 use database::{
 	BackupRestoreCheck, NewRestoreReplica, RestoreConsumerCapability, RestoreReplica,
 	RestoreReplicaUpdate, backups::BackupCredentialIssuance, devices::Device, servers::Server,
@@ -87,6 +89,16 @@ pub struct RestoreReplicaView {
 	/// `create` and `update` accept these strings back.
 	#[schema(value_type = Object)]
 	pub params: serde_json::Value,
+	/// Whether the replica is served de-identified.
+	pub redacts: bool,
+	/// True when the intent carries the `redact` semantic, so the declaration
+	/// can be switched to redacting.
+	pub can_redact: bool,
+	/// Servers this declaration covers that cannot currently be redacted:
+	/// either their product publishes no masking manifest, or the version
+	/// they report has none published. Each is withheld from the worklist
+	/// rather than restored unmasked. Empty unless the declaration redacts.
+	pub redaction_gaps: Vec<RedactionGap>,
 	/// Whether the declaration is active. Disabled declarations are not
 	/// dispatched to the consumer and grant no backup access.
 	pub enabled: bool,
@@ -101,6 +113,19 @@ pub struct RestoreReplicaView {
 	/// When the declaration was last modified.
 	#[schema(value_type = String)]
 	pub updated_at: Timestamp,
+}
+
+/// One server a redacting declaration covers but cannot redact.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct RedactionGap {
+	/// The server that would be restored unmasked, and so isn't restored.
+	pub server_id: Uuid,
+	/// Its display name, when known.
+	pub server_name: Option<String>,
+	/// Why it can't be redacted.
+	pub reason: RedactionGapReason,
+	/// The version it reports, when the reason concerns one.
+	pub version: Option<String>,
 }
 
 /// A restore consumer and the restore intents it currently advertises.
@@ -160,6 +185,12 @@ pub struct RestoreReplicasCreateArgs {
 	#[serde(default)]
 	#[schema(value_type = Object)]
 	pub params: ParamValues,
+	/// Whether the replica is served de-identified. Accepted only for an
+	/// intent carrying the `redact` semantic; Canopy resolves the masking
+	/// manifest itself from the server's product, so there is nothing else
+	/// to set. Defaults to false.
+	#[serde(default)]
+	pub redacts: bool,
 }
 
 /// Request to update an existing declaration.
@@ -201,6 +232,10 @@ pub struct RestoreReplicasUpdateArgs {
 	#[serde(default)]
 	#[schema(value_type = Object)]
 	pub params: ParamValues,
+	/// Whether the replica is served de-identified. Accepted only for an
+	/// intent carrying the `redact` semantic. Defaults to false.
+	#[serde(default)]
+	pub redacts: bool,
 	/// Whether the declaration should be active.
 	pub enabled: bool,
 }
@@ -235,16 +270,69 @@ async fn normalized_params_for_intent(
 	consumer_device_id: Uuid,
 	intent: &RestoreIntent,
 	params: &ParamValues,
+	redacts: bool,
 ) -> Result<ParamValues> {
 	let descriptors =
 		RestoreConsumerCapability::list_for_consumer(conn, consumer_device_id).await?;
 	let Some(desc) = descriptors.iter().find(|d| &d.intent == intent) else {
 		return Ok(params.clone());
 	};
+
+	// The masking parameters are Canopy's for any intent carrying `redact`,
+	// whether or not this declaration redacts. An operator value for one is
+	// dropped rather than stored: were it kept, a declaration could redact
+	// with its flag off and the flag would stop answering on its own whether
+	// an unmasked replica is a finding.
+	let owns_masking = desc.has_semantic(semantics::REDACT);
+	if redacts && !owns_masking {
+		return Err(AppError::BadRequest(format!(
+			"intent {intent} cannot redact: it does not carry the `redact` semantic"
+		)));
+	}
+	let params = if owns_masking {
+		&params
+			.iter()
+			.filter(|(name, _)| !redaction_params::ALL.contains(&name.as_str()))
+			.map(|(name, value)| (name.clone(), value.clone()))
+			.collect()
+	} else {
+		params
+	};
+
 	let normalized =
 		normalize_params(&desc.params, params).map_err(|e| AppError::BadRequest(e.to_string()))?;
 	validate_params(&desc.params, &normalized).map_err(|e| AppError::BadRequest(e.to_string()))?;
 	Ok(normalized)
+}
+
+/// The servers a redacting declaration covers that can't be redacted, so an
+/// operator sees which of its replicas are being withheld and why.
+// spec: RST#the-masking-manifest
+async fn redaction_gaps_for(
+	conn: &mut AsyncPgConnection,
+	replica: &RestoreReplica,
+) -> Result<Vec<RedactionGap>> {
+	let servers = match replica.server_id {
+		Some(sid) => Server::get_by_id(conn, sid)
+			.await
+			.ok()
+			.into_iter()
+			.collect(),
+		None => Server::list_live_in_group(conn, replica.group_id).await?,
+	};
+
+	let mut gaps = Vec::new();
+	for server in servers {
+		if let Some((reason, version)) = restore::redaction_gap_for(conn, &server).await? {
+			gaps.push(RedactionGap {
+				server_id: server.id,
+				server_name: server.name.clone(),
+				reason,
+				version,
+			});
+		}
+	}
+	Ok(gaps)
 }
 
 /// Build views from declarations, resolving consumer display names and the
@@ -270,6 +358,14 @@ async fn to_views(
 		caps.insert(id, descriptors);
 	}
 
+	// Only a redacting declaration can have a redaction gap, and resolving
+	// one walks the declaration's servers, so this is keyed by declaration
+	// and computed only for those that redact.
+	let mut gaps: HashMap<Uuid, Vec<RedactionGap>> = HashMap::new();
+	for r in replicas.iter().filter(|r| r.redacts) {
+		gaps.insert(r.id, redaction_gaps_for(conn, r).await?);
+	}
+
 	Ok(replicas
 		.into_iter()
 		.map(|r| {
@@ -287,6 +383,12 @@ async fn to_views(
 			};
 			RestoreReplicaView {
 				gap: schema.is_none(),
+				can_redact: caps
+					.get(&r.consumer_device_id)
+					.and_then(|descs| descs.iter().find(|d| d.intent == r.intent))
+					.is_some_and(|d| d.has_semantic(semantics::REDACT)),
+				redacts: r.redacts,
+				redaction_gaps: gaps.remove(&r.id).unwrap_or_default(),
 				consumer_name: names.get(&r.consumer_device_id).cloned().flatten(),
 				overdue_after: r
 					.overdue_after
@@ -604,6 +706,7 @@ pub async fn create(
 		args.consumer_device_id,
 		&args.intent,
 		&args.params,
+		args.redacts,
 	)
 	.await?;
 	let replica = RestoreReplica::create(
@@ -617,6 +720,7 @@ pub async fn create(
 			name: args.name,
 			overdue_after: overdue_after_to_pg(args.overdue_after.as_deref())?,
 			params: serde_json::to_value(&params).expect("params serialize"),
+			redacts: args.redacts,
 			created_by: Some(admin.login),
 		},
 	)
@@ -665,6 +769,7 @@ pub async fn update(
 		args.consumer_device_id,
 		&args.intent,
 		&args.params,
+		args.redacts,
 	)
 	.await?;
 	let replica = RestoreReplica::update(
@@ -679,6 +784,7 @@ pub async fn update(
 			name: args.name,
 			overdue_after: overdue_after_to_pg(args.overdue_after.as_deref())?,
 			params: serde_json::to_value(&params).expect("params serialize"),
+			redacts: args.redacts,
 			enabled: args.enabled,
 		},
 	)

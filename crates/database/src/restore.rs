@@ -7,7 +7,9 @@
 use std::collections::{HashMap, hash_map::Entry};
 
 use commons_errors::{AppError, Result};
-use commons_types::backup::{BackupType, IntentDescriptor, RestoreIntent, RunOutcome, semantics};
+use commons_types::backup::{
+	BackupType, IntentDescriptor, RedactionOutcome, RestoreIntent, RunOutcome, semantics,
+};
 use commons_types::status::CheckResult;
 use diesel::{
 	prelude::*,
@@ -68,6 +70,11 @@ pub struct RestoreReplica {
 	/// operator explicitly set are included.
 	#[schema(value_type = Object)]
 	pub params: serde_json::Value,
+	/// Whether this replica is served de-identified. Canopy resolves the
+	/// masking manifest itself from the server's product, so this flag is
+	/// the whole of the operator's say in it, and it answers on its own
+	/// whether a replica that came up unmasked is a finding.
+	pub redacts: bool,
 	/// Whether this declaration is currently active. When disabled, it
 	/// produces no work and grants no access, but is kept for reference.
 	pub enabled: bool,
@@ -93,6 +100,7 @@ pub struct NewRestoreReplica {
 	pub name: String,
 	pub overdue_after: Option<PgDuration>,
 	pub params: serde_json::Value,
+	pub redacts: bool,
 	pub created_by: Option<String>,
 }
 
@@ -109,6 +117,7 @@ pub struct RestoreReplicaUpdate {
 	pub name: String,
 	pub overdue_after: Option<PgDuration>,
 	pub params: serde_json::Value,
+	pub redacts: bool,
 	pub enabled: bool,
 }
 
@@ -242,6 +251,7 @@ impl RestoreReplica {
 				dsl::name.eq(name),
 				dsl::overdue_after.eq(update.overdue_after),
 				dsl::params.eq(update.params),
+				dsl::redacts.eq(update.redacts),
 				dsl::enabled.eq(update.enabled),
 			))
 			.returning(Self::as_select())
@@ -275,6 +285,7 @@ impl RestoreReplica {
 				existing.server_id,
 				&existing.r#type,
 				&existing.intent,
+				existing.redacts,
 			)
 			.await?;
 		}
@@ -308,6 +319,7 @@ impl RestoreReplica {
 				existing.server_id,
 				&existing.r#type,
 				&existing.intent,
+				existing.redacts,
 			)
 			.await?;
 			Ok(())
@@ -464,6 +476,158 @@ fn restore_verification_ref(r#type: &BackupType, intent: &RestoreIntent) -> Stri
 	format!("{}:{}:{}", refs::RESTORE_VERIFICATION, r#type, intent)
 }
 
+/// Why a server a redacting declaration covers can't be redacted.
+///
+/// Each of these withholds the server's worklist entry: a replica that
+/// cannot be redacted is not restored at all, since an unredacted replica
+/// standing in for a redacted one is worse than no replica.
+// spec: RST#the-masking-manifest
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RedactionGapReason {
+	/// The server's product publishes no masking manifests.
+	ProductHasNoManifest,
+	/// The product publishes them, but not for the version this server
+	/// reports, so the consumer would fetch a URL that 404s.
+	VersionHasNoManifest,
+	/// The server has reported no version to resolve a manifest for.
+	VersionUnknown,
+}
+
+/// Whether a server can be redacted, and why not when it can't.
+///
+/// Corroborates the product's manifest template against the artefacts the
+/// version actually published: a template that resolves to nothing is
+/// caught here, at declaration time, rather than when a restore fails.
+// spec: RST#the-masking-manifest
+pub async fn redaction_gap_for(
+	db: &mut AsyncPgConnection,
+	server: &crate::servers::Server,
+) -> Result<Option<(RedactionGapReason, Option<String>)>> {
+	let Some(manifest) = server.product.caps().redaction else {
+		return Ok(Some((RedactionGapReason::ProductHasNoManifest, None)));
+	};
+
+	let Some(reported) =
+		crate::reported_detail::ReportedDetail::last_version(db, server.id).await?
+	else {
+		return Ok(Some((RedactionGapReason::VersionUnknown, None)));
+	};
+	let shown = reported.0.to_string();
+
+	// An unpublished version has no artefacts at all, which reads the same
+	// way as a published one that didn't upload a manifest: either way the
+	// URL the consumer would fetch isn't there.
+	let Ok(version) = crate::versions::Version::get_by_version(db, reported).await else {
+		return Ok(Some((
+			RedactionGapReason::VersionHasNoManifest,
+			Some(shown),
+		)));
+	};
+
+	let published = crate::artifacts::Artifact::get_for_version(db, version.id)
+		.await?
+		.into_iter()
+		.any(|a| a.artifact_type == manifest.artifact_type);
+
+	Ok((!published).then_some((RedactionGapReason::VersionHasNoManifest, Some(shown))))
+}
+
+/// The stable check ref for one replica's redaction, keyed the same way
+/// restore-verification is so the catalog holds one policy per replica shape
+/// rather than one per server.
+fn redaction_ref(r#type: &BackupType, intent: &RestoreIntent) -> String {
+	format!("{}:{}:{}", refs::REDACTION, r#type, intent)
+}
+
+/// What a consumer's masking did to the replica a report is about.
+#[derive(Debug, Clone)]
+struct ReportedRedaction {
+	outcome: RedactionOutcome,
+	manifest_version: Option<String>,
+	columns_masked: Option<i64>,
+	columns_skipped: Option<i64>,
+	error: Option<String>,
+}
+
+/// Raise or recover the server's redaction check.
+///
+/// A warning that does not escalate. The deployment is healthy and its data
+/// is where it should be; the finding is that a replica made from that data
+/// is not as safe to hand out as it was declared to be, which belongs to
+/// whoever gave out the replica rather than to whoever is on call for
+/// outages.
+// spec: RST#alerting
+async fn file_redaction_outcome(
+	db: &mut AsyncPgConnection,
+	server_id: Uuid,
+	r#type: &BackupType,
+	intent: &RestoreIntent,
+	redaction: &ReportedRedaction,
+) -> Result<()> {
+	let r#ref = redaction_ref(r#type, intent);
+	let detail = serde_json::json!({
+		"outcome": redaction.outcome.to_string(),
+		"manifest_version": redaction.manifest_version,
+		"columns_masked": redaction.columns_masked,
+		"columns_skipped": redaction.columns_skipped,
+		"error": redaction.error,
+	});
+
+	let (observed, title, message) = match redaction.outcome {
+		RedactionOutcome::Complete => (
+			CheckResult::Passed,
+			None,
+			format!("Replica of server {server_id} redacted: {type} / {intent}"),
+		),
+		RedactionOutcome::Partial => {
+			let skipped = redaction
+				.columns_skipped
+				.map(|n| format!("{n} columns"))
+				.unwrap_or_else(|| "some columns".into());
+			(
+				CheckResult::Warning,
+				Some("redaction partial"),
+				format!(
+					"Replica of server {server_id} is live with {skipped} unmasked: {type} / {intent}"
+				),
+			)
+		}
+		RedactionOutcome::Failed => {
+			let why = redaction
+				.error
+				.clone()
+				.unwrap_or_else(|| "no reason given".into());
+			(
+				CheckResult::Warning,
+				Some("redaction failed"),
+				format!(
+					"Replica of server {server_id} is held on its previous data, unredacted: {type} / {intent}: {why}"
+				),
+			)
+		}
+	};
+
+	file_check(
+		db,
+		CheckFiling {
+			source: crate::statuses::CANOPY_SOURCE,
+			scope: Scope::Server(server_id),
+			device_id: None,
+			check: &r#ref,
+			observed,
+			title,
+			message: &message,
+			detail: Some(detail),
+			default_ceiling: CheckResult::Warning,
+			default_escalates: false,
+			documentation: Some(refs::REDACTION_DOC),
+		},
+	)
+	.await?;
+	Ok(())
+}
+
 /// Recover any active restore-verification alert keyed to a declaration's old
 /// `(server, type, intent)`, called when the declaration stops covering that
 /// scope (it was deleted, or its scope moved elsewhere). Mirrors the recovery
@@ -476,6 +640,7 @@ async fn recover_old_scope_alerts(
 	old_server_id: Option<Uuid>,
 	old_type: &BackupType,
 	old_intent: &RestoreIntent,
+	old_redacts: bool,
 ) -> Result<()> {
 	let servers = match old_server_id {
 		Some(sid) => vec![sid],
@@ -506,6 +671,32 @@ async fn recover_old_scope_alerts(
 			},
 		)
 		.await?;
+
+		// Only a declaration that redacted has a redaction check to clear;
+		// recovering one for every declaration would seed the catalog with
+		// checks that were never raised.
+		if old_redacts {
+			let r#ref = redaction_ref(old_type, old_intent);
+			file_check(
+				db,
+				CheckFiling {
+					source: crate::statuses::CANOPY_SOURCE,
+					scope: Scope::Server(sid),
+					device_id: None,
+					check: &r#ref,
+					observed: CheckResult::Passed,
+					title: None,
+					message: &format!(
+						"Redaction no longer tracked at this scope: {old_type} / {old_intent} for server {sid}"
+					),
+					detail: None,
+					default_ceiling: CheckResult::Warning,
+					default_escalates: false,
+					documentation: Some(refs::REDACTION_DOC),
+				},
+			)
+			.await?;
+		}
 	}
 
 	Ok(())
@@ -577,6 +768,20 @@ pub struct BackupRestoreCheck {
 	/// (for Canopy-measured duration). `None` for older consumers, which fall
 	/// back to time-window matching.
 	pub run_id: Option<Uuid>,
+	/// How far the replica's masking manifest got. `None` for a replica that
+	/// doesn't redact.
+	pub redaction_outcome: Option<RedactionOutcome>,
+	/// The version whose manifest was fetched, when the manifest URL named one.
+	pub redaction_manifest_version: Option<String>,
+	/// How many columns the manifest masked.
+	pub redaction_columns_masked: Option<i64>,
+	/// How many columns the manifest named but could not mask. Non-zero is
+	/// what makes a redaction partial.
+	pub redaction_columns_skipped: Option<i64>,
+	/// Why the redaction failed, when it did. Distinct from `error`, which
+	/// describes the restore: the restore can succeed and the redaction that
+	/// follows it fail.
+	pub redaction_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -602,6 +807,11 @@ pub struct NewBackupRestoreCheck {
 	pub s3_received_payload_bytes: Option<i64>,
 	pub health_details: Option<serde_json::Value>,
 	pub run_id: Option<Uuid>,
+	pub redaction_outcome: Option<RedactionOutcome>,
+	pub redaction_manifest_version: Option<String>,
+	pub redaction_columns_masked: Option<i64>,
+	pub redaction_columns_skipped: Option<i64>,
+	pub redaction_error: Option<String>,
 }
 
 impl BackupRestoreCheck {
@@ -621,6 +831,13 @@ impl BackupRestoreCheck {
 		let intent = new.intent.clone();
 		let error = new.error.clone();
 		let snapshot_id = new.snapshot_id.clone();
+		let redaction = new.redaction_outcome.map(|outcome| ReportedRedaction {
+			outcome,
+			manifest_version: new.redaction_manifest_version.clone(),
+			columns_masked: new.redaction_columns_masked,
+			columns_skipped: new.redaction_columns_skipped,
+			error: new.redaction_error.clone(),
+		});
 
 		let check_id: i64 = diesel::insert_into(dsl::backup_restore_checks)
 			.values(new)
@@ -682,6 +899,12 @@ impl BackupRestoreCheck {
 					},
 				)
 				.await?;
+			}
+
+			// Redaction is its own signal: a replica can restore healthily and
+			// still come up with data that was meant to be masked and isn't.
+			if let Some(redaction) = redaction {
+				file_redaction_outcome(db, sid, &r#type, &intent, &redaction).await?;
 			}
 		}
 		Ok(check_id)
