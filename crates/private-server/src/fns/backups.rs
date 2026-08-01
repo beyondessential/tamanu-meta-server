@@ -14,7 +14,7 @@ use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::TailscaleAdmin;
+use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::{
 	Uuid,
 	backup::{
@@ -973,6 +973,7 @@ pub struct SetCapabilityArgs {
 )]
 pub async fn get(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	Json(args): Json<BackupsGroupArgs>,
 ) -> Result<Json<Option<BackupConfigView>>> {
 	let mut conn = state.db.get().await?;
@@ -1001,6 +1002,7 @@ pub async fn get(
 )]
 pub async fn list(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	_body: Json<serde_json::Value>,
 ) -> Result<Json<Vec<BackupConfigSummary>>> {
 	let mut conn = state.db.get().await?;
@@ -1611,6 +1613,7 @@ pub struct GroupTypeScheduleView {
 )]
 pub async fn group_schedules(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	Json(args): Json<BackupsGroupArgs>,
 ) -> Result<Json<Vec<GroupTypeScheduleView>>> {
 	let mut conn = state.db.get().await?;
@@ -1715,6 +1718,7 @@ pub struct TypeDefaultView {
 )]
 pub async fn type_defaults(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	_body: Json<serde_json::Value>,
 ) -> Result<Json<Vec<TypeDefaultView>>> {
 	let mut conn = state.db.get().await?;
@@ -2054,6 +2058,7 @@ pub async fn cancel_maintenance(
 )]
 pub async fn stats(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	Json(args): Json<BackupsGroupArgs>,
 ) -> Result<Json<BackupStatsView>> {
 	let mut conn = state.db.get().await?;
@@ -2298,6 +2303,7 @@ pub struct RunProgressPoint {
 )]
 pub async fn run_progress(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	Json(args): Json<RunProgressArgs>,
 ) -> Result<Json<Vec<RunProgressPoint>>> {
 	let mut conn = state.db.get().await?;
@@ -2338,6 +2344,7 @@ pub async fn run_progress(
 )]
 pub async fn capabilities(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	Json(args): Json<ServerArgs>,
 ) -> Result<Json<Vec<ServerBackupCapabilityView>>> {
 	let mut conn = state.db.get().await?;
