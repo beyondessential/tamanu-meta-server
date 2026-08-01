@@ -22,6 +22,7 @@ mod incident_linger;
 mod incident_reeval_queue;
 mod incident_result_semantics;
 mod incident_stats;
+mod issue_list_filters;
 mod mcp_tokens;
 mod migration_test_candidates;
 mod migration_test_reports;
