@@ -47,21 +47,53 @@ function resolveVar(varPath: string, sample: HealthcheckSample): { found: boolea
 	return { found: true, value: map[field] };
 }
 
+/**
+ * What Rust's `str::parse::<f64>()` accepts, which is narrower than
+ * `Number()`: no hex/binary/octal (`0x10` is 16 to JS, an error to Rust), no
+ * digit separators, and no surrounding whitespace.
+ *
+ * `inf`/`nan` spellings are left out. Rust accepts them, but they can only
+ * arrive as strings, and a string equal to another is already structurally
+ * equal — while `inf` compared against any real number is false either way.
+ */
+const RUST_F64 = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
+
 function toNumber(v: unknown): number | null {
 	if (typeof v === "number") return Number.isFinite(v) ? v : null;
-	if (typeof v === "string") {
-		const trimmed = v.trim();
-		if (trimmed === "") return null;
-		const n = Number(trimmed);
-		return Number.isFinite(n) ? n : null;
+	if (typeof v !== "string") return null;
+	// Deliberately not trimmed: `" 12 ".parse::<f64>()` is an error in Rust.
+	if (!RUST_F64.test(v)) return null;
+	const n = Number(v);
+	return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Structural equality, mirroring `PartialEq for serde_json::Value` — Rust
+ * compares arrays element-wise and objects key-wise, so `[1,2] == [1,2]` is
+ * true there. `===` is reference equality for both, which made the preview
+ * say the opposite of what the rule does.
+ */
+function deepEqual(a: unknown, b: unknown): boolean {
+	if (a === b) return true;
+	if (a === null || b === null) return false;
+	if (typeof a !== "object" || typeof b !== "object") return false;
+	if (Array.isArray(a) !== Array.isArray(b)) return false;
+	if (Array.isArray(a) && Array.isArray(b)) {
+		return a.length === b.length && a.every((x, i) => deepEqual(x, b[i]));
 	}
-	return null;
+	const ao = a as Record<string, unknown>;
+	const bo = b as Record<string, unknown>;
+	const ak = Object.keys(ao);
+	// Key order is irrelevant to `serde_json::Value` equality, so compare as
+	// sets of entries rather than in insertion order.
+	return (
+		ak.length === Object.keys(bo).length &&
+		ak.every((k) => k in bo && deepEqual(ao[k], bo[k]))
+	);
 }
 
 function jsonEqual(a: unknown, b: unknown): boolean {
-	// Strict structural equality (JSON-level).
-	if (a === b) return true;
-	if (typeof a === "number" && typeof b === "number") return a === b;
+	if (deepEqual(a, b)) return true;
 	// Numeric coercion: same as Rust evaluator.
 	const an = toNumber(a);
 	const bn = toNumber(b);
