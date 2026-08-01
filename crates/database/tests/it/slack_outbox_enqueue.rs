@@ -630,14 +630,14 @@ async fn mark_failed_holds_the_row_back_for_its_backoff() {
 
 #[test]
 fn retry_backoff_doubles_then_holds_at_the_cap() {
-	use database::slack_outbox::{RETRY_BACKOFF_CAP, retry_backoff};
+	use database::slack_outbox::{RETRY_BACKOFF, retry_backoff};
 
 	assert_eq!(retry_backoff(1), SignedDuration::from_secs(15));
 	assert_eq!(retry_backoff(2), SignedDuration::from_secs(30));
 	assert_eq!(retry_backoff(3), SignedDuration::from_mins(1));
 	assert_eq!(retry_backoff(6), SignedDuration::from_mins(8));
-	assert_eq!(retry_backoff(7), RETRY_BACKOFF_CAP);
-	assert_eq!(retry_backoff(100), RETRY_BACKOFF_CAP);
+	assert_eq!(retry_backoff(7), RETRY_BACKOFF.cap());
+	assert_eq!(retry_backoff(100), RETRY_BACKOFF.cap());
 
 	// The drainer's 10-attempt budget must span a routine Slack incident,
 	// not a couple of minutes' worth of ticks.

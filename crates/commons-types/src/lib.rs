@@ -1,6 +1,7 @@
 pub use uuid::Uuid;
 
 pub mod acme;
+pub mod backoff;
 pub mod backup;
 pub mod device;
 pub mod dns;

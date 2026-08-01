@@ -23,6 +23,7 @@
 //! eventually wakes up.
 
 use commons_errors::{AppError, Result};
+use commons_types::backoff::Backoff;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::{SignedDuration, Timestamp};
@@ -43,25 +44,20 @@ pub const KIND_SELF_ALERT_OPEN: &str = "self_alert_open";
 /// Legacy: see [`KIND_SELF_ALERT_OPEN`].
 pub const KIND_SELF_ALERT_RESOLVE: &str = "self_alert_resolve";
 
-/// Delay after the first failed attempt; doubles from there.
-pub const RETRY_BACKOFF_BASE: SignedDuration = SignedDuration::from_secs(15);
-/// Ceiling on the retry backoff, so the tail of a long outage is retried
-/// on a steady cadence rather than an ever-lengthening one.
-pub const RETRY_BACKOFF_CAP: SignedDuration = SignedDuration::from_mins(15);
+/// Redelivery schedule: 15s after the first failure, doubling, held at 15
+/// minutes so the tail of a long outage is retried on a steady cadence rather
+/// than an ever-lengthening one.
+pub const RETRY_BACKOFF: Backoff =
+	Backoff::new(SignedDuration::from_secs(15), SignedDuration::from_mins(15));
 
-/// How long to hold a row back after its `attempts`th failed delivery:
-/// [`RETRY_BACKOFF_BASE`] doubling per attempt, capped at
-/// [`RETRY_BACKOFF_CAP`].
+/// How long to hold a row back after its `attempts`th failed delivery.
 ///
 /// With the drainer's 10-attempt budget this spends about an hour before
 /// giving up (15s, 30s, 1m, 2m, 4m, 8m, then 15m a few times), which covers
 /// a routine Slack incident. The naive "retry on the next tick" schedule
 /// spent the same budget in well under two minutes.
 pub fn retry_backoff(attempts: i32) -> SignedDuration {
-	let doublings = attempts.clamp(1, 20) - 1;
-	RETRY_BACKOFF_BASE
-		.saturating_mul(2i32.saturating_pow(doublings as u32))
-		.min(RETRY_BACKOFF_CAP)
+	RETRY_BACKOFF.after(attempts.max(0) as u32)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable)]

@@ -38,7 +38,7 @@ use tracing::{debug, error, info};
 use super::{
 	complete,
 	kopia::{self, KopiaEnv},
-	worker::Worker,
+	worker::{OpKind, Worker},
 };
 
 const TICK: Duration = Duration::from_secs(60);
@@ -94,6 +94,7 @@ fn spawn_inspect(worker: &Worker, config: ServerGroupBackupConfig) {
 		let result = run_inspect_op(&worker, &config).await;
 		match result {
 			Ok(outcome) => {
+				worker.backoffs.succeeded(group_id, OpKind::Inspection);
 				let Ok(mut db) = worker.pool.get().await else {
 					error!(group = %group_id, "inspection: failed to get db connection to record result");
 					return;
@@ -107,7 +108,12 @@ fn spawn_inspect(worker: &Worker, config: ServerGroupBackupConfig) {
 			Err(e) => {
 				// A hard inspect failure means we don't know the verify state, so we
 				// don't write ground truth or touch the corruption alert — leave the
-				// last known truth in place.
+				// last known truth in place. Nothing is recorded, so the scheduler
+				// would re-spawn this group on every tick; the backoff is what
+				// stops that.
+				worker
+					.backoffs
+					.failed(group_id, OpKind::Inspection, Timestamp::now());
 				error!(group = %group_id, "inspection failed: {e:#}");
 			}
 		}
@@ -184,6 +190,14 @@ async fn tick(worker: &Worker) -> Result<(), String> {
 			&& !due_after_maint
 			&& !slot_deadline_due(c.group_id, window, last_inspected, now)
 		{
+			continue;
+		}
+		// Due, but still cooling off from a failed inspection. A hard inspect
+		// failure deliberately records nothing — not even `last_inspected` —
+		// so every one of these signals stays true and the group is
+		// re-spawned every tick, holding a concurrency permit each time.
+		if worker.backoffs.blocked(c.group_id, OpKind::Inspection, now) {
+			debug!(group = %c.group_id, "inspection due but backing off after a failure");
 			continue;
 		}
 		spawn_inspect(worker, c.clone());
