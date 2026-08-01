@@ -43,21 +43,26 @@ WITH roots_needing_groups AS (
 		OR EXISTS (SELECT 1 FROM incidents i WHERE i.server_id = s.id)
 	  )
 ),
-inserted AS (
-	INSERT INTO server_groups (name)
-	SELECT COALESCE(r.name, 'server-' || substr(r.id::text, 1, 8))
+-- Mint each root's group id up front, so the root→group mapping is carried
+-- rather than reconstructed. Pairing them by name afterwards is wrong:
+-- `servers.name` is not unique, so two roots sharing a name each insert a
+-- group with that name, the join produces the full cross product, and the
+-- final UPDATE picks arbitrary rows. Reproduced on Postgres 16 with two
+-- roots named "Fiji", one child each: both roots landed in one group and
+-- both children in the other, separating servers from their own parents.
+-- MATERIALIZED so `gen_random_uuid()` is evaluated exactly once per root,
+-- not re-evaluated per reference.
+root_to_group AS MATERIALIZED (
+	SELECT
+		r.id AS server_id,
+		gen_random_uuid() AS group_id,
+		COALESCE(r.name, 'server-' || substr(r.id::text, 1, 8)) AS group_name
 	FROM roots_needing_groups r
-	RETURNING id, name
 ),
--- Pair each root's id with the newly-inserted group id by name. Group names
--- come from the root's name (or an id-derived fallback when the root is
--- unnamed); both halves of the join produce the same string in the same row
--- order so the mapping is unambiguous.
-root_to_group AS (
-	SELECT r.id AS server_id, ig.id AS group_id
-	FROM roots_needing_groups r
-	JOIN inserted ig
-		ON ig.name = COALESCE(r.name, 'server-' || substr(r.id::text, 1, 8))
+inserted AS (
+	INSERT INTO server_groups (id, name)
+	SELECT rtg.group_id, rtg.group_name
+	FROM root_to_group rtg
 )
 -- Walk the tree from each root, assigning group_id to the root itself and
 -- every descendant.
