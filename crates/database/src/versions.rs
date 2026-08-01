@@ -179,6 +179,13 @@ impl Version {
 			.map_err(AppError::from)
 	}
 
+	/// The newest published patch of every `(major, minor)` line above
+	/// `version`, within the same major.
+	///
+	/// The `version_updates` view ranks published rows only, so a line whose
+	/// newest patch is draft or yanked still offers its newest *published*
+	/// patch rather than dropping out entirely. The `status` filter below is
+	/// belt-and-braces on top of that.
 	pub async fn get_updates_for_version(
 		db: &mut AsyncPgConnection,
 		version: VersionStr,

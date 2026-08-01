@@ -47,4 +47,5 @@ mod status_figures;
 mod statuses_device_fk;
 mod tag_reserved_prefix;
 mod version_known_issue_provenance;
+mod version_updates_view;
 mod versions;
