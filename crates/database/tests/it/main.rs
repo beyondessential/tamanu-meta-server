@@ -19,6 +19,7 @@ mod health_rollup;
 mod incident_close_result;
 mod incident_get_with_issues;
 mod incident_linger;
+mod incident_list_status;
 mod incident_reeval_queue;
 mod incident_result_semantics;
 mod incident_stats;
