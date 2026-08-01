@@ -895,6 +895,52 @@ async fn update_region_and_delete() {
 	.await;
 }
 
+/// Onboarding is all-or-nothing on both create paths. A config row left behind
+/// by a failed Secret create is unrecoverable: it points its
+/// `repo_password_ref` at nothing, and every retry now sees a config and takes
+/// the *update* path, which never creates the Secret.
+#[tokio::test(flavor = "multi_thread")]
+async fn upsert_rolls_back_the_config_when_the_secret_cannot_be_created() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+
+		// Onboard once so the group's passphrase Secret exists...
+		let resp = private
+			.post("/api/backups/create")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "bes-iac",
+				"target_role_arn": "arn:aws:iam::123:role/dev",
+				"maintenance_role_arn": "arn:aws:iam::123:role/maint",
+				"mode": "from_birth",
+			}))
+			.await;
+		resp.assert_status_ok();
+
+		// ...then drop only the config row, leaving the Secret behind. `upsert`
+		// now takes the create path, and its create-if-absent Secret write
+		// fails — the shape of any transient secret-store failure.
+		conn.batch_execute(&format!(
+			"DELETE FROM server_group_backup_config WHERE group_id = '{group_id}'"
+		))
+		.await
+		.expect("drop config row");
+
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "bes-iac",
+				"target_role_arn": "arn:aws:iam::123:role/dev",
+				"maintenance_role_arn": "arn:aws:iam::123:role/maint",
+			}))
+			.await;
+		resp.assert_status(axum::http::StatusCode::BAD_GATEWAY);
+		assert_no_config!(private, group_id);
+	})
+	.await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn upsert_creates_then_reapplies_idempotently() {
 	commons_tests::server::run(async |mut conn, _public, private| {
