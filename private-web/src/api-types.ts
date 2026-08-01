@@ -6931,7 +6931,7 @@ export interface components {
          *     standing in for a redacted one is worse than no replica.
          * @enum {string}
          */
-        RedactionGapReason: "product_has_no_manifest" | "version_has_no_manifest" | "version_unknown";
+        RedactionGapReason: "product_has_no_manifest" | "version_has_no_manifest";
         /**
          * @description Where a product publishes the masking manifests that say how to
          *     de-identify a restored copy of one of its databases.

@@ -1053,6 +1053,8 @@ export async function seedRestoreReplica(
 		/** Operator-supplied parameter values. */
 		params?: Record<string, unknown>;
 		enabled?: boolean;
+		/** Whether the replica is served de-identified. */
+		redacts?: boolean;
 	},
 ): Promise<SeededRestoreReplica> {
 	const id = randomUUID();
@@ -1061,8 +1063,8 @@ export async function seedRestoreReplica(
 	if (overdue == null) {
 		await sql.query(
 			`INSERT INTO restore_replicas
-			 (id, consumer_device_id, group_id, server_id, type, intent, name, params, enabled)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9)`,
+			 (id, consumer_device_id, group_id, server_id, type, intent, name, params, enabled, redacts)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)`,
 			[
 				id,
 				opts.consumerDeviceId,
@@ -1073,13 +1075,14 @@ export async function seedRestoreReplica(
 				opts.name ?? randomLabel("replica"),
 				params,
 				opts.enabled ?? true,
+				opts.redacts ?? false,
 			],
 		);
 	} else {
 		await sql.query(
 			`INSERT INTO restore_replicas
-			 (id, consumer_device_id, group_id, server_id, type, intent, name, overdue_after, params, enabled)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, make_interval(secs => $8), $9::jsonb, $10)`,
+			 (id, consumer_device_id, group_id, server_id, type, intent, name, overdue_after, params, enabled, redacts)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, make_interval(secs => $8), $9::jsonb, $10, $11)`,
 			[
 				id,
 				opts.consumerDeviceId,
@@ -1091,6 +1094,7 @@ export async function seedRestoreReplica(
 				overdue,
 				params,
 				opts.enabled ?? true,
+				opts.redacts ?? false,
 			],
 		);
 	}
@@ -1118,12 +1122,22 @@ export async function seedRestoreCheck(
 		observedAt?: string;
 		/** Optional run correlation id, matching a restore issuance's run_id. */
 		runId?: string | null;
+		/** What the masking manifest did, for a replica that redacts. */
+		redaction?: {
+			outcome: "complete" | "partial" | "failed";
+			manifestVersion?: string | null;
+			columnsMasked?: number | null;
+			columnsSkipped?: number | null;
+			error?: string | null;
+		};
 	},
 ): Promise<void> {
+	const redaction = opts.redaction;
 	await sql.query(
 		`INSERT INTO backup_restore_checks
-		 (replica_id, consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome, error, replica_healthy, postgres_version, health_details, observed_at, run_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, COALESCE($13::timestamptz, NOW()), $14)`,
+		 (replica_id, consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome, error, replica_healthy, postgres_version, health_details, observed_at, run_id,
+		  redaction_outcome, redaction_manifest_version, redaction_columns_masked, redaction_columns_skipped, redaction_error)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, COALESCE($13::timestamptz, NOW()), $14, $15, $16, $17, $18, $19)`,
 		[
 			opts.replicaId ?? null,
 			opts.consumerDeviceId,
@@ -1139,6 +1153,11 @@ export async function seedRestoreCheck(
 			opts.healthDetails === undefined ? null : JSON.stringify(opts.healthDetails),
 			opts.observedAt ?? null,
 			opts.runId ?? null,
+			redaction?.outcome ?? null,
+			redaction?.manifestVersion ?? null,
+			redaction?.columnsMasked ?? null,
+			redaction?.columnsSkipped ?? null,
+			redaction?.error ?? null,
 		],
 	);
 }

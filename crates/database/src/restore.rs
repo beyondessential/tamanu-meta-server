@@ -485,13 +485,15 @@ fn restore_verification_ref(r#type: &BackupType, intent: &RestoreIntent) -> Stri
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RedactionGapReason {
-	/// The server's product publishes no masking manifests.
+	/// The server's product publishes no masking manifests, so the replica is
+	/// withheld from the worklist rather than restored unmasked.
 	ProductHasNoManifest,
 	/// The product publishes them, but not for the version this server
-	/// reports, so the consumer would fetch a URL that 404s.
+	/// reports, so the consumer would fetch a URL that 404s. The replica is
+	/// still dispatched — the consumer resolves the manifest against the
+	/// version in the data it restored, which may not be this one, and holds
+	/// the switchover if it can't.
 	VersionHasNoManifest,
-	/// The server has reported no version to resolve a manifest for.
-	VersionUnknown,
 }
 
 /// Whether a server can be redacted, and why not when it can't.
@@ -508,10 +510,14 @@ pub async fn redaction_gap_for(
 		return Ok(Some((RedactionGapReason::ProductHasNoManifest, None)));
 	};
 
+	// The consumer resolves the manifest against the version in the data it
+	// restored, not against what the server last reported, so a server Canopy
+	// holds no version for isn't one that can't be redacted — it's one Canopy
+	// can't corroborate, which is not a finding.
 	let Some(reported) =
 		crate::reported_detail::ReportedDetail::last_version(db, server.id).await?
 	else {
-		return Ok(Some((RedactionGapReason::VersionUnknown, None)));
+		return Ok(None);
 	};
 	let shown = reported.0.to_string();
 

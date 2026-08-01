@@ -419,10 +419,10 @@ function ParamFieldsEditor({
 	);
 }
 
-/** Whether a declaration redacts, and any servers it covers that can't be:
- * those are withheld from the worklist rather than restored unmasked, so an
- * operator seeing a redacting declaration with no replica needs to be told
- * which servers are missing and why. */
+/** Whether a declaration redacts, and any servers it covers whose masking
+ * Canopy can't currently line up — a redacting declaration that quietly
+ * restores nothing for a server, or resolves a manifest that was never
+ * published, is otherwise indistinguishable from one that is working. */
 function RedactionCell({ replica }: { replica: RestoreReplicaView }) {
 	if (!replica.redacts) {
 		return (
@@ -439,7 +439,7 @@ function RedactionCell({ replica }: { replica: RestoreReplicaView }) {
 				<Tooltip
 					title={
 						<>
-							Not restored, because these servers can't be redacted:
+							Canopy has no masking for:
 							{gaps.map((g) => (
 								<div key={g.server_id}>
 									{g.server_name ?? g.server_id.slice(0, 8)} —{" "}
@@ -451,7 +451,7 @@ function RedactionCell({ replica }: { replica: RestoreReplicaView }) {
 					}
 				>
 					<Chip
-						label={`${gaps.length} withheld`}
+						label={`${gaps.length} unmaskable`}
 						color="warning"
 						size="small"
 					/>

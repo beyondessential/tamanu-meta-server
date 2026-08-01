@@ -12277,8 +12277,7 @@
         "description": "Why a server a redacting declaration covers can't be redacted.\n\nEach of these withholds the server's worklist entry: a replica that\ncannot be redacted is not restored at all, since an unredacted replica\nstanding in for a redacted one is worse than no replica.",
         "enum": [
           "product_has_no_manifest",
-          "version_has_no_manifest",
-          "version_unknown"
+          "version_has_no_manifest"
         ]
       },
       "RedactionManifest": {
