@@ -2,7 +2,7 @@ use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::TailscaleAdmin;
+use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::Uuid;
 use database::silenced_refs::{ServerGroupSilencedRef, ServerSilencedRef};
 use serde::Deserialize;
@@ -79,6 +79,7 @@ pub struct SilenceGroupArgs {
 )]
 pub async fn list_for_server(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	Json(args): Json<ServerScopeArgs>,
 ) -> Result<Json<Vec<ServerSilencedRef>>> {
 	let mut conn = state.db.get().await?;
@@ -103,6 +104,7 @@ pub async fn list_for_server(
 )]
 pub async fn list_for_group(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	Json(args): Json<GroupScopeArgs>,
 ) -> Result<Json<Vec<ServerGroupSilencedRef>>> {
 	let mut conn = state.db.get().await?;

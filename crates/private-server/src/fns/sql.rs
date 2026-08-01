@@ -122,7 +122,7 @@ pub struct ExecuteArgs {
 )]
 pub async fn execute_query(
 	State(state): State<AppState>,
-	user: std::result::Result<TailscaleUser, AppError>,
+	user: TailscaleUser,
 	Json(args): Json<ExecuteArgs>,
 ) -> Result<Json<SqlResult>> {
 	let Some(ro_pool) = state.ro_pool.clone() else {
@@ -132,7 +132,6 @@ pub async fn execute_query(
 	};
 
 	let query = args.query;
-	let user = user.unwrap_or_default();
 	let start_time = Instant::now();
 
 	let mut conn = state.db.get().await?;
@@ -246,9 +245,8 @@ pub async fn execute_query(
 )]
 pub async fn get_last_user_query(
 	State(state): State<AppState>,
-	user: std::result::Result<TailscaleUser, AppError>,
+	user: TailscaleUser,
 ) -> Result<Json<Option<String>>> {
-	let user = user.unwrap_or_default();
 	let mut conn = state.db.get().await?;
 	let last = SqlPlaygroundHistory::get_last_by_user(&mut conn, &user.login)
 		.await?

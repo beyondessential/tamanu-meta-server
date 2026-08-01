@@ -327,7 +327,7 @@ async fn artifacts_create_draft_version_if_not_found() {
 		async |mut conn, cert, device_id, public, _| {
 			let response = public
 				.post("/artifacts/999.999.999/installer/windows")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.text("https://example.com/installer.exe")
 				.await;
 			response.assert_status_ok();
@@ -363,7 +363,7 @@ async fn version_create_publishes_draft_if_exists() {
 			// First, create a draft version by creating an artifact
 			let response = public
 				.post("/artifacts/2.0.0/installer/windows")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.text("https://example.com/installer.exe")
 				.await;
 			response.assert_status_ok();
@@ -380,7 +380,7 @@ async fn version_create_publishes_draft_if_exists() {
 			let changelog = "# Version 2.0.0\n\nNew features and improvements";
 			let response = public
 				.post("/versions/2.0.0")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.text(changelog)
 				.await;
 			response.assert_status_ok();
@@ -421,7 +421,7 @@ async fn version_create_duplicate_published_fails() {
 			let changelog = "# Version 3.0.0\n\nDifferent changelog";
 			let response = public
 				.post("/versions/3.0.0")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.text(changelog)
 				.await;
 
@@ -457,6 +457,40 @@ async fn version_range_latest_matching() {
 		let response = public.get("/versions/1.0/mobile").await;
 		response.assert_status_ok();
 		response.assert_header("content-type", "text/html; charset=utf-8");
+	})
+	.await
+}
+
+/// A range whose floor sits in an earlier minor line must still resolve to the
+/// newer minor: semver orders lexicographically, so `1.1.0` satisfies
+/// `>=1.0.5` even though its patch is lower.
+#[tokio::test(flavor = "multi_thread")]
+async fn version_range_resolves_across_minor_lines() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		let older = "55555555-5555-5555-5555-555555555555";
+		let newer = "66666666-6666-6666-6666-666666666666";
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
+			('{older}', 1, 0, 5, 'Version 1.0.5', 'published'),
+			('{newer}', 1, 1, 0, 'Version 1.1.0', 'published');
+			INSERT INTO artifacts (version_id, platform, artifact_type, download_url) VALUES
+			('{older}', 'windows', 'installer', 'https://example.com/1.0.5.exe'),
+			('{newer}', 'windows', 'installer', 'https://example.com/1.1.0.exe')",
+		))
+		.await
+		.unwrap();
+
+		let response = public.get("/versions/%3E%3D1.0.5/artifacts").await;
+		response.assert_status_ok();
+		let artifacts: Vec<Artifact> = response.json();
+		assert_eq!(
+			artifacts
+				.iter()
+				.map(|a| a.download_url.as_str())
+				.collect::<Vec<_>>(),
+			vec!["https://example.com/1.1.0.exe"],
+			"the range must resolve to 1.1.0, not the floor it was anchored on",
+		);
 	})
 	.await
 }
@@ -623,6 +657,53 @@ async fn artifact_specificity_conflict_resolution() {
 	.await
 }
 
+/// Deduplication has to be by key, not by adjacency. The SQL `ORDER BY` groups
+/// each type+platform together, but the specificity sort then hoists every
+/// exact artifact ahead of every range one. Any other exact artifact sorting
+/// after the duplicated key therefore lands between its exact and range rows,
+/// and they stop being neighbours.
+#[tokio::test(flavor = "multi_thread")]
+async fn artifact_specificity_dedups_non_adjacent_duplicates() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		let version_id = "cccccccc-cccc-cccc-cccc-ccccccccccc1";
+		let exact_windows = "dddddddd-dddd-dddd-dddd-ddddddddddd1";
+		let range_windows = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeee1";
+		let exact_android = "ffffffff-ffff-ffff-ffff-fffffffffff1";
+
+		// installer/windows is duplicated; mobile/android sorts after it, so the
+		// specificity sort yields [installer-exact, mobile-exact, installer-range]
+		// and the two installer rows are no longer adjacent.
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
+			('{version_id}', 1, 0, 1, 'v1.0.1', 'published');
+
+			INSERT INTO artifacts (id, version_id, platform, artifact_type, download_url, version_range_pattern) VALUES
+			('{exact_windows}', '{version_id}', 'windows', 'installer', 'https://example.com/exact.exe', NULL),
+			('{range_windows}', NULL, 'windows', 'installer', 'https://example.com/1x.exe', '1.x'),
+			('{exact_android}', '{version_id}', 'android', 'mobile', 'https://example.com/exact.apk', NULL)",
+		))
+		.await
+		.unwrap();
+
+		let response = public.get("/versions/1.0.1/artifacts").await;
+		response.assert_status_ok();
+		let artifacts: Vec<Artifact> = response.json();
+		let installers: Vec<&Artifact> = artifacts
+			.iter()
+			.filter(|a| a.platform == "windows" && a.artifact_type == "installer")
+			.collect();
+		assert_eq!(
+			installers.len(),
+			1,
+			"one entry per type+platform; got conflicting download URLs: {:?}",
+			installers.iter().map(|a| &a.download_url).collect::<Vec<_>>(),
+		);
+		assert_eq!(installers[0].id.to_string(), exact_windows.to_lowercase());
+		assert_eq!(artifacts.len(), 2, "windows installer + android mobile");
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn artifact_range_specificity_conflict_resolution() {
 	commons_tests::server::run(async |mut conn, public, _| {
@@ -694,7 +775,7 @@ async fn artifact_create_range_authenticated() {
 		async |_conn, cert, _device_id, public, _| {
 			let response = public
 				.post("/artifacts/1.0.x/installer/windows")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.text("https://example.com/installer-1.0.x.exe")
 				.await;
 
@@ -721,7 +802,7 @@ async fn artifact_create_range_invalid_pattern() {
 		async |_conn, cert, _device_id, public, _| {
 			let response = public
 				.post("/artifacts/invalid@@range/installer/windows")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.text("https://example.com/installer.exe")
 				.await;
 

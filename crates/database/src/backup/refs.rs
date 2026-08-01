@@ -53,6 +53,12 @@ pub const RECONCILE_MISSING: &str = "backup-reconcile-missing";
 /// via [`crate::issues::file_check`]; this constant is the contract.
 pub const CORRUPTION: &str = "backup-corruption";
 
+/// A rotation left the repo openable by neither the committed passphrase nor
+/// the in-flight candidate. Backups and restores are both dead for the group
+/// until someone intervenes. Group-scoped, escalating — Canopy cannot recover
+/// from this on its own, so it must not wait behind incident grace.
+pub const ROTATION_BROKEN: &str = "backup-rotation-broken";
+
 /// Canopy's own `sts:GetCallerIdentity` failed — the shared IRSA identity is
 /// broken. `Critical`. Filed once against the nil/meta server (one fact about
 /// canopy, not one per group); recovery also clears any group-scoped issues
@@ -170,6 +176,20 @@ The repository inspection job detected corruption or poisoning in the group's ba
 ## Solve
 
 Do not run maintenance (it may GC evidence). Inspect the repository with kopia directly, identify the damaged blobs and affected snapshots, and restore repository health from object-lock history if needed.";
+
+pub const ROTATION_BROKEN_DOC: &str = "## Description
+
+A passphrase rotation was interrupted and left the repository openable by neither the committed passphrase nor the in-flight candidate — most likely the kopia format-blob corruption of kopia#3049, where a crash between the two format writes loses both.
+
+Every device backup for the group fails against an unopenable repository, and no restore is possible either. Canopy cannot recover from this on its own: it holds the only copies of both passphrases and neither works.
+
+## Results
+
+- **fail** — neither passphrase opens the repo. Escalates: restorability is already gone, so this must not wait out incident grace.
+
+## Solve
+
+Recover the repository's format blob from object-lock history (the bucket keeps prior versions), then re-run the rotation. Do not run maintenance in the meantime — it may GC evidence. Until the repo opens again, treat the group as having no working backup.";
 
 pub const PREFLIGHT_IDENTITY_DOC: &str = "## Description
 

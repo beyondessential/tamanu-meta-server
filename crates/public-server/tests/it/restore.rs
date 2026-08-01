@@ -122,7 +122,7 @@ async fn capabilities_register_then_worklist_filters_by_intent() {
 			// Register only `verify`.
 			public
 				.post("/restore-capabilities")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(
 					&serde_json::json!({ "intents": [{"intent": "verify", "semantics": ["check", "once"]}] }),
 				)
@@ -131,7 +131,7 @@ async fn capabilities_register_then_worklist_filters_by_intent() {
 
 			let resp = public
 				.get("/restore-worklist")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			resp.assert_status_ok();
 			let entries: Vec<serde_json::Value> = resp.json();
@@ -160,7 +160,7 @@ async fn worklist_expands_group_wide_to_each_server() {
 			declare_replica(&mut conn, device_id, group, "verify").await;
 			public
 				.post("/restore-capabilities")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(
 					&serde_json::json!({ "intents": [{"intent": "verify", "semantics": ["check", "once"]}] }),
 				)
@@ -169,7 +169,7 @@ async fn worklist_expands_group_wide_to_each_server() {
 
 			let resp = public
 				.get("/restore-worklist")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			resp.assert_status_ok();
 			let entries: Vec<serde_json::Value> = resp.json();
@@ -213,7 +213,7 @@ async fn worklist_dedupes_server_specific_over_group_wide() {
 			declare_replica_server(&mut conn, device_id, group, server, "verify").await;
 			public
 				.post("/restore-capabilities")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(
 					&serde_json::json!({ "intents": [{"intent": "verify", "semantics": ["check", "once"]}] }),
 				)
@@ -222,7 +222,7 @@ async fn worklist_dedupes_server_specific_over_group_wide() {
 
 			let resp = public
 				.get("/restore-worklist")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			resp.assert_status_ok();
 			let entries: Vec<serde_json::Value> = resp.json();
@@ -247,7 +247,7 @@ async fn worklist_empty_without_registered_capabilities() {
 			// No capabilities registered → nothing dispatched.
 			let resp = public
 				.get("/restore-worklist")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			resp.assert_status_ok();
 			let entries: Vec<serde_json::Value> = resp.json();
@@ -269,7 +269,7 @@ async fn worklist_once_suppresses_verified_snapshot_until_newer() {
 			declare_replica(&mut conn, device_id, group, "verify").await;
 			public
 				.post("/restore-capabilities")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"intents": [{"intent": "verify", "semantics": ["check", "once"]}]
 				}))
@@ -279,7 +279,7 @@ async fn worklist_once_suppresses_verified_snapshot_until_newer() {
 			// Before verification, snap-1 is on the worklist.
 			let entries: Vec<serde_json::Value> = public
 				.get("/restore-worklist")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await
 				.json();
 			assert_eq!(entries.len(), 1, "got {entries:?}");
@@ -287,7 +287,7 @@ async fn worklist_once_suppresses_verified_snapshot_until_newer() {
 			// Report snap-1 verified healthy → a `once` intent drops it.
 			public
 				.post("/restore-verification")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"group": group,
 					"server_id": server,
@@ -303,7 +303,7 @@ async fn worklist_once_suppresses_verified_snapshot_until_newer() {
 
 			let entries: Vec<serde_json::Value> = public
 				.get("/restore-worklist")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await
 				.json();
 			assert!(
@@ -315,7 +315,7 @@ async fn worklist_once_suppresses_verified_snapshot_until_newer() {
 			make_success_run(&mut conn, device_id, group, server, "snap-2").await;
 			let entries: Vec<serde_json::Value> = public
 				.get("/restore-worklist")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await
 				.json();
 			assert_eq!(entries.len(), 1, "newer snapshot reappears: {entries:?}");
@@ -338,7 +338,7 @@ async fn worklist_resolves_params_with_defaults_and_nulls() {
 			// Advertise analytics with a defaulted duration and an unset bytes cap.
 			public
 				.post("/restore-capabilities")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"intents": [{
 						"intent": "analytics",
@@ -354,7 +354,7 @@ async fn worklist_resolves_params_with_defaults_and_nulls() {
 
 			let entries: Vec<serde_json::Value> = public
 				.get("/restore-worklist")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await
 				.json();
 			assert_eq!(entries.len(), 1, "got {entries:?}");
@@ -375,7 +375,7 @@ async fn restore_credentials_without_declaration_is_403() {
 			make_config(&mut conn, group, "ready").await;
 			let resp = public
 				.post("/restore-credentials")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "group": group, "type": "tamanu-postgres" }))
 				.await;
 			resp.assert_status(http::StatusCode::FORBIDDEN);
@@ -397,7 +397,7 @@ async fn restore_credentials_authorized_but_unconfigured_is_502() {
 			// fails upstream rather than 403.
 			let resp = public
 				.post("/restore-credentials")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "group": group, "type": "tamanu-postgres" }))
 				.await;
 			resp.assert_status(http::StatusCode::BAD_GATEWAY);
@@ -414,7 +414,7 @@ async fn restore_endpoints_reject_non_consumer_role() {
 		async |_conn, cert, _device_id, public, _| {
 			let resp = public
 				.get("/restore-worklist")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			resp.assert_status(http::StatusCode::FORBIDDEN);
 		},
@@ -446,7 +446,7 @@ async fn restore_verification_without_declaration_is_403() {
 			let server = make_server(&mut conn, group).await;
 			let resp = public
 				.post("/restore-verification")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"group": group,
 					"server_id": server,
@@ -474,7 +474,7 @@ async fn restore_verification_records_and_raises_alert() {
 
 			public
 				.post("/restore-verification")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"group": group,
 					"server_id": server,
@@ -551,7 +551,7 @@ async fn report_version(conn: &mut AsyncPgConnection, server_id: Uuid, version: 
 async fn register_migrate_intent(public: &axum_test::TestServer, cert: &str) {
 	public
 		.post("/restore-capabilities")
-		.add_header("mtls-certificate", cert)
+		.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 		.json(&serde_json::json!({
 			"intents": [{"intent": "verify", "semantics": ["check", "once", "migrate"]}]
 		}))
@@ -576,7 +576,7 @@ async fn a_migrate_entry_names_the_newest_version_the_server_could_take() {
 
 			let resp = public
 				.get("/restore-worklist")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			resp.assert_status_ok();
 			let entries: Vec<serde_json::Value> = resp.json();
@@ -606,7 +606,7 @@ async fn a_server_already_on_the_newest_version_gets_no_migrate_entry() {
 
 			let resp = public
 				.get("/restore-worklist")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			resp.assert_status_ok();
 			let entries: Vec<serde_json::Value> = resp.json();
@@ -636,7 +636,7 @@ async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
 
 			let before: Vec<serde_json::Value> = public
 				.get("/restore-worklist")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await
 				.json();
 			assert_eq!(before.len(), 1, "dispatched once: got {before:?}");
@@ -682,7 +682,7 @@ async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
 
 			let after: Vec<serde_json::Value> = public
 				.get("/restore-worklist")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await
 				.json();
 			assert!(
@@ -710,7 +710,7 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 
 			let dispatched: Vec<serde_json::Value> = public
 				.get("/restore-worklist")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await
 				.json();
 			assert_eq!(dispatched.len(), 1, "got {dispatched:?}");
@@ -719,7 +719,7 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 			// Report it back the way a consumer would, echoing the entry.
 			public
 				.post("/restore-verification")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"replica_id": entry["replica_id"],
 					"group": group,
@@ -756,7 +756,7 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 			// And the pair is settled, so it is not dispatched again.
 			let after: Vec<serde_json::Value> = public
 				.get("/restore-worklist")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await
 				.json();
 			assert!(after.is_empty(), "got {after:?}");

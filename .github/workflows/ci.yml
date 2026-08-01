@@ -118,6 +118,11 @@ jobs:
       - name: npm ci
         run: npm ci
         working-directory: private-web
+      # Frontend unit tests (vitest). They need no browser or database, so
+      # they run here before the expensive Playwright setup and fail fast.
+      - name: Frontend unit tests
+        run: npm run test
+        working-directory: private-web
       - name: Cache Playwright browsers
         uses: actions/cache@v6.1.0
         with:

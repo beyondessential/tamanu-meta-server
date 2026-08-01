@@ -508,6 +508,67 @@ async fn backup_problems_scan_runs() {
 	.await
 }
 
+/// The advertised window is "failed runs in the last 24h". Inspecting only the
+/// N newest runs and time-filtering afterwards shrinks that window for exactly
+/// the groups that back up most often — a real failure vanishes behind the
+/// successes reported since.
+#[tokio::test(flavor = "multi_thread")]
+async fn backup_problems_finds_a_failure_behind_many_later_successes() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group = "cccccccc-0000-0000-0000-000000000001";
+		let server = "cccccccc-0000-0000-0000-000000000002";
+		let device = "cccccccc-0000-0000-0000-000000000003";
+
+		let mut sql = format!(
+			"INSERT INTO server_groups (id, name) VALUES ('{group}', 'Chatty'); \
+			 INSERT INTO servers (id, host, name, kind, group_id) VALUES \
+				('{server}', 'https://chatty', 'Chatty', 'central', '{group}'); \
+			 INSERT INTO devices (id, role) VALUES ('{device}', 'server'); \
+			 INSERT INTO server_group_backup_config \
+				(group_id, bucket, prefix, target_role_arn, maintenance_role_arn, \
+				 repo_password_ref, status, mode, placement) \
+				VALUES ('{group}', 'b', '', 'arn', 'maint', 'pw', 'ready', 'from_birth', 'external'); \
+			 INSERT INTO backup_runs \
+				(id, device_id, group_id, server_id, type, purpose, outcome, error, reported_at) \
+			  VALUES ('{}', '{device}', '{group}', '{server}', 'tamanu-postgres', 'backup', \
+				'failure', 'disk full', NOW() - interval '8 hours');",
+			uuid::Uuid::new_v4()
+		);
+		// 30 later successes — more than any per-group row cap — all inside the
+		// same 24h window, each newer than the failure.
+		for i in 0..30 {
+			sql.push_str(&format!(
+				"INSERT INTO backup_runs \
+					(id, device_id, group_id, server_id, type, purpose, outcome, reported_at) \
+				  VALUES ('{}', '{device}', '{group}', '{server}', 'tamanu-postgres', 'backup', \
+					'success', NOW() - interval '{i} minutes');",
+				uuid::Uuid::new_v4()
+			));
+		}
+		conn.batch_execute(&sql).await.expect("seed chatty group");
+
+		let p = call_tool!(
+			private,
+			"find_backup_problems",
+			serde_json::json!({ "group_id": group })
+		);
+		let failures: Vec<&serde_json::Value> = p["problems"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.filter(|x| x["kind"] == "failed_run")
+			.collect();
+		assert_eq!(
+			failures.len(),
+			1,
+			"the 8h-old failure is inside the 24h window: {}",
+			p["problems"]
+		);
+		assert_eq!(failures[0]["detail"], "disk full");
+	})
+	.await
+}
+
 // --- backup runs, maintenance runs, restore replicas, backup defaults -------
 
 const RGROUP: &str = "bbbbbbbb-0000-0000-0000-000000000001";

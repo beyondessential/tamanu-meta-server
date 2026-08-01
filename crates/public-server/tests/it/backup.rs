@@ -125,7 +125,7 @@ async fn credentials_no_live_server_is_412() {
 			// No server row seeded for this device.
 			let resp = public
 				.post("/backup-credentials")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "type": "tamanu-postgres" }))
 				.await;
 			resp.assert_status(http::StatusCode::PRECONDITION_FAILED);
@@ -142,7 +142,7 @@ async fn credentials_ungrouped_server_is_409() {
 			make_server(&mut conn, device_id, None).await;
 			let resp = public
 				.post("/backup-credentials")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "type": "tamanu-postgres" }))
 				.await;
 			resp.assert_status(http::StatusCode::CONFLICT);
@@ -160,7 +160,7 @@ async fn credentials_no_config_is_409() {
 			make_server(&mut conn, device_id, Some(group)).await;
 			let resp = public
 				.post("/backup-credentials")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "type": "tamanu-postgres" }))
 				.await;
 			resp.assert_status(http::StatusCode::CONFLICT);
@@ -180,7 +180,7 @@ async fn credentials_dormant_config_is_409() {
 			enable_capability(&mut conn, server, "tamanu-postgres").await;
 			let resp = public
 				.post("/backup-credentials")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "type": "tamanu-postgres" }))
 				.await;
 			resp.assert_status(http::StatusCode::CONFLICT);
@@ -200,7 +200,7 @@ async fn credentials_type_not_enabled_is_409() {
 			// No capability row → not enabled.
 			let resp = public
 				.post("/backup-credentials")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "type": "tamanu-postgres" }))
 				.await;
 			resp.assert_status(http::StatusCode::CONFLICT);
@@ -221,7 +221,7 @@ async fn credentials_disabled_capability_no_request_is_409() {
 			declare_capability_disabled(&mut conn, server, "tamanu-config").await;
 			let resp = public
 				.post("/backup-credentials")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "type": "tamanu-config" }))
 				.await;
 			resp.assert_status(http::StatusCode::CONFLICT);
@@ -242,7 +242,7 @@ async fn credentials_restore_closed_window_is_409() {
 			// speak to the restore window rather than the backup-schedule gate.
 			let resp = public
 				.post("/backup-credentials")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "type": "tamanu-postgres", "purpose": "restore" }))
 				.await;
 			resp.assert_status(http::StatusCode::CONFLICT);
@@ -272,7 +272,7 @@ async fn credentials_restore_expired_window_is_409() {
 			expire_restore(&mut conn, server).await;
 			let resp = public
 				.post("/backup-credentials")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "type": "tamanu-postgres", "purpose": "restore" }))
 				.await;
 			resp.assert_status(http::StatusCode::CONFLICT);
@@ -296,7 +296,7 @@ async fn credentials_restore_open_window_passes_gate() {
 			allow_restore(&mut conn, server).await;
 			let resp = public
 				.post("/backup-credentials")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "type": "tamanu-postgres", "purpose": "restore" }))
 				.await;
 			resp.assert_status(http::StatusCode::BAD_GATEWAY);
@@ -317,7 +317,7 @@ async fn credentials_ready_but_sts_unconfigured_is_502() {
 			// Harness default: AppState.sts == None → 502.
 			let resp = public
 				.post("/backup-credentials")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "type": "tamanu-postgres" }))
 				.await;
 			resp.assert_status(http::StatusCode::BAD_GATEWAY);
@@ -333,7 +333,7 @@ async fn target_no_live_server_is_412() {
 		async |_conn, cert, _device_id, public, _| {
 			let resp = public
 				.get("/backup-target")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			resp.assert_status(http::StatusCode::PRECONDITION_FAILED);
 		},
@@ -352,7 +352,7 @@ async fn target_ready_but_kube_unconfigured_is_502() {
 			// Harness default: AppState.kube == None → 502.
 			let resp = public
 				.get("/backup-target")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			resp.assert_status(http::StatusCode::BAD_GATEWAY);
 		},
@@ -375,7 +375,7 @@ async fn capabilities_registers_and_204() {
 
 			let resp = public
 				.post("/backup-capabilities")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "types": ["tamanu-postgres", "custom-thing"] }))
 				.await;
 			resp.assert_status(http::StatusCode::NO_CONTENT);
@@ -400,7 +400,7 @@ async fn capabilities_ungrouped_is_409() {
 			make_server(&mut conn, device_id, None).await;
 			let resp = public
 				.post("/backup-capabilities")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "types": ["tamanu-postgres"] }))
 				.await;
 			resp.assert_status(http::StatusCode::CONFLICT);
@@ -427,7 +427,7 @@ async fn report_writes_run_with_context_attribution_and_204() {
 			let bogus_group = Uuid::new_v4();
 			let resp = public
 				.post("/backup-report")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -483,14 +483,14 @@ async fn report_duplicate_run_id_is_409() {
 
 			let first = public
 				.post("/backup-report")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&body)
 				.await;
 			first.assert_status(http::StatusCode::NO_CONTENT);
 
 			let dup = public
 				.post("/backup-report")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&body)
 				.await;
 			dup.assert_status(http::StatusCode::CONFLICT);
@@ -507,7 +507,7 @@ async fn report_ungrouped_is_409() {
 			make_server(&mut conn, device_id, None).await;
 			let resp = public
 				.post("/backup-report")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": Uuid::new_v4(),
 					"type": "tamanu-postgres",
@@ -529,7 +529,7 @@ async fn report_no_live_server_is_412() {
 		async |_conn, cert, _device_id, public, _| {
 			let resp = public
 				.post("/backup-report")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": Uuid::new_v4(),
 					"type": "tamanu-postgres",
@@ -551,6 +551,7 @@ async fn report_no_live_server_is_412() {
 fn public_server_with_sts(url: &str, sts: aws_sdk_sts::Client) -> TestServer {
 	let db = database::init_to(url);
 	let state = public_server::state::AppState {
+		client_cert_header: commons_servers::device_auth::mtls::ClientCertHeader::Xfcc,
 		db: db.clone(),
 		db_read: db,
 		tera: public_server::state::AppState::init_tera().unwrap(),
@@ -637,7 +638,7 @@ async fn credentials_backup_happy_path_200_and_audit() {
 
 		let resp = public
 			.post("/backup-credentials")
-			.add_header("mtls-certificate", &cert)
+			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 			.json(&serde_json::json!({ "type": "tamanu-postgres", "purpose": "backup" }))
 			.await;
 		resp.assert_status_ok();
@@ -684,7 +685,7 @@ async fn credentials_disabled_capability_with_pending_request_200() {
 
 		let resp = public
 			.post("/backup-credentials")
-			.add_header("mtls-certificate", &cert)
+			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 			.json(&serde_json::json!({ "type": "tamanu-config", "purpose": "backup" }))
 			.await;
 		resp.assert_status_ok();
@@ -720,7 +721,7 @@ async fn credentials_restore_sends_session_policy() {
 
 		let resp = public
 			.post("/backup-credentials")
-			.add_header("mtls-certificate", &cert)
+			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 			.json(&serde_json::json!({ "type": "tamanu-postgres", "purpose": "restore" }))
 			.await;
 		resp.assert_status_ok();
@@ -742,7 +743,7 @@ async fn progress_unbound_device_is_412() {
 		async |_conn, cert, _device_id, public, _| {
 			let resp = public
 				.post("/backup-progress")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": Uuid::new_v4(),
 					"type": "tamanu-postgres",
@@ -762,7 +763,7 @@ async fn progress_ungrouped_server_is_409() {
 			make_server(&mut conn, device_id, None).await;
 			let resp = public
 				.post("/backup-progress")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": Uuid::new_v4(),
 					"type": "tamanu-postgres",
@@ -787,7 +788,7 @@ async fn progress_accepted_without_ready_config_or_capability() {
 			// No config row at all, and no registered capability.
 			let resp = public
 				.post("/backup-progress")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": Uuid::new_v4(),
 					"type": "tamanu-postgres",
@@ -812,7 +813,7 @@ async fn progress_records_counters_and_extra() {
 
 			let resp = public
 				.post("/backup-progress")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -867,7 +868,7 @@ async fn progress_after_report_is_accepted() {
 
 			public
 				.post("/backup-report")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -879,7 +880,7 @@ async fn progress_after_report_is_accepted() {
 
 			let resp = public
 				.post("/backup-progress")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -906,7 +907,7 @@ async fn progress_rate_limit_is_429() {
 			for _ in 0..61 {
 				let resp = public
 					.post("/backup-progress")
-					.add_header("mtls-certificate", &cert)
+					.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 					.json(&serde_json::json!({
 						"run_id": run_id,
 						"type": "tamanu-postgres",
@@ -944,7 +945,7 @@ async fn report_takes_snapshot_moment_from_progress() {
 			// Announced on the first sample, as a device does, and omitted after.
 			public
 				.post("/backup-progress")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -955,7 +956,7 @@ async fn report_takes_snapshot_moment_from_progress() {
 				.assert_status(http::StatusCode::NO_CONTENT);
 			public
 				.post("/backup-progress")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -968,7 +969,7 @@ async fn report_takes_snapshot_moment_from_progress() {
 			// must come from the *first* sample even though the last one has NULL.
 			public
 				.post("/backup-report")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -1006,7 +1007,7 @@ async fn progress_snapshot_moment_beats_the_report() {
 
 			public
 				.post("/backup-progress")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -1017,7 +1018,7 @@ async fn progress_snapshot_moment_beats_the_report() {
 
 			public
 				.post("/backup-report")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -1055,7 +1056,7 @@ async fn report_without_snapshot_moment_leaves_it_unset() {
 
 			public
 				.post("/backup-report")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -1092,7 +1093,7 @@ async fn report_backfills_omitted_figures_from_last_sample() {
 			for uploaded in [100_i64, 900] {
 				public
 					.post("/backup-progress")
-					.add_header("mtls-certificate", &cert)
+					.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 					.json(&serde_json::json!({
 						"run_id": run_id,
 						"type": "tamanu-postgres",
@@ -1108,7 +1109,7 @@ async fn report_backfills_omitted_figures_from_last_sample() {
 
 			public
 				.post("/backup-report")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -1149,7 +1150,7 @@ async fn report_figures_win_over_progress() {
 
 			public
 				.post("/backup-progress")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -1161,7 +1162,7 @@ async fn report_figures_win_over_progress() {
 
 			public
 				.post("/backup-report")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -1199,7 +1200,7 @@ async fn report_without_any_progress_is_unchanged() {
 
 			public
 				.post("/backup-report")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -1217,6 +1218,64 @@ async fn report_without_any_progress_is_unchanged() {
 			assert_eq!(run.bytes_uploaded, Some(42));
 			assert_eq!(run.s3_sent_raw_bytes, None);
 			assert_eq!(run.snapshot_taken_at, None);
+		},
+	)
+	.await;
+}
+
+// --- passphrase-rotation interlock ------------------------------------------
+
+/// While a rotation is in flight the repository passphrase is about to change,
+/// so a device must not be handed the credentials to start a backup with it —
+/// `kopia change-password` would kill the run partway through.
+#[tokio::test(flavor = "multi_thread")]
+async fn credentials_during_a_rotation_is_503() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group_id = make_group(&mut conn).await;
+			let server_id = make_server(&mut conn, device_id, Some(group_id)).await;
+			make_config(&mut conn, group_id, "ready").await;
+			enable_capability(&mut conn, server_id, "tamanu-postgres").await;
+
+			database::backups::ServerGroupBackupConfig::begin_passphrase_rotation(
+				&mut conn,
+				group_id,
+				jiff::Timestamp::now(),
+			)
+			.await
+			.expect("claim the interlock");
+
+			let resp = public
+				.post("/backup-credentials")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({ "type": "tamanu-postgres" }))
+				.await;
+			resp.assert_status(http::StatusCode::SERVICE_UNAVAILABLE);
+
+			// And the passphrase itself is withheld on the same grounds.
+			let target = public
+				.get("/backup-target")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.await;
+			target.assert_status(http::StatusCode::SERVICE_UNAVAILABLE);
+
+			// Once the rotation finishes, issuance resumes.
+			database::backups::ServerGroupBackupConfig::end_passphrase_rotation(
+				&mut conn, group_id,
+			)
+			.await
+			.expect("release");
+			let resp = public
+				.post("/backup-credentials")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({ "type": "tamanu-postgres" }))
+				.await;
+			assert_ne!(
+				resp.status_code(),
+				http::StatusCode::SERVICE_UNAVAILABLE,
+				"the interlock must not outlive the rotation",
+			);
 		},
 	)
 	.await;

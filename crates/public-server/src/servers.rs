@@ -209,14 +209,19 @@ pub struct BeginResponse {
 ///   (base64-standard DER). `tailscale serve` can't do client-cert mTLS, so the
 ///   `mtls-certificate` header is *not* set by a trusted terminator here — it is
 ///   attacker-controllable and therefore ignored.
-fn resolve_spki(headers: &HeaderMap, body_spki: Option<&str>, tailnet: bool) -> Result<Vec<u8>> {
+fn resolve_spki(
+	headers: &HeaderMap,
+	body_spki: Option<&str>,
+	tailnet: bool,
+	trusted: mtls::ClientCertHeader,
+) -> Result<Vec<u8>> {
 	if tailnet {
 		let b64 = body_spki.ok_or(AppError::EnrollmentFailed)?;
 		base64::engine::general_purpose::STANDARD
 			.decode(b64)
 			.map_err(|_| AppError::EnrollmentFailed)
 	} else {
-		mtls::spki_from_headers(headers)
+		mtls::spki_from_headers(headers, trusted)
 			.map_err(|_| AppError::EnrollmentFailed)?
 			.ok_or(AppError::EnrollmentFailed)
 	}
@@ -275,6 +280,7 @@ pub async fn register_begin(
 	State(db): State<Db>,
 	State(rl): State<RateLimiter>,
 	State(directory): State<Option<TailnetDirectory>>,
+	State(cert_header): State<mtls::ClientCertHeader>,
 	ClientIp(ip): ClientIp,
 	headers: HeaderMap,
 	Json(args): Json<BeginArgs>,
@@ -284,7 +290,7 @@ pub async fn register_begin(
 	// `Some` only on the private-server's `/public` (tailnet) mount; `None` on
 	// the internet binary — see `AppState::tailnet_directory`.
 	let tailnet = directory.is_some();
-	let spki = resolve_spki(&headers, args.spki.as_deref(), tailnet)?;
+	let spki = resolve_spki(&headers, args.spki.as_deref(), tailnet, cert_header)?;
 
 	// Server must exist and be live.
 	let server = Server::get_by_id(&mut db, args.server_id)
@@ -378,6 +384,7 @@ pub async fn register_complete(
 	State(db): State<Db>,
 	State(rl): State<RateLimiter>,
 	State(directory): State<Option<TailnetDirectory>>,
+	State(cert_header): State<mtls::ClientCertHeader>,
 	ClientIp(ip): ClientIp,
 	headers: HeaderMap,
 	Json(args): Json<CompleteArgs>,
@@ -385,7 +392,7 @@ pub async fn register_complete(
 	enforce_rate_limit(&rl, ip, args.server_id)?;
 	let mut db = db.get().await?;
 	let tailnet = directory.is_some();
-	let spki = resolve_spki(&headers, args.spki.as_deref(), tailnet)?;
+	let spki = resolve_spki(&headers, args.spki.as_deref(), tailnet, cert_header)?;
 
 	let nonce = base64::engine::general_purpose::STANDARD
 		.decode(&args.nonce)

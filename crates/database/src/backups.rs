@@ -21,9 +21,14 @@ use diesel::{
 	result::{DatabaseErrorKind, Error as DieselError},
 };
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use jiff::Timestamp;
+use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+
+/// How long a rotation marker is believed. A `kopia change-password` is one
+/// short call, so anything older is a rotation whose process died: readers
+/// ignore it rather than let a crash block a group's backups forever.
+pub const ROTATION_WINDOW: SignedDuration = SignedDuration::from_mins(15);
 use uuid::Uuid;
 
 use crate::pg_duration::PgDuration;
@@ -168,6 +173,22 @@ pub struct ServerGroupBackupConfig {
 	pub force_full_maintenance_at: Option<Timestamp>,
 	/// Who requested the pending full-maintenance run, if any.
 	pub force_full_maintenance_by: Option<String>,
+	/// When the repository passphrase was last successfully rotated. `None`
+	/// means it hasn't been since the column was added — such a group is due
+	/// at its next rotation target. The rotation scheduler's cadence anchor.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(
+		deserialize_as = jiff_diesel::NullableTimestamp,
+		serialize_as = jiff_diesel::NullableTimestamp,
+		treat_none_as_default_value = false
+	)]
+	pub repo_password_rotated_at: Option<Timestamp>,
+	/// Set while a passphrase rotation is in flight. Credential and target
+	/// issuance is refused meanwhile, so no device starts a backup with a
+	/// passphrase that is about to stop working. A value older than
+	/// [`ROTATION_WINDOW`] is a crashed rotation and is ignored.
+	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
+	pub repo_password_rotating_since: Option<Timestamp>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -354,6 +375,84 @@ impl ServerGroupBackupConfig {
 			.await
 			.map_err(AppError::from)?;
 		Ok(())
+	}
+
+	/// Stamp a successful passphrase rotation, which is the rotation
+	/// scheduler's cadence anchor. `updated_at` is deliberately not touched —
+	/// this records work done, not a config edit.
+	pub async fn mark_passphrase_rotated(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<()> {
+		use crate::schema::server_group_backup_config::dsl;
+
+		diesel::update(dsl::server_group_backup_config.filter(dsl::group_id.eq(group_id)))
+			.set(dsl::repo_password_rotated_at.eq(now))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
+	}
+
+	/// Claim the rotation interlock for a group, refusing if one is already
+	/// in flight (and still fresh). Returns `true` when claimed.
+	///
+	/// A marker older than [`ROTATION_WINDOW`] is a rotation whose process
+	/// died before clearing it; taking it over is correct, and leaving it set
+	/// would block the group's backups indefinitely.
+	pub async fn begin_passphrase_rotation(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		at: Timestamp,
+	) -> Result<bool> {
+		use crate::schema::server_group_backup_config::dsl;
+
+		let stale_before = at - ROTATION_WINDOW;
+		let claimed = diesel::update(
+			dsl::server_group_backup_config
+				.filter(dsl::group_id.eq(group_id))
+				.filter(
+					dsl::repo_password_rotating_since
+						.is_null()
+						.or(dsl::repo_password_rotating_since
+							.lt(jiff_diesel::Timestamp::from(stale_before))),
+				),
+		)
+		.set(dsl::repo_password_rotating_since.eq(jiff_diesel::Timestamp::from(at)))
+		.execute(db)
+		.await
+		.map_err(AppError::from)?;
+		Ok(claimed > 0)
+	}
+
+	/// Release the rotation interlock, whether the rotation succeeded or not.
+	pub async fn end_passphrase_rotation(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<()> {
+		use crate::schema::server_group_backup_config::dsl;
+
+		diesel::update(dsl::server_group_backup_config.filter(dsl::group_id.eq(group_id)))
+			.set(dsl::repo_password_rotating_since.eq(None::<jiff_diesel::Timestamp>))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
+	}
+
+	/// Whether a rotation is in flight for the group *right now* — the
+	/// question the credential and target endpoints ask before handing out a
+	/// passphrase. A stale marker reads as "not rotating".
+	pub async fn passphrase_rotation_in_flight(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		at: Timestamp,
+	) -> Result<bool> {
+		use crate::schema::server_group_backup_config::dsl;
+
+		let since: Option<Option<Timestamp>> = dsl::server_group_backup_config
+			.select(dsl::repo_password_rotating_since.nullable())
+			.filter(dsl::group_id.eq(group_id))
+			.first::<Option<jiff_diesel::Timestamp>>(db)
+			.await
+			.optional()
+			.map_err(AppError::from)?
+			.map(|v| v.map(Into::into));
+		Ok(matches!(since.flatten(), Some(t) if at.duration_since(t) < ROTATION_WINDOW))
 	}
 
 	/// Advance (or reset) the lifecycle status (repo-init flow).
@@ -780,6 +879,29 @@ impl ServerGroupBackupSchedule {
 	}
 }
 
+/// Resolve the effective scheduled backup interval for one `(group, type)`.
+///
+/// The single source of truth for this precedence, shared by the schedulers,
+/// the staleness scan, and the admin API — they must agree or a pair can be
+/// commanded to back up on a cadence nothing then monitors (or vice versa).
+///
+/// An override *row* decides on its own: its `expected_interval` is the answer,
+/// including when it is NULL, which the model documents as manual-only. Only
+/// the absence of a row inherits the type's canopy-wide `default_interval`.
+/// `None` ⇒ no scheduled cadence (manual-only).
+pub async fn effective_interval(
+	db: &mut AsyncPgConnection,
+	group_id: Uuid,
+	r#type: &BackupType,
+) -> Result<Option<PgDuration>> {
+	match ServerGroupBackupSchedule::get(db, group_id, r#type).await? {
+		Some(schedule) => Ok(schedule.expected_interval),
+		None => Ok(BackupTypeDefault::get(db, r#type)
+			.await?
+			.and_then(|d| d.default_interval)),
+	}
+}
+
 // ---------------------------------------------------------------------------
 // backup_credential_issuances — audit log of every STS issuance
 // ---------------------------------------------------------------------------
@@ -910,6 +1032,32 @@ impl BackupCredentialIssuance {
 			.load(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// Whether any credentials issued for this group are still within their
+	/// lifetime — i.e. a device may be running a backup right now, using the
+	/// passphrase it was handed.
+	///
+	/// Rotation asks this before rewriting the repository's format blob:
+	/// `kopia change-password` invalidates the passphrase in flight, and the
+	/// device only discovers that when its backup fails. Issuances are
+	/// recorded before the credentials are returned, so this cannot miss one
+	/// that has already been handed out.
+	pub async fn any_live_for_group(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		at: Timestamp,
+	) -> Result<bool> {
+		use crate::schema::backup_credential_issuances::dsl;
+
+		let n: i64 = dsl::backup_credential_issuances
+			.filter(dsl::group_id.eq(group_id))
+			.filter(dsl::expires_at.gt(jiff_diesel::Timestamp::from(at)))
+			.count()
+			.get_result(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(n > 0)
 	}
 
 	/// Issuances for a group issued at or after `since`, newest-first. Backs the

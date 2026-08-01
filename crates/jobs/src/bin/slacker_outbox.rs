@@ -6,9 +6,13 @@
 //! `slack_outbox` row is already the flat JSON the workflow expects — we
 //! POST it verbatim.
 //!
-//! Each loop iteration claims up to [`BATCH`] pending rows with
-//! `FOR UPDATE SKIP LOCKED`, posts them one at a time, and marks them
-//! delivered or failed inside the same transaction.
+//! Each loop iteration drains up to [`BATCH`] rows, one per transaction: a
+//! row is claimed with `FOR UPDATE SKIP LOCKED` (the lock is what keeps
+//! concurrent drainers off it), posted, and marked delivered or failed, then
+//! that transaction commits before the next row is claimed. Per-row rather
+//! than per-batch because the POST is irreversible — one transaction around
+//! the whole batch meant a late DB error rolled back the `delivered_at` of
+//! rows already posted, and the next tick posted them again.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -159,10 +163,23 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 				continue;
 			};
 
-			let result = db
-				.transaction::<_, commons_errors::AppError, _>(async |conn| {
-					let claimed = SlackOutbox::claim_pending(conn, BATCH).await?;
-					for row in claimed {
+			// One transaction per row, not one per batch. The HTTP POST is
+			// irreversible, so a row's `delivered_at` must commit on its own:
+			// batching them meant a late DB error (or a failed commit) rolled
+			// back the stamps of rows already posted, and the next tick posted
+			// them again — duplicate incident pages from a single hiccup.
+			//
+			// The transaction still wraps claim-post-mark, because
+			// `claim_pending` claims by row lock (`FOR UPDATE SKIP LOCKED`)
+			// and that lock is what keeps concurrent drainers off the same
+			// row. Claiming one row at a time keeps that exclusion while
+			// bounding the blast radius of a failure to the row that failed.
+			for _ in 0..BATCH {
+				let result = db
+					.transaction::<_, commons_errors::AppError, _>(async |conn| {
+						let Some(row) = SlackOutbox::claim_pending(conn, 1).await?.pop() else {
+							return Ok(false);
+						};
 						match deliver(&client, &cfg, &row).await {
 							Ok(body) => {
 								info!(
@@ -208,6 +225,9 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 										kind = %row.kind,
 										incident_id = ?row.incident_id,
 										attempts = next_attempts,
+										retry_in = %database::slack_outbox::retry_backoff(
+											next_attempts
+										),
 										err = %err.msg,
 										response = ?err.body,
 										"slack delivery failed; will retry"
@@ -222,12 +242,23 @@ fn spawn(cfg: Config) -> JoinHandle<()> {
 								}
 							}
 						}
+						Ok(true)
+					})
+					.await;
+				match result {
+					// Queue drained (or every remaining row is another
+					// drainer's); nothing to do until the next tick.
+					Ok(false) => break,
+					Ok(true) => {}
+					Err(err) => {
+						// This row is untouched — its claim lock is released
+						// and it stays pending, so the next tick retries it.
+						// Rows already delivered in this tick keep their
+						// stamps.
+						error!("slack outbox row failed: {err}");
+						break;
 					}
-					Ok(())
-				})
-				.await;
-			if let Err(err) = result {
-				error!("slack outbox tx failed: {err}");
+				}
 			}
 		}
 	})

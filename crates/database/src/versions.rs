@@ -26,6 +26,38 @@ macro_rules! predicate_version {
 }
 pub use predicate_version;
 
+/// SQL predicate for "this row is at or above `floor`", comparing
+/// `(major, minor, patch)` **lexicographically**, the way semver orders
+/// versions — not component-wise. `2.6.0` is above `2.5.1` despite its lower
+/// patch, and `3.0.0` is above `2.5.1` despite its lower minor.
+///
+/// Only ever a prefilter ahead of the real [`node_semver::Range::satisfies`]
+/// check, so what matters is that it never excludes a row the range accepts.
+/// Prerelease ordering is left to that check: a row whose triple ties with
+/// `floor` is kept regardless of prerelease.
+pub fn at_or_above_version(
+	floor: &node_semver::Version,
+) -> Box<
+	dyn BoxableExpression<
+			crate::schema::versions::table,
+			diesel::pg::Pg,
+			SqlType = diesel::sql_types::Bool,
+		>,
+> {
+	use crate::schema::versions::dsl::{major, minor, patch};
+
+	let (floor_major, floor_minor, floor_patch) =
+		(floor.major as i32, floor.minor as i32, floor.patch as i32);
+
+	Box::new(
+		major.gt(floor_major).or(major.eq(floor_major).and(
+			minor
+				.gt(floor_minor)
+				.or(minor.eq(floor_minor).and(patch.ge(floor_patch))),
+		)),
+	)
+}
+
 /// A release version of the monitored software, with its publication
 /// status and changelog.
 #[derive(
@@ -147,6 +179,13 @@ impl Version {
 			.map_err(AppError::from)
 	}
 
+	/// The newest published patch of every `(major, minor)` line above
+	/// `version`, within the same major.
+	///
+	/// The `version_updates` view ranks published rows only, so a line whose
+	/// newest patch is draft or yanked still offers its newest *published*
+	/// patch rather than dropping out entirely. The `status` filter below is
+	/// belt-and-braces on top of that.
 	pub async fn get_updates_for_version(
 		db: &mut AsyncPgConnection,
 		version: VersionStr,
@@ -182,22 +221,12 @@ impl Version {
 	) -> Result<Self> {
 		use crate::schema::versions::*;
 
-		let node_semver::Version {
-			major: target_major,
-			minor: target_minor,
-			patch: target_patch,
-			..
-		} = range.min_version().ok_or(AppError::UnusableRange)?;
+		let floor = range.min_version().ok_or(AppError::UnusableRange)?;
 
 		table
 			.select(Version::as_select())
-			.filter(
-				status
-					.eq(VersionStatus::Published)
-					.and(major.ge(target_major as i32))
-					.and(minor.ge(target_minor as i32))
-					.and(patch.ge(target_patch as i32)),
-			)
+			.filter(status.eq(VersionStatus::Published))
+			.filter(at_or_above_version(&floor))
 			.order_by(major.desc())
 			.then_order_by(minor.desc())
 			.then_order_by(patch.desc())

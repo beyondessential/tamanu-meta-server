@@ -225,6 +225,21 @@ roles, buckets, or secret names) is logged server-side only. Retry after a short
 delay; if it persists, the deployment's AWS/IRSA or kube wiring (or the group's
 provisioning) likely needs attention.
 
+## Backup Rotation In Progress
+
+Returned (HTTP 503) by `POST /backup-credentials` and `GET /backup-target` while
+a passphrase rotation is in flight for the group. The repository password is
+about to change, so handing it out would give the device a passphrase that
+stops working mid-backup — `kopia change-password` rewrites the repository's
+format blob, and a run already under way fails when it next touches it.
+
+This is not a failure: rotation is one short operation, so retry after a few
+seconds. Backups skipped during the window are picked up on the next cycle.
+
+A rotation that crashes without clearing its marker stops blocking issuance
+once the marker ages past the rotation window, so this cannot wedge a group's
+backups indefinitely.
+
 ## Other
 
 An unclassified error.

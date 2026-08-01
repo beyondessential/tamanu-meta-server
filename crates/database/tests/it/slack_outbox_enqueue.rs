@@ -322,6 +322,101 @@ async fn resolving_before_open_ships_cancels_open_and_skips_resolve() {
 	.await
 }
 
+/// Escalation enqueues a *second* `incident_open` for the same incident. If
+/// the incident resolves before the drainer ships that escalation row,
+/// cancelling it is right — but skipping the resolve is not: Slack is still
+/// showing the original open, and would show it as unresolved forever.
+#[tokio::test(flavor = "multi_thread")]
+async fn resolve_is_still_sent_when_only_the_escalation_open_was_pending() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn, "http://escalate.invalid/").await;
+
+		// An Error-severity failure opens the incident.
+		let stamp = database::issues::CheckStateStamp {
+			check: "ref-error".into(),
+			observed: CheckResult::Failed,
+			effective: CheckResult::Failed,
+			escalates: false,
+			detail: None,
+		};
+		NewEvent {
+			source: "test".into(),
+			r#ref: "ref-error".into(),
+			description: None,
+			message: "boom".into(),
+			active: Some(true),
+			occurred_at: None,
+		}
+		.save_with_state(&mut conn, server_id, None, Some(&stamp), false)
+		.await
+		.expect("save error issue");
+
+		let incident = Incident::list_for_server(&mut conn, server_id, false, 10)
+			.await
+			.expect("list incidents")
+			.into_iter()
+			.next()
+			.expect("incident opened");
+
+		// Slack has now seen the incident.
+		mark_open_delivered(&mut conn, incident.id).await;
+
+		// An escalating failure joins, enqueuing a second open row.
+		let escalating = database::issues::CheckStateStamp {
+			check: "ref-critical".into(),
+			observed: CheckResult::Failed,
+			effective: CheckResult::Failed,
+			escalates: true,
+			detail: None,
+		};
+		NewEvent {
+			source: "test".into(),
+			r#ref: "ref-critical".into(),
+			description: None,
+			message: "worse".into(),
+			active: Some(true),
+			occurred_at: None,
+		}
+		.save_with_state(&mut conn, server_id, None, Some(&escalating), false)
+		.await
+		.expect("save escalating issue");
+
+		let opens: Vec<_> = pending_for_incident(&mut conn, incident.id)
+			.await
+			.into_iter()
+			.filter(|r| r.kind == KIND_INCIDENT_OPEN)
+			.collect();
+		assert_eq!(opens.len(), 2, "escalation enqueues a second open");
+		assert!(
+			opens.iter().any(|r| r.delivered_at.is_none()),
+			"the escalation open is still pending",
+		);
+
+		// Resolving now cancels the pending escalation open — but Slack is
+		// showing the delivered original, so it is owed a resolve.
+		Incident::resolve(
+			&mut conn,
+			incident.id,
+			"operator@example.test",
+			ResolvedReason::Fixed,
+		)
+		.await
+		.expect("resolve");
+
+		let rows = pending_for_incident(&mut conn, incident.id).await;
+		let resolves: Vec<_> = rows
+			.iter()
+			.filter(|r| r.kind == KIND_INCIDENT_RESOLVE)
+			.collect();
+		assert_eq!(
+			resolves.len(),
+			1,
+			"Slack saw the open, so it must see the resolve: {rows:#?}",
+		);
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn cascade_close_via_issue_resolve_attributes_to_operator() {
 	// When the operator resolves the last live issue and the cascade
@@ -469,6 +564,90 @@ async fn mark_given_up_removes_row_from_claim_pending() {
 		);
 	})
 	.await
+}
+
+/// The retry budget has to be a duration, not a handful of ticks. The
+/// drainer re-claims every 5 seconds, so a failed row that stays immediately
+/// claimable burns all ten attempts inside a couple of minutes and is given
+/// up permanently — any Slack outage longer than that silently drops every
+/// page enqueued during it.
+#[tokio::test(flavor = "multi_thread")]
+async fn mark_failed_holds_the_row_back_for_its_backoff() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn, "http://backoff.invalid/").await;
+		let stamp = database::issues::CheckStateStamp {
+			check: "ref-b".into(),
+			observed: CheckResult::Failed,
+			effective: CheckResult::Failed,
+			escalates: false,
+			detail: None,
+		};
+		let event = NewEvent {
+			source: "test".into(),
+			r#ref: "ref-b".into(),
+			description: None,
+			message: "boom".into(),
+			active: Some(true),
+			occurred_at: None,
+		};
+		event
+			.save_with_state(&mut conn, server_id, None, Some(&stamp), false)
+			.await
+			.expect("save");
+		expire_deliver_after(&mut conn).await;
+		let row = SlackOutbox::claim_pending(&mut conn, 10)
+			.await
+			.expect("claim")
+			.into_iter()
+			.next()
+			.expect("one pending row");
+
+		let attempts = SlackOutbox::mark_failed(&mut conn, row.id, "slack 503", Some("upstream"))
+			.await
+			.expect("mark_failed");
+		assert_eq!(attempts, 1);
+
+		let still_pending = SlackOutbox::claim_pending(&mut conn, 10)
+			.await
+			.expect("claim again");
+		assert!(
+			still_pending.iter().all(|r| r.id != row.id),
+			"a failed row must not be reclaimable on the very next tick",
+		);
+
+		// It comes back once the backoff has elapsed.
+		expire_deliver_after(&mut conn).await;
+		let after_backoff = SlackOutbox::claim_pending(&mut conn, 10)
+			.await
+			.expect("claim after backoff");
+		assert!(
+			after_backoff.iter().any(|r| r.id == row.id),
+			"the row is still owed once its backoff passes — failure is not give-up",
+		);
+	})
+	.await
+}
+
+#[test]
+fn retry_backoff_doubles_then_holds_at_the_cap() {
+	use database::slack_outbox::{RETRY_BACKOFF_CAP, retry_backoff};
+
+	assert_eq!(retry_backoff(1), SignedDuration::from_secs(15));
+	assert_eq!(retry_backoff(2), SignedDuration::from_secs(30));
+	assert_eq!(retry_backoff(3), SignedDuration::from_mins(1));
+	assert_eq!(retry_backoff(6), SignedDuration::from_mins(8));
+	assert_eq!(retry_backoff(7), RETRY_BACKOFF_CAP);
+	assert_eq!(retry_backoff(100), RETRY_BACKOFF_CAP);
+
+	// The drainer's 10-attempt budget must span a routine Slack incident,
+	// not a couple of minutes' worth of ticks.
+	let total: SignedDuration = (1..10)
+		.map(retry_backoff)
+		.fold(SignedDuration::ZERO, |acc, d| acc + d);
+	assert!(
+		total >= SignedDuration::from_mins(45),
+		"ten attempts should span most of an hour, got {total}",
+	);
 }
 
 #[tokio::test(flavor = "multi_thread")]
