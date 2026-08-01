@@ -366,6 +366,159 @@ async fn worklist_resolves_params_with_defaults_and_nulls() {
 	.await;
 }
 
+/// A server of a product with no masking manifest, so a redacting
+/// declaration covering it has nothing to redact with.
+async fn make_senaite_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uuid {
+	let server_id = Uuid::new_v4();
+	let host = format!("https://lims-{server_id}.example.com");
+	sql_query(
+		"INSERT INTO servers (id, host, kind, product, group_id) \
+		 VALUES ($1, $2, 'standalone', 'senaite', $3)",
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Text, _>(host)
+	.bind::<sql_types::Uuid, _>(group_id)
+	.execute(conn)
+	.await
+	.expect("insert senaite server");
+	server_id
+}
+
+/// Advertise `analytics` with `redact` and the three masking parameters, as
+/// the restore consumer does.
+async fn register_redact_intent(public: &axum_test::TestServer, cert: &str) {
+	public
+		.post("/restore-capabilities")
+		.add_header("mtls-certificate", cert)
+		.json(&serde_json::json!({
+			"intents": [{
+				"intent": "analytics",
+				"semantics": ["check", "url", "redact"],
+				"params": {
+					"redaction_manifest_url": {"type": "text"},
+					"redaction_version_query": {"type": "text"},
+					"redaction_version_fallback_to_base": {"type": "boolean", "default": false},
+				},
+			}]
+		}))
+		.await
+		.assert_status(http::StatusCode::NO_CONTENT);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_redacting_declaration_carries_the_products_masking_manifest() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let server = make_server(&mut conn, group).await;
+			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
+			declare_replica(&mut conn, device_id, group, "analytics").await;
+			sql_query("UPDATE restore_replicas SET redacts = true")
+				.execute(&mut conn)
+				.await
+				.expect("turn redaction on");
+			register_redact_intent(&public, &cert).await;
+
+			let entries: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("mtls-certificate", &cert)
+				.await
+				.json();
+			assert_eq!(entries.len(), 1, "got {entries:?}");
+			let params = &entries[0]["params"];
+			assert_eq!(
+				params["redaction_manifest_url"],
+				"https://docs.data.bes.au/tamanu/v{version}/manifest.json"
+			);
+			assert!(
+				params["redaction_version_query"]
+					.as_str()
+					.expect("a version query")
+					.contains("local_system_facts"),
+				"got {params:?}"
+			);
+			assert_eq!(params["redaction_version_fallback_to_base"], true);
+		},
+	)
+	.await;
+}
+
+/// The manifest URL is what turns redaction on for the consumer, so a
+/// declaration that doesn't redact has to send it unset — including when an
+/// operator's stored value says otherwise, since Canopy owns the parameter.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_declaration_that_doesnt_redact_sends_no_manifest() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let server = make_server(&mut conn, group).await;
+			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
+			declare_replica(&mut conn, device_id, group, "analytics").await;
+			sql_query(
+				"UPDATE restore_replicas SET params = '{\"redaction_manifest_url\": \
+				 \"https://evil.example/manifest.json\"}'::jsonb",
+			)
+			.execute(&mut conn)
+			.await
+			.expect("store a manifest URL behind canopy's back");
+			register_redact_intent(&public, &cert).await;
+
+			let entries: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("mtls-certificate", &cert)
+				.await
+				.json();
+			assert_eq!(entries.len(), 1, "got {entries:?}");
+			assert_eq!(
+				entries[0]["params"]["redaction_manifest_url"],
+				serde_json::Value::Null,
+				"a stored value must not make a non-redacting replica redact"
+			);
+		},
+	)
+	.await;
+}
+
+/// A replica that can't be redacted isn't restored at all: an unredacted
+/// replica standing in for a redacted one is worse than no replica.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_whose_product_has_no_manifest_is_withheld() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let tamanu = make_server(&mut conn, group).await;
+			let senaite = make_senaite_server(&mut conn, group).await;
+			make_success_run(&mut conn, device_id, group, tamanu, "snap-1").await;
+			make_success_run(&mut conn, device_id, group, senaite, "snap-2").await;
+			declare_replica(&mut conn, device_id, group, "analytics").await;
+			sql_query("UPDATE restore_replicas SET redacts = true")
+				.execute(&mut conn)
+				.await
+				.expect("turn redaction on");
+			register_redact_intent(&public, &cert).await;
+
+			let entries: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("mtls-certificate", &cert)
+				.await
+				.json();
+			assert_eq!(entries.len(), 1, "got {entries:?}");
+			assert_eq!(
+				entries[0]["server_id"],
+				tamanu.to_string(),
+				"only the server with a manifest is dispatched"
+			);
+		},
+	)
+	.await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn restore_credentials_without_declaration_is_403() {
 	commons_tests::server::run_with_device_auth(
@@ -508,6 +661,138 @@ async fn restore_verification_records_and_raises_alert() {
 				)
 				.await,
 				1,
+			);
+		},
+	)
+	.await;
+}
+
+/// A partial redaction is live and mostly masked, so the restore is healthy
+/// and the finding belongs to the redaction — two signals from one report.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_partial_redaction_warns_while_the_restore_stays_healthy() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			let server = make_server(&mut conn, group).await;
+			declare_replica(&mut conn, device_id, group, "analytics").await;
+
+			public
+				.post("/restore-verification")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"group": group,
+					"server_id": server,
+					"type": "tamanu-postgres",
+					"intent": "analytics",
+					"snapshot_id": "snap-1",
+					"outcome": "success",
+					"replica_healthy": true,
+					"observed_at": "2026-06-30T00:00:00Z",
+					"redaction": {
+						"outcome": "partial",
+						"manifest_version": "2.41.3",
+						"columns_masked": 118,
+						"columns_skipped": 3,
+					},
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			assert_eq!(
+				count(
+					&mut conn,
+					"SELECT count(*) AS count FROM backup_restore_checks \
+					 WHERE group_id = $1 AND redaction_outcome = 'partial' \
+					 AND redaction_columns_skipped = 3",
+					group,
+				)
+				.await,
+				1,
+				"the reported redaction is stored first-class",
+			);
+			assert_eq!(
+				count(
+					&mut conn,
+					"SELECT count(*) AS count FROM issues i \
+					 JOIN servers s ON s.id = i.server_id \
+					 WHERE s.group_id = $1 AND i.ref LIKE 'redaction:%' AND i.active = true",
+					group,
+				)
+				.await,
+				1,
+				"a partial redaction raises the redaction check",
+			);
+			assert_eq!(
+				count(
+					&mut conn,
+					"SELECT count(*) AS count FROM issues i \
+					 JOIN servers s ON s.id = i.server_id \
+					 WHERE s.group_id = $1 AND i.ref LIKE 'restore-verification:%' AND i.active = true",
+					group,
+				)
+				.await,
+				0,
+				"the backup restored, so restore health is untouched",
+			);
+		},
+	)
+	.await;
+}
+
+/// A failed redaction is reported when it settles, before any switchover:
+/// the restore succeeded and says so, and the replica stays on its previous
+/// data rather than serving anything unmasked.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_redaction_warns_and_then_recovers_when_it_applies() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			let server = make_server(&mut conn, group).await;
+			declare_replica(&mut conn, device_id, group, "analytics").await;
+
+			let report = |outcome: &'static str, error: Option<&'static str>| {
+				serde_json::json!({
+					"group": group,
+					"server_id": server,
+					"type": "tamanu-postgres",
+					"intent": "analytics",
+					"snapshot_id": "snap-1",
+					"outcome": "success",
+					"replica_healthy": true,
+					"observed_at": "2026-06-30T00:00:00Z",
+					"redaction": { "outcome": outcome, "error": error },
+				})
+			};
+
+			public
+				.post("/restore-verification")
+				.add_header("mtls-certificate", &cert)
+				.json(&report("failed", Some("manifest host unreachable")))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			const ACTIVE_REDACTION_CHECKS: &str = "SELECT count(*) AS count FROM issues i \
+				 JOIN servers s ON s.id = i.server_id \
+				 WHERE s.group_id = $1 AND i.ref LIKE 'redaction:%' AND i.active = true";
+			assert_eq!(
+				count(&mut conn, ACTIVE_REDACTION_CHECKS, group).await,
+				1,
+				"a failed redaction warns",
+			);
+
+			public
+				.post("/restore-verification")
+				.add_header("mtls-certificate", &cert)
+				.json(&report("complete", None))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+			assert_eq!(
+				count(&mut conn, ACTIVE_REDACTION_CHECKS, group).await,
+				0,
+				"a redaction that fully applies recovers the check",
 			);
 		},
 	)

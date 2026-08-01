@@ -20,8 +20,9 @@ use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::device_auth::BackupRestoreDevice;
 use commons_types::backup::{
 	BackupPurpose, BackupType, IntentDescriptor, ParamValues, RedactionOutcome, RestoreIntent,
-	RunOutcome, resolve_params, semantics,
+	RunOutcome, redaction_params, resolve_params, semantics,
 };
+use commons_types::server::product::RedactionManifest;
 use database::{
 	Db,
 	backups::{BackupRun, NewBackupCredentialIssuance, ServerGroupBackupConfig},
@@ -34,6 +35,7 @@ use database::{
 };
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -257,6 +259,7 @@ async fn worklist(
 		let descriptor = &descriptors[&d.intent];
 		let once = descriptor.has_semantic(semantics::ONCE);
 		let migrates = descriptor.has_semantic(semantics::MIGRATE);
+		let owns_masking = descriptor.has_semantic(semantics::REDACT);
 		let replica_values: ParamValues =
 			serde_json::from_value(d.params.clone()).unwrap_or_default();
 		let params = resolve_params(&descriptor.params, &replica_values);
@@ -278,6 +281,25 @@ async fn worklist(
 				}
 			} else {
 				None
+			};
+
+			// The masking parameters are Canopy's for a `redact` intent: resolved
+			// from the server's product when the declaration redacts, sent unset
+			// when it doesn't. A redacting declaration contributes nothing for a
+			// server that can't be redacted — an unredacted replica standing in
+			// for a redacted one is worse than no replica.
+			let params = if owns_masking {
+				let manifest = if d.redacts {
+					match server.product.caps().redaction {
+						Some(manifest) => Some(manifest),
+						None => continue,
+					}
+				} else {
+					None
+				};
+				masked_params(&params, manifest)
+			} else {
+				params.clone()
 			};
 
 			// A `once` intent drops off the worklist once its work is settled for
@@ -308,7 +330,7 @@ async fn worklist(
 				intent: d.intent.clone(),
 				name: d.name.clone(),
 				overdue_after_seconds: d.overdue_after.map(|f| f.0.as_secs()),
-				params: params.clone(),
+				params,
 				snapshot_id: latest.and_then(|r| r.snapshot_id.clone()),
 				snapshot_at: latest.map(|r| r.reported_at.to_string()),
 				storage: "s3".into(),
@@ -565,6 +587,36 @@ pub struct VerificationArgs {
 	/// What the masking manifest did, for a replica that redacts. Omit for a
 	/// replica that doesn't.
 	pub redaction: Option<RedactionArgs>,
+}
+
+/// Overlay Canopy's masking parameters onto an intent's resolved values.
+///
+/// Canopy owns these for any intent carrying `redact`, so whatever the
+/// declaration stored for them is replaced: by the product's manifest when
+/// the replica redacts, and by nothing when it doesn't. Sending them unset
+/// is what tells the consumer not to redact, so this has to overwrite rather
+/// than fill in.
+// spec: RST#the-masking-manifest
+fn masked_params(resolved: &ParamValues, manifest: Option<RedactionManifest>) -> ParamValues {
+	let mut params = resolved.clone();
+	for name in redaction_params::ALL {
+		// Only parameters the intent advertises are sent, so an intent that
+		// carries `redact` without accepting one of these doesn't gain it.
+		if !params.contains_key(*name) {
+			continue;
+		}
+		let value = match (manifest, *name) {
+			(None, _) => Value::Null,
+			(Some(m), redaction_params::MANIFEST_URL) => Value::from(m.url_template),
+			(Some(m), redaction_params::VERSION_QUERY) => Value::from(m.version_query),
+			(Some(m), redaction_params::VERSION_FALLBACK_TO_BASE) => {
+				Value::from(m.fallback_to_base)
+			}
+			(Some(_), _) => unreachable!("every owned parameter is resolved"),
+		};
+		params.insert((*name).to_string(), value);
+	}
+	params
 }
 
 /// How the masking manifest went against the restored replica.
