@@ -14,7 +14,7 @@ use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::acme::RevokeFor;
-use commons_servers::tailscale_auth::TailscaleAdmin;
+use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::Uuid;
 use commons_types::dns::{is_within, match_zone};
 use database::server_certificates::{RevocationReason, ServerCertificate};
@@ -199,6 +199,7 @@ fn certificate_view(cert: ServerCertificate) -> CertificateView {
 )]
 pub async fn for_server(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	Json(args): Json<ServerIdArgs>,
 ) -> Result<Json<ServerNamesView>> {
 	let mut conn = state.db_read.get().await?;
@@ -281,6 +282,7 @@ pub struct DomainHealthView {
 )]
 pub async fn for_group(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	Json(args): Json<GroupIdArgs>,
 ) -> Result<Json<Vec<DomainHealthView>>> {
 	use database::server_certificates::Risk;
@@ -389,7 +391,10 @@ pub struct AuthorityView {
 	security(("tailscale-user" = [])),
 	responses((status = 200, body = AuthorityView)),
 )]
-pub async fn authority(State(state): State<AppState>) -> Result<Json<AuthorityView>> {
+pub async fn authority(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+) -> Result<Json<AuthorityView>> {
 	use database::self_alerts::{CA_ACCOUNT_REF, CA_THROTTLED_REF, CA_UNREACHABLE_REF, current};
 
 	let mut conn = state.db_read.get().await?;
