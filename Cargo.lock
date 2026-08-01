@@ -2208,6 +2208,7 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 name = "database"
 version = "6.6.6"
 dependencies = [
+ "axum",
  "base64 0.22.1",
  "bestool-postgres",
  "clap",

@@ -47,5 +47,7 @@ bestool-postgres = "1.0.9"
 getrandom = "0.4.2"
 
 [dev-dependencies]
+axum = { workspace = true }
 commons-tests = { path = "../commons-tests" }
 rcgen = "0.14.8"
+tokio = { workspace = true, features = ["net"] }

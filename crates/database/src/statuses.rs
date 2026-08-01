@@ -178,12 +178,27 @@ impl Status {
 		let start = Instant::now();
 		let url = host.join("/api/public/ping").unwrap();
 		debug!(%url, "pinging");
-		match client.get(url).send().await.map(|res| {
-			res.headers()
-				.get("X-Version")
-				.and_then(|value| value.to_str().ok())
-				.and_then(|value| VersionStr::from_str(value).ok())
-		}) {
+		// `send()` resolves to `Ok` for *any* HTTP response, so only transport
+		// failures (DNS, refused, timeout) land in the `Err` arm. A reverse
+		// proxy answering 502 because the app behind it is down is exactly the
+		// outage this sweep exists to catch, so a non-2xx status is a ping
+		// failure, not a reachable server with no version header.
+		match client
+			.get(url)
+			.send()
+			.await
+			.map_err(|err| err.to_string())
+			.and_then(|res| {
+				let status = res.status();
+				if !status.is_success() {
+					return Err(format!("ping endpoint returned {status}"));
+				}
+				Ok(res
+					.headers()
+					.get("X-Version")
+					.and_then(|value| value.to_str().ok())
+					.and_then(|value| VersionStr::from_str(value).ok()))
+			}) {
 			Ok(version) => {
 				let latency = start.elapsed().as_millis().try_into().unwrap_or(i32::MAX);
 				info!(server=%server.id, host=%host, %latency, "ping success");
