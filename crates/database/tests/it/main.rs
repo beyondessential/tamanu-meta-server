@@ -38,3 +38,4 @@ mod slack_outbox_enqueue;
 mod status_figures;
 mod statuses_device_fk;
 mod tag_reserved_prefix;
+mod versions;
