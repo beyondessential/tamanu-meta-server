@@ -14,6 +14,7 @@ use std::{
 
 use anyhow::{Result, anyhow};
 use commons_servers::backup_secrets::BackupSecrets;
+use commons_types::backoff::Backoff;
 use database::Db;
 use jiff::{SignedDuration, Timestamp};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -88,13 +89,13 @@ impl Slots {
 	}
 }
 
-/// Wait after the first failure of a group's op, doubling with each
-/// consecutive failure.
-const BACKOFF_BASE: SignedDuration = SignedDuration::from_mins(15);
-/// Ceiling on the doubling, so a long-broken group still retries daily
-/// (in case someone fixed it out-of-band) without occupying a permit
-/// every tick.
-const BACKOFF_MAX: SignedDuration = SignedDuration::from_hours(12);
+/// Wait after the first failure of a group's op, doubling with each consecutive
+/// failure. The ceiling keeps a long-broken group retrying twice a day (in case
+/// someone fixed it out-of-band) without occupying a permit every tick.
+const OP_BACKOFF: Backoff = Backoff::new(
+	SignedDuration::from_mins(15),
+	SignedDuration::from_hours(12),
+);
 
 /// Which scheduler an op belongs to. Backoff is tracked per (group, op) so
 /// a broken inspection doesn't hold back maintenance for the same group.
@@ -102,11 +103,6 @@ const BACKOFF_MAX: SignedDuration = SignedDuration::from_hours(12);
 pub enum OpKind {
 	Maintenance,
 	Inspection,
-}
-
-/// Wait required after `consecutive` back-to-back failures.
-fn backoff_for(consecutive: u32) -> SignedDuration {
-	BACKOFF_MAX.min(BACKOFF_BASE * 2i32.saturating_pow(consecutive.saturating_sub(1).min(16)))
 }
 
 /// Per-(group, op) retry backoff for failing kopia ops.
@@ -136,7 +132,7 @@ impl Backoffs {
 			.unwrap()
 			.get(&(group_id, op))
 			.is_some_and(|(consecutive, last_failed)| {
-				now < *last_failed + backoff_for(*consecutive)
+				now < *last_failed + OP_BACKOFF.after(*consecutive)
 			})
 	}
 
@@ -248,14 +244,14 @@ mod tests {
 
 	#[test]
 	fn backoff_doubles_then_caps() {
-		assert_eq!(backoff_for(1), SignedDuration::from_mins(15));
-		assert_eq!(backoff_for(2), SignedDuration::from_mins(30));
-		assert_eq!(backoff_for(3), SignedDuration::from_hours(1));
-		assert_eq!(backoff_for(6), SignedDuration::from_hours(8));
+		assert_eq!(OP_BACKOFF.after(1), SignedDuration::from_mins(15));
+		assert_eq!(OP_BACKOFF.after(2), SignedDuration::from_mins(30));
+		assert_eq!(OP_BACKOFF.after(3), SignedDuration::from_hours(1));
+		assert_eq!(OP_BACKOFF.after(6), SignedDuration::from_hours(8));
 		// Capped, and no overflow panic however long a group stays broken.
-		assert_eq!(backoff_for(7), BACKOFF_MAX);
-		assert_eq!(backoff_for(1000), BACKOFF_MAX);
-		assert_eq!(backoff_for(u32::MAX), BACKOFF_MAX);
+		assert_eq!(OP_BACKOFF.after(7), OP_BACKOFF.cap());
+		assert_eq!(OP_BACKOFF.after(1000), OP_BACKOFF.cap());
+		assert_eq!(OP_BACKOFF.after(u32::MAX), OP_BACKOFF.cap());
 	}
 
 	/// A group whose op always fails must not be re-spawned every tick: each

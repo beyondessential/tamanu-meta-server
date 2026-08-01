@@ -11,7 +11,7 @@
 // spec: CRT#certificates
 
 use commons_errors::{AppError, Result};
-use commons_types::dns::normalize_domain;
+use commons_types::{backoff::Backoff, dns::normalize_domain};
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -36,14 +36,15 @@ const RENEW_AT_FRACTION_REMAINING: i64 = 3;
 /// without success.
 const CRITICAL_AT_FRACTION_REMAINING: i64 = 6;
 
-/// The longest Canopy waits between attempts at an order. Failures are usually
-/// the authority being briefly unavailable or a record not yet visible, so the
-/// interval grows — but not past this, or a certificate could expire while
+/// How long Canopy waits between attempts at an order. Failures are usually the
+/// authority being briefly unavailable or a record not yet visible, so the
+/// interval grows — but not past the cap, or a certificate could expire while
 /// Canopy waits.
-pub const MAX_BACKOFF: SignedDuration = SignedDuration::from_hours(6);
+pub const ORDER_BACKOFF: Backoff =
+	Backoff::new(SignedDuration::from_secs(60), SignedDuration::from_hours(6));
 
-/// The first interval between attempts, doubling from there.
-const BASE_BACKOFF: SignedDuration = SignedDuration::from_secs(60);
+/// The longest Canopy waits between attempts at an order.
+pub const MAX_BACKOFF: SignedDuration = ORDER_BACKOFF.cap();
 
 /// Where an order stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -846,11 +847,9 @@ pub fn default_renew_after(issued_at: Timestamp, not_after: Timestamp) -> Timest
 	not_after - lifetime / RENEW_AT_FRACTION_REMAINING as i32
 }
 
-/// Doubling backoff from [`BASE_BACKOFF`], capped at [`MAX_BACKOFF`].
+/// How long to wait after an order's `attempts`th failure, on [`ORDER_BACKOFF`].
 pub fn backoff_for(attempts: i32) -> SignedDuration {
-	let shift = attempts.clamp(1, 16) - 1;
-	let seconds = BASE_BACKOFF.as_secs().saturating_mul(1i64 << shift.min(20));
-	SignedDuration::from_secs(seconds.min(MAX_BACKOFF.as_secs()))
+	ORDER_BACKOFF.after(attempts.max(0) as u32)
 }
 
 #[cfg(test)]
