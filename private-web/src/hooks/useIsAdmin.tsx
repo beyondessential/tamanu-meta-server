@@ -1,23 +1,54 @@
-import { type ReactNode, createContext, useContext, useEffect, useState } from "react";
+import {
+	type ReactNode,
+	createContext,
+	useContext,
+	useEffect,
+	useMemo,
+	useState,
+} from "react";
 import { useApi } from "../api";
 import { useReloadInterval } from "./useReloadInterval";
 
-/** `true` if confirmed admin, `false` if confirmed non-admin, `undefined` only
- * until the very first probe resolves. Treat undefined as non-admin for gating
- * edit-only UI — better to flicker missing buttons on for an admin than to
- * briefly expose them to a non-admin. */
-const AdminContext = createContext<boolean | undefined>(undefined);
+/** How often to re-probe once we have an answer. */
+const REPROBE_MS = 5 * 60_000;
+/** How fast to retry while we have no answer at all. */
+const RETRY_MS = 3_000;
 
-/** Single source of truth for the caller's admin status. Mount once near the
- * router root so every consumer reads the same value without each one
- * re-fetching the probe. */
+export interface AdminStatus {
+	/** `true` if confirmed admin, `false` if confirmed non-admin, `undefined`
+	 * while the status is still unknown (no probe has ever succeeded). */
+	isAdmin: boolean | undefined;
+	/** The probe has answered at least once this session. While this is false,
+	 * `isAdmin` is `undefined` and admin-only UI is hidden. */
+	resolved: boolean;
+	/** The most recent probe failed. Only interesting when `resolved` is false:
+	 * once we have an answer we keep it and ride out transient failures. */
+	error: Error | null;
+	/** Re-probe now. Wired to the retry button in the unresolved banner. */
+	reload: () => void;
+}
+
+// `null` (not `undefined`) so the hooks can tell "no provider mounted" apart
+// from "provider mounted, status not yet known" and shout about the former
+// instead of silently reporting non-admin.
+const AdminContext = createContext<AdminStatus | null>(null);
+
+/** Single source of truth for the caller's admin status. Mounted once near the
+ * router root; every consumer reads the same value through {@link useIsAdmin}
+ * so the whole page agrees. Never probe `commons.is_current_user_admin`
+ * directly from a component — per-component probes have their own lifecycle
+ * and their own failure modes, which is how one half of a page ends up in
+ * admin mode while the other half isn't. */
 export function AdminProvider({ children }: { children: ReactNode }) {
 	// Re-probe periodically and when the tab regains focus. The provider
 	// mounts once and lives for the whole SPA session, so without this a
 	// single failed probe at initial load would hide every admin control
 	// until a manual hard reload.
-	const tick = useReloadInterval(5 * 60_000);
+	const tick = useReloadInterval(REPROBE_MS);
 	const probe = useApi("commons", "is_current_user_admin", {}, [tick]);
+	const { reload } = probe;
+	const answer = probe.status === "ok" ? probe.data : null;
+	const error = probe.status === "error" ? probe.error : null;
 
 	// Last confirmed answer. Kept sticky across background-refetch errors so a
 	// transient blip (e.g. the tailnet control plane momentarily unreachable)
@@ -25,22 +56,52 @@ export function AdminProvider({ children }: { children: ReactNode }) {
 	// first-ever load shows `undefined`.
 	const [known, setKnown] = useState<boolean | undefined>(undefined);
 	useEffect(() => {
-		if (probe.status === "ok") setKnown(probe.data);
-	}, [probe]);
+		if (answer !== null) setKnown(answer);
+	}, [answer]);
 
 	// Until we've learned the status at least once, retry a failed probe
-	// quickly so the session self-heals without a hard reload.
+	// quickly so the session self-heals without a hard reload. The deps are all
+	// stable values, not the per-render `probe` object — keying off that would
+	// let any re-render of the tree above us clear the pending timer before it
+	// ever fires. Reloading flips the status to `loading` first, so this
+	// re-arms itself on each successive failure.
 	useEffect(() => {
-		if (probe.status !== "error" || known !== undefined) return;
-		const id = window.setTimeout(() => probe.reload(), 3000);
+		if (!error || known !== undefined) return;
+		const id = window.setTimeout(reload, RETRY_MS);
 		return () => window.clearTimeout(id);
-	}, [probe, known]);
+	}, [error, known, reload]);
 
-	return <AdminContext.Provider value={known}>{children}</AdminContext.Provider>;
+	const value = useMemo<AdminStatus>(
+		() => ({
+			isAdmin: known,
+			resolved: known !== undefined,
+			error,
+			reload,
+		}),
+		[known, error, reload],
+	);
+
+	return (
+		<AdminContext.Provider value={value}>{children}</AdminContext.Provider>
+	);
 }
 
-/** Returns `true`/`false` once the probe has resolved, or `undefined` while
- * loading. Callers should `=== true` to gate admin-only UI. */
+/** Full admin status, including whether the probe has resolved and why not.
+ * Most callers want {@link useIsAdmin}; this is for UI that needs to explain
+ * the unknown state rather than just hide behind it. */
+export function useAdminStatus(): AdminStatus {
+	const ctx = useContext(AdminContext);
+	if (!ctx) {
+		throw new Error("useAdminStatus must be used inside <AdminProvider>");
+	}
+	return ctx;
+}
+
+/** Returns `true`/`false` once the probe has resolved, or `undefined` while the
+ * status is unknown. Callers should `=== true` to gate admin-only UI: better to
+ * briefly hide buttons from an admin than to briefly offer them to a non-admin.
+ * When the status is unknown because the probe is failing, `AdminProbeBanner`
+ * tells the user why the controls aren't there. */
 export function useIsAdmin(): boolean | undefined {
-	return useContext(AdminContext);
+	return useAdminStatus().isAdmin;
 }

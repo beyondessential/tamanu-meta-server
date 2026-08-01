@@ -35,6 +35,7 @@ Tracks whether the sources canopy expects to report on this server are actually 
 
 ## Results
 
+- **pass** — every source canopy expects to report on this server is reporting within the server's down threshold.
 - **warn** — a source in reachability mode `on` has gone quiet past the server's down threshold while others still report; the quiet sources are listed in the detail.
 - **fail** — every expected source is stale, or the server has never reported: nothing is reaching canopy, and the server is unreachable.
 
@@ -252,7 +253,7 @@ impl Status {
 		Ok(())
 	}
 
-	/// File (or update) each monitored server's single `reachability` check
+	/// File (or update) each server's single `reachability` check
 	/// from the freshness of the sources it is expected to report, against
 	/// its per-server `alert_when_down_for` threshold. Passed when every
 	/// expected source is fresh; warning when an `on`-mode source has gone
@@ -263,20 +264,24 @@ impl Status {
 	/// toward unreachable, or is ignored. Servers with no counted source
 	/// fall back to whether anything at all has reached canopy.
 	///
+	/// Unmonitored servers are swept alongside the rest: their reachability
+	/// is recorded and presented, and the monitoring gate in
+	/// [`crate::issues::NewEvent::save_with_state`] is what keeps it out of
+	/// incidents. The UI marks them so an operator reads "unreachable and
+	/// nobody is being paged" rather than "unreachable".
+	///
 	/// Returns the number of events filed in this pass.
+	// spec: CHK#monitoring-gate
 	pub async fn sweep_staleness(db: &mut AsyncPgConnection) -> Result<usize> {
 		use commons_types::source::ReachabilityMode;
 		use std::collections::HashMap;
 
 		let servers = Server::get_all(db, 0, None).await?;
-		let monitored: Vec<&Server> = servers
-			.iter()
-			.filter(|s| s.is_monitored && s.id != Uuid::nil())
-			.collect();
-		if monitored.is_empty() {
+		let swept: Vec<&Server> = servers.iter().filter(|s| s.id != Uuid::nil()).collect();
+		if swept.is_empty() {
 			return Ok(0);
 		}
-		let server_ids: Vec<Uuid> = monitored.iter().map(|s| s.id).collect();
+		let server_ids: Vec<Uuid> = swept.iter().map(|s| s.id).collect();
 
 		// Per-source freshness (already excludes canopy/manual and
 		// decommissioned checks), grouped by server, plus each source's
@@ -304,7 +309,7 @@ impl Status {
 
 		let now = Timestamp::now();
 		let mut filed = 0usize;
-		for server in &monitored {
+		for server in &swept {
 			let threshold = server.alert_when_down_for.0;
 			let label = server_label(server);
 

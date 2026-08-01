@@ -5,3 +5,4 @@
 //! retention floor) live in `commons_servers::backup_jobs`.
 
 pub mod backup;
+pub mod domains;

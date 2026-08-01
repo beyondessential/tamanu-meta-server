@@ -1,7 +1,7 @@
 use commons_errors::{AppError, Result};
 use commons_types::{
 	geo::GeoPoint,
-	server::{RESERVED_TAG_PREFIX, TagMap, kind::ServerKind, rank::ServerRank},
+	server::{RESERVED_TAG_PREFIX, TagMap, kind::ServerKind, product::Product, rank::ServerRank},
 };
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -60,7 +60,13 @@ pub struct Server {
 	#[diesel(treat_none_as_default_value = false)]
 	pub host: Option<UrlField>,
 
-	/// The server's role, for example central or facility.
+	/// The application this server runs, for example tamanu or senaite.
+	/// Decides which of canopy's per-server features apply to it at all.
+	// spec: APP#product-and-kind
+	#[diesel(deserialize_as = String, serialize_as = String)]
+	pub product: Product,
+	/// The server's role within its product's topology, for example central
+	/// or facility. Which roles are available depends on the product.
 	#[diesel(deserialize_as = String, serialize_as = String)]
 	pub kind: ServerKind,
 	/// The server's environment tier, for example production, test, or dev.
@@ -140,6 +146,48 @@ pub struct Server {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	#[diesel(treat_none_as_default_value = false)]
 	pub restore_allowed_by: Option<String>,
+	/// Whether this server may manage its own DNS records for names under its
+	/// group's domains. Withheld by default: a server without it is
+	/// authenticated and refused. Unlike the restore window this is a standing
+	/// grant, records needing maintenance for as long as the server lives.
+	// spec: DOM#permission-for-a-server-to-manage-its-own-names
+	pub may_manage_dns: bool,
+	/// Whether this server may obtain TLS certificates for names under its
+	/// group's domains. Separate from `may_manage_dns`: a deployment whose
+	/// records are managed elsewhere may still want its certificates here.
+	// spec: DOM#permission-for-a-server-to-manage-its-own-names
+	pub may_manage_tls: bool,
+	/// The certificate profile — the authority's name for a lifetime — this
+	/// server's certificates are requested under. `None` means the longest the
+	/// authority offers, which is every server until an operator says otherwise:
+	/// a short lifetime is adopted deliberately rather than inherited.
+	// spec: CRT#lifetime
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(treat_none_as_default_value = false)]
+	pub certificate_profile: Option<String>,
+	/// When this server's name management was paused. While set, Canopy makes no
+	/// new changes on its behalf — nothing ordered, renewed, or republished —
+	/// though nothing already in place is withdrawn.
+	///
+	/// Set automatically when one of the server's certificates is revoked, so
+	/// revocation and re-issuance don't chase each other. Only an operator lifts
+	/// it.
+	// spec: CRT#pausing-a-server
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(
+		deserialize_as = jiff_diesel::NullableTimestamp,
+		serialize_as = jiff_diesel::NullableTimestamp,
+		treat_none_as_default_value = false
+	)]
+	pub name_management_paused_at: Option<Timestamp>,
+	/// Who paused it. `None` when Canopy paused it itself on a revocation.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(treat_none_as_default_value = false)]
+	pub name_management_paused_by: Option<String>,
+	/// Why it was paused.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(treat_none_as_default_value = false)]
+	pub name_management_pause_reason: Option<String>,
 }
 
 impl Server {
@@ -428,6 +476,85 @@ impl Server {
 	/// already-open window resets the expiry. Returns the new expiry so callers
 	/// can echo it back to the operator. `allowed_by` is the operator's identity
 	/// (Tailscale login) for audit.
+	/// Pause Canopy acting on this server's behalf: no certificate ordered or
+	/// renewed, no address record changed. Nothing already in place is withdrawn.
+	///
+	/// Pausing an already-paused server leaves the original pause standing, so the
+	/// recorded reason and age stay those of the pause that first stopped the
+	/// work — which is the one an operator is investigating.
+	// spec: CRT#pausing-a-server
+	/// Whether Canopy is currently making no new changes on this server's behalf.
+	pub fn name_management_paused(&self) -> bool {
+		self.name_management_paused_at.is_some()
+	}
+
+	pub async fn pause_name_management(
+		db: &mut AsyncPgConnection,
+		server_id: Uuid,
+		paused_by: Option<&str>,
+		reason: &str,
+	) -> Result<()> {
+		use crate::schema::servers::dsl;
+		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+			.filter(dsl::name_management_paused_at.is_null())
+			.set((
+				dsl::name_management_paused_at
+					.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))),
+				dsl::name_management_paused_by.eq(paused_by),
+				dsl::name_management_pause_reason.eq(Some(reason)),
+			))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
+	}
+
+	/// Lift a pause, so the work resumes where it left off.
+	///
+	/// Only ever called for an operator: Canopy pauses itself on a revocation but
+	/// never un-pauses itself, however long the pause has stood and however much
+	/// is expiring under it. Deciding it is safe to start again is a judgement
+	/// Canopy is not in a position to make.
+	// spec: CRT#pausing-a-server
+	pub async fn resume_name_management(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<()> {
+		use crate::schema::servers::dsl;
+		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+			.set((
+				dsl::name_management_paused_at.eq(jiff_diesel::NullableTimestamp::from(None)),
+				dsl::name_management_paused_by.eq::<Option<String>>(None),
+				dsl::name_management_pause_reason.eq::<Option<String>>(None),
+			))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
+	}
+
+	/// Set (or clear) the profile this server's certificates are requested under.
+	///
+	/// `None` means the authority's own default, which is its longest-lived: a
+	/// short lifetime is something adopted deliberately for a server rather than a
+	/// default anyone inherits. Takes effect on the next issuance or renewal; a
+	/// certificate already held keeps the lifetime it was issued with.
+	// spec: CRT#lifetime
+	pub async fn set_certificate_profile(
+		db: &mut AsyncPgConnection,
+		server_id: Uuid,
+		profile: Option<&str>,
+	) -> Result<()> {
+		use crate::schema::servers::dsl;
+		let updated = diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+			.filter(dsl::deleted_at.is_null())
+			.set(dsl::certificate_profile.eq(profile))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		if updated == 0 {
+			return Err(AppError::DatabaseQuery(diesel::result::Error::NotFound));
+		}
+		Ok(())
+	}
+
 	pub async fn allow_restore(
 		db: &mut AsyncPgConnection,
 		server_id: Uuid,
@@ -650,8 +777,14 @@ impl Server {
 		use crate::schema::servers::dsl::*;
 		let search_pattern = format!("%{}%", query);
 
+		// Both halves of eligibility, stated rather than implied: only a
+		// product canopy lists publicly, and only its central servers. The
+		// kind filter alone would exclude other products today, but by
+		// accident of their having no central role rather than on purpose.
+		// spec: APP#public-listing
 		let mut query_builder = servers
 			.select(Self::as_select())
+			.filter(product.eq_any(Product::stored_values_where(|p| p.caps().public_listing)))
 			.filter(kind.eq(ServerKind::Central.to_string()))
 			.filter(public_name.is_not_null())
 			.filter(deleted_at.is_null())
@@ -755,6 +888,7 @@ impl Server {
 	/// read-only tags describing the server itself, under the reserved
 	/// [`RESERVED_TAG_PREFIX`] namespace:
 	///
+	/// - `canopy:product` — the server's [`Product`] (always present).
 	/// - `canopy:kind` — the server's [`ServerKind`] (always present).
 	/// - `canopy:rank` — the server's [`ServerRank`], only when one is set.
 	/// - `canopy:group-id` / `canopy:group-name` — only when grouped.
@@ -772,6 +906,10 @@ impl Server {
 			None => self.tags.clone(),
 		};
 
+		tags.0.insert(
+			format!("{RESERVED_TAG_PREFIX}product"),
+			self.product.to_string(),
+		);
 		tags.0
 			.insert(format!("{RESERVED_TAG_PREFIX}kind"), self.kind.to_string());
 		if let Some(rank) = self.rank {
@@ -807,6 +945,7 @@ fn test_server_serialization() {
 	let server = Server {
 		id: Uuid::nil(),
 		name: Some("Test Server".to_string()),
+		product: Product::Tamanu,
 		kind: ServerKind::Central,
 		rank: Some(ServerRank::Production),
 		host: Some(UrlField("https://example.com/".parse().unwrap())),
@@ -823,6 +962,12 @@ fn test_server_serialization() {
 		registered_at: None,
 		restore_allowed_until: None,
 		restore_allowed_by: None,
+		may_manage_dns: false,
+		may_manage_tls: false,
+		certificate_profile: None,
+		name_management_paused_at: None,
+		name_management_paused_by: None,
+		name_management_pause_reason: None,
 	};
 
 	let serialized = serde_json::to_string_pretty(&server).unwrap();
@@ -832,6 +977,7 @@ fn test_server_serialization() {
   "id": "00000000-0000-0000-0000-000000000000",
   "name": "Test Server",
   "host": "https://example.com",
+  "product": "tamanu",
   "kind": "central",
   "rank": "production",
   "device_id": "00000000-0000-0000-0000-000000000000",
@@ -839,7 +985,9 @@ fn test_server_serialization() {
   "is_monitored": true,
   "alert_when_down_for": 600,
   "notes": "",
-  "tags": {}
+  "tags": {},
+  "may_manage_dns": false,
+  "may_manage_tls": false
 }"#
 	);
 }
@@ -854,7 +1002,11 @@ pub struct NewServer {
 	/// The server's URL, if known up front.
 	#[serde(default)]
 	pub host: Option<UrlField>,
-	/// The server's role, for example central or facility.
+	/// The application this server runs. Defaults to tamanu.
+	#[serde(default)]
+	pub product: Product,
+	/// The server's role within its product's topology, for example central
+	/// or facility.
 	pub kind: ServerKind,
 	/// The server's environment tier, for example production, test, or dev.
 	pub rank: Option<ServerRank>,
@@ -870,6 +1022,7 @@ impl From<NewServer> for Server {
 		Server {
 			id: Uuid::new_v4(),
 			name: server.name,
+			product: server.product,
 			kind: server.kind,
 			rank: server.rank,
 			host: server.host,
@@ -886,6 +1039,12 @@ impl From<NewServer> for Server {
 			registered_at: None,
 			restore_allowed_until: None,
 			restore_allowed_by: None,
+			may_manage_dns: false,
+			may_manage_tls: false,
+			certificate_profile: None,
+			name_management_paused_at: None,
+			name_management_paused_by: None,
+			name_management_pause_reason: None,
 		}
 	}
 }
@@ -903,6 +1062,11 @@ pub struct PartialServer {
 	pub id: Uuid,
 	/// New display name for the server.
 	pub name: Option<String>,
+	/// New application for the server. When this changes to a product that
+	/// does not define the server's current kind, the caller settles the kind
+	/// too — the endpoint moves it to the new product's default.
+	#[diesel(deserialize_as = String, serialize_as = String)]
+	pub product: Option<Product>,
 	/// New role for the server, for example central or facility.
 	pub kind: Option<ServerKind>,
 	/// New environment tier for the server, for example production, test,
@@ -934,4 +1098,10 @@ pub struct PartialServer {
 	/// New set of key/value tags for the server. This replaces the whole
 	/// tag set.
 	pub tags: Option<TagMap>,
+	/// Whether the server may manage its own DNS records under its group's
+	/// domains.
+	pub may_manage_dns: Option<bool>,
+	/// Whether the server may obtain TLS certificates for names under its
+	/// group's domains.
+	pub may_manage_tls: Option<bool>,
 }

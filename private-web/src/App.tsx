@@ -10,13 +10,16 @@ import {
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { useApi } from "./api";
+import AdminProbeBanner from "./components/AdminProbeBanner";
 import { AdminProvider } from "./hooks/useIsAdmin";
+import { ProductsProvider } from "./hooks/useProducts";
 import { useReloadInterval } from "./hooks/useReloadInterval";
 import Admins from "./routes/Admins";
 import BackupConfig from "./routes/BackupConfig";
 import BackupDefaults from "./routes/BackupDefaults";
 import RecoveryVault from "./routes/RecoveryVault";
 import BackupPanel from "./routes/BackupPanel";
+import CertificateAuthority from "./routes/CertificateAuthority";
 import McpTokens from "./routes/McpTokens";
 import RestoreConsumers from "./routes/RestoreConsumers";
 import SelfAlerts from "./routes/SelfAlerts";
@@ -99,6 +102,7 @@ export default function App() {
 
 	return (
 		<AdminProvider>
+		<ProductsProvider>
 		<Box>
 			<AppBar position="static" color="default" elevation={1}>
 				<Toolbar variant="dense" sx={{ gap: 2 }}>
@@ -179,6 +183,7 @@ export default function App() {
 					))}
 				</Toolbar>
 			</AppBar>
+			<AdminProbeBanner />
 			<SelfAlertsBanner reloadTick={reloadTick} />
 			<Container maxWidth="lg" sx={{ py: 3 }}>
 				<Routes>
@@ -232,6 +237,10 @@ export default function App() {
 						/>
 						<Route path="restore-consumers" element={<RestoreConsumers />} />
 						<Route path="mcp-tokens" element={<McpTokens />} />
+						<Route
+							path="certificate-authority"
+							element={<CertificateAuthority />}
+						/>
 					</Route>
 					<Route path="/devices" element={<Devices />}>
 						<Route index element={<DevicesSearch />} />
@@ -253,6 +262,7 @@ export default function App() {
 				</Routes>
 			</Container>
 		</Box>
+		</ProductsProvider>
 		</AdminProvider>
 	);
 }

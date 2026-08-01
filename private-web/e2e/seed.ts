@@ -47,12 +47,27 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, server_reported_detail, issues, device_keys, servers, server_groups, devices, versions, tailscale_users, check_policies, scoped_check_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, recovery_vault_writes RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, server_reported_detail, issues, device_keys, servers, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, recovery_vault_writes, server_names, server_certificates, compromised_keys RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" server with it;
-	// self-alerts attach to that row, so put it back.
+	// self-alerts attach to that row, so put it back. `kind = 'canopy'` is the
+	// legacy value the product migration deliberately left in place, so this
+	// also keeps the read alias exercised; `product` has to be set explicitly
+	// since that migration's backfill has already run by now.
 	await sql.query(
-		"INSERT INTO servers (id, kind, name, host) VALUES ('00000000-0000-0000-0000-000000000000', 'canopy', 'Canopy', 'http://localhost')",
+		"INSERT INTO servers (id, product, kind, name, host) VALUES ('00000000-0000-0000-0000-000000000000', 'canopy', 'canopy', 'Canopy', 'http://localhost')",
+	);
+	// Same for the migration's one seeded source policy: tamanu reports on
+	// its own schedule, so its silence is not a reachability signal.
+	await sql.query(
+		"INSERT INTO source_policies (source, reachability) VALUES ('tamanu', 'quiet')",
+	);
+	// And the catalog row the server registers at startup for canopy's own
+	// reachability check: every server presents a passing reachability, and
+	// that presentation is gated on this row existing.
+	await sql.query(
+		"INSERT INTO check_policies (source, check_name, ceiling, reviewed_at, reviewed_by) \
+		 VALUES ('canopy', 'reachability', 'failed', NOW(), 'canopy')",
 	);
 }
 
@@ -102,12 +117,15 @@ export async function seedServerGroup(
 }
 
 export type ServerRank = "production" | "clone" | "demo" | "test" | "dev";
+export type Product = "tamanu" | "senaite" | "canopy";
+export type ServerKind = "central" | "facility" | "standalone";
 
 export interface SeededServer {
 	id: string;
 	name: string;
 	host: string;
-	kind: "central" | "facility";
+	product: Product;
+	kind: ServerKind;
 	rank: ServerRank | null;
 }
 
@@ -116,7 +134,9 @@ export async function seedServer(
 	opts: {
 		name?: string;
 		host?: string;
-		kind?: "central" | "facility";
+		/** Which application the server runs. Defaults to tamanu. */
+		product?: Product;
+		kind?: ServerKind;
 		rank?: ServerRank | null;
 		groupId?: string | null;
 		deviceId?: string;
@@ -127,22 +147,31 @@ export async function seedServer(
 		isMonitored?: boolean;
 		/** Threshold in seconds; defaults to 600 (10 min). Must be > 0. */
 		alertWhenDownFor?: number;
+		/** Whether the server may manage its own DNS records / obtain its own
+		 * TLS certificates under its group's domains. Both off by default, as
+		 * they are for a real server. */
+		mayManageDns?: boolean;
+		mayManageTls?: boolean;
 	} = {},
 ): Promise<SeededServer> {
 	const id = randomUUID();
 	const name = opts.name ?? randomLabel("srv");
 	const host = opts.host ?? `https://${randomLabel("host")}.e2e.invalid`;
-	const kind = opts.kind ?? "central";
+	const product = opts.product ?? "tamanu";
+	// Default the role to one the chosen product actually defines, so a seed
+	// that only names a product doesn't produce a misclassified server.
+	const kind = opts.kind ?? (product === "tamanu" ? "central" : "standalone");
 	const rank = opts.rank ?? "production";
 	const isMonitored = opts.isMonitored ?? false;
 	const alertWhenDownFor = opts.alertWhenDownFor ?? 600;
 	await sql.query(
-		`INSERT INTO servers (id, name, host, kind, rank, group_id, device_id, is_monitored, alert_when_down_for, notes, tags)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)`,
+		`INSERT INTO servers (id, name, host, product, kind, rank, group_id, device_id, is_monitored, alert_when_down_for, notes, tags, may_manage_dns, may_manage_tls)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14)`,
 		[
 			id,
 			name,
 			host,
+			product,
 			kind,
 			rank,
 			opts.groupId ?? null,
@@ -151,9 +180,11 @@ export async function seedServer(
 			alertWhenDownFor,
 			opts.notes ?? "",
 			JSON.stringify(opts.tags ?? {}),
+			opts.mayManageDns ?? false,
+			opts.mayManageTls ?? false,
 		],
 	);
-	return { id, name, host, kind, rank };
+	return { id, name, host, product, kind, rank };
 }
 
 export interface SeededDevice {
@@ -713,16 +744,22 @@ export async function seedBackupRun(
 		s3ReceivedPayloadBytes?: number | null;
 		/** Backdate `reported_at` by this many seconds (default: now). */
 		reportedAgoSecs?: number;
+		/** How long before now the run froze its data. Omit for a run that
+		 * reported no freeze moment (the pre-progress client behaviour). */
+		snapshotTakenAgoSecs?: number | null;
+		/** Force the run's id, so progress samples can be correlated to it. */
+		id?: string;
 	},
 ): Promise<{ id: string }> {
-	const id = randomUUID();
+	const id = opts.id ?? randomUUID();
 	await sql.query(
 		`INSERT INTO backup_runs
 		 (id, device_id, group_id, server_id, type, purpose, outcome, error, bytes_uploaded, snapshot_id,
 		  s3_sent_raw_bytes, s3_sent_payload_bytes, s3_received_raw_bytes, s3_received_payload_bytes,
-		  snapshot_logical_bytes, reported_at)
+		  snapshot_logical_bytes, reported_at, snapshot_taken_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-		  NOW() - make_interval(secs => $16))`,
+		  NOW() - make_interval(secs => $16),
+		  CASE WHEN $17::float8 IS NULL THEN NULL ELSE NOW() - make_interval(secs => $17) END)`,
 		[
 			id,
 			opts.deviceId,
@@ -740,6 +777,7 @@ export async function seedBackupRun(
 			opts.s3ReceivedPayloadBytes ?? null,
 			opts.snapshotLogicalBytes ?? null,
 			opts.reportedAgoSecs ?? 0,
+			opts.snapshotTakenAgoSecs ?? null,
 		],
 	);
 	return { id };
@@ -815,6 +853,79 @@ export async function seedBackupCredentialIssuance(
 			"bes-test-bucket",
 			"",
 			opts.runId ?? null,
+		],
+	);
+}
+
+/** Seed a `backup_run_progress` sample.
+ *
+ * `observedAgoSecs` backdates `observed_at`, which is normally server-stamped on
+ * receipt — a series is built by seeding several samples at decreasing ages.
+ * Counters are cumulative from the start of the run, so each successive sample's
+ * figures should be equal to or larger than the previous one's. */
+export async function seedBackupRunProgress(
+	sql: Sql,
+	opts: {
+		runId: string;
+		deviceId: string;
+		groupId: string;
+		serverId?: string | null;
+		type?: string;
+		purpose?: "backup" | "restore";
+		observedAgoSecs?: number;
+		snapshotTakenAgoSecs?: number | null;
+		bytesRead?: number | null;
+		bytesHashed?: number | null;
+		bytesUploaded?: number | null;
+		bytesCached?: number | null;
+		bytesEstimated?: number | null;
+		filesDone?: number | null;
+		filesEstimated?: number | null;
+		errors?: number | null;
+		ignoredErrors?: number | null;
+		currentPath?: string | null;
+		s3SentRawBytes?: number | null;
+		s3SentPayloadBytes?: number | null;
+		s3ReceivedRawBytes?: number | null;
+		s3ReceivedPayloadBytes?: number | null;
+		extra?: unknown;
+	},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO backup_run_progress
+		 (run_id, device_id, group_id, server_id, type, purpose, observed_at, snapshot_taken_at,
+		  bytes_read, bytes_hashed, bytes_uploaded, bytes_cached, bytes_estimated,
+		  files_done, files_estimated, errors, ignored_errors, current_path,
+		  s3_sent_raw_bytes, s3_sent_payload_bytes, s3_received_raw_bytes, s3_received_payload_bytes,
+		  extra)
+		 VALUES ($1, $2, $3, $4, $5, $6,
+		         NOW() - make_interval(secs => $7),
+		         CASE WHEN $8::float8 IS NULL THEN NULL ELSE NOW() - make_interval(secs => $8) END,
+		         $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
+		[
+			opts.runId,
+			opts.deviceId,
+			opts.groupId,
+			opts.serverId ?? null,
+			opts.type ?? "tamanu-postgres",
+			opts.purpose ?? "backup",
+			opts.observedAgoSecs ?? 0,
+			opts.snapshotTakenAgoSecs ?? null,
+			opts.bytesRead ?? null,
+			opts.bytesHashed ?? null,
+			opts.bytesUploaded ?? null,
+			opts.bytesCached ?? null,
+			opts.bytesEstimated ?? null,
+			opts.filesDone ?? null,
+			opts.filesEstimated ?? null,
+			opts.errors ?? null,
+			opts.ignoredErrors ?? null,
+			opts.currentPath ?? null,
+			opts.s3SentRawBytes ?? null,
+			opts.s3SentPayloadBytes ?? null,
+			opts.s3ReceivedRawBytes ?? null,
+			opts.s3ReceivedPayloadBytes ?? null,
+			JSON.stringify(opts.extra ?? {}),
 		],
 	);
 }
@@ -1032,6 +1143,58 @@ export async function seedRestoreCheck(
 	);
 }
 
+/** Seed a migration-test result: the restore-health report that carries the
+ * common fields, plus the migration outcome hung off it. A named
+ * `failedMigration` is what makes the verdict a failure. */
+export async function seedMigrationTest(
+	sql: Sql,
+	opts: {
+		consumerDeviceId: string;
+		groupId: string;
+		serverId: string;
+		targetVersionId: string;
+		snapshotId?: string;
+		failedMigration?: string | null;
+		totalElapsedSecs?: number;
+		dataBytesBefore?: number;
+		dataBytesAfter?: number;
+		timings?: Array<{ name: string; elapsedSecs: number }>;
+	},
+): Promise<void> {
+	const rows = await sql.query<{ id: string }>(
+		`INSERT INTO backup_restore_checks
+		 (consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome,
+		  replica_healthy, observed_at)
+		 VALUES ($1, $2, $3, 'tamanu-postgres', 'migrate', $4, 'success', true, NOW())
+		 RETURNING id`,
+		[opts.consumerDeviceId, opts.groupId, opts.serverId, opts.snapshotId ?? "snap-1"],
+	);
+	const checkId = rows[0]!.id;
+
+	await sql.query(
+		`INSERT INTO migration_tests
+		 (check_id, target_version_id, total_elapsed, failed_migration,
+		  data_bytes_before, data_bytes_after)
+		 VALUES ($1, $2, make_interval(secs => $3), $4, $5, $6)`,
+		[
+			checkId,
+			opts.targetVersionId,
+			opts.totalElapsedSecs ?? 60,
+			opts.failedMigration ?? null,
+			opts.dataBytesBefore ?? 0,
+			opts.dataBytesAfter ?? 0,
+		],
+	);
+
+	for (const [ordinal, timing] of (opts.timings ?? []).entries()) {
+		await sql.query(
+			`INSERT INTO migration_timings (check_id, ordinal, name, elapsed)
+			 VALUES ($1, $2, $3, make_interval(secs => $4))`,
+			[checkId, ordinal, timing.name, timing.elapsedSecs],
+		);
+	}
+}
+
 /** Seed a `recovery_vault_writes` row. `writtenAgoSecs` backdates the write;
  * omit for NOW(). */
 export async function seedRecoveryVaultWrite(
@@ -1043,4 +1206,122 @@ export async function seedRecoveryVaultWrite(
 		 VALUES (NOW() - make_interval(secs => $1), $2)`,
 		[opts.writtenAgoSecs ?? 0, opts.bytes ?? 4096],
 	);
+}
+
+/** Seed a `server_group_domains` row: a domain the group controls. Claims must
+ * not overlap, so give each seeded group its own name. */
+export async function seedServerGroupDomain(
+	sql: Sql,
+	opts: { groupId: string; domain: string; createdBy?: string },
+): Promise<{ id: string; domain: string }> {
+	const id = randomUUID();
+	await sql.query(
+		`INSERT INTO server_group_domains (id, group_id, domain, created_by)
+		 VALUES ($1, $2, $3, $4)`,
+		[id, opts.groupId, opts.domain, opts.createdBy ?? null],
+	);
+	return { id, domain: opts.domain };
+}
+
+/** Seed a `server_names` row: a public name a server registered, with the
+ * addresses it asked for and (optionally) the ones Canopy has published. Leave
+ * `publishedAddresses` unset for a registration the zone has not caught up with. */
+export async function seedServerName(
+	sql: Sql,
+	opts: {
+		serverId: string;
+		name: string;
+		addresses: string[];
+		publishedAddresses?: string[];
+		lastError?: string;
+	},
+): Promise<{ id: string; name: string }> {
+	const id = randomUUID();
+	const toInet = (addresses: string[]) =>
+		`{${addresses.map((a) => `"${a}"`).join(",")}}`;
+	await sql.query(
+		`INSERT INTO server_names
+		   (id, server_id, name, addresses, published_addresses, published_at, last_error)
+		 VALUES ($1, $2, $3, $4::inet[], $5::inet[], $6, $7)`,
+		[
+			id,
+			opts.serverId,
+			opts.name,
+			toInet(opts.addresses),
+			toInet(opts.publishedAddresses ?? []),
+			opts.publishedAddresses && opts.publishedAddresses.length > 0
+				? new Date()
+				: null,
+			opts.lastError ?? null,
+		],
+	);
+	return { id, name: opts.name };
+}
+
+/** Seed a `server_certificates` row.
+ *
+ * `expiresInDays` and `lifetimeDays` place the certificate anywhere in its life,
+ * which is what drives the risk grading — that is a fraction of each
+ * certificate's own lifetime rather than a fixed duration, so both are needed. */
+export async function seedServerCertificate(
+	sql: Sql,
+	opts: {
+		serverId: string;
+		name: string;
+		state?: "pending" | "issued" | "failed" | "revoked";
+		keyFingerprint?: string;
+		profile?: string;
+		expiresInDays?: number;
+		lifetimeDays?: number;
+		renewing?: boolean;
+		attempts?: number;
+		lastError?: string;
+		revokedBy?: string;
+		revocationReason?: string;
+	},
+): Promise<{ id: string; name: string }> {
+	const id = randomUUID();
+	const state = opts.state ?? "issued";
+	const issued = state === "issued" || state === "revoked";
+	const lifetimeDays = opts.lifetimeDays ?? 90;
+	const expiresInDays = opts.expiresInDays ?? 80;
+	const notAfter = issued
+		? new Date(Date.now() + expiresInDays * 86400_000)
+		: null;
+	const issuedAt = issued
+		? new Date(Date.now() - (lifetimeDays - expiresInDays) * 86400_000)
+		: null;
+	await sql.query(
+		`INSERT INTO server_certificates
+		   (id, server_id, name, key_fingerprint, csr, state, chain, not_after,
+		    issued_at, renewing, attempts, last_error, profile, renew_after,
+		    revoked_at, revoked_by, revocation_reason)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+		[
+			id,
+			opts.serverId,
+			opts.name,
+			opts.keyFingerprint ?? randomUUID().replace(/-/g, "").repeat(2).slice(0, 64),
+			Buffer.from("csr"),
+			state,
+			issued ? "-----BEGIN CERTIFICATE-----\n" : null,
+			notAfter,
+			issuedAt,
+			opts.renewing ?? false,
+			opts.attempts ?? 0,
+			opts.lastError ?? null,
+			opts.profile ?? null,
+			// A third of the life left is where Canopy would renew, so this is what
+			// makes an aged certificate read as overdue rather than merely old.
+			issued
+				? new Date(
+						notAfter!.getTime() - (lifetimeDays / 3) * 86400_000,
+					)
+				: null,
+			state === "revoked" ? new Date() : null,
+			opts.revokedBy ?? null,
+			opts.revocationReason ?? null,
+		],
+	);
+	return { id, name: opts.name };
 }

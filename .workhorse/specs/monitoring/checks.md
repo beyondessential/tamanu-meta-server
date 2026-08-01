@@ -134,6 +134,10 @@ It keeps one `reachability` check per server, under the `canopy` source, reflect
 A stale source degrades the server rather than silently dropping its checks, so a reporter going quiet is never mistaken for health.
 There is no per-source staleness check; the one reachability check carries the full picture.
 
+Every server presents a reachability check as it currently stands, whether or not a reporter has ever gone quiet: a server with nothing stale presents it as passed, and a server whose reachability is silenced presents it as skipped.
+So the check — and the controls on it — are reachable before anything has gone wrong.
+A server's checks as they stood at a past time carry reachability only where it was recorded at that time.
+
 ## Liveness and decommissioning
 
 Reachability is a per-server signal about reporters that have gone quiet; check liveness is a fleet-wide signal about a (source, check) that has gone away everywhere.
@@ -163,6 +167,8 @@ No surface presents one source's checks in isolation, and none exposes a source'
 ## Operator controls
 
 **Silences** are the scoped policy described above.
+A server's own settings additionally carry its reachability silence, presented alongside its monitoring switch so the two are read together: with monitoring off no check on the server alerts at all, while with unreachability alerting off every other check alerts as normal and only the server going away is quiet.
+That control is the same server-scoped silence of the reachability check reached from the check itself, and each surface reflects what the other did.
 
 **Snoozes** suppress one state until a chosen time, after which it contributes again if still degraded.
 
@@ -179,4 +185,9 @@ A manual condition behaves as a reported check whose reporter is the operator: i
 ## Monitoring gate
 
 Server-targeted checks on a server that is not monitored are recorded and presented for visibility but do not contribute to incidents.
+Canopy's own per-server determinations are made for unmonitored servers just as for monitored ones, so an unmonitored server that has gone away still presents as unreachable and unhealthy — it simply raises nothing.
 Group and Canopy-wide checks are not subject to any server's monitoring gate.
+
+Because an unmonitored server can present as failing while nothing is being alerted on, every surface presenting its health or reachability as they currently stand marks it as unmonitored.
+Its health is presented muted and accompanied by a silenced indicator explaining that alerting is off for the server, and its status indicator is struck through with a diagonal cut, so the distinction survives at the size of a single dot.
+The status legend names the mark.

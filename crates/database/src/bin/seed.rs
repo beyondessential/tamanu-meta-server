@@ -17,7 +17,7 @@ use commons_types::{
 	device::DeviceRole,
 	geo::GeoPoint,
 	issue::ResolvedReason,
-	server::{TagMap, kind::ServerKind, rank::ServerRank},
+	server::{TagMap, kind::ServerKind, product::Product, rank::ServerRank},
 	status::CheckResult,
 	version::{VersionStatus, VersionStr},
 };
@@ -290,6 +290,7 @@ async fn seed_known_issues(conn: &mut AsyncPgConnection) -> Result<()> {
 		(2, 11, 0),
 		"carol.releases@example.com",
 		"Report exports time out on large datasets; avoid 2.11.x in production.",
+		None,
 	)
 	.await?;
 
@@ -298,6 +299,7 @@ async fn seed_known_issues(conn: &mut AsyncPgConnection) -> Result<()> {
 		(2, 9, 0),
 		"carol.releases@example.com",
 		"Sync stalls when a facility reconnects after a long outage.",
+		None,
 	)
 	.await?;
 	VersionKnownIssue::resolve(
@@ -592,6 +594,9 @@ struct SeededServers {
 	pending_with_token: Uuid,
 	/// Pending enrollment, no token yet.
 	pending_no_token: Uuid,
+	/// A non-Tamanu server sharing a group with Tamanu ones: no version at
+	/// all, and it must not become the group's headline version.
+	senaite_lims: Uuid,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -607,10 +612,15 @@ async fn seed_servers(
 	}
 
 	fn base(host: &str, kind: ServerKind) -> Server {
+		base_of(Product::Tamanu, host, kind)
+	}
+
+	fn base_of(product: Product, host: &str, kind: ServerKind) -> Server {
 		Server {
 			id: Uuid::new_v4(),
 			name: None,
 			host: Some(url(host)),
+			product,
 			kind,
 			rank: None,
 			device_id: None,
@@ -626,6 +636,12 @@ async fn seed_servers(
 			registered_at: None,
 			restore_allowed_until: None,
 			restore_allowed_by: None,
+			may_manage_dns: false,
+			may_manage_tls: false,
+			certificate_profile: None,
+			name_management_paused_at: None,
+			name_management_paused_by: None,
+			name_management_pause_reason: None,
 		}
 	}
 
@@ -772,6 +788,26 @@ async fn seed_servers(
 	.await?;
 
 	// Archived (soft-deleted) server. Insert it live, then soft_delete so the
+	// A SENAITE server in the same group as the Tamanu ones: the mixed-product
+	// group the version rollup and billing attribution have to cope with.
+	let senaite_lims = insert(
+		conn,
+		Server {
+			name: Some("Pacific LIMS".to_string()),
+			rank: Some(ServerRank::Production),
+			group_id: Some(groups.pacific),
+			cloud: Some(true),
+			notes: "SENAITE laboratory system for the Pacific region.".to_string(),
+			registered_at: Some(now),
+			..base_of(
+				Product::Senaite,
+				"https://pacific-lims.example.com/",
+				ServerKind::Standalone,
+			)
+		},
+	)
+	.await?;
+
 	// real archival path runs (releases device, deactivates keys).
 	let archived = insert(
 		conn,
@@ -803,6 +839,7 @@ async fn seed_servers(
 		ungrouped,
 		pending_with_token,
 		pending_no_token,
+		senaite_lims,
 	})
 }
 
@@ -958,6 +995,29 @@ async fn seed_statuses(
 		true,
 		serde_json::json!([{"check": "database_connectivity", "healthy": true}]),
 		extra("PostgreSQL 13.12", "2.8.0", 50_000),
+	)
+	.await?;
+
+	// SENAITE server — healthy, and reporting no version at all. Its extra
+	// deliberately carries no `tamanuVersion`, so the detail view has to
+	// present nothing rather than "unknown", and the group's headline version
+	// has to come from a Tamanu member.
+	insert_status(
+		conn,
+		servers.senaite_lims,
+		None,
+		now,
+		None,
+		true,
+		serde_json::json!([
+			{"check": "database_connectivity", "healthy": true},
+			{"check": "disk_space", "healthy": true, "free_pct": 71},
+		]),
+		serde_json::json!({
+			"pgVersion": "PostgreSQL 16.2, compiled by gcc",
+			"bestoolVersion": "2.10.5",
+			"uptimeSecs": 604_800,
+		}),
 	)
 	.await?;
 

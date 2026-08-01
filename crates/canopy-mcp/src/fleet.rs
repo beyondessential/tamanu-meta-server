@@ -41,6 +41,7 @@ pub struct FindBackupProblemsArgs {
 
 #[derive(Serialize, Default)]
 struct Counts {
+	by_product: HashMap<String, usize>,
 	by_kind: HashMap<String, usize>,
 	by_rank: HashMap<String, usize>,
 }
@@ -94,8 +95,8 @@ struct BackupProblems {
 #[tool_router(router = fleet_router, vis = "pub(crate)")]
 impl CanopyMcp {
 	#[tool(
-		description = "Fleet-wide overview: server counts by kind/rank, version distribution, a \
-		               health rollup, and a backup-health rollup."
+		description = "Fleet-wide overview: server counts by product/kind/rank, version \
+		               distribution, a health rollup, and a backup-health rollup."
 	)]
 	async fn fleet_summary(
 		&self,
@@ -118,6 +119,7 @@ impl CanopyMcp {
 		let mut health = HealthRollup::default();
 		let mut version_distribution: HashMap<String, usize> = HashMap::new();
 		for s in &servers {
+			*counts.by_product.entry(s.product.to_string()).or_default() += 1;
 			*counts.by_kind.entry(s.kind.to_string()).or_default() += 1;
 			if let Some(r) = &s.rank {
 				*counts.by_rank.entry(r.to_string()).or_default() += 1;

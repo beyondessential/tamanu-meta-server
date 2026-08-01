@@ -26,7 +26,7 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import BackupIcon from "@mui/icons-material/Backup";
 import RestoreIcon from "@mui/icons-material/SettingsBackupRestore";
 import DeleteIcon from "@mui/icons-material/Delete";
@@ -48,7 +48,9 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import TimeAgo from "../components/TimeAgo";
 import { LatestSnapshot, SnapshotId } from "../components/SnapshotId";
 import { BackupProcessingChip } from "../components/BackupProcessingChip";
+import { BackupLiveProgress } from "../components/BackupLiveProgress";
 import RestoreReplicasSection from "../components/RestoreReplicasSection";
+import RunThroughputChart from "../components/RunThroughputChart";
 import {
 	BACKUP_STATUS_HELP,
 	BACKUP_STATUS_INTENT,
@@ -57,6 +59,7 @@ import {
 	type BackupConfigView,
 	type BackupMaintenanceRun,
 	groupServersByRank,
+	type LiveProgress,
 	type RecentRun,
 	type ServerInfo,
 } from "../types";
@@ -690,13 +693,24 @@ function RunOutcomeChip({ run }: { run: RecentRun }) {
 		);
 	}
 	if (run.status === "in_progress") {
+		// A run reporting progress can say when it was last heard from; one that
+		// isn't falls back to what we've always been able to say — that credentials
+		// were issued and no report has arrived.
+		const live = run.progress;
 		return (
 			<Tooltip
 				title={
-					<>
-						Credentials issued <TimeAgo timestamp={run.started_at ?? run.at} />;
-						awaiting the run report.
-					</>
+					live ? (
+						<>
+							Last progress <TimeAgo timestamp={live.observed_at} />
+							{live.current_path ? <> — working on {live.current_path}</> : null}
+						</>
+					) : (
+						<>
+							Credentials issued <TimeAgo timestamp={run.started_at ?? run.at} />;
+							awaiting the run report. This client reports no progress.
+						</>
+					)
 				}
 			>
 				<Chip
@@ -740,13 +754,81 @@ function RunDurationCell({ run }: { run: RecentRun }) {
 	return <>—</>;
 }
 
-/// One row of the recent-runs table. Runs with an error or reported S3 traffic
-/// get an expand toggle that reveals the detail in a collapsible sub-row.
+/// Transfer figures for a run still in flight: what it has moved so far, against
+/// the total it expects, with its current rate.
+///
+/// Every figure is independently optional, and an absent one reads as unknown
+/// rather than as zero — a client that measures nothing must not look like a run
+/// that is moving nothing.
+function LiveTransferCell({ live }: { live: LiveProgress }) {
+	const moved = live.bytes_uploaded;
+	const expected = live.bytes_estimated;
+	const pct =
+		moved != null && expected != null && expected > 0
+			? Math.min(100, (moved / expected) * 100)
+			: null;
+	if (moved == null && live.bytes_per_second == null) {
+		return (
+			<Tooltip title="This run reports no transfer figures.">
+				<span>—</span>
+			</Tooltip>
+		);
+	}
+	return (
+		<Stack spacing={0.25} sx={{ minWidth: 120 }} data-testid="live-transfer">
+			<Typography variant="body2" component="span">
+				{moved == null ? "—" : formatBytes(moved)}
+				{expected != null && ` / ~${formatBytes(expected)}`}
+			</Typography>
+			{pct != null && (
+				<Tooltip title={`${Math.round(pct)}% of the run's own estimate, which it may revise upward`}>
+					<LinearProgress
+						variant="determinate"
+						value={pct}
+						sx={{ height: 4, borderRadius: 2 }}
+					/>
+				</Tooltip>
+			)}
+			<Typography variant="caption" color="text.secondary">
+				{live.bytes_per_second == null
+					? "rate unknown"
+					: `${formatBytes(live.bytes_per_second)}/s`}
+			</Typography>
+		</Stack>
+	);
+}
+
+/// When the run froze the data it captured, shown under the row's time. For a long
+/// backup this is materially earlier than the report, and it is the figure that
+/// says how old the data actually is.
+function SnapshotTakenCaption({ run }: { run: RecentRun }) {
+	if (!run.snapshot_taken_at) return null;
+	return (
+		<Tooltip title="When the run froze the data it backed up — the point in time this backup represents, as opposed to when its upload finished.">
+			<Typography
+				variant="caption"
+				color="text.secondary"
+				sx={{ display: "block" }}
+				data-testid="snapshot-taken"
+			>
+				data from <TimeAgo timestamp={run.snapshot_taken_at} />
+			</Typography>
+		</Tooltip>
+	);
+}
+
+/// One row of the recent-runs table. Runs with an error, reported S3 traffic, or
+/// live progress get an expand toggle that reveals the detail in a collapsible
+/// sub-row.
 function RunRow({ run, members }: { run: RecentRun; members: ServerInfo[] }) {
 	const [open, setOpen] = useState(false);
 	const hasError = Boolean(run.error);
 	const hasS3 = hasS3Traffic(run);
-	const expandable = hasError || hasS3;
+	const live = run.progress;
+	// A run with a correlation id has a series worth charting even once finished,
+	// for as long as that series is retained.
+	const chartable = run.run_id != null;
+	const expandable = hasError || hasS3 || live != null || chartable;
 	// The snapshot's logical tree size, from whichever source reported it:
 	// bestool's own accounting, or (failing that) canopy's repo inspection.
 	// Both describe the same quantity — kopia doesn't re-upload bits the
@@ -780,6 +862,7 @@ function RunRow({ run, members }: { run: RecentRun; members: ServerInfo[] }) {
 				</TableCell>
 				<TableCell>
 					<TimeAgo timestamp={run.at} />
+					<SnapshotTakenCaption run={run} />
 				</TableCell>
 				<TableCell>{serverLabel(members, run.server_id)}</TableCell>
 				<TableCell>{run.type}</TableCell>
@@ -807,7 +890,15 @@ function RunRow({ run, members }: { run: RecentRun; members: ServerInfo[] }) {
 						formatBytes(snapshotSize)
 					)}
 				</TableCell>
-				<TableCell>{transfer == null ? "—" : formatBytes(transfer)}</TableCell>
+				<TableCell>
+					{live ? (
+						<LiveTransferCell live={live} />
+					) : transfer == null ? (
+						"—"
+					) : (
+						formatBytes(transfer)
+					)}
+				</TableCell>
 				<TableCell>
 					<SnapshotId id={run.snapshot_id} />
 				</TableCell>
@@ -833,11 +924,159 @@ function RunRow({ run, members }: { run: RecentRun; members: ServerInfo[] }) {
 								</Alert>
 							)}
 							{hasS3 && <S3TrafficDetail run={run} />}
+							{live && <LiveProgressDetail live={live} />}
+							{/* Mounted only while open so an expanded row is the only one
+							    that fetches its series. */}
+							{open && chartable && run.run_id && (
+								<RunProgressSection
+									runId={run.run_id}
+									live={run.status === "in_progress"}
+								/>
+							)}
 						</Collapse>
 					</TableCell>
 				</TableRow>
 			)}
 		</>
+	);
+}
+
+/// Engine counters for a run in flight, and the proxy's tally set against them.
+///
+/// The two describe the same upload from different vantage points, so they should
+/// track closely; a visible gap is retries or protocol overhead, and worth seeing.
+function LiveProgressDetail({ live }: { live: LiveProgress }) {
+	const engine = live.bytes_uploaded;
+	const proxy = live.s3_sent_payload_bytes;
+	const raw = live.s3_sent_raw_bytes;
+	const overheadPct =
+		raw != null && proxy != null && proxy > 0
+			? ((raw - proxy) / proxy) * 100
+			: null;
+	const divergencePct =
+		engine != null && proxy != null && engine > 0
+			? ((proxy - engine) / engine) * 100
+			: null;
+	return (
+		<Stack spacing={0.5} sx={{ my: 1 }} data-testid="live-progress-detail">
+			<Typography variant="subtitle2">In flight</Typography>
+			<Stat label="Read" value={formatBytes(live.bytes_read)} />
+			<Stat label="Processed" value={formatBytes(live.bytes_hashed)} />
+			<Stat label="Already present" value={formatBytes(live.bytes_cached)} />
+			{(live.files_done != null || live.files_estimated != null) && (
+				<Stat
+					label="Files"
+					value={`${live.files_done ?? "—"} / ${live.files_estimated ?? "—"}`}
+				/>
+			)}
+			{(live.errors != null || live.ignored_errors != null) && (
+				<Stat
+					label="Errors"
+					value={`${live.errors ?? 0} (${live.ignored_errors ?? 0} ignored)`}
+				/>
+			)}
+			<Stat
+				label="Last heard"
+				value={`${humanSeconds(live.seconds_since_observed)} ago`}
+			/>
+
+			<Typography variant="subtitle2" sx={{ pt: 0.5 }}>
+				Engine vs proxy
+			</Typography>
+			<Stat label="Engine uploaded" value={formatBytes(engine)} />
+			<Stat
+				label="Proxy sent"
+				value={
+					proxy == null
+						? formatBytes(proxy)
+						: `${formatBytes(proxy)} payload${
+								divergencePct == null
+									? ""
+									: ` (${divergencePct >= 0 ? "+" : ""}${divergencePct.toFixed(1)}% vs engine)`
+							}`
+				}
+			/>
+			<Stat
+				label="Proxy raw"
+				value={
+					raw == null
+						? formatBytes(raw)
+						: `${formatBytes(raw)}${
+								overheadPct == null ? "" : ` (+${overheadPct.toFixed(1)}% overhead)`
+							}`
+				}
+			/>
+
+			{live.extra != null && Object.keys(live.extra as object).length > 0 && (
+				<RawEngineDetail extra={live.extra} />
+			)}
+		</Stack>
+	);
+}
+
+/// Whatever the backup engine reported that Canopy doesn't model, shown verbatim.
+/// Collapsed by default: useful when a run misbehaves, noise otherwise.
+function RawEngineDetail({ extra }: { extra: unknown }) {
+	const [open, setOpen] = useState(false);
+	return (
+		<Box>
+			<Button size="small" onClick={() => setOpen((o) => !o)} sx={{ px: 0.5 }}>
+				{open ? "Hide" : "Show"} raw engine data
+			</Button>
+			<Collapse in={open} timeout="auto" unmountOnExit>
+				<Typography
+					component="pre"
+					variant="body2"
+					data-testid="raw-engine-data"
+					sx={{
+						m: 0,
+						fontFamily: "monospace",
+						whiteSpace: "pre-wrap",
+						wordBreak: "break-word",
+					}}
+				>
+					{JSON.stringify(extra, null, 2)}
+				</Typography>
+			</Collapse>
+		</Box>
+	);
+}
+
+/// The run's rate over its life. Fetched per expanded row rather than with the
+/// panel, since a series is only wanted when someone opens the row.
+///
+/// A run still in flight keeps extending its series, so poll while it does; a
+/// finished run's series is fixed and fetched once.
+function RunProgressSection({
+	runId,
+	live,
+}: {
+	runId: string;
+	live: boolean;
+}) {
+	const tick = useReloadInterval(live ? 5_000 : 300_000, "canopy-data-changed");
+	const series = useApi("backups", "run_progress", { run_id: runId }, [
+		runId,
+		live ? tick : 0,
+	]);
+	if (series.status === "loading" || series.status === "idle") {
+		return <LinearProgress sx={{ my: 1 }} />;
+	}
+	if (series.status === "error") {
+		return (
+			<Alert severity="error" variant="outlined" sx={{ my: 1 }}>
+				{series.error.message}
+			</Alert>
+		);
+	}
+	if (series.data.length === 0) return null;
+	return (
+		<Box sx={{ my: 1 }}>
+			<Typography variant="subtitle2" gutterBottom>
+				Upload rate
+			</Typography>
+			<RunThroughputChart series={series.data} />
+		</Box>
 	);
 }
 
@@ -1001,12 +1240,27 @@ function RecentRunsPanel({
 	groupId: string;
 	members: ServerInfo[];
 }) {
+	// Poll faster while a run is in flight, so its progress figures actually
+	// advance while someone is watching — a live view that only moved on page
+	// reload would defeat the point. Back off to a gentle cadence when the table
+	// is all settled history. Mirrors MaintenancePanel.
+	const [inFlight, setInFlight] = useState(false);
+	const tick = useReloadInterval(
+		inFlight ? 5_000 : 30_000,
+		"canopy-data-changed",
+	);
 	const stats = useApi(
 		"backups",
 		"stats",
 		{ server_group_id: groupId },
-		[groupId],
+		[groupId, tick],
 	);
+	const anyInFlight =
+		stats.status === "ok" &&
+		stats.data.recent_runs.some((r) => r.status === "in_progress");
+	useEffect(() => {
+		setInFlight(anyInFlight);
+	}, [anyInFlight]);
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
 			<Typography variant="h6" component="h2" gutterBottom>
@@ -1355,11 +1609,18 @@ function ServersPanel({
 	members: ServerInfo[];
 	isAdmin: boolean;
 }) {
+	// As with the runs panel: watch closely while a backup is in flight so its
+	// figures move on their own, and back off once nothing is running.
+	const [inFlight, setInFlight] = useState(false);
+	const tick = useReloadInterval(
+		inFlight ? 5_000 : 30_000,
+		"canopy-data-changed",
+	);
 	const stats = useApi(
 		"backups",
 		"stats",
 		{ server_group_id: groupId },
-		[groupId],
+		[groupId, tick],
 	);
 	const requestNow = useApiAction("backups", "request_now");
 	const cancel = useApiAction("backups", "cancel_request");
@@ -1368,6 +1629,10 @@ function ServersPanel({
 
 	const pending = stats.status === "ok" ? stats.data.pending_requests : [];
 	const capabilities = stats.status === "ok" ? stats.data.capabilities : [];
+	const anyInFlight = capabilities.some((c) => c.processing_since != null);
+	useEffect(() => {
+		setInFlight(anyInFlight);
+	}, [anyInFlight]);
 	const restoreWindows =
 		stats.status === "ok" ? stats.data.restore_windows : [];
 	const restoreWindowFor = (serverId: string) =>
@@ -1653,6 +1918,7 @@ function ServersPanel({
 																since={cap?.processing_since}
 															/>
 														</Stack>
+														<BackupLiveProgress progress={cap?.progress} />
 													</TableCell>
 													<TableCell>
 														{cap?.next_backup_at ? (

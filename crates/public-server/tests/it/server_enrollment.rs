@@ -9,7 +9,7 @@
 
 use base64::Engine;
 use commons_tests::server::{make_signing_certificate, run, run_with_tailnet_device_auth};
-use commons_types::server::{TagMap, kind::ServerKind};
+use commons_types::server::{TagMap, kind::ServerKind, product::Product};
 use database::{
 	pg_duration::PgDuration, server_enrollment_tokens::ServerEnrollmentToken, servers::Server,
 	url_field::UrlField,
@@ -27,6 +27,7 @@ fn new_server(host: &str) -> Server {
 		id: Uuid::new_v4(),
 		name: Some("test".into()),
 		host: Some(UrlField(host.parse().unwrap())),
+		product: Product::Tamanu,
 		kind: ServerKind::Central,
 		rank: None,
 		device_id: None,
@@ -42,6 +43,12 @@ fn new_server(host: &str) -> Server {
 		registered_at: None,
 		restore_allowed_until: None,
 		restore_allowed_by: None,
+		may_manage_dns: false,
+		may_manage_tls: false,
+		certificate_profile: None,
+		name_management_paused_at: None,
+		name_management_paused_by: None,
+		name_management_pause_reason: None,
 	}
 }
 

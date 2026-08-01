@@ -12,6 +12,7 @@ import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
 import { Link as RouterLink } from "react-router-dom";
 import ServerShorty, { type ServerInfo } from "../components/ServerShorty";
 import { useApi, useApiAction } from "../api";
+import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { compareServersByRankThenKind } from "../types";
 
@@ -19,8 +20,7 @@ import { compareServersByRankThenKind } from "../types";
 /// find them — every other listing filters archived rows out.
 export default function ArchivedList() {
 	usePageTitle("Archived");
-	const isAdmin = useApi("commons", "is_current_user_admin", {}, []);
-	const admin = isAdmin.status === "ok" && isAdmin.data;
+	const admin = useIsAdmin() === true;
 	const groups = useApi("server_groups", "list_archived", {}, []);
 	const servers = useApi("servers", "list_archived", {}, []);
 

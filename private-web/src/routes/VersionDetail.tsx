@@ -34,6 +34,7 @@ import Markdown from "../components/Markdown";
 import TimeAgo from "../components/TimeAgo";
 import VersionStatusChip from "../components/VersionStatusChip";
 import { useApi, useApiAction } from "../api";
+import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { prettifyVersionRange } from "../lib/versionRange";
 import type {
@@ -53,7 +54,7 @@ export default function VersionDetail() {
 		{ version },
 		[version],
 	);
-	const isAdmin = useApi("commons", "is_current_user_admin");
+	const admin = useIsAdmin() === true;
 
 	if (detail.status === "loading" || detail.status === "idle") {
 		return <LinearProgress />;
@@ -64,7 +65,6 @@ export default function VersionDetail() {
 
 	const v = detail.data;
 	const versionStr = `${v.major}.${v.minor}.${v.patch}`;
-	const admin = isAdmin.status === "ok" && isAdmin.data;
 
 	return (
 		<Stack spacing={3}>

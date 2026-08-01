@@ -1354,6 +1354,38 @@ pub async fn consolidated_checks_latest(
 			})
 		})
 		.collect();
+	// Reachability presents for every server, whether or not a reporter has
+	// ever gone quiet. The sweep only files this check while it's degraded
+	// (or when it has a degradation to close), so a server that has never
+	// had a problem carries no state row for it — fill that in as passing,
+	// so the check and its silence control are there before anything is
+	// red. Gated on a live catalog row so decommissioning still removes it,
+	// and graded through the same silence pass as everything else.
+	// spec: CHK#reachability
+	let reachability = (
+		crate::statuses::CANOPY_SOURCE.to_string(),
+		crate::statuses::REACHABILITY_REF.to_string(),
+	);
+	if cataloged.contains(&reachability)
+		&& !checks
+			.iter()
+			.any(|c| c.source == reachability.0 && c.check == reachability.1)
+	{
+		let is_silenced = silenced.contains(&reachability);
+		checks.push(ConsolidatedCheck {
+			silenced: is_silenced,
+			observed: Some(CheckResult::Passed),
+			source: reachability.0,
+			check: reachability.1,
+			effective: if is_silenced {
+				CheckResult::Skipped
+			} else {
+				CheckResult::Passed
+			},
+			detail: serde_json::json!({}),
+		});
+	}
+
 	checks.sort_by(|a, b| {
 		a.effective
 			.urgency_rank()
@@ -2629,6 +2661,28 @@ impl Issue {
 			.filter(dsl::active.eq(true))
 			.filter(dsl::server_group_id.is_not_null())
 			.select(dsl::server_group_id.assume_not_null())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Server ids carrying an active server-scoped issue with this
+	/// `(source, ref)`. The counterpart to
+	/// [`Self::active_group_ids_by_source_ref`], for the sweeps whose work list is
+	/// "what is wrong now" and which need "what was wrong last time" to know what
+	/// to close.
+	pub async fn active_server_ids_by_source_ref(
+		db: &mut AsyncPgConnection,
+		source: &str,
+		ref_: &str,
+	) -> Result<Vec<Uuid>> {
+		use crate::schema::issues::dsl;
+		dsl::issues
+			.filter(dsl::source.eq(source))
+			.filter(dsl::ref_.eq(ref_))
+			.filter(dsl::active.eq(true))
+			.filter(dsl::server_id.is_not_null())
+			.select(dsl::server_id.assume_not_null())
 			.load(db)
 			.await
 			.map_err(AppError::from)

@@ -13,9 +13,11 @@ import {
 } from "@mui/material";
 import BarChartIcon from "@mui/icons-material/BarChart";
 import PersonIcon from "@mui/icons-material/Person";
+import { useMemo } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import StatusDot from "../components/StatusDot";
 import VersionIndicator from "../components/VersionIndicator";
+import { useVersionTrackingAcross } from "../hooks/useProducts";
 import {
 	HealthLegend,
 	OperatorLegend,
@@ -300,6 +302,13 @@ function GroupCard({
 	operators: AggregatedOperator[];
 	openIncident: IncidentLoudness | null;
 }) {
+	// The headline version comes from whichever member speaks for the group, so
+	// how to present it follows from the products its members actually have: a
+	// group with no versioned member shows no version rather than an "unknown".
+	// spec: APP#versions
+	const tracking = useVersionTrackingAcross(
+		useMemo(() => group.members.map((m) => m.product), [group.members]),
+	);
 	return (
 		<Stack spacing={1}>
 			<Stack
@@ -322,6 +331,7 @@ function GroupCard({
 				<Box sx={{ flexShrink: 0 }}>
 					<VersionIndicator
 						version={group.version}
+						tracking={tracking}
 						distance={group.version_distance}
 						addLink={false}
 					/>
@@ -452,6 +462,7 @@ export function RankedDotStrip({ members }: { members: FacilityServerStatus[] })
 					<StatusDot
 						up={m.up}
 						health={m.health}
+						monitored={m.is_monitored}
 						title={`${m.name}: ${m.up}${
 							m.health !== "healthy" ? ` (${m.health})` : ""
 						}`}

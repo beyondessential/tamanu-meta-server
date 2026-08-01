@@ -161,6 +161,15 @@ pub struct StatusResponse {
 	/// `warn`. Clients that predate this field can safely ignore it; the
 	/// same mapping is served on demand at `GET /status/{server_id}/check-severities`.
 	pub check_severities: BTreeMap<String, CheckSeverity>,
+	/// What this server is entitled to do with names: the domains its group
+	/// controls, the grants it holds, whether it is paused, and the names and
+	/// certificates it already has. A server-wide fact, so returned to every
+	/// source — an agent already reporting status learns of a new domain or a
+	/// newly granted permission without asking separately. Identical to what
+	/// `GET /names/entitlements` returns. Clients that predate this field can
+	/// safely ignore it.
+	// spec: CRT#what-a-server-may-act-on
+	pub names: crate::names::Entitlements,
 	/// The server's effective tags: its own tags overlaid on its group's,
 	/// plus the synthetic read-only `canopy:` tags and effective `billing.*`
 	/// labels. Identical to what the standalone `GET /tags` endpoint
@@ -216,6 +225,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 async fn create(
 	Path(server_id): Path<Uuid>,
 	State(db): State<Db>,
+	State(dns_zones): State<Vec<commons_types::dns::ManagedZone>>,
 	device: ServerDevice,
 	current_version: Option<VersionHeader>,
 	body: Option<Json<serde_json::Value>>,
@@ -335,9 +345,15 @@ async fn create(
 	let check_severities =
 		effective_check_severities(&mut db, server_id, server.group_id, &source).await?;
 
+	// A server-wide fact, like the tags: every source gets it, so an agent
+	// reporting status learns of a new domain or grant without a second call.
+	// spec: CRT#what-a-server-may-act-on
+	let names = crate::names::entitlements_for(&mut db, &server, &dns_zones).await?;
+
 	Ok(Json(StatusResponse {
 		backup_now,
 		check_severities,
+		names,
 		tags: effective_tags,
 	}))
 }
