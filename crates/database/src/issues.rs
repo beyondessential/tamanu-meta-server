@@ -1511,6 +1511,12 @@ async fn re_evaluate_incident_membership(
 		&issue.r#ref,
 	)
 	.await?;
+	// Lock the target before reading whether it has an open incident: for a
+	// sub-Error issue, that read is the entire justification for joining, and
+	// a concurrent close landing between here and `find_or_open_incident`
+	// would turn "join the open incident" into "open a new one" — a Slack page
+	// for a Warning.
+	lock_target(conn, target).await?;
 	let target_open = target_has_open_incident(conn, target).await?;
 
 	let should_leave =
@@ -2142,6 +2148,12 @@ pub async fn sweep_lingering_incidents(db: &mut AsyncPgConnection) -> Result<usi
 	for candidate in candidates {
 		let did_close = db
 			.transaction::<_, AppError, _>(async |conn| {
+				// Target lock first, before the incident row, matching the
+				// order the open path takes them in: an incident's target
+				// never changes, so `candidate` is a safe source for it, and
+				// this is what stops a close landing inside the open path's
+				// join decision.
+				lock_target(conn, IncidentTarget::of_incident(&candidate)).await?;
 				let incident: Option<Incident> = incidents::table
 					.select(Incident::as_select())
 					.filter(incidents::id.eq(candidate.id))
@@ -2260,13 +2272,20 @@ async fn target_has_open_incident(
 /// per-group; the global target has no row to lock, so it serializes on a
 /// transaction-scoped advisory lock instead. The unique partial indexes on
 /// open incidents are the belt-and-braces backstop at the DB layer.
-async fn find_or_open_incident(
-	db: &mut AsyncPgConnection,
-	target: IncidentTarget,
-	opened_at: Timestamp,
-) -> Result<(Uuid, bool)> {
-	use crate::schema::{incidents, server_groups};
-
+/// Serialise everything that opens or closes an incident for one target.
+///
+/// The open path decides "join the target's existing incident" from an
+/// unlocked read, so without a common lock a concurrent close can land between
+/// that read and the open, and `find_or_open_incident` then creates a *new*
+/// incident — for an issue whose severity may not warrant one, since a
+/// sub-Error issue's `should_join` is justified solely by "the target already
+/// has one open". Both close paths take this too, so the read, the open and
+/// the close all serialise on the same object.
+///
+/// Always taken *before* any `incidents` row lock, so the two lock orders
+/// can't deadlock against each other.
+async fn lock_target(db: &mut AsyncPgConnection, target: IncidentTarget) -> Result<()> {
+	use crate::schema::server_groups;
 	match target {
 		IncidentTarget::Group(gid) => {
 			let _group_lock: Uuid = server_groups::table
@@ -2284,6 +2303,17 @@ async fn find_or_open_incident(
 				.await?;
 		}
 	}
+	Ok(())
+}
+
+async fn find_or_open_incident(
+	db: &mut AsyncPgConnection,
+	target: IncidentTarget,
+	opened_at: Timestamp,
+) -> Result<(Uuid, bool)> {
+	use crate::schema::incidents;
+
+	lock_target(db, target).await?;
 
 	let mut q = incidents::table
 		.select(Incident::as_select())
@@ -3222,6 +3252,12 @@ impl Incident {
 				.first(conn)
 				.await?;
 			let target = IncidentTarget::of_incident(&incident_loaded);
+			// Take the target lock before touching any incident row, same
+			// order as the open path, so an operator resolve can't land inside
+			// another transaction's join decision and make it open a fresh
+			// incident. An incident's target never changes, so reading it
+			// before the lock is safe.
+			lock_target(conn, target).await?;
 
 			let open_issue_ids: Vec<Uuid> = incident_issues::table
 				.select(incident_issues::issue_id)
