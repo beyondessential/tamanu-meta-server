@@ -100,11 +100,28 @@ pub fn spki_from_key_pem(key_pem: &str) -> Vec<u8> {
 	x509_cert.tbs_certificate.subject_pki.raw.to_vec()
 }
 
+/// Trust both client-certificate header paths for the duration of the test
+/// binary. The harness stands in for an ingress we trust, and the suite
+/// covers both the nginx (`mtls-certificate`) and Envoy (XFCC) transports —
+/// which of them a *deployment* trusts is configuration, unit-tested in
+/// `commons_servers::device_auth::mtls`.
+fn trust_both_cert_headers() {
+	// First call wins; every later call is the same value, so ignore the
+	// "already set" error rather than racing on it.
+	let _ = commons_servers::device_auth::mtls::force_trusted_cert_headers(
+		commons_servers::device_auth::mtls::TrustedCertHeaders {
+			mtls_header: true,
+			xfcc: true,
+		},
+	);
+}
+
 pub async fn run<F, T, Fut>(test: F) -> T
 where
 	F: FnOnce(AsyncPgConnection, TestServer, TestServer) -> Fut,
 	Fut: Future<Output = T>,
 {
+	trust_both_cert_headers();
 	TestDb::run(async |conn, url| {
 		// One pool per state, shared between the RW and RO handles — a second
 		// pool would double connections against the throwaway test cluster,
@@ -152,6 +169,7 @@ where
 	F: FnOnce(AsyncPgConnection, String, Uuid, TestServer, TestServer) -> Fut,
 	Fut: Future<Output = T>,
 {
+	trust_both_cert_headers();
 	run(async |mut conn, mut public, private| {
 		let (key_data, cert) = make_certificate();
 
@@ -203,6 +221,7 @@ where
 	F: FnOnce(AsyncPgConnection, std::net::IpAddr, String, Uuid, TestServer, TestServer) -> Fut,
 	Fut: Future<Output = T>,
 {
+	trust_both_cert_headers();
 	use commons_servers::tailnet_directory::{DirectoryEntry, TailnetDirectory};
 
 	let tailnet_ip: std::net::IpAddr = "100.64.0.42".parse().expect("parse test ip");

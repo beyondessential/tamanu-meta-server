@@ -5,7 +5,7 @@
 //! A device row is created only through the gated enrollment flow
 //! (`/servers/register/*`); an unknown key here is `AuthCertificateNotFound`.
 
-use std::sync::LazyLock;
+use std::sync::{LazyLock, OnceLock};
 
 use commons_errors::{AppError, Result};
 use database::devices::Device;
@@ -98,7 +98,23 @@ fn env_flag(key: &str, default: bool) -> bool {
 	}
 }
 
-static TRUSTED: LazyLock<TrustedCertHeaders> = LazyLock::new(TrustedCertHeaders::from_env);
+static FROM_ENV: LazyLock<TrustedCertHeaders> = LazyLock::new(TrustedCertHeaders::from_env);
+static OVERRIDE: OnceLock<TrustedCertHeaders> = OnceLock::new();
+
+/// Force the trusted-header set instead of reading the environment. First
+/// call wins; later calls return the value already in force.
+///
+/// For harnesses that stand in for a trusted ingress and need to exercise
+/// both header paths. Production reads the environment.
+pub fn force_trusted_cert_headers(
+	trusted: TrustedCertHeaders,
+) -> std::result::Result<(), TrustedCertHeaders> {
+	OVERRIDE.set(trusted)
+}
+
+fn trusted() -> TrustedCertHeaders {
+	OVERRIDE.get().copied().unwrap_or(*FROM_ENV)
+}
 
 /// Resolve a request to a [`Device`] via mTLS. Returns:
 ///
@@ -136,7 +152,7 @@ pub fn spki_from_headers(headers: &http::HeaderMap) -> Result<Option<Vec<u8>>> {
 }
 
 fn extract_cert_pem(headers: &http::HeaderMap) -> Result<Option<String>> {
-	extract_cert_pem_with(headers, *TRUSTED)
+	extract_cert_pem_with(headers, trusted())
 }
 
 /// [`extract_cert_pem`] against an explicit trust configuration, so the
