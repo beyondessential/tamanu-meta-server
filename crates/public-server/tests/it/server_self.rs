@@ -30,7 +30,7 @@ async fn self_endpoint_returns_server_and_device_ids() {
 
 			let response = public
 				.get("/servers/self")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			response.assert_status_ok();
 			let body: SelfResponse = response.json();
@@ -50,7 +50,7 @@ async fn self_endpoint_412_when_device_has_no_server() {
 		async |mut _conn, cert, _device_id, public, _| {
 			let response = public
 				.get("/servers/self")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			response.assert_status(StatusCode::PRECONDITION_FAILED);
 		},

@@ -100,7 +100,7 @@ async fn endpoint_maps_catalog_severities_and_silences() {
 
 			let response = public
 				.get(&format!("/status/{server_id}/check-severities"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			response.assert_status_ok();
 			let map: serde_json::Value = response.json();
@@ -134,7 +134,7 @@ async fn endpoint_works_for_ungrouped_server() {
 
 			let response = public
 				.get(&format!("/status/{server_id}/check-severities"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			response.assert_status_ok();
 			let map: serde_json::Value = response.json();
@@ -160,7 +160,7 @@ async fn status_response_carries_check_severities() {
 
 			let response = public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({"health": [
 					{"check": "disk_space", "result": "passed"},
 					{"check": "cert_expiry", "result": "failed"},
@@ -194,7 +194,7 @@ async fn endpoint_rejects_device_not_bound_to_server() {
 
 			let response = public
 				.get(&format!("/status/{server_id}/check-severities"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			response.assert_status_not_ok();
 		},
@@ -209,7 +209,7 @@ async fn endpoint_404s_for_unknown_server() {
 		async |_conn, cert, _device_id, public, _| {
 			let response = public
 				.get(&format!("/status/{}/check-severities", Uuid::new_v4()))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			response.assert_status_not_found();
 		},
