@@ -855,6 +855,128 @@ async fn update_moving_scope_recovers_stale_alert_at_old_key() {
 	.await;
 }
 
+/// Disabling a declaration drops it out of the overdue sweep exactly as
+/// deleting it does, and a disabled replica generates no consumer work, so
+/// nothing can clear its alert. Decommissioning by disabling must not leave
+/// the operator paged forever.
+#[tokio::test(flavor = "multi_thread")]
+async fn disabling_recovers_the_stale_alert() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let server = insert_server(&mut conn, group).await;
+		let r = RestoreReplica::create(
+			&mut conn,
+			new_replica(
+				consumer,
+				group,
+				Some(server),
+				RestoreIntent::from("verify"),
+				"n",
+			),
+		)
+		.await
+		.expect("create");
+
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			new_check(
+				consumer,
+				group,
+				server,
+				RestoreIntent::from("verify"),
+				RunOutcome::Failure,
+				false,
+			),
+		)
+		.await
+		.expect("record failure");
+		assert_eq!(active_restore_issues(&mut conn, group).await, 1);
+
+		RestoreReplica::update(
+			&mut conn,
+			r.id,
+			RestoreReplicaUpdate {
+				enabled: false,
+				..update_from(&r)
+			},
+		)
+		.await
+		.expect("disable");
+		assert_eq!(
+			active_restore_issues(&mut conn, group).await,
+			0,
+			"a disabled declaration's alert is recovered, not left open forever"
+		);
+	})
+	.await;
+}
+
+/// Re-enabling is not a recovery event of its own: the sweep picks the
+/// declaration back up and re-raises if it is still overdue.
+#[tokio::test(flavor = "multi_thread")]
+async fn re_enabling_does_not_recover_anything() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let server = insert_server(&mut conn, group).await;
+		let r = RestoreReplica::create(
+			&mut conn,
+			new_replica(
+				consumer,
+				group,
+				Some(server),
+				RestoreIntent::from("verify"),
+				"n",
+			),
+		)
+		.await
+		.expect("create");
+		let disabled = RestoreReplica::update(
+			&mut conn,
+			r.id,
+			RestoreReplicaUpdate {
+				enabled: false,
+				..update_from(&r)
+			},
+		)
+		.await
+		.expect("disable");
+
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			new_check(
+				consumer,
+				group,
+				server,
+				RestoreIntent::from("verify"),
+				RunOutcome::Failure,
+				false,
+			),
+		)
+		.await
+		.expect("record failure");
+		assert_eq!(active_restore_issues(&mut conn, group).await, 1);
+
+		RestoreReplica::update(
+			&mut conn,
+			disabled.id,
+			RestoreReplicaUpdate {
+				enabled: true,
+				..update_from(&disabled)
+			},
+		)
+		.await
+		.expect("re-enable");
+		assert_eq!(
+			active_restore_issues(&mut conn, group).await,
+			1,
+			"re-enabling must not silently clear a live alert"
+		);
+	})
+	.await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn delete_recovers_stale_alert_for_removed_scope() {
 	TestDb::run(|mut conn, _url| async move {
