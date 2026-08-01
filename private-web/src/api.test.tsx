@@ -67,6 +67,28 @@ describe("useApi keeps prior data only for the same query", () => {
 		);
 	});
 
+	// Callers force a refetch by bumping a nonce inside `deps` (`[id, tick]`).
+	// That's the same entity, so the page must not blank — anything with local
+	// state inside it (an open dialog mid-flow, say) would be unmounted.
+	it("keeps prior data when only a refetch nonce in deps changes", async () => {
+		vi.stubGlobal("fetch", stubApi({ "/api/": { name: "same" } }));
+
+		const { result, rerender } = renderHook(
+			({ tick }: { tick: number }) =>
+				// biome-ignore lint/suspicious/noExplicitAny: test stub, not a real fn
+				useApi("devices" as any, "get_device_by_id" as any, { device_id: "A" }, [
+					"A",
+					tick,
+				]),
+			{ initialProps: { tick: 0 } },
+		);
+		await waitFor(() => expect(result.current.status).toBe("ok"));
+
+		rerender({ tick: 1 });
+		expect(result.current.status).toBe("ok");
+		await waitFor(() => expect(result.current.status).toBe("ok"));
+	});
+
 	it("keeps prior data across a reload of the same query", async () => {
 		vi.stubGlobal("fetch", stubApi({ "/api/": { name: "same" } }));
 
