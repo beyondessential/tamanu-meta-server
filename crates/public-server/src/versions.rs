@@ -62,22 +62,12 @@ async fn latest_matching_ready(
 ) -> Result<Version> {
 	use database::schema::versions::*;
 
-	let node_semver::Version {
-		major: target_major,
-		minor: target_minor,
-		patch: target_patch,
-		..
-	} = range.min_version().ok_or(AppError::UnusableRange)?;
+	let floor = range.min_version().ok_or(AppError::UnusableRange)?;
 
 	let candidates: Vec<Version> = table
 		.select(Version::as_select())
-		.filter(
-			status
-				.eq(commons_types::version::VersionStatus::Published)
-				.and(major.ge(target_major as i32))
-				.and(minor.ge(target_minor as i32))
-				.and(patch.ge(target_patch as i32)),
-		)
+		.filter(status.eq(commons_types::version::VersionStatus::Published))
+		.filter(database::versions::at_or_above_version(&floor))
 		.order_by(major.desc())
 		.then_order_by(minor.desc())
 		.then_order_by(patch.desc())

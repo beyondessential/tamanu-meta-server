@@ -461,6 +461,40 @@ async fn version_range_latest_matching() {
 	.await
 }
 
+/// A range whose floor sits in an earlier minor line must still resolve to the
+/// newer minor: semver orders lexicographically, so `1.1.0` satisfies
+/// `>=1.0.5` even though its patch is lower.
+#[tokio::test(flavor = "multi_thread")]
+async fn version_range_resolves_across_minor_lines() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		let older = "55555555-5555-5555-5555-555555555555";
+		let newer = "66666666-6666-6666-6666-666666666666";
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
+			('{older}', 1, 0, 5, 'Version 1.0.5', 'published'),
+			('{newer}', 1, 1, 0, 'Version 1.1.0', 'published');
+			INSERT INTO artifacts (version_id, platform, artifact_type, download_url) VALUES
+			('{older}', 'windows', 'installer', 'https://example.com/1.0.5.exe'),
+			('{newer}', 'windows', 'installer', 'https://example.com/1.1.0.exe')",
+		))
+		.await
+		.unwrap();
+
+		let response = public.get("/versions/%3E%3D1.0.5/artifacts").await;
+		response.assert_status_ok();
+		let artifacts: Vec<Artifact> = response.json();
+		assert_eq!(
+			artifacts
+				.iter()
+				.map(|a| a.download_url.as_str())
+				.collect::<Vec<_>>(),
+			vec!["https://example.com/1.1.0.exe"],
+			"the range must resolve to 1.1.0, not the floor it was anchored on",
+		);
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn artifact_download_proxy() {
 	commons_tests::server::run(async |mut conn, public, _| {
