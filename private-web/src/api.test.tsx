@@ -43,7 +43,7 @@ describe("useApi keeps prior data only for the same query", () => {
 
 		const { result, rerender } = renderHook(
 			({ id }: { id: string }) =>
-				// biome-ignore lint/suspicious/noExplicitAny: test stub, not a real fn
+				// Cast: these name a stub endpoint, not a real one in the spec.
 				useApi("servers" as any, "get_detail" as any, { id }, [id]),
 			{ initialProps: { id: "A" } },
 		);
@@ -75,7 +75,7 @@ describe("useApi keeps prior data only for the same query", () => {
 
 		const { result, rerender } = renderHook(
 			({ tick }: { tick: number }) =>
-				// biome-ignore lint/suspicious/noExplicitAny: test stub, not a real fn
+				// Cast: these name a stub endpoint, not a real one in the spec.
 				useApi("devices" as any, "get_device_by_id" as any, { device_id: "A" }, [
 					"A",
 					tick,
@@ -93,7 +93,7 @@ describe("useApi keeps prior data only for the same query", () => {
 		vi.stubGlobal("fetch", stubApi({ "/api/": { name: "same" } }));
 
 		const { result } = renderHook(() =>
-			// biome-ignore lint/suspicious/noExplicitAny: test stub, not a real fn
+			// Cast: these name a stub endpoint, not a real one in the spec.
 			useApi("servers" as any, "get_detail" as any, { id: "A" }, ["A"]),
 		);
 		await waitFor(() => expect(result.current.status).toBe("ok"));
