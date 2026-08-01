@@ -780,6 +780,29 @@ impl ServerGroupBackupSchedule {
 	}
 }
 
+/// Resolve the effective scheduled backup interval for one `(group, type)`.
+///
+/// The single source of truth for this precedence, shared by the schedulers,
+/// the staleness scan, and the admin API — they must agree or a pair can be
+/// commanded to back up on a cadence nothing then monitors (or vice versa).
+///
+/// An override *row* decides on its own: its `expected_interval` is the answer,
+/// including when it is NULL, which the model documents as manual-only. Only
+/// the absence of a row inherits the type's canopy-wide `default_interval`.
+/// `None` ⇒ no scheduled cadence (manual-only).
+pub async fn effective_interval(
+	db: &mut AsyncPgConnection,
+	group_id: Uuid,
+	r#type: &BackupType,
+) -> Result<Option<PgDuration>> {
+	match ServerGroupBackupSchedule::get(db, group_id, r#type).await? {
+		Some(schedule) => Ok(schedule.expected_interval),
+		None => Ok(BackupTypeDefault::get(db, r#type)
+			.await?
+			.and_then(|d| d.default_interval)),
+	}
+}
+
 // ---------------------------------------------------------------------------
 // backup_credential_issuances — audit log of every STS issuance
 // ---------------------------------------------------------------------------

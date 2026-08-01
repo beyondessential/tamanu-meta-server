@@ -776,6 +776,45 @@ async fn group_schedules_reports_next_run_from_last_success_plus_interval() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn group_schedules_reports_manual_only_override_as_no_schedule() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+		let server_id = Uuid::new_v4();
+		// An override row with a NULL interval is manual-only, even though
+		// `tamanu-postgres` has a canopy-wide 6h default to inherit from.
+		conn.batch_execute(&format!(
+			"INSERT INTO servers (id, host, kind, group_id) VALUES \
+				('{server_id}', 'https://e.test', 'central', '{group_id}');
+			 INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES \
+				('{server_id}', 'tamanu-postgres', true);
+			 INSERT INTO server_group_backup_schedule (group_id, type, expected_interval) VALUES \
+				('{group_id}', 'tamanu-postgres', NULL);"
+		))
+		.await
+		.expect("seed manual-only override");
+
+		let resp = private
+			.post("/api/backups/group_schedules")
+			.json(&serde_json::json!({ "server_group_id": group_id }))
+			.await;
+		resp.assert_status_ok();
+		let body: serde_json::Value = resp.json();
+		let row = body
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|r| r["type"] == "tamanu-postgres")
+			.expect("the overridden type appears in schedule/retention");
+		assert!(
+			row["effective_interval"].is_null(),
+			"manual-only must not resurrect the type default",
+		);
+		assert!(row["next_run_at"].is_null());
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn group_schedules_includes_disabled_declared_types() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;
@@ -852,6 +891,52 @@ async fn update_region_and_delete() {
 			.await;
 		resp.assert_status_ok();
 		assert!(resp.json::<serde_json::Value>().is_null());
+	})
+	.await;
+}
+
+/// Onboarding is all-or-nothing on both create paths. A config row left behind
+/// by a failed Secret create is unrecoverable: it points its
+/// `repo_password_ref` at nothing, and every retry now sees a config and takes
+/// the *update* path, which never creates the Secret.
+#[tokio::test(flavor = "multi_thread")]
+async fn upsert_rolls_back_the_config_when_the_secret_cannot_be_created() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = seed_group(&mut conn).await;
+
+		// Onboard once so the group's passphrase Secret exists...
+		let resp = private
+			.post("/api/backups/create")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "bes-iac",
+				"target_role_arn": "arn:aws:iam::123:role/dev",
+				"maintenance_role_arn": "arn:aws:iam::123:role/maint",
+				"mode": "from_birth",
+			}))
+			.await;
+		resp.assert_status_ok();
+
+		// ...then drop only the config row, leaving the Secret behind. `upsert`
+		// now takes the create path, and its create-if-absent Secret write
+		// fails — the shape of any transient secret-store failure.
+		conn.batch_execute(&format!(
+			"DELETE FROM server_group_backup_config WHERE group_id = '{group_id}'"
+		))
+		.await
+		.expect("drop config row");
+
+		let resp = private
+			.post("/api/backups/upsert")
+			.json(&serde_json::json!({
+				"server_group_id": group_id,
+				"bucket": "bes-iac",
+				"target_role_arn": "arn:aws:iam::123:role/dev",
+				"maintenance_role_arn": "arn:aws:iam::123:role/maint",
+			}))
+			.await;
+		resp.assert_status(axum::http::StatusCode::BAD_GATEWAY);
+		assert_no_config!(private, group_id);
 	})
 	.await;
 }

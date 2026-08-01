@@ -25,7 +25,7 @@
 use commons_errors::{AppError, Result};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use jiff::Timestamp;
+use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
@@ -42,6 +42,27 @@ pub const KIND_INCIDENT_RESOLVE: &str = "incident_resolve";
 pub const KIND_SELF_ALERT_OPEN: &str = "self_alert_open";
 /// Legacy: see [`KIND_SELF_ALERT_OPEN`].
 pub const KIND_SELF_ALERT_RESOLVE: &str = "self_alert_resolve";
+
+/// Delay after the first failed attempt; doubles from there.
+pub const RETRY_BACKOFF_BASE: SignedDuration = SignedDuration::from_secs(15);
+/// Ceiling on the retry backoff, so the tail of a long outage is retried
+/// on a steady cadence rather than an ever-lengthening one.
+pub const RETRY_BACKOFF_CAP: SignedDuration = SignedDuration::from_mins(15);
+
+/// How long to hold a row back after its `attempts`th failed delivery:
+/// [`RETRY_BACKOFF_BASE`] doubling per attempt, capped at
+/// [`RETRY_BACKOFF_CAP`].
+///
+/// With the drainer's 10-attempt budget this spends about an hour before
+/// giving up (15s, 30s, 1m, 2m, 4m, 8m, then 15m a few times), which covers
+/// a routine Slack incident. The naive "retry on the next tick" schedule
+/// spent the same budget in well under two minutes.
+pub fn retry_backoff(attempts: i32) -> SignedDuration {
+	let doublings = attempts.clamp(1, 20) - 1;
+	RETRY_BACKOFF_BASE
+		.saturating_mul(2i32.saturating_pow(doublings as u32))
+		.min(RETRY_BACKOFF_CAP)
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable)]
 #[diesel(table_name = crate::schema::slack_outbox)]
@@ -258,6 +279,15 @@ impl SlackOutbox {
 		Ok(())
 	}
 
+	/// Record a failed delivery attempt and hold the row back until its
+	/// backoff has elapsed. Returns the new attempt count.
+	///
+	/// Advancing `deliver_after` is what makes the retry budget a *duration*
+	/// rather than a handful of ticks: the drainer re-claims on a 5-second
+	/// tick, so without it every attempt is burnt inside a minute and a
+	/// routine Slack incident permanently drops every page enqueued during
+	/// it.
+	///
 	/// `response` is the HTTP body Slack returned for this attempt, if we
 	/// got one (network errors before any response leave this `None`).
 	pub async fn mark_failed(
@@ -265,18 +295,26 @@ impl SlackOutbox {
 		id: Uuid,
 		error: &str,
 		response: Option<&str>,
-	) -> Result<()> {
+	) -> Result<i32> {
 		use crate::schema::slack_outbox::dsl;
-		diesel::update(dsl::slack_outbox.filter(dsl::id.eq(id)))
+		let attempts: i32 = diesel::update(dsl::slack_outbox.filter(dsl::id.eq(id)))
 			.set((
 				dsl::attempts.eq(dsl::attempts + 1),
 				dsl::last_error.eq(error),
 				dsl::last_response.eq(response),
 			))
+			.returning(dsl::attempts)
+			.get_result(db)
+			.await
+			.map_err(AppError::from)?;
+
+		let next_try = Timestamp::now() + retry_backoff(attempts);
+		diesel::update(dsl::slack_outbox.filter(dsl::id.eq(id)))
+			.set(dsl::deliver_after.eq(jiff_diesel::Timestamp::from(next_try)))
 			.execute(db)
 			.await
 			.map_err(AppError::from)?;
-		Ok(())
+		Ok(attempts)
 	}
 
 	/// Mark the row as terminally given-up — the drainer will not retry
