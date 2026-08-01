@@ -147,7 +147,13 @@ export function evaluate(condition: Condition, sample: HealthcheckSample): Previ
 					notes: `value ${fmt(value)} is not a string, so it can't be a semver range.`,
 				};
 			}
-			const ver = semver.valid(semver.coerce(lhs)?.version ?? lhs);
+			// Strict parse, no `coerce`. The Rust evaluator this mirrors does
+			// `parse::<node_semver::Version>()`, which rejects a partial like
+			// "2.28" outright and keeps a prerelease suffix intact. `coerce`
+			// fabricates "2.28.0" from the former and discards the suffix on
+			// the latter, so the preview would report a match where production
+			// files nothing.
+			const ver = semver.valid(lhs);
 			const range = semver.validRange(value);
 			if (!ver) {
 				return {
