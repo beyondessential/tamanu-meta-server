@@ -4180,6 +4180,7 @@ export interface components {
              *     clients.
              */
             public_listing: boolean;
+            redaction?: null | components["schemas"]["RedactionManifest"];
             /** @description How this product's application version is treated. */
             version_tracking: components["schemas"]["VersionTracking"];
         };
@@ -6908,6 +6909,62 @@ export interface components {
              */
             verified_at: string;
         };
+        /** @description One server a redacting declaration covers but cannot redact. */
+        RedactionGap: {
+            /** @description Why it can't be redacted. */
+            reason: components["schemas"]["RedactionGapReason"];
+            /**
+             * Format: uuid
+             * @description The server that would be restored unmasked, and so isn't restored.
+             */
+            server_id: string;
+            /** @description Its display name, when known. */
+            server_name?: string | null;
+            /** @description The version it reports, when the reason concerns one. */
+            version?: string | null;
+        };
+        /**
+         * @description Why a server a redacting declaration covers can't be redacted.
+         *
+         *     Each of these withholds the server's worklist entry: a replica that
+         *     cannot be redacted is not restored at all, since an unredacted replica
+         *     standing in for a redacted one is worse than no replica.
+         * @enum {string}
+         */
+        RedactionGapReason: "product_has_no_manifest" | "version_has_no_manifest" | "version_unknown";
+        /**
+         * @description Where a product publishes the masking manifests that say how to
+         *     de-identify a restored copy of one of its databases.
+         *
+         *     Canopy holds this rather than the operator: what to mask is a property
+         *     of the product, so an operator declaring a redacting replica says only
+         *     that it redacts, never where its masking comes from.
+         */
+        RedactionManifest: {
+            /**
+             * @description The artefact type under which a version's manifest is registered, so
+             *     canopy can tell whether the URL it would hand out has actually been
+             *     published for that version.
+             */
+            artifact_type: string;
+            /**
+             * @description Whether to retry at the `major.minor.0` base version when the
+             *     versioned URL 404s, for a product publishing per minor rather than
+             *     per patch.
+             */
+            fallback_to_base: boolean;
+            /**
+             * @description Where the manifest for a given version lives. `{version}` is
+             *     substituted by the consumer with the version it reads out of the
+             *     data it restored.
+             */
+            url_template: string;
+            /**
+             * @description Single-row, single-column SQL reading the deployment's own version
+             *     out of the restored database, to substitute into `url_template`.
+             */
+            version_query: string;
+        };
         /**
          * @description Another patch version within the same release line as a version being
          *     viewed.
@@ -7042,6 +7099,25 @@ export interface components {
             outcome?: string | null;
             /** @description PostgreSQL version of the restored database, if reported. */
             postgres_version?: string | null;
+            /**
+             * Format: int64
+             * @description How many columns the manifest masked.
+             */
+            redaction_columns_masked?: number | null;
+            /**
+             * Format: int64
+             * @description How many columns it named but could not mask.
+             */
+            redaction_columns_skipped?: number | null;
+            /** @description Why the redaction failed, when it did. */
+            redaction_error?: string | null;
+            /** @description The version whose manifest was fetched. */
+            redaction_manifest_version?: string | null;
+            /**
+             * @description How far the replica's masking manifest got, for a replica that
+             *     redacts: `complete`, `partial`, or `failed`.
+             */
+            redaction_outcome?: string | null;
             /** @description Whether the restored replica came up healthy; only for a reported check. */
             replica_healthy?: boolean | null;
             /**
@@ -7117,6 +7193,11 @@ export interface components {
          */
         RestoreReplicaView: {
             /**
+             * @description True when the intent carries the `redact` semantic, so the declaration
+             *     can be switched to redacting.
+             */
+            can_redact: boolean;
+            /**
              * Format: uuid
              * @description Identifier of the restore consumer device the declaration is assigned to.
              */
@@ -7170,6 +7251,15 @@ export interface components {
              */
             params: Record<string, never>;
             /**
+             * @description Servers this declaration covers that cannot currently be redacted:
+             *     either their product publishes no masking manifest, or the version
+             *     they report has none published. Each is withheld from the worklist
+             *     rather than restored unmasked. Empty unless the declaration redacts.
+             */
+            redaction_gaps: components["schemas"]["RedactionGap"][];
+            /** @description Whether the replica is served de-identified. */
+            redacts: boolean;
+            /**
              * Format: uuid
              * @description Specific server within the group, or null to cover all current servers
              *     in the group.
@@ -7219,6 +7309,13 @@ export interface components {
              *     as raw integer seconds/bytes. Defaults to empty.
              */
             params?: Record<string, never>;
+            /**
+             * @description Whether the replica is served de-identified. Accepted only for an
+             *     intent carrying the `redact` semantic; Canopy resolves the masking
+             *     manifest itself from the server's product, so there is nothing else
+             *     to set. Defaults to false.
+             */
+            redacts?: boolean;
             /**
              * Format: uuid
              * @description Specific server within the group; omit or null to cover all current
@@ -7286,6 +7383,11 @@ export interface components {
              *     seconds/bytes. Defaults to empty.
              */
             params?: Record<string, never>;
+            /**
+             * @description Whether the replica is served de-identified. Accepted only for an
+             *     intent carrying the `redact` semantic. Defaults to false.
+             */
+            redacts?: boolean;
             /**
              * Format: uuid
              * @description Specific server within the group; omit or null to cover all current

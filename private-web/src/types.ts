@@ -186,6 +186,22 @@ export type ServerBackupCapabilityView = Solidify<
 >;
 export type RestoreWindowRow = Solidify<Schemas["RestoreWindowRow"]>;
 export type RestoreWindowView = Solidify<Schemas["RestoreWindowView"]>;
+export type RedactionGap = Solidify<Schemas["RedactionGap"]>;
+
+/** The masking parameters Canopy resolves itself for a `redact` intent. They
+ * are filtered out of the parameter form: an operator sets whether a replica
+ * redacts, not where its masking comes from. */
+export const REDACTION_PARAMS = [
+	"redaction_manifest_url",
+	"redaction_version_query",
+	"redaction_version_fallback_to_base",
+];
+
+export const REDACTION_GAP_LABELS: Record<string, string> = {
+	product_has_no_manifest: "product publishes no masking manifest",
+	version_has_no_manifest: "no manifest published for this version",
+	version_unknown: "no version reported",
+};
 
 export type ManagedZoneView = Solidify<Schemas["ManagedZoneView"]>;
 export type GroupDomainView = Solidify<Schemas["GroupDomainView"]>;

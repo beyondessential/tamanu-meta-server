@@ -18,9 +18,9 @@ use commons_types::device::DeviceRole;
 use commons_types::{
 	Uuid,
 	backup::{
-		BackupPurpose, BackupType, IntentDescriptor, ParamValues, RestoreIntent, RunOutcome,
-		display_param_defaults, display_params, normalize_params, redaction_params, semantics,
-		validate_params,
+		BackupPurpose, BackupType, IntentDescriptor, ParamValues, RedactionOutcome, RestoreIntent,
+		RunOutcome, display_param_defaults, display_params, normalize_params, redaction_params,
+		semantics, validate_params,
 	},
 	units,
 };
@@ -516,6 +516,18 @@ pub struct RestoreActivity {
 	pub snapshot_id: Option<String>,
 	/// Consumer-supplied health data, if any (reported checks only).
 	pub health_details: Option<serde_json::Value>,
+	/// How far the replica's masking manifest got, for a replica that
+	/// redacts: `complete`, `partial`, or `failed`.
+	#[schema(value_type = Option<String>)]
+	pub redaction_outcome: Option<RedactionOutcome>,
+	/// The version whose manifest was fetched.
+	pub redaction_manifest_version: Option<String>,
+	/// How many columns the manifest masked.
+	pub redaction_columns_masked: Option<i64>,
+	/// How many columns it named but could not mask.
+	pub redaction_columns_skipped: Option<i64>,
+	/// Why the redaction failed, when it did.
+	pub redaction_error: Option<String>,
 	/// Raw bytes sent to S3 during the restore, if reported.
 	pub s3_sent_raw_bytes: Option<i64>,
 	/// Payload bytes sent to S3 during the restore, if reported.
@@ -623,6 +635,11 @@ pub async fn checks(
 				postgres_version: c.postgres_version,
 				snapshot_id: c.snapshot_id,
 				health_details: c.health_details,
+				redaction_outcome: c.redaction_outcome,
+				redaction_manifest_version: c.redaction_manifest_version,
+				redaction_columns_masked: c.redaction_columns_masked,
+				redaction_columns_skipped: c.redaction_columns_skipped,
+				redaction_error: c.redaction_error,
 				s3_sent_raw_bytes: c.s3_sent_raw_bytes,
 				s3_sent_payload_bytes: c.s3_sent_payload_bytes,
 				s3_received_raw_bytes: c.s3_received_raw_bytes,
@@ -651,6 +668,11 @@ pub async fn checks(
 			postgres_version: None,
 			snapshot_id: None,
 			health_details: None,
+			redaction_outcome: None,
+			redaction_manifest_version: None,
+			redaction_columns_masked: None,
+			redaction_columns_skipped: None,
+			redaction_error: None,
 			s3_sent_raw_bytes: None,
 			s3_sent_payload_bytes: None,
 			s3_received_raw_bytes: None,
