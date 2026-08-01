@@ -10075,6 +10075,14 @@ export interface operations {
                     "application/json": components["schemas"]["BestoolSnippetDetail"];
                 };
             };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
             500: {
                 headers: {
                     [name: string]: unknown;

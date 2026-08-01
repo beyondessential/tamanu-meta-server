@@ -5,6 +5,7 @@
 
 mod artifacts;
 mod backups;
+mod bestool_snippets;
 mod create_server;
 mod device_admin_endpoints;
 mod device_keys;
