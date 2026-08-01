@@ -129,10 +129,9 @@ pub struct SaveArgs {
 )]
 pub async fn save_snippet(
 	State(state): State<AppState>,
-	user: std::result::Result<TailscaleUser, AppError>,
+	user: TailscaleUser,
 	Json(args): Json<SaveArgs>,
 ) -> Result<Json<BestoolSnippetDetail>> {
-	let user = user.unwrap_or_default();
 	let mut conn = state.db.get().await?;
 	let snippet = database::BestoolSnippet::create(
 		&mut conn,
