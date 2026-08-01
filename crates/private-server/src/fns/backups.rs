@@ -1076,12 +1076,22 @@ pub async fn upsert(
 				},
 			)
 			.await?;
-			kube.create_password(
-				&repo_password_ref,
-				REPO_PASSWORD_SECRET_KEY,
-				&commons_servers::backup_secrets::generate_passphrase(),
-			)
-			.await?;
+			// Same all-or-nothing invariant as `create`: a failed Secret create
+			// must not leave a half-created config stuck in `provisioning` with
+			// a `repo_password_ref` pointing at nothing. Without the rollback
+			// every retry takes the *update* path — which never creates the
+			// Secret — so the group could never be provisioned again.
+			if let Err(e) = kube
+				.create_password(
+					&repo_password_ref,
+					REPO_PASSWORD_SECRET_KEY,
+					&commons_servers::backup_secrets::generate_passphrase(),
+				)
+				.await
+			{
+				let _ = ServerGroupBackupConfig::delete(&mut conn, args.server_group_id).await;
+				return Err(e);
+			}
 		}
 	}
 

@@ -145,13 +145,21 @@ impl BackupSecrets {
 				Ok(())
 			}
 			Self::Memory(store) => {
-				store
-					.lock()
-					.unwrap()
-					.entry(secret_name.to_string())
-					.or_default()
-					.insert(key.to_string(), value.to_string());
-				Ok(())
+				use std::collections::btree_map::Entry;
+
+				match store.lock().unwrap().entry(secret_name.to_string()) {
+					// Kube answers 409 here. The double has to as well, or the
+					// double-create path passes in tests and 502s in production
+					// — and the callers' rollback of a failed create can't be
+					// exercised at all.
+					Entry::Occupied(_) => Err(AppError::Upstream(format!(
+						"secret create failed: {secret_name} already exists"
+					))),
+					Entry::Vacant(slot) => {
+						slot.insert(BTreeMap::from([(key.to_string(), value.to_string())]));
+						Ok(())
+					}
+				}
 			}
 		}
 	}
@@ -311,6 +319,33 @@ mod tests {
 
 		// Deleting an already-absent Secret is a no-op success.
 		secrets.delete_password("backup-repo-x").await.unwrap();
+	}
+
+	/// `create_password` is create-if-absent (Kube answers 409). The double
+	/// has to reject too — otherwise a double-create passes in tests and 502s
+	/// in production, and no test can reach a caller's rollback path.
+	#[tokio::test]
+	async fn memory_create_password_rejects_an_existing_secret() {
+		let secrets = BackupSecrets::memory();
+		secrets
+			.create_password("backup-repo-y", "password", "first")
+			.await
+			.unwrap();
+		assert!(
+			secrets
+				.create_password("backup-repo-y", "password", "second")
+				.await
+				.is_err(),
+			"creating over an existing secret must fail",
+		);
+		assert_eq!(
+			secrets
+				.read_password("backup-repo-y", "password")
+				.await
+				.unwrap(),
+			"first",
+			"the rejected create must not have overwritten anything",
+		);
 	}
 }
 
