@@ -218,9 +218,10 @@ impl RestoreReplica {
 	/// that collides with another declaration's `(consumer, group, type,
 	/// intent, server)`, or a name already used by another of the consumer's
 	/// declarations, maps to `409`, same as [`Self::create`]. If the scope
-	/// (group, server, or type/intent) moves, any active restore-verification
-	/// alert keyed to the *old* scope is recovered — the overdue sweep only
-	/// walks current declarations, so a stale key would otherwise never clear.
+	/// (group, server, or type/intent) moves, or the declaration is disabled,
+	/// any active restore-verification alert keyed to the *old* scope is
+	/// recovered — the overdue sweep only walks current *enabled* declarations,
+	/// so a stale key would otherwise never clear.
 	pub async fn update(
 		db: &mut AsyncPgConnection,
 		id: Uuid,
@@ -261,7 +262,13 @@ impl RestoreReplica {
 			|| existing.server_id != result.server_id
 			|| existing.r#type != result.r#type
 			|| existing.intent != result.intent;
-		if scope_changed {
+		// Disabling drops the declaration out of the overdue sweep exactly as
+		// deleting it does (`sweep_overdue` filters `enabled = true`), and a
+		// disabled replica generates no consumer work, so `record_report` can't
+		// clear the alert either. Left alone, the alert and its incident stay
+		// open forever.
+		let disabled = existing.enabled && !result.enabled;
+		if scope_changed || disabled {
 			recover_old_scope_alerts(
 				db,
 				existing.group_id,
