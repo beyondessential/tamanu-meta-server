@@ -133,6 +133,27 @@ text_enum! {
 }
 
 text_enum! {
+	/// How far a replica's masking manifest got before the replica was
+	/// served.
+	///
+	/// A partial redaction is live: the manifest applied, but some of its
+	/// columns did not, leaving a mostly-masked replica with an
+	/// unidentified remainder in the clear. A failed one is not live at
+	/// all — the consumer holds the replica on the data it was already
+	/// serving.
+	pub enum RedactionOutcome {
+		/// Every column the manifest named was masked.
+		Complete = "complete",
+		/// The manifest applied, but some of its columns did not.
+		Partial = "partial",
+		/// No masking took effect.
+		Failed = "failed",
+	}
+	default = Failed;
+	error RedactionOutcomeFromStringError = "invalid redaction outcome; expected one of: complete, partial, failed";
+}
+
+text_enum! {
 	/// Which maintenance cycle a reported backup-repository maintenance run
 	/// performed.
 	pub enum MaintenanceKind {
@@ -392,6 +413,11 @@ pub mod semantics {
 	/// an entry from a server with no candidate version, and keys `once` to the
 	/// snapshot and target version together.
 	pub const MIGRATE: &str = "migrate";
+	/// The intent can de-identify the restored data before serving it: Canopy
+	/// resolves the masking manifest for the server's product into the
+	/// worklist entry, withholds an entry from a server whose product has no
+	/// manifest, and holds the replica to the redaction outcome reported back.
+	pub const REDACT: &str = "redact";
 }
 
 /// The data type of a restore-replica configuration parameter, which
