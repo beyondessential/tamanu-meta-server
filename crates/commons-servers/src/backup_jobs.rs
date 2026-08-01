@@ -447,14 +447,43 @@ pub fn is_due(window: Duration, last: Option<Timestamp>, now: Timestamp) -> bool
 /// Derived deterministically from the group UUID's bytes, so it is stable
 /// across restarts and identical in every scheduler — a given group always
 /// lands in the same slot.
+///
+/// Two kinds of work sharing a window therefore land on the *same second* for
+/// a given group, and since they also share the per-group in-flight lock, one
+/// of them systematically loses. Use [`jitter_slot_in`] to put a job in its
+/// own slot space when that matters.
 pub fn jitter_slot(group_id: Uuid, window: Duration) -> Duration {
-	let window_secs = window.as_secs().max(1);
+	Duration::from_secs(group_hash(group_id) % window.as_secs().max(1))
+}
+
+/// [`jitter_slot`], with the slot drawn from a per-`domain` space so two kinds
+/// of work on the same cadence don't land on the same second for the same
+/// group. `domain` names the job ("rotation"); it only has to be stable and
+/// distinct, and it never collides with the unseeded [`jitter_slot`].
+pub fn jitter_slot_in(domain: &str, group_id: Uuid, window: Duration) -> Duration {
+	let seed = group_hash(group_id) ^ fnv1a(domain);
+	Duration::from_secs(seed % window.as_secs().max(1))
+}
+
+fn group_hash(group_id: Uuid) -> u64 {
 	let bytes = group_id.as_bytes();
 	// Fold both halves so any byte difference changes the slot (UUIDs that
 	// differ only in their low bytes must not collide).
 	let hi = u64::from_be_bytes(bytes[..8].try_into().expect("uuid is 16 bytes"));
 	let lo = u64::from_be_bytes(bytes[8..].try_into().expect("uuid is 16 bytes"));
-	Duration::from_secs((hi ^ lo) % window_secs)
+	hi ^ lo
+}
+
+/// FNV-1a, so a domain's offset is identical in every process and across
+/// releases — `DefaultHasher` explicitly doesn't promise that, and a slot that
+/// moves between deploys defeats the point of a stable schedule.
+fn fnv1a(s: &str) -> u64 {
+	let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+	for byte in s.as_bytes() {
+		hash ^= *byte as u64;
+		hash = hash.wrapping_mul(0x1000_0000_01b3);
+	}
+	hash
 }
 
 /// Whether `now` (as a count of seconds into the window) falls in this group's
@@ -509,9 +538,25 @@ pub fn slot_deadline_due(
 	last: Option<Timestamp>,
 	now: Timestamp,
 ) -> bool {
+	deadline_due(jitter_slot(group_id, window), window, last, now)
+}
+
+/// [`slot_deadline_due`] against a per-`domain` slot — see [`jitter_slot_in`].
+/// Use it when another job already schedules this group on the same window and
+/// the two would otherwise contend for its in-flight lock on the same second.
+pub fn slot_deadline_due_in(
+	domain: &str,
+	group_id: Uuid,
+	window: Duration,
+	last: Option<Timestamp>,
+	now: Timestamp,
+) -> bool {
+	deadline_due(jitter_slot_in(domain, group_id, window), window, last, now)
+}
+
+fn deadline_due(slot: Duration, window: Duration, last: Option<Timestamp>, now: Timestamp) -> bool {
 	let window_secs = window.as_secs().max(1) as i64;
-	let offset = (jitter_slot(group_id, window).as_secs() as i64)
-		.min((window_secs - DEADLINE_END_GUARD).max(0));
+	let offset = (slot.as_secs() as i64).min((window_secs - DEADLINE_END_GUARD).max(0));
 	let now_s = now.as_second();
 	let window_start = now_s - now_s.rem_euclid(window_secs);
 	let target = window_start + offset;
@@ -620,6 +665,90 @@ mod tests {
 			window,
 			Some(ts(stale)),
 			ts(window_start + 1)
+		));
+	}
+
+	/// Rotation (weekly by default) shares full maintenance's window, so an
+	/// unseeded slot puts both on the identical second for every group —
+	/// and they share the group's in-flight lock, so maintenance wins every
+	/// time and rotation is starved. A domain-seeded slot has to actually
+	/// move, for every group, not just on average.
+	#[test]
+	fn domain_seeded_slots_never_coincide_with_the_unseeded_one() {
+		let window = Duration::from_secs(7 * 86400);
+		for n in 0..500u128 {
+			let g = Uuid::from_u128(0x5eed_0000_0000_0000_0000_0000_0000_0000 + n);
+			assert_ne!(
+				jitter_slot_in("rotation", g, window),
+				jitter_slot(g, window),
+				"group {g} would rotate on its maintenance second",
+			);
+		}
+	}
+
+	#[test]
+	fn domain_seeded_slots_are_stable_bounded_and_domain_distinct() {
+		let g = Uuid::from_u128(0x1234_5678_9abc_def0_1122_3344_5566_7788);
+		let window = Duration::from_secs(3600);
+		assert_eq!(
+			jitter_slot_in("rotation", g, window),
+			jitter_slot_in("rotation", g, window),
+			"stable per (domain, group)",
+		);
+		assert!(jitter_slot_in("rotation", g, window).as_secs() < 3600);
+		assert_ne!(
+			jitter_slot_in("rotation", g, window),
+			jitter_slot_in("inspection", g, window),
+			"different domains get different slots",
+		);
+	}
+
+	/// The seeded deadline rule is the plain one on a different slot, so it
+	/// keeps the catch-up property that makes a lost tick cost a tick rather
+	/// than a whole period.
+	#[test]
+	fn seeded_deadline_still_catches_up_after_a_missed_slot() {
+		let g = Uuid::from_u128(0x9e37_79b9_7f4a_7c15_f39c_c060_5ced_c834);
+		let window = Duration::from_secs(7 * 86400);
+		let window_secs = window.as_secs() as i64;
+		let ts = |s: i64| Timestamp::from_second(s).unwrap();
+
+		let offset = (jitter_slot_in("rotation", g, window).as_secs() as i64)
+			.min(window_secs - DEADLINE_END_GUARD);
+		let window_start = 100 * window_secs;
+		let target = window_start + offset;
+		let prev = window_start - window_secs + offset;
+
+		assert!(!slot_deadline_due_in(
+			"rotation",
+			g,
+			window,
+			Some(ts(prev)),
+			ts(target - 1)
+		));
+		assert!(slot_deadline_due_in(
+			"rotation",
+			g,
+			window,
+			Some(ts(prev)),
+			ts(target)
+		));
+		// The target tick was lost (the group was busy with maintenance); a
+		// later tick in the same window still fires it.
+		assert!(slot_deadline_due_in(
+			"rotation",
+			g,
+			window,
+			Some(ts(prev)),
+			ts(target + 60)
+		));
+		// Once it runs, it's done for the window.
+		assert!(!slot_deadline_due_in(
+			"rotation",
+			g,
+			window,
+			Some(ts(target + 60)),
+			ts(target + 120)
 		));
 	}
 
