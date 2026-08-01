@@ -151,6 +151,18 @@ impl
 	}
 }
 
+/// Which incidents a listing wants. `Open` and `Resolved` overlap: an
+/// operator can resolve an incident that is still open.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum IncidentStatusFilter {
+	#[default]
+	All,
+	/// Not yet closed.
+	Open,
+	/// Resolved by an operator.
+	Resolved,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Associations)]
 #[diesel(belongs_to(ServerGroup, foreign_key = server_group_id))]
 #[diesel(table_name = crate::schema::incidents)]
@@ -3093,10 +3105,18 @@ impl Incident {
 	/// open (`closed_at IS NULL`) or closed no earlier than `since`. Optionally
 	/// restricted to one group. Ordered newest-opened first. Drives historical
 	/// queries like "incidents open in the past week".
+	/// Incidents that were open at any point since `since` — still open, or
+	/// closed within the window — narrowed by `status`, newest-opened first.
+	///
+	/// `status` is applied in SQL so `limit` bounds the *filtered* set. The
+	/// window routinely holds more sub-grace flap rows than the limit, and
+	/// they sort by `opened_at` alongside everything else, so narrowing a page
+	/// afterwards can hide a still-open incident entirely.
 	pub async fn list_open_since(
 		db: &mut AsyncPgConnection,
 		since: Timestamp,
 		group_id: Option<Uuid>,
+		status: IncidentStatusFilter,
 		limit: i64,
 	) -> Result<Vec<Self>> {
 		use crate::schema::incidents::dsl;
@@ -3111,6 +3131,11 @@ impl Incident {
 			.into_boxed();
 		if let Some(gid) = group_id {
 			q = q.filter(dsl::server_group_id.eq(gid));
+		}
+		match status {
+			IncidentStatusFilter::All => {}
+			IncidentStatusFilter::Open => q = q.filter(dsl::closed_at.is_null()),
+			IncidentStatusFilter::Resolved => q = q.filter(dsl::resolved_at.is_not_null()),
 		}
 		q.order(dsl::opened_at.desc())
 			.limit(limit)

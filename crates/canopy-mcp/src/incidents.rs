@@ -2,7 +2,7 @@
 
 use commons_types::{Uuid, status::CheckResult};
 use database::{
-	issues::{Incident, Issue, IssueListFilters},
+	issues::{Incident, IncidentStatusFilter, Issue, IssueListFilters},
 	server_groups::ServerGroup,
 	servers::Server,
 	slack_outbox::SlackOutbox,
@@ -295,18 +295,16 @@ impl CanopyMcp {
 		let since = since_from_days(args.since_days.unwrap_or(7));
 		let group = parse_opt_uuid(&args.group_id, "group_id")?;
 		let limit = args.limit.unwrap_or(100);
-		let status = args.status.as_deref().unwrap_or("all");
+		let status = match args.status.as_deref().unwrap_or("all") {
+			"open" => IncidentStatusFilter::Open,
+			"resolved" => IncidentStatusFilter::Resolved,
+			_ => IncidentStatusFilter::All,
+		};
 
-		let incidents: Vec<Incident> = Incident::list_open_since(&mut conn, since, group, limit)
-			.await
-			.map_err(mcp_err)?
-			.into_iter()
-			.filter(|i| match status {
-				"open" => i.closed_at.is_none(),
-				"resolved" => i.resolved_at.is_some(),
-				_ => true,
-			})
-			.collect();
+		let incidents: Vec<Incident> =
+			Incident::list_open_since(&mut conn, since, group, status, limit)
+				.await
+				.map_err(mcp_err)?;
 
 		let group_names = group_names(
 			&mut conn,
