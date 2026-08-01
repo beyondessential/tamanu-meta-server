@@ -322,6 +322,101 @@ async fn resolving_before_open_ships_cancels_open_and_skips_resolve() {
 	.await
 }
 
+/// Escalation enqueues a *second* `incident_open` for the same incident. If
+/// the incident resolves before the drainer ships that escalation row,
+/// cancelling it is right — but skipping the resolve is not: Slack is still
+/// showing the original open, and would show it as unresolved forever.
+#[tokio::test(flavor = "multi_thread")]
+async fn resolve_is_still_sent_when_only_the_escalation_open_was_pending() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn, "http://escalate.invalid/").await;
+
+		// An Error-severity failure opens the incident.
+		let stamp = database::issues::CheckStateStamp {
+			check: "ref-error".into(),
+			observed: CheckResult::Failed,
+			effective: CheckResult::Failed,
+			escalates: false,
+			detail: None,
+		};
+		NewEvent {
+			source: "test".into(),
+			r#ref: "ref-error".into(),
+			description: None,
+			message: "boom".into(),
+			active: Some(true),
+			occurred_at: None,
+		}
+		.save_with_state(&mut conn, server_id, None, Some(&stamp), false)
+		.await
+		.expect("save error issue");
+
+		let incident = Incident::list_for_server(&mut conn, server_id, false, 10)
+			.await
+			.expect("list incidents")
+			.into_iter()
+			.next()
+			.expect("incident opened");
+
+		// Slack has now seen the incident.
+		mark_open_delivered(&mut conn, incident.id).await;
+
+		// An escalating failure joins, enqueuing a second open row.
+		let escalating = database::issues::CheckStateStamp {
+			check: "ref-critical".into(),
+			observed: CheckResult::Failed,
+			effective: CheckResult::Failed,
+			escalates: true,
+			detail: None,
+		};
+		NewEvent {
+			source: "test".into(),
+			r#ref: "ref-critical".into(),
+			description: None,
+			message: "worse".into(),
+			active: Some(true),
+			occurred_at: None,
+		}
+		.save_with_state(&mut conn, server_id, None, Some(&escalating), false)
+		.await
+		.expect("save escalating issue");
+
+		let opens: Vec<_> = pending_for_incident(&mut conn, incident.id)
+			.await
+			.into_iter()
+			.filter(|r| r.kind == KIND_INCIDENT_OPEN)
+			.collect();
+		assert_eq!(opens.len(), 2, "escalation enqueues a second open");
+		assert!(
+			opens.iter().any(|r| r.delivered_at.is_none()),
+			"the escalation open is still pending",
+		);
+
+		// Resolving now cancels the pending escalation open — but Slack is
+		// showing the delivered original, so it is owed a resolve.
+		Incident::resolve(
+			&mut conn,
+			incident.id,
+			"operator@example.test",
+			ResolvedReason::Fixed,
+		)
+		.await
+		.expect("resolve");
+
+		let rows = pending_for_incident(&mut conn, incident.id).await;
+		let resolves: Vec<_> = rows
+			.iter()
+			.filter(|r| r.kind == KIND_INCIDENT_RESOLVE)
+			.collect();
+		assert_eq!(
+			resolves.len(),
+			1,
+			"Slack saw the open, so it must see the resolve: {rows:#?}",
+		);
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn cascade_close_via_issue_resolve_attributes_to_operator() {
 	// When the operator resolves the last live issue and the cascade

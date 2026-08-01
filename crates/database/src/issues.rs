@@ -2449,7 +2449,16 @@ async fn enqueue_slack_resolve_inner(
 		"cancelled: incident resolved before the open had been delivered to Slack",
 	)
 	.await?;
-	if cancelled > 0 {
+	// Having cancelled something is not proof Slack is unaware. Escalation
+	// enqueues a *second* `incident_open` for the same incident, so a
+	// delivered original can coexist with a pending escalation open — and
+	// cancelling the latter would then suppress the resolve for an incident
+	// Slack is actively showing as open, permanently. What matters is whether
+	// any open was ever delivered.
+	let ever_delivered = crate::slack_outbox::SlackOutbox::delivered_open_ids(conn, &[incident.id])
+		.await?
+		.contains(&incident.id);
+	if cancelled > 0 && !ever_delivered {
 		return Ok(());
 	}
 	let label = match incident.server_group_id {
