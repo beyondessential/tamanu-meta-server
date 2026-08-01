@@ -13,7 +13,7 @@ use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::TailscaleAdmin;
+use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::device::DeviceRole;
 use commons_types::{
 	Uuid,
@@ -326,6 +326,7 @@ async fn to_views(
 )]
 pub async fn for_group(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	Json(args): Json<RestoreReplicasGroupArgs>,
 ) -> Result<Json<Vec<RestoreReplicaView>>> {
 	let mut conn = state.db_read.get().await?;
@@ -349,7 +350,10 @@ pub async fn for_group(
 	security(("tailscale-user" = [])),
 	responses((status = 200, body = Vec<RestoreConsumerView>)),
 )]
-pub async fn consumers(State(state): State<AppState>) -> Result<Json<Vec<RestoreConsumerView>>> {
+pub async fn consumers(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+) -> Result<Json<Vec<RestoreConsumerView>>> {
 	let mut conn = state.db_read.get().await?;
 	let devices = Device::list_by_role(&mut conn, DeviceRole::BackupRestore).await?;
 	let mut out = Vec::with_capacity(devices.len());
@@ -456,6 +460,7 @@ pub struct RestoreActivity {
 )]
 pub async fn checks(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	Json(args): Json<RestoreReplicasGroupArgs>,
 ) -> Result<Json<Vec<RestoreActivity>>> {
 	let mut conn = state.db_read.get().await?;
