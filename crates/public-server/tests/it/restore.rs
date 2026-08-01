@@ -662,6 +662,18 @@ async fn restore_verification_records_and_raises_alert() {
 				.await,
 				1,
 			);
+			assert_eq!(
+				count(
+					&mut conn,
+					"SELECT count(*) AS count FROM issues i \
+					 JOIN servers s ON s.id = i.server_id \
+					 WHERE s.group_id = $1 AND i.ref LIKE 'redaction:%'",
+					group,
+				)
+				.await,
+				0,
+				"a report carrying no redaction files no redaction check at all",
+			);
 		},
 	)
 	.await;

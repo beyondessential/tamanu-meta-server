@@ -158,6 +158,19 @@ that withholds an entry rather than dispatching an unredacted replica.
       report showing as partial on the table and in the expanded row —
       extend `e2e/seed.ts` for the new columns
 
+## Deviations from the plan as written
+
+- The redaction **gap** narrowed while building it. A server Canopy holds
+  no version for was going to be a gap; it isn't, because the consumer
+  resolves the manifest against the version in the data it restored, not
+  against what the server last reported, so Canopy simply can't
+  corroborate. Only two reasons survive, and only one of them
+  (`product_has_no_manifest`) withholds the replica — the other lets the
+  restore proceed and lets the consumer hold the switchover.
+- The **enabled toggle** on the declarations list needed `redacts` added
+  to it. `update` replaces every field, so the toggle would silently have
+  cleared the flag on any redacting declaration.
+
 ## Companion change in the restore consumer
 
 Not in this repo; blocked on a canopy release carrying the schema.
