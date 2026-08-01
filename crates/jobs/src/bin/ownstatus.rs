@@ -39,11 +39,15 @@ pub fn spawn() -> JoinHandle<()> {
 	let start = Instant::now();
 	task::spawn(async move {
 		loop {
+			// Sleep at the top, like `pingtask`: a `continue` from the error
+			// path must not skip it. With the sleep at the bottom, a
+			// persistent, fast-failing error (the database unreachable, no
+			// `Server::own` row) spins as fast as the query can fail, burning
+			// a connection attempt and an `error!` line each time.
+			sleep(Duration::from_secs(60)).await;
 			if let Err(err) = record_own_status(pool.clone(), start).await {
 				error!("Failed to record own status: {err}");
-				continue;
 			}
-			sleep(Duration::from_secs(60)).await;
 		}
 	})
 }
