@@ -56,14 +56,19 @@ import HealthChip from "../components/HealthChip";
 import IncidentsLink from "../components/IncidentsLink";
 import OperatorAvatars from "../components/OperatorAvatars";
 import ManualEventButton from "../components/ManualEventButton";
+import ServerCertificatesSection from "../components/ServerCertificatesSection";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import StatusDot from "../components/StatusDot";
 import TailnetIdentitySection from "../components/TailnetIdentitySection";
 import TimeAgo from "../components/TimeAgo";
 import { LatestSnapshot } from "../components/SnapshotId";
 import { BackupProcessingChip } from "../components/BackupProcessingChip";
+import { BackupLiveProgress } from "../components/BackupLiveProgress";
 import TimezoneTooltip from "../components/TimezoneTooltip";
 import VersionIndicator from "../components/VersionIndicator";
+import ServerProductChip from "../components/ServerProductChip";
+import { useProductCaps } from "../hooks/useProducts";
+import { PRODUCT_LABELS } from "../types";
 import { HealthLegend, StatusLegend, VersionLegend } from "../components/Legends";
 import ServerKindChip from "../components/ServerKindChip";
 import ServerRankChip from "../components/ServerRankChip";
@@ -71,12 +76,14 @@ import ServerSetupInstructions from "../components/ServerSetupInstructions";
 import { callApi, useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { useReloadInterval } from "../hooks/useReloadInterval";
 import { humanSeconds } from "../lib/humanDuration";
 import ServerNameWithGroup from "../components/ServerNameWithGroup";
 import {
 	compareServersByRankThenKind,
 	groupServersByRank,
 	healthcheckPath,
+	silenceRef,
 	type CheckResult,
 	type ConsolidatedCheck,
 	type ConsolidatedChecks,
@@ -101,7 +108,7 @@ export default function ServerDetail() {
 		{ server_id: id },
 		[id],
 	);
-	const isAdmin = useApi("commons", "is_current_user_admin");
+	const admin = useIsAdmin() === true;
 	// Single refresh signal for everything on the page that talks to the
 	// issues/incidents APIs. Any mutation (manual-event submit, resolve/
 	// snooze on a row, etc.) bumps this so all sibling panels refetch in
@@ -148,7 +155,6 @@ export default function ServerDetail() {
 	}
 
 	const data = detail.data;
-	const admin = isAdmin.status === "ok" && isAdmin.data;
 	const archived = data.server.archived;
 	const registered = data.server.registered_at != null;
 
@@ -205,6 +211,7 @@ export default function ServerDetail() {
 					tags={data.server.tags}
 				/>
 			)}
+			<ServerCertificatesSection serverId={data.server.id} />
 			<AdvancedIdentitySection
 				host={data.server.display_host}
 				serverId={data.server.id}
@@ -276,6 +283,7 @@ function Header({
 				useFlexGap
 			>
 				{data.server.rank && <ServerRankChip rank={data.server.rank} />}
+				<ServerProductChip product={data.server.product} />
 				<ServerKindChip kind={data.server.kind} />
 				<Typography variant="h4" component="h1" sx={{ ml: 1 }}>
 					<SiblingDotStrip
@@ -769,6 +777,7 @@ function InfoSection({
 				<HealthIndicator
 					health={health}
 					up={up}
+					monitored={server.is_monitored !== false}
 					operators={status.operators}
 				/>
 			)}
@@ -797,6 +806,16 @@ function InfoSection({
 					<InfoItem
 						label="Location"
 						value={renderLocation(server)}
+					/>
+				)}
+				{/* Only where something has been granted. "Not permitted" on every
+				    server in the fleet advertises a feature that a deployment
+				    without DNS zones does not have.
+				    spec: DOM#permission-for-a-server-to-manage-its-own-names */}
+				{(server.may_manage_dns || server.may_manage_tls) && (
+					<InfoItem
+						label="Name management"
+						value={nameManagementLabel(server)}
 					/>
 				)}
 			</Stack>
@@ -845,10 +864,12 @@ function InfoSection({
 function HealthIndicator({
 	health,
 	up,
+	monitored,
 	operators,
 }: {
 	health: HealthState;
 	up: ShortStatus;
+	monitored: boolean;
 	operators: OperatorPresence[];
 }) {
 	const reporting = up === "up" || up === "blip";
@@ -859,7 +880,7 @@ function HealthIndicator({
 			useFlexGap
 			sx={{ mb: 1.5, alignItems: "center", flexWrap: "wrap" }}
 		>
-			<HealthChip health={health} stale={!reporting} />
+			<HealthChip health={health} stale={!reporting} monitored={monitored} />
 			{reporting && operators.length > 0 && (
 				<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 					<OperatorAvatars operators={operators} size={24} />
@@ -970,8 +991,9 @@ function ChecksTableBody({
 				{visible.map((entry) => {
 					// Match the silence refs to this entry's own source — a
 					// silence on another source's same-named check is a
-					// different check.
-					const refName = `health/${entry.check}`;
+					// different check, and canopy's own checks are silenced
+					// at a bare ref rather than under `health/`.
+					const refName = silenceRef(entry.source, entry.check);
 					const serverSilence =
 						serverSilences.find(
 							(s) => s.source === entry.source && s.ref === refName,
@@ -1258,7 +1280,7 @@ function SilenceCheckButton({
 		silenceGroup.error ??
 		unsilenceServer.error ??
 		unsilenceGroup.error;
-	const refName = `health/${check}`;
+	const refName = silenceRef(source, check);
 	const silenced = !!serverSilence || !!groupSilence;
 	const handle = async (fn: () => Promise<unknown>) => {
 		try {
@@ -1421,6 +1443,7 @@ function SilenceScopeRow({
 }
 
 function StatusInfoFields({ status }: { status: ServerLastStatusData }) {
+	const tracking = useProductCaps(status.product)?.version_tracking;
 	return (
 		<>
 			<Stack spacing={0.25}>
@@ -1441,15 +1464,22 @@ function StatusInfoFields({ status }: { status: ServerLastStatusData }) {
 					</Typography>
 				</InfoItem>
 			)}
-			<Stack spacing={0.25}>
-				<Typography variant="caption" color="text.secondary">
-					Tamanu
-				</Typography>
-				<VersionIndicator
-					version={status.version}
-					distance={status.version_distance}
-				/>
-			</Stack>
+			{/* A product with no application version shows no version block at
+			    all — the caption included, since an empty one reads as a
+			    reporting failure rather than an absence.
+			    spec: APP#versions */}
+			{tracking !== undefined && tracking !== "absent" && (
+				<Stack spacing={0.25}>
+					<Typography variant="caption" color="text.secondary">
+						{PRODUCT_LABELS[status.product]}
+					</Typography>
+					<VersionIndicator
+						version={status.version}
+						tracking={tracking}
+						distance={status.version_distance}
+					/>
+				</Stack>
+			)}
 			{status.postgres && (
 				<InfoItem
 					label="PostgreSQL"
@@ -1505,6 +1535,14 @@ function InfoItem({
 function renderLocation(server: ServerInfo): string {
 	if (!server.cloud) return "On premise";
 	return "Cloud";
+}
+
+/// What this server is trusted to do with names under its group's domains. Only
+/// called where it is trusted with one of them, so there is no "none" reading.
+// spec: DOM#permission-for-a-server-to-manage-its-own-names
+function nameManagementLabel(server: ServerInfo): string {
+	if (server.may_manage_dns && server.may_manage_tls) return "DNS and TLS";
+	return server.may_manage_dns ? "DNS only" : "TLS only";
 }
 
 function SiblingServers({
@@ -1572,6 +1610,7 @@ function SiblingServers({
 									<StatusDot
 										up={sib.up ?? "gone"}
 										health={sib.health ?? undefined}
+										monitored={sib.is_monitored !== false}
 									/>
 									<MuiLink
 										component={RouterLink}
@@ -1630,12 +1669,25 @@ function BackupCapabilitiesSection({
 	groupId: string | null;
 	isAdmin: boolean;
 }) {
+	// Poll faster while a backup of any type is in flight, so its figures advance
+	// and the "backing up…" chip appears and clears on its own; back off when
+	// nothing is running. Without this the section was frozen at page load.
+	const [inFlight, setInFlight] = useState(false);
+	const backupTick = useReloadInterval(
+		inFlight ? 5_000 : 30_000,
+		"canopy-data-changed",
+	);
 	const caps = useApi(
 		"backups",
 		"capabilities",
 		{ server_id: serverId },
-		[serverId],
+		[serverId, backupTick],
 	);
+	const anyInFlight =
+		caps.status === "ok" && caps.data.some((c) => c.processing_since != null);
+	useEffect(() => {
+		setInFlight(anyInFlight);
+	}, [anyInFlight]);
 	// Whether the group has an *active* (ready) backup config. Ungrouped servers
 	// query the nil group, which always returns no config. While this is loading
 	// we optimistically treat the section as active to avoid a grey→normal flash.
@@ -1861,6 +1913,7 @@ function BackupCapabilityRow({
 					</Typography>
 					<BackupProcessingChip since={cap.processing_since} />
 				</Stack>
+				<BackupLiveProgress progress={cap.progress} />
 				<LatestSnapshot
 					id={cap.latest_snapshot_id}
 					at={cap.latest_snapshot_at}
@@ -2061,6 +2114,7 @@ function SiblingDotStrip({
 							key={m.entry.id}
 							up={(m.entry.up as ShortStatus | undefined) ?? "gone"}
 							health={(m.entry.health as HealthState | undefined) ?? undefined}
+							monitored={m.entry.is_monitored !== false}
 							title={m.entry.name ?? ""}
 							dim={!m.focused}
 							size="0.8em"

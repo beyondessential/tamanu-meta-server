@@ -1085,6 +1085,46 @@
         ]
       }
     },
+    "/api/backups/run_progress": {
+      "post": {
+        "tags": [
+          "backups"
+        ],
+        "summary": "The progress a run reported over its life, oldest first.",
+        "description": "Every figure is cumulative from the start of the run, so a rate is the\ndifference between adjacent points divided by the time between them — and a\ngap in the series costs resolution without distorting the totals either side\nof it.\n\nAvailable for a run in flight and for one that has finished, for as long as\nits series is retained. Empty for a run that reported no progress (an older\nclient), for one whose series has been pruned, and for an unknown run — all\nthree are \"nothing to plot\" rather than errors.",
+        "operationId": "backups_run_progress",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunProgressArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RunProgressPoint"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
     "/api/backups/set_capability": {
       "post": {
         "tags": [
@@ -1650,13 +1690,317 @@
         ]
       }
     },
+    "/api/certificates/authority": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "The authority, its profiles, and whether Canopy's account with it is usable.",
+        "description": "Presented to operators because a misconfiguration of issuance shows up here\nrather than on any one server.",
+        "operationId": "certificates_authority",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorityView"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/certificates/for_group": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "The names in use under each domain a group controls, and which of them hold a\ncurrent certificate.",
+        "description": "So that whether a deployment's names are healthy is answerable from the\ngroup's page, without visiting each of its servers.",
+        "operationId": "certificates_for_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/DomainHealthView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/certificates/for_server": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Everything a server's page needs about its names and certificates.",
+        "description": "One call rather than several, because the parts are read together and a\nhalf-loaded panel would show a certificate without the pause that explains\nwhy it is not renewing.",
+        "operationId": "certificates_for_server",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerNamesView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/certificates/pause": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Pause a server: Canopy makes no new changes on its behalf.",
+        "description": "Nothing already in place is withdrawn — records published stand, certificates\nheld stay held and collectable until they expire, and the deployment keeps\nworking exactly as it did. What stops is Canopy doing anything *new*.\n\nA second pause leaves the first in place, so the original reason and time are\nnot overwritten by a later one.",
+        "operationId": "certificates_pause",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PauseArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/certificates/resume": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Lift a server's pause. Work resumes where it left off.",
+        "description": "Only an operator can do this: Canopy never lifts a pause itself, however long\nit has been in place and however much is expiring under it.",
+        "operationId": "certificates_resume",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/certificates/revoke": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Revoke a certificate Canopy holds.",
+        "description": "Canopy holds the account that obtained it, which is authority enough; the\nserver's private key is not needed and is not asked for. The authority is told\nfirst and Canopy records the revocation only once it has accepted, so the two\nnever disagree — a 502 means nothing was revoked and the operator can try\nagain.\n\nRevoking pauses the server, without being asked. Revocation and re-issuance\nwould otherwise chase each other: a key revoked as compromised has its\nreplacement requested within minutes by an agent doing exactly what it was\nbuilt to do, and if the key leaked because the host was compromised, that\nreplacement hands the same attacker a fresh certificate.\n\nCannot be undone: a revoked certificate stays revoked, and the remedy is a new\none.",
+        "operationId": "certificates_revoke",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CertificateRevokeArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "There is no chain to revoke, or it is revoked already.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The authority would not accept the revocation; nothing was changed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/certificates/set_profile": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Set the profile a server's certificates are requested under.",
+        "description": "Lifetime is a property of how a deployment is run rather than of Canopy, so it\nis an operator's choice per server: a cloud deployment whose issuance is\nexercised constantly can carry a short lifetime where an on-premises one that\nmay be offline for days cannot. Takes effect on the next issuance or renewal;\na certificate already held keeps the lifetime it was issued with.\n\nResponds 409 for a profile the authority does not advertise.",
+        "operationId": "certificates_set_profile",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetProfileArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The authority does not offer that profile.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/commons/is_current_user_admin": {
       "post": {
         "tags": [
           "commons"
         ],
         "summary": "Check whether the caller is an admin.",
-        "description": "Reports `true` if the caller is authenticated and their identity is on\nthe admin allow-list, `false` otherwise — including when the caller is\nnot authenticated at all. This endpoint intentionally requires no\nauthentication of its own, since it exists so a client can check whether\nto show admin-only controls before doing anything else.",
+        "description": "Reports `true` if the caller is authenticated and their identity is on\nthe admin allow-list, `false` if the caller definitely isn't an admin —\nincluding when the caller is not authenticated at all. This endpoint\nintentionally requires no authentication of its own, since it exists so a\nclient can check whether to show admin-only controls before doing anything\nelse.\n\nA failure that isn't an authorization outcome (a database blip while\nreading the allow-list, say) is reported as an error, not as `false`.",
         "operationId": "is_current_user_admin",
         "responses": {
           "200": {
@@ -1665,6 +2009,51 @@
               "application/json": {
                 "schema": {
                   "type": "boolean"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The caller's admin status could not be determined. Distinct from a `false` answer: retry rather than treating the caller as a non-admin.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/commons/products": {
+      "post": {
+        "tags": [
+          "commons"
+        ],
+        "summary": "Describe every product canopy monitors.",
+        "description": "The operator UI reads this to decide what to present for a server — which\nroles to offer, whether a version applies and whether it can be graded,\nwhether the public-name field is meaningful — rather than restating the\nmapping client-side, where it would drift as products are added.",
+        "operationId": "products",
+        "responses": {
+          "200": {
+            "description": "Every product, its capabilities, and the roles it defines.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProductInfo"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
                 }
               }
             }
@@ -2503,6 +2892,210 @@
         "security": [
           {
             "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/domains/claim": {
+      "post": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Claim a domain for a group.",
+        "description": "The group then controls the domain and every name beneath it, and no other\ngroup can claim a name overlapping it. Requires the caller to be on the\nadmin allow-list. Responds 400 if the name is not a valid domain of at least\ntwo labels or does not sit within one of Canopy's managed zones, and 409 if\nit overlaps a domain already claimed — by this group or another.",
+        "operationId": "domains_claim",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DomainClaimArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupDomainView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The domain overlaps one already claimed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/domains/for_group": {
+      "post": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "List the domains a group controls.",
+        "description": "Each carries the managed zone it resolves to, or null for a claim no\nconfigured zone matches.",
+        "operationId": "domains_for_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GroupDomainView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/domains/grant_availability": {
+      "post": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Whether granting a server name management would mean anything yet.",
+        "description": "The two grants are only ever exercised over names beneath a domain the\nserver's group controls, so offering them where no domain is controlled — or\nwhere the deployment has no zones at all — presents a control that cannot do\nanything. The rule lives here rather than in the UI so there is one answer\nto it.",
+        "operationId": "domains_grant_availability",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MaybeGroupIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantAvailabilityView"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/domains/release": {
+      "post": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "Release a claimed domain.",
+        "description": "The group loses control of the domain and every name beneath it, and the\nname becomes claimable again. Requires the caller to be on the admin\nallow-list. Responds 404 if there is no such claim.",
+        "operationId": "domains_release",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DomainIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/domains/zones": {
+      "post": {
+        "tags": [
+          "domains"
+        ],
+        "summary": "List the managed DNS zones Canopy is configured with.",
+        "description": "An operator claiming a domain for a group needs these to know which names\nare claimable at all: a claim has to sit at or under one of these apexes.\nAn empty list means Canopy has been given no zones, so no domain can be\nclaimed until its deployment configuration provides one.",
+        "operationId": "domains_zones",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ManagedZoneView"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
           }
         ]
       }
@@ -4032,6 +4625,66 @@
         ]
       }
     },
+    "/api/migration_tests/for_group": {
+      "post": {
+        "tags": [
+          "migration_tests"
+        ],
+        "summary": "Where each of a group's servers stands against the version it would take\nnext.",
+        "description": "One entry per server that has a candidate version. A server already on the\nnewest published version, running another product, or yet to report a\nversion has nothing to be tested against and is absent.",
+        "operationId": "migration_tests_for_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForGroupArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Verdicts, one per server with a candidate.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GroupVerdict"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/restore_replicas/checks": {
       "post": {
         "tags": [
@@ -4108,7 +4761,7 @@
           "restore_replicas"
         ],
         "summary": "Declare a managed restore replica.",
-        "description": "Creates a declaration instructing the chosen consumer to maintain a\nrestored replica of the given backup type for the given intent, and\nrecords the calling operator as its creator. The overdue bound is a\nhuman-friendly duration string (e.g. `2h 30m`); `duration` and `bytes`\nparameter values likewise accept human-unit strings (e.g. `20Gi`), which\nare resolved to raw seconds/bytes before validation against the consumer's\nadvertised schema for the intent and stored raw. If the intent is not\ncurrently advertised, the values are accepted as-is and the declaration is\ncreated with a gap. Requires the caller to be on the admin allow-list.\nResponds 400 if the overdue bound or a parameter value fails to parse or\nvalidate, and 409 if a matching declaration already exists.",
+        "description": "Creates a declaration instructing the chosen consumer to maintain a\nrestored replica of the given backup type for the given intent, and\nrecords the calling operator as its creator. The overdue bound is a\nhuman-friendly duration string (e.g. `2h 30m`); `duration` and `bytes`\nparameter values likewise accept human-unit strings (e.g. `20Gi`), which\nare resolved to raw seconds/bytes before validation against the consumer's\nadvertised schema for the intent and stored raw. If the intent is not\ncurrently advertised, the values are accepted as-is and the declaration is\ncreated with a gap. The name must be unique among the consumer's\ndeclarations. Requires the caller to be on the admin allow-list. Responds\n400 if the name is blank or the overdue bound or a parameter value fails to\nparse or validate, and 409 if a matching declaration already exists or the\nconsumer already has a declaration with that name.",
         "operationId": "restore_replicas_create",
         "requestBody": {
           "content": {
@@ -4132,7 +4785,7 @@
             }
           },
           "409": {
-            "description": "A matching declaration already exists.",
+            "description": "A matching declaration already exists, or the consumer already has one with that name.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4155,7 +4808,7 @@
           "restore_replicas"
         ],
         "summary": "Delete a restore replica declaration.",
-        "description": "Removes the declaration: the consumer stops being asked to maintain the\nreplica and loses the backup access the declaration granted. Any active\nrestore-verification alert for the declaration's scope is recovered, since\nnothing tracks that scope any more. Requires the caller to be on the admin\nallow-list. Responds 404 if the declaration does not exist.",
+        "description": "Removes the declaration: the consumer stops being asked to maintain the\nreplica and loses the backup access the declaration granted. Any active\nrestore-verification alert for the declaration's scope is recovered, since\nnothing tracks that scope any more. The restore-health reports it collected\nare retained, detached from the deleted declaration. Requires the caller to\nbe on the admin allow-list. Responds 404 if the declaration does not exist.",
         "operationId": "restore_replicas_delete",
         "requestBody": {
           "content": {
@@ -4235,7 +4888,7 @@
           "restore_replicas"
         ],
         "summary": "Update a restore replica declaration.",
-        "description": "Replaces every field, including scope: the consumer, group, server,\nbackup type, and intent can be retargeted in the same call as the name,\noverdue bound, parameter values, and enabled flag. The overdue bound and\n`duration`/`bytes` parameter values accept human-unit strings (e.g.\n`2h 30m`, `20Gi`), resolved to raw seconds/bytes and validated against the\n*new* consumer+intent's advertised parameter schema; as with `create`, an\nintent the new consumer doesn't currently advertise is accepted and the\nvalues pass through unvalidated, leaving the declaration with a gap. If\nthe scope changes, any active restore-verification alert for the\ndeclaration's old scope is recovered. Requires the caller to be on the\nadmin allow-list. Responds 400 if the overdue bound or a parameter value\nfails to parse or validate, 404 if the declaration does not exist, and 409\nif the new scope collides with another declaration.",
+        "description": "Replaces every field, including scope: the consumer, group, server,\nbackup type, and intent can be retargeted in the same call as the name,\noverdue bound, parameter values, and enabled flag. The overdue bound and\n`duration`/`bytes` parameter values accept human-unit strings (e.g.\n`2h 30m`, `20Gi`), resolved to raw seconds/bytes and validated against the\n*new* consumer+intent's advertised parameter schema; as with `create`, an\nintent the new consumer doesn't currently advertise is accepted and the\nvalues pass through unvalidated, leaving the declaration with a gap. If\nthe scope changes, any active restore-verification alert for the\ndeclaration's old scope is recovered. The name must be unique among the\nconsumer's declarations. Requires the caller to be on the admin allow-list.\nResponds 400 if the name is blank or the overdue bound or a parameter value\nfails to parse or validate, 404 if the declaration does not exist, and 409\nif the new scope or name collides with another declaration.",
         "operationId": "restore_replicas_update",
         "requestBody": {
           "content": {
@@ -4269,7 +4922,7 @@
             }
           },
           "409": {
-            "description": "The new scope collides with another declaration.",
+            "description": "The new scope or name collides with another declaration.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5388,7 +6041,7 @@
           "servers"
         ],
         "summary": "Update a server's fields.",
-        "description": "Applies a partial update — only the fields present in `data` are\nchanged. Moving a previously-ungrouped server into a group, or toggling\n`is_monitored`, re-evaluates the server's open issues so incidents catch\nup with the new state. Returns 400 if the update is rejected (e.g. an\ninvalid host value).",
+        "description": "Applies a partial update — only the fields present in `data` are\nchanged. Moving a previously-ungrouped server into a group, or toggling\n`is_monitored`, re-evaluates the server's open issues so incidents catch\nup with the new state. Returns 400 if the update is rejected (e.g. an\ninvalid host value, or a role the target product doesn't define).",
         "operationId": "server_update",
         "requestBody": {
           "content": {
@@ -6684,6 +7337,41 @@
           }
         }
       },
+      "AuthorityView": {
+        "type": "object",
+        "description": "The certificate authority Canopy is configured to use, and whether it works.",
+        "required": [
+          "profiles",
+          "account_usable"
+        ],
+        "properties": {
+          "account_usable": {
+            "type": "boolean",
+            "description": "Whether Canopy holds a usable account at the authority. False where none\nis configured, or where the last attempt to use it failed."
+          },
+          "directory": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The authority's directory URL, or null where none is configured — in\nwhich case Canopy issues no certificates at all."
+          },
+          "problem": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What is currently wrong, where anything is: the message from the standing\nself-alert, so the settings panel says the same thing as the alerting."
+          },
+          "profiles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The profiles the authority advertises, as it names them. Empty means it\nadvertises none, so asking for one would be refused."
+          }
+        }
+      },
       "BTreeMap": {
         "type": "object",
         "additionalProperties": {
@@ -7146,7 +7834,7 @@
       },
       "BillingTag": {
         "type": "object",
-        "description": "One effective billing label attributed to a group's cloud resources.\n\nLabels are computed from the group's configuration: explicit `billing.*`\ntags on the group are honoured verbatim; otherwise the product defaults to\n`tamanu`, the deployment to the group name in lower-kebab-case, and the\nstage to the group's highest-ranked live member (for example `prod`). The\nstage label is omitted entirely when the group has no ranked members.",
+        "description": "One effective billing label attributed to a group's cloud resources.\n\nLabels are computed from the group's configuration: explicit `billing.*`\ntags on the group are honoured verbatim; otherwise the product comes from\nthe one its live members agree on, the deployment from the group name in\nlower-kebab-case, and the stage from the group's highest-ranked live member\n(for example `prod`). A label with nothing to attribute to is omitted\nentirely: the stage when the group has no ranked members, and the product\nwhen its members span products.",
         "required": [
           "key",
           "value"
@@ -7159,6 +7847,150 @@
           "value": {
             "type": "string",
             "description": "Label value."
+          }
+        }
+      },
+      "Caps": {
+        "type": "object",
+        "description": "What canopy does for a product's servers.\n\nReachability, health checks and backups are deliberately absent: checks\nare graded by the source that reports them, and backup types are\nadvertised per-server by the agent, so both already work for any product.",
+        "required": [
+          "version_tracking",
+          "public_listing"
+        ],
+        "properties": {
+          "public_listing": {
+            "type": "boolean",
+            "description": "Whether this product's servers can be listed for end-user-facing\nclients."
+          },
+          "version_tracking": {
+            "$ref": "#/components/schemas/VersionTracking",
+            "description": "How this product's application version is treated."
+          }
+        }
+      },
+      "CertificateRevokeArgs": {
+        "type": "object",
+        "description": "Which certificate to revoke, and why.",
+        "required": [
+          "id",
+          "reason"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The certificate to revoke."
+          },
+          "reason": {
+            "$ref": "#/components/schemas/RevocationReason",
+            "description": "The reason to give the authority. `key_compromise` additionally bars that\nkey from ever being certified again, for any name by any server."
+          }
+        }
+      },
+      "CertificateView": {
+        "type": "object",
+        "description": "A certificate Canopy holds for a server, or an order in flight.",
+        "required": [
+          "id",
+          "name",
+          "state",
+          "renewing",
+          "collectable",
+          "risk",
+          "attempts",
+          "key_fingerprint"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Failed attempts since the last success."
+          },
+          "collectable": {
+            "type": "boolean",
+            "description": "Whether the server can collect this certificate right now."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier of the certificate."
+          },
+          "issued_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When it was issued."
+          },
+          "key_fingerprint": {
+            "type": "string",
+            "description": "Hex SHA-256 of the certified key, so an operator can tell two\ncertificates for the same name apart."
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the last attempt failed, if it did."
+          },
+          "name": {
+            "type": "string",
+            "description": "The single name it covers."
+          },
+          "not_after": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When it expires. Null for an order that has produced nothing yet."
+          },
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The profile it was issued under — the authority's name for a lifetime.\nNull for one the authority offered no profile for."
+          },
+          "remaining_seconds": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How long is left, in seconds. Negative once expired, null before\nissuance — given alongside the instant so the UI need not compute it and\nthe two cannot disagree."
+          },
+          "renewing": {
+            "type": "boolean",
+            "description": "Whether the order in flight is extending a certificate that already\nissued, which tells a stalled renewal apart from one that never came up."
+          },
+          "revocation_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The reason given for revocation."
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When an operator revoked it."
+          },
+          "revoked_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who revoked it."
+          },
+          "risk": {
+            "type": "string",
+            "description": "How urgently it needs attention: `none`, `at_risk`, or `critical`,\njudged against its own lifetime."
+          },
+          "state": {
+            "type": "string",
+            "description": "`pending`, `issued`, `failed`, or `revoked`."
           }
         }
       },
@@ -7797,7 +8629,7 @@
           },
           "kind": {
             "$ref": "#/components/schemas/ServerKind",
-            "description": "The kind of deployment this server represents."
+            "description": "The server's role within its product's topology. Rejected when the\nproduct does not define it."
           },
           "name": {
             "type": [
@@ -7812,6 +8644,10 @@
               "null"
             ],
             "description": "Free-text operator notes about the server."
+          },
+          "product": {
+            "$ref": "#/components/schemas/Product",
+            "description": "The application this server runs. Defaults to tamanu."
           },
           "public_name": {
             "type": [
@@ -8116,6 +8952,112 @@
           }
         }
       },
+      "DomainClaimArgs": {
+        "type": "object",
+        "description": "Fields needed to claim a domain for a group.",
+        "required": [
+          "server_group_id",
+          "domain"
+        ],
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "The domain to claim. Case and a trailing dot are not significant. An\ninternationalised domain is claimed in its ASCII-compatible (punycode)\nspelling."
+          },
+          "server_group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group to give control of the domain."
+          }
+        }
+      },
+      "DomainHealthView": {
+        "type": "object",
+        "description": "The names in use beneath one of a group's domains.",
+        "required": [
+          "domain",
+          "names"
+        ],
+        "properties": {
+          "domain": {
+            "type": "string",
+            "description": "The claimed domain these names sit beneath."
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DomainNameView"
+            },
+            "description": "The names in use beneath it, by name."
+          }
+        }
+      },
+      "DomainIdArgs": {
+        "type": "object",
+        "description": "Identifies a claim.",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The claim to release."
+          }
+        }
+      },
+      "DomainNameView": {
+        "type": "object",
+        "description": "One name in use beneath a group's domain, with whether it is covered.",
+        "required": [
+          "name",
+          "server_id",
+          "certificate"
+        ],
+        "properties": {
+          "certificate": {
+            "type": "boolean",
+            "description": "Whether a certificate Canopy holds for it is current and collectable."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name."
+          },
+          "not_after": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When the certificate expires."
+          },
+          "published": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the address records Canopy publishes for it are up to date. Null\nwhere the name has no registration — a certificate obtained for a name\nwhose addresses the server publishes itself."
+          },
+          "risk": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "How urgently that certificate needs attention: `none`, `at_risk`, or\n`critical`. Null where there is no certificate."
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The server that registered it or holds its certificate."
+          },
+          "server_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "That server's name, for display."
+          }
+        }
+      },
       "DutyBucket": {
         "type": "object",
         "description": "One hour-of-week bucket of the degradation profile.",
@@ -8211,7 +9153,9 @@
           "name",
           "up",
           "health",
+          "is_monitored",
           "operators",
+          "product",
           "kind"
         ],
         "properties": {
@@ -8224,9 +9168,13 @@
             "format": "uuid",
             "description": "Unique identifier of the server."
           },
+          "is_monitored": {
+            "type": "boolean",
+            "description": "Whether canopy alerts on this server's checks. An unmonitored\nserver's reachability and health are determined and presented as\nnormal, but raise nothing — so consumers mark it, rather than\nshowing a failure that nobody is being paged about."
+          },
           "kind": {
             "$ref": "#/components/schemas/ServerKind",
-            "description": "The server's kind (central, facility, or canopy)."
+            "description": "The server's role within its product's topology (for Tamanu, central\nor facility; standalone for a product with no internal roles)."
           },
           "name": {
             "type": "string",
@@ -8238,6 +9186,10 @@
               "$ref": "#/components/schemas/OperatorPresence"
             },
             "description": "People currently connected to this server, from its latest status\nupdate. Always empty unless the server is actively reporting (`up`\nor `blip`) — a stale report can't be trusted to reflect who is\nconnected right now."
+          },
+          "product": {
+            "$ref": "#/components/schemas/Product",
+            "description": "The application the server runs, presented alongside its role."
           },
           "rank": {
             "oneOf": [
@@ -8262,6 +9214,7 @@
         "required": [
           "server_id",
           "server_name",
+          "product",
           "kind",
           "detail",
           "checks"
@@ -8299,7 +9252,7 @@
           },
           "kind": {
             "$ref": "#/components/schemas/ServerKind",
-            "description": "The kind of deployment the server represents."
+            "description": "The server's role within its product's topology."
           },
           "nodejs": {
             "type": [
@@ -8321,6 +9274,10 @@
               "null"
             ],
             "description": "Reported database engine version."
+          },
+          "product": {
+            "$ref": "#/components/schemas/Product",
+            "description": "The application the server runs. The fleet view reads it to keep the\napplication-version spread to servers that have one to report."
           },
           "rank": {
             "oneOf": [
@@ -8359,6 +9316,20 @@
                 "description": "Application version the server reports running, if any."
               }
             ]
+          }
+        }
+      },
+      "ForGroupArgs": {
+        "type": "object",
+        "description": "Request body for reading a group's migration-test verdicts.",
+        "required": [
+          "group_id"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group to report on."
           }
         }
       },
@@ -8410,6 +9381,27 @@
           }
         }
       },
+      "GrantAvailabilityView": {
+        "type": "object",
+        "description": "Where a group stands with respect to granting its servers name management.",
+        "required": [
+          "state",
+          "group_domains"
+        ],
+        "properties": {
+          "group_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The domains this group controls, so the UI can name what a grant would\ncover. Empty unless `state` is `available`."
+          },
+          "state": {
+            "type": "string",
+            "description": "What an operator can do with the two grants right now:\n\n- `unconfigured` — Canopy has no managed zones and no group anywhere\n  controls a domain, so name management is not in use in this deployment.\n  Granting it would do nothing and there is nothing an operator can do\n  about that from here; it becomes available once the infrastructure\n  provides a zone.\n- `no_group_domain` — name management is in use, but this group controls no\n  domain, so a grant would authorise the server over no name. Claim a\n  domain for the group first.\n- `available` — the group controls at least one domain, and a grant takes\n  effect over the names beneath it."
+          }
+        }
+      },
       "GroupDetail": {
         "type": "object",
         "description": "A server group together with its member servers and billing labels.",
@@ -8450,6 +9442,50 @@
             "type": "string",
             "format": "uuid",
             "description": "Id of the server group to fetch details for."
+          }
+        }
+      },
+      "GroupDomainView": {
+        "type": "object",
+        "description": "A domain a group controls, with the managed zone it resolves to.",
+        "required": [
+          "id",
+          "group_id",
+          "domain",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "description": "When it was claimed."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Login of the operator who claimed it, if recorded."
+          },
+          "domain": {
+            "type": "string",
+            "description": "The domain, normalised to lower case without a trailing dot."
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group that controls the domain."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier of the claim."
+          },
+          "zone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Apex of the managed zone this domain resolves to — the longest\nconfigured apex it sits within. Null when no configured zone covers it,\nwhich means the zone has left Canopy's configuration since the claim was\nmade: the claim stands and still excludes others, but Canopy will act on\nno name beneath it until the zone is restored or the claim released."
           }
         }
       },
@@ -8542,6 +9578,47 @@
           "type": {
             "type": "string",
             "description": "Backup type this schedule and retention apply to."
+          }
+        }
+      },
+      "GroupVerdict": {
+        "type": "object",
+        "description": "Where one of a group's servers stands against the version it would take\nnext.",
+        "required": [
+          "server_id",
+          "target_version_id",
+          "target_version",
+          "verdict"
+        ],
+        "properties": {
+          "latest": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LatestTest",
+                "description": "The test the verdict came from, absent when there has not been one."
+              }
+            ]
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The server the verdict is about."
+          },
+          "target_version": {
+            "type": "string",
+            "description": "That version, as semver."
+          },
+          "target_version_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The version it would take next."
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/Verdict",
+            "description": "Where it stands against that version."
           }
         }
       },
@@ -9585,6 +10662,56 @@
           }
         }
       },
+      "LatestTest": {
+        "type": "object",
+        "description": "The most recent test of one (server, version) pair.",
+        "required": [
+          "verdict",
+          "reported_at",
+          "total_elapsed",
+          "data_bytes_before",
+          "data_bytes_after"
+        ],
+        "properties": {
+          "data_bytes_after": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size of it afterwards; the growth is what a heavy backfill shows up as."
+          },
+          "data_bytes_before": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Size of the data the migrations ran against."
+          },
+          "failed_migration": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The migration that failed, when one did."
+          },
+          "reported_at": {
+            "type": "string",
+            "description": "When the consumer reported it."
+          },
+          "snapshot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The snapshot the verdict was reached against."
+          },
+          "total_elapsed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Whole seconds the migration run took."
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/Verdict",
+            "description": "Whether the migrations applied."
+          }
+        }
+      },
       "ListActiveArgs": {
         "type": "object",
         "description": "Filters for listing open incidents.",
@@ -9657,6 +10784,150 @@
           }
         }
       },
+      "LiveProgress": {
+        "type": "object",
+        "description": "The live state of a run still in flight, from the progress it has reported.\n\nAbsent entirely (`None` on the row) when a run has reported no progress —\neither an older client or one that cannot. That is a distinct state from a\nrun reporting zeroes, and the interface must render it as unknown rather than\nas a stalled run.\n\nEvery byte figure here is cumulative since the run started, exactly as\nreported; [`Self::bytes_per_second`] is the only derived rate.",
+        "required": [
+          "observed_at",
+          "seconds_since_observed",
+          "extra"
+        ],
+        "properties": {
+          "bytes_cached": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes found already present, and so not re-uploaded."
+          },
+          "bytes_estimated": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Total bytes the run currently expects to handle. An estimate the run may\nrevise upward, so a percentage derived from it can go down."
+          },
+          "bytes_hashed": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes processed so far."
+          },
+          "bytes_per_second": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Upload rate over the trailing window, derived by differencing cumulative\n`bytes_uploaded` across samples. `None` when the window holds fewer than\ntwo samples, spans no time, or the run reports no uploaded figure — never\nzero as a stand-in, since \"not enough data to say\" and \"moving no bytes\"\nare different answers."
+          },
+          "bytes_read": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Source bytes read so far."
+          },
+          "bytes_uploaded": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes uploaded so far."
+          },
+          "current_path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What the run was working on at the last sample."
+          },
+          "errors": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Errors hit so far."
+          },
+          "extra": {
+            "type": "object",
+            "description": "Whatever the backup engine reported beyond what Canopy models, verbatim\nfrom the last sample. Shown for inspection; never interpreted."
+          },
+          "files_done": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Files finished so far."
+          },
+          "files_estimated": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Total files the run currently expects to handle."
+          },
+          "ignored_errors": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Errors hit and deliberately ignored so far."
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the last sample arrived, as timed by Canopy on receipt."
+          },
+          "s3_received_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Payload bytes received from object storage so far."
+          },
+          "s3_received_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Raw bytes received from object storage so far."
+          },
+          "s3_sent_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Payload bytes sent to object storage so far."
+          },
+          "s3_sent_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Raw bytes sent to object storage so far, as the client's proxy tallied."
+          },
+          "seconds_since_observed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How long since the last sample. The \"is anyone still there\" figure: it\ngrows without bound if a device goes quiet mid-run."
+          }
+        }
+      },
       "LiveVersionsBracket": {
         "type": "object",
         "description": "The lowest and highest software version currently reported by any\nproduction server.",
@@ -9682,6 +10953,38 @@
           "quick",
           "full"
         ]
+      },
+      "ManagedZoneView": {
+        "type": "object",
+        "description": "A DNS zone Canopy can write records in.\n\nZones come from Canopy's deployment configuration rather than from operator\nstate: they are what the infrastructure has granted Canopy write access to,\nand they bound which domains a group can be given.",
+        "required": [
+          "apex",
+          "provider_zone_id"
+        ],
+        "properties": {
+          "apex": {
+            "type": "string",
+            "description": "The zone's apex domain, for example `tamanu.app`."
+          },
+          "provider_zone_id": {
+            "type": "string",
+            "description": "The identifier the DNS provider knows this zone by."
+          }
+        }
+      },
+      "MaybeGroupIdArgs": {
+        "type": "object",
+        "description": "Identifies a group, or none.",
+        "properties": {
+          "server_group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The group to ask about. Null for a server with no group, which can hold\nno domain and so no useful grant."
+          }
+        }
       },
       "McpTokenView": {
         "type": "object",
@@ -9840,6 +11143,67 @@
           "token": {
             "$ref": "#/components/schemas/McpTokenView",
             "description": "Metadata about the newly minted token."
+          }
+        }
+      },
+      "NameView": {
+        "type": "object",
+        "description": "A name a server has registered, and how far Canopy has got with it.",
+        "required": [
+          "id",
+          "name",
+          "addresses",
+          "published_addresses",
+          "published"
+        ],
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The addresses the server asked to be reachable at."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier of the registration."
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the last publish attempt failed, if it did."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name, normalised."
+          },
+          "published": {
+            "type": "boolean",
+            "description": "Whether the zone has caught up with what the server asked for."
+          },
+          "published_addresses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The addresses Canopy has actually published. Differs from `addresses`\nwhile a change is waiting to be reconciled."
+          },
+          "published_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When Canopy last published this name's records."
+          },
+          "zone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Apex of the managed zone covering this name, or null where no configured\nzone does — in which case Canopy can publish nothing for it."
           }
         }
       },
@@ -10002,13 +11366,16 @@
               "description": "A server in the fleet inventory: its identity, classification, network\naddress, monitoring configuration, and (when requested by the endpoint)\ncurrent reachability/health.",
               "required": [
                 "id",
+                "product",
                 "kind",
                 "display_host",
                 "is_monitored",
                 "alert_when_down_for",
                 "notes",
                 "tags",
-                "archived"
+                "archived",
+                "may_manage_dns",
+                "may_manage_tls"
               ],
               "properties": {
                 "alert_when_down_for": {
@@ -10094,7 +11461,15 @@
                 },
                 "kind": {
                   "$ref": "#/components/schemas/ServerKind",
-                  "description": "The kind of deployment this server represents."
+                  "description": "The server's role within its product's topology."
+                },
+                "may_manage_dns": {
+                  "type": "boolean",
+                  "description": "Whether the server may manage its own DNS records for names under its\ngroup's domains."
+                },
+                "may_manage_tls": {
+                  "type": "boolean",
+                  "description": "Whether the server may obtain TLS certificates for names under its\ngroup's domains."
                 },
                 "name": {
                   "type": [
@@ -10106,6 +11481,10 @@
                 "notes": {
                   "type": "string",
                   "description": "Free-text operator notes about the server."
+                },
+                "product": {
+                  "$ref": "#/components/schemas/Product",
+                  "description": "The application this server runs. Decides which of canopy's\nper-server features apply to it."
                 },
                 "public_name": {
                   "type": [
@@ -10292,6 +11671,25 @@
           }
         }
       },
+      "PauseArgs": {
+        "type": "object",
+        "description": "Why a server is being paused.",
+        "required": [
+          "server_id",
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "Why, recorded so whoever finds the pause later knows what it was for."
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The server to pause."
+          }
+        }
+      },
       "PendingRequestRow": {
         "type": "object",
         "description": "A pending one-off backup or restore request.",
@@ -10436,6 +11834,46 @@
           }
         }
       },
+      "Product": {
+        "type": "string",
+        "description": "Which application a server runs.\n\nThe set is closed and defined here rather than configured, because each\nproduct's handling — what canopy tracks for it, what it presents — is\nbuilt in. See [`Product::caps`].",
+        "enum": [
+          "tamanu",
+          "senaite",
+          "canopy"
+        ]
+      },
+      "ProductInfo": {
+        "type": "object",
+        "description": "One product canopy monitors, with what canopy does for its servers and the\nroles it defines.",
+        "required": [
+          "product",
+          "caps",
+          "kinds",
+          "default_kind"
+        ],
+        "properties": {
+          "caps": {
+            "$ref": "#/components/schemas/Caps",
+            "description": "What canopy does for this product's servers."
+          },
+          "default_kind": {
+            "$ref": "#/components/schemas/ServerKind",
+            "description": "The role a server of this product takes when none is chosen."
+          },
+          "kinds": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServerKind"
+            },
+            "description": "The roles this product defines, in the order they rank when choosing a\ngroup's canonical member."
+          },
+          "product": {
+            "$ref": "#/components/schemas/Product",
+            "description": "The product itself."
+          }
+        }
+      },
       "ProvisionArgs": {
         "type": "object",
         "description": "Request to mint a new device credential.",
@@ -10567,6 +12005,17 @@
               }
             ]
           },
+          "progress": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LiveProgress",
+                "description": "Live figures for a run still in flight, from the progress it has reported.\n`None` when the run has reported none — which is unknown, not zero."
+              }
+            ]
+          },
           "purpose": {
             "type": "string",
             "description": "Whether the run was a backup or a restore."
@@ -10578,6 +12027,14 @@
             ],
             "format": "date-time",
             "description": "When the device reported the run. `None` for an inferred (unreported) row."
+          },
+          "run_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The run identifier, when known — present on a reported run, and on an\ninferred row whose credential issuance carried one. Needed to fetch the\nrun's progress series; `None` for an issuance from a client that predates\nrun correlation, which therefore has no series to fetch."
           },
           "s3_received_payload_bytes": {
             "type": [
@@ -10633,6 +12090,14 @@
             ],
             "format": "int64",
             "description": "Logical size of the run's snapshot, if known (reported runs only). For\na backup this comes from repo inspection. For a restore it is resolved\nfrom the backup run that produced the snapshot (matched by snapshot id),\nfalling back to inspection's backfill onto the restore run itself."
+          },
+          "snapshot_taken_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the run froze the data it captured, if it reported that. Distinct from\n`reported_at`: for a long backup the two are hours apart, and this is the\none that says how old the data actually is."
           },
           "started_at": {
             "type": [
@@ -11200,7 +12665,7 @@
           },
           "name": {
             "type": "string",
-            "description": "Display name for the declaration."
+            "description": "Display name for the declaration, unique among the consumer's\ndeclarations."
           },
           "overdue_after": {
             "type": [
@@ -11279,7 +12744,7 @@
           },
           "name": {
             "type": "string",
-            "description": "New display name for the declaration."
+            "description": "New display name for the declaration, unique among the consumer's\ndeclarations."
           },
           "overdue_after": {
             "type": [
@@ -11390,6 +12855,16 @@
           }
         }
       },
+      "RevocationReason": {
+        "type": "string",
+        "description": "Why a certificate was revoked. The names are the RFC 5280 reasons an\nauthority accepts; Canopy offers the few an operator would actually reach\nfor rather than the whole set.",
+        "enum": [
+          "unspecified",
+          "key_compromise",
+          "superseded",
+          "cessation_of_operation"
+        ]
+      },
       "RevokeArgs": {
         "type": "object",
         "description": "Request body for revoking an MCP access token.",
@@ -11411,6 +12886,106 @@
           "success",
           "failure"
         ]
+      },
+      "RunProgressArgs": {
+        "type": "object",
+        "description": "Identifies the run whose progress series to fetch.",
+        "required": [
+          "run_id"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The run identifier, as carried on the activity row (`run_id`)."
+          }
+        }
+      },
+      "RunProgressPoint": {
+        "type": "object",
+        "description": "One point of a run's progress series.\n\nA trimmed projection of what the device reported: the counters a rate or\nvolume chart plots, and nothing else. The full sample — including whatever the\nengine reported that Canopy does not model — is on the activity row's live\nfigures for a run still in flight.",
+        "required": [
+          "observed_at"
+        ],
+        "properties": {
+          "bytes_cached": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Cumulative bytes found already present at this point."
+          },
+          "bytes_estimated": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "The run's expected total as of this point. May grow over the series."
+          },
+          "bytes_hashed": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Cumulative bytes processed at this point."
+          },
+          "bytes_read": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Cumulative source bytes read at this point."
+          },
+          "bytes_uploaded": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Cumulative bytes uploaded at this point."
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When Canopy received this sample."
+          },
+          "s3_received_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Cumulative payload bytes received from object storage at this point."
+          },
+          "s3_received_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Cumulative raw bytes received from object storage at this point."
+          },
+          "s3_sent_payload_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Cumulative payload bytes sent to object storage at this point."
+          },
+          "s3_sent_raw_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Cumulative raw bytes sent to object storage at this point."
+          }
+        }
       },
       "RunStatus": {
         "type": "string",
@@ -11671,6 +13246,17 @@
             "format": "date-time",
             "description": "`Some(issued_at)` when a backup of this type appears to be in flight:\nbackup credentials were issued and are still valid, and no run has\nbeen reported since they were issued. `None` otherwise. Lets the UI\nshow a \"backing up…\" state."
           },
+          "progress": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LiveProgress",
+                "description": "Live figures for the in-flight run of this type, when it is reporting\nprogress. `None` when nothing is in flight, or when the run reports no\nprogress — which is unknown, not zero."
+              }
+            ]
+          },
           "server_id": {
             "type": "string",
             "format": "uuid",
@@ -11749,9 +13335,23 @@
               },
               {
                 "$ref": "#/components/schemas/ServerKind",
-                "description": "New deployment kind for the server. Omit to leave unchanged."
+                "description": "New role for the server within its product's topology. Omit to leave\nunchanged. Rejected when the product does not define it."
               }
             ]
+          },
+          "may_manage_dns": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether this server may manage its own DNS records for names under its\ngroup's domains. Omit to leave unchanged."
+          },
+          "may_manage_tls": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether this server may obtain TLS certificates for names under its\ngroup's domains. Omit to leave unchanged."
           },
           "name": {
             "type": [
@@ -11766,6 +13366,17 @@
               "null"
             ],
             "description": "New free-text notes for the server. Omit to leave unchanged."
+          },
+          "product": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Product",
+                "description": "New application for the server. Omit to leave unchanged. Changing it\nto a product that does not define the server's kind moves the kind to\nthe new product's default, unless this request sets one too."
+              }
+            ]
           },
           "public_name": {
             "type": [
@@ -11816,7 +13427,7 @@
             "items": {
               "$ref": "#/components/schemas/BillingTag"
             },
-            "description": "The server's effective `billing.*` labels — i.e. its group's\n(product/deployment/stage). Empty when the server is ungrouped."
+            "description": "The server's own effective `billing.*` labels\n(product/deployment/stage) — the ones canopy hands the server's device,\ncarrying its own product and rank rather than its group's. Empty when\nthe server is ungrouped, there being no deployment to attribute to."
           },
           "checks": {
             "$ref": "#/components/schemas/ConsolidatedChecks",
@@ -12149,13 +13760,16 @@
         "description": "A server in the fleet inventory: its identity, classification, network\naddress, monitoring configuration, and (when requested by the endpoint)\ncurrent reachability/health.",
         "required": [
           "id",
+          "product",
           "kind",
           "display_host",
           "is_monitored",
           "alert_when_down_for",
           "notes",
           "tags",
-          "archived"
+          "archived",
+          "may_manage_dns",
+          "may_manage_tls"
         ],
         "properties": {
           "alert_when_down_for": {
@@ -12241,7 +13855,15 @@
           },
           "kind": {
             "$ref": "#/components/schemas/ServerKind",
-            "description": "The kind of deployment this server represents."
+            "description": "The server's role within its product's topology."
+          },
+          "may_manage_dns": {
+            "type": "boolean",
+            "description": "Whether the server may manage its own DNS records for names under its\ngroup's domains."
+          },
+          "may_manage_tls": {
+            "type": "boolean",
+            "description": "Whether the server may obtain TLS certificates for names under its\ngroup's domains."
           },
           "name": {
             "type": [
@@ -12253,6 +13875,10 @@
           "notes": {
             "type": "string",
             "description": "Free-text operator notes about the server."
+          },
+          "product": {
+            "$ref": "#/components/schemas/Product",
+            "description": "The application this server runs. Decides which of canopy's\nper-server features apply to it."
           },
           "public_name": {
             "type": [
@@ -12299,11 +13925,11 @@
       },
       "ServerKind": {
         "type": "string",
-        "description": "What kind of server this is within a deployment.",
+        "description": "A server's role relative to the other servers of its product.\n\nWhich kinds are available depends on the server's product; see\n[`Product::kinds`](super::product::Product::kinds).",
         "enum": [
           "central",
           "facility",
-          "canopy"
+          "standalone"
         ]
       },
       "ServerLastStatusData": {
@@ -12312,6 +13938,7 @@
         "required": [
           "id",
           "created_at",
+          "product",
           "source",
           "extra",
           "operators"
@@ -12374,6 +14001,10 @@
               "null"
             ],
             "description": "PostgreSQL version the server reported, if any."
+          },
+          "product": {
+            "$ref": "#/components/schemas/Product",
+            "description": "The application the server runs. Travels with the version so a\nconsumer can tell a product with no version from one that has yet to\nreport one."
           },
           "source": {
             "type": "string",
@@ -12440,6 +14071,81 @@
             "format": "int64",
             "description": "Number of items to skip from the start of the result set.",
             "minimum": 0
+          }
+        }
+      },
+      "ServerNamesView": {
+        "type": "object",
+        "description": "What a server's page shows about its names and certificates.",
+        "required": [
+          "may_manage_dns",
+          "may_manage_tls",
+          "paused",
+          "domains",
+          "names",
+          "certificates"
+        ],
+        "properties": {
+          "certificate_profile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The profile this server's certificates are requested under. Null means\nthe authority's own default, which is its longest-lived."
+          },
+          "certificates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CertificateView"
+            },
+            "description": "Every certificate Canopy holds or has an order in flight for, newest\nfirst. A name may appear more than once — a key rotation leaves the\nprevious certificate behind until it expires."
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The domains this server's group controls, so the UI can say which names\nare available to it at all."
+          },
+          "may_manage_dns": {
+            "type": "boolean",
+            "description": "Whether an operator has allowed this server to manage its own DNS."
+          },
+          "may_manage_tls": {
+            "type": "boolean",
+            "description": "Whether an operator has allowed this server to obtain its own\ncertificates."
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameView"
+            },
+            "description": "The public names this server has registered, by name."
+          },
+          "pause_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it was set."
+          },
+          "paused": {
+            "type": "boolean",
+            "description": "Whether Canopy has been told to stop doing anything new for this server."
+          },
+          "paused_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When the pause was set."
+          },
+          "paused_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who set it."
           }
         }
       },
@@ -12545,6 +14251,27 @@
           "type": {
             "type": "string",
             "description": "Backup type to enable or disable."
+          }
+        }
+      },
+      "SetProfileArgs": {
+        "type": "object",
+        "description": "The profile a server's certificates are requested under.",
+        "required": [
+          "server_id"
+        ],
+        "properties": {
+          "profile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The profile, as the authority names it, or null for the authority's own\ndefault — its longest-lived, which is what a server takes until an\noperator says otherwise."
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The server to set."
           }
         }
       },
@@ -12982,6 +14709,7 @@
           "id",
           "created_at",
           "server_id",
+          "product",
           "extra",
           "operators",
           "checks"
@@ -13055,6 +14783,10 @@
               "null"
             ],
             "description": "Reported database engine version."
+          },
+          "product": {
+            "$ref": "#/components/schemas/Product",
+            "description": "The application the server runs. Travels with the version so a\nconsumer can tell a product with no version from one that has yet to\nreport one."
           },
           "server_id": {
             "type": "string",
@@ -13521,6 +15253,15 @@
         }
       },
       "Value": {},
+      "Verdict": {
+        "type": "string",
+        "description": "Where a (server, version) pair stands.",
+        "enum": [
+          "nottested",
+          "passed",
+          "failed"
+        ]
+      },
       "VersionData": {
         "type": "object",
         "description": "A single released (or draft) software version.",
@@ -13692,6 +15433,15 @@
             "description": "Exact version string to look up (e.g. `\"1.2.3\"`)."
           }
         }
+      },
+      "VersionTracking": {
+        "type": "string",
+        "description": "How canopy treats a product's application version.",
+        "enum": [
+          "tracked",
+          "reported",
+          "absent"
+        ]
       }
     },
     "securitySchemes": {
@@ -13723,12 +15473,20 @@
       "description": "Bestool SQL snippet library."
     },
     {
+      "name": "certificates",
+      "description": "TLS certificates and public names: what each server holds, the pause and profile that govern them, and revocation."
+    },
+    {
       "name": "commons",
       "description": "Shared configuration and identity helpers."
     },
     {
       "name": "devices",
       "description": "Device registry, trust, and key management."
+    },
+    {
+      "name": "domains",
+      "description": "Managed DNS zones and the domains each group controls."
     },
     {
       "name": "healthchecks",
@@ -13745,6 +15503,10 @@
     {
       "name": "mcp_tokens",
       "description": "Bearer tokens for the public MCP mount."
+    },
+    {
+      "name": "migration_tests",
+      "description": "Where each server stands against the version it would take next."
     },
     {
       "name": "restore_replicas",

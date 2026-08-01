@@ -1,0 +1,435 @@
+//! Device-facing name and certificate endpoints (CRT). The point of these is the
+//! authorisation chain: every refusal has to be distinguishable by problem type,
+//! so an agent can tell being unentitled from being paused from lacking the
+//! grant without reading English.
+
+use commons_tests::diesel_async::{AsyncPgConnection, SimpleAsyncConnection};
+use diesel::{sql_query, sql_types};
+use diesel_async::RunQueryDsl;
+use rcgen::{CertificateParams, DistinguishedName, DnType, KeyPair};
+use uuid::Uuid;
+
+#[derive(diesel::QueryableByName)]
+struct Count {
+	#[diesel(sql_type = sql_types::BigInt)]
+	count: i64,
+}
+
+async fn count_certificates(conn: &mut AsyncPgConnection) -> i64 {
+	sql_query("SELECT count(*) AS count FROM server_certificates")
+		.get_result::<Count>(conn)
+		.await
+		.expect("count")
+		.count
+}
+
+/// Each nextest test runs in its own process, so the zone configuration set here
+/// is isolated. It has to be set before the server is built.
+fn configure_zones(spec: &str) {
+	unsafe { std::env::set_var("CANOPY_DNS_ZONES", spec) };
+}
+
+/// A group holding `domain`, and a server in it with both grants, bound to the
+/// authenticated device.
+async fn entitled(
+	conn: &mut AsyncPgConnection,
+	device_id: Uuid,
+	domain: Option<&str>,
+	dns: bool,
+	tls: bool,
+) -> Uuid {
+	let group = Uuid::new_v4();
+	conn.batch_execute(&format!(
+		"INSERT INTO server_groups (id, name) VALUES ('{group}', 'crt-{group}')"
+	))
+	.await
+	.expect("insert group");
+
+	if let Some(domain) = domain {
+		conn.batch_execute(&format!(
+			"INSERT INTO server_group_domains (group_id, domain) VALUES ('{group}', '{domain}')"
+		))
+		.await
+		.expect("claim domain");
+	}
+
+	let server = Uuid::new_v4();
+	conn.batch_execute(&format!(
+		"INSERT INTO servers (id, name, host, kind, group_id, device_id, may_manage_dns, may_manage_tls) \
+		 VALUES ('{server}', 'crt', 'https://{server}.example.invalid', 'central', '{group}', \
+		 '{device_id}', {dns}, {tls})"
+	))
+	.await
+	.expect("insert server");
+	server
+}
+
+/// A base64 CSR for `names`, the first also the subject common name.
+fn csr_for(names: &[&str]) -> String {
+	use base64::Engine;
+	let key = KeyPair::generate().expect("keygen");
+	let mut params =
+		CertificateParams::new(names.iter().map(|n| n.to_string()).collect::<Vec<_>>())
+			.expect("params");
+	let mut dn = DistinguishedName::new();
+	dn.push(DnType::CommonName, names[0]);
+	params.distinguished_name = dn;
+	let csr = params.serialize_request(&key).expect("serialize");
+	base64::engine::general_purpose::STANDARD.encode(csr.der())
+}
+
+/// The problem type of a response body, which is what an agent matches on.
+/// Canopy renders types as `/errors/<slug>`; the slug is the stable part.
+fn problem_type(body: &serde_json::Value) -> String {
+	body["type"]
+		.as_str()
+		.unwrap_or_default()
+		.trim_start_matches("/errors/")
+		.to_string()
+}
+
+// ── Entitlements ────────────────────────────────────────────────────────────
+
+#[tokio::test(flavor = "multi_thread")]
+async fn entitlements_report_what_the_server_may_act_on() {
+	configure_zones("tamanu.app=Z1");
+
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			entitled(&mut conn, device_id, Some("fiji.tamanu.app"), true, true).await;
+
+			let resp = public
+				.get("/names/entitlements")
+				.add_header("mtls-certificate", &cert)
+				.await;
+			resp.assert_status_ok();
+			let body: serde_json::Value = resp.json();
+			assert_eq!(body["may_manage_dns"], true);
+			assert_eq!(body["may_manage_tls"], true);
+			assert_eq!(body["paused"], false);
+			assert_eq!(body["domains"][0], "fiji.tamanu.app");
+			assert!(body["certificates"].as_array().unwrap().is_empty());
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn entitlements_are_empty_rather_than_an_error_when_there_is_nothing() {
+	configure_zones("tamanu.app=Z1");
+
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			// No domain, no grants: asking what one may do is not privileged.
+			entitled(&mut conn, device_id, None, false, false).await;
+
+			let resp = public
+				.get("/names/entitlements")
+				.add_header("mtls-certificate", &cert)
+				.await;
+			resp.assert_status_ok();
+			let body: serde_json::Value = resp.json();
+			assert_eq!(body["may_manage_dns"], false);
+			assert!(body["domains"].as_array().unwrap().is_empty());
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_domain_whose_zone_has_gone_is_not_offered() {
+	// The claim stands, but Canopy cannot act in that zone, so offering the
+	// domain would have an agent request a name that can never be fulfilled.
+	configure_zones("senaite.app=Z9");
+
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			entitled(&mut conn, device_id, Some("fiji.tamanu.app"), true, true).await;
+
+			let resp = public
+				.get("/names/entitlements")
+				.add_header("mtls-certificate", &cert)
+				.await;
+			resp.assert_status_ok();
+			let body: serde_json::Value = resp.json();
+			assert!(
+				body["domains"].as_array().unwrap().is_empty(),
+				"a domain Canopy cannot act in is not offered: {body}"
+			);
+		},
+	)
+	.await;
+}
+
+// ── Addresses ───────────────────────────────────────────────────────────────
+
+#[tokio::test(flavor = "multi_thread")]
+async fn registering_addresses_records_the_intent() {
+	configure_zones("tamanu.app=Z1");
+
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			entitled(&mut conn, device_id, Some("fiji.tamanu.app"), true, true).await;
+
+			let resp = public
+				.post("/names/register")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({
+					"name": "Central.Fiji.Tamanu.App.",
+					"addresses": ["192.0.2.1", "2001:db8::1"],
+				}))
+				.await;
+			resp.assert_status_ok();
+			let body: serde_json::Value = resp.json();
+			assert_eq!(body["name"], "central.fiji.tamanu.app");
+			assert_eq!(
+				body["published"], false,
+				"publishing happens in the background"
+			);
+			assert_eq!(body["addresses"].as_array().unwrap().len(), 2);
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn each_refusal_is_distinguishable_by_problem_type() {
+	configure_zones("tamanu.app=Z1");
+
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			let server =
+				entitled(&mut conn, device_id, Some("fiji.tamanu.app"), false, false).await;
+
+			// No grant.
+			let resp = public
+				.post("/names/register")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({"name": "a.fiji.tamanu.app", "addresses": []}))
+				.await;
+			assert_eq!(problem_type(&resp.json()), "auth-insufficient-permissions");
+
+			conn.batch_execute(&format!(
+				"UPDATE servers SET may_manage_dns = true, may_manage_tls = true WHERE id = '{server}'"
+			))
+			.await
+			.unwrap();
+
+			// A name outside the group's domains — reported the same whether it is
+			// unclaimed or someone else's, so this is not a directory.
+			let resp = public
+				.post("/names/register")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({"name": "a.samoa.tamanu.app", "addresses": []}))
+				.await;
+			assert_eq!(problem_type(&resp.json()), "name-not-entitled");
+
+			// Paused.
+			conn.batch_execute(&format!(
+				"UPDATE servers SET name_management_paused_at = now(), \
+				 name_management_pause_reason = 'looking into it' WHERE id = '{server}'"
+			))
+			.await
+			.unwrap();
+			let resp = public
+				.post("/names/register")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({"name": "a.fiji.tamanu.app", "addresses": []}))
+				.await;
+			let body: serde_json::Value = resp.json();
+			assert_eq!(problem_type(&body), "name-management-paused");
+			assert!(
+				body["detail"]
+					.as_str()
+					.unwrap_or_default()
+					.contains("looking into it"),
+				"the reason belongs in the refusal: {body}"
+			);
+		},
+	)
+	.await;
+}
+
+// ── Certificates ────────────────────────────────────────────────────────────
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_first_request_is_accepted_and_a_repeat_is_the_same_order() {
+	configure_zones("tamanu.app=Z1");
+
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			entitled(&mut conn, device_id, Some("fiji.tamanu.app"), true, true).await;
+			let csr = csr_for(&["central.fiji.tamanu.app"]);
+
+			let resp = public
+				.post("/certificates/request")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({"name": "central.fiji.tamanu.app", "csr": csr}))
+				.await;
+			// 202: recorded, nothing to collect yet — proving control through DNS
+			// takes far longer than a handshake.
+			resp.assert_status(axum::http::StatusCode::ACCEPTED);
+			let body: serde_json::Value = resp.json();
+			assert_eq!(body["state"], "pending");
+			assert!(body["chain"].is_null());
+			assert_eq!(body["usable"], false);
+
+			// Repeating is safe and does not open a second order.
+			let resp = public
+				.post("/certificates/request")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({"name": "central.fiji.tamanu.app", "csr": csr}))
+				.await;
+			resp.assert_status(axum::http::StatusCode::ACCEPTED);
+
+			assert_eq!(
+				count_certificates(&mut conn).await,
+				1,
+				"a repeat request is the same order"
+			);
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_csr_carrying_another_name_is_refused_rather_than_trimmed() {
+	configure_zones("tamanu.app=Z1");
+
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			entitled(&mut conn, device_id, Some("fiji.tamanu.app"), true, true).await;
+
+			// The group controls fiji, so the *name* is entitled — but the CSR
+			// smuggles a second name past that check, and must be refused.
+			let csr = csr_for(&["central.fiji.tamanu.app", "central.samoa.tamanu.app"]);
+			let resp = public
+				.post("/certificates/request")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({"name": "central.fiji.tamanu.app", "csr": csr}))
+				.await;
+			resp.assert_status_bad_request();
+
+			assert_eq!(
+				count_certificates(&mut conn).await,
+				0,
+				"nothing recorded for a refused request"
+			);
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_certificate_becomes_collectable_once_issued() {
+	configure_zones("tamanu.app=Z1");
+
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			entitled(&mut conn, device_id, Some("fiji.tamanu.app"), true, true).await;
+			let csr = csr_for(&["central.fiji.tamanu.app"]);
+			let args = serde_json::json!({"name": "central.fiji.tamanu.app", "csr": csr});
+
+			public
+				.post("/certificates/request")
+				.add_header("mtls-certificate", &cert)
+				.json(&args)
+				.await
+				.assert_status(axum::http::StatusCode::ACCEPTED);
+
+			// The worker would do this.
+			conn.batch_execute(
+				"UPDATE server_certificates SET state = 'issued', chain = '-----BEGIN CERT-----', \
+				 issued_at = now(), not_after = now() + interval '80 days', profile = 'classic'",
+			)
+			.await
+			.unwrap();
+
+			let resp = public
+				.post("/certificates/request")
+				.add_header("mtls-certificate", &cert)
+				.json(&args)
+				.await;
+			resp.assert_status_ok();
+			let body: serde_json::Value = resp.json();
+			assert_eq!(body["state"], "issued");
+			assert_eq!(body["chain"], "-----BEGIN CERT-----");
+			assert_eq!(body["usable"], true);
+			assert_eq!(body["profile"], "classic");
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_revoked_compromised_key_is_refused_actionably() {
+	configure_zones("tamanu.app=Z1");
+
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			entitled(&mut conn, device_id, Some("fiji.tamanu.app"), true, true).await;
+			let csr = csr_for(&["central.fiji.tamanu.app"]);
+			let args = serde_json::json!({"name": "central.fiji.tamanu.app", "csr": csr});
+
+			public
+				.post("/certificates/request")
+				.add_header("mtls-certificate", &cert)
+				.json(&args)
+				.await
+				.assert_status(axum::http::StatusCode::ACCEPTED);
+
+			// Bar the key the way a key-compromise revocation does.
+			conn.batch_execute(
+				"INSERT INTO compromised_keys (key_fingerprint) \
+				 SELECT key_fingerprint FROM server_certificates",
+			)
+			.await
+			.unwrap();
+
+			let resp = public
+				.post("/certificates/request")
+				.add_header("mtls-certificate", &cert)
+				.json(&args)
+				.await;
+			// The whole point: matchable on the type, so bestool rotates the key
+			// itself rather than waiting for an operator.
+			assert_eq!(problem_type(&resp.json()), "certificate-key-compromised");
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_status_push_carries_the_same_entitlements() {
+	configure_zones("tamanu.app=Z1");
+
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			let server = entitled(&mut conn, device_id, Some("fiji.tamanu.app"), true, true).await;
+
+			let resp = public
+				.post(&format!("/status/{server}"))
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({"source": "tamanu", "healthy": true}))
+				.await;
+			resp.assert_status_ok();
+			let body: serde_json::Value = resp.json();
+			assert_eq!(
+				body["names"]["domains"][0], "fiji.tamanu.app",
+				"an agent already reporting status learns of its domains: {body}"
+			);
+			assert_eq!(body["names"]["may_manage_tls"], true);
+		},
+	)
+	.await;
+}

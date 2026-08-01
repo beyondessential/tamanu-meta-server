@@ -1,9 +1,15 @@
-import { seedCheckPolicy } from "./seed";
+import { resetSeededTables, seedCheckPolicy } from "./seed";
 import { expect, test } from "./test-fixtures";
 
 const SOURCES_PATH = "/settings/healthchecks/sources";
 
 test.describe("Source ingest gating", () => {
+	// A source's ingest mode outlives the test that sets it — the stack
+	// (and its database) is per worker, not per test.
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
 	test("setting ingest to deny persists and disables reachability", async ({
 		page,
 		sql,

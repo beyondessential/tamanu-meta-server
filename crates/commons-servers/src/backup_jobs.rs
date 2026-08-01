@@ -9,7 +9,7 @@ use commons_errors::Result;
 use commons_types::{
 	Uuid,
 	backup::{BackupConfigStatus, BackupPurpose, BackupType},
-	server::{rank::ServerRank, tags::TagMap},
+	server::{product::Product, rank::ServerRank, tags::TagMap},
 };
 use database::{
 	BackupRequest, BackupRun, BackupTypeDefault, ServerBackupCapability, ServerGroupBackupConfig,
@@ -215,9 +215,12 @@ pub async fn backups_due_now_for_server(
 		let Some(interval) = effective_interval_for_type(db, group_id, &cap.r#type).await? else {
 			continue;
 		};
+		// Due-ness is measured from the data's own moment, matching staleness
+		// detection — otherwise a server could be flagged stale without ever being
+		// asked to back up.
 		let last = BackupRun::latest_success_for_server(db, server_id, &cap.r#type)
 			.await?
-			.map(|r| r.reported_at);
+			.map(|r| r.anchor());
 		if is_due(interval, last, now) {
 			due.insert(cap.r#type);
 		}
@@ -231,7 +234,12 @@ pub async fn backups_due_now_for_server(
 /// The three `billing.*` pod labels spawned Jobs carry for AWS cost allocation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BillingLabels {
-	pub product: String,
+	/// `None` ⇒ omit the `billing.product` label. A group whose members span
+	/// products has no single product to attribute its shared cost to, and
+	/// naming one of several would charge it to the wrong place — the same
+	/// reasoning as `stage`.
+	// spec: APP#billing-attribution
+	pub product: Option<String>,
 	pub deployment: String,
 	/// `None` ⇒ omit the `billing.stage` label (group with no ranked members);
 	/// a wrong `prod` would mis-attribute cost.
@@ -253,18 +261,27 @@ pub fn stage_for_rank(rank: ServerRank) -> &'static str {
 }
 
 impl BillingLabels {
-	/// Derive labels from a group's tags, name, and highest member rank.
-	/// Explicit `billing.*` tags are honored **verbatim**; computed fallbacks are
-	/// lower-kebab-cased — `product = "tamanu"`, `deployment = lower_kebab(group
-	/// name)`, `stage = mapped highest rank` (omitted when the group has no ranked
+	/// Derive labels from a group's tags, name, resolved product, and highest
+	/// member rank. Explicit `billing.*` tags are honored **verbatim**; computed
+	/// fallbacks are lower-kebab-cased — `deployment = lower_kebab(group name)`,
+	/// `stage = mapped highest rank` (omitted when the group has no ranked
 	/// members).
-	pub fn from_group(tags: &TagMap, group_name: &str, highest_rank: Option<ServerRank>) -> Self {
+	///
+	/// `product` is the one its live members agree on, or `None` when they span
+	/// products; see [`Self::product`].
+	// spec: APP#billing-attribution
+	pub fn from_group(
+		tags: &TagMap,
+		group_name: &str,
+		product: Option<Product>,
+		highest_rank: Option<ServerRank>,
+	) -> Self {
 		BillingLabels {
 			product: tags
 				.0
 				.get("billing.product")
 				.cloned()
-				.unwrap_or_else(|| "tamanu".to_string()),
+				.or_else(|| product.map(String::from)),
 			deployment: tags
 				.0
 				.get("billing.deployment")
@@ -278,21 +295,41 @@ impl BillingLabels {
 		}
 	}
 
+	/// Labels for one server's own resources: its own product and its own rank,
+	/// against the deployment its group names.
+	///
+	/// Every label describing the server carries the server's value rather than
+	/// its group's — a `rank = clone` server must report `stage = clone` and
+	/// never the group's `prod`, and a SENAITE server in a Tamanu group must
+	/// report `product = senaite`.
+	// spec: APP#billing-attribution
+	pub fn for_server(
+		tags: &TagMap,
+		group_name: &str,
+		product: Product,
+		rank: Option<ServerRank>,
+	) -> Self {
+		Self::from_group(tags, group_name, Some(product), rank)
+	}
+
 	/// Override the `product` label — e.g. `"backups"` for a backup bucket, which
 	/// should attribute to the backups product regardless of the group's own
 	/// `billing.product`. (Reusable for other canopy-owned resources later.)
 	pub fn with_product(mut self, product: impl Into<String>) -> Self {
-		self.product = product.into();
+		self.product = Some(product.into());
 		self
 	}
 
-	/// Render as AWS `billing.*` resource tags. `billing.stage` is omitted when
-	/// the group has no ranked members (no stage to attribute to).
+	/// Render as AWS `billing.*` resource tags. A label with nothing to
+	/// attribute to is omitted rather than guessed: `billing.stage` when the
+	/// group has no ranked members, `billing.product` when its members span
+	/// products.
 	pub fn into_tags(self) -> Vec<(String, String)> {
-		let mut tags = vec![
-			("billing.product".to_string(), self.product),
-			("billing.deployment".to_string(), self.deployment),
-		];
+		let mut tags = Vec::with_capacity(3);
+		if let Some(product) = self.product {
+			tags.push(("billing.product".to_string(), product));
+		}
+		tags.push(("billing.deployment".to_string(), self.deployment));
 		if let Some(stage) = self.stage {
 			tags.push(("billing.stage".to_string(), stage));
 		}
@@ -394,7 +431,7 @@ pub fn backup_bucket_billing_tags(
 	group_name: &str,
 	highest_rank: Option<ServerRank>,
 ) -> Vec<(String, String)> {
-	BillingLabels::from_group(group_tags, group_name, highest_rank)
+	BillingLabels::from_group(group_tags, group_name, None, highest_rank)
 		.with_product("backups")
 		.into_tags()
 }
@@ -690,33 +727,89 @@ mod tests {
 	fn billing_labels_defaults_and_overrides() {
 		// All-unranked group: no stage label, defaults for the rest.
 		let empty = TagMap::default();
-		let b = BillingLabels::from_group(&empty, "my-group", None);
-		assert_eq!(b.product, "tamanu");
+		let b = BillingLabels::from_group(&empty, "my-group", Some(Product::Tamanu), None);
+		assert_eq!(b.product.as_deref(), Some("tamanu"));
 		assert_eq!(b.deployment, "my-group");
 		assert_eq!(b.stage, None);
 
 		// A computed deployment (group name) is lower-kebab-cased.
-		let b = BillingLabels::from_group(&empty, "Acme Prod", None);
+		let b = BillingLabels::from_group(&empty, "Acme Prod", Some(Product::Tamanu), None);
 		assert_eq!(b.deployment, "acme-prod");
 
 		// An explicit billing.deployment tag is honored verbatim (not kebab'd).
 		let mut dep = TagMap::default();
 		dep.0
 			.insert("billing.deployment".into(), "Acme Prod".into());
-		let b = BillingLabels::from_group(&dep, "ignored", None);
+		let b = BillingLabels::from_group(&dep, "ignored", Some(Product::Tamanu), None);
 		assert_eq!(b.deployment, "Acme Prod");
 
 		// Highest rank maps in when present.
-		let b = BillingLabels::from_group(&empty, "g", Some(ServerRank::Production));
+		let b = BillingLabels::from_group(
+			&empty,
+			"g",
+			Some(Product::Tamanu),
+			Some(ServerRank::Production),
+		);
 		assert_eq!(b.stage.as_deref(), Some("prod"));
 
 		// Explicit billing.* tags win.
 		let mut tags = TagMap::default();
 		tags.0.insert("billing.product".into(), "pgro".into());
 		tags.0.insert("billing.stage".into(), "staging".into());
-		let b = BillingLabels::from_group(&tags, "g", Some(ServerRank::Production));
-		assert_eq!(b.product, "pgro");
+		let b = BillingLabels::from_group(
+			&tags,
+			"g",
+			Some(Product::Tamanu),
+			Some(ServerRank::Production),
+		);
+		assert_eq!(b.product.as_deref(), Some("pgro"));
 		assert_eq!(b.stage.as_deref(), Some("staging"));
+	}
+
+	#[test]
+	fn mixed_product_group_attributes_no_product() {
+		// Members spanning products: nothing to attribute the group's shared
+		// cost to, so the label is omitted rather than guessed at.
+		let empty = TagMap::default();
+		let b = BillingLabels::from_group(&empty, "pacific", None, Some(ServerRank::Production));
+		assert_eq!(b.product, None);
+		let tags = b.into_tags();
+		assert!(!tags.iter().any(|(k, _)| k == "billing.product"));
+		// The labels that *are* unambiguous still land.
+		assert!(tags.contains(&("billing.deployment".to_string(), "pacific".to_string())));
+		assert!(tags.contains(&("billing.stage".to_string(), "prod".to_string())));
+	}
+
+	#[test]
+	fn explicit_group_product_tag_pins_a_mixed_group() {
+		// An operator can always attribute a mixed group by hand.
+		let mut tags = TagMap::default();
+		tags.0.insert("billing.product".into(), "tamanu".into());
+		let b = BillingLabels::from_group(&tags, "pacific", None, None);
+		assert_eq!(b.product.as_deref(), Some("tamanu"));
+	}
+
+	#[test]
+	fn server_labels_use_the_servers_own_product_and_rank() {
+		// A SENAITE server in a Tamanu group attributes to senaite, and to its
+		// own stage rather than the group's highest.
+		let empty = TagMap::default();
+		let b =
+			BillingLabels::for_server(&empty, "Pacific", Product::Senaite, Some(ServerRank::Clone));
+		assert_eq!(b.product.as_deref(), Some("senaite"));
+		assert_eq!(b.deployment, "pacific");
+		assert_eq!(b.stage.as_deref(), Some("clone"));
+	}
+
+	#[test]
+	fn backup_bucket_tags_attribute_to_the_backups_product() {
+		// Backup spend never charges to the deployment's application, and a
+		// group's own product label must not leak through.
+		let mut tags = TagMap::default();
+		tags.0.insert("billing.product".into(), "tamanu".into());
+		let out = backup_bucket_billing_tags(&tags, "pacific", Some(ServerRank::Production));
+		assert!(out.contains(&("billing.product".to_string(), "backups".to_string())));
+		assert!(!out.contains(&("billing.product".to_string(), "tamanu".to_string())));
 	}
 
 	#[test]

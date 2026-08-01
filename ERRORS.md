@@ -120,6 +120,44 @@ a way the operator can resolve (e.g. importing a ticket whose
 canonical URL is already claimed by a different server id). Body
 content explains the conflict.
 
+## Certificate key compromised
+
+Issued when a certificate is requested for a key that was revoked
+as compromised. Canopy will never certify that key again, for any
+name or server, so retrying with it cannot succeed.
+
+Distinct from a plain conflict so a client can act on it
+unattended: the remedy is always the same — generate a fresh key
+pair, submit a new signing request for it, and discard the old
+key. Body content names the key and the certificate whose
+revocation barred it.
+
+## Name management paused
+
+Issued when a paused server asks Canopy to act on its behalf —
+publish an address record, or obtain a certificate. Canopy makes no
+new changes for a paused server, though nothing already in place is
+withdrawn.
+
+Distinct from a withheld grant so a client can tell *not now* from
+*not you*: a pause is expected to lift, so the client should wait
+and try later rather than treat the refusal as permanent. Body
+content says when the pause was set and why.
+
+Revoking a certificate pauses its server automatically, so this is
+the refusal an agent meets while an operator is investigating.
+
+## Name not entitled
+
+Issued when a server asks Canopy to act on a name that is not
+within any domain its own group controls.
+
+Reported identically whether the name is unclaimed or controlled by
+a different group, so the endpoint cannot be used to discover other
+deployments' names. Distinct from a withheld grant so a client can
+tell "this name is not yours" from "you may not manage names at
+all".
+
 ## Auth: tailnet identity missing
 
 Issued on the private-server's `/public/...` mount when the

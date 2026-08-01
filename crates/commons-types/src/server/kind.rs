@@ -9,7 +9,11 @@ use diesel::{
 };
 use serde::{Deserialize, Serialize};
 
-/// What kind of server this is within a deployment.
+/// A server's role relative to the other servers of its product.
+///
+/// Which kinds are available depends on the server's product; see
+/// [`Product::kinds`](super::product::Product::kinds).
+// spec: APP#product-and-kind
 #[derive(
 	Debug,
 	Clone,
@@ -31,8 +35,8 @@ pub enum ServerKind {
 	Central,
 	/// A facility server: an on-site instance that syncs to a central server.
 	Facility,
-	/// A canopy instance itself, monitored like any other server.
-	Canopy,
+	/// A server that holds no role relative to its product's other servers.
+	Standalone,
 }
 
 impl Display for ServerKind {
@@ -40,7 +44,7 @@ impl Display for ServerKind {
 		match self {
 			ServerKind::Central => write!(f, "central"),
 			ServerKind::Facility => write!(f, "facility"),
-			ServerKind::Canopy => write!(f, "canopy"),
+			ServerKind::Standalone => write!(f, "standalone"),
 		}
 	}
 }
@@ -62,7 +66,10 @@ impl FromStr for ServerKind {
 		match value.to_ascii_lowercase().as_ref() {
 			"tamanu sync server" | "central" => Ok(Self::Central),
 			"tamanu lan server" | "facility" => Ok(Self::Facility),
-			"canopy" => Ok(Self::Canopy),
+			// `canopy` is what a canopy instance's kind was before product
+			// became its own axis. Stored rows still carry it until a later
+			// migration normalises them.
+			"standalone" | "canopy" => Ok(Self::Standalone),
 			s => Err(ServerKindFromStringError(s.into())),
 		}
 	}

@@ -935,13 +935,13 @@ impl BackupCredentialIssuance {
 	}
 
 	/// Latest *backup-purpose* credential issuance per `(device, type)` within a
-	/// group, as `(issued_at, expires_at)`. Keyed `(device_id, type)`; restore
-	/// issuances are excluded. Used to infer an in-flight backup: creds still
-	/// within their validity window with no newer run report.
+	/// group. Keyed `(device_id, type)`; restore issuances are excluded. Used to
+	/// infer an in-flight backup: creds still within their validity window with no
+	/// newer run report.
 	pub async fn latest_backup_by_device_type_for_group(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
-	) -> Result<HashMap<(Uuid, BackupType), (Timestamp, Timestamp)>> {
+	) -> Result<HashMap<(Uuid, BackupType), LatestIssuance>> {
 		use crate::schema::backup_credential_issuances::dsl;
 
 		let rows: Vec<Self> = dsl::backup_credential_issuances
@@ -955,9 +955,31 @@ impl BackupCredentialIssuance {
 
 		Ok(rows
 			.into_iter()
-			.map(|r| ((r.device_id, r.r#type.clone()), (r.issued_at, r.expires_at)))
+			.map(|r| {
+				(
+					(r.device_id, r.r#type.clone()),
+					LatestIssuance {
+						issued_at: r.issued_at,
+						expires_at: r.expires_at,
+						run_id: r.run_id,
+					},
+				)
+			})
 			.collect())
 	}
+}
+
+/// The latest backup credential issuance for a `(device, type)`, reduced to what
+/// the activity views need of it.
+///
+/// `run_id` is what ties the inferred in-flight state to the progress that run has
+/// been reporting; an issuance from a client predating run correlation has none,
+/// and so has no progress to match.
+#[derive(Debug, Clone, Copy)]
+pub struct LatestIssuance {
+	pub issued_at: Timestamp,
+	pub expires_at: Timestamp,
+	pub run_id: Option<Uuid>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1015,6 +1037,44 @@ pub struct BackupRun {
 	/// Distinct from `bytes_uploaded`; filled in after the fact, once, and
 	/// never overwritten.
 	pub snapshot_logical_bytes: Option<i64>,
+	/// When the run froze the data it captured — the point in time this backup
+	/// represents, as opposed to [`Self::reported_at`], when its upload finished.
+	/// For a large backup the two are hours apart. Often a filesystem-level
+	/// snapshot taken *below* the backup engine, so it leaves no trace in the
+	/// repository and can only come from the device. Written once per run,
+	/// whichever report carries it first. `None` for a client that doesn't
+	/// report it, in which case [`Self::anchor`] falls back to `reported_at`.
+	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
+	pub snapshot_taken_at: Option<Timestamp>,
+}
+
+impl BackupRun {
+	/// When this run's data is *as of*, for any question about the age of what
+	/// was backed up: the moment the run froze its data, falling back to the
+	/// report time when the client didn't report one.
+	///
+	/// This is the staleness measure (see BKJ). It is deliberately not used for
+	/// the reconcile signals, which assert that the *reporting path* works and so
+	/// belong on `reported_at`.
+	pub fn anchor(&self) -> Timestamp {
+		self.snapshot_taken_at.unwrap_or(self.reported_at)
+	}
+}
+
+/// SQL for [`BackupRun::anchor`], for ordering and filtering in the database.
+///
+/// Queries that pick the "latest" successful run must order by *this*, not by
+/// `reported_at`, whenever the caller then measures staleness from
+/// [`BackupRun::anchor`]. If selection and measure disagree, a server's freshness
+/// can travel backwards: given run A (reported 08:00, taken 04:00) and run B
+/// (reported 09:00, taken 03:00), ordering by `reported_at` picks B, whose data
+/// is the *older* of the two — so the arrival of a newer run would age the
+/// server and flap its staleness state.
+pub const ANCHOR_SQL: &str = "COALESCE(snapshot_taken_at, reported_at)";
+
+/// [`ANCHOR_SQL`] as a typed Diesel expression, for `ORDER BY`.
+fn anchor_expr() -> diesel::expression::SqlLiteral<diesel::sql_types::Timestamptz> {
+	diesel::dsl::sql::<diesel::sql_types::Timestamptz>(ANCHOR_SQL)
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -1037,6 +1097,8 @@ pub struct NewBackupRun {
 	pub s3_sent_payload_bytes: Option<i64>,
 	pub s3_received_raw_bytes: Option<i64>,
 	pub s3_received_payload_bytes: Option<i64>,
+	#[diesel(serialize_as = jiff_diesel::NullableTimestamp)]
+	pub snapshot_taken_at: Option<Timestamp>,
 }
 
 /// Multi-field filter for the fleet-wide backup-run history query. Each field
@@ -1060,7 +1122,7 @@ impl BackupRun {
 
 		let id = new.id;
 		match diesel::insert_into(dsl::backup_runs)
-			.values(&new)
+			.values(new)
 			.returning(Self::as_select())
 			.get_result(db)
 			.await
@@ -1076,6 +1138,9 @@ impl BackupRun {
 	/// Latest successful *backup* (never restore) for a `(server, type)` — the
 	/// staleness anchor. Filters `purpose='backup'` + `outcome='success'` so a
 	/// recent successful restore can't reset backup staleness.
+	///
+	/// "Latest" is by [`Self::anchor`] — the data's own moment — not by report
+	/// time; see [`ANCHOR_SQL`].
 	pub async fn latest_success_for_server(
 		db: &mut AsyncPgConnection,
 		server_id: Uuid,
@@ -1088,7 +1153,7 @@ impl BackupRun {
 			.filter(dsl::type_.eq(r#type.as_str()))
 			.filter(dsl::purpose.eq(BackupPurpose::Backup))
 			.filter(dsl::outcome.eq(RunOutcome::Success))
-			.order(dsl::reported_at.desc())
+			.order(anchor_expr().desc())
 			.first(db)
 			.await
 			.optional()
@@ -1098,6 +1163,9 @@ impl BackupRun {
 	/// Latest successful backup per `(server, type)` within a group — the bulk
 	/// staleness-scan input. Keyed `(server_id, type)`; rows with a NULL
 	/// `server_id` are skipped (they can't be attributed to a server).
+	///
+	/// "Latest" is by [`Self::anchor`], matching what the caller then measures
+	/// staleness from; see [`ANCHOR_SQL`] for why the two must agree.
 	pub async fn latest_success_by_server_type_for_group(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
@@ -1110,7 +1178,7 @@ impl BackupRun {
 			.filter(dsl::outcome.eq(RunOutcome::Success))
 			.filter(dsl::server_id.is_not_null())
 			.distinct_on((dsl::server_id, dsl::type_))
-			.order_by((dsl::server_id, dsl::type_, dsl::reported_at.desc()))
+			.order_by((dsl::server_id, dsl::type_, anchor_expr().desc()))
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
@@ -1360,6 +1428,311 @@ impl BackupRun {
 				(up > 0 && snap > 0).then_some(((sid, r.r#type.clone()), (up, snap)))
 			})
 			.collect())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// backup_run_progress — what bestool reports *while* a run is in flight
+// ---------------------------------------------------------------------------
+
+/// One progress sample reported by a device during a run.
+///
+/// Unlike [`BackupRun`], which exists only once a run has finished, a sample
+/// describes a run still under way — so it carries no foreign key to
+/// `backup_runs` and is self-describing on device/group/server/type/purpose,
+/// exactly as [`BackupCredentialIssuance`] is and for the same reason.
+///
+/// **Every counter is cumulative from the start of the run**, never an interval
+/// delta. That is what makes a dropped or repeated sample cost only resolution
+/// rather than corrupt a total, and it is why the last sample of a run is a
+/// usable stand-in for a figure the run's report omitted. All counters are
+/// optional: a device omits whatever it does not measure.
+#[derive(
+	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, utoipa::ToSchema,
+)]
+#[diesel(table_name = crate::schema::backup_run_progress)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct BackupRunProgress {
+	/// Row id. Not meaningful beyond ordering ties within an instant.
+	pub id: i64,
+	/// The run this sample belongs to — the uuid the device minted for it, the
+	/// same one it reports the run under. Not a foreign key: the run has no row
+	/// until it finishes.
+	pub run_id: Uuid,
+	/// The device that reported the sample.
+	pub device_id: Uuid,
+	/// The group whose repository the run is writing to or reading from.
+	pub group_id: Uuid,
+	/// The server the run is for, when the device resolved to one.
+	pub server_id: Option<Uuid>,
+	/// The backup type being run.
+	#[diesel(column_name = type_)]
+	#[serde(rename = "type")]
+	#[schema(value_type = String)]
+	pub r#type: BackupType,
+	/// Whether the run is a backup (upload) or a restore (download).
+	pub purpose: BackupPurpose,
+	/// When Canopy received this sample. Server-stamped, not device-supplied:
+	/// transfer rate is derived from it, and "is this run moving, as far as
+	/// Canopy can tell" is a receipt-time question.
+	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
+	pub observed_at: Timestamp,
+	/// When the run froze the data it captured, as reported by the device. See
+	/// [`BackupRun::snapshot_taken_at`] — known before any transfer starts, so a
+	/// device can report it on its very first sample.
+	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
+	pub snapshot_taken_at: Option<Timestamp>,
+	/// Source bytes the run has read so far.
+	pub bytes_read: Option<i64>,
+	/// Bytes the run has processed (hashed/compressed) so far.
+	pub bytes_hashed: Option<i64>,
+	/// Bytes the run has uploaded to the repository so far.
+	pub bytes_uploaded: Option<i64>,
+	/// Bytes the run found already present and so did not re-upload.
+	pub bytes_cached: Option<i64>,
+	/// Total bytes the run expects to handle, as it currently estimates. An
+	/// estimate, and one that may be revised upward mid-run.
+	pub bytes_estimated: Option<i64>,
+	/// Files the run has finished with so far.
+	pub files_done: Option<i64>,
+	/// Total files the run expects to handle, as it currently estimates.
+	pub files_estimated: Option<i64>,
+	/// Errors the run has hit so far.
+	pub errors: Option<i64>,
+	/// Errors the run has hit and deliberately ignored so far.
+	pub ignored_errors: Option<i64>,
+	/// What the run was working on when it took the sample.
+	pub current_path: Option<String>,
+	/// Bytes sent to object storage so far, counting full HTTP requests.
+	pub s3_sent_raw_bytes: Option<i64>,
+	/// Bytes sent to object storage so far, counting decoded payload only.
+	pub s3_sent_payload_bytes: Option<i64>,
+	/// Bytes received from object storage so far, counting full HTTP responses.
+	pub s3_received_raw_bytes: Option<i64>,
+	/// Bytes received from object storage so far, counting decoded payload only.
+	pub s3_received_payload_bytes: Option<i64>,
+	/// Engine-specific detail Canopy makes no commitment about. Stored and
+	/// surfaced verbatim; never interpreted, never queried against.
+	pub extra: JsonValue,
+}
+
+#[derive(Debug, Clone, Insertable)]
+#[diesel(table_name = crate::schema::backup_run_progress)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct NewBackupRunProgress {
+	pub run_id: Uuid,
+	pub device_id: Uuid,
+	pub group_id: Uuid,
+	pub server_id: Option<Uuid>,
+	#[diesel(column_name = type_)]
+	pub r#type: BackupType,
+	pub purpose: BackupPurpose,
+	#[diesel(serialize_as = jiff_diesel::NullableTimestamp)]
+	pub snapshot_taken_at: Option<Timestamp>,
+	pub bytes_read: Option<i64>,
+	pub bytes_hashed: Option<i64>,
+	pub bytes_uploaded: Option<i64>,
+	pub bytes_cached: Option<i64>,
+	pub bytes_estimated: Option<i64>,
+	pub files_done: Option<i64>,
+	pub files_estimated: Option<i64>,
+	pub errors: Option<i64>,
+	pub ignored_errors: Option<i64>,
+	pub current_path: Option<String>,
+	pub s3_sent_raw_bytes: Option<i64>,
+	pub s3_sent_payload_bytes: Option<i64>,
+	pub s3_received_raw_bytes: Option<i64>,
+	pub s3_received_payload_bytes: Option<i64>,
+	pub extra: JsonValue,
+}
+
+impl BackupRunProgress {
+	/// Store a sample. `observed_at` is left to the column default so the time is
+	/// Postgres's, not the device's and not the application's.
+	pub async fn record(db: &mut AsyncPgConnection, new: NewBackupRunProgress) -> Result<Self> {
+		use crate::schema::backup_run_progress::dsl;
+
+		diesel::insert_into(dsl::backup_run_progress)
+			.values(new)
+			.returning(Self::as_select())
+			.get_result(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// The whole series for one run, oldest-first — the shape a rate chart wants.
+	/// Served by the `(run_id, observed_at DESC)` index.
+	pub async fn series_for_run(db: &mut AsyncPgConnection, run_id: Uuid) -> Result<Vec<Self>> {
+		use crate::schema::backup_run_progress::dsl;
+
+		dsl::backup_run_progress
+			.filter(dsl::run_id.eq(run_id))
+			.order_by((dsl::observed_at.asc(), dsl::id.asc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// The most recent sample for one run, if it has reported any.
+	pub async fn latest_for_run(db: &mut AsyncPgConnection, run_id: Uuid) -> Result<Option<Self>> {
+		use crate::schema::backup_run_progress::dsl;
+
+		dsl::backup_run_progress
+			.filter(dsl::run_id.eq(run_id))
+			.order_by((dsl::observed_at.desc(), dsl::id.desc()))
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)
+	}
+
+	/// The most recent sample per run for a set of runs, in one query.
+	///
+	/// This is the batch loader the group activity view uses: it has many
+	/// in-flight rows to decorate, and issuing [`Self::latest_for_run`] per row
+	/// would be an N+1. Empty input short-circuits without touching the database.
+	pub async fn latest_by_run(
+		db: &mut AsyncPgConnection,
+		run_ids: &[Uuid],
+	) -> Result<HashMap<Uuid, Self>> {
+		use crate::schema::backup_run_progress::dsl;
+
+		if run_ids.is_empty() {
+			return Ok(HashMap::new());
+		}
+
+		let rows: Vec<Self> = dsl::backup_run_progress
+			.filter(dsl::run_id.eq_any(run_ids))
+			.distinct_on(dsl::run_id)
+			.order_by((dsl::run_id, dsl::observed_at.desc(), dsl::id.desc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(rows.into_iter().map(|r| (r.run_id, r)).collect())
+	}
+
+	/// The earliest freeze moment this run reported as progress, if it reported one
+	/// at all.
+	///
+	/// Distinct from reading [`Self::latest_for_run`]'s `snapshot_taken_at`: a
+	/// device may announce the moment on its first sample and omit it from every
+	/// sample after, so the latest sample often has NULL where an earlier one had
+	/// the value. `snapshot_taken_at` is write-once per run — first value seen
+	/// stands — and this is what "first seen" means on the progress side.
+	pub async fn earliest_snapshot_taken_at_for_run(
+		db: &mut AsyncPgConnection,
+		run_id: Uuid,
+	) -> Result<Option<Timestamp>> {
+		use crate::schema::backup_run_progress::dsl;
+
+		let found: Option<jiff_diesel::Timestamp> = dsl::backup_run_progress
+			.filter(dsl::run_id.eq(run_id))
+			.filter(dsl::snapshot_taken_at.is_not_null())
+			.order_by((dsl::observed_at.asc(), dsl::id.asc()))
+			.select(dsl::snapshot_taken_at.assume_not_null())
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)?;
+
+		Ok(found.map(Timestamp::from))
+	}
+
+	/// Samples for one run at or after `since`, oldest-first. Backs rate over a
+	/// trailing window without pulling a long run's entire series.
+	pub async fn for_run_since(
+		db: &mut AsyncPgConnection,
+		run_id: Uuid,
+		since: Timestamp,
+	) -> Result<Vec<Self>> {
+		use crate::schema::backup_run_progress::dsl;
+
+		dsl::backup_run_progress
+			.filter(dsl::run_id.eq(run_id))
+			.filter(dsl::observed_at.ge(jiff_diesel::Timestamp::from(since)))
+			.order_by((dsl::observed_at.asc(), dsl::id.asc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// The earliest freeze moment each of `run_ids` reported, for those that
+	/// reported one. Batch counterpart to
+	/// [`Self::earliest_snapshot_taken_at_for_run`], and subject to the same
+	/// subtlety: a device usually announces the moment once, on an early sample, so
+	/// this cannot be read off the latest sample.
+	pub async fn earliest_snapshot_taken_at_by_run(
+		db: &mut AsyncPgConnection,
+		run_ids: &[Uuid],
+	) -> Result<HashMap<Uuid, Timestamp>> {
+		use crate::schema::backup_run_progress::dsl;
+
+		if run_ids.is_empty() {
+			return Ok(HashMap::new());
+		}
+
+		let rows: Vec<(Uuid, jiff_diesel::Timestamp)> = dsl::backup_run_progress
+			.filter(dsl::run_id.eq_any(run_ids))
+			.filter(dsl::snapshot_taken_at.is_not_null())
+			.distinct_on(dsl::run_id)
+			.order_by((dsl::run_id, dsl::observed_at.asc(), dsl::id.asc()))
+			.select((dsl::run_id, dsl::snapshot_taken_at.assume_not_null()))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(rows
+			.into_iter()
+			.map(|(rid, ts)| (rid, Timestamp::from(ts)))
+			.collect())
+	}
+
+	/// Samples for a set of runs observed at or after `since`, oldest-first within
+	/// each run, grouped by run.
+	///
+	/// The batch counterpart to [`Self::for_run_since`]: the activity view needs a
+	/// trailing window for every in-flight row at once, and issuing one query per
+	/// row would be an N+1. Empty input short-circuits.
+	pub async fn for_runs_since(
+		db: &mut AsyncPgConnection,
+		run_ids: &[Uuid],
+		since: Timestamp,
+	) -> Result<HashMap<Uuid, Vec<Self>>> {
+		use crate::schema::backup_run_progress::dsl;
+
+		if run_ids.is_empty() {
+			return Ok(HashMap::new());
+		}
+
+		let rows: Vec<Self> = dsl::backup_run_progress
+			.filter(dsl::run_id.eq_any(run_ids))
+			.filter(dsl::observed_at.ge(jiff_diesel::Timestamp::from(since)))
+			.order_by((dsl::run_id, dsl::observed_at.asc(), dsl::id.asc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		let mut out: HashMap<Uuid, Vec<Self>> = HashMap::new();
+		for row in rows {
+			out.entry(row.run_id).or_default().push(row);
+		}
+		Ok(out)
+	}
+
+	/// Delete samples observed before `cutoff`, returning how many went. The
+	/// series is working data for watching and reviewing runs, not part of a
+	/// run's permanent record, so it is pruned wholesale on age.
+	pub async fn prune_before(db: &mut AsyncPgConnection, cutoff: Timestamp) -> Result<usize> {
+		use crate::schema::backup_run_progress::dsl;
+
+		diesel::delete(
+			dsl::backup_run_progress
+				.filter(dsl::observed_at.lt(jiff_diesel::Timestamp::from(cutoff))),
+		)
+		.execute(db)
+		.await
+		.map_err(AppError::from)
 	}
 }
 

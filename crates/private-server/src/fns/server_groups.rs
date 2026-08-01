@@ -99,10 +99,13 @@ pub struct GroupIdArgs {
 /// One effective billing label attributed to a group's cloud resources.
 ///
 /// Labels are computed from the group's configuration: explicit `billing.*`
-/// tags on the group are honoured verbatim; otherwise the product defaults to
-/// `tamanu`, the deployment to the group name in lower-kebab-case, and the
-/// stage to the group's highest-ranked live member (for example `prod`). The
-/// stage label is omitted entirely when the group has no ranked members.
+/// tags on the group are honoured verbatim; otherwise the product comes from
+/// the one its live members agree on, the deployment from the group name in
+/// lower-kebab-case, and the stage from the group's highest-ranked live member
+/// (for example `prod`). A label with nothing to attribute to is omitted
+/// entirely: the stage when the group has no ranked members, and the product
+/// when its members span products.
+// spec: APP#billing-attribution
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct BillingTag {
 	/// Label key, for example `billing.product`.
@@ -120,8 +123,12 @@ pub(crate) async fn group_billing_labels(
 		.await?
 		.get(&group.id)
 		.copied();
+	let product = ServerGroup::sole_member_products(conn, &[group.id])
+		.await?
+		.get(&group.id)
+		.copied();
 	Ok(
-		BillingLabels::from_group(&group.tags, &group.name, highest_rank)
+		BillingLabels::from_group(&group.tags, &group.name, product, highest_rank)
 			.into_tags()
 			.into_iter()
 			.map(|(key, value)| BillingTag { key, value })

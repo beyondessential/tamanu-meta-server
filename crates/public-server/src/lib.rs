@@ -8,6 +8,7 @@ pub mod artifacts;
 pub mod backup;
 pub mod bestool;
 pub mod mcp;
+pub mod names;
 pub mod openapi;
 #[cfg(feature = "ui")]
 pub mod password;
@@ -30,6 +31,8 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.merge(restore::routes())
 		.nest("/artifacts", artifacts::routes())
 		.nest("/bestool", bestool::routes())
+		.nest("/certificates", names::certificate_routes())
+		.nest("/names", names::routes())
 		.nest("/servers", servers::routes())
 		.nest("/status", statuses::routes())
 		.nest("/tags", tags::routes())

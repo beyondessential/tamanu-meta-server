@@ -24,6 +24,13 @@ updates:
     cooldown:
       default-days: 7
       semver-major-days: 14
+    ignore:
+      # TypeScript 7 is the native port, and its JS API no longer exposes
+      # `ts.factory`, which openapi-typescript calls — so `npm run gen:api-types`
+      # dies on import under TS 7. Hold at 5.x until openapi-typescript
+      # supports it, then drop this.
+      - dependency-name: typescript
+        versions: [">=6"]
     groups:
       deps-patches:
         patterns:

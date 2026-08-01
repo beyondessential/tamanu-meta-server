@@ -34,6 +34,9 @@ pub struct VersionKnownIssue {
 	pub max_major: Option<i32>,
 	pub max_minor: Option<i32>,
 	pub max_patch: Option<i32>,
+	/// Provenance, not scope: the server whose data provoked the issue, where
+	/// one did. The issue itself covers the version range regardless.
+	pub server_id: Option<Uuid>,
 }
 
 impl VersionKnownIssue {
@@ -42,6 +45,7 @@ impl VersionKnownIssue {
 		min: (i32, i32, i32),
 		author: &str,
 		description: &str,
+		server_id: Option<Uuid>,
 	) -> Result<Self> {
 		use crate::schema::version_known_issues;
 		diesel::insert_into(version_known_issues::table)
@@ -51,11 +55,40 @@ impl VersionKnownIssue {
 				version_known_issues::min_patch.eq(min.2),
 				version_known_issues::author.eq(author),
 				version_known_issues::description.eq(description),
+				version_known_issues::server_id.eq(server_id),
 			))
 			.returning(Self::as_select())
 			.get_result(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// Whether an unresolved issue already blames `server_id` for this exact
+	/// version.
+	///
+	/// Snapshots arrive daily, so a version that fails against a deployment
+	/// fails again on tomorrow's data. One issue per version and server is the
+	/// finding; a second is noise.
+	pub async fn unresolved_for_server(
+		db: &mut AsyncPgConnection,
+		version: (i32, i32, i32),
+		server_id: Uuid,
+	) -> Result<bool> {
+		use crate::schema::version_known_issues::dsl;
+
+		let existing: Option<Uuid> = dsl::version_known_issues
+			.select(dsl::id)
+			.filter(dsl::min_major.eq(version.0))
+			.filter(dsl::min_minor.eq(version.1))
+			.filter(dsl::min_patch.eq(version.2))
+			.filter(dsl::server_id.eq(server_id))
+			.filter(dsl::resolved_at.is_null())
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)?;
+
+		Ok(existing.is_some())
 	}
 
 	/// All known issues whose minor branch matches the given (major, minor)

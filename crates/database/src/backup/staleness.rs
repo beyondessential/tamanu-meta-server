@@ -186,7 +186,12 @@ pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 		let runs =
 			crate::backups::BackupRun::latest_success_by_server_type_for_group(db, gid).await?;
 		for ((sid, ty), run) in runs {
-			last_success.insert((sid, ty), run.reported_at);
+			// The data's own moment, not when its upload finished: a backup that
+			// took hours to transfer is as old as what it captured. `anchor` falls
+			// back to the report time for a client that reports no freeze moment,
+			// so this is a no-op for those. See `BackupRun::ANCHOR_SQL` for why the
+			// query above orders by the same expression.
+			last_success.insert((sid, ty), run.anchor());
 		}
 	}
 

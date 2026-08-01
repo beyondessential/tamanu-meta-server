@@ -9,6 +9,7 @@ use commons_types::{
 	server::{
 		cards::{FacilityServerStatus, ServerGroupCard},
 		kind::ServerKind,
+		product::Product,
 		rank::ServerRank,
 	},
 	status::{CheckResult, OperatorPresence, ShortStatus},
@@ -262,8 +263,10 @@ pub async fn group_details(
 				name: s.name.clone().unwrap_or_default(),
 				up,
 				health: member_health.get(&s.id).copied().unwrap_or_default(),
+				is_monitored: s.is_monitored,
 				operators,
 				rank: s.rank,
+				product: s.product,
 				kind: s.kind,
 			}
 		})
@@ -582,6 +585,11 @@ pub struct StatusSnapshotData {
 	pub server_id: Uuid,
 	/// Id of the device that sent this status push, if known.
 	pub device_id: Option<Uuid>,
+	/// The application the server runs. Travels with the version so a
+	/// consumer can tell a product with no version from one that has yet to
+	/// report one.
+	// spec: APP#versions
+	pub product: Product,
 	/// Software version reported in this push.
 	pub version: Option<VersionStr>,
 	/// How many releases behind the latest published version this push's
@@ -663,12 +671,22 @@ pub async fn snapshot(
 	};
 	let server = Server::get_by_id(&mut conn, args.server_id).await?;
 
+	// Grading a version means measuring it against a release train canopy
+	// holds, so it applies only to a product that has one. A canopy instance
+	// reports its own build version and would otherwise be measured against
+	// Tamanu's releases, yielding a distance that means nothing.
+	//
 	// If the deployment has no published versions yet, we just skip
 	// the distance computation rather than 404'ing the whole
 	// snapshot — the call still wants to surface everything else.
-	let version_distance = match Version::get_latest_matching(&mut conn, "*".parse()?).await {
-		Ok(v) => status.distance_from_version(&v.as_semver()),
-		Err(_) => None,
+	// spec: APP#versions
+	let version_distance = if server.product.tracks_versions() {
+		match Version::get_latest_matching(&mut conn, "*".parse()?).await {
+			Ok(v) => status.distance_from_version(&v.as_semver()),
+			Err(_) => None,
+		}
+	} else {
+		None
 	};
 	// The consolidated checks as of this snapshot: every source's most
 	// recent report at-or-before `at`, re-graded through current policy,
@@ -699,10 +717,14 @@ pub async fn snapshot(
 			}
 		}
 	};
-	let min_chrome_version = if let Some(ref v) = status.version {
-		super::servers::compute_min_chrome_version(&mut conn, v).await
-	} else {
-		None
+	// The embedded-browser floor is a property of a Tamanu release, so it too
+	// only means something for a product whose releases canopy holds.
+	// spec: APP#versions
+	let min_chrome_version = match &status.version {
+		Some(v) if server.product.tracks_versions() => {
+			super::servers::compute_min_chrome_version(&mut conn, v).await
+		}
+		_ => None,
 	};
 	let mut operators = status.operators();
 	enrich_operators(&mut conn, operators.iter_mut()).await?;
@@ -712,7 +734,11 @@ pub async fn snapshot(
 		created_at: status.created_at,
 		server_id: status.server_id,
 		device_id: status.device_id,
-		version: status.version,
+		product: server.product,
+		// A product with no application version presents none, as against the
+		// `unknown` a versioned server shows before it has reported one.
+		// spec: APP#versions
+		version: status.version.filter(|_| server.product.has_versions()),
 		version_distance,
 		min_chrome_version,
 		platform: figures.platform(),
@@ -919,7 +945,11 @@ pub struct FleetServerDetailData {
 	pub group_name: Option<String>,
 	/// Where the server sits in its deployment's promotion order, if set.
 	pub rank: Option<ServerRank>,
-	/// The kind of deployment the server represents.
+	/// The application the server runs. The fleet view reads it to keep the
+	/// application-version spread to servers that have one to report.
+	// spec: APP#versions
+	pub product: Product,
+	/// The server's role within its product's topology.
 	pub kind: ServerKind,
 	/// Application version the server reports running, if any.
 	pub version: Option<VersionStr>,
@@ -1011,8 +1041,12 @@ pub async fn fleet_detail(
 				group_id: server.group_id,
 				group_name: server.group_id.and_then(|g| group_names.get(&g).cloned()),
 				rank: server.rank,
+				product: server.product,
 				kind: server.kind,
-				version,
+				// A product with no application version reports none, so the
+				// row carries nothing for the fleet view to count.
+				// spec: APP#versions
+				version: version.filter(|_| server.product.has_versions()),
 				platform: figures.platform(),
 				postgres: figures.postgres_version(),
 				nodejs: figures.node_version(),

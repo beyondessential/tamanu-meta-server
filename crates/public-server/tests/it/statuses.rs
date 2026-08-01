@@ -243,14 +243,26 @@ async fn submit_status() {
 
 			// The response carries only the return-path fields; the stored
 			// status record is not echoed back. Tags for this bare ungrouped
-			// server are just the synthetic `canopy:kind`.
+			// server are just the synthetic `canopy:product` and `canopy:kind`.
+			// `names` is present but empty throughout: this server holds neither
+			// grant and its group controls no domain, so it is entitled to nothing
+			// — which is a fact worth stating on every push rather than an absence
+			// the server has to infer.
 			let body: serde_json::Value = response.json();
 			assert_eq!(
 				body,
 				serde_json::json!({
 					"backup_now": [],
 					"check_severities": {},
-					"tags": {"canopy:kind": "facility"},
+					"names": {
+						"may_manage_dns": false,
+						"may_manage_tls": false,
+						"paused": false,
+						"domains": [],
+						"registered_names": [],
+						"certificates": [],
+					},
+					"tags": {"canopy:product": "tamanu", "canopy:kind": "facility"},
 				}),
 			);
 
@@ -2504,11 +2516,15 @@ async fn submit_status_result_all_kinds_upsert_catalog() {
 				#[diesel(sql_type = sql_types::Text)]
 				check_name: String,
 			}
-			let rows: Vec<NameRow> =
-				sql_query("SELECT check_name FROM check_policies ORDER BY check_name")
-					.get_results(&mut conn)
-					.await
-					.expect("list catalog");
+			// Reported checks only: canopy's own checks are catalogued at
+			// startup and aren't what this push is being judged on.
+			let rows: Vec<NameRow> = sql_query(
+				"SELECT check_name FROM check_policies WHERE source <> 'canopy' \
+				 ORDER BY check_name",
+			)
+			.get_results(&mut conn)
+			.await
+			.expect("list catalog");
 			let names: Vec<&str> = rows.iter().map(|r| r.check_name.as_str()).collect();
 			assert_eq!(names, vec!["a_passed", "b_skipped", "c_broken"]);
 		},

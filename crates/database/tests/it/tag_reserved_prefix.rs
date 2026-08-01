@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use commons_errors::AppError;
-use commons_types::server::{TagMap, kind::ServerKind};
+use commons_types::server::{TagMap, kind::ServerKind, product::Product};
 use database::{
 	pg_duration::PgDuration,
 	server_groups::{NewServerGroup, PartialServerGroup, ServerGroup},
@@ -26,6 +26,7 @@ fn new_server(host: &str) -> Server {
 		id: Uuid::new_v4(),
 		name: Some("t".into()),
 		host: Some(UrlField(host.parse().unwrap())),
+		product: Product::Tamanu,
 		kind: ServerKind::Central,
 		rank: None,
 		device_id: None,
@@ -41,6 +42,12 @@ fn new_server(host: &str) -> Server {
 		registered_at: None,
 		restore_allowed_until: None,
 		restore_allowed_by: None,
+		may_manage_dns: false,
+		may_manage_tls: false,
+		certificate_profile: None,
+		name_management_paused_at: None,
+		name_management_paused_by: None,
+		name_management_pause_reason: None,
 	}
 }
 
@@ -70,6 +77,7 @@ async fn server_update_rejects_reserved_tag_keys() {
 		let updates = PartialServer {
 			id: server.id,
 			name: None,
+			product: None,
 			kind: None,
 			rank: None,
 			host: None,
@@ -82,6 +90,8 @@ async fn server_update_rejects_reserved_tag_keys() {
 			alert_when_down_for: None,
 			notes: None,
 			tags: Some(reserved_tags()),
+			may_manage_dns: None,
+			may_manage_tls: None,
 		};
 		assert_bad_request(Server::update(&mut conn, server.id, updates).await);
 	})

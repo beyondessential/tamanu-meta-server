@@ -653,3 +653,120 @@ async fn consumers_format_unit_param_defaults_for_display() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn create_and_update_reject_a_name_the_consumer_already_uses() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group = insert_group(&mut conn).await;
+		let consumer = insert_consumer(&mut conn).await;
+		advertise_verify_and_analytics(&mut conn, consumer).await;
+
+		private
+			.post("/api/restore_replicas/create")
+			.json(&serde_json::json!({
+				"consumer_device_id": consumer,
+				"group_id": group,
+				"server_id": null,
+				"type": "tamanu-postgres",
+				"intent": "verify",
+				"name": "nightly",
+				"overdue_after": null,
+				"params": {},
+			}))
+			.await
+			.assert_status_ok();
+
+		// A different intent is a different scope, so the scope check passes —
+		// but the name is the consumer's already, and two same-named replicas
+		// are indistinguishable to consumer and operator alike.
+		private
+			.post("/api/restore_replicas/create")
+			.json(&serde_json::json!({
+				"consumer_device_id": consumer,
+				"group_id": group,
+				"server_id": null,
+				"type": "tamanu-postgres",
+				"intent": "analytics",
+				"name": "nightly",
+				"overdue_after": null,
+				"params": {},
+			}))
+			.await
+			.assert_status_conflict();
+
+		private
+			.post("/api/restore_replicas/create")
+			.json(&serde_json::json!({
+				"consumer_device_id": consumer,
+				"group_id": group,
+				"server_id": null,
+				"type": "tamanu-postgres",
+				"intent": "analytics",
+				"name": "",
+				"overdue_after": null,
+				"params": {},
+			}))
+			.await
+			.assert_status_bad_request();
+
+		let other = create_replica(
+			&private,
+			consumer,
+			group,
+			"analytics",
+			serde_json::json!({}),
+		)
+		.await;
+		private
+			.post("/api/restore_replicas/update")
+			.json(&serde_json::json!({
+				"id": other,
+				"consumer_device_id": consumer,
+				"group_id": group,
+				"server_id": null,
+				"type": "tamanu-postgres",
+				"intent": "analytics",
+				"name": "nightly",
+				"overdue_after": null,
+				"params": {},
+				"enabled": true,
+			}))
+			.await
+			.assert_status_conflict();
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn delete_succeeds_for_a_declaration_with_restore_health_history() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group = insert_group(&mut conn).await;
+		let server = insert_server(&mut conn, group).await;
+		let consumer = insert_consumer(&mut conn).await;
+		advertise_verify(&mut conn, consumer).await;
+		let id = create_replica(&private, consumer, group, "verify", serde_json::json!({})).await;
+
+		conn.batch_execute(&format!(
+			"INSERT INTO backup_restore_checks \
+			 (replica_id, consumer_device_id, group_id, server_id, type, intent, \
+			  snapshot_id, outcome, replica_healthy, observed_at) \
+			 VALUES ('{id}', '{consumer}', '{group}', '{server}', 'tamanu-postgres', \
+			  'verify', 'snap-1', 'success', true, now())"
+		))
+		.await
+		.expect("insert report");
+
+		private
+			.post("/api/restore_replicas/delete")
+			.json(&serde_json::json!({ "id": id }))
+			.await
+			.assert_status_ok();
+
+		let checks = database::BackupRestoreCheck::list_recent_for_group(&mut conn, group, 10)
+			.await
+			.expect("list checks");
+		assert_eq!(checks.len(), 1, "the report outlives the declaration");
+		assert_eq!(checks[0].replica_id, None);
+	})
+	.await;
+}

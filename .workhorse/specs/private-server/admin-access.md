@@ -47,3 +47,16 @@ The administrative surface admits only callers bearing a tailnet user identity, 
 Administrative status derived from the policy reflects the policy as of the most recent successful read, refreshed periodically.
 Reading the policy requires read access to the tailnet policy file.
 When the policy cannot be read, the recorded allowlist remains authoritative, so a control-plane outage never withdraws administrative access held through the allowlist.
+
+## Reporting administrative status to a caller
+
+A caller can ask whether it is an administrator without itself being one, so that a client can decide whether to offer administrative controls before attempting anything.
+The answer is `true` for an administrator and `false` for a caller that definitely is not one, including a caller bearing no tailnet identity at all.
+A failure that is not an authorization outcome — the allowlist being unreadable, say — is reported as an error rather than as `false`, because a caller cannot tell a wrongly-negative answer from a real one.
+
+## Presenting administrative controls
+
+An operator client decides the whole session's administrative controls from a single answer, so that every part of a page agrees about whether the operator is an administrator.
+Until an answer arrives, administrative controls are withheld.
+Once an answer arrives it is retained for the session and refreshed periodically; a later failed refresh leaves the retained answer in place rather than withdrawing controls mid-session.
+While no answer has yet arrived and the request is failing, the client retries and tells the operator that administrative status is undetermined, rather than presenting an unexplained read-only view.

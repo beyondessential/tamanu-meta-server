@@ -22,6 +22,7 @@ pub mod worker;
 pub mod inspection;
 pub mod maintenance;
 pub mod preflight;
+pub mod progress_prune;
 pub mod provision;
 pub mod rotation;
 pub mod s3_metrics;

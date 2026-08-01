@@ -74,6 +74,10 @@ export type Solidify<T> = T extends readonly unknown[]
 export type ShortStatus = Solidify<Schemas["ShortStatus"]>;
 export type HealthState = Solidify<Schemas["HealthState"]>;
 export type ServerKind = Solidify<Schemas["ServerKind"]>;
+export type Product = Solidify<Schemas["Product"]>;
+export type VersionTracking = Solidify<Schemas["VersionTracking"]>;
+export type Caps = Solidify<Schemas["Caps"]>;
+export type ProductInfo = Solidify<Schemas["ProductInfo"]>;
 export type ServerRank = Solidify<Schemas["ServerRank"]>;
 export type VersionStatus = Solidify<Schemas["VersionStatus"]>;
 export type DeviceRole = Solidify<Schemas["DeviceRole"]>;
@@ -167,6 +171,8 @@ export type BackupStatsView = Solidify<Schemas["BackupStatsView"]>;
 export type BackupRepoStats = Solidify<Schemas["BackupRepoStats"]>;
 export type RecentRun = Solidify<Schemas["RecentRun"]>;
 export type RunStatus = Schemas["RunStatus"];
+export type LiveProgress = Solidify<Schemas["LiveProgress"]>;
+export type RunProgressPoint = Solidify<Schemas["RunProgressPoint"]>;
 export type RestoreActivity = Solidify<Schemas["RestoreActivity"]>;
 export type RestoreConsumerView = Solidify<Schemas["RestoreConsumerView"]>;
 export type RestoreReplicaView = Solidify<Schemas["RestoreReplicaView"]>;
@@ -180,6 +186,9 @@ export type ServerBackupCapabilityView = Solidify<
 >;
 export type RestoreWindowRow = Solidify<Schemas["RestoreWindowRow"]>;
 export type RestoreWindowView = Solidify<Schemas["RestoreWindowView"]>;
+
+export type ManagedZoneView = Solidify<Schemas["ManagedZoneView"]>;
+export type GroupDomainView = Solidify<Schemas["GroupDomainView"]>;
 
 // `mode`/`status` arrive as plain strings on the wire (the Rust enums use a
 // custom Text serializer, so utoipa emits `string`). Narrow them in the UI so
@@ -213,10 +222,22 @@ export const SERVER_RANK_ORDER: ServerRank[] = [
 	"dev",
 ];
 
+/// Human-readable product names. The wire values are lowercase identifiers;
+/// these are how a product is written in the UI.
+export const PRODUCT_LABELS: Record<Product, string> = {
+	tamanu: "Tamanu",
+	senaite: "SENAITE",
+	canopy: "Canopy",
+};
+
 /// Display order for server kinds — centrals first, then facilities,
-/// then canopy's own. Used as a tiebreak within a single rank in
+/// then standalone. Used as a tiebreak within a single rank in
 /// status-dot lists / group detail views.
-export const SERVER_KIND_ORDER: ServerKind[] = ["central", "facility", "canopy"];
+export const SERVER_KIND_ORDER: ServerKind[] = [
+	"central",
+	"facility",
+	"standalone",
+];
 
 /// Sort key combining rank index (with `null` ranks pushed last) and
 /// kind index. Stable per-rank ordering matches what the UI grouping
@@ -374,6 +395,28 @@ export function healthcheckNameFromRef(
 	if (!ref.startsWith(prefix)) return null;
 	return ref.slice(prefix.length);
 }
+
+/// Sources canopy reserves for its own conditions. They file at bare
+/// refs; every other source's checks are namespaced under `health/`.
+export const RESERVED_SOURCES = ["canopy", "manual"];
+
+/// The silence ref for a check, which is what the silence endpoints and
+/// the silence listings speak. Mirrors `database::silenced_refs`: bare
+/// for the reserved sources, `health/`-prefixed for reported checks.
+/// Building it by hand gets the reserved sources wrong, and a mismatched
+/// ref silently fails to match an existing silence.
+export function silenceRef(source: string, check: string): string {
+	return RESERVED_SOURCES.includes(source) ? check : `health/${check}`;
+}
+
+/// Canopy's per-server reachability check, with the ref its silence is
+/// keyed by. The server form's "alert when unreachable" switch and the
+/// check's own silence button both write this one silence.
+export const REACHABILITY_CHECK = {
+	source: "canopy",
+	check: "reachability",
+	ref: silenceRef("canopy", "reachability"),
+} as const;
 
 /// One person connected somewhere in a server group, with the names of
 /// the member servers they're on. Produced by [`aggregateOperators`].
