@@ -22,6 +22,10 @@ pub struct AppState {
 	/// `crate::routes` all write (status/event ingestion, credential
 	/// issuance) and stay on `db`.
 	pub db_read: Db,
+	/// Which client-certificate header this server's ingress sets, and so the
+	/// only one device auth may believe. Read from the environment at
+	/// startup; tests construct it directly.
+	pub client_cert_header: commons_servers::device_auth::mtls::ClientCertHeader,
 	#[cfg(feature = "ui")]
 	pub tera: Arc<Tera>,
 	#[cfg(feature = "ui")]
@@ -107,6 +111,7 @@ impl AppState {
 	) -> Result<Self> {
 		let db_read = database::init_ro().unwrap_or_else(|| db.clone());
 		Ok(Self {
+			client_cert_header: commons_servers::device_auth::mtls::ClientCertHeader::from_env(),
 			db,
 			db_read,
 			#[cfg(feature = "ui")]
@@ -133,6 +138,7 @@ impl AppState {
 		kube: Option<BackupSecrets>,
 	) -> Result<Self> {
 		Ok(Self {
+			client_cert_header: commons_servers::device_auth::mtls::ClientCertHeader::from_env(),
 			sts,
 			kube,
 			..Self::from_db_with_directory(db, tailnet_directory)?
@@ -174,5 +180,11 @@ impl FromRef<AppState> for Option<BackupSecrets> {
 impl FromRef<AppState> for Arc<Tera> {
 	fn from_ref(state: &AppState) -> Self {
 		state.tera.clone()
+	}
+}
+
+impl FromRef<AppState> for commons_servers::device_auth::mtls::ClientCertHeader {
+	fn from_ref(state: &AppState) -> Self {
+		state.client_cert_header
 	}
 }

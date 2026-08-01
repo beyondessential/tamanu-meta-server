@@ -615,7 +615,7 @@ async fn reopen_via_device_clears_resolved_fields() {
 			// Device opens the issue by pushing a failing check.
 			public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"health": [ { "check": "x", "result": "failed" } ],
 				}))
@@ -645,7 +645,7 @@ async fn reopen_via_device_clears_resolved_fields() {
 			// Device pushes again — should clear resolved_* (Sentry-style reopen).
 			public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"health": [ { "check": "x", "result": "failed" } ],
 				}))

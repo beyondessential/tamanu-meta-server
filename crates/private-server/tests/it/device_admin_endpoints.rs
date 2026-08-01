@@ -34,6 +34,7 @@ async fn private_with_directory(url: &str, directory: TailnetDirectory) -> TestS
 	let db = database::init_to(url);
 	let router = router(
 		private_server::routes(private_server::state::AppState {
+			client_cert_header: commons_servers::device_auth::mtls::ClientCertHeader::Xfcc,
 			db: db.clone(),
 			db_read: db,
 			ro_pool: None,

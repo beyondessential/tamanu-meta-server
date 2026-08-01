@@ -1,6 +1,7 @@
 use ::time::OffsetDateTime;
 use axum_client_ip::ClientIpSource;
 use axum_test::TestServer;
+use commons_servers::device_auth::mtls::ClientCertHeader;
 use commons_servers::router;
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::AsyncPgConnection;
@@ -100,34 +101,38 @@ pub fn spki_from_key_pem(key_pem: &str) -> Vec<u8> {
 	x509_cert.tbs_certificate.subject_pki.raw.to_vec()
 }
 
-/// Trust both client-certificate header paths for the duration of the test
-/// binary. The harness stands in for an ingress we trust, and the suite
-/// covers both the nginx (`mtls-certificate`) and Envoy (XFCC) transports —
-/// which of them a *deployment* trusts is configuration, unit-tested in
-/// `commons_servers::device_auth::mtls`.
-fn trust_both_cert_headers() {
-	// First call wins; every later call is the same value, so ignore the
-	// "already set" error rather than racing on it.
-	let _ = commons_servers::device_auth::mtls::force_trusted_cert_headers(
-		commons_servers::device_auth::mtls::TrustedCertHeaders {
-			mtls_header: true,
-			xfcc: true,
-		},
-	);
-}
+/// The client-certificate header the suite runs against.
+///
+/// Envoy/XFCC deliberately, not the live nginx path: nginx is exercised
+/// continuously by production, while XFCC is the shape that goes live at the
+/// cutover and has no other real coverage. Testing it here means the eventual
+/// removal of the nginx path is a delete rather than a rewrite.
+///
+/// The handful of tests that still pin the nginx header use
+/// [`run_with_device_auth_on`].
+const DEFAULT_CERT_HEADER: ClientCertHeader = ClientCertHeader::Xfcc;
 
 pub async fn run<F, T, Fut>(test: F) -> T
 where
 	F: FnOnce(AsyncPgConnection, TestServer, TestServer) -> Fut,
 	Fut: Future<Output = T>,
 {
-	trust_both_cert_headers();
+	run_on(DEFAULT_CERT_HEADER, test).await
+}
+
+/// [`run`] against an explicitly chosen client-certificate header.
+pub async fn run_on<F, T, Fut>(cert_header: ClientCertHeader, test: F) -> T
+where
+	F: FnOnce(AsyncPgConnection, TestServer, TestServer) -> Fut,
+	Fut: Future<Output = T>,
+{
 	TestDb::run(async |conn, url| {
 		// One pool per state, shared between the RW and RO handles — a second
 		// pool would double connections against the throwaway test cluster,
 		// and this mirrors production with RO_DATABASE_URL unset.
 		let public_db = database::init_to(&url);
 		let public_state = public_server::state::AppState {
+			client_cert_header: cert_header,
 			db: public_db.clone(),
 			db_read: public_db,
 			tera: public_server::state::AppState::init_tera().unwrap(),
@@ -169,8 +174,53 @@ where
 	F: FnOnce(AsyncPgConnection, String, Uuid, TestServer, TestServer) -> Fut,
 	Fut: Future<Output = T>,
 {
-	trust_both_cert_headers();
 	run(async |mut conn, mut public, private| {
+		let (key_data, cert) = make_certificate();
+
+		let device_row: Device = sql_query(
+			r#"
+				INSERT INTO devices (role)
+				VALUES ($1)
+				RETURNING id
+			"#,
+		)
+		.bind::<sql_types::Text, _>(role)
+		.get_result(&mut conn)
+		.await
+		.expect("insert device");
+		let device_id = device_row.id;
+
+		sql_query(
+			r#"
+				INSERT INTO device_keys (device_id, key_data, name, is_active)
+				VALUES ($1, $2, 'Test Key', true)
+			"#,
+		)
+		.bind::<sql_types::Uuid, _>(device_id)
+		.bind::<sql_types::Binary, _>(key_data)
+		.execute(&mut conn)
+		.await
+		.expect("insert device key");
+
+		public.add_header("X-Version", "3.4.5");
+		test(conn, cert, device_id, public, private).await
+	})
+	.await
+}
+
+/// [`run_with_device_auth`] against an explicitly chosen client-certificate
+/// header, for the tests that still cover the nginx path while the suite
+/// defaults to XFCC.
+pub async fn run_with_device_auth_on<F, T, Fut>(
+	cert_header: ClientCertHeader,
+	role: &'static str,
+	test: F,
+) -> T
+where
+	F: FnOnce(AsyncPgConnection, String, Uuid, TestServer, TestServer) -> Fut,
+	Fut: Future<Output = T>,
+{
+	run_on(cert_header, async |mut conn, mut public, private| {
 		let (key_data, cert) = make_certificate();
 
 		let device_row: Device = sql_query(
@@ -221,7 +271,7 @@ where
 	F: FnOnce(AsyncPgConnection, std::net::IpAddr, String, Uuid, TestServer, TestServer) -> Fut,
 	Fut: Future<Output = T>,
 {
-	trust_both_cert_headers();
+	let cert_header = DEFAULT_CERT_HEADER;
 	use commons_servers::tailnet_directory::{DirectoryEntry, TailnetDirectory};
 
 	let tailnet_ip: std::net::IpAddr = "100.64.0.42".parse().expect("parse test ip");
@@ -257,6 +307,7 @@ where
 
 		let public_db = database::init_to(&url);
 		let public_state = public_server::state::AppState {
+			client_cert_header: cert_header,
 			db: public_db.clone(),
 			db_read: public_db,
 			tera: public_server::state::AppState::init_tera().unwrap(),
@@ -274,6 +325,7 @@ where
 		let private_db = database::init_to(&url);
 		let private_router = router(
 			private_server::routes(private_server::state::AppState {
+				client_cert_header: cert_header,
 				db: private_db.clone(),
 				db_read: private_db,
 				ro_pool: None,

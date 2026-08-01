@@ -183,7 +183,7 @@ async fn submit_status_defers_incident_open_until_reeval_drained() {
 			// observe the state between ingest and reeval.
 			public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"healthy": false,
 					"health": [ { "check": "database", "healthy": false } ],
@@ -235,7 +235,7 @@ async fn submit_status() {
 
 			let response = public
 				.post(&format!("/status/{}", server_id))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "uptime": 3600, "health": [] }))
 				.await;
 			response.assert_status_ok();
@@ -312,14 +312,14 @@ async fn submit_status_returns_effective_tags_matching_tags_endpoint() {
 
 			let tags_response = public
 				.get("/tags")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			tags_response.assert_status_ok();
 			let standalone_tags: serde_json::Value = tags_response.json();
 
 			let response = public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "health": [] }))
 				.await;
 			response.assert_status_ok();
@@ -365,7 +365,7 @@ async fn submit_status_with_geolocation() {
 
 			let response = public
 				.post(&format!("/status/{}", server_id))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "uptime": 7200, "version": "2.8.1", "health": [] }))
 				.await;
 			response.assert_status_ok();
@@ -445,7 +445,7 @@ async fn submit_status_with_cloud() {
 
 			let response = public
 				.post(&format!("/status/{}", server_id))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "uptime": 4800, "platform": "Linux", "health": [] }))
 				.await;
 			response.assert_status_ok();
@@ -526,7 +526,7 @@ async fn submit_status_with_geolocation_and_cloud() {
 
 			let response = public
 				.post(&format!("/status/{}", server_id))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(
 					&serde_json::json!({ "uptime": 10000, "version": "3.0.0", "timezone": "America/New_York", "health": [] }),
 				)
@@ -668,7 +668,7 @@ async fn submit_status_legacy_no_healthy_field() {
 
 			let response = public
 				.post(&format!("/status/{}", server_id))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "uptime": 100, "health": [] }))
 				.await;
 			response.assert_status_ok();
@@ -695,7 +695,7 @@ async fn submit_status_with_healthy_true_no_checks() {
 
 			let response = public
 				.post(&format!("/status/{}", server_id))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "healthy": true, "health": [] }))
 				.await;
 			response.assert_status_ok();
@@ -718,7 +718,7 @@ async fn submit_status_with_healthy_false_persists() {
 
 			let response = public
 				.post(&format!("/status/{}", server_id))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"healthy": false,
 					"uptime": 42,
@@ -745,7 +745,7 @@ async fn submit_status_with_health_checks_persists() {
 
 			let response = public
 				.post(&format!("/status/{}", server_id))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"healthy": true,
 					"health": [
@@ -788,7 +788,7 @@ async fn submit_status_rejects_non_bool_healthy() {
 
 			let response = public
 				.post(&format!("/status/{}", server_id))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "healthy": "yes" }))
 				.await;
 			response.assert_status_bad_request();
@@ -806,7 +806,7 @@ async fn submit_status_rejects_non_array_health() {
 
 			let response = public
 				.post(&format!("/status/{}", server_id))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "health": { "check": "x", "healthy": true } }))
 				.await;
 			response.assert_status_bad_request();
@@ -824,7 +824,7 @@ async fn submit_status_rejects_health_entry_missing_check() {
 
 			let response = public
 				.post(&format!("/status/{}", server_id))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"health": [ { "healthy": true } ]
 				}))
@@ -844,7 +844,7 @@ async fn submit_status_rejects_health_entry_missing_healthy() {
 
 			let response = public
 				.post(&format!("/status/{}", server_id))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"health": [ { "check": "database" } ]
 				}))
@@ -967,7 +967,7 @@ async fn post_status(
 ) {
 	let response = public
 		.post(&format!("/status/{}", server_id))
-		.add_header("mtls-certificate", cert)
+		.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 		.json(&body)
 		.await;
 	response.assert_status_ok();
@@ -998,7 +998,7 @@ async fn submit_status_ingest_gating() {
 				.expect("set deny");
 			public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&body)
 				.await
 				.assert_status_forbidden();
@@ -1014,7 +1014,7 @@ async fn submit_status_ingest_gating() {
 				.expect("set ignore");
 			let ignored = public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&body)
 				.await;
 			ignored.assert_status_ok();
@@ -1031,7 +1031,7 @@ async fn submit_status_ingest_gating() {
 				.expect("set allow");
 			public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&body)
 				.await
 				.assert_status_ok();
@@ -2067,7 +2067,7 @@ async fn submit_status_result_validation() {
 			// bestool that adds enum values).
 			let response = public
 				.post(&format!("/status/{}", server_id))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"health": [ { "check": "db", "result": "exploded" } ],
 				}))
@@ -2077,7 +2077,7 @@ async fn submit_status_result_validation() {
 			// Non-string result → 400.
 			let response = public
 				.post(&format!("/status/{}", server_id))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"health": [ { "check": "db", "result": true } ],
 				}))
@@ -2087,7 +2087,7 @@ async fn submit_status_result_validation() {
 			// Both forms on one entry → 400.
 			let response = public
 				.post(&format!("/status/{}", server_id))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"health": [ { "check": "db", "result": "passed", "healthy": true } ],
 				}))
@@ -2596,7 +2596,7 @@ async fn status_signals_backup_now_for_due_schedule() {
 
 			let resp = public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "health": [] }))
 				.await;
 			resp.assert_status_ok();
@@ -2621,7 +2621,7 @@ async fn status_backup_now_only_for_alertd() {
 			// A named non-alertd source.
 			let resp = public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "source": "seedling", "health": [] }))
 				.await;
 			resp.assert_status_ok();
@@ -2630,7 +2630,7 @@ async fn status_backup_now_only_for_alertd() {
 			// The legacy (no health array) push, attributed to tamanu.
 			let resp = public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "healthy": true }))
 				.await;
 			resp.assert_status_ok();
@@ -2663,7 +2663,7 @@ async fn status_no_backup_now_when_recent_success() {
 
 			let resp = public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "health": [] }))
 				.await;
 			resp.assert_status_ok();
@@ -2685,7 +2685,7 @@ async fn status_no_backup_now_until_config_ready() {
 
 			let resp = public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "health": [] }))
 				.await;
 			resp.assert_status_ok();
@@ -2716,7 +2716,7 @@ async fn status_one_off_request_surfaced_then_cleared_by_report() {
 
 			let resp = public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "health": [] }))
 				.await;
 			resp.assert_status_ok();
@@ -2724,7 +2724,7 @@ async fn status_one_off_request_surfaced_then_cleared_by_report() {
 
 			let report = public
 				.post("/backup-report")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": Uuid::new_v4(),
 					"type": "tamanu-postgres",
@@ -2736,7 +2736,7 @@ async fn status_one_off_request_surfaced_then_cleared_by_report() {
 
 			let resp = public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "health": [] }))
 				.await;
 			resp.assert_status_ok();
@@ -2842,7 +2842,7 @@ async fn submit_status_version_without_header_uses_payload() {
 				.post(&format!("/status/{server_id}"))
 				.clear_headers()
 				.add_header("Forwarded", "for=192.0.1.60")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "tamanuVersion": "2.12.3", "health": [] }))
 				.await;
 			response.assert_status_ok();
@@ -2870,7 +2870,7 @@ async fn submit_status_versionless_when_neither_present() {
 				.post(&format!("/status/{server_id}"))
 				.clear_headers()
 				.add_header("Forwarded", "for=192.0.1.60")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "health": [] }))
 				.await;
 			response.assert_status_ok();
@@ -2898,7 +2898,7 @@ async fn multi_source_pushes_do_not_flap() {
 			// Source-less push: attributed to alertd, files its failure there.
 			public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "health": [{ "check": "db", "result": "failed" }] }))
 				.await
 				.assert_status_ok();
@@ -2913,7 +2913,7 @@ async fn multi_source_pushes_do_not_flap() {
 			// files under its name, and alertd's open issue is untouched.
 			public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"source": "seedling",
 					"health": [{ "check": "disk", "result": "failed" }],
@@ -2937,7 +2937,7 @@ async fn multi_source_pushes_do_not_flap() {
 			// The second source recovering only closes its own issue.
 			public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "source": "seedling", "health": [] }))
 				.await
 				.assert_status_ok();
@@ -2985,7 +2985,7 @@ async fn source_field_validation() {
 			for source in ["canopy", "Manual", ""] {
 				public
 					.post(&format!("/status/{server_id}"))
-					.add_header("mtls-certificate", &cert)
+					.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 					.json(&serde_json::json!({ "source": source, "health": [] }))
 					.await
 					.assert_status_bad_request();
@@ -2993,7 +2993,7 @@ async fn source_field_validation() {
 
 			public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({ "source": 42, "health": [] }))
 				.await
 				.assert_status_bad_request();
@@ -3015,7 +3015,7 @@ async fn filings_stamp_check_state_columns() {
 			// and effective diverge.
 			public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"health": [{ "check": "db", "result": "failed", "latency_ms": 42 }],
 				}))
@@ -3063,7 +3063,7 @@ async fn filings_stamp_check_state_columns() {
 			// Recovery stamps the pass.
 			public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"health": [{ "check": "db", "result": "passed" }],
 				}))
@@ -3112,7 +3112,7 @@ async fn push_records_the_source_s_current_detail() {
 
 			public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"source": "alertd",
 					"health": [],
@@ -3128,7 +3128,7 @@ async fn push_records_the_source_s_current_detail() {
 			// A second source's push doesn't disturb the first's.
 			public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"source": "tamanu",
 					"health": [],
@@ -3151,7 +3151,7 @@ async fn push_records_the_source_s_current_detail() {
 			// truth, so the dropped field goes with it.
 			public
 				.post(&format!("/status/{server_id}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"source": "alertd",
 					"health": [],

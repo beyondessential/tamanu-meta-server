@@ -32,6 +32,10 @@ pub struct AppState {
 	/// without a code change on the ops side.
 	#[from_ref(skip)]
 	pub db_read: Db,
+	/// Which client-certificate header this server's ingress sets, and so the
+	/// only one device auth may believe. Read from the environment at
+	/// startup; tests construct it directly.
+	pub client_cert_header: commons_servers::device_auth::mtls::ClientCertHeader,
 	pub ro_pool: Option<PgPool>,
 	pub tailnet_directory: Option<TailnetDirectory>,
 	/// Secret store for the per-group repo-password Secrets (onboarding creates
@@ -94,6 +98,7 @@ impl AppState {
 		let db_read = database::init_ro().unwrap_or_else(|| db.clone());
 
 		Ok(Self {
+			client_cert_header: commons_servers::device_auth::mtls::ClientCertHeader::from_env(),
 			db,
 			db_read,
 			ro_pool,
@@ -113,6 +118,7 @@ impl AppState {
 	pub async fn from_db_url(url: &str) -> Result<Self> {
 		let db = database::init_to(url);
 		Ok(Self {
+			client_cert_header: commons_servers::device_auth::mtls::ClientCertHeader::from_env(),
 			db_read: db.clone(),
 			db,
 			ro_pool: None,

@@ -3,7 +3,7 @@ use commons_tests::{diesel_async::SimpleAsyncConnection, server::make_certificat
 // Tests to verify that device key authentication works with the new split schema
 
 #[tokio::test(flavor = "multi_thread")]
-async fn device_key_authentication_works_with_xfcc_header() {
+async fn device_key_authentication_works_with_the_cert_header() {
 	commons_tests::server::run_with_device_auth("releaser", async |mut conn, cert, _device_id, public, _| {
 		conn.batch_execute(
 			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES (1, 0, 0, 'Test version', 'published')",
@@ -11,11 +11,9 @@ async fn device_key_authentication_works_with_xfcc_header() {
 		.await
 		.unwrap();
 
-		// cert is already percent-encoded PEM; wrap it in Envoy XFCC format
-		let xfcc = format!("Hash=abc123;Cert={}", cert);
 		let response = public
 			.post("/versions/1.0.1")
-			.add_header("x-forwarded-client-cert", &xfcc)
+			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 			.text("changelog for 1.0.1")
 			.await;
 
@@ -37,7 +35,7 @@ async fn device_key_authentication_works() {
 		// Test that the device authentication works with the new schema
 		let response = public
 			.post("/versions/1.0.1")
-			.add_header("mtls-certificate", &cert)
+			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 			.text("changelog for 1.0.1")
 			.await;
 
@@ -94,7 +92,7 @@ async fn inactive_keys_not_used_for_auth() {
 
 		let response_before = public
 			.post("/versions/2.0.1")
-			.add_header("mtls-certificate", &cert)
+			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 			.text("changelog before deactivation")
 			.await;
 		response_before.assert_status_ok();
@@ -109,7 +107,7 @@ async fn inactive_keys_not_used_for_auth() {
 		// Now authentication should fail
 		let response_after = public
 			.post("/versions/2.0.2")
-			.add_header("mtls-certificate", &cert)
+			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 			.text("changelog after deactivation")
 			.await;
 		response_after.assert_status_not_ok();
@@ -218,7 +216,7 @@ async fn multiple_keys_authenticate_same_device() {
 
 		let response = public
 			.post("/versions/3.0.1")
-			.add_header("mtls-certificate", &cert)
+			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 			.text("changelog from admin device")
 			.await;
 		response.assert_status_ok();
@@ -250,7 +248,7 @@ async fn key_deactivation_works() {
 			// Verify authentication works initially
 			let response_before = public
 				.post("/status/77777777-7777-7777-7777-777777777777")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({"uptime": 3600, "health": []}))
 				.await;
 			response_before.assert_status_ok();
@@ -267,7 +265,7 @@ async fn key_deactivation_works() {
 			// Verify authentication now fails
 			let response_after = public
 				.post("/status/77777777-7777-7777-7777-777777777777")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({"uptime": 7200}))
 				.await;
 			response_after.assert_status_not_ok();
@@ -322,7 +320,7 @@ async fn device_key_management() {
 
 		let response = public
 			.post("/artifacts/4.0.0/mobile/android")
-			.add_header("mtls-certificate", &cert)
+			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 			.text("https://example.com/download.apk")
 			.await;
 		response.assert_status_ok();
@@ -359,7 +357,7 @@ async fn key_rotation_scenario() {
 			// Verify initial authentication works
 			let response_initial = public
 				.post("/status/99999999-9999-9999-9999-999999999999")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({"uptime": 1800, "health": []}))
 				.await;
 			response_initial.assert_status_ok();
@@ -378,13 +376,13 @@ async fn key_rotation_scenario() {
 			// Verify both keys work (overlap period for graceful rotation)
 			let response = public
 				.post("/status/99999999-9999-9999-9999-999999999999")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({"uptime": 3600, "health": []}))
 				.await;
 			response.assert_status_ok();
 			let response = public
 				.post("/status/99999999-9999-9999-9999-999999999999")
-				.add_header("mtls-certificate", &new_cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", new_cert))
 				.json(&serde_json::json!({"uptime": 5400, "health": []}))
 				.await;
 			response.assert_status_ok();
@@ -405,7 +403,7 @@ async fn key_rotation_scenario() {
 			// Verify old key no longer works for authentication
 			let response = public
 				.post("/status/99999999-9999-9999-9999-999999999999")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({"uptime": 5400, "health": []}))
 				.await;
 			response.assert_status_not_ok();
@@ -413,10 +411,46 @@ async fn key_rotation_scenario() {
 			// Verify the new key works
 			let response = public
 				.post("/status/99999999-9999-9999-9999-999999999999")
-				.add_header("mtls-certificate", &new_cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", new_cert))
 				.json(&serde_json::json!({"uptime": 5400, "health": []}))
 				.await;
 			response.assert_status_ok();
+		},
+	)
+	.await;
+}
+
+/// The suite runs on XFCC — the path that goes live at the Envoy cutover, and
+/// the one production doesn't yet exercise. This is the counterpart: the
+/// nginx header still authenticates a device end-to-end on a server
+/// configured for it. Delete alongside `ClientCertHeader::Mtls` once Envoy is
+/// the only ingress.
+#[tokio::test(flavor = "multi_thread")]
+async fn device_key_authentication_works_on_the_nginx_header() {
+	commons_tests::server::run_with_device_auth_on(
+		commons_servers::device_auth::mtls::ClientCertHeader::Mtls,
+		"releaser",
+		async |mut conn, cert, _device_id, public, _| {
+			conn.batch_execute(
+				"INSERT INTO versions (major, minor, patch, changelog, status) VALUES (1, 0, 0, 'Test version', 'published')",
+			)
+			.await
+			.unwrap();
+
+			let response = public
+				.post("/versions/1.0.1")
+				.add_header("mtls-certificate", &cert)
+				.text("changelog for 1.0.1")
+				.await;
+			response.assert_status_ok();
+
+			// And XFCC is the untrusted one there, so it must not work.
+			let spoofed = public
+				.post("/versions/1.0.2")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.text("changelog for 1.0.2")
+				.await;
+			spoofed.assert_status_not_ok();
 		},
 	)
 	.await;

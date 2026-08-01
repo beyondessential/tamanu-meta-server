@@ -59,6 +59,7 @@ macro_rules! device_role_struct {
 		where
 			Db: FromRef<S>,
 			Option<TailnetDirectory>: FromRef<S>,
+			$crate::device_auth::mtls::ClientCertHeader: FromRef<S>,
 			S: Send + Sync,
 		{
 			type Rejection = AppError;
@@ -89,6 +90,7 @@ impl<S> axum::extract::FromRequestParts<S> for AuthDevice
 where
 	Db: FromRef<S>,
 	Option<TailnetDirectory>: FromRef<S>,
+	mtls::ClientCertHeader: FromRef<S>,
 	S: Send + Sync,
 {
 	type Rejection = AppError;
@@ -114,7 +116,7 @@ where
 				.map(|(device, node_id)| (device, AuthMethod::Tailnet { node_id }))
 				.ok_or(AppError::AuthTailnetIdentityMissing)?
 		} else {
-			mtls::resolve(parts, &mut db)
+			mtls::resolve(parts, &mut db, mtls::ClientCertHeader::from_ref(state))
 				.await?
 				.map(|device| (device, AuthMethod::Mtls))
 				.ok_or(AppError::AuthMissingCertificate)?

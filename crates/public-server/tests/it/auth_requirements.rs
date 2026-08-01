@@ -110,7 +110,7 @@ async fn auth_header_invalid_certificate() {
 		// Send invalid certificate data
 		let response = public
 			.post("/versions/1.0.1")
-			.add_header("mtls-certificate", "invalid-certificate-data")
+			.add_header("x-forwarded-client-cert", "Cert=invalid-certificate-data")
 			.text("changelog")
 			.await;
 
@@ -126,7 +126,7 @@ async fn auth_header_malformed_pem() {
 		let response = public
 			.post("/artifacts/1.0.0/mobile/android")
 			.add_header(
-				"mtls-certificate",
+				"x-forwarded-client-cert",
 				utf8_percent_encode(
 					"-----BEGIN CERTIFICATE-----\ninvalid\n-----END CERTIFICATE-----",
 					percent_encoding::NON_ALPHANUMERIC,
@@ -147,7 +147,7 @@ async fn auth_header_empty() {
 		// Send empty certificate header
 		let response = public
 			.post("/artifacts/1.0.0/mobile/android")
-			.add_header("mtls-certificate", "")
+			.add_header("x-forwarded-client-cert", "Cert=")
 			.text("https://example.com/download.apk")
 			.await;
 
@@ -172,9 +172,11 @@ async fn auth_with_ssl_client_cert_header() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn auth_with_xfcc_header_invalid_cert() {
+async fn auth_with_an_untrusted_xfcc_header_is_rejected() {
 	commons_tests::server::run(async |_conn, public, _| {
-		// XFCC header present but Cert= field contains invalid certificate data
+		// The deployment trusts the nginx header, so XFCC is client-supplied
+		// as far as this server can tell and must not authenticate anything —
+		// valid certificate or not.
 		let response = public
 			.post("/artifacts/1.0.0/mobile/android")
 			.add_header(
@@ -190,9 +192,9 @@ async fn auth_with_xfcc_header_invalid_cert() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn auth_xfcc_header_missing_cert_field_falls_back() {
+async fn auth_with_an_xfcc_header_carrying_no_cert_is_rejected() {
 	commons_tests::server::run(async |_conn, public, _| {
-		// XFCC header present but no Cert= field — should fall back and fail with missing cert
+		// Same, with nothing usable in the header either.
 		let response = public
 			.post("/artifacts/1.0.0/mobile/android")
 			.add_header(

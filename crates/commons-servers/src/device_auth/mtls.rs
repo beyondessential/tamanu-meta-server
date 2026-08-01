@@ -5,8 +5,6 @@
 //! A device row is created only through the gated enrollment flow
 //! (`/servers/register/*`); an unknown key here is `AuthCertificateNotFound`.
 
-use std::sync::{LazyLock, OnceLock};
-
 use commons_errors::{AppError, Result};
 use database::devices::Device;
 use diesel_async::AsyncPgConnection;
@@ -14,106 +12,60 @@ use http::request::Parts;
 use tracing::warn;
 use x509_parser::prelude::*;
 
-/// Env var gating the nginx path (`mtls-certificate` / `ssl-client-cert`).
-/// Default **on** — this is what the live ingress sets today.
-const MTLS_HEADER_ENV: &str = "CANOPY_DEVICE_AUTH_MTLS_HEADER";
-/// Env var gating the Envoy path (`x-forwarded-client-cert`).
-/// Default **off** — see [`TrustedCertHeaders`].
-const XFCC_ENV: &str = "CANOPY_DEVICE_AUTH_XFCC";
+/// Env var naming the client-certificate header to trust. See
+/// [`ClientCertHeader`].
+const CERT_HEADER_ENV: &str = "CANOPY_DEVICE_AUTH_CERT_HEADER";
 
-/// Which client-certificate headers this deployment trusts.
+/// Which client-certificate header this deployment's ingress sets — and
+/// therefore the only one that may be believed.
 ///
-/// A header naming a client certificate is only meaningful if it can *only*
+/// A header naming a client certificate is meaningful only if it can *only*
 /// have been set by the proxy that terminated the TLS connection and verified
 /// the peer. [`resolve`] authenticates by looking the certificate's public key
-/// up in `devices` — there is no proof of possession at this layer, and a
-/// public key is not a secret — so any caller able to set a trusted header can
+/// up in `devices`: there is no proof of possession at this layer, and a
+/// public key is not a secret. So any caller able to set a believed header can
 /// present an enrolled device's certificate and be resolved as that device.
 ///
-/// The two ingress paths are therefore gated separately, and only the one a
-/// deployment actually runs should be on:
-///
-/// - **nginx** (`mtls-certificate`, `ssl-client-cert`) — on by default; the
-///   live path today.
-/// - **Envoy** (`x-forwarded-client-cert`) — off by default. Envoy is not yet
-///   deployed, and nginx has no reason to strip a header it doesn't use, so
-///   accepting XFCC unconditionally meant a client could set it themselves.
-///   It was also *preferred* over the nginx header, so it overrode the
-///   genuinely-verified certificate.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TrustedCertHeaders {
-	/// Trust `mtls-certificate` / `ssl-client-cert`.
-	pub mtls_header: bool,
-	/// Trust `x-forwarded-client-cert`.
-	pub xfcc: bool,
+/// One setting, naming one header, so "trust both" and "trust neither" are
+/// not states this can be configured into. XFCC used to be read
+/// unconditionally *and* preferred over the nginx header — Envoy is not
+/// deployed, and nginx has no reason to strip a header it doesn't use, so a
+/// client could set it themselves and override the genuinely-verified
+/// certificate.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ClientCertHeader {
+	/// nginx: `mtls-certificate`, falling back to `ssl-client-cert`. The live
+	/// ingress path, and the default.
+	#[default]
+	Mtls,
+	/// Envoy: `x-forwarded-client-cert`. Select this when the Envoy ingress
+	/// is what fronts this server.
+	Xfcc,
 }
 
-impl Default for TrustedCertHeaders {
-	fn default() -> Self {
-		Self {
-			mtls_header: true,
-			xfcc: false,
-		}
-	}
-}
-
-impl TrustedCertHeaders {
-	fn from_env() -> Self {
-		let default = Self::default();
-		let me = Self {
-			mtls_header: env_flag(MTLS_HEADER_ENV, default.mtls_header),
-			xfcc: env_flag(XFCC_ENV, default.xfcc),
+impl ClientCertHeader {
+	/// Read the configured header from the environment. Called once when a
+	/// server's state is built.
+	pub fn from_env() -> Self {
+		let Ok(raw) = std::env::var(CERT_HEADER_ENV) else {
+			return Self::default();
 		};
-		if !me.mtls_header && !me.xfcc {
-			warn!(
-				"both {MTLS_HEADER_ENV} and {XFCC_ENV} are off: no client-certificate header \
-				 is trusted, so mTLS device auth cannot succeed"
-			);
-		}
-		if me.mtls_header && me.xfcc {
-			warn!(
-				"both {MTLS_HEADER_ENV} and {XFCC_ENV} are on: only the ingress actually in \
-				 front of this server should be trusted, or the other header can be spoofed"
-			);
-		}
-		me
-	}
-}
-
-/// Parse a boolean env var, falling back to `default` when unset, empty, or
-/// unrecognised. An unrecognised value warns rather than silently flipping a
-/// security-relevant switch.
-fn env_flag(key: &str, default: bool) -> bool {
-	let Ok(raw) = std::env::var(key) else {
-		return default;
-	};
-	match raw.trim().to_ascii_lowercase().as_str() {
-		"" => default,
-		"1" | "true" | "yes" | "on" => true,
-		"0" | "false" | "no" | "off" => false,
-		other => {
-			warn!("{key}: unrecognised value {other:?}, keeping the default ({default})");
-			default
+		match raw.trim().to_ascii_lowercase().as_str() {
+			"" => Self::default(),
+			"mtls" | "mtls-certificate" | "nginx" => Self::Mtls,
+			"xfcc" | "x-forwarded-client-cert" | "envoy" => Self::Xfcc,
+			other => {
+				// Never guess on a security switch: an unrecognised value
+				// keeps the live path rather than silently trusting another.
+				warn!(
+					"{CERT_HEADER_ENV}: unrecognised value {other:?}, keeping the default \
+					 ({:?}). Valid values are \"mtls\" and \"xfcc\".",
+					Self::default()
+				);
+				Self::default()
+			}
 		}
 	}
-}
-
-static FROM_ENV: LazyLock<TrustedCertHeaders> = LazyLock::new(TrustedCertHeaders::from_env);
-static OVERRIDE: OnceLock<TrustedCertHeaders> = OnceLock::new();
-
-/// Force the trusted-header set instead of reading the environment. First
-/// call wins; later calls return the value already in force.
-///
-/// For harnesses that stand in for a trusted ingress and need to exercise
-/// both header paths. Production reads the environment.
-pub fn force_trusted_cert_headers(
-	trusted: TrustedCertHeaders,
-) -> std::result::Result<(), TrustedCertHeaders> {
-	OVERRIDE.set(trusted)
-}
-
-fn trusted() -> TrustedCertHeaders {
-	OVERRIDE.get().copied().unwrap_or(*FROM_ENV)
 }
 
 /// Resolve a request to a [`Device`] via mTLS. Returns:
@@ -122,8 +74,12 @@ fn trusted() -> TrustedCertHeaders {
 /// - `Ok(None)` — no cert header at all (caller may try another path).
 /// - `Err(AuthCertificateNotFound)` — cert present but its key is unknown.
 /// - `Err(_)` — header present but malformed.
-pub async fn resolve(parts: &Parts, db: &mut AsyncPgConnection) -> Result<Option<Device>> {
-	let Some(key) = spki_from_headers(&parts.headers)? else {
+pub async fn resolve(
+	parts: &Parts,
+	db: &mut AsyncPgConnection,
+	trusted: ClientCertHeader,
+) -> Result<Option<Device>> {
+	let Some(key) = spki_from_headers(&parts.headers, trusted)? else {
 		return Ok(None);
 	};
 
@@ -137,8 +93,11 @@ pub async fn resolve(parts: &Parts, db: &mut AsyncPgConnection) -> Result<Option
 /// from the request headers, *without* touching the database or creating a
 /// device. Returns `Ok(None)` when no cert header is present. The enrollment
 /// endpoints use this to own device resolution themselves.
-pub fn spki_from_headers(headers: &http::HeaderMap) -> Result<Option<Vec<u8>>> {
-	let Some(pem) = extract_cert_pem(headers)? else {
+pub fn spki_from_headers(
+	headers: &http::HeaderMap,
+	trusted: ClientCertHeader,
+) -> Result<Option<Vec<u8>>> {
+	let Some(pem) = extract_cert_pem_with(headers, trusted)? else {
 		return Ok(None);
 	};
 
@@ -151,29 +110,22 @@ pub fn spki_from_headers(headers: &http::HeaderMap) -> Result<Option<Vec<u8>>> {
 	Ok(Some(cert.tbs_certificate.subject_pki.raw.to_vec()))
 }
 
-fn extract_cert_pem(headers: &http::HeaderMap) -> Result<Option<String>> {
-	extract_cert_pem_with(headers, trusted())
-}
-
 /// [`extract_cert_pem`] against an explicit trust configuration, so the
 /// gating is testable without touching process-wide env.
 fn extract_cert_pem_with(
 	headers: &http::HeaderMap,
-	trusted: TrustedCertHeaders,
+	trusted: ClientCertHeader,
 ) -> Result<Option<String>> {
-	// Prefer x-forwarded-client-cert (Envoy XFCC format) when trusted and
-	// present, falling back to mtls-certificate and ssl-client-cert headers.
-	let xfcc_cert = trusted
-		.xfcc
-		.then(|| {
-			headers
-				.get("x-forwarded-client-cert")
-				.and_then(|v| v.to_str().ok())
-				.and_then(xfcc_client_cert)
-		})
-		.flatten();
-
-	if let Some(cert_value) = xfcc_cert {
+	// Only the header the configured ingress sets is read. Any other is
+	// client-supplied as far as this server can tell.
+	if trusted == ClientCertHeader::Xfcc {
+		let Some(cert_value) = headers
+			.get("x-forwarded-client-cert")
+			.and_then(|v| v.to_str().ok())
+			.and_then(xfcc_client_cert)
+		else {
+			return Ok(None);
+		};
 		return Ok(Some(
 			percent_encoding::percent_decode(cert_value.as_bytes())
 				.decode_utf8()
@@ -184,9 +136,6 @@ fn extract_cert_pem_with(
 		));
 	}
 
-	if !trusted.mtls_header {
-		return Ok(None);
-	}
 	let Some(value) = headers
 		.get("mtls-certificate")
 		.or_else(|| headers.get("ssl-client-cert"))
@@ -338,27 +287,26 @@ mod tests {
 		h
 	}
 
-	fn extracted(pairs: &[(&str, &str)], trusted: TrustedCertHeaders) -> Option<String> {
+	fn extracted(pairs: &[(&str, &str)], trusted: ClientCertHeader) -> Option<String> {
 		extract_cert_pem_with(&headers(pairs), trusted).expect("well-formed headers")
 	}
 
-	/// The shipped default: nginx's header is honoured, Envoy's is not.
+	/// The shipped default is the live ingress path.
 	#[test]
-	fn defaults_trust_the_nginx_header_only() {
-		let d = TrustedCertHeaders::default();
-		assert!(d.mtls_header && !d.xfcc);
+	fn the_default_is_the_nginx_header() {
+		assert_eq!(ClientCertHeader::default(), ClientCertHeader::Mtls);
 	}
 
-	/// The bug this gate exists for. Envoy is not deployed, and nginx has no
+	/// The bug the gate exists for. Envoy is not deployed, and nginx has no
 	/// reason to strip a header it doesn't use, so an untrusted caller could
 	/// set XFCC itself — and it was *preferred* over the header nginx
 	/// actually verifies.
 	#[test]
-	fn xfcc_is_ignored_by_default_even_when_present() {
+	fn xfcc_is_ignored_on_the_nginx_path() {
 		assert_eq!(
 			extracted(
 				&[("x-forwarded-client-cert", &format!("Cert={PEM}"))],
-				TrustedCertHeaders::default(),
+				ClientCertHeader::Mtls,
 			),
 			None,
 			"an untrusted XFCC header must not authenticate anything",
@@ -367,7 +315,7 @@ mod tests {
 
 	/// And it must not be able to override the genuinely-verified one.
 	#[test]
-	fn untrusted_xfcc_cannot_override_the_nginx_header() {
+	fn xfcc_cannot_override_the_nginx_header() {
 		let nginx = "-----BEGIN%20CERTIFICATE-----NGINX";
 		assert_eq!(
 			extracted(
@@ -375,91 +323,63 @@ mod tests {
 					("x-forwarded-client-cert", &format!("Cert={PEM}")),
 					("mtls-certificate", nginx),
 				],
-				TrustedCertHeaders::default(),
+				ClientCertHeader::Mtls,
 			)
 			.as_deref(),
 			Some("-----BEGIN CERTIFICATE-----NGINX"),
 		);
 	}
 
+	/// The mirror image: on the Envoy path the nginx headers are the
+	/// client-supplied ones, and must not be read either.
 	#[test]
-	fn xfcc_is_honoured_once_enabled() {
+	fn the_nginx_headers_are_ignored_on_the_envoy_path() {
+		for header in ["mtls-certificate", "ssl-client-cert"] {
+			assert_eq!(
+				extracted(&[(header, PEM)], ClientCertHeader::Xfcc),
+				None,
+				"{header} must not be read on the Envoy path",
+			);
+		}
+	}
+
+	#[test]
+	fn xfcc_is_honoured_on_the_envoy_path() {
 		assert_eq!(
 			extracted(
 				&[("x-forwarded-client-cert", &format!("Cert={PEM}"))],
-				TrustedCertHeaders {
-					mtls_header: false,
-					xfcc: true,
-				},
+				ClientCertHeader::Xfcc,
 			)
 			.as_deref(),
 			Some("-----BEGIN CERTIFICATE-----A"),
 		);
 	}
 
-	/// Turning the nginx path off must actually stop it being read — that's
-	/// the whole point of the switch for the eventual Envoy cutover.
 	#[test]
-	fn the_nginx_header_is_ignored_when_disabled() {
-		for header in ["mtls-certificate", "ssl-client-cert"] {
+	fn env_parses_both_spellings_and_keeps_the_default_otherwise() {
+		let key = CERT_HEADER_ENV;
+		for (raw, expected) in [
+			("mtls", ClientCertHeader::Mtls),
+			("nginx", ClientCertHeader::Mtls),
+			(" MTLS ", ClientCertHeader::Mtls),
+			("xfcc", ClientCertHeader::Xfcc),
+			("envoy", ClientCertHeader::Xfcc),
+			("X-Forwarded-Client-Cert", ClientCertHeader::Xfcc),
+		] {
+			// SAFETY: single-threaded test; the key is only read here.
+			unsafe { std::env::set_var(key, raw) };
+			assert_eq!(ClientCertHeader::from_env(), expected, "{raw:?}");
+		}
+		// Empty or unrecognised keeps the live path rather than guessing.
+		for raw in ["", "   ", "both", "none", "true"] {
+			unsafe { std::env::set_var(key, raw) };
 			assert_eq!(
-				extracted(
-					&[(header, PEM)],
-					TrustedCertHeaders {
-						mtls_header: false,
-						xfcc: true,
-					},
-				),
-				None,
-				"{header} must not be read once disabled",
+				ClientCertHeader::from_env(),
+				ClientCertHeader::Mtls,
+				"{raw:?} must not select a non-default header",
 			);
 		}
-	}
-
-	#[test]
-	fn nothing_is_read_when_both_are_off() {
-		let off = TrustedCertHeaders {
-			mtls_header: false,
-			xfcc: false,
-		};
-		assert_eq!(
-			extracted(
-				&[
-					("x-forwarded-client-cert", &format!("Cert={PEM}")),
-					("mtls-certificate", PEM),
-				],
-				off,
-			),
-			None,
-		);
-	}
-
-	#[test]
-	fn env_flag_parses_both_spellings_and_keeps_the_default_otherwise() {
-		// SAFETY: single-threaded test, and the key is unique to it.
-		let key = "CANOPY_TEST_DEVICE_AUTH_FLAG";
-		for (raw, expected) in [
-			("1", true),
-			("true", true),
-			("ON", true),
-			(" yes ", true),
-			("0", false),
-			("false", false),
-			("Off", false),
-			("no", false),
-		] {
-			unsafe { std::env::set_var(key, raw) };
-			assert_eq!(env_flag(key, !expected), expected, "{raw:?}");
-		}
-		// Unrecognised and empty both keep the default rather than flipping
-		// a security switch on a typo.
-		for raw in ["", "  ", "maybe"] {
-			unsafe { std::env::set_var(key, raw) };
-			assert!(env_flag(key, true), "{raw:?} should keep default true");
-			assert!(!env_flag(key, false), "{raw:?} should keep default false");
-		}
 		unsafe { std::env::remove_var(key) };
-		assert!(env_flag(key, true));
-		assert!(!env_flag(key, false));
+		assert_eq!(ClientCertHeader::from_env(), ClientCertHeader::Mtls);
 	}
 }

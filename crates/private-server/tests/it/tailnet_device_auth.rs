@@ -81,6 +81,7 @@ async fn unknown_tailnet_node_is_rejected_without_creating_a_row() {
 		let db = database::init_to(&url);
 		let private_router = router(
 			private_server::routes(private_server::state::AppState {
+				client_cert_header: commons_servers::device_auth::mtls::ClientCertHeader::Xfcc,
 				db: db.clone(),
 				db_read: db,
 				ro_pool: None,

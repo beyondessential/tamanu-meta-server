@@ -34,7 +34,7 @@ async fn tags_endpoint_returns_group_tags_when_server_has_none() {
 
 			let response = public
 				.get("/tags")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			response.assert_status_ok();
 			let tags: HashMap<String, String> = response.json();
@@ -74,7 +74,7 @@ async fn tags_endpoint_overlays_server_tags_onto_group() {
 
 			let response = public
 				.get("/tags")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			response.assert_status_ok();
 			let tags: HashMap<String, String> = response.json();
@@ -108,7 +108,7 @@ async fn tags_endpoint_returns_server_tags_when_ungrouped() {
 
 			let response = public
 				.get("/tags")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			response.assert_status_ok();
 			let tags: HashMap<String, String> = response.json();
@@ -152,7 +152,7 @@ async fn tags_endpoint_includes_synthetic_server_attributes() {
 
 			let response = public
 				.get("/tags")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			response.assert_status_ok();
 			let tags: HashMap<String, String> = response.json();
@@ -201,7 +201,7 @@ async fn tags_endpoint_includes_effective_billing_labels() {
 
 			let response = public
 				.get("/tags")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			response.assert_status_ok();
 			let tags: HashMap<String, String> = response.json();
@@ -249,7 +249,7 @@ async fn tags_endpoint_server_billing_tags_win() {
 
 			let response = public
 				.get("/tags")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			response.assert_status_ok();
 			let tags: HashMap<String, String> = response.json();
@@ -293,7 +293,7 @@ async fn tags_endpoint_group_billing_tags_win_over_defaults() {
 
 			let response = public
 				.get("/tags")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			response.assert_status_ok();
 			let tags: HashMap<String, String> = response.json();
@@ -344,7 +344,7 @@ async fn tags_endpoint_billing_stage_is_per_server_rank() {
 
 			let response = public
 				.get("/tags")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			response.assert_status_ok();
 			let tags: HashMap<String, String> = response.json();
@@ -382,7 +382,7 @@ async fn tags_endpoint_no_billing_stage_when_server_unranked() {
 
 			let response = public
 				.get("/tags")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			response.assert_status_ok();
 			let tags: HashMap<String, String> = response.json();
@@ -413,7 +413,7 @@ async fn tags_endpoint_no_billing_labels_when_ungrouped() {
 
 			let response = public
 				.get("/tags")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			response.assert_status_ok();
 			let tags: HashMap<String, String> = response.json();
@@ -435,7 +435,7 @@ async fn tags_endpoint_412_when_device_has_no_server() {
 		async |mut _conn, cert, _device_id, public, _| {
 			let response = public
 				.get("/tags")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			response.assert_status(StatusCode::PRECONDITION_FAILED);
 		},

@@ -327,7 +327,7 @@ async fn artifacts_create_draft_version_if_not_found() {
 		async |mut conn, cert, device_id, public, _| {
 			let response = public
 				.post("/artifacts/999.999.999/installer/windows")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.text("https://example.com/installer.exe")
 				.await;
 			response.assert_status_ok();
@@ -363,7 +363,7 @@ async fn version_create_publishes_draft_if_exists() {
 			// First, create a draft version by creating an artifact
 			let response = public
 				.post("/artifacts/2.0.0/installer/windows")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.text("https://example.com/installer.exe")
 				.await;
 			response.assert_status_ok();
@@ -380,7 +380,7 @@ async fn version_create_publishes_draft_if_exists() {
 			let changelog = "# Version 2.0.0\n\nNew features and improvements";
 			let response = public
 				.post("/versions/2.0.0")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.text(changelog)
 				.await;
 			response.assert_status_ok();
@@ -421,7 +421,7 @@ async fn version_create_duplicate_published_fails() {
 			let changelog = "# Version 3.0.0\n\nDifferent changelog";
 			let response = public
 				.post("/versions/3.0.0")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.text(changelog)
 				.await;
 
@@ -694,7 +694,7 @@ async fn artifact_create_range_authenticated() {
 		async |_conn, cert, _device_id, public, _| {
 			let response = public
 				.post("/artifacts/1.0.x/installer/windows")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.text("https://example.com/installer-1.0.x.exe")
 				.await;
 
@@ -721,7 +721,7 @@ async fn artifact_create_range_invalid_pattern() {
 		async |_conn, cert, _device_id, public, _| {
 			let response = public
 				.post("/artifacts/invalid@@range/installer/windows")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.text("https://example.com/installer.exe")
 				.await;
 

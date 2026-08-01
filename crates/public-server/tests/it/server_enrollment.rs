@@ -57,7 +57,7 @@ async fn run_handshake(
 ) -> axum_test::TestResponse {
 	let begin = public
 		.post("/servers/register/begin")
-		.add_header("mtls-certificate", cert)
+		.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 		.json(&json!({"server_id": server_id, "token": token}))
 		.await;
 	begin.assert_status_ok();
@@ -72,7 +72,7 @@ async fn run_handshake(
 
 	public
 		.post("/servers/register/complete")
-		.add_header("mtls-certificate", cert)
+		.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 		.json(&json!({
 			"server_id": server_id,
 			"nonce": nonce_b64,
@@ -84,7 +84,7 @@ async fn run_handshake(
 /// Drive begin → sign → complete over the private-server's tailnet `/public`
 /// mount, where there is no client cert: the SPKI rides in the body. The
 /// `Forwarded` header makes the caller look like the tagged tailnet device the
-/// harness primed. `forged_cert`, if set, is sent as an `mtls-certificate`
+/// harness primed. `forged_cert`, if set, is sent as a client-certificate
 /// header to prove it is *ignored* on this transport. Returns the `complete`
 /// response.
 async fn run_tailnet_handshake(
@@ -103,7 +103,7 @@ async fn run_tailnet_handshake(
 		.post("/public/servers/register/begin")
 		.add_header("Forwarded", &fwd);
 	if let Some(cert) = forged_cert {
-		begin_req = begin_req.add_header("mtls-certificate", cert);
+		begin_req = begin_req.add_header("x-forwarded-client-cert", &format!("Cert={}", cert));
 	}
 	let begin = begin_req
 		.json(&json!({"server_id": server_id, "token": token, "spki": spki_b64}))
@@ -122,7 +122,8 @@ async fn run_tailnet_handshake(
 		.post("/public/servers/register/complete")
 		.add_header("Forwarded", &fwd);
 	if let Some(cert) = forged_cert {
-		complete_req = complete_req.add_header("mtls-certificate", cert);
+		complete_req =
+			complete_req.add_header("x-forwarded-client-cert", &format!("Cert={}", cert));
 	}
 	complete_req
 		.json(&json!({
@@ -208,7 +209,7 @@ async fn tailnet_ignores_the_mtls_certificate_header() {
 		async |mut conn, fwd_ip, _node, _dev, _public, private| {
 			use database::Device;
 			// Real device key (carried in the body) and a *different*, attacker-style
-			// cert sent in the (forgeable) mtls-certificate header.
+			// cert sent in the (forgeable) client-certificate header.
 			let (spki_real, _c, key_real) = make_signing_certificate();
 			let (spki_forged, cert_forged, _k) = make_signing_certificate();
 			let server = Server::create(&mut conn, new_server("https://ts-forge.example/"))
@@ -344,7 +345,7 @@ async fn enrollment_happy_path() {
 		// begin
 		let resp = public
 			.post("/servers/register/begin")
-			.add_header("mtls-certificate", &cert)
+			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 			.json(&json!({"server_id": server.id, "token": token}))
 			.await;
 		resp.assert_status_ok();
@@ -364,7 +365,7 @@ async fn enrollment_happy_path() {
 		// complete
 		let resp = public
 			.post("/servers/register/complete")
-			.add_header("mtls-certificate", &cert)
+			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 			.json(&json!({"server_id": server.id, "nonce": nonce_b64, "signature": sig_b64}))
 			.await;
 		resp.assert_status_ok();
@@ -397,7 +398,7 @@ async fn enrollment_bad_signature_is_opaque_and_keeps_token() {
 
 		let resp = public
 			.post("/servers/register/begin")
-			.add_header("mtls-certificate", &cert)
+			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 			.json(&json!({"server_id": server.id, "token": token}))
 			.await;
 		resp.assert_status_ok();
@@ -406,7 +407,7 @@ async fn enrollment_bad_signature_is_opaque_and_keeps_token() {
 		// garbage signature
 		let resp = public
 			.post("/servers/register/complete")
-			.add_header("mtls-certificate", &cert)
+			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 			.json(&json!({
 				"server_id": server.id,
 				"nonce": nonce_b64,
@@ -456,7 +457,7 @@ async fn enrollment_unknown_server_and_bad_token_are_opaque() {
 		// unknown server id
 		let resp = public
 			.post("/servers/register/begin")
-			.add_header("mtls-certificate", &cert)
+			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 			.json(&json!({"server_id": Uuid::new_v4(), "token": "whatever"}))
 			.await;
 		resp.assert_status_forbidden();
@@ -467,7 +468,7 @@ async fn enrollment_unknown_server_and_bad_token_are_opaque() {
 			.unwrap();
 		let resp = public
 			.post("/servers/register/begin")
-			.add_header("mtls-certificate", &cert)
+			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 			.json(&json!({"server_id": server.id, "token": "not-the-token"}))
 			.await;
 		resp.assert_status_forbidden();
@@ -554,7 +555,7 @@ async fn run_cb_handshake(
 ) -> (Value, axum_test::TestResponse) {
 	let begin = public
 		.post("/servers/register/begin")
-		.add_header("mtls-certificate", cert)
+		.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 		.json(&json!({"server_id": server_id, "token": token}))
 		.await;
 	begin.assert_status_ok();
@@ -573,7 +574,7 @@ async fn run_cb_handshake(
 
 	let mut complete_req = public
 		.post("/servers/register/complete")
-		.add_header("mtls-certificate", cert);
+		.add_header("x-forwarded-client-cert", &format!("Cert={}", cert));
 	if let Some(ekm) = header_ekm {
 		complete_req = complete_req.add_header(EKM_HEADER, b64().encode(ekm));
 	}
