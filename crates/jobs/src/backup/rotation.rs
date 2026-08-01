@@ -17,7 +17,12 @@ use std::{collections::BTreeMap, time::Duration};
 
 use anyhow::{Result, anyhow, bail};
 use commons_servers::{backup_jobs::slot_is_due, backup_secrets::generate_passphrase};
-use database::{BackupConfigStatus, ServerGroupBackupConfig};
+use commons_types::status::CheckResult;
+use database::{
+	BackupConfigStatus, ServerGroupBackupConfig,
+	backup::refs,
+	issues::{CheckFiling, Scope, file_check},
+};
 use jiff::Timestamp;
 use tokio::{
 	task::{self, JoinHandle},
@@ -157,6 +162,75 @@ fn reconcile_decision(
 	}
 }
 
+/// Raise the group-level [`refs::ROTATION_BROKEN`] alert.
+async fn file_broken_alert(
+	db: &mut diesel_async::AsyncPgConnection,
+	group_id: uuid::Uuid,
+	message: &str,
+) -> Result<(), commons_errors::AppError> {
+	file_check(
+		db,
+		CheckFiling {
+			source: database::statuses::CANOPY_SOURCE,
+			scope: Scope::Group(group_id),
+			device_id: None,
+			check: refs::ROTATION_BROKEN,
+			observed: CheckResult::Failed,
+			title: Some("backup repository opens with neither passphrase"),
+			message,
+			detail: None,
+			default_ceiling: CheckResult::Failed,
+			default_escalates: true,
+			documentation: Some(refs::ROTATION_BROKEN_DOC),
+		},
+	)
+	.await
+	.map(|_| ())
+}
+
+/// Clear the [`refs::ROTATION_BROKEN`] alert once the repo opens again.
+/// Filing `Passed` is a no-op when no alert is open.
+async fn clear_broken_alert(
+	db: &mut diesel_async::AsyncPgConnection,
+	group_id: uuid::Uuid,
+) -> Result<(), commons_errors::AppError> {
+	file_check(
+		db,
+		CheckFiling {
+			source: database::statuses::CANOPY_SOURCE,
+			scope: Scope::Group(group_id),
+			device_id: None,
+			check: refs::ROTATION_BROKEN,
+			observed: CheckResult::Passed,
+			title: None,
+			message: "backup repository opens again",
+			detail: None,
+			default_ceiling: CheckResult::Failed,
+			default_escalates: true,
+			documentation: Some(refs::ROTATION_BROKEN_DOC),
+		},
+	)
+	.await
+	.map(|_| ())
+}
+
+/// Run an alert write against a pooled connection, logging rather than
+/// propagating: these are bookkeeping around a verdict the caller has already
+/// reached, and a failure to record must not mask it.
+async fn with_db_best_effort<F>(worker: &Worker, group_id: uuid::Uuid, what: &str, f: F)
+where
+	F: AsyncFnOnce(&mut diesel_async::AsyncPgConnection) -> Result<(), commons_errors::AppError>,
+{
+	match worker.pool.get().await {
+		Ok(mut db) => {
+			if let Err(e) = f(&mut db).await {
+				error!(group = %group_id, "rotation reconcile: {what} failed: {e}");
+			}
+		}
+		Err(e) => error!(group = %group_id, "rotation reconcile: no db to {what}: {e}"),
+	}
+}
+
 /// Finish or abandon a rotation that crashed mid-flight (idempotent; safe to
 /// call before every rotation and on a recovery sweep).
 pub async fn reconcile(worker: &Worker, config: &ServerGroupBackupConfig) -> Result<()> {
@@ -197,18 +271,46 @@ pub async fn reconcile(worker: &Worker, config: &ServerGroupBackupConfig) -> Res
 		Recovery::Noop => Ok(()),
 		Recovery::Abandon => {
 			warn!(group = %config.group_id, "rotation reconcile: abandoning uncommitted candidate");
+			// Reaching either of these means a passphrase opened the repo, so
+			// a previously-filed broken alert no longer holds.
+			with_db_best_effort(
+				worker,
+				config.group_id,
+				"clear the broken-repo alert",
+				async |db| clear_broken_alert(db, config.group_id).await,
+			)
+			.await;
 			put(worker, secret_ref, &[(KEY_CURRENT, &current)]).await
 		}
 		Recovery::Promote => {
 			warn!(group = %config.group_id, "rotation reconcile: promoting committed candidate");
+			with_db_best_effort(
+				worker,
+				config.group_id,
+				"clear the broken-repo alert",
+				async |db| clear_broken_alert(db, config.group_id).await,
+			)
+			.await;
 			put(worker, secret_ref, &[(KEY_CURRENT, &next)]).await
 		}
 		Recovery::Broken => {
-			bail!(
+			let msg = format!(
 				"rotation reconcile for group {}: neither passphrase opens the repo \
 				 (possible kopia #3049 corruption — manual intervention required)",
 				config.group_id
+			);
+			// Backups and restores are both dead for this group and Canopy
+			// can't fix it — so this has to reach an operator, not just the
+			// log. `bail!` alone left the dashboard green while every device
+			// backup failed, until backup-staleness eventually noticed.
+			with_db_best_effort(
+				worker,
+				config.group_id,
+				"file the broken-repo alert",
+				async |db| file_broken_alert(db, config.group_id, &msg).await,
 			)
+			.await;
+			bail!(msg)
 		}
 	}
 }
@@ -320,5 +422,82 @@ mod tests {
 			reconcile_decision(Some("old"), Some("new"), false, false),
 			Recovery::Broken
 		);
+	}
+
+	/// A `Broken` verdict means backups *and* restores are dead for the group
+	/// and Canopy can't fix it on its own, so it has to reach an operator. It
+	/// used to only produce an `error!` line, leaving the dashboard green.
+	#[tokio::test(flavor = "multi_thread")]
+	async fn broken_repo_files_an_escalating_group_alert_and_clears() {
+		use diesel::{QueryableByName, sql_query, sql_types};
+		use diesel_async::{RunQueryDsl as _, SimpleAsyncConnection as _};
+
+		#[derive(QueryableByName, Debug)]
+		struct AlertRow {
+			#[diesel(sql_type = sql_types::Bool)]
+			active: bool,
+			#[diesel(sql_type = sql_types::Bool)]
+			escalates: bool,
+			#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+			effective_result: Option<String>,
+		}
+
+		async fn alerts(
+			conn: &mut diesel_async::AsyncPgConnection,
+			group: uuid::Uuid,
+		) -> Vec<AlertRow> {
+			sql_query(
+				"SELECT active, escalates, effective_result FROM issues \
+				 WHERE server_group_id = $1 AND source = $2 AND \"ref\" = $3",
+			)
+			.bind::<sql_types::Uuid, _>(group)
+			.bind::<sql_types::Text, _>(database::statuses::CANOPY_SOURCE)
+			.bind::<sql_types::Text, _>(refs::ROTATION_BROKEN)
+			.load::<AlertRow>(conn)
+			.await
+			.expect("query alerts")
+		}
+
+		commons_tests::db::TestDb::run(async |mut conn, _url| {
+			let group = uuid::Uuid::new_v4();
+			conn.batch_execute(&format!(
+				"INSERT INTO server_groups (id, name) VALUES ('{group}', 'Broken');"
+			))
+			.await
+			.expect("seed group");
+
+			file_broken_alert(&mut conn, group, "neither passphrase opens the repo")
+				.await
+				.expect("file");
+
+			let rows = alerts(&mut conn, group).await;
+			assert_eq!(
+				rows.len(),
+				1,
+				"the broken repo is filed as an alert, not just logged",
+			);
+			assert!(rows[0].active);
+			assert_eq!(rows[0].effective_result.as_deref(), Some("failed"));
+			assert!(
+				rows[0].escalates,
+				"restorability is already gone; this must not wait out incident grace",
+			);
+
+			// Re-filing each period coalesces rather than piling up new issues.
+			file_broken_alert(&mut conn, group, "still broken")
+				.await
+				.expect("file again");
+			assert_eq!(alerts(&mut conn, group).await.len(), 1);
+
+			// A later reconcile that opens the repo clears it.
+			clear_broken_alert(&mut conn, group).await.expect("clear");
+			let rows = alerts(&mut conn, group).await;
+			assert_eq!(rows.len(), 1, "the row survives as history");
+			assert!(
+				!rows[0].active,
+				"the alert clears when the repo opens again",
+			);
+		})
+		.await
 	}
 }
