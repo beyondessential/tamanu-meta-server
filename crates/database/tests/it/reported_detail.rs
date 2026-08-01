@@ -528,3 +528,45 @@ async fn merge_by_server_keeps_servers_apart() {
 	})
 	.await
 }
+
+/// An archived production server has stopped being part of the fleet, so
+/// what it last reported must not be counted among the versions in
+/// production. The `deleted_at` filter every sibling query carries was
+/// missing here at one point, letting an archived server contribute for as
+/// long as its last report stayed inside the active window.
+#[tokio::test(flavor = "multi_thread")]
+async fn production_versions_excludes_archived_servers() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let live = insert_production_server(&mut conn).await;
+		let archived = insert_production_server(&mut conn).await;
+
+		for (server, version) in [(live, "2.34.1"), (archived, "2.11.0")] {
+			ReportedDetail::record(
+				&mut conn,
+				server,
+				"alertd",
+				&json!({}),
+				Some(&version.parse().unwrap()),
+			)
+			.await
+			.unwrap();
+		}
+
+		database::servers::Server::soft_delete(&mut conn, archived)
+			.await
+			.expect("archive the server");
+
+		let versions: Vec<String> = ReportedDetail::production_versions(&mut conn)
+			.await
+			.expect("production versions")
+			.iter()
+			.map(ToString::to_string)
+			.collect();
+		assert_eq!(
+			versions,
+			vec!["2.34.1"],
+			"an archived server is not running anything",
+		);
+	})
+	.await
+}

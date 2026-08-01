@@ -505,3 +505,91 @@ async fn sweep_closes_issue_when_server_returns() {
 	})
 	.await
 }
+
+async fn insert_status_days_ago(
+	conn: &mut diesel_async::AsyncPgConnection,
+	server_id: Uuid,
+	days_ago: i32,
+) {
+	sql_query(
+		r#"
+			INSERT INTO statuses (server_id, created_at, extra)
+			VALUES ($1, NOW() - ($2 || ' days')::INTERVAL, '{}'::jsonb)
+		"#,
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Text, _>(days_ago.to_string())
+	.execute(conn)
+	.await
+	.expect("insert backdated status");
+}
+
+/// The sweep's backstop read the latest status through a fixed seven-day
+/// window, and took "absent from the window" for "never reported". That
+/// capped every per-server `alert_when_down_for` at seven days: a server
+/// allowed to be quiet for twenty was reported down the moment it passed
+/// seven.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_threshold_longer_than_the_status_window_is_honoured() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		// Allowed to be quiet for 20 days; last reported 10 days ago.
+		let id = insert_server(&mut conn, "http://slow.invalid/", 20 * 86400).await;
+		insert_status_days_ago(&mut conn, id, 10).await;
+
+		let filed = Status::sweep_staleness(&mut conn).await.expect("sweep");
+
+		assert_eq!(filed, 0, "10 days quiet is inside a 20-day threshold");
+		assert!(issue_for(&mut conn, id).await.is_none());
+	})
+	.await
+}
+
+/// And when such a server *is* past its threshold, the issue must say how
+/// long it has been quiet rather than claiming it never reported at all.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_long_quiet_server_is_not_reported_as_never_having_reported() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		// Allowed 9 days; last reported 12 days ago.
+		let id = insert_server(&mut conn, "http://quiet.invalid/", 9 * 86400).await;
+		insert_status_days_ago(&mut conn, id, 12).await;
+
+		let filed = Status::sweep_staleness(&mut conn).await.expect("sweep");
+		assert_eq!(filed, 1);
+
+		let issue = issue_for(&mut conn, id).await.expect("issue exists");
+		assert_eq!(issue.effective_result, Some(CheckResult::Failed));
+		assert!(
+			!issue.message.contains("has never reported"),
+			"this server has reported, 12 days ago: {}",
+			issue.message,
+		);
+		assert!(
+			issue.message.contains("has not reported for 12d"),
+			"expected the real elapsed time, got: {}",
+			issue.message,
+		);
+	})
+	.await
+}
+
+/// A server that genuinely has no status row at all still reads as never
+/// having reported — the unbounded probe finds nothing rather than nothing
+/// being looked for.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_with_no_status_at_all_still_reads_as_never_reported() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let id = insert_server(&mut conn, "http://silent.invalid/", 30 * 86400).await;
+
+		let filed = Status::sweep_staleness(&mut conn).await.expect("sweep");
+		assert_eq!(filed, 1);
+
+		let issue = issue_for(&mut conn, id).await.expect("issue exists");
+		assert_eq!(issue.effective_result, Some(CheckResult::Failed));
+		assert!(
+			issue.message.contains("has never reported"),
+			"got: {}",
+			issue.message,
+		);
+	})
+	.await
+}

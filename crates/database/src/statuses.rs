@@ -297,8 +297,27 @@ impl Status {
 		// Backstop for servers with no counted source (never reported, or
 		// only reached by pingtask): the latest status row, any source.
 		let statuses = Self::latest_for_servers(db, &server_ids).await?;
-		let status_map: HashMap<Uuid, Status> =
+		let mut status_map: HashMap<Uuid, Status> =
 			statuses.into_iter().map(|s| (s.server_id, s)).collect();
+
+		// A server absent from that seven-day window has not necessarily never
+		// reported — it may have reported longer ago than the window looks.
+		// Taking absence for "never" capped every per-server
+		// `alert_when_down_for` at seven days (a threshold of ten days could
+		// never be measured, so the server was down the moment it passed
+		// seven) and labelled the issue "has never reported" for a server with
+		// years of history. Probe the stragglers without a floor; there are
+		// few of them, and the fleet-wide fast path above is untouched.
+		let unseen: Vec<Uuid> = server_ids
+			.iter()
+			.copied()
+			.filter(|id| !status_map.contains_key(id))
+			.collect();
+		if !unseen.is_empty() {
+			for status in Self::latest_ever_for_servers(db, &unseen).await? {
+				status_map.insert(status.server_id, status);
+			}
+		}
 
 		let existing_issues =
 			Issue::list_by_source_ref(db, CANOPY_SOURCE, REACHABILITY_REF, &server_ids).await?;
@@ -603,6 +622,35 @@ impl Status {
 				SELECT * FROM statuses \
 				WHERE server_id = s.id \
 				AND created_at >= NOW() - INTERVAL '7 days' \
+				AND id != '00000000-0000-0000-0000-000000000000' \
+				ORDER BY created_at DESC LIMIT 1 \
+			 ) st",
+		)
+		.bind::<diesel::sql_types::Array<diesel::sql_types::Uuid>, _>(server_ids);
+
+		query.load::<Status>(db).await.map_err(AppError::from)
+	}
+
+	/// The most recent status for each server, however long ago it was.
+	///
+	/// [`Self::latest_for_servers`] caps its search at seven days so Postgres
+	/// can prune every partition older than that, which is what keeps the
+	/// fleet-wide sweep cheap. This one has no floor, so it costs an index
+	/// probe per partition per server. Use it for the few servers that fast
+	/// path didn't find — not in place of it.
+	pub async fn latest_ever_for_servers(
+		db: &mut AsyncPgConnection,
+		server_ids: &[Uuid],
+	) -> Result<Vec<Status>> {
+		if server_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		let query = diesel::sql_query(
+			"SELECT st.* FROM unnest($1) AS s(id) \
+			 CROSS JOIN LATERAL ( \
+				SELECT * FROM statuses \
+				WHERE server_id = s.id \
 				AND id != '00000000-0000-0000-0000-000000000000' \
 				ORDER BY created_at DESC LIMIT 1 \
 			 ) st",
