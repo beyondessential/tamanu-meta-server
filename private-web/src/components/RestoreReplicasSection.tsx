@@ -130,6 +130,7 @@ export default function RestoreReplicasSection({
 				name: r.name,
 				overdue_after: r.overdue_after,
 				params: r.params as Record<string, unknown>,
+				redacts: r.redacts,
 				enabled,
 			});
 			reload();
@@ -220,7 +221,10 @@ export default function RestoreReplicasSection({
 									</TableCell>
 									<TableCell>{r.overdue_after ?? "no bound"}</TableCell>
 									<TableCell>
-										<RedactionCell replica={r} />
+										<RedactionCell
+											replica={r}
+											activity={checks.status === "ok" ? checks.data : []}
+										/>
 									</TableCell>
 									<TableCell>
 										<ParamSummary params={r.params} />
@@ -423,7 +427,13 @@ function ParamFieldsEditor({
  * Canopy can't currently line up — a redacting declaration that quietly
  * restores nothing for a server, or resolves a manifest that was never
  * published, is otherwise indistinguishable from one that is working. */
-function RedactionCell({ replica }: { replica: RestoreReplicaView }) {
+function RedactionCell({
+	replica,
+	activity,
+}: {
+	replica: RestoreReplicaView;
+	activity: RestoreActivity[];
+}) {
 	if (!replica.redacts) {
 		return (
 			<Typography variant="body2" color="text.secondary">
@@ -432,9 +442,32 @@ function RedactionCell({ replica }: { replica: RestoreReplicaView }) {
 		);
 	}
 	const gaps = replica.redaction_gaps;
+	// What the declaration asks for is not what it got: the most recent
+	// report that carried a redaction says whether the replicas are actually
+	// masked, and a partial one is the case worth seeing from the list.
+	const reported = activity.find(
+		(c) =>
+			c.redaction_outcome != null &&
+			c.type === replica.type &&
+			c.intent === replica.intent &&
+			(replica.server_id == null || c.server_id === replica.server_id),
+	);
+	const state = reported?.redaction_outcome;
 	return (
 		<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
-			<Chip label="redacted" color="success" size="small" />
+			{state === "partial" || state === "failed" ? (
+				<Tooltip
+					title={
+						state === "partial"
+							? "Live and mostly masked, with columns in the clear."
+							: "No masking took effect; the replica is held on its previous data."
+					}
+				>
+					<Chip label={state} color="warning" size="small" />
+				</Tooltip>
+			) : (
+				<Chip label="redacted" color="success" size="small" />
+			)}
 			{gaps.length > 0 && (
 				<Tooltip
 					title={
@@ -1142,19 +1175,41 @@ function RedactionOutcomeChip({ check }: { check: RestoreActivity }) {
 	);
 }
 
+/** One labelled line of a report's promoted detail; renders nothing when the
+ * value is absent, so an unreported field leaves no empty row behind. */
+function DetailLine({
+	label,
+	value,
+}: {
+	label: string;
+	value: string | number | null | undefined;
+}) {
+	if (value == null) return null;
+	return (
+		<Typography variant="body2">
+			<Box component="span" sx={{ color: "text.secondary" }}>
+				{label}:{" "}
+			</Box>
+			{value}
+		</Typography>
+	);
+}
+
 /** One restore-activity row: a reported health check, or a restore inferred from
  * a credential issuance that never reported. When the consumer sent arbitrary
- * `health_details`, the row expands to reveal it as pretty-printed JSON; a `url`
- * in the details is surfaced as a link to the running replica. */
+ * `health_details`, or the report carried a redaction, the row expands to
+ * reveal them; a `url` in the details is surfaced as a link to the running
+ * replica. */
 function CheckRow({ check }: { check: RestoreActivity }) {
 	const [open, setOpen] = useState(false);
 	const url = healthUrl(check.health_details);
-	const hasDetails =
+	const hasHealthJson =
 		check.health_details != null &&
 		!(
 			typeof check.health_details === "object" &&
 			Object.keys(check.health_details).length === 0
 		);
+	const hasDetails = hasHealthJson || check.redaction_outcome != null;
 	return (
 		<>
 			<TableRow sx={hasDetails ? { "& > *": { borderBottom: "unset" } } : undefined}>
@@ -1212,25 +1267,50 @@ function CheckRow({ check }: { check: RestoreActivity }) {
 				<TableRow>
 					<TableCell sx={{ py: 0 }} colSpan={11}>
 						<Collapse in={open} timeout="auto" unmountOnExit>
-							<Box sx={{ my: 1 }}>
-								<Typography variant="caption" color="text.secondary">
-									Health details
-								</Typography>
-								<Box
-									component="pre"
-									sx={{
-										m: 0,
-										mt: 0.5,
-										p: 1,
-										fontSize: "0.75rem",
-										overflowX: "auto",
-										bgcolor: "action.hover",
-										borderRadius: 1,
-									}}
-								>
-									{JSON.stringify(check.health_details, null, 2)}
+							{check.redaction_outcome != null && (
+								<Box sx={{ my: 1 }}>
+									<Typography variant="caption" color="text.secondary">
+										Redaction
+									</Typography>
+									<Stack sx={{ mt: 0.5 }}>
+										<DetailLine label="Outcome" value={check.redaction_outcome} />
+										<DetailLine
+											label="Manifest version"
+											value={check.redaction_manifest_version}
+										/>
+										<DetailLine
+											label="Columns masked"
+											value={check.redaction_columns_masked}
+										/>
+										<DetailLine
+											label="Columns left in the clear"
+											value={check.redaction_columns_skipped}
+										/>
+										<DetailLine label="Error" value={check.redaction_error} />
+									</Stack>
 								</Box>
-							</Box>
+							)}
+							{hasHealthJson && (
+								<Box sx={{ my: 1 }}>
+									<Typography variant="caption" color="text.secondary">
+										Health details
+									</Typography>
+									<Box
+										component="pre"
+										sx={{
+											m: 0,
+											mt: 0.5,
+											p: 1,
+											fontSize: "0.75rem",
+											overflowX: "auto",
+											bgcolor: "action.hover",
+											borderRadius: 1,
+										}}
+									>
+										{JSON.stringify(check.health_details, null, 2)}
+									</Box>
+								</Box>
+							)}
 						</Collapse>
 					</TableCell>
 				</TableRow>

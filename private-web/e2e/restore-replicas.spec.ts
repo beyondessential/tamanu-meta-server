@@ -189,7 +189,7 @@ test.describe("restore replicas", () => {
 			consumerDeviceId: consumer,
 			groupId,
 			intent: "analytics",
-			name: "redacted-analytics",
+			name: "masked-analytics",
 			redacts: true,
 		});
 		// The restore is healthy and the redaction is not: two signals from one
@@ -213,12 +213,20 @@ test.describe("restore replicas", () => {
 
 		await page.goto(`/groups/${groupId}/backups`);
 
+		// The declaration asked for masking; what it got is what the list has
+		// to show, so a partial redaction reads as partial from the row.
 		await expect(
-			page.getByRole("row", { name: /redacted-analytics/ }),
-		).toContainText("redacted");
+			page.getByRole("row", { name: /masked-analytics/ }),
+		).toContainText("partial");
 		const reportRow = page.getByRole("row", { name: /analytics/ }).last();
 		await expect(reportRow).toContainText("healthy");
 		await expect(reportRow).toContainText("partial");
+
+		// The counts and manifest version are promoted out of the health-details
+		// JSON, so the columns left in the clear are readable without one.
+		await reportRow.getByRole("button", { name: /show health details/i }).click();
+		await expect(page.getByText("Columns left in the clear: 3")).toBeVisible();
+		await expect(page.getByText("Manifest version: 2.41.3")).toBeVisible();
 	});
 
 	test("a redacting declaration names the servers it can't redact", async ({
