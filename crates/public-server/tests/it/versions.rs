@@ -657,6 +657,53 @@ async fn artifact_specificity_conflict_resolution() {
 	.await
 }
 
+/// Deduplication has to be by key, not by adjacency. The SQL `ORDER BY` groups
+/// each type+platform together, but the specificity sort then hoists every
+/// exact artifact ahead of every range one. Any other exact artifact sorting
+/// after the duplicated key therefore lands between its exact and range rows,
+/// and they stop being neighbours.
+#[tokio::test(flavor = "multi_thread")]
+async fn artifact_specificity_dedups_non_adjacent_duplicates() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		let version_id = "cccccccc-cccc-cccc-cccc-ccccccccccc1";
+		let exact_windows = "dddddddd-dddd-dddd-dddd-ddddddddddd1";
+		let range_windows = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeee1";
+		let exact_android = "ffffffff-ffff-ffff-ffff-fffffffffff1";
+
+		// installer/windows is duplicated; mobile/android sorts after it, so the
+		// specificity sort yields [installer-exact, mobile-exact, installer-range]
+		// and the two installer rows are no longer adjacent.
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
+			('{version_id}', 1, 0, 1, 'v1.0.1', 'published');
+
+			INSERT INTO artifacts (id, version_id, platform, artifact_type, download_url, version_range_pattern) VALUES
+			('{exact_windows}', '{version_id}', 'windows', 'installer', 'https://example.com/exact.exe', NULL),
+			('{range_windows}', NULL, 'windows', 'installer', 'https://example.com/1x.exe', '1.x'),
+			('{exact_android}', '{version_id}', 'android', 'mobile', 'https://example.com/exact.apk', NULL)",
+		))
+		.await
+		.unwrap();
+
+		let response = public.get("/versions/1.0.1/artifacts").await;
+		response.assert_status_ok();
+		let artifacts: Vec<Artifact> = response.json();
+		let installers: Vec<&Artifact> = artifacts
+			.iter()
+			.filter(|a| a.platform == "windows" && a.artifact_type == "installer")
+			.collect();
+		assert_eq!(
+			installers.len(),
+			1,
+			"one entry per type+platform; got conflicting download URLs: {:?}",
+			installers.iter().map(|a| &a.download_url).collect::<Vec<_>>(),
+		);
+		assert_eq!(installers[0].id.to_string(), exact_windows.to_lowercase());
+		assert_eq!(artifacts.len(), 2, "windows installer + android mobile");
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn artifact_range_specificity_conflict_resolution() {
 	commons_tests::server::run(async |mut conn, public, _| {
