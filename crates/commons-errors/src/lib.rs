@@ -151,6 +151,13 @@ pub enum AppError {
 	/// (which can name roles/buckets/secrets) is logged server-side only.
 	#[error("upstream dependency failed: {0}")]
 	Upstream(String),
+
+	/// A passphrase rotation is in flight for the group, so the repository
+	/// password is about to change and must not be handed out. Maps to 503:
+	/// the caller should retry shortly, not treat this as a failure. Rotation
+	/// is one short operation, so the wait is seconds to low minutes.
+	#[error("a backup passphrase rotation is in progress for this group; retry shortly")]
+	BackupRotationInProgress,
 }
 
 impl AppError {
@@ -220,6 +227,7 @@ impl AppError {
 			Self::EnrollmentFailed => StatusCode::FORBIDDEN,
 			Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
 			Self::Upstream(_) => StatusCode::BAD_GATEWAY,
+			Self::BackupRotationInProgress => StatusCode::SERVICE_UNAVAILABLE,
 			_ => StatusCode::INTERNAL_SERVER_ERROR,
 		}
 	}
@@ -274,6 +282,7 @@ impl AppError {
 						Self::EnrollmentFailed => "enrollment-failed",
 						Self::RateLimited => "rate-limited",
 						Self::Upstream(_) => "upstream",
+						Self::BackupRotationInProgress => "backup-rotation-in-progress",
 						Self::Problem(_) => unreachable!(),
 					}
 				))

@@ -17,7 +17,7 @@ use std::{collections::BTreeMap, time::Duration};
 
 use anyhow::{Result, anyhow, bail};
 use commons_servers::{backup_jobs::slot_deadline_due_in, backup_secrets::generate_passphrase};
-use database::{BackupConfigStatus, ServerGroupBackupConfig};
+use database::{BackupConfigStatus, ServerGroupBackupConfig, backups::BackupCredentialIssuance};
 use jiff::Timestamp;
 use tokio::{
 	task::{self, JoinHandle},
@@ -101,6 +101,41 @@ pub async fn rotate_to(
 	new: &str,
 ) -> Result<()> {
 	let secret_ref = &config.repo_password_ref;
+	let group_id = config.group_id;
+
+	// 0. Don't rotate out from under a device that is mid-backup.
+	//
+	// `kopia change-password` rewrites the repository's format blob, so the
+	// passphrase a device is holding stops working the moment it lands.
+	// Devices get that passphrase from `GET /backup-target` along with
+	// credentials good for an hour, and nothing in that path touches the
+	// worker's per-group slot — that slot only excludes maintenance,
+	// inspection and init, and only within this process.
+	//
+	// So: claim a cross-process interlock, then re-check for live
+	// credentials. Claiming first closes the window where an issuance lands
+	// between the check and the rotation; the public server refuses to issue
+	// while the interlock is held. Deferring is cheap — rotation is
+	// deadline-with-catch-up, so it retries next tick and goes through as
+	// soon as the outstanding credentials expire.
+	let mut db = worker.pool.get().await?;
+	let claimed =
+		ServerGroupBackupConfig::begin_passphrase_rotation(&mut db, group_id, Timestamp::now())
+			.await?;
+	if !claimed {
+		debug!(group = %group_id, "rotation deferred: another rotation holds the interlock");
+		return Ok(());
+	}
+	let guard = RotationInterlock {
+		worker: worker.clone(),
+		group_id,
+	};
+	if BackupCredentialIssuance::any_live_for_group(&mut db, group_id, Timestamp::now()).await? {
+		debug!(group = %group_id, "rotation deferred: a device holds live backup credentials");
+		return Ok(());
+	}
+	drop(db);
+
 	let creds = worker
 		.creds
 		.resolve(&config.maintenance_role_arn, config.region.as_deref())
@@ -141,7 +176,37 @@ pub async fn rotate_to(
 			warn!(group = %config.group_id, "passphrase rotated but stamping it failed: {e}")
 		}
 	}
+	drop(guard);
 	Ok(())
+}
+
+/// Releases the rotation interlock on drop, so an error or an early return
+/// can't leave credential issuance blocked. The marker is timestamped as a
+/// second line of defence against the process dying outright.
+struct RotationInterlock {
+	worker: Worker,
+	group_id: uuid::Uuid,
+}
+
+impl Drop for RotationInterlock {
+	fn drop(&mut self) {
+		let worker = self.worker.clone();
+		let group_id = self.group_id;
+		task::spawn(async move {
+			match worker.pool.get().await {
+				Ok(mut db) => {
+					if let Err(e) =
+						ServerGroupBackupConfig::end_passphrase_rotation(&mut db, group_id).await
+					{
+						warn!(group = %group_id, "releasing the rotation interlock failed: {e}");
+					}
+				}
+				Err(e) => {
+					warn!(group = %group_id, "releasing the rotation interlock failed: {e}")
+				}
+			}
+		});
+	}
 }
 
 /// Outcome of inspecting a (possibly) half-done rotation.

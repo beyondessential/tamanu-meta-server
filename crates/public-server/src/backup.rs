@@ -100,6 +100,26 @@ async fn require_ready_config(
 			"group backup config is not ready".into(),
 		));
 	}
+	// Both callers hand a device what it needs to start a backup — the
+	// short-lived S3 credentials, and the repository passphrase. Neither may
+	// go out while a rotation is in flight: `kopia change-password` rewrites
+	// the format blob, so a run started now would fail partway with a
+	// passphrase that stopped working under it.
+	//
+	// A marker older than the rotation window is a rotation whose process
+	// died; it's ignored (and logged), so a crash can't block a group's
+	// backups indefinitely.
+	if let Some(since) = cfg.repo_password_rotating_since {
+		let age = Timestamp::now().duration_since(since);
+		if age < database::backups::ROTATION_WINDOW {
+			return Err(AppError::BackupRotationInProgress);
+		}
+		tracing::warn!(
+			group = %group_id,
+			?age,
+			"ignoring a stale passphrase-rotation marker; a rotation likely died without clearing it",
+		);
+	}
 	Ok(cfg)
 }
 

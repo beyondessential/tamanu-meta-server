@@ -462,6 +462,7 @@ diesel::table! {
 		force_full_maintenance_at -> Nullable<Timestamptz>,
 		force_full_maintenance_by -> Nullable<Text>,
 		repo_password_rotated_at -> Nullable<Timestamptz>,
+		repo_password_rotating_since -> Nullable<Timestamptz>,
 	}
 }
 

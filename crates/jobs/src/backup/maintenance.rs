@@ -506,6 +506,7 @@ mod tests {
 			force_full_maintenance_at: None,
 			force_full_maintenance_by: None,
 			repo_password_rotated_at: None,
+			repo_password_rotating_since: None,
 		}
 	}
 

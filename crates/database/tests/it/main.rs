@@ -26,6 +26,7 @@ mod reachability_sweep;
 mod recovery_vault;
 mod reported_detail;
 mod restore;
+mod rotation_interlock;
 mod scope;
 mod scoped_check_policies;
 mod self_alerts;

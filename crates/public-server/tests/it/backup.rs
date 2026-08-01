@@ -731,3 +731,61 @@ async fn credentials_restore_sends_session_policy() {
 	})
 	.await;
 }
+
+// --- passphrase-rotation interlock ------------------------------------------
+
+/// While a rotation is in flight the repository passphrase is about to change,
+/// so a device must not be handed the credentials to start a backup with it —
+/// `kopia change-password` would kill the run partway through.
+#[tokio::test(flavor = "multi_thread")]
+async fn credentials_during_a_rotation_is_503() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let group_id = make_group(&mut conn).await;
+			let server_id = make_server(&mut conn, device_id, Some(group_id)).await;
+			make_config(&mut conn, group_id, "ready").await;
+			enable_capability(&mut conn, server_id, "tamanu-postgres").await;
+
+			database::backups::ServerGroupBackupConfig::begin_passphrase_rotation(
+				&mut conn,
+				group_id,
+				jiff::Timestamp::now(),
+			)
+			.await
+			.expect("claim the interlock");
+
+			let resp = public
+				.post("/backup-credentials")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "type": "tamanu-postgres" }))
+				.await;
+			resp.assert_status(http::StatusCode::SERVICE_UNAVAILABLE);
+
+			// And the passphrase itself is withheld on the same grounds.
+			let target = public
+				.get("/backup-target")
+				.add_header("mtls-certificate", &cert)
+				.await;
+			target.assert_status(http::StatusCode::SERVICE_UNAVAILABLE);
+
+			// Once the rotation finishes, issuance resumes.
+			database::backups::ServerGroupBackupConfig::end_passphrase_rotation(
+				&mut conn, group_id,
+			)
+			.await
+			.expect("release");
+			let resp = public
+				.post("/backup-credentials")
+				.add_header("mtls-certificate", &cert)
+				.json(&serde_json::json!({ "type": "tamanu-postgres" }))
+				.await;
+			assert_ne!(
+				resp.status_code(),
+				http::StatusCode::SERVICE_UNAVAILABLE,
+				"the interlock must not outlive the rotation",
+			);
+		},
+	)
+	.await;
+}
