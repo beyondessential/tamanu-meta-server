@@ -9,7 +9,10 @@ use commons_types::{
 };
 use database::{
 	backup::staleness::{StalenessVerdict, scan_rows},
-	backups::{BackupMaintenanceRun, BackupRun, ServerGroupBackupConfig},
+	backups::{
+		BackupMaintenanceRun, BackupMaintenanceRunFilters, BackupRun, BackupRunFilters,
+		MaintenanceOutcomeFilter, ServerGroupBackupConfig,
+	},
 	server_groups::ServerGroup,
 	servers::Server,
 	statuses::Status,
@@ -32,6 +35,11 @@ use crate::{
 const STUCK_MAINTENANCE_AFTER: SignedDuration = SignedDuration::from_hours(6);
 /// Only the last day of failed runs is surfaced, to bound noise.
 const FAILED_RUN_WINDOW: SignedDuration = SignedDuration::from_hours(24);
+/// Cap on how many problem rows of one kind a single group can contribute,
+/// so one pathological group can't drown out the rest of the fleet. Applied
+/// to the already-filtered set, so it bounds real problems rather than
+/// deciding which ones get looked at.
+const PROBLEM_LIMIT: i64 = 20;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct FindBackupProblemsArgs {
@@ -233,34 +241,53 @@ impl CanopyMcp {
 					since: None,
 				});
 			}
-			for run in BackupRun::list_for_group(&mut conn, c.group_id, 20)
-				.await
-				.map_err(mcp_err)?
+			// Failures within the window, selected in SQL. Scanning the N
+			// newest runs and time-filtering afterwards shrinks the advertised
+			// 24h window for exactly the groups that back up most often: a
+			// failure eight hours ago disappears behind the successes that
+			// followed it.
+			for run in BackupRun::list_filtered(
+				&mut conn,
+				BackupRunFilters {
+					group_id: Some(c.group_id),
+					outcome: Some(RunOutcome::Failure),
+					since: Some(now - FAILED_RUN_WINDOW),
+					..Default::default()
+				},
+				PROBLEM_LIMIT,
+			)
+			.await
+			.map_err(mcp_err)?
 			{
-				if run.outcome == RunOutcome::Failure
-					&& now.duration_since(run.reported_at) <= FAILED_RUN_WINDOW
-				{
-					problems.push(BackupProblem {
-						kind: "failed_run",
-						severity: "warning",
-						group_id: c.group_id,
-						server_id: run.server_id,
-						r#type: Some(run.r#type.to_string()),
-						detail: run
-							.error
-							.clone()
-							.unwrap_or_else(|| "backup run failed".into()),
-						since: Some(run.reported_at),
-					});
-				}
+				problems.push(BackupProblem {
+					kind: "failed_run",
+					severity: "warning",
+					group_id: c.group_id,
+					server_id: run.server_id,
+					r#type: Some(run.r#type.to_string()),
+					detail: run
+						.error
+						.clone()
+						.unwrap_or_else(|| "backup run failed".into()),
+					since: Some(run.reported_at),
+				});
 			}
-			for m in BackupMaintenanceRun::list_for_group(&mut conn, c.group_id, 5)
-				.await
-				.map_err(mcp_err)?
+			// Same shape: still-running maintenance is selected in SQL rather
+			// than found among the few newest runs, so a stuck run can't be
+			// pushed out of view by later ones.
+			for m in BackupMaintenanceRun::list_filtered(
+				&mut conn,
+				BackupMaintenanceRunFilters {
+					group_id: Some(c.group_id),
+					outcome: Some(MaintenanceOutcomeFilter::Running),
+					..Default::default()
+				},
+				PROBLEM_LIMIT,
+			)
+			.await
+			.map_err(mcp_err)?
 			{
-				if m.finished_at.is_none()
-					&& now.duration_since(m.started_at) > STUCK_MAINTENANCE_AFTER
-				{
+				if now.duration_since(m.started_at) > STUCK_MAINTENANCE_AFTER {
 					problems.push(BackupProblem {
 						kind: "stuck_maintenance",
 						severity: "warning",
