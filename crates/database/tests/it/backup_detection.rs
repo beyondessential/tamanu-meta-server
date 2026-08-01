@@ -661,6 +661,112 @@ async fn reconcile_files_missing_when_report_fresh_but_no_snapshot() {
 	.await;
 }
 
+/// The case the "missing" verdict exists for: a device reports success while
+/// nothing lands in the repo, so the inspection job — which only writes rows
+/// for sources it actually finds — never creates a snapshot row for the pair.
+/// Inventory freshness has to come from the *group's* last inspection, not
+/// from the absent row, or the alert can never fire.
+#[tokio::test(flavor = "multi_thread")]
+async fn reconcile_files_missing_when_report_fresh_and_the_pair_has_no_snapshot_row() {
+	TestDb::run(|mut conn, _url| async move {
+		let pg = BackupType::TamanuPostgres;
+		let interval = SignedDuration::from_hours(12);
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id, true).await;
+		let other_id = insert_server(&mut conn, group_id, true).await;
+		let device_id = insert_device(&mut conn).await;
+
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
+		insert_schedule(&mut conn, group_id, &pg, interval).await;
+		enable_capability(&mut conn, server_id, &pg).await;
+
+		// Fresh report for our server...
+		insert_backup_success_aged(
+			&mut conn,
+			device_id,
+			group_id,
+			server_id,
+			&pg,
+			SignedDuration::from_hours(2),
+		)
+		.await;
+		// ...and the inspector ran recently, but only found another server's
+		// source — nothing for ours.
+		BackupRepoSnapshot::upsert(
+			&mut conn,
+			group_id,
+			&format!("canopy@{other_id}:/data"),
+			Some(other_id),
+			Some(&pg),
+			Some(Timestamp::now() - SignedDuration::from_hours(2)),
+		)
+		.await
+		.expect("upsert other server's snapshot");
+
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan");
+		database::backup::reconcile::sweep(&mut conn, &rows)
+			.await
+			.expect("reconcile sweep");
+
+		let mref = typed_ref(refs::RECONCILE_MISSING, &pg);
+		let issue = group_issue(&mut conn, group_id, &mref)
+			.await
+			.expect("reconcile-missing issue filed for the pair with no snapshot");
+		assert_eq!(issue.effective_result.as_deref(), Some("failed"));
+		assert!(issue.active);
+	})
+	.await;
+}
+
+/// The freshness guard still holds: a group the inspector has never run
+/// against has no inventory to conclude "nothing landed" from, so the missing
+/// verdict defers to the inspection job's own failure surfacing.
+#[tokio::test(flavor = "multi_thread")]
+async fn reconcile_skips_missing_when_the_group_was_never_inspected() {
+	TestDb::run(|mut conn, _url| async move {
+		let pg = BackupType::TamanuPostgres;
+		let interval = SignedDuration::from_hours(12);
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id, true).await;
+		let device_id = insert_device(&mut conn).await;
+
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
+		insert_schedule(&mut conn, group_id, &pg, interval).await;
+		enable_capability(&mut conn, server_id, &pg).await;
+		insert_backup_success_aged(
+			&mut conn,
+			device_id,
+			group_id,
+			server_id,
+			&pg,
+			SignedDuration::from_hours(2),
+		)
+		.await;
+		// No `backup_repo_snapshots` rows at all for the group.
+
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan");
+		database::backup::reconcile::sweep(&mut conn, &rows)
+			.await
+			.expect("reconcile sweep");
+
+		assert!(
+			group_issue(
+				&mut conn,
+				group_id,
+				&typed_ref(refs::RECONCILE_MISSING, &pg)
+			)
+			.await
+			.is_none(),
+			"an uninspected group must not be accused of losing backups",
+		);
+	})
+	.await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn reconcile_clears_report_gap_when_report_and_snapshot_agree() {
 	TestDb::run(|mut conn, _url| async move {
