@@ -136,23 +136,15 @@ pub async fn effective_retention_for_group(
 	Ok(out)
 }
 
-/// Resolve the effective backup interval for one `(group, type)`: the schedule
-/// `expected_interval` override, else the type's `default_interval`. `None` ⇒
-/// manual-only (no scheduled cadence).
+/// Resolve the effective backup interval for one `(group, type)`: an override
+/// row's `expected_interval` (NULL there means manual-only), else the type's
+/// `default_interval`. `None` ⇒ manual-only (no scheduled cadence).
 async fn effective_interval_for_type(
 	db: &mut AsyncPgConnection,
 	group_id: Uuid,
 	ty: &BackupType,
 ) -> Result<Option<Duration>> {
-	let interval = match ServerGroupBackupSchedule::get(db, group_id, ty)
-		.await?
-		.and_then(|s| s.expected_interval)
-	{
-		Some(i) => Some(i),
-		None => BackupTypeDefault::get(db, ty)
-			.await?
-			.and_then(|d| d.default_interval),
-	};
+	let interval = database::backups::effective_interval(db, group_id, ty).await?;
 	// PgDuration wraps a jiff SignedDuration; whole seconds → Duration.
 	Ok(interval.map(|pg| Duration::from_secs(pg.0.as_secs().max(0) as u64)))
 }
