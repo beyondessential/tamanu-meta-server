@@ -743,7 +743,7 @@ async fn progress_unbound_device_is_412() {
 		async |_conn, cert, _device_id, public, _| {
 			let resp = public
 				.post("/backup-progress")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": Uuid::new_v4(),
 					"type": "tamanu-postgres",
@@ -763,7 +763,7 @@ async fn progress_ungrouped_server_is_409() {
 			make_server(&mut conn, device_id, None).await;
 			let resp = public
 				.post("/backup-progress")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": Uuid::new_v4(),
 					"type": "tamanu-postgres",
@@ -788,7 +788,7 @@ async fn progress_accepted_without_ready_config_or_capability() {
 			// No config row at all, and no registered capability.
 			let resp = public
 				.post("/backup-progress")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": Uuid::new_v4(),
 					"type": "tamanu-postgres",
@@ -813,7 +813,7 @@ async fn progress_records_counters_and_extra() {
 
 			let resp = public
 				.post("/backup-progress")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -868,7 +868,7 @@ async fn progress_after_report_is_accepted() {
 
 			public
 				.post("/backup-report")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -880,7 +880,7 @@ async fn progress_after_report_is_accepted() {
 
 			let resp = public
 				.post("/backup-progress")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -907,7 +907,7 @@ async fn progress_rate_limit_is_429() {
 			for _ in 0..61 {
 				let resp = public
 					.post("/backup-progress")
-					.add_header("mtls-certificate", &cert)
+					.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 					.json(&serde_json::json!({
 						"run_id": run_id,
 						"type": "tamanu-postgres",
@@ -945,7 +945,7 @@ async fn report_takes_snapshot_moment_from_progress() {
 			// Announced on the first sample, as a device does, and omitted after.
 			public
 				.post("/backup-progress")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -956,7 +956,7 @@ async fn report_takes_snapshot_moment_from_progress() {
 				.assert_status(http::StatusCode::NO_CONTENT);
 			public
 				.post("/backup-progress")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -969,7 +969,7 @@ async fn report_takes_snapshot_moment_from_progress() {
 			// must come from the *first* sample even though the last one has NULL.
 			public
 				.post("/backup-report")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -1007,7 +1007,7 @@ async fn progress_snapshot_moment_beats_the_report() {
 
 			public
 				.post("/backup-progress")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -1018,7 +1018,7 @@ async fn progress_snapshot_moment_beats_the_report() {
 
 			public
 				.post("/backup-report")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -1056,7 +1056,7 @@ async fn report_without_snapshot_moment_leaves_it_unset() {
 
 			public
 				.post("/backup-report")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -1093,7 +1093,7 @@ async fn report_backfills_omitted_figures_from_last_sample() {
 			for uploaded in [100_i64, 900] {
 				public
 					.post("/backup-progress")
-					.add_header("mtls-certificate", &cert)
+					.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 					.json(&serde_json::json!({
 						"run_id": run_id,
 						"type": "tamanu-postgres",
@@ -1109,7 +1109,7 @@ async fn report_backfills_omitted_figures_from_last_sample() {
 
 			public
 				.post("/backup-report")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -1150,7 +1150,7 @@ async fn report_figures_win_over_progress() {
 
 			public
 				.post("/backup-progress")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -1162,7 +1162,7 @@ async fn report_figures_win_over_progress() {
 
 			public
 				.post("/backup-report")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",
@@ -1200,7 +1200,7 @@ async fn report_without_any_progress_is_unchanged() {
 
 			public
 				.post("/backup-report")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"run_id": run_id,
 					"type": "tamanu-postgres",

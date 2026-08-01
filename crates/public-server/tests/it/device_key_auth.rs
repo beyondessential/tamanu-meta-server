@@ -87,7 +87,7 @@ async fn authentication_survives_unwritable_connection_history() {
 
 			let response = public
 				.post("/versions/1.0.1")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.text("changelog for 1.0.1")
 				.await;
 

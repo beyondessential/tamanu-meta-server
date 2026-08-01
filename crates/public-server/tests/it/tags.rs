@@ -485,7 +485,7 @@ async fn tags_endpoint_billing_product_is_the_servers_own() {
 
 			let response = public
 				.get("/tags")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			response.assert_status_ok();
 			let tags: HashMap<String, String> = response.json();
@@ -520,7 +520,7 @@ async fn tags_endpoint_ungrouped_server_has_no_billing_product() {
 
 			let response = public
 				.get("/tags")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			response.assert_status_ok();
 			let tags: HashMap<String, String> = response.json();

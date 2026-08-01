@@ -101,7 +101,7 @@ async fn entitlements_report_what_the_server_may_act_on() {
 
 			let resp = public
 				.get("/names/entitlements")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			resp.assert_status_ok();
 			let body: serde_json::Value = resp.json();
@@ -127,7 +127,7 @@ async fn entitlements_are_empty_rather_than_an_error_when_there_is_nothing() {
 
 			let resp = public
 				.get("/names/entitlements")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			resp.assert_status_ok();
 			let body: serde_json::Value = resp.json();
@@ -151,7 +151,7 @@ async fn a_domain_whose_zone_has_gone_is_not_offered() {
 
 			let resp = public
 				.get("/names/entitlements")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await;
 			resp.assert_status_ok();
 			let body: serde_json::Value = resp.json();
@@ -177,7 +177,7 @@ async fn registering_addresses_records_the_intent() {
 
 			let resp = public
 				.post("/names/register")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"name": "Central.Fiji.Tamanu.App.",
 					"addresses": ["192.0.2.1", "2001:db8::1"],
@@ -209,7 +209,7 @@ async fn each_refusal_is_distinguishable_by_problem_type() {
 			// No grant.
 			let resp = public
 				.post("/names/register")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({"name": "a.fiji.tamanu.app", "addresses": []}))
 				.await;
 			assert_eq!(problem_type(&resp.json()), "auth-insufficient-permissions");
@@ -224,7 +224,7 @@ async fn each_refusal_is_distinguishable_by_problem_type() {
 			// unclaimed or someone else's, so this is not a directory.
 			let resp = public
 				.post("/names/register")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({"name": "a.samoa.tamanu.app", "addresses": []}))
 				.await;
 			assert_eq!(problem_type(&resp.json()), "name-not-entitled");
@@ -238,7 +238,7 @@ async fn each_refusal_is_distinguishable_by_problem_type() {
 			.unwrap();
 			let resp = public
 				.post("/names/register")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({"name": "a.fiji.tamanu.app", "addresses": []}))
 				.await;
 			let body: serde_json::Value = resp.json();
@@ -269,7 +269,7 @@ async fn a_first_request_is_accepted_and_a_repeat_is_the_same_order() {
 
 			let resp = public
 				.post("/certificates/request")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({"name": "central.fiji.tamanu.app", "csr": csr}))
 				.await;
 			// 202: recorded, nothing to collect yet — proving control through DNS
@@ -283,7 +283,7 @@ async fn a_first_request_is_accepted_and_a_repeat_is_the_same_order() {
 			// Repeating is safe and does not open a second order.
 			let resp = public
 				.post("/certificates/request")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({"name": "central.fiji.tamanu.app", "csr": csr}))
 				.await;
 			resp.assert_status(axum::http::StatusCode::ACCEPTED);
@@ -312,7 +312,7 @@ async fn a_csr_carrying_another_name_is_refused_rather_than_trimmed() {
 			let csr = csr_for(&["central.fiji.tamanu.app", "central.samoa.tamanu.app"]);
 			let resp = public
 				.post("/certificates/request")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({"name": "central.fiji.tamanu.app", "csr": csr}))
 				.await;
 			resp.assert_status_bad_request();
@@ -340,7 +340,7 @@ async fn a_certificate_becomes_collectable_once_issued() {
 
 			public
 				.post("/certificates/request")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&args)
 				.await
 				.assert_status(axum::http::StatusCode::ACCEPTED);
@@ -355,7 +355,7 @@ async fn a_certificate_becomes_collectable_once_issued() {
 
 			let resp = public
 				.post("/certificates/request")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&args)
 				.await;
 			resp.assert_status_ok();
@@ -382,7 +382,7 @@ async fn a_revoked_compromised_key_is_refused_actionably() {
 
 			public
 				.post("/certificates/request")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&args)
 				.await
 				.assert_status(axum::http::StatusCode::ACCEPTED);
@@ -397,7 +397,7 @@ async fn a_revoked_compromised_key_is_refused_actionably() {
 
 			let resp = public
 				.post("/certificates/request")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&args)
 				.await;
 			// The whole point: matchable on the type, so bestool rotates the key
@@ -419,7 +419,7 @@ async fn the_status_push_carries_the_same_entitlements() {
 
 			let resp = public
 				.post(&format!("/status/{server}"))
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({"source": "tamanu", "healthy": true}))
 				.await;
 			resp.assert_status_ok();
