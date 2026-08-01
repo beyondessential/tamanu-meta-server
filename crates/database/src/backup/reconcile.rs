@@ -74,6 +74,19 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 	};
 	let snaps = snapshot_info(db, &group_ids).await?;
 
+	// Inventory freshness is a property of the *group's* inspection, not of any
+	// one pair's snapshot row: the inspection Job only writes a row for sources
+	// it actually finds, so the pair with nothing in the repo — precisely the
+	// one the "missing" verdict exists for — has no row of its own to date.
+	let mut inspected_at: HashMap<Uuid, Timestamp> = HashMap::new();
+	for gid in &group_ids {
+		if let Some(at) =
+			crate::backups::BackupRepoSnapshot::last_inspected_at_for_group(db, *gid).await?
+		{
+			inspected_at.insert(*gid, at);
+		}
+	}
+
 	// Latest comparable (reported, observed) sizes per (server, type). A server
 	// belongs to one group, so keys don't collide across groups.
 	let mut sized: HashMap<(Uuid, BackupType), (i64, i64)> = HashMap::new();
@@ -94,8 +107,9 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 		let snapshot_fresh = snap
 			.and_then(|s| s.latest_snapshot_at)
 			.is_some_and(|t| now.duration_since(t) <= grace);
-		let inventory_fresh =
-			snap.is_some_and(|s| now.duration_since(s.observed_at) <= INVENTORY_STALE_AFTER);
+		let inventory_fresh = inspected_at
+			.get(&row.group_id)
+			.is_some_and(|at| now.duration_since(*at) <= INVENTORY_STALE_AFTER);
 
 		let missing_ref = format!("{}:{}", refs::RECONCILE_MISSING, row.r#type);
 		let gap_ref = format!("{}:{}", refs::RECONCILE_REPORT_GAP, row.r#type);
