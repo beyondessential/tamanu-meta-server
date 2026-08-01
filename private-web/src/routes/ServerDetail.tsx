@@ -316,7 +316,11 @@ function Header({
 				{muninUrl && (
 					<ActionButton href={muninUrl} icon={<InsightsIcon />} label="Munin" />
 				)}
-				<IncidentsLink serverId={data.server.id} refreshKey={refreshTick} />
+				<IncidentsLink
+					serverId={data.server.id}
+					groupId={data.group?.id ?? null}
+					refreshKey={refreshTick}
+				/>
 				{isAdmin && (
 					<>
 						<ManualEventButton

@@ -260,6 +260,8 @@ pub struct IssueListFilters {
 	pub results: Option<Vec<CheckResult>>,
 	/// Restrict to issues whose server belongs to this group.
 	pub server_group_id: Option<Uuid>,
+	/// Restrict to issues raised against this server.
+	pub server_id: Option<Uuid>,
 	/// When `Some`, restrict to issues last seen at or after this time.
 	pub since: Option<Timestamp>,
 }
@@ -2592,6 +2594,11 @@ impl Issue {
 	///   latest effective result is one of those.
 	/// - `server_group_id`: when `Some`, restrict to issues whose server is
 	///   in that group. A direct `IN (SELECT id FROM servers WHERE group_id = $)`.
+	/// - `server_id`: when `Some`, restrict to issues on that server.
+	///
+	/// Every filter is applied in SQL, so `limit` bounds the *filtered* set.
+	/// Narrowing a page after the fact would let a busy fleet push a quiet
+	/// server's issues off the end and report it clean.
 	pub async fn list(
 		db: &mut AsyncPgConnection,
 		filters: IssueListFilters,
@@ -2630,6 +2637,9 @@ impl Issue {
 				.load(db)
 				.await?;
 			q = q.filter(dsl::server_id.eq_any(server_ids));
+		}
+		if let Some(sid) = filters.server_id {
+			q = q.filter(dsl::server_id.eq(sid));
 		}
 		if let Some(since) = filters.since {
 			q = q.filter(dsl::last_seen.ge(jiff_diesel::Timestamp::from(since)));

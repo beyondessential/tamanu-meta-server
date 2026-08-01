@@ -9,7 +9,7 @@ use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::TailscaleAdmin;
+use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::Uuid;
 use commons_types::dns::{ManagedZone, match_zone};
 use database::ServerGroupDomain;
@@ -89,7 +89,10 @@ fn to_view(row: ServerGroupDomain, zones: &[ManagedZone]) -> GroupDomainView {
 	security(("tailscale-user" = [])),
 	responses((status = 200, body = Vec<ManagedZoneView>)),
 )]
-pub async fn zones(State(state): State<AppState>) -> Result<Json<Vec<ManagedZoneView>>> {
+pub async fn zones(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+) -> Result<Json<Vec<ManagedZoneView>>> {
 	Ok(Json(
 		state
 			.dns_zones
@@ -117,6 +120,7 @@ pub async fn zones(State(state): State<AppState>) -> Result<Json<Vec<ManagedZone
 )]
 pub async fn for_group(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	Json(args): Json<GroupIdArgs>,
 ) -> Result<Json<Vec<GroupDomainView>>> {
 	let mut conn = state.db_read.get().await?;
@@ -176,6 +180,7 @@ pub struct MaybeGroupIdArgs {
 )]
 pub async fn grant_availability(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	Json(args): Json<MaybeGroupIdArgs>,
 ) -> Result<Json<GrantAvailabilityView>> {
 	let mut conn = state.db_read.get().await?;

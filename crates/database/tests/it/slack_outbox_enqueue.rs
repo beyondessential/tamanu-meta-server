@@ -471,6 +471,90 @@ async fn mark_given_up_removes_row_from_claim_pending() {
 	.await
 }
 
+/// The retry budget has to be a duration, not a handful of ticks. The
+/// drainer re-claims every 5 seconds, so a failed row that stays immediately
+/// claimable burns all ten attempts inside a couple of minutes and is given
+/// up permanently — any Slack outage longer than that silently drops every
+/// page enqueued during it.
+#[tokio::test(flavor = "multi_thread")]
+async fn mark_failed_holds_the_row_back_for_its_backoff() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn, "http://backoff.invalid/").await;
+		let stamp = database::issues::CheckStateStamp {
+			check: "ref-b".into(),
+			observed: CheckResult::Failed,
+			effective: CheckResult::Failed,
+			escalates: false,
+			detail: None,
+		};
+		let event = NewEvent {
+			source: "test".into(),
+			r#ref: "ref-b".into(),
+			description: None,
+			message: "boom".into(),
+			active: Some(true),
+			occurred_at: None,
+		};
+		event
+			.save_with_state(&mut conn, server_id, None, Some(&stamp), false)
+			.await
+			.expect("save");
+		expire_deliver_after(&mut conn).await;
+		let row = SlackOutbox::claim_pending(&mut conn, 10)
+			.await
+			.expect("claim")
+			.into_iter()
+			.next()
+			.expect("one pending row");
+
+		let attempts = SlackOutbox::mark_failed(&mut conn, row.id, "slack 503", Some("upstream"))
+			.await
+			.expect("mark_failed");
+		assert_eq!(attempts, 1);
+
+		let still_pending = SlackOutbox::claim_pending(&mut conn, 10)
+			.await
+			.expect("claim again");
+		assert!(
+			still_pending.iter().all(|r| r.id != row.id),
+			"a failed row must not be reclaimable on the very next tick",
+		);
+
+		// It comes back once the backoff has elapsed.
+		expire_deliver_after(&mut conn).await;
+		let after_backoff = SlackOutbox::claim_pending(&mut conn, 10)
+			.await
+			.expect("claim after backoff");
+		assert!(
+			after_backoff.iter().any(|r| r.id == row.id),
+			"the row is still owed once its backoff passes — failure is not give-up",
+		);
+	})
+	.await
+}
+
+#[test]
+fn retry_backoff_doubles_then_holds_at_the_cap() {
+	use database::slack_outbox::{RETRY_BACKOFF_CAP, retry_backoff};
+
+	assert_eq!(retry_backoff(1), SignedDuration::from_secs(15));
+	assert_eq!(retry_backoff(2), SignedDuration::from_secs(30));
+	assert_eq!(retry_backoff(3), SignedDuration::from_mins(1));
+	assert_eq!(retry_backoff(6), SignedDuration::from_mins(8));
+	assert_eq!(retry_backoff(7), RETRY_BACKOFF_CAP);
+	assert_eq!(retry_backoff(100), RETRY_BACKOFF_CAP);
+
+	// The drainer's 10-attempt budget must span a routine Slack incident,
+	// not a couple of minutes' worth of ticks.
+	let total: SignedDuration = (1..10)
+		.map(retry_backoff)
+		.fold(SignedDuration::ZERO, |acc, d| acc + d);
+	assert!(
+		total >= SignedDuration::from_mins(45),
+		"ten attempts should span most of an hour, got {total}",
+	);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn claim_pending_skips_rows_whose_deliver_after_is_in_the_future() {
 	// Direct check on the drainer's claim filter: an open row that's

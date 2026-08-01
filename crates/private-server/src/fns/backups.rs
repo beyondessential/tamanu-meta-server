@@ -14,7 +14,7 @@ use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::TailscaleAdmin;
+use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::{
 	Uuid,
 	backup::{
@@ -828,18 +828,15 @@ impl RestoreWindowView {
 }
 
 /// Effective scheduled interval (seconds) for a `(group, type)`: the per-group
-/// override if set, else the canopy-wide default. `None` = manual-only.
+/// override row if there is one (a NULL interval there being manual-only), else
+/// the canopy-wide default. `None` = manual-only.
 async fn effective_interval_secs(
 	conn: &mut AsyncPgConnection,
 	group_id: Uuid,
 	ty: &BackupType,
 ) -> Result<Option<i64>> {
-	let over = ServerGroupBackupSchedule::get(conn, group_id, ty).await?;
-	let def = BackupTypeDefault::get(conn, ty).await?;
-	Ok(over
-		.as_ref()
-		.and_then(|s| s.expected_interval)
-		.or_else(|| def.as_ref().and_then(|d| d.default_interval))
+	Ok(database::backups::effective_interval(conn, group_id, ty)
+		.await?
 		.map(|pg| pg.0.as_secs()))
 }
 
@@ -976,6 +973,7 @@ pub struct SetCapabilityArgs {
 )]
 pub async fn get(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	Json(args): Json<BackupsGroupArgs>,
 ) -> Result<Json<Option<BackupConfigView>>> {
 	let mut conn = state.db.get().await?;
@@ -1004,6 +1002,7 @@ pub async fn get(
 )]
 pub async fn list(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	_body: Json<serde_json::Value>,
 ) -> Result<Json<Vec<BackupConfigSummary>>> {
 	let mut conn = state.db.get().await?;
@@ -1331,12 +1330,22 @@ pub async fn upsert(
 				},
 			)
 			.await?;
-			kube.create_password(
-				&repo_password_ref,
-				REPO_PASSWORD_SECRET_KEY,
-				&commons_servers::backup_secrets::generate_passphrase(),
-			)
-			.await?;
+			// Same all-or-nothing invariant as `create`: a failed Secret create
+			// must not leave a half-created config stuck in `provisioning` with
+			// a `repo_password_ref` pointing at nothing. Without the rollback
+			// every retry takes the *update* path — which never creates the
+			// Secret — so the group could never be provisioned again.
+			if let Err(e) = kube
+				.create_password(
+					&repo_password_ref,
+					REPO_PASSWORD_SECRET_KEY,
+					&commons_servers::backup_secrets::generate_passphrase(),
+				)
+				.await
+			{
+				let _ = ServerGroupBackupConfig::delete(&mut conn, args.server_group_id).await;
+				return Err(e);
+			}
 		}
 	}
 
@@ -1604,6 +1613,7 @@ pub struct GroupTypeScheduleView {
 )]
 pub async fn group_schedules(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	Json(args): Json<BackupsGroupArgs>,
 ) -> Result<Json<Vec<GroupTypeScheduleView>>> {
 	let mut conn = state.db.get().await?;
@@ -1633,11 +1643,13 @@ pub async fn group_schedules(
 	for ty in types {
 		let over = ServerGroupBackupSchedule::get(&mut conn, args.server_group_id, &ty).await?;
 		let def = BackupTypeDefault::get(&mut conn, &ty).await?;
-		let effective_interval = over
-			.as_ref()
-			.and_then(|s| s.expected_interval)
-			.or_else(|| def.as_ref().and_then(|d| d.default_interval))
-			.map(|pg| pg.0.as_secs());
+		// An override row decides alone (NULL interval = manual-only); only its
+		// absence inherits the type default. Same precedence as the schedulers.
+		let effective_interval = match over.as_ref() {
+			Some(over) => over.expected_interval,
+			None => def.as_ref().and_then(|d| d.default_interval),
+		}
+		.map(|pg| pg.0.as_secs());
 		let effective_retention = over
 			.as_ref()
 			.and_then(|s| s.retention.as_ref())
@@ -1706,6 +1718,7 @@ pub struct TypeDefaultView {
 )]
 pub async fn type_defaults(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	_body: Json<serde_json::Value>,
 ) -> Result<Json<Vec<TypeDefaultView>>> {
 	let mut conn = state.db.get().await?;
@@ -2045,6 +2058,7 @@ pub async fn cancel_maintenance(
 )]
 pub async fn stats(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	Json(args): Json<BackupsGroupArgs>,
 ) -> Result<Json<BackupStatsView>> {
 	let mut conn = state.db.get().await?;
@@ -2289,6 +2303,7 @@ pub struct RunProgressPoint {
 )]
 pub async fn run_progress(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	Json(args): Json<RunProgressArgs>,
 ) -> Result<Json<Vec<RunProgressPoint>>> {
 	let mut conn = state.db.get().await?;
@@ -2329,6 +2344,7 @@ pub async fn run_progress(
 )]
 pub async fn capabilities(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	Json(args): Json<ServerArgs>,
 ) -> Result<Json<Vec<ServerBackupCapabilityView>>> {
 	let mut conn = state.db.get().await?;

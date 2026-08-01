@@ -79,11 +79,23 @@ export function useApi<
 	fn: F,
 	params: Record<string, unknown> = {},
 	deps: ReadonlyArray<unknown> = [],
+	/** `skip` leaves the hook idle without calling the endpoint, for when the
+	 * params aren't available yet (a filter the caller doesn't have). Hooks
+	 * can't be called conditionally, so the condition has to live here. */
+	options: { skip?: boolean } = {},
 ): ApiState<T> & { reload: () => void } {
 	const [state, setState] = useState<ApiState<T>>({ status: "idle" });
 	const tick = useRef(0);
+	const skip = options.skip ?? false;
 
 	const run = useCallback(() => {
+		if (skip) {
+			// Bump the tick so an in-flight response from before the skip
+			// can't land and present stale data as current.
+			tick.current++;
+			setState({ status: "idle" });
+			return;
+		}
 		const myTick = ++tick.current;
 		const controller = new AbortController();
 		// Keep prior data on screen during background refetches so the UI
@@ -106,7 +118,7 @@ export function useApi<
 			});
 		return () => controller.abort();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, deps);
+	}, [...deps, skip]);
 
 	useEffect(() => run(), [run]);
 
