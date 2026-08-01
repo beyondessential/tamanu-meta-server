@@ -8,6 +8,8 @@ use database::server_groups::{NewServerGroup, PartialServerGroup, ServerGroup};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use commons_servers::tailscale_auth::TailscaleUser;
+
 use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
@@ -40,6 +42,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 )]
 pub async fn list(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	_body: Json<serde_json::Value>,
 ) -> Result<Json<Vec<ServerGroup>>> {
 	let mut conn = state.db.get().await?;
@@ -74,6 +77,7 @@ pub struct GroupServerCount {
 )]
 pub async fn server_counts(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	_body: Json<serde_json::Value>,
 ) -> Result<Json<Vec<GroupServerCount>>> {
 	let mut conn = state.db.get().await?;
@@ -167,6 +171,7 @@ pub struct GroupDetail {
 )]
 pub async fn get(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	Json(args): Json<GroupIdArgs>,
 ) -> Result<Json<GroupDetail>> {
 	let mut conn = state.db.get().await?;
@@ -370,6 +375,7 @@ pub async fn restore(
 )]
 pub async fn list_archived(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	_body: Json<serde_json::Value>,
 ) -> Result<Json<Vec<ServerGroup>>> {
 	let mut conn = state.db.get().await?;
@@ -400,6 +406,7 @@ pub struct ServerGroupsSearchArgs {
 )]
 pub async fn search(
 	State(state): State<AppState>,
+	_user: TailscaleUser,
 	Json(args): Json<ServerGroupsSearchArgs>,
 ) -> Result<Json<Vec<ServerGroup>>> {
 	let mut conn = state.db.get().await?;

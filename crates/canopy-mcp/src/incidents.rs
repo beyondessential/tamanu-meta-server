@@ -436,21 +436,19 @@ impl CanopyMcp {
 		let since = args.since_days.map(since_from_days);
 		let limit = args.limit.unwrap_or(100);
 
-		let mut issues = Issue::list(
+		let issues = Issue::list(
 			&mut conn,
 			IssueListFilters {
 				active_only: args.active_only.unwrap_or(true),
 				results,
 				server_group_id: group,
+				server_id: server,
 				since,
 			},
 			limit,
 		)
 		.await
 		.map_err(mcp_err)?;
-		if let Some(sid) = server {
-			issues.retain(|i| i.server_id == Some(sid));
-		}
 
 		let names = Server::names_by_ids(
 			&mut conn,

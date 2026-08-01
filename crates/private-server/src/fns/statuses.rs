@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
-use commons_errors::{ProblemDetailsSchema, Result};
+use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleUser;
 use commons_types::{
 	server::{
@@ -218,9 +218,15 @@ pub async fn group_details(
 	let group = ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
 	let servers = group.list_servers(&mut conn).await?;
 
-	let latest_version = Version::get_latest_matching(&mut conn, "*".parse()?)
-		.await?
-		.as_semver();
+	// A group card shouldn't 404 just because no versions are published yet
+	// (e.g. a fresh deployment, or every version still draft); treat "no match"
+	// as "unknown latest" so `version_distance` falls back to None. Same as
+	// `servers::get_detail` and `statuses::snapshot`.
+	let latest_version = match Version::get_latest_matching(&mut conn, "*".parse()?).await {
+		Ok(v) => Some(v.as_semver()),
+		Err(AppError::NoMatchingVersions) => None,
+		Err(e) => return Err(e),
+	};
 
 	let server_ids: Vec<Uuid> = servers.iter().map(|s| s.id).collect();
 	let status_map: HashMap<Uuid, Status> = Status::latest_for_servers(&mut conn, &server_ids)
@@ -242,7 +248,8 @@ pub async fn group_details(
 	let card_version = group.effective_version.clone();
 	let version_distance = card_version
 		.as_ref()
-		.map(|v| database::statuses::version_distance(&v.0, &latest_version));
+		.zip(latest_version.as_ref())
+		.map(|(current, latest)| database::statuses::version_distance(&current.0, latest));
 
 	let mut members: Vec<FacilityServerStatus> = servers
 		.into_iter()

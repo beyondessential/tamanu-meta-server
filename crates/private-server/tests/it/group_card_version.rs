@@ -60,3 +60,37 @@ async fn group_card_version_is_from_highest_rank_kind_member() {
 	})
 	.await;
 }
+
+/// A fresh deployment — or one where every version is still draft — has no
+/// published version to measure against. That's an unknown distance, not a
+/// missing group: 404ing here blanks the whole status board.
+#[tokio::test(flavor = "multi_thread")]
+async fn group_card_is_served_when_no_version_is_published() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO versions (major, minor, patch, changelog, status)
+				VALUES (2, 10, 0, 'unreleased', 'draft');
+			INSERT INTO server_groups (id, name)
+				VALUES ('bbbbbbbb-0000-0000-0000-000000000001', 'Fresh');
+			INSERT INTO servers (id, name, host, kind, rank, group_id) VALUES
+				('bbbbbbbb-0000-0000-0000-0000000000c0', 'central',
+				 'https://fresh.example.com', 'central', 'production',
+				 'bbbbbbbb-0000-0000-0000-000000000001');",
+		)
+		.await
+		.unwrap();
+
+		let resp = private
+			.post("/api/statuses/group_details")
+			.json(&json!({ "server_group_id": "bbbbbbbb-0000-0000-0000-000000000001" }))
+			.await;
+		resp.assert_status_ok();
+		let card: Value = resp.json();
+		assert_eq!(card["name"], "Fresh");
+		assert!(
+			card["version_distance"].is_null(),
+			"no published version to compare against means unknown distance",
+		);
+	})
+	.await;
+}
