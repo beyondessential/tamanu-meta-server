@@ -965,12 +965,9 @@ const SRV_OFFLINE: &str = "44444444-4444-4444-4444-444444444444";
 /// `ServerSummary.version` is documented "retained even when long offline",
 /// and `get_server` implements that via `ReportedDetail::last_version`.
 /// `find_servers` took it from the status row instead, which is read through
-/// a seven-day window — so a server quiet for longer reported no version and
-/// no last-seen at all, and a fleet version survey run through this tool
-/// undercounted exactly the servers most worth noticing.
-///
-/// `reachability` is deliberately still `gone`: nothing `short_status()`
-/// returns means "long offline", so that absence is the signal.
+/// a seven-day window — so a server quiet for longer reported no version at
+/// all, and a fleet version survey run through this tool undercounted
+/// exactly the servers most worth noticing.
 #[tokio::test(flavor = "multi_thread")]
 async fn find_servers_retains_the_version_of_a_long_offline_server() {
 	commons_tests::server::run(async |mut conn, _public, private| {
@@ -999,9 +996,14 @@ async fn find_servers_retains_the_version_of_a_long_offline_server() {
 			s["version"], "2.30.0",
 			"the last version it reported is retained, got {s}",
 		);
+		// Both still come from the windowed status read. Answering
+		// "when, however long ago" against `statuses` means scanning every
+		// weekly partition, which is exactly what the lookback cap exists to
+		// refuse; `server_reported_detail` carries the version without that
+		// cost. So the version is retained and these two are not.
 		assert!(
-			!s["last_seen"].is_null(),
-			"it was last seen 30 days ago, not never: {s}",
+			s["last_seen"].is_null(),
+			"last_seen stays bounded by the status window: {s}",
 		);
 		assert_eq!(
 			s["reachability"], "gone",
