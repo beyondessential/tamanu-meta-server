@@ -55,7 +55,7 @@ pulldown-cmark = { version = "0.13.4", features = ["html"] }
 reqwest = { version = "0.13.3", default-features = false, features = ["json", "rustls", "stream"] }
 rss = "2.0.13"
 serde = "1.0.228"
-tera = "1.20.1"
+tera = "2.0.0"
 timesimp = "1.0.0"
 tokio = "1.52.3"
 tracing = "0.1.44"
