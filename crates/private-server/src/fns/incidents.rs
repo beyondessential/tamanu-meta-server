@@ -518,7 +518,7 @@ pub async fn add_note(
 	Json(args): Json<IncidentAddNoteArgs>,
 ) -> Result<Json<IncidentNoteData>> {
 	if args.body.trim().is_empty() {
-		return Err(AppError::custom("note body is required"));
+		return Err(AppError::BadRequest("note body is required".into()));
 	}
 	let mut conn = state.db.get().await?;
 	let note = IncidentNote::add(&mut conn, args.incident_id, &admin.0.login, &args.body).await?;
