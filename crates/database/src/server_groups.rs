@@ -243,6 +243,7 @@ impl ServerGroup {
 		use crate::schema::{server_groups::dsl, servers};
 		use diesel_async::AsyncConnection;
 
+		let archived_at = Timestamp::now();
 		db.transaction::<_, AppError, _>(async |conn| {
 			let member_ids: Vec<Uuid> = servers::table
 				.select(servers::id)
@@ -267,13 +268,24 @@ impl ServerGroup {
 				for id in &member_ids {
 					Server::soft_delete(conn, *id).await?;
 				}
+
+				// Stamp the whole cascade with the group's own archival time.
+				// `member_ids` is exactly the members that were live a moment
+				// ago, so every one of them was archived by *this* cascade —
+				// and matching timestamps is what lets `restore` tell them
+				// from a server an operator had already archived on its own.
+				diesel::update(servers::table.filter(servers::id.eq_any(&member_ids)))
+					.set(
+						servers::deleted_at
+							.eq(jiff_diesel::NullableTimestamp::from(Some(archived_at))),
+					)
+					.execute(conn)
+					.await
+					.map_err(AppError::from)?;
 			}
 
 			diesel::update(dsl::server_groups.filter(dsl::id.eq(group_id)))
-				.set(
-					dsl::deleted_at
-						.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))),
-				)
+				.set(dsl::deleted_at.eq(jiff_diesel::NullableTimestamp::from(Some(archived_at))))
 				.execute(conn)
 				.await
 				.map_err(AppError::from)?;
@@ -282,20 +294,43 @@ impl ServerGroup {
 		.await
 	}
 
-	/// Un-archive a group, cascading to restore its archived members (the
-	/// inverse of [`ServerGroup::soft_delete`]'s cascade).
+	/// Un-archive a group, cascading to restore the members its archival took
+	/// down with it — the exact inverse of [`ServerGroup::soft_delete`]'s
+	/// cascade.
+	///
+	/// Only those members. A server an operator archived deliberately *before*
+	/// the group was archived is not part of the cascade and stays archived:
+	/// resurrecting it would put a decommissioned box back into a group whose
+	/// `is_monitored` survived archival, so it would rejoin monitoring and
+	/// start filing "never reported" alerts nobody asked for. The cascade is
+	/// identified by `deleted_at` matching the group's, which `soft_delete`
+	/// stamps across the set it archives.
 	pub async fn restore(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<()> {
 		use crate::schema::{server_groups::dsl, servers};
 		use diesel_async::AsyncConnection;
 
 		db.transaction::<_, AppError, _>(async |conn| {
-			let archived_members: Vec<Uuid> = servers::table
-				.select(servers::id)
-				.filter(servers::group_id.eq(group_id))
-				.filter(servers::deleted_at.is_not_null())
-				.load(conn)
+			let archived_at: Option<Timestamp> = dsl::server_groups
+				.select(dsl::deleted_at)
+				.filter(dsl::id.eq(group_id))
+				.first::<jiff_diesel::NullableTimestamp>(conn)
 				.await
-				.map_err(AppError::from)?;
+				.map_err(AppError::from)?
+				.into();
+
+			// A group that isn't archived has no cascade to undo. Restoring
+			// its archived members would be the same resurrection by another
+			// route.
+			let archived_members: Vec<Uuid> = match archived_at {
+				Some(at) => servers::table
+					.select(servers::id)
+					.filter(servers::group_id.eq(group_id))
+					.filter(servers::deleted_at.eq(jiff_diesel::NullableTimestamp::from(Some(at))))
+					.load(conn)
+					.await
+					.map_err(AppError::from)?,
+				None => Vec::new(),
+			};
 			for id in &archived_members {
 				Server::restore(conn, *id).await?;
 			}

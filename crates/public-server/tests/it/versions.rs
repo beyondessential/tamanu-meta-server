@@ -824,3 +824,75 @@ async fn artifact_create_range_no_auth() {
 	})
 	.await
 }
+
+/// The "newer version available" banner on a version page filtered only on
+/// `Published`, while the page's own version comes through
+/// `latest_matching_ready`, which also excludes anything a known issue
+/// covers. So the banner could recommend — and link to — a version hidden
+/// from every listing, whose own page 404s.
+#[tokio::test(flavor = "multi_thread")]
+async fn version_page_banner_does_not_recommend_a_known_issue_version() {
+	commons_tests::server::run(async |mut conn, public, _| {
+		conn.batch_execute(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
+			('22222222-2222-2222-2222-222222222200', 2, 0, 0, 'old', 'published'),
+			('22222222-2222-2222-2222-222222222201', 2, 0, 1, 'fine', 'published'),
+			('22222222-2222-2222-2222-222222222202', 2, 0, 2, 'broken', 'published');
+			INSERT INTO version_known_issues (author, description, min_major, min_minor, min_patch)
+			VALUES ('admin', 'broken', 2, 0, 2)",
+		)
+		.await
+		.unwrap();
+
+		// Sanity: the covered version really is hidden from the public site.
+		public
+			.get("/versions/2.0.2")
+			.await
+			.assert_status_not_found();
+
+		let body = public.get("/versions/2.0.0").await.text();
+		assert!(
+			!body.contains("2.0.2"),
+			"the banner must not point at a version a known issue covers: {body}",
+		);
+		assert!(
+			body.contains("2.0.1"),
+			"it should point at the newest ready patch instead: {body}",
+		);
+	})
+	.await
+}
+
+/// The changelog cap was written `1024 * 1024 * 1024` next to a comment
+/// saying "up to a MiB" — a GiB, so the intended limit was never enforced.
+#[tokio::test(flavor = "multi_thread")]
+async fn changelog_is_capped_at_a_mebibyte() {
+	use database::versions::Version;
+
+	const MIB: usize = 1024 * 1024;
+
+	commons_tests::server::run_with_device_auth(
+		"releaser",
+		async |mut conn, cert, _device_id, public, _| {
+			// Comfortably over the cap, all single-byte characters so the
+			// byte count and the character count agree.
+			let oversized = "x".repeat(MIB + 4096);
+			let response = public
+				.post("/versions/3.1.4")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.text(&oversized)
+				.await;
+			response.assert_status_ok();
+
+			let version = Version::get_by_version(&mut conn, "3.1.4".parse().unwrap())
+				.await
+				.unwrap();
+			assert_eq!(
+				version.changelog.len(),
+				MIB,
+				"the changelog should be truncated to a MiB, not stored whole",
+			);
+		},
+	)
+	.await
+}

@@ -505,7 +505,7 @@ pub async fn submit_manual_event(
 	Json(args): Json<SubmitManualEventArgs>,
 ) -> Result<Json<IssueData>> {
 	if args.r#ref.trim().is_empty() {
-		return Err(AppError::custom("ref is required"));
+		return Err(AppError::BadRequest("ref is required".into()));
 	}
 
 	let observed = if args.active == Some(false) {
@@ -720,7 +720,7 @@ pub async fn add_note(
 	Json(args): Json<IssueAddNoteArgs>,
 ) -> Result<Json<IssueNoteData>> {
 	if args.body.trim().is_empty() {
-		return Err(AppError::custom("note body is required"));
+		return Err(AppError::BadRequest("note body is required".into()));
 	}
 	let mut conn = state.db.get().await?;
 	let note = IssueNote::add(&mut conn, args.issue_id, &admin.0.login, &args.body).await?;

@@ -26,6 +26,19 @@ impl RateLimiter {
 	/// caller has exceeded the limit. Expired windows reset on access; entries
 	/// for keys idle longer than `window` are pruned opportunistically to keep
 	/// the map bounded.
+	/// Whether `key` has already exhausted `limit` within the current
+	/// `window`, **without** recording a hit.
+	///
+	/// [`Self::check`] can only report an exhausted budget by spending one,
+	/// which means the caller has to do the work first. This lets a caller
+	/// turn a client away before doing the work the budget exists to bound.
+	pub fn exceeded(&self, key: &str, limit: u32, window: Duration) -> bool {
+		let now = Instant::now();
+		let map = self.windows.lock().expect("rate-limiter mutex");
+		map.get(key)
+			.is_some_and(|w| now.duration_since(w.start) <= window && w.count >= limit)
+	}
+
 	pub fn check(&self, key: &str, limit: u32, window: Duration) -> bool {
 		let now = Instant::now();
 		let mut map = self.windows.lock().expect("rate-limiter mutex");

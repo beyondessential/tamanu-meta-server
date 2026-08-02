@@ -935,7 +935,7 @@ pub async fn attach_tailscale(
 		.resolve_identifier(&args.identifier)
 		.await
 		.map_err(|_| AppError::AuthTailnetDirectoryUnavailable)?
-		.ok_or_else(|| AppError::custom("no tailnet device matches that identifier"))?;
+		.ok_or_else(|| AppError::NotFound("no tailnet device matches that identifier".into()))?;
 
 	let mut conn = state.db.get().await?;
 	Device::attach_tailscale(
