@@ -40,6 +40,7 @@ pub mod stability;
 pub mod statuses;
 pub mod tags;
 pub mod tailscale_users;
+pub mod upgrade_plans;
 pub mod url_field;
 pub mod version_known_issues;
 pub mod versions;

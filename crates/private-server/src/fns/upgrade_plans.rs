@@ -1,0 +1,376 @@
+use axum::Json;
+use axum::extract::State;
+use canopy_utoipa_axum::{router::OpenApiRouter, routes};
+use commons_errors::{ProblemDetailsSchema, Result};
+use commons_servers::tailscale_auth::TailscaleAdmin;
+use database::upgrade_plans::UpgradePlan;
+use jiff::{Zoned, civil::Date};
+use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
+use uuid::Uuid;
+
+use crate::state::AppState;
+
+pub fn routes() -> OpenApiRouter<AppState> {
+	OpenApiRouter::new()
+		.routes(routes!(fleet))
+		.routes(routes!(targets))
+		.routes(routes!(for_group))
+		.routes(routes!(record))
+		.routes(routes!(amend))
+		.routes(routes!(withdraw))
+}
+
+/// One row of the planned-upgrades view.
+#[derive(Serialize, ToSchema)]
+pub struct PlannedUpgrade {
+	/// The group this concerns.
+	pub group_id: Uuid,
+	/// Its name, so the view reads without a second lookup.
+	pub group_name: String,
+	/// The version the group runs now, where it has reported one.
+	pub current_version: Option<String>,
+	/// The plan, absent for a group with none.
+	pub plan: Option<UpgradePlan>,
+	/// The plan's target as semver.
+	pub target_version: Option<String>,
+	/// Whether the planned date has passed without the upgrade happening.
+	/// Presentational: a slipping upgrade is normal operational reality.
+	pub late: bool,
+	/// Where the group's data stands against the planned version, rolled up from
+	/// its servers: any failure makes the group a failure, since one server
+	/// whose data breaks is enough to stop the upgrade. `null` without a plan.
+	pub verdict: Option<String>,
+	/// Whether a restore attempt is under way, carried beside the verdict rather
+	/// than folded into it: a restore takes hours, so a group mid-test would
+	/// otherwise read as untested for the whole window.
+	pub attempt: Option<crate::fns::migration_tests::AttemptState>,
+}
+
+/// Planned upgrades across the fleet.
+///
+/// Every live group, whether or not it has a plan. A group several minors
+/// behind with no plan is the thing this view exists to surface, so it is listed
+/// rather than omitted.
+// spec: UPG#the-dashboard
+#[utoipa::path(
+	post,
+	path = "/fleet",
+	operation_id = "upgrade_plans_fleet",
+	tag = "upgrade_plans",
+	security(("tailscale-admin" = [])),
+	responses(
+		(status = 200, description = "One row per live group.", body = Vec<PlannedUpgrade>),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn fleet(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+) -> Result<Json<Vec<PlannedUpgrade>>> {
+	let mut conn = state.db.get().await?;
+	// Late is judged against the server's own day; nothing depends on it beyond
+	// presentation.
+	let today = Zoned::now().date();
+	let now_ts = jiff::Timestamp::now();
+
+	let mut out = Vec::new();
+	for group in database::server_groups::ServerGroup::list_all(&mut conn).await? {
+		let plan = UpgradePlan::open_for_group(&mut conn, group.id).await?;
+		let target = match &plan {
+			Some(plan) => Some(
+				database::upgrade_plans::target_version_str(&mut conn, plan)
+					.await?
+					.to_string(),
+			),
+			None => None,
+		};
+		let late = plan
+			.as_ref()
+			.is_some_and(|plan| database::upgrade_plans::is_late(plan, today));
+
+		// The plan says where the group is going; the verdict says whether its
+		// data survives getting there. Pairing them is what makes this view
+		// worth reading.
+		let verdict = match &plan {
+			None => None,
+			Some(_) => {
+				let per_server =
+					database::migration_tests::verdicts_for_group(&mut conn, group.id).await?;
+				Some(roll_up(&per_server).to_owned())
+			}
+		};
+
+		let attempt = match &plan {
+			None => None,
+			Some(_) => {
+				crate::fns::migration_tests::attempt_state(&mut conn, group.id, now_ts).await?
+			}
+		};
+
+		out.push(PlannedUpgrade {
+			group_id: group.id,
+			group_name: group.name,
+			current_version: group.effective_version.map(|v| v.to_string()),
+			plan,
+			target_version: target,
+			late,
+			verdict,
+			attempt,
+		});
+	}
+
+	Ok(Json(out))
+}
+
+/// The group's standing against its planned version: the worst of its servers'.
+///
+/// One server whose data breaks the migrations is enough to stop the upgrade, so
+/// a failure anywhere is the group's answer.
+fn roll_up(per_server: &[database::migration_tests::GroupVerdict]) -> &'static str {
+	use database::migration_tests::Verdict;
+
+	if per_server.is_empty() {
+		return "nottested";
+	}
+	if per_server.iter().any(|v| v.verdict == Verdict::Failed) {
+		return "failed";
+	}
+	if per_server.iter().any(|v| v.verdict == Verdict::NotTested) {
+		return "nottested";
+	}
+	"passed"
+}
+
+/// Request body for reading one group's plans. Named apart from the
+/// migration-test one because utoipa keys component schemas by short name.
+#[derive(Deserialize, ToSchema)]
+pub struct PlansForGroupArgs {
+	/// The group to read.
+	pub group_id: Uuid,
+}
+
+/// A group's plan and the plans it has had before.
+///
+/// The history is the record of what a deployment planned, when for, and when
+/// it landed.
+// spec: UPG#when-a-plan-is-met
+#[utoipa::path(
+	post,
+	path = "/for_group",
+	operation_id = "upgrade_plans_for_group",
+	tag = "upgrade_plans",
+	security(("tailscale-admin" = [])),
+	request_body = PlansForGroupArgs,
+	responses(
+		(status = 200, description = "Every plan the group has had, newest first.", body = Vec<UpgradePlan>),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn for_group(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<PlansForGroupArgs>,
+) -> Result<Json<Vec<UpgradePlan>>> {
+	let mut conn = state.db.get().await?;
+	Ok(Json(
+		UpgradePlan::history_for_group(&mut conn, args.group_id).await?,
+	))
+}
+
+/// A version a group could be planned onto.
+#[derive(Serialize, ToSchema)]
+pub struct PlannableVersion {
+	/// The version's identifier, for `record`.
+	pub id: Uuid,
+	/// Its semver.
+	pub version: String,
+}
+
+/// The versions a group could be planned onto: published, and ahead of what it
+/// runs.
+///
+/// Offering only valid targets is what keeps the operator from picking one
+/// `record` would refuse.
+// spec: UPG#a-plan
+#[utoipa::path(
+	post,
+	path = "/targets",
+	operation_id = "upgrade_plans_targets",
+	tag = "upgrade_plans",
+	security(("tailscale-admin" = [])),
+	request_body = PlansForGroupArgs,
+	responses(
+		(status = 200, description = "Plannable versions, newest first.", body = Vec<PlannableVersion>),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn targets(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<PlansForGroupArgs>,
+) -> Result<Json<Vec<PlannableVersion>>> {
+	let mut conn = state.db.get().await?;
+	let running = database::server_groups::ServerGroup::get_by_id(&mut conn, args.group_id)
+		.await?
+		.effective_version;
+
+	let mut out: Vec<PlannableVersion> = database::versions::Version::get_all(&mut conn)
+		.await?
+		.into_iter()
+		.filter(|version| {
+			running
+				.as_ref()
+				.is_none_or(|running| version.as_semver() > running.0)
+		})
+		.map(|version| PlannableVersion {
+			id: version.id,
+			version: version.as_semver().to_string(),
+		})
+		.collect();
+	// get_all is already newest-first; keep that for the picker.
+	out.truncate(50);
+	Ok(Json(out))
+}
+
+/// Request body for recording where a group is going.
+#[derive(Deserialize, ToSchema)]
+pub struct RecordArgs {
+	/// The group that intends to move.
+	pub group_id: Uuid,
+	/// The published version it intends to move to.
+	pub target_version_id: Uuid,
+	/// The day it is expected to happen, as `YYYY-MM-DD`. Optional.
+	#[schema(value_type = Option<String>)]
+	pub planned_for: Option<Date>,
+	/// Anything the next reader needs to know. Optional.
+	pub note: Option<String>,
+}
+
+/// Record where a group is going, retiring any plan it already had.
+///
+/// A group goes one place next, so this replaces rather than queues. The target
+/// must be published and ahead of what the group runs.
+// spec: UPG#a-plan
+#[utoipa::path(
+	post,
+	path = "/record",
+	operation_id = "upgrade_plans_record",
+	tag = "upgrade_plans",
+	security(("tailscale-admin" = [])),
+	request_body = RecordArgs,
+	responses(
+		(status = 200, description = "The recorded plan.", body = UpgradePlan),
+		(status = 400, description = "The target is unpublished, or not ahead of the group.", body = ProblemDetailsSchema),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn record(
+	State(state): State<AppState>,
+	admin: TailscaleAdmin,
+	Json(args): Json<RecordArgs>,
+) -> Result<Json<UpgradePlan>> {
+	let mut conn = state.db.get().await?;
+	let note = args
+		.note
+		.as_deref()
+		.map(str::trim)
+		.filter(|n| !n.is_empty());
+	let plan = UpgradePlan::record(
+		&mut conn,
+		args.group_id,
+		args.target_version_id,
+		args.planned_for,
+		note,
+		&admin.0.login,
+	)
+	.await?;
+	Ok(Json(plan))
+}
+
+/// Request body for amending an open plan.
+#[derive(Deserialize, ToSchema)]
+pub struct AmendArgs {
+	/// The plan to amend.
+	pub id: Uuid,
+	/// The day it is expected to happen, as `YYYY-MM-DD`. Cleared when absent.
+	#[schema(value_type = Option<String>)]
+	pub planned_for: Option<Date>,
+	/// Anything the next reader needs to know. Cleared when absent.
+	pub note: Option<String>,
+}
+
+/// Amend an open plan's date and note.
+///
+/// The same plan better described, so it keeps its place in the history rather
+/// than being replaced. Moving a group to a different version is a new plan:
+/// record that instead.
+// spec: UPG#a-plan
+#[utoipa::path(
+	post,
+	path = "/amend",
+	operation_id = "upgrade_plans_amend",
+	tag = "upgrade_plans",
+	security(("tailscale-admin" = [])),
+	request_body = AmendArgs,
+	responses(
+		(status = 200, description = "The amended plan.", body = UpgradePlan),
+		(status = 400, description = "The plan has been met or replaced, so it is history.", body = ProblemDetailsSchema),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn amend(
+	State(state): State<AppState>,
+	admin: TailscaleAdmin,
+	Json(args): Json<AmendArgs>,
+) -> Result<Json<UpgradePlan>> {
+	let mut conn = state.db.get().await?;
+	let note = args
+		.note
+		.as_deref()
+		.map(str::trim)
+		.filter(|n| !n.is_empty());
+	let plan =
+		UpgradePlan::amend(&mut conn, args.id, args.planned_for, note, &admin.0.login).await?;
+	Ok(Json(plan))
+}
+
+/// Request body for withdrawing a plan.
+#[derive(Deserialize, ToSchema)]
+pub struct WithdrawArgs {
+	/// The plan to withdraw.
+	pub id: Uuid,
+}
+
+/// Withdraw a plan: the deployment is no longer going there.
+///
+/// This does not say the upgrade happened. Canopy closes a met plan on its own
+/// once the group reports the target.
+// spec: UPG#a-plan
+#[utoipa::path(
+	post,
+	path = "/withdraw",
+	operation_id = "upgrade_plans_withdraw",
+	tag = "upgrade_plans",
+	security(("tailscale-admin" = [])),
+	request_body = WithdrawArgs,
+	responses(
+		(status = 200, description = "Withdrawn (idempotent)."),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn withdraw(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<WithdrawArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	UpgradePlan::delete(&mut conn, args.id).await?;
+	Ok(Json(()))
+}

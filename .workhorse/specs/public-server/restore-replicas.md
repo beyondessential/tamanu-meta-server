@@ -218,12 +218,13 @@ Canopy knows the version each server reports running and the upgrade path it wou
 
 Canopy decides which versions are tested against which servers, rather than an operator naming each pair.
 
-A server's candidate is the newest published version it could upgrade to: newer than the version it reports running, and on the upgrade path Canopy would serve it.
+A server's candidate is the version its group plans to move to, when a plan is open (see [UPG](../private-server/upgrade-plans.md)).
+Without a plan it is the newest published version the server could upgrade to: newer than the version it reports running, and on the upgrade path Canopy would serve it.
 
 One candidate, not one per version along the path.
 Migrations are applied to the restored snapshot in sequence, so a run targeting the newest version applies every migration between the snapshot's version and that one, and exercises the whole chain an upgrade would.
 
-Which minor a deployment moves to is a decision Canopy has no part in, and testing every minor ahead of a server would cost a full restore each to cover the ones it does not choose.
+Which minor a deployment moves to is not something Canopy can derive, and testing every minor ahead of a server would cost a full restore each to cover the ones it does not choose.
 It does not need to: coverage accumulates on its own.
 Snapshots arrive daily and releases far less often, so every version is tested against a deployment's data while it is the newest, and a deployment that later settles on an older minor already has a result from when that version was current.
 Where a chain does break, the failing migration named in the report identifies the step without a second run.
@@ -239,12 +240,15 @@ That window is where the answer is still cheap: the fleet is not moving yet, and
 
 ### Dispatching a migration test
 
-`migrate` rides on an intent rather than being one, and that is the point.
-An intent that already restores a snapshot to prove it restorable can apply the migrations to that same replica, so one restore answers both questions: the backup is good, and the next version's migrations survive this deployment's data.
-A consumer that advertises `check`, `once` and `migrate` together reports the replica's health and the migrations' outcome from a single run, and the two land as separate signals from the one report.
+`migrate` is a semantic an intent opts into, and an intent carrying it carries no other purpose.
+It carries `check` alongside, so a single restore reports the replica's health and the migrations' outcome as two signals from one report.
 
-Declaring a migrate-only intent alongside a verifying one is possible and costs a second full restore of the same snapshot.
-That is worth paying only when the two need different cadences or overdue bounds, because a restore is the expensive part and the migrations are cheap next to it.
+An intent carrying `migrate` is withheld from a server with no candidate version.
+An intent that verifies backups therefore does not also migrate: it would go undispatched for every server without a candidate, leaving the backups of any non-Tamanu product, and of any deployment already on the newest version available to it, unverified.
+An intent that keeps a replica queryable does not migrate either: a migrated replica sits at a version its deployment is not running, so a declaration promoted to it would give an operator a schema that does not match production.
+
+A verifying intent and a migrating intent restore the same snapshot separately.
+A verifying intent restores once per snapshot, and a migrating intent's `once` is keyed to the snapshot and target version together, so it restores when a new candidate version appears rather than on every snapshot.
 
 An entry for a `migrate` intent names the target version alongside the snapshot.
 A consumer obtains that version's migrations from its published artefacts, the same way a server being upgraded does, so naming the version is the whole reference it needs.
@@ -284,6 +288,13 @@ Verdicts are presented per group, as the set of versions tested against that gro
 
 A verdict names the snapshot it was reached against and when that was, because a pass against a month-old snapshot is a weaker statement than one against last night's.
 A newer test of the same pair supersedes the previous verdict, and the superseded reports remain.
+
+Whether an attempt is under way is carried beside the verdict rather than folded into it.
+A restore takes hours, so a group with a test running would otherwise read as untested for the whole window, and a consumer that has quietly stopped would look the same as one that has not started.
+An attempt is in flight while credentials have been issued and not yet expired with no report, and is a run that ended without reporting once they have, exactly as [Restore-health reporting](#restore-health-reporting) already derives for restores.
+
+Keeping the two apart is what lets a pair read as failed with a fresh attempt already running.
+Folding the attempt into the verdict would overwrite the answer with the activity and lose the finding.
 
 ### Version readiness
 

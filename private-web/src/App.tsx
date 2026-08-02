@@ -51,6 +51,7 @@ import Settings from "./routes/Settings";
 import Sql from "./routes/Sql";
 import UngroupedServersList from "./routes/UngroupedServersList";
 import VersionDetail from "./routes/VersionDetail";
+import Upgrades from "./routes/Upgrades";
 import Versions from "./routes/Versions";
 
 interface NavItem {
@@ -63,6 +64,7 @@ const BASE_NAV: NavItem[] = [
 	{ label: "Incidents", to: "/incidents" },
 	{ label: "Fleet", to: "/servers" },
 	{ label: "Versions", to: "/versions" },
+	{ label: "Upgrades", to: "/upgrades" },
 	{ label: "Devices", to: "/devices" },
 	{ label: "Bestool", to: "/bestool" },
 	{ label: "Settings", to: "/settings" },
@@ -193,6 +195,7 @@ export default function App() {
 					<Route path="/incidents" element={<Incidents />} />
 					<Route path="/incidents/:id" element={<IncidentDetail />} />
 					<Route path="/healthchecks/:source/:check" element={<CheckDetail />} />
+					<Route path="/upgrades" element={<Upgrades />} />
 					<Route path="/versions" element={<Versions />} />
 					<Route path="/versions/:version" element={<VersionDetail />} />
 					<Route path="/servers" element={<Servers />}>

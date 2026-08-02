@@ -4,7 +4,7 @@ use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use database::migration_tests::GroupVerdict;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -49,4 +49,82 @@ pub async fn for_group(
 	let mut conn = state.db.get().await?;
 	let verdicts = database::migration_tests::verdicts_for_group(&mut conn, args.group_id).await?;
 	Ok(Json(verdicts))
+}
+
+/// Whether a restore attempt is under way for a group, for showing beside a
+/// verdict.
+///
+/// Group-level, because credentials are issued per `(group, type)`: RST scopes
+/// them that way since one repo holds all of a group's snapshots, so this is the
+/// finest granularity the signal honestly has.
+// spec: RST#verdicts
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AttemptState {
+	/// Credentials were issued and have not expired with no report yet.
+	InFlight,
+	/// Credentials expired with no report: it ran and never said how it went.
+	EndedWithoutReport,
+}
+
+/// The state of the newest unreported restore attempt for `group_id`, if any.
+///
+/// A restore takes hours, so without this a group mid-test reads as untested for
+/// the whole window and a consumer that has stopped looks the same as one that
+/// never started.
+// spec: RST#verdicts
+pub async fn attempt_state(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	group_id: Uuid,
+	now: jiff::Timestamp,
+) -> Result<Option<AttemptState>> {
+	use database::backups::BackupCredentialIssuance;
+
+	let reports =
+		database::restore::BackupRestoreCheck::list_recent_for_group(conn, group_id, 50).await?;
+	let since =
+		crate::run_pairing::issuance_since(now, reports.iter().map(|c| c.reported_at).min());
+	let issuances: Vec<_> =
+		BackupCredentialIssuance::list_for_group_since(conn, group_id, since, 200)
+			.await?
+			.into_iter()
+			.filter(|i| i.purpose == commons_types::backup::BackupPurpose::Restore)
+			.collect();
+
+	let report_refs: Vec<crate::run_pairing::ReportRef> = reports
+		.iter()
+		.map(|c| crate::run_pairing::ReportRef {
+			run_id: c.run_id,
+			key: crate::run_pairing::run_key(
+				c.consumer_device_id,
+				&c.r#type,
+				commons_types::backup::BackupPurpose::Restore,
+			),
+			reported_at: c.reported_at,
+		})
+		.collect();
+
+	let (_starts, attempts) = crate::run_pairing::pair_issuances(issuances, &report_refs);
+
+	// A chain abandoned before the newest report is history, not the pipeline's
+	// current state: something has reported since, so showing it would nag about
+	// a run already superseded.
+	let newest_report = report_refs.iter().map(|r| r.reported_at).max();
+	let attempts: Vec<_> = attempts
+		.into_iter()
+		.filter(|a| newest_report.is_none_or(|newest| a.latest_expires > newest))
+		.collect();
+
+	// An in-flight attempt is the more useful of the two to report, since it
+	// says the pipeline is working right now.
+	let newest_in_flight = attempts
+		.iter()
+		.any(|a| matches!(a.status(now), crate::run_pairing::RunStatus::InProgress));
+	if newest_in_flight {
+		return Ok(Some(AttemptState::InFlight));
+	}
+	if attempts.is_empty() {
+		return Ok(None);
+	}
+	Ok(Some(AttemptState::EndedWithoutReport))
 }

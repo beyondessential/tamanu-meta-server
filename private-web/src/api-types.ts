@@ -3469,6 +3469,135 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/upgrade_plans/amend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Amend an open plan's date and note.
+         * @description The same plan better described, so it keeps its place in the history rather
+         *     than being replaced. Moving a group to a different version is a new plan:
+         *     record that instead.
+         */
+        post: operations["upgrade_plans_amend"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/upgrade_plans/fleet": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Planned upgrades across the fleet.
+         * @description Every live group, whether or not it has a plan. A group several minors
+         *     behind with no plan is the thing this view exists to surface, so it is listed
+         *     rather than omitted.
+         */
+        post: operations["upgrade_plans_fleet"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/upgrade_plans/for_group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A group's plan and the plans it has had before.
+         * @description The history is the record of what a deployment planned, when for, and when
+         *     it landed.
+         */
+        post: operations["upgrade_plans_for_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/upgrade_plans/record": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record where a group is going, retiring any plan it already had.
+         * @description A group goes one place next, so this replaces rather than queues. The target
+         *     must be published and ahead of what the group runs.
+         */
+        post: operations["upgrade_plans_record"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/upgrade_plans/targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The versions a group could be planned onto: published, and ahead of what it
+         *     runs.
+         * @description Offering only valid targets is what keeps the operator from picking one
+         *     `record` would refuse.
+         */
+        post: operations["upgrade_plans_targets"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/upgrade_plans/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Withdraw a plan: the deployment is no longer going there.
+         * @description This does not say the upgrade happened. Canopy closes a met plan on its own
+         *     once the group reports the target.
+         */
+        post: operations["upgrade_plans_withdraw"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/versions/add_known_issue": {
         parameters: {
             query?: never;
@@ -3746,6 +3875,18 @@ export interface components {
              */
             version_id: string;
         };
+        /** @description Request body for amending an open plan. */
+        AmendArgs: {
+            /**
+             * Format: uuid
+             * @description The plan to amend.
+             */
+            id: string;
+            /** @description Anything the next reader needs to know. Cleared when absent. */
+            note?: string | null;
+            /** @description The day it is expected to happen, as `YYYY-MM-DD`. Cleared when absent. */
+            planned_for?: string | null;
+        };
         /**
          * @description A downloadable artifact (for example an installer) associated with a
          *     version, either tied to that exact version or matched via a version
@@ -3821,6 +3962,16 @@ export interface components {
              */
             server_id: string;
         };
+        /**
+         * @description Whether a restore attempt is under way for a group, for showing beside a
+         *     verdict.
+         *
+         *     Group-level, because credentials are issued per `(group, type)`: RST scopes
+         *     them that way since one repo holds all of a group's snapshots, so this is the
+         *     finest granularity the signal honestly has.
+         * @enum {string}
+         */
+        AttemptState: "in_flight" | "ended_without_report";
         /** @description The certificate authority Canopy is configured to use, and whether it works. */
         AuthorityView: {
             /**
@@ -6575,6 +6726,54 @@ export interface components {
             /** @description Backup type requested. */
             type: string;
         };
+        /** @description A version a group could be planned onto. */
+        PlannableVersion: {
+            /**
+             * Format: uuid
+             * @description The version's identifier, for `record`.
+             */
+            id: string;
+            /** @description Its semver. */
+            version: string;
+        };
+        /** @description One row of the planned-upgrades view. */
+        PlannedUpgrade: {
+            attempt?: null | components["schemas"]["AttemptState"];
+            /** @description The version the group runs now, where it has reported one. */
+            current_version?: string | null;
+            /**
+             * Format: uuid
+             * @description The group this concerns.
+             */
+            group_id: string;
+            /** @description Its name, so the view reads without a second lookup. */
+            group_name: string;
+            /**
+             * @description Whether the planned date has passed without the upgrade happening.
+             *     Presentational: a slipping upgrade is normal operational reality.
+             */
+            late: boolean;
+            plan?: null | components["schemas"]["UpgradePlan"];
+            /** @description The plan's target as semver. */
+            target_version?: string | null;
+            /**
+             * @description Where the group's data stands against the planned version, rolled up from
+             *     its servers: any failure makes the group a failure, since one server
+             *     whose data breaks is enough to stop the upgrade. `null` without a plan.
+             */
+            verdict?: string | null;
+        };
+        /**
+         * @description Request body for reading one group's plans. Named apart from the
+         *     migration-test one because utoipa keys component schemas by short name.
+         */
+        PlansForGroupArgs: {
+            /**
+             * Format: uuid
+             * @description The group to read.
+             */
+            group_id: string;
+        };
         /** @description Request to inspect a bucket/prefix before configuring backups on it. */
         ProbeArgs: {
             /** @description Name of the S3 bucket to inspect. */
@@ -6841,6 +7040,23 @@ export interface components {
             status: components["schemas"]["RunStatus"];
             /** @description The backup type that ran. */
             type: string;
+        };
+        /** @description Request body for recording where a group is going. */
+        RecordArgs: {
+            /**
+             * Format: uuid
+             * @description The group that intends to move.
+             */
+            group_id: string;
+            /** @description Anything the next reader needs to know. Optional. */
+            note?: string | null;
+            /** @description The day it is expected to happen, as `YYYY-MM-DD`. Optional. */
+            planned_for?: string | null;
+            /**
+             * Format: uuid
+             * @description The published version it intends to move to.
+             */
+            target_version_id: string;
         };
         /** @description A freshly issued recovery-verification challenge. */
         RecoveryChallengeResponse: {
@@ -8769,6 +8985,40 @@ export interface components {
             /** @description Exact version string to update (e.g. `"1.2.3"`). */
             version: string;
         };
+        /** @description A group's recorded intention to move to a version. */
+        UpgradePlan: {
+            /** @description When it was last amended. */
+            amended_at?: string | null;
+            /** @description The operator who last amended the date or note, where one has. */
+            amended_by?: string | null;
+            /** @description When it was recorded. */
+            created_at: string;
+            /** @description The operator who recorded it. */
+            created_by?: string | null;
+            /**
+             * Format: uuid
+             * @description The group that intends to move.
+             */
+            group_id: string;
+            /**
+             * Format: uuid
+             * @description Unique identifier for this plan.
+             */
+            id: string;
+            /** @description When the group's reported version reached the target. */
+            met_at?: string | null;
+            /** @description Whatever the operator needs the next reader to know. */
+            note?: string | null;
+            /** @description The day the upgrade is expected, where one is known. */
+            planned_for?: string | null;
+            /** @description When a newer plan replaced this one. */
+            superseded_at?: string | null;
+            /**
+             * Format: uuid
+             * @description The version it intends to move to.
+             */
+            target_version_id: string;
+        };
         /**
          * @description Request to declaratively create or update a group's backup configuration,
          *     for automated/infrastructure-as-code callers. Always creates the
@@ -8934,6 +9184,14 @@ export interface components {
          * @enum {string}
          */
         VersionTracking: "tracked" | "reported" | "absent";
+        /** @description Request body for withdrawing a plan. */
+        WithdrawArgs: {
+            /**
+             * Format: uuid
+             * @description The plan to withdraw.
+             */
+            id: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -13510,6 +13768,258 @@ export interface operations {
                 };
             };
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    upgrade_plans_amend: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AmendArgs"];
+            };
+        };
+        responses: {
+            /** @description The amended plan. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpgradePlan"];
+                };
+            };
+            /** @description The plan has been met or replaced, so it is history. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    upgrade_plans_fleet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One row per live group. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlannedUpgrade"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    upgrade_plans_for_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlansForGroupArgs"];
+            };
+        };
+        responses: {
+            /** @description Every plan the group has had, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpgradePlan"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    upgrade_plans_record: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordArgs"];
+            };
+        };
+        responses: {
+            /** @description The recorded plan. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpgradePlan"];
+                };
+            };
+            /** @description The target is unpublished, or not ahead of the group. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    upgrade_plans_targets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlansForGroupArgs"];
+            };
+        };
+        responses: {
+            /** @description Plannable versions, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlannableVersion"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    upgrade_plans_withdraw: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WithdrawArgs"];
+            };
+        };
+        responses: {
+            /** @description Withdrawn (idempotent). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
