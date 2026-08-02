@@ -23,10 +23,16 @@ use std::time::Duration;
 
 use crate::state::AppState;
 
-/// Failed-auth budget within a 1-minute window, per source IP. Successful
-/// requests don't count against it, so a busy legitimate agent is unaffected;
+/// Failed-auth budget within a 1-minute window, per source IP. Only failures
+/// spend it, so an agent presenting a working token never approaches it;
 /// a token-guesser is blunted. Guessing is hopeless anyway (tokens are 256-bit
 /// CSPRNG), this just bounds the DB lookups it can burn.
+///
+/// Once an IP has spent the budget it is turned away for the rest of the
+/// window whatever it presents, valid token included. That is the cost of
+/// bounding the lookups: whether a token is good is exactly what the lookup
+/// answers. It only bites an IP already producing thirty auth failures a
+/// minute.
 const RL_WINDOW: Duration = Duration::from_secs(60);
 const RL_PER_IP: u32 = 30;
 
@@ -50,6 +56,17 @@ async fn require_bearer_token(
 	req: Request,
 	next: Next,
 ) -> Result<Response, AppError> {
+	// Before anything that costs: an IP that has already spent its budget is
+	// turned away without a connection checkout or a query. `refuse` consults
+	// the same budget, but by the time it runs `find_active` has been and
+	// gone — so the budget bounded the *responses* a guesser got, not the
+	// database work it burned, which is what it is documented to bound.
+	let key = format!("mcp:{ip}");
+	if state.rate_limiter.exceeded(&key, RL_PER_IP, RL_WINDOW) {
+		tracing::warn!(target: "mcp_auth", %ip, "mcp auth rate limit exceeded");
+		return Err(AppError::RateLimited);
+	}
+
 	let presented = req
 		.headers()
 		.get(header::AUTHORIZATION)
