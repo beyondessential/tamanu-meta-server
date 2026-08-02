@@ -497,13 +497,12 @@ async fn file_health_events(
 
 	// Grade every check in the push through its policy.
 	let mut effective: BTreeMap<&String, GradedResult> = BTreeMap::new();
-	for (check, result) in &curr_check_results {
-		let entry = find_health_entry(&status.health, check);
+	for (check, (result, entry)) in &curr_check_results {
 		// Strip the reserved `check` / `healthy` keys, and replace any
 		// wire-form `result` with the normalised value so rules see a
 		// uniform `check.result` even for legacy (`healthy: bool`)
 		// payloads.
-		let mut check_extra = entry.cloned().unwrap_or_default();
+		let mut check_extra = (*entry).clone();
 		check_extra.remove("check");
 		check_extra.remove("healthy");
 		check_extra.insert(
@@ -627,13 +626,13 @@ async fn file_health_events(
 				}),
 			),
 		};
-		let entry = find_health_entry(&status.health, check);
+		let (observed, entry) = curr_check_results[*check];
 		let stamp = CheckStateStamp {
 			check: (*check).clone(),
-			observed: curr_check_results[*check],
+			observed,
 			effective,
 			escalates,
-			detail: entry.cloned().map(serde_json::Value::Object),
+			detail: Some(serde_json::Value::Object(entry.clone())),
 		};
 		NewEvent {
 			source: status.source.clone(),
@@ -695,7 +694,9 @@ async fn file_health_events(
 /// looking at our own well-formed data or at historical pre-contract
 /// rows where missing means absent. Reads both the `result` enum form
 /// and the legacy `healthy: bool` form via [`CheckResult::from_entry`].
-fn collect_check_results(health: &serde_json::Value) -> BTreeMap<String, CheckResult> {
+fn collect_check_results(
+	health: &serde_json::Value,
+) -> BTreeMap<String, (CheckResult, &serde_json::Map<String, serde_json::Value>)> {
 	let Some(arr) = health.as_array() else {
 		return BTreeMap::new();
 	};
@@ -704,26 +705,12 @@ fn collect_check_results(health: &serde_json::Value) -> BTreeMap<String, CheckRe
 			let obj = e.as_object()?;
 			let check = obj.get("check")?.as_str()?;
 			let result = CheckResult::from_entry(obj)?;
-			Some((check.to_string(), result))
+			Some((check.to_string(), (result, obj)))
 		})
 		.collect()
 }
 
-fn find_health_entry<'a>(
-	health: &'a serde_json::Value,
-	name: &str,
-) -> Option<&'a serde_json::Map<String, serde_json::Value>> {
-	health.as_array()?.iter().find_map(|e| {
-		let obj = e.as_object()?;
-		let check = obj.get("check")?.as_str()?;
-		(check == name).then_some(obj)
-	})
-}
-
-fn per_check_description(
-	entry: Option<&serde_json::Map<String, serde_json::Value>>,
-) -> Option<String> {
-	let entry = entry?;
+fn per_check_description(entry: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
 	let mut lines = Vec::new();
 	for (k, v) in entry.iter() {
 		if k == "check" || k == "healthy" || k == "result" {

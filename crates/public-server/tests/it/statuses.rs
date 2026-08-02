@@ -3187,3 +3187,52 @@ async fn push_records_the_source_s_current_detail() {
 	)
 	.await
 }
+
+/// Validation permits two `health[]` entries with the same `check` name.
+/// The result came from a map (last wins) while the message, extras, and
+/// severity-rule context came from a linear search (first wins), so the
+/// filed issue mixed one entry's verdict with another entry's data.
+#[tokio::test(flavor = "multi_thread")]
+async fn duplicate_check_names_file_one_consistent_entry() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			public
+				.post(&format!("/status/{}", server_id))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"health": [
+						{ "check": "disk", "result": "passed", "free_pct": 80 },
+						{ "check": "disk", "result": "failed", "free_pct": 2 },
+					],
+				}))
+				.await
+				.assert_status_ok();
+
+			let issue = fetch_issue(&mut conn, server_id, "alertd", "health/disk")
+				.await
+				.expect("the check filed an issue");
+
+			// The map keeps the last entry's result, so the message and extras
+			// have to come from that same entry.
+			assert_eq!(
+				issue.observed_result.as_deref(),
+				Some("failed"),
+				"the later entry supersedes the earlier one",
+			);
+			assert!(
+				issue.message.contains("`2`"),
+				"the detail must come from the entry the result came from, got: {}",
+				issue.message,
+			);
+			assert!(
+				!issue.message.contains("`80`"),
+				"the superseded entry's detail must not be reported: {}",
+				issue.message,
+			);
+		},
+	)
+	.await
+}
