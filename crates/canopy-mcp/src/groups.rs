@@ -13,6 +13,7 @@ use database::{
 		BackupMaintenanceRun, BackupRepoSnapshot, BackupRepoStats, BackupRun,
 		ServerGroupBackupConfig, ServerGroupBackupSchedule,
 	},
+	reported_detail::ReportedDetail,
 	server_groups::ServerGroup,
 	statuses::Status,
 };
@@ -27,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
 	CanopyMcp,
-	servers::{ServerSummary, summarize},
+	servers::{Retained, ServerSummary, summarize},
 	util::{mcp_err, not_found, ok_json, parse_uuid},
 };
 
@@ -162,6 +163,17 @@ impl CanopyMcp {
 			.await
 			.map_err(mcp_err)?;
 		let st_by: HashMap<Uuid, &Status> = statuses.iter().map(|s| (s.server_id, s)).collect();
+		// Same retained-version resolution as `find_servers`: a member quiet
+		// for more than the status window still ran something last time
+		// anyone heard from it.
+		let missed: Vec<Uuid> = mids
+			.iter()
+			.copied()
+			.filter(|id| !st_by.contains_key(id))
+			.collect();
+		let last_versions = ReportedDetail::last_versions(&mut conn, &missed)
+			.await
+			.map_err(mcp_err)?;
 		let member_groups: Vec<(Uuid, Option<Uuid>)> =
 			members.iter().map(|s| (s.id, s.group_id)).collect();
 		let health = database::issues::health_from_check_state(&mut conn, &member_groups)
@@ -173,6 +185,9 @@ impl CanopyMcp {
 				summarize(
 					s,
 					st_by.get(&s.id).copied(),
+					Retained {
+						version: last_versions.get(&s.id).cloned(),
+					},
 					Some(group.name.clone()),
 					health.get(&s.id).copied().unwrap_or_default(),
 				)

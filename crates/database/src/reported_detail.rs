@@ -152,6 +152,37 @@ impl ReportedDetail {
 		Ok(version.flatten())
 	}
 
+	/// The last version each of `server_ids` reported, however long ago — the
+	/// batch form of [`Self::last_version`], and unbounded for the same
+	/// reason: this answers "what was it running", which stays true while a
+	/// server is offline. Servers that have never reported a version are
+	/// absent from the map.
+	pub async fn last_versions(
+		db: &mut AsyncPgConnection,
+		server_ids: &[Uuid],
+	) -> Result<std::collections::HashMap<Uuid, VersionStr>> {
+		use crate::schema::server_reported_detail::dsl;
+
+		if server_ids.is_empty() {
+			return Ok(std::collections::HashMap::new());
+		}
+
+		let rows: Vec<(Uuid, Option<VersionStr>)> = dsl::server_reported_detail
+			.select((dsl::server_id, dsl::version))
+			.filter(dsl::server_id.eq_any(server_ids))
+			.filter(dsl::version.is_not_null())
+			.distinct_on(dsl::server_id)
+			.order((dsl::server_id, dsl::reported_at.desc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(rows
+			.into_iter()
+			.filter_map(|(id, version)| version.map(|v| (id, v)))
+			.collect())
+	}
+
 	/// The application version each still-reporting production server runs,
 	/// one per server.
 	///

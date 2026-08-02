@@ -189,6 +189,24 @@ impl CanopyMcp {
 			.await
 			.map_err(mcp_err)?;
 		let st_by: HashMap<Uuid, &Status> = statuses.iter().map(|s| (s.server_id, s)).collect();
+
+		// `version` is documented as retained even when long offline, and
+		// `get_server` implements that through `ReportedDetail::last_version`.
+		// Sourcing it from the status window alone made `find_servers`
+		// disagree: a server quiet for more than a week reported no version at
+		// all, so a fleet version survey run through this tool undercounted
+		// exactly the servers most worth noticing. Only the servers the window
+		// missed are looked up again, and only against the projection table —
+		// status history stays windowed.
+		let missed: Vec<Uuid> = ids
+			.iter()
+			.copied()
+			.filter(|id| !st_by.contains_key(id))
+			.collect();
+		let last_versions = ReportedDetail::last_versions(&mut conn, &missed)
+			.await
+			.map_err(mcp_err)?;
+
 		let group_names = Server::group_names_by_server_ids(&mut conn, &ids)
 			.await
 			.map_err(mcp_err)?;
@@ -204,6 +222,9 @@ impl CanopyMcp {
 				summarize(
 					s,
 					st_by.get(&s.id).copied(),
+					Retained {
+						version: last_versions.get(&s.id).cloned(),
+					},
 					group_names.get(&s.id).cloned().flatten(),
 					health.get(&s.id).copied().unwrap_or_default(),
 				)
@@ -331,9 +352,29 @@ impl CanopyMcp {
 /// Shared with the groups module, for member listings on [`crate::groups::GroupDetail`].
 /// `health` is the server's check-state rollup (silenced checks already
 /// skipped).
+/// What a server last told canopy, read from the current-state projection
+/// rather than from status history.
+///
+/// Only the version. `last_seen` and `reachability` stay sourced from the
+/// windowed status read: `statuses` is partitioned by week and a predicate on
+/// `server_id` alone can't be pruned, so answering "when was it last seen,
+/// however long ago" means scanning every partition — the cost
+/// `statuses::GRACE_LOOKBACK_SQL` exists to refuse. `server_reported_detail`
+/// has no such problem: one row per (server, source), which is why
+/// `last_version` is already unbounded there.
+///
+/// So a server past the window still reports what it was running, and still
+/// reads as `gone` with no last-seen. That is the documented trade, not an
+/// oversight.
+#[derive(Default)]
+pub(crate) struct Retained {
+	pub version: Option<VersionStr>,
+}
+
 pub(crate) fn summarize(
 	s: &Server,
 	st: Option<&Status>,
+	retained: Retained,
 	group_name: Option<String>,
 	health: HealthState,
 ) -> ServerSummary {
@@ -354,6 +395,7 @@ pub(crate) fn summarize(
 		// spec: APP#versions
 		version: st
 			.and_then(|st| st.version.clone())
+			.or(retained.version)
 			.filter(|_| s.product.has_versions()),
 		reachability: st.map_or(ShortStatus::Gone, |s| s.short_status()),
 		health,
