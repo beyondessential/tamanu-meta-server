@@ -30,6 +30,7 @@ mod migration_test_reports;
 mod partitions;
 mod reachability_sweep;
 mod recovery_vault;
+mod repair_group_version_cache_migration;
 mod reported_detail;
 mod restore;
 mod rotation_interlock;
