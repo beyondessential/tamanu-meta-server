@@ -114,3 +114,28 @@ async fn server_versions_rc_section() {
 	})
 	.await;
 }
+
+/// A server can report a version while `version_distance` is null — most
+/// plainly when nothing is published yet, so there's no latest to measure
+/// against. The distance ladder in the template compares that against
+/// numbers, and a null there used to blow the whole page up.
+#[tokio::test(flavor = "multi_thread")]
+async fn server_versions_renders_a_reported_version_with_no_distance() {
+	server::run(|mut conn, public, _private| async move {
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Production Server 1', 'https://prod1.example.com', 'production', 'central');
+			INSERT INTO statuses (id, server_id, version, extra) VALUES
+			('11111111-1111-1111-1111-111111111111', '11111111-1111-1111-1111-111111111111', '2.12.0', '{}')",
+		)
+		.await
+		.unwrap();
+
+		let response = public.get("/server-versions?s=test-secret").await;
+		assert_eq!(response.status_code(), StatusCode::OK);
+		let body = response.text();
+		assert!(body.contains("Production Server 1"));
+		assert!(body.contains("2.12.0"));
+	})
+	.await;
+}

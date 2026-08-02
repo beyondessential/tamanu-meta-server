@@ -216,3 +216,14 @@ impl FromRef<AppState> for commons_servers::device_auth::mtls::ClientCertHeader 
 		state.client_cert_header
 	}
 }
+
+#[cfg(all(test, feature = "ui"))]
+mod tests {
+	/// The templates are embedded, so a syntax error in one is a startup
+	/// panic rather than a compile error. Without this, the first thing to
+	/// notice is every server-backed integration test failing at once.
+	#[test]
+	fn every_embedded_template_parses() {
+		super::AppState::init_tera().unwrap();
+	}
+}

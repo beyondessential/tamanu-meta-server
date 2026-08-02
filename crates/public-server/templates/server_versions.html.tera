@@ -231,7 +231,9 @@
 				<div class="version-container">
 					<span class="version-display">
 						<a class="version-text" href="/versions/{{ server.version }}">{{ server.version }}</a>
-						{% if server.version_distance == 0 %}
+						{% if server.version_distance is none %}
+							<span class="version-indicator version-very-outdated" title="Distance from latest unknown"></span>
+						{% elif server.version_distance == 0 %}
 							<span class="version-indicator version-up-to-date" title="Up to date"></span>
 						{% elif server.version_distance < 2 %}
 							<span class="version-indicator version-up-to-date" title="{{ server.version_distance }} versions behind"></span>
