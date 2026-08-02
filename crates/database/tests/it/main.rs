@@ -3,6 +3,7 @@
 // file, which keeps rebuilds from swamping the machine with I/O.
 // Nextest still runs every #[tokio::test] in parallel as usual.
 
+mod admins;
 mod backfill_registered_at_migration;
 mod backup_detection;
 mod backups;
