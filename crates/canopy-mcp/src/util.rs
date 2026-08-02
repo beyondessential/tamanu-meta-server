@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use commons_types::Uuid;
 use database::{diesel_async::AsyncPgConnection, server_groups::ServerGroup};
 use jiff::{SignedDuration, Timestamp};
-use rmcp::model::{CallToolResult, Content, ErrorData as McpError};
+use rmcp::model::{CallToolResult, ContentBlock, ErrorData as McpError};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -19,14 +19,14 @@ pub(crate) struct EmptyArgs {}
 pub(crate) fn ok_json<T: Serialize>(value: &T) -> Result<CallToolResult, McpError> {
 	let json = serde_json::to_value(value).map_err(mcp_err)?;
 	let text = serde_json::to_string_pretty(&json).map_err(mcp_err)?;
-	let mut result = CallToolResult::success(vec![Content::text(text)]);
+	let mut result = CallToolResult::success(vec![ContentBlock::text(text)]);
 	result.structured_content = Some(json);
 	Ok(result)
 }
 
 /// A "ran successfully but found nothing" result the caller's client renders.
 pub(crate) fn not_found(message: String) -> CallToolResult {
-	CallToolResult::error(vec![Content::text(message)])
+	CallToolResult::error(vec![ContentBlock::text(message)])
 }
 
 /// Map any internal/db error into an MCP protocol error.
