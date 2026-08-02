@@ -13,6 +13,7 @@ mod check_policies;
 mod check_policy_rules;
 mod check_severity_map;
 mod check_stability;
+mod chrome_releases;
 mod consolidated_checks;
 mod event_validation;
 mod fleet_check_detail;
