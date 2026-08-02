@@ -389,7 +389,7 @@ async fn make_senaite_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uu
 async fn register_redact_intent(public: &axum_test::TestServer, cert: &str) {
 	public
 		.post("/restore-capabilities")
-		.add_header("mtls-certificate", cert)
+		.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 		.json(&serde_json::json!({
 			"intents": [{
 				"intent": "analytics",
@@ -423,7 +423,7 @@ async fn a_redacting_declaration_carries_the_products_masking_manifest() {
 
 			let entries: Vec<serde_json::Value> = public
 				.get("/restore-worklist")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await
 				.json();
 			assert_eq!(entries.len(), 1, "got {entries:?}");
@@ -469,7 +469,7 @@ async fn a_declaration_that_doesnt_redact_sends_no_manifest() {
 
 			let entries: Vec<serde_json::Value> = public
 				.get("/restore-worklist")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await
 				.json();
 			assert_eq!(entries.len(), 1, "got {entries:?}");
@@ -505,7 +505,7 @@ async fn a_server_whose_product_has_no_manifest_is_withheld() {
 
 			let entries: Vec<serde_json::Value> = public
 				.get("/restore-worklist")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.await
 				.json();
 			assert_eq!(entries.len(), 1, "got {entries:?}");
@@ -692,7 +692,7 @@ async fn a_partial_redaction_warns_while_the_restore_stays_healthy() {
 
 			public
 				.post("/restore-verification")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
 					"group": group,
 					"server_id": server,
@@ -781,7 +781,7 @@ async fn a_failed_redaction_warns_and_then_recovers_when_it_applies() {
 
 			public
 				.post("/restore-verification")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&report("failed", Some("manifest host unreachable")))
 				.await
 				.assert_status(http::StatusCode::NO_CONTENT);
@@ -797,7 +797,7 @@ async fn a_failed_redaction_warns_and_then_recovers_when_it_applies() {
 
 			public
 				.post("/restore-verification")
-				.add_header("mtls-certificate", &cert)
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&report("complete", None))
 				.await
 				.assert_status(http::StatusCode::NO_CONTENT);
