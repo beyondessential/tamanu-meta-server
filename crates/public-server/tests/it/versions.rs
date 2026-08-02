@@ -825,6 +825,27 @@ async fn artifact_create_range_no_auth() {
 	.await
 }
 
+/// A malformed version in a URL path is a client mistake, not a server
+/// fault: `AppError::VersionParse` fell through to the catch-all 500 arm,
+/// so bad input polluted 5xx monitoring and told clients to retry something
+/// that can never succeed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_malformed_version_in_the_path_is_a_400() {
+	commons_tests::server::run(async |_conn, public, _| {
+		for path in [
+			"/versions/update-for/not-a-version",
+			"/versions/not-a-version",
+		] {
+			let response = public.get(path).await;
+			assert_eq!(
+				response.status_code(),
+				StatusCode::BAD_REQUEST,
+				"{path} should be a 400",
+			);
+		}
+	})
+	.await
+}
 /// The "newer version available" banner on a version page filtered only on
 /// `Published`, while the page's own version comes through
 /// `latest_matching_ready`, which also excludes anything a known issue

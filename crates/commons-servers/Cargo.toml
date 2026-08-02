@@ -59,3 +59,6 @@ tracing.workspace = true
 # `verify` gives `verify_signature` on a parsed CSR — proof the sender holds the
 # key it asks Canopy to certify. Backed by ring, already a dependency here.
 x509-parser = { version = "0.18.1", features = ["verify"] }
+
+[dev-dependencies]
+axum-test = { workspace = true }

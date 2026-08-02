@@ -242,11 +242,19 @@ impl AppError {
 	/// long time answering 500: adding a variant and forgetting its status
 	/// was silent. Now it doesn't compile, so the status is a decision
 	/// somebody makes rather than one that defaults.
+	///
+	/// Note the arms are ordered, so a variant listed twice silently takes
+	/// the first match. Keep each one in exactly one arm.
 	fn to_http_status(&self) -> StatusCode {
 		match self {
 			Self::NotImplemented => StatusCode::NOT_IMPLEMENTED,
 			Self::NoMatchingVersions => StatusCode::NOT_FOUND,
 			Self::UnusableRange => StatusCode::BAD_REQUEST,
+			// Both arise purely from what a client sent: a version segment in
+			// a URL path, or the `X-Version` header. Nothing on the server is
+			// wrong, and retrying the same request can never succeed.
+			Self::VersionParse(_) => StatusCode::BAD_REQUEST,
+			Self::Header(_) => StatusCode::BAD_REQUEST,
 			Self::DatabaseQuery(diesel::result::Error::NotFound) => StatusCode::NOT_FOUND,
 			Self::AuthMissingHeader(_) => StatusCode::UNAUTHORIZED,
 			Self::AuthMissingCertificate => StatusCode::UNAUTHORIZED,
@@ -280,8 +288,6 @@ impl AppError {
 			Self::Custom(_)
 			| Self::Problem(_)
 			| Self::Environment(_)
-			| Self::VersionParse(_)
-			| Self::Header(_)
 			| Self::DatabasePool(_)
 			| Self::DatabaseQuery(_)
 			| Self::Tera(_)
