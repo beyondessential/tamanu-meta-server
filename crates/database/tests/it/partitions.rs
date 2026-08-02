@@ -290,3 +290,58 @@ async fn runway_alert_warns_fails_and_recovers() {
 	})
 	.await;
 }
+
+/// Two callers provisioning at once must not collide. The functions this
+/// replaced probed for a partition and then created it without a lock or an
+/// `IF NOT EXISTS`, so two concurrent invocations — the in-process loop and
+/// the external schedule named in the old COMMENTs, or two schedulers —
+/// could both pass the check and one would abort on the `CREATE`, rolling
+/// back every week it had already provisioned in that call.
+///
+/// Both callers must come back clean, and every week must end up attached.
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_provisioning_does_not_collide() {
+	commons_tests::db::TestDb::run(async |mut conn, url| {
+		// Leave real work to race over.
+		assert!(drop_partitions_from(&mut conn, "statuses", 7).await > 0);
+		let before = days_remaining(&mut conn, "statuses").await;
+
+		let pool = database::init_to(&url);
+		let mut first = pool.get().await.expect("first connection");
+		let mut second = pool.get().await.expect("second connection");
+
+		// Genuinely concurrent: both futures are in flight together, so
+		// whichever reaches the existence probe first, the other is inside
+		// the same window.
+		let (a, b) = tokio::join!(
+			partitions::ensure_runway(&mut first, 6),
+			partitions::ensure_runway(&mut second, 6),
+		);
+		let a = a.expect("first caller must not error");
+		let b = b.expect("second caller must not error");
+
+		assert!(
+			a.iter().chain(b.iter()).all(|week| !week.failed()),
+			"a caller reported a failed week: {a:?} / {b:?}",
+		);
+		assert!(
+			a.iter()
+				.chain(b.iter())
+				.any(|week| week.action == "created"),
+			"nothing was provisioned, so the test proved nothing: {a:?} / {b:?}",
+		);
+
+		// The point of the whole exercise: the runway really was extended,
+		// and no week was left behind by a rolled-back call.
+		let after = days_remaining(&mut conn, "statuses").await;
+		assert!(
+			after > before,
+			"runway did not grow ({before} -> {after} days)",
+		);
+		assert!(
+			after >= 6 * 7 - 7,
+			"six weeks were asked for, got {after} days"
+		);
+	})
+	.await;
+}
