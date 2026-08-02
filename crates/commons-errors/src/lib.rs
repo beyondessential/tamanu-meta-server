@@ -242,6 +242,9 @@ impl AppError {
 	/// long time answering 500: adding a variant and forgetting its status
 	/// was silent. Now it doesn't compile, so the status is a decision
 	/// somebody makes rather than one that defaults.
+	///
+	/// Note the arms are ordered, so a variant listed twice silently takes
+	/// the first match. Keep each one in exactly one arm.
 	fn to_http_status(&self) -> StatusCode {
 		match self {
 			Self::NotImplemented => StatusCode::NOT_IMPLEMENTED,
@@ -285,8 +288,6 @@ impl AppError {
 			Self::Custom(_)
 			| Self::Problem(_)
 			| Self::Environment(_)
-			| Self::VersionParse(_)
-			| Self::Header(_)
 			| Self::DatabasePool(_)
 			| Self::DatabaseQuery(_)
 			| Self::Tera(_)
