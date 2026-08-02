@@ -489,8 +489,10 @@ pub async fn update_version_status(
 	if version_record.status == VersionStatus::Published && new_status == VersionStatus::Draft {
 		let is_latest = Version::is_latest_in_minor(&mut conn, version.clone()).await?;
 		if !is_latest {
-			return Err(AppError::custom(
-				"Cannot change a published version to draft unless it is the latest in its minor version",
+			return Err(AppError::BadRequest(
+				"Cannot change a published version to draft unless it is the latest in its \
+				 minor version"
+					.into(),
 			));
 		}
 	}

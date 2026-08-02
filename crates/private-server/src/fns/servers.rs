@@ -992,7 +992,7 @@ pub async fn create(
 			.await
 			.map_err(|_| AppError::AuthTailnetDirectoryUnavailable)?
 			.ok_or_else(|| {
-				AppError::BadRequest("no tailnet device matches that identifier".into())
+				AppError::NotFound("no tailnet device matches that identifier".into())
 			})?;
 		let device = match Device::from_tailscale_node_id(&mut conn, &entry.node_id).await? {
 			Some(existing) => existing,
@@ -1324,7 +1324,7 @@ pub async fn attach_tailscale_device(
 		.resolve_identifier(&args.identifier)
 		.await
 		.map_err(|_| AppError::AuthTailnetDirectoryUnavailable)?
-		.ok_or_else(|| AppError::BadRequest("no tailnet device matches that identifier".into()))?;
+		.ok_or_else(|| AppError::NotFound("no tailnet device matches that identifier".into()))?;
 
 	let mut conn = state.db.get().await?;
 
