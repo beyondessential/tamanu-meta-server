@@ -8384,9 +8384,14 @@ export interface components {
             /**
              * Format: int64
              * @description How long the query took to run, in milliseconds. Timing starts
-             *     just before execution begins (immediately after the query has
-             *     been recorded to the shared history) and stops once every value
+             *     immediately before the query is sent and stops once every value
              *     has been read back, including any text conversions.
+             *
+             *     Endpoint overhead is deliberately outside the window: both pool
+             *     checkouts, the write to the shared history, and the transaction
+             *     setup. Those are not what the operator is measuring when they time
+             *     a query, and the read-only pool's checkout in particular can
+             *     dominate under contention.
              */
             execution_time_ms: number;
             /** @description Number of rows returned. */

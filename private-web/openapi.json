@@ -14582,7 +14582,7 @@
           "execution_time_ms": {
             "type": "integer",
             "format": "int64",
-            "description": "How long the query took to run, in milliseconds. Timing starts\njust before execution begins (immediately after the query has\nbeen recorded to the shared history) and stops once every value\nhas been read back, including any text conversions.",
+            "description": "How long the query took to run, in milliseconds. Timing starts\nimmediately before the query is sent and stops once every value\nhas been read back, including any text conversions.\n\nEndpoint overhead is deliberately outside the window: both pool\ncheckouts, the write to the shared history, and the transaction\nsetup. Those are not what the operator is measuring when they time\na query, and the read-only pool's checkout in particular can\ndominate under contention.",
             "minimum": 0
           },
           "row_count": {

@@ -45,9 +45,14 @@ pub struct SqlResult {
 	/// Number of rows returned.
 	pub row_count: usize,
 	/// How long the query took to run, in milliseconds. Timing starts
-	/// just before execution begins (immediately after the query has
-	/// been recorded to the shared history) and stops once every value
+	/// immediately before the query is sent and stops once every value
 	/// has been read back, including any text conversions.
+	///
+	/// Endpoint overhead is deliberately outside the window: both pool
+	/// checkouts, the write to the shared history, and the transaction
+	/// setup. Those are not what the operator is measuring when they time
+	/// a query, and the read-only pool's checkout in particular can
+	/// dominate under contention.
 	pub execution_time_ms: u64,
 }
 
@@ -132,7 +137,6 @@ pub async fn execute_query(
 	};
 
 	let query = args.query;
-	let start_time = Instant::now();
 
 	let mut conn = state.db.get().await?;
 	SqlPlaygroundHistory::create(&mut conn, query.query.clone(), user.login.clone())
@@ -161,6 +165,12 @@ pub async fn execute_query(
 			))
 		})?;
 
+	// The clock starts here, not before the pool checkouts, the history
+	// write, and the transaction setup. Those are endpoint overhead, and
+	// under contention for the read-only pool they dominated what was
+	// reported as the query's own time.
+	let start_time = Instant::now();
+
 	let rows = tokio::time::timeout(
 		Duration::from_secs(60),
 		transaction.query(&query.query, &[]),
@@ -174,14 +184,12 @@ pub async fn execute_query(
 		.await
 		.map_err(|e| AppError::custom(format_db_error(&e, None)))?;
 
-	let execution_time = start_time.elapsed();
-
 	if rows.is_empty() {
 		return Ok(Json(SqlResult {
 			columns: Vec::new(),
 			rows: Vec::new(),
 			row_count: 0,
-			execution_time_ms: execution_time.as_millis() as u64,
+			execution_time_ms: start_time.elapsed().as_millis() as u64,
 		}));
 	}
 
@@ -221,11 +229,13 @@ pub async fn execute_query(
 		}
 	}
 
+	// After the text conversions, which the field documents as included —
+	// they are a second round-trip and the operator is paying for them.
 	Ok(Json(SqlResult {
 		columns,
 		rows: all_values,
 		row_count: rows.len(),
-		execution_time_ms: execution_time.as_millis() as u64,
+		execution_time_ms: start_time.elapsed().as_millis() as u64,
 	}))
 }
 

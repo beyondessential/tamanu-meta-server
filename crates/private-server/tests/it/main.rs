@@ -27,6 +27,7 @@ mod provision_credential;
 mod restore_replicas;
 mod server_products;
 mod server_version_distance;
+mod sql;
 mod tagged_device_guard;
 mod tailnet_device_auth;
 mod tailnet_key_expiry_sweep;
