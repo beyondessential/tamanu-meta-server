@@ -320,6 +320,12 @@ impl Version {
 
 		let version_record = Self::get_by_version(db, version.clone()).await?;
 
+		// `.optional()`, not `.ok()`: the latter folded every Diesel error —
+		// a dropped connection, a serialisation failure — into `None`, and
+		// `None` here reports "yes, latest". That is the permissive answer,
+		// and it is the one guarding the publish-to-draft demotion in
+		// `fns::versions::update_version_status`, so a transient database
+		// fault would wave through a demotion the guard exists to refuse.
 		let latest_in_minor: Option<Version> = versions
 			.filter(major.eq(version_record.major))
 			.filter(minor.eq(version_record.minor))
@@ -328,7 +334,8 @@ impl Version {
 			.select(Version::as_select())
 			.first(db)
 			.await
-			.ok();
+			.optional()
+			.map_err(AppError::from)?;
 
 		Ok(latest_in_minor
 			.as_ref()
