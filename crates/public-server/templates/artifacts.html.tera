@@ -178,7 +178,7 @@
                         {% if artifact.artifact_type == "mobile" %}
                         <a href="/versions/{{ version.major }}.{{ version.minor }}.{{ version.patch }}/mobile" class="button is-info">Install</a>
                         {% endif %}
-                        {% if artifact.download_url is starting_with("https://") %}
+                        {% if artifact.download_url is starting_with(pat="https://") %}
                         <a href="{{ artifact.download_url }}" class="button is-primary" target="_blank">Download</a>
                         {% endif %}
                         <button class="button" onclick="copyToClipboard('{{ artifact.download_url }}')" title="Copy URL" aria-label="Copy URL">
