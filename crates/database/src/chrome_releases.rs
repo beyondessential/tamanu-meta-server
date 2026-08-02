@@ -38,6 +38,19 @@ impl NewChromeRelease {
 	}
 }
 
+/// `version` is TEXT holding a Chrome major, so ordering it as text puts
+/// `"100"` before `"99"`. Sort on the number it spells instead.
+///
+/// Anything that isn't a run of digits sorts last (Postgres puts NULLs last on
+/// an ascending sort), which matches how the value is read back: a version that
+/// won't `parse::<u32>()` is treated as no version at all.
+fn version_as_number()
+-> diesel::expression::SqlLiteral<diesel::sql_types::Nullable<diesel::sql_types::BigInt>> {
+	diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::BigInt>>(
+		"case when version ~ '^[0-9]+$' then version::bigint end",
+	)
+}
+
 impl ChromeRelease {
 	pub async fn get_min_version_at_date(
 		db: &mut AsyncPgConnection,
@@ -52,7 +65,7 @@ impl ChromeRelease {
 			.select(version)
 			.filter(release_date.le(&date_str))
 			.filter(is_eol.eq(false).or(eol_from.gt(&date_str)))
-			.order_by(version.asc())
+			.order_by(version_as_number().asc())
 			.limit(1)
 			.first(db)
 			.await
@@ -75,7 +88,7 @@ impl ChromeRelease {
 		use crate::schema::chrome_releases::*;
 
 		table
-			.order_by(version.asc())
+			.order_by(version_as_number().asc())
 			.load(db)
 			.await
 			.map_err(AppError::from)

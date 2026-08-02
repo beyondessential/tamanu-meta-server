@@ -3,6 +3,7 @@
 // file, which keeps rebuilds from swamping the machine with I/O.
 // Nextest still runs every #[tokio::test] in parallel as usual.
 
+mod admins;
 mod backfill_registered_at_migration;
 mod backup_detection;
 mod backups;
@@ -12,6 +13,7 @@ mod check_policies;
 mod check_policy_rules;
 mod check_severity_map;
 mod check_stability;
+mod chrome_releases;
 mod consolidated_checks;
 mod event_validation;
 mod fleet_check_detail;
@@ -20,6 +22,7 @@ mod incident_close_result;
 mod incident_get_with_issues;
 mod incident_linger;
 mod incident_list_status;
+mod incident_open_race;
 mod incident_reeval_queue;
 mod incident_result_semantics;
 mod incident_stats;

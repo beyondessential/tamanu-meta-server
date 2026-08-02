@@ -62,3 +62,58 @@ async fn latest_matching_finds_a_higher_minor_as_the_sole_candidate() {
 	})
 	.await;
 }
+
+/// `is_latest_in_minor` folded any Diesel error into `None` and then reported
+/// `None` as "yes, latest" — the permissive answer, and the one guarding the
+/// publish-to-draft demotion. These pin the answers the guard actually
+/// depends on, so the swap from `.ok()` to `.optional()?` is behaviour-
+/// preserving everywhere except the error path.
+#[tokio::test(flavor = "multi_thread")]
+async fn is_latest_in_minor_answers_within_the_minor_line() {
+	TestDb::run(|mut conn, _url| async move {
+		seed(&mut conn, &[(3, 4, 0), (3, 4, 1), (3, 5, 0)]).await;
+
+		assert!(
+			Version::is_latest_in_minor(&mut conn, "3.4.1".parse().unwrap())
+				.await
+				.expect("query"),
+			"3.4.1 is the highest published patch in 3.4",
+		);
+		assert!(
+			!Version::is_latest_in_minor(&mut conn, "3.4.0".parse().unwrap())
+				.await
+				.expect("query"),
+			"3.4.0 is behind 3.4.1",
+		);
+		assert!(
+			Version::is_latest_in_minor(&mut conn, "3.5.0".parse().unwrap())
+				.await
+				.expect("query"),
+			"a later minor line is judged on its own",
+		);
+	})
+	.await
+}
+
+/// A draft version has no published sibling to lose to, so it still reads as
+/// latest — the genuine empty-result case, which must stay distinct from the
+/// error case.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_minor_line_with_nothing_published_reads_as_latest() {
+	TestDb::run(|mut conn, _url| async move {
+		conn.batch_execute(
+			"INSERT INTO versions (major, minor, patch, changelog, status) \
+			 VALUES (4, 0, 0, 'v4.0.0', 'draft')",
+		)
+		.await
+		.expect("seed draft");
+
+		assert!(
+			Version::is_latest_in_minor(&mut conn, "4.0.0".parse().unwrap())
+				.await
+				.expect("query"),
+			"nothing published in 4.0 to be behind",
+		);
+	})
+	.await
+}

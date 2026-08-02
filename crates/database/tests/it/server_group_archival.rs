@@ -218,3 +218,72 @@ async fn live_server_counts_excludes_archived() {
 	})
 	.await
 }
+
+/// Restore is the inverse of the archival *cascade*, not a blanket
+/// un-archive of everything in the group. A server an operator archived
+/// deliberately before the group was archived must stay archived: the group's
+/// `is_monitored` survives archival, so resurrecting a decommissioned box
+/// puts it straight back into monitoring and it starts filing "never
+/// reported" alerts.
+#[tokio::test(flavor = "multi_thread")]
+async fn restore_leaves_individually_archived_members_archived() {
+	TestDb::run(async |mut conn, _| {
+		let group = insert_group(&mut conn, "Group").await;
+		// Archived on its own, well before the group.
+		let retired = insert_server(&mut conn, group, true).await;
+		// Live, so the group's archival cascades over it.
+		let cascaded = insert_server(&mut conn, group, false).await;
+
+		ServerGroup::soft_delete(&mut conn, group).await.unwrap();
+		assert!(
+			Server::get_by_id(&mut conn, cascaded)
+				.await
+				.unwrap()
+				.deleted_at
+				.is_some(),
+			"the live member is cascade-archived",
+		);
+
+		ServerGroup::restore(&mut conn, group).await.unwrap();
+
+		assert!(
+			Server::get_by_id(&mut conn, cascaded)
+				.await
+				.unwrap()
+				.deleted_at
+				.is_none(),
+			"the cascade-archived member comes back",
+		);
+		assert!(
+			Server::get_by_id(&mut conn, retired)
+				.await
+				.unwrap()
+				.deleted_at
+				.is_some(),
+			"the individually-archived member stays archived",
+		);
+	})
+	.await
+}
+
+/// The same resurrection by another route: restoring a group that was never
+/// archived must not un-archive its members either.
+#[tokio::test(flavor = "multi_thread")]
+async fn restoring_a_live_group_does_not_resurrect_its_archived_members() {
+	TestDb::run(async |mut conn, _| {
+		let group = insert_group(&mut conn, "Group").await;
+		let retired = insert_server(&mut conn, group, true).await;
+
+		ServerGroup::restore(&mut conn, group).await.unwrap();
+
+		assert!(
+			Server::get_by_id(&mut conn, retired)
+				.await
+				.unwrap()
+				.deleted_at
+				.is_some(),
+			"nothing was cascaded, so nothing comes back",
+		);
+	})
+	.await
+}

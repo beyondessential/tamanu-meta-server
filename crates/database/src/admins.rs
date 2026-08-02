@@ -34,11 +34,20 @@ impl Admin {
 			.map_err(AppError::from)
 	}
 
+	/// Add an admin, returning the row whether it was just created or already
+	/// existed.
+	///
+	/// `DO NOTHING` would insert no row on a conflict, and `get_result` on no
+	/// rows is `NotFound` — a 404 out of an endpoint documented as idempotent.
+	/// A no-op `DO UPDATE` on the same column returns the existing row instead,
+	/// leaving its original `created_at` intact.
 	pub async fn add(db: &mut AsyncPgConnection, email: &str) -> Result<Self> {
 		use crate::schema::admins::dsl;
 		diesel::insert_into(dsl::admins)
 			.values(dsl::email.eq(email))
-			.on_conflict_do_nothing()
+			.on_conflict(dsl::email)
+			.do_update()
+			.set(dsl::email.eq(email))
 			.get_result(db)
 			.await
 			.map_err(AppError::from)

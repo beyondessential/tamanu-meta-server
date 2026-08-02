@@ -285,8 +285,10 @@ async fn create(
 	use commons_types::version::VersionStatus;
 
 	let mut db = db.get().await?;
-	let mut stream = data.take(1024 * 1024 * 1024); // up to a MiB
-	let mut changelog = String::with_capacity(data.len().min(1024 * 1024 * 1024));
+	const CHANGELOG_LIMIT: usize = 1024 * 1024; // a MiB, as documented
+
+	let mut stream = data.take(CHANGELOG_LIMIT as u64);
+	let mut changelog = String::with_capacity(data.len().min(CHANGELOG_LIMIT));
 	stream.read_to_string(&mut changelog).await?;
 	let version_str = VersionStr::from_str(&version)?;
 	let device_id = device.0.0.id;
@@ -405,18 +407,25 @@ async fn view_artifacts(
 	version.changelog = parse_markdown(&version.changelog);
 	let artifacts = Artifact::get_for_version(&mut db, version.id).await?;
 
-	// Check if this is the latest published version in its minor
+	// The latest *ready* version in this minor. The page's own version came
+	// through `latest_matching_ready`, so the banner has to use the same set:
+	// a version a known issue still covers is hidden from every listing and
+	// its own page 404s, so recommending one — and linking to it — sends the
+	// reader nowhere.
 	let latest_in_minor = {
 		use database::schema::versions::dsl::*;
-		versions
+		let published: Vec<Version> = versions
 			.filter(major.eq(version.major))
 			.filter(minor.eq(version.minor))
 			.filter(status.eq(VersionStatus::Published))
 			.order_by(patch.desc())
 			.select(Version::as_select())
-			.first(&mut db)
+			.load(&mut db)
 			.await
-			.ok()
+			.map_err(AppError::from)?;
+		// `filter_ready` keeps the order it's given, so the first survivor is
+		// the highest ready patch.
+		filter_ready(&mut db, published).await?.into_iter().next()
 	};
 
 	let is_latest = latest_in_minor

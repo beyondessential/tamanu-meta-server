@@ -151,3 +151,49 @@ async fn oauth_discovery_is_404() {
 	})
 	.await
 }
+
+/// The budget is documented as bounding "the DB lookups a token-guesser can
+/// burn", but it was only consulted inside `refuse` — after
+/// `McpToken::find_active` had already taken a pool connection and run its
+/// query. So an over-budget IP still cost a lookup per guess.
+///
+/// Proved by making the lookup impossible: with the table gone, any code
+/// path that still reaches the database errors into a 500. A 429 means the
+/// request was turned away before it got there.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_over_budget_ip_is_refused_without_a_database_lookup() {
+	commons_tests::server::run(async |mut conn, public, _private| {
+		let guess = async || {
+			public
+				.post("/mcp")
+				.add_header("accept", ACCEPT)
+				.add_header("mcp-protocol-version", PROTO)
+				.add_header("authorization", "Bearer canopy_mcp_guess")
+				.json(&fleet_summary_call())
+				.await
+				.status_code()
+				.as_u16()
+		};
+
+		// Spend the budget.
+		let mut spent = false;
+		for _ in 0..40 {
+			if guess().await == 429 {
+				spent = true;
+				break;
+			}
+		}
+		assert!(spent, "failed attempts never rate limited");
+
+		diesel_async::SimpleAsyncConnection::batch_execute(&mut conn, "DROP TABLE mcp_tokens")
+			.await
+			.expect("drop the token table");
+
+		assert_eq!(
+			guess().await,
+			429,
+			"an over-budget IP must be refused before the lookup, not after it",
+		);
+	})
+	.await
+}
