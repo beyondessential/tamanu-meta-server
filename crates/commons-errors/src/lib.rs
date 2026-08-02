@@ -125,6 +125,14 @@ pub enum AppError {
 	#[error("invalid request: {0}")]
 	BadRequest(String),
 
+	/// A specific resource was looked up and not found, where the lookup
+	/// doesn't go through Diesel's own `NotFound` — an `Option` returned by a
+	/// directory, a cache, or a helper that already mapped its error away.
+	/// Maps to 404, and reuses the `resource-not-found` problem type so a
+	/// caller matches one slug for "not found" however the miss was produced.
+	#[error("not found: {0}")]
+	NotFound(String),
+
 	/// Resource conflict — e.g. attempting to import a ticket whose
 	/// canonical URL already belongs to a different server id. Maps
 	/// to 409.
@@ -227,6 +235,13 @@ impl Clone for AppError {
 }
 
 impl AppError {
+	/// The status each variant answers with.
+	///
+	/// Deliberately exhaustive — no `_` arm. A wildcard here is how
+	/// `VersionParse` and `Header`, both purely client-input errors, spent a
+	/// long time answering 500: adding a variant and forgetting its status
+	/// was silent. Now it doesn't compile, so the status is a decision
+	/// somebody makes rather than one that defaults.
 	fn to_http_status(&self) -> StatusCode {
 		match self {
 			Self::NotImplemented => StatusCode::NOT_IMPLEMENTED,
@@ -249,6 +264,7 @@ impl AppError {
 			Self::AuthTailnetIdentityMissing => StatusCode::UNAUTHORIZED,
 			Self::AuthTokenNotValid => StatusCode::UNAUTHORIZED,
 			Self::BadRequest(_) => StatusCode::BAD_REQUEST,
+			Self::NotFound(_) => StatusCode::NOT_FOUND,
 			Self::Conflict(_) => StatusCode::CONFLICT,
 			Self::CertificateKeyCompromised(_) => StatusCode::CONFLICT,
 			Self::NameManagementPaused(_) => StatusCode::CONFLICT,
@@ -257,7 +273,20 @@ impl AppError {
 			Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
 			Self::Upstream(_) => StatusCode::BAD_GATEWAY,
 			Self::BackupRotationInProgress => StatusCode::SERVICE_UNAVAILABLE,
-			_ => StatusCode::INTERNAL_SERVER_ERROR,
+
+			// Everything below is a server-side fault or a non-HTTP context,
+			// and answers 500. Listed rather than wildcarded so a new variant
+			// has to be placed deliberately.
+			Self::Custom(_)
+			| Self::Problem(_)
+			| Self::Environment(_)
+			| Self::VersionParse(_)
+			| Self::Header(_)
+			| Self::DatabasePool(_)
+			| Self::DatabaseQuery(_)
+			| Self::Tera(_)
+			| Self::Io(_)
+			| Self::Timesync(_) => StatusCode::INTERNAL_SERVER_ERROR,
 		}
 	}
 
@@ -281,8 +310,8 @@ impl AppError {
 						Self::Header(_) => "header",
 						Self::VersionParse(_) => "version-parse",
 						Self::DatabasePool(_) => "database",
-						Self::DatabaseQuery(diesel::result::Error::NotFound) =>
-							"resource-not-found",
+						Self::DatabaseQuery(diesel::result::Error::NotFound)
+						| Self::NotFound(_) => "resource-not-found",
 						Self::DatabaseQuery(_) => "database",
 						Self::Tera(_) => "render",
 						Self::Io(_) => "io",

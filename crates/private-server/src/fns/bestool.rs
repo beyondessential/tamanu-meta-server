@@ -182,7 +182,7 @@ pub async fn get_snippet(
 	let mut conn = state.db.get().await?;
 	let snippet = database::BestoolSnippet::get_by_id(&mut conn, args.id)
 		.await?
-		.ok_or_else(|| AppError::custom("Snippet not found"))?;
+		.ok_or_else(|| AppError::NotFound(format!("no snippet with id {}", args.id)))?;
 	Ok(Json(BestoolSnippetDetail {
 		id: snippet.id,
 		name: snippet.name,

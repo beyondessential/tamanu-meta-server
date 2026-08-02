@@ -1163,3 +1163,56 @@ async fn incident_resolve_metadata() {
 	})
 	.await;
 }
+
+/// Empty-input validation used `AppError::custom`, which maps to 500 —
+/// though all three endpoints document 400, and the codebase convention for
+/// exactly this check (`mcp_tokens::mint`'s empty-name guard) is
+/// `AppError::BadRequest`.
+#[tokio::test(flavor = "multi_thread")]
+async fn empty_validation_input_is_a_400_not_a_500() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let server_id = Uuid::new_v4();
+		let group_id = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
+			 INSERT INTO servers (id, host, kind, group_id) VALUES \
+				('{server_id}', 'https://validate.example.com', 'central', '{group_id}');
+			 INSERT INTO issues (id, server_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, last_degraded_at) VALUES \
+				('11111111-2222-3333-4444-555555555555', '{server_id}', 'src', 'r', 'r', 'failed', 'failed', 'm', true, NOW(), NOW(), NOW());"
+		))
+		.await
+		.expect("seed");
+
+		// A blank `ref` on a manual event.
+		let resp = private
+			.post("/api/issues/submit_manual_event")
+			.json(&serde_json::json!({
+				"ref": "   ",
+				"serverId": server_id,
+				"message": "m",
+			}))
+			.await;
+		assert_eq!(
+			resp.status_code().as_u16(),
+			400,
+			"blank ref: {}",
+			resp.text()
+		);
+
+		// A blank note body on an issue.
+		let resp = private
+			.post("/api/issues/add_note")
+			.json(&serde_json::json!({
+				"issue_id": "11111111-2222-3333-4444-555555555555",
+				"body": "  ",
+			}))
+			.await;
+		assert_eq!(
+			resp.status_code().as_u16(),
+			400,
+			"blank issue note: {}",
+			resp.text()
+		);
+	})
+	.await
+}

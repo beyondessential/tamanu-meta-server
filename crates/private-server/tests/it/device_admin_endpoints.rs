@@ -350,3 +350,53 @@ async fn resolve_tailnet_identifier_returns_null_for_unknown() {
 	})
 	.await
 }
+
+/// Both attach handlers document 404 for "identifier does not resolve to a
+/// known tailnet node". `devices::attach_tailscale` answered 500 (via
+/// `AppError::custom`) and `servers::attach_tailscale` answered 400 — so
+/// they disagreed with the spec and with each other.
+#[tokio::test(flavor = "multi_thread")]
+async fn attach_tailscale_is_404_for_an_unresolvable_identifier() {
+	TestDb::run(async |mut conn, url| {
+		let (_ip, _node_id, dir) = test_directory();
+		let private = private_with_directory(&url, dir).await;
+		let device_id = insert_device(&mut conn).await;
+
+		let resp = private
+			.post("/api/devices/attach_tailscale")
+			.json(&serde_json::json!({
+				"device_id": device_id,
+				"identifier": "100.64.99.99",
+			}))
+			.await;
+		assert_eq!(resp.status_code().as_u16(), 404, "body: {}", resp.text());
+	})
+	.await
+}
+
+/// The server-side attach handler documents the same 404 and must agree.
+#[tokio::test(flavor = "multi_thread")]
+async fn server_attach_tailscale_is_404_for_an_unresolvable_identifier() {
+	TestDb::run(async |mut conn, url| {
+		let (_ip, _node_id, dir) = test_directory();
+		let private = private_with_directory(&url, dir).await;
+
+		let server_id = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO servers (id, host, kind) \
+			 VALUES ('{server_id}', 'https://attach.example.com', 'central');"
+		))
+		.await
+		.expect("insert server");
+
+		let resp = private
+			.post("/api/servers/attach_tailscale_device")
+			.json(&serde_json::json!({
+				"server_id": server_id,
+				"identifier": "100.64.99.99",
+			}))
+			.await;
+		assert_eq!(resp.status_code().as_u16(), 404, "body: {}", resp.text());
+	})
+	.await
+}
