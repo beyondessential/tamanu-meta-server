@@ -959,3 +959,45 @@ async fn check_stability_returns_full_records_for_pairs() {
 	})
 	.await
 }
+
+/// `get_restore_replica` took the group's 50 newest checks and *then* kept
+/// the ones belonging to this replica — filter-after-limit. A replica
+/// checked rarely, alongside a chatty one in the same group, had every one
+/// of its reports pushed out of the window and read as never checked.
+#[tokio::test(flavor = "multi_thread")]
+async fn get_restore_replica_checks_are_the_replicas_own_newest() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		seed_backup_runs(&mut conn).await;
+		seed_restore_replicas(&mut conn).await;
+
+		// The group-wide replica reports rarely; give it one old check, then
+		// bury it under a run of newer checks from its noisy neighbour.
+		let mut rows = format!(
+			"INSERT INTO backup_restore_checks \
+			 (replica_id, consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome, replica_healthy, observed_at) \
+			 VALUES ('{REPLICA_GROUP_WIDE}', '{CONSUMER}', '{RGROUP}', NULL, 'tamanu-postgres', 'verify', 'quiet-snap', 'success', true, NOW() - interval '10 days');"
+		);
+		for i in 0..60 {
+			rows.push_str(&format!(
+				"INSERT INTO backup_restore_checks \
+				 (replica_id, consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome, replica_healthy, observed_at) \
+				 VALUES ('{REPLICA_SERVER_SCOPED}', '{CONSUMER}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'verify', 'noisy-{i}', 'success', true, NOW() - interval '{i} minutes');"
+			));
+		}
+		conn.batch_execute(&rows).await.expect("seed noisy checks");
+
+		let detail = call_tool!(
+			private,
+			"get_restore_replica",
+			serde_json::json!({ "replica_id": REPLICA_GROUP_WIDE })
+		);
+		let checks = detail["recent_checks"].as_array().expect("recent_checks");
+		assert_eq!(
+			checks.len(),
+			1,
+			"the quiet replica's own check must survive a noisy neighbour: {detail}",
+		);
+		assert_eq!(checks[0]["snapshot_id"], "quiet-snap");
+	})
+	.await
+}

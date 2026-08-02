@@ -705,6 +705,28 @@ impl BackupRestoreCheck {
 			.map_err(AppError::from)
 	}
 
+	/// Recent reports for one replica, newest first.
+	///
+	/// Not [`Self::list_recent_for_group`] filtered afterwards: the limit has
+	/// to bite the replica's own checks, or a low-frequency replica sharing a
+	/// group with a chatty one has every one of its reports pushed out of the
+	/// window and reads as never checked.
+	pub async fn list_recent_for_replica(
+		db: &mut AsyncPgConnection,
+		replica_id: Uuid,
+		limit: i64,
+	) -> Result<Vec<Self>> {
+		use crate::schema::backup_restore_checks::dsl;
+		dsl::backup_restore_checks
+			.select(Self::as_select())
+			.filter(dsl::replica_id.eq(Some(replica_id)))
+			.order(dsl::observed_at.desc())
+			.limit(limit)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Recent reports across all groups, newest first.
 	pub async fn list_recent(db: &mut AsyncPgConnection, limit: i64) -> Result<Vec<Self>> {
 		use crate::schema::backup_restore_checks::dsl;

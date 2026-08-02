@@ -164,12 +164,9 @@ impl CanopyMcp {
 				.find(|d| d.intent == replica.intent);
 
 		let relevant: Vec<BackupRestoreCheck> =
-			BackupRestoreCheck::list_recent_for_group(&mut conn, replica.group_id, 50)
+			BackupRestoreCheck::list_recent_for_replica(&mut conn, replica.id, 50)
 				.await
-				.map_err(mcp_err)?
-				.into_iter()
-				.filter(|c| c.replica_id == Some(replica.id))
-				.collect();
+				.map_err(mcp_err)?;
 		let check_server_names = Server::names_by_ids(
 			&mut conn,
 			&unique(relevant.iter().filter_map(|c| c.server_id)),
