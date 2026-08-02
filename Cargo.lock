@@ -1754,6 +1754,7 @@ dependencies = [
  "axum",
  "axum-client-ip",
  "axum-server-timing",
+ "axum-test",
  "chbs",
  "commons-errors",
  "commons-types",

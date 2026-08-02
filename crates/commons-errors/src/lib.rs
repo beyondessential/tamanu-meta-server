@@ -232,6 +232,11 @@ impl AppError {
 			Self::NotImplemented => StatusCode::NOT_IMPLEMENTED,
 			Self::NoMatchingVersions => StatusCode::NOT_FOUND,
 			Self::UnusableRange => StatusCode::BAD_REQUEST,
+			// Both arise purely from what a client sent: a version segment in
+			// a URL path, or the `X-Version` header. Nothing on the server is
+			// wrong, and retrying the same request can never succeed.
+			Self::VersionParse(_) => StatusCode::BAD_REQUEST,
+			Self::Header(_) => StatusCode::BAD_REQUEST,
 			Self::DatabaseQuery(diesel::result::Error::NotFound) => StatusCode::NOT_FOUND,
 			Self::AuthMissingHeader(_) => StatusCode::UNAUTHORIZED,
 			Self::AuthMissingCertificate => StatusCode::UNAUTHORIZED,

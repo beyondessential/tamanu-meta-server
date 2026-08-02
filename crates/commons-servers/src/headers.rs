@@ -51,3 +51,45 @@ where
 			.map(Some)
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use axum::{Router, routing::get};
+
+	async fn handler(v: Option<VersionHeader>) -> String {
+		format!("{:?}", v.map(|v| v.0.to_string()))
+	}
+
+	#[tokio::test]
+	async fn a_malformed_version_header_rejects_rather_than_reading_as_absent() {
+		let app = Router::new().route("/", get(handler));
+		let server = axum_test::TestServer::new(app);
+
+		assert_eq!(
+			server.get("/").await.status_code().as_u16(),
+			200,
+			"absent is fine"
+		);
+		assert_eq!(
+			server
+				.get("/")
+				.add_header("x-version", "2.3.4")
+				.await
+				.status_code()
+				.as_u16(),
+			200,
+			"a good version is fine",
+		);
+		assert_eq!(
+			server
+				.get("/")
+				.add_header("x-version", "garbage")
+				.await
+				.status_code()
+				.as_u16(),
+			400,
+			"a garbage version is a client bug, not an absent header",
+		);
+	}
+}

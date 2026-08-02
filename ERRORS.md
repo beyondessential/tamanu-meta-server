@@ -8,11 +8,14 @@ This should never be exposed over the API.
 
 ## Header
 
-Issued when an HTTP Header is missing or malformed.
+Issued when an HTTP Header is missing or malformed. **400 Bad Request** — the
+header came from the client, so nothing on the server is at fault and
+retrying the same request cannot succeed.
 
 ## Version Parse
 
 Issued when a version or version range in URLs or API bodies is not parseable.
+**400 Bad Request**, for the same reason as [Header](#header).
 
 ## Database
 
