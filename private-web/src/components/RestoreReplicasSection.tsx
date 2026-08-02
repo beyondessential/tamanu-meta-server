@@ -45,6 +45,7 @@ import type {
 	RestoreConsumerView,
 	RestoreReplicaView,
 } from "../types";
+import { REDACTION_GAP_LABELS, REDACTION_PARAMS } from "../types";
 
 function kebabCase(s: string): string {
 	return s
@@ -129,6 +130,7 @@ export default function RestoreReplicasSection({
 				name: r.name,
 				overdue_after: r.overdue_after,
 				params: r.params as Record<string, unknown>,
+				redacts: r.redacts,
 				enabled,
 			});
 			reload();
@@ -186,6 +188,7 @@ export default function RestoreReplicasSection({
 								<TableCell>Type</TableCell>
 								<TableCell>Intent</TableCell>
 								<TableCell>Overdue after</TableCell>
+								<TableCell>Redaction</TableCell>
 								<TableCell>Params</TableCell>
 								<TableCell>Enabled</TableCell>
 								{isAdmin && <TableCell align="right">Actions</TableCell>}
@@ -217,6 +220,12 @@ export default function RestoreReplicasSection({
 										</Stack>
 									</TableCell>
 									<TableCell>{r.overdue_after ?? "no bound"}</TableCell>
+									<TableCell>
+										<RedactionCell
+											replica={r}
+											activity={checks.status === "ok" ? checks.data : []}
+										/>
+									</TableCell>
 									<TableCell>
 										<ParamSummary params={r.params} />
 									</TableCell>
@@ -270,6 +279,7 @@ export default function RestoreReplicasSection({
 								<TableCell>Outcome</TableCell>
 								<TableCell>Duration</TableCell>
 								<TableCell>PG version</TableCell>
+								<TableCell>Redaction</TableCell>
 								<TableCell>Snapshot</TableCell>
 								<TableCell>Replica</TableCell>
 							</TableRow>
@@ -413,6 +423,109 @@ function ParamFieldsEditor({
 	);
 }
 
+/** Whether a declaration redacts, and any servers it covers whose masking
+ * Canopy can't currently line up — a redacting declaration that quietly
+ * restores nothing for a server, or resolves a manifest that was never
+ * published, is otherwise indistinguishable from one that is working. */
+function RedactionCell({
+	replica,
+	activity,
+}: {
+	replica: RestoreReplicaView;
+	activity: RestoreActivity[];
+}) {
+	if (!replica.redacts) {
+		return (
+			<Typography variant="body2" color="text.secondary">
+				not redacted
+			</Typography>
+		);
+	}
+	const gaps = replica.redaction_gaps;
+	// What the declaration asks for is not what it got: the most recent
+	// report that carried a redaction says whether the replicas are actually
+	// masked, and a partial one is the case worth seeing from the list.
+	const reported = activity.find(
+		(c) =>
+			c.redaction_outcome != null &&
+			c.type === replica.type &&
+			c.intent === replica.intent &&
+			(replica.server_id == null || c.server_id === replica.server_id),
+	);
+	const state = reported?.redaction_outcome;
+	return (
+		<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
+			{state === "partial" || state === "failed" ? (
+				<Tooltip
+					title={
+						state === "partial"
+							? "Live and mostly masked, with columns in the clear."
+							: "No masking took effect; the replica is held on its previous data."
+					}
+				>
+					<Chip label={state} color="warning" size="small" />
+				</Tooltip>
+			) : (
+				<Chip label="redacted" color="success" size="small" />
+			)}
+			{gaps.length > 0 && (
+				<Tooltip
+					title={
+						<>
+							Canopy has no masking for:
+							{gaps.map((g) => (
+								<div key={g.server_id}>
+									{g.server_name ?? g.server_id.slice(0, 8)} —{" "}
+									{REDACTION_GAP_LABELS[g.reason] ?? g.reason}
+									{g.version ? ` (${g.version})` : ""}
+								</div>
+							))}
+						</>
+					}
+				>
+					<Chip
+						label={`${gaps.length} unmaskable`}
+						color="warning"
+						size="small"
+					/>
+				</Tooltip>
+			)}
+		</Stack>
+	);
+}
+
+/** The redaction switch, shown only for an intent that can redact. Canopy
+ * resolves the masking manifest from the server's product, so there is
+ * nothing else for the operator to fill in. */
+function RedactionField({
+	value,
+	onChange,
+}: {
+	value: boolean;
+	onChange: (value: boolean) => void;
+}) {
+	return (
+		<FormControlLabel
+			control={
+				<Switch
+					size="small"
+					checked={value}
+					onChange={(e) => onChange(e.target.checked)}
+				/>
+			}
+			label={
+				<Stack>
+					<Typography variant="body2">Redact this replica</Typography>
+					<Typography variant="caption" color="text.secondary">
+						Masks the data before it is served, using the manifest published
+						for the version restored.
+					</Typography>
+				</Stack>
+			}
+		/>
+	);
+}
+
 /** Convert the typed form fields into the wire params object, omitting any the
  * operator left unset (the consumer resolves those to their default or null).
  * Returns an error message string if a numeric field doesn't parse. */
@@ -497,9 +610,20 @@ function useIntentSchema(
 	const selectedConsumer = consumers.find((c) => c.device_id === consumerId);
 	const intentOptions: IntentDescriptor[] = selectedConsumer?.intents ?? [];
 	const selectedDescriptor = intentOptions.find((d) => d.intent === intent);
-	const paramSchema: Record<string, ParamSpec> =
+	const advertised =
 		(selectedDescriptor?.params as Record<string, ParamSpec> | undefined) ?? {};
-	return { intentOptions, selectedDescriptor, paramSchema };
+	const canRedact = selectedDescriptor?.semantics?.includes("redact") ?? false;
+	// Canopy owns the masking parameters for a `redact` intent in both states,
+	// so they get no field: the redaction switch is the whole of the operator's
+	// say in it.
+	const paramSchema: Record<string, ParamSpec> = canRedact
+		? Object.fromEntries(
+				Object.entries(advertised).filter(
+					([key]) => !REDACTION_PARAMS.includes(key),
+				),
+			)
+		: advertised;
+	return { intentOptions, selectedDescriptor, paramSchema, canRedact };
 }
 
 /** Consumer, server (or whole-group), type, and intent selects, shared by the
@@ -651,14 +775,12 @@ function CreateReplicaDialog({
 	const [nameEdited, setNameEdited] = useState(false);
 	const [overdue, setOverdue] = useState("");
 	const [paramValues, setParamValues] = useState<Record<string, string>>({});
+	const [redacts, setRedacts] = useState(false);
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	const { intentOptions, selectedDescriptor, paramSchema } = useIntentSchema(
-		consumers,
-		consumerId,
-		intent,
-	);
+	const { intentOptions, selectedDescriptor, paramSchema, canRedact } =
+		useIntentSchema(consumers, consumerId, intent);
 
 	// Auto-select the sole consumer, if there's only one to choose from.
 	useEffect(() => {
@@ -680,6 +802,12 @@ function CreateReplicaDialog({
 	useEffect(() => {
 		setParamValues({});
 	}, [intent]);
+
+	// An intent that can't redact can't carry the flag, and the backend
+	// refuses it rather than storing an intent it can't honour.
+	useEffect(() => {
+		if (!canRedact) setRedacts(false);
+	}, [canRedact]);
 
 	// Suggest a name from the group, (if picked) server, and intent, until the
 	// operator types their own. The intent is part of it because names are
@@ -717,6 +845,7 @@ function CreateReplicaDialog({
 				name: name.trim(),
 				overdue_after,
 				params,
+				redacts,
 			});
 			onCreated();
 		} catch (err) {
@@ -769,6 +898,10 @@ function CreateReplicaDialog({
 						value={overdue}
 						onChange={(e) => setOverdue(e.target.value)}
 					/>
+
+					{canRedact && (
+						<RedactionField value={redacts} onChange={setRedacts} />
+					)}
 
 					<ParamFieldsEditor
 						paramSchema={paramSchema}
@@ -825,6 +958,7 @@ function EditReplicaDialog({
 	const [name, setName] = useState(replica.name);
 	const [overdue, setOverdue] = useState(replica.overdue_after ?? "");
 	const [enabled, setEnabled] = useState(replica.enabled);
+	const [redacts, setRedacts] = useState(replica.redacts);
 	const [paramValues, setParamValues] = useState<Record<string, string>>(() => {
 		const initialDescriptor = consumers
 			.find((c) => c.device_id === replica.consumer_device_id)
@@ -836,11 +970,14 @@ function EditReplicaDialog({
 	const [pending, setPending] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
-	const { intentOptions, selectedDescriptor, paramSchema } = useIntentSchema(
-		consumers,
-		consumerId,
-		intent,
-	);
+	const { intentOptions, selectedDescriptor, paramSchema, canRedact } =
+		useIntentSchema(consumers, consumerId, intent);
+
+	// Retargeting to an intent that can't redact drops the flag with it, so the
+	// declaration doesn't carry an intent the new consumer can't honour.
+	useEffect(() => {
+		if (!canRedact) setRedacts(false);
+	}, [canRedact]);
 
 	// Re-derive parameter values whenever the consumer or intent changes: keep
 	// values for parameter names the new schema still has, drop the rest.
@@ -883,6 +1020,7 @@ function EditReplicaDialog({
 				name: name.trim(),
 				overdue_after,
 				params,
+				redacts,
 				enabled,
 			});
 			onUpdated();
@@ -944,6 +1082,10 @@ function EditReplicaDialog({
 						label="Enabled"
 					/>
 
+					{canRedact && (
+						<RedactionField value={redacts} onChange={setRedacts} />
+					)}
+
 					<ParamFieldsEditor
 						paramSchema={paramSchema}
 						values={paramValues}
@@ -1002,19 +1144,72 @@ function RestoreOutcomeChip({ check }: { check: RestoreActivity }) {
 	);
 }
 
+/** What the masking manifest did, for a report from a replica that redacts.
+ * A partial redaction is the one that needs saying out loud: the replica is
+ * live and mostly masked, with columns in the clear that only the consumer's
+ * logs name. */
+function RedactionOutcomeChip({ check }: { check: RestoreActivity }) {
+	if (check.redaction_outcome == null) return <>—</>;
+	const masked = check.redaction_columns_masked;
+	const skipped = check.redaction_columns_skipped;
+	const version = check.redaction_manifest_version;
+	const detail =
+		check.redaction_outcome === "failed"
+			? (check.redaction_error ??
+				"No masking took effect; the replica stayed on its previous data.")
+			: [
+					masked != null ? `${masked} columns masked` : null,
+					skipped ? `${skipped} left in the clear` : null,
+					version ? `manifest ${version}` : null,
+				]
+					.filter(Boolean)
+					.join(", ");
+	const color =
+		check.redaction_outcome === "complete"
+			? ("success" as const)
+			: ("warning" as const);
+	return (
+		<Tooltip title={detail}>
+			<Chip label={check.redaction_outcome} color={color} size="small" />
+		</Tooltip>
+	);
+}
+
+/** One labelled line of a report's promoted detail; renders nothing when the
+ * value is absent, so an unreported field leaves no empty row behind. */
+function DetailLine({
+	label,
+	value,
+}: {
+	label: string;
+	value: string | number | null | undefined;
+}) {
+	if (value == null) return null;
+	return (
+		<Typography variant="body2">
+			<Box component="span" sx={{ color: "text.secondary" }}>
+				{label}:{" "}
+			</Box>
+			{value}
+		</Typography>
+	);
+}
+
 /** One restore-activity row: a reported health check, or a restore inferred from
  * a credential issuance that never reported. When the consumer sent arbitrary
- * `health_details`, the row expands to reveal it as pretty-printed JSON; a `url`
- * in the details is surfaced as a link to the running replica. */
+ * `health_details`, or the report carried a redaction, the row expands to
+ * reveal them; a `url` in the details is surfaced as a link to the running
+ * replica. */
 function CheckRow({ check }: { check: RestoreActivity }) {
 	const [open, setOpen] = useState(false);
 	const url = healthUrl(check.health_details);
-	const hasDetails =
+	const hasHealthJson =
 		check.health_details != null &&
 		!(
 			typeof check.health_details === "object" &&
 			Object.keys(check.health_details).length === 0
 		);
+	const hasDetails = hasHealthJson || check.redaction_outcome != null;
 	return (
 		<>
 			<TableRow sx={hasDetails ? { "& > *": { borderBottom: "unset" } } : undefined}>
@@ -1047,6 +1242,9 @@ function CheckRow({ check }: { check: RestoreActivity }) {
 				</TableCell>
 				<TableCell>{check.postgres_version ?? "—"}</TableCell>
 				<TableCell>
+					<RedactionOutcomeChip check={check} />
+				</TableCell>
+				<TableCell>
 					{check.snapshot_id ? check.snapshot_id.slice(0, 12) : "—"}
 				</TableCell>
 				<TableCell>
@@ -1067,27 +1265,52 @@ function CheckRow({ check }: { check: RestoreActivity }) {
 			</TableRow>
 			{hasDetails && (
 				<TableRow>
-					<TableCell sx={{ py: 0 }} colSpan={10}>
+					<TableCell sx={{ py: 0 }} colSpan={11}>
 						<Collapse in={open} timeout="auto" unmountOnExit>
-							<Box sx={{ my: 1 }}>
-								<Typography variant="caption" color="text.secondary">
-									Health details
-								</Typography>
-								<Box
-									component="pre"
-									sx={{
-										m: 0,
-										mt: 0.5,
-										p: 1,
-										fontSize: "0.75rem",
-										overflowX: "auto",
-										bgcolor: "action.hover",
-										borderRadius: 1,
-									}}
-								>
-									{JSON.stringify(check.health_details, null, 2)}
+							{check.redaction_outcome != null && (
+								<Box sx={{ my: 1 }}>
+									<Typography variant="caption" color="text.secondary">
+										Redaction
+									</Typography>
+									<Stack sx={{ mt: 0.5 }}>
+										<DetailLine label="Outcome" value={check.redaction_outcome} />
+										<DetailLine
+											label="Manifest version"
+											value={check.redaction_manifest_version}
+										/>
+										<DetailLine
+											label="Columns masked"
+											value={check.redaction_columns_masked}
+										/>
+										<DetailLine
+											label="Columns left in the clear"
+											value={check.redaction_columns_skipped}
+										/>
+										<DetailLine label="Error" value={check.redaction_error} />
+									</Stack>
 								</Box>
-							</Box>
+							)}
+							{hasHealthJson && (
+								<Box sx={{ my: 1 }}>
+									<Typography variant="caption" color="text.secondary">
+										Health details
+									</Typography>
+									<Box
+										component="pre"
+										sx={{
+											m: 0,
+											mt: 0.5,
+											p: 1,
+											fontSize: "0.75rem",
+											overflowX: "auto",
+											bgcolor: "action.hover",
+											borderRadius: 1,
+										}}
+									>
+										{JSON.stringify(check.health_details, null, 2)}
+									</Box>
+								</Box>
+							)}
 						</Collapse>
 					</TableCell>
 				</TableRow>

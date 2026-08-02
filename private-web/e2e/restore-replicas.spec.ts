@@ -123,6 +123,139 @@ test.describe("restore replicas", () => {
 		await expect(verifyRow.getByText("gap")).toHaveCount(0);
 	});
 
+	/** A consumer advertising `analytics` with `redact` and the three masking
+	 * parameters Canopy takes over. */
+	async function redactingConsumer(sql: Sql): Promise<string> {
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await seedRestoreConsumerCapability(sql, {
+			deviceId: consumer.id,
+			intents: [
+				{
+					intent: "analytics",
+					semantics: ["check", "url", "redact"],
+					params: {
+						minimum_uptime: { type: "duration", default: 7200 },
+						redaction_manifest_url: { type: "text" },
+						redaction_version_query: { type: "text" },
+						redaction_version_fallback_to_base: {
+							type: "boolean",
+							default: false,
+						},
+					},
+				},
+			],
+		});
+		return consumer.id;
+	}
+
+	test("declaring a redacting replica offers the switch, not the manifest fields", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await redactingConsumer(sql);
+		const groupId = await groupWithBackups(sql, "redact-declare");
+		await seedServer(sql, { groupId, name: "redact-srv" });
+
+		await page.goto(`/groups/${groupId}/backups`);
+		await page.getByRole("button", { name: /declare replica/i }).click();
+
+		const dialog = page.getByRole("dialog");
+		await expect(dialog.getByText(/redact this replica/i)).toBeVisible();
+		// Canopy owns these, so they get no field for an operator to fill in.
+		await expect(dialog.getByLabel(/^redaction_manifest_url/)).toHaveCount(0);
+		await expect(dialog.getByLabel(/^redaction_version_query/)).toHaveCount(0);
+		// Other parameters of the same intent are unaffected.
+		await expect(dialog.getByLabel(/^minimum_uptime/)).toBeVisible();
+
+		await dialog.getByRole("switch", { name: /redact this replica/i }).check();
+		await dialog.getByRole("button", { name: "Declare" }).click();
+
+		await expect(dialog).toHaveCount(0);
+		const rows = await sql.query<{ redacts: boolean }>(
+			`SELECT redacts FROM restore_replicas WHERE consumer_device_id = $1`,
+			[consumer],
+		);
+		expect(rows[0]?.redacts).toBe(true);
+	});
+
+	test("a partial redaction shows against the report that carried it", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await redactingConsumer(sql);
+		const groupId = await groupWithBackups(sql, "redact-partial");
+		const server = await seedServer(sql, { groupId, name: "partial-srv" });
+		const replica = await seedRestoreReplica(sql, {
+			consumerDeviceId: consumer,
+			groupId,
+			intent: "analytics",
+			name: "masked-analytics",
+			redacts: true,
+		});
+		// The restore is healthy and the redaction is not: two signals from one
+		// report.
+		await seedRestoreCheck(sql, {
+			consumerDeviceId: consumer,
+			groupId,
+			serverId: server.id,
+			replicaId: replica.id,
+			intent: "analytics",
+			snapshotId: "snap-1",
+			outcome: "success",
+			replicaHealthy: true,
+			redaction: {
+				outcome: "partial",
+				manifestVersion: "2.41.3",
+				columnsMasked: 118,
+				columnsSkipped: 3,
+			},
+		});
+
+		await page.goto(`/groups/${groupId}/backups`);
+
+		// The declaration asked for masking; what it got is what the list has
+		// to show, so a partial redaction reads as partial from the row.
+		await expect(
+			page.getByRole("row", { name: /masked-analytics/ }),
+		).toContainText("partial");
+		const reportRow = page.getByRole("row", { name: /analytics/ }).last();
+		await expect(reportRow).toContainText("healthy");
+		await expect(reportRow).toContainText("partial");
+
+		// The counts and manifest version are promoted out of the health-details
+		// JSON, so the columns left in the clear are readable without one.
+		await reportRow.getByRole("button", { name: /show health details/i }).click();
+		await expect(page.getByText("Columns left in the clear: 3")).toBeVisible();
+		await expect(page.getByText("Manifest version: 2.41.3")).toBeVisible();
+	});
+
+	test("a redacting declaration names the servers it can't redact", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await redactingConsumer(sql);
+		const groupId = await groupWithBackups(sql, "redact-gap");
+		await seedServer(sql, { groupId, name: "tamanu-srv" });
+		await seedServer(sql, {
+			groupId,
+			name: "lims-srv",
+			product: "senaite",
+			kind: "standalone",
+		});
+		await seedRestoreReplica(sql, {
+			consumerDeviceId: consumer,
+			groupId,
+			intent: "analytics",
+			name: "group-wide-redacted",
+			redacts: true,
+		});
+
+		await page.goto(`/groups/${groupId}/backups`);
+		await expect(
+			page.getByRole("row", { name: /group-wide-redacted/ }),
+		).toContainText("1 unmaskable");
+	});
+
 	test("settings lists restore consumers and their capabilities", async ({
 		page,
 		sql,

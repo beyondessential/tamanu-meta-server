@@ -63,6 +63,11 @@ fn new_check(
 		s3_received_payload_bytes: None,
 		health_details: None,
 		run_id: None,
+		redaction_outcome: None,
+		redaction_manifest_version: None,
+		redaction_columns_masked: None,
+		redaction_columns_skipped: None,
+		redaction_error: None,
 	}
 }
 
@@ -116,6 +121,7 @@ fn new_replica(
 		name: name.into(),
 		overdue_after: None,
 		params: serde_json::json!({}),
+		redacts: false,
 		created_by: Some("op@example.com".into()),
 	}
 }
@@ -132,6 +138,7 @@ fn update_from(r: &RestoreReplica) -> RestoreReplicaUpdate {
 		name: r.name.clone(),
 		overdue_after: r.overdue_after,
 		params: r.params.clone(),
+		redacts: r.redacts,
 		enabled: r.enabled,
 	}
 }
@@ -1262,6 +1269,77 @@ async fn blank_name_is_rejected() {
 		assert!(
 			matches!(blanked, Err(AppError::BadRequest(_))),
 			"got {blanked:?}"
+		);
+	})
+	.await;
+}
+
+/// Canopy corroborates a product's manifest template against what each
+/// version actually published, so a redacting declaration pointing at a
+/// version with no manifest is a finding before any restore is attempted.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_version_without_a_published_manifest_is_a_redaction_gap() {
+	TestDb::run(|mut conn, _url| async move {
+		let group = insert_group(&mut conn, "redaction-gap").await;
+		let server_id = insert_server(&mut conn, group).await;
+		let server = database::servers::Server::get_by_id(&mut conn, server_id)
+			.await
+			.expect("server");
+
+		// No version reported yet: canopy can't corroborate, and the consumer
+		// resolves the manifest against the data it restores anyway.
+		assert!(
+			database::restore::redaction_gap_for(&mut conn, &server)
+				.await
+				.expect("gap")
+				.is_none(),
+			"an unknown version is not a server that can't be redacted"
+		);
+
+		let version_id = sql_query(
+			"INSERT INTO versions (major, minor, patch, status, changelog) \
+			 VALUES (2, 41, 3, 'published', '') RETURNING id",
+		)
+		.get_result::<RowId>(&mut conn)
+		.await
+		.expect("insert version")
+		.id;
+		sql_query(
+			"INSERT INTO server_reported_detail (server_id, source, extra, version) \
+			 VALUES ($1, 'tamanu', '{}'::jsonb, '2.41.3')",
+		)
+		.bind::<sql_types::Uuid, _>(server_id)
+		.execute(&mut conn)
+		.await
+		.expect("report a version");
+
+		let gap = database::restore::redaction_gap_for(&mut conn, &server)
+			.await
+			.expect("gap");
+		assert_eq!(
+			gap,
+			Some((
+				database::restore::RedactionGapReason::VersionHasNoManifest,
+				Some("2.41.3".to_string())
+			)),
+			"a version that published no manifest is a gap"
+		);
+
+		sql_query(
+			"INSERT INTO artifacts (version_id, platform, artifact_type, download_url) \
+			 VALUES ($1, 'any', 'dbt-manifest', 'https://docs.example/manifest.json')",
+		)
+		.bind::<sql_types::Uuid, _>(version_id)
+		.execute(&mut conn)
+		.await
+		.expect("publish a manifest");
+
+		assert!(
+			database::restore::redaction_gap_for(&mut conn, &server)
+				.await
+				.expect("gap")
+				.is_none(),
+			"a version whose manifest is published is no gap"
 		);
 	})
 	.await;

@@ -19,9 +19,10 @@ use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::device_auth::BackupRestoreDevice;
 use commons_types::backup::{
-	BackupPurpose, BackupType, IntentDescriptor, ParamValues, RestoreIntent, RunOutcome,
-	resolve_params, semantics,
+	BackupPurpose, BackupType, IntentDescriptor, ParamValues, RedactionOutcome, RestoreIntent,
+	RunOutcome, redaction_params, resolve_params, semantics,
 };
+use commons_types::server::product::RedactionManifest;
 use database::{
 	Db,
 	backups::{BackupRun, NewBackupCredentialIssuance, ServerGroupBackupConfig},
@@ -34,6 +35,7 @@ use database::{
 };
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -257,6 +259,7 @@ async fn worklist(
 		let descriptor = &descriptors[&d.intent];
 		let once = descriptor.has_semantic(semantics::ONCE);
 		let migrates = descriptor.has_semantic(semantics::MIGRATE);
+		let owns_masking = descriptor.has_semantic(semantics::REDACT);
 		let replica_values: ParamValues =
 			serde_json::from_value(d.params.clone()).unwrap_or_default();
 		let params = resolve_params(&descriptor.params, &replica_values);
@@ -278,6 +281,25 @@ async fn worklist(
 				}
 			} else {
 				None
+			};
+
+			// The masking parameters are Canopy's for a `redact` intent: resolved
+			// from the server's product when the declaration redacts, sent unset
+			// when it doesn't. A redacting declaration contributes nothing for a
+			// server that can't be redacted — an unredacted replica standing in
+			// for a redacted one is worse than no replica.
+			let params = if owns_masking {
+				let manifest = if d.redacts {
+					match server.product.caps().redaction {
+						Some(manifest) => Some(manifest),
+						None => continue,
+					}
+				} else {
+					None
+				};
+				masked_params(&params, manifest)
+			} else {
+				params.clone()
 			};
 
 			// A `once` intent drops off the worklist once its work is settled for
@@ -308,7 +330,7 @@ async fn worklist(
 				intent: d.intent.clone(),
 				name: d.name.clone(),
 				overdue_after_seconds: d.overdue_after.map(|f| f.0.as_secs()),
-				params: params.clone(),
+				params,
 				snapshot_id: latest.and_then(|r| r.snapshot_id.clone()),
 				snapshot_at: latest.map(|r| r.reported_at.to_string()),
 				storage: "s3".into(),
@@ -562,6 +584,61 @@ pub struct VerificationArgs {
 	/// What the migrations did, for a report under a `migrate` intent. Omit for
 	/// every other intent.
 	pub migration: Option<MigrationArgs>,
+	/// What the masking manifest did, for a replica that redacts. Omit for a
+	/// replica that doesn't.
+	pub redaction: Option<RedactionArgs>,
+}
+
+/// Overlay Canopy's masking parameters onto an intent's resolved values.
+///
+/// Canopy owns these for any intent carrying `redact`, so whatever the
+/// declaration stored for them is replaced: by the product's manifest when
+/// the replica redacts, and by nothing when it doesn't. Sending them unset
+/// is what tells the consumer not to redact, so this has to overwrite rather
+/// than fill in.
+// spec: RST#the-masking-manifest
+fn masked_params(resolved: &ParamValues, manifest: Option<RedactionManifest>) -> ParamValues {
+	let mut params = resolved.clone();
+	for name in redaction_params::ALL {
+		// Only parameters the intent advertises are sent, so an intent that
+		// carries `redact` without accepting one of these doesn't gain it.
+		if !params.contains_key(*name) {
+			continue;
+		}
+		let value = match (manifest, *name) {
+			(None, _) => Value::Null,
+			(Some(m), redaction_params::MANIFEST_URL) => Value::from(m.url_template),
+			(Some(m), redaction_params::VERSION_QUERY) => Value::from(m.version_query),
+			(Some(m), redaction_params::VERSION_FALLBACK_TO_BASE) => {
+				Value::from(m.fallback_to_base)
+			}
+			(Some(_), _) => unreachable!("every owned parameter is resolved"),
+		};
+		params.insert((*name).to_string(), value);
+	}
+	params
+}
+
+/// How the masking manifest went against the restored replica.
+///
+/// Reported when the redaction settles, which for a failure is before any
+/// switchover: the restore itself succeeded and is reported healthy, and the
+/// replica stays on the data it was already serving.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct RedactionArgs {
+	/// How far the manifest got: `complete`, `partial`, or `failed`.
+	#[schema(value_type = String)]
+	pub outcome: RedactionOutcome,
+	/// The version resolved into the manifest URL. Omit when the URL named no
+	/// version to resolve.
+	pub manifest_version: Option<String>,
+	/// How many columns the manifest masked.
+	pub columns_masked: Option<i64>,
+	/// How many columns the manifest named but could not mask. Non-zero is
+	/// what makes an outcome `partial`.
+	pub columns_skipped: Option<i64>,
+	/// Why the redaction failed, when it did.
+	pub error: Option<String>,
 }
 
 /// How the target version's migrations went against the restored replica.
@@ -649,6 +726,14 @@ async fn verification(
 		s3_received_payload_bytes: args.s3_received_payload_bytes,
 		health_details: args.health_details,
 		run_id: args.run_id,
+		redaction_outcome: args.redaction.as_ref().map(|r| r.outcome),
+		redaction_manifest_version: args
+			.redaction
+			.as_ref()
+			.and_then(|r| r.manifest_version.clone()),
+		redaction_columns_masked: args.redaction.as_ref().and_then(|r| r.columns_masked),
+		redaction_columns_skipped: args.redaction.as_ref().and_then(|r| r.columns_skipped),
+		redaction_error: args.redaction.as_ref().and_then(|r| r.error.clone()),
 	};
 
 	match args.migration {

@@ -2247,6 +2247,49 @@
           }
         }
       },
+      "RedactionArgs": {
+        "type": "object",
+        "description": "How the masking manifest went against the restored replica.\n\nReported when the redaction settles, which for a failure is before any\nswitchover: the restore itself succeeded and is reported healthy, and the\nreplica stays on the data it was already serving.",
+        "required": [
+          "outcome"
+        ],
+        "properties": {
+          "columns_masked": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How many columns the manifest masked."
+          },
+          "columns_skipped": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How many columns the manifest named but could not mask. Non-zero is\nwhat makes an outcome `partial`."
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the redaction failed, when it did."
+          },
+          "manifest_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The version resolved into the manifest URL. Omit when the URL named no\nversion to resolve."
+          },
+          "outcome": {
+            "type": "string",
+            "description": "How far the manifest got: `complete`, `partial`, or `failed`."
+          }
+        }
+      },
       "RegisterNameArgs": {
         "type": "object",
         "description": "The name a server should be reachable at, and where.",
@@ -2682,6 +2725,17 @@
               "null"
             ],
             "description": "Version of the PostgreSQL server the data was restored into, if\napplicable."
+          },
+          "redaction": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RedactionArgs",
+                "description": "What the masking manifest did, for a replica that redacts. Omit for a\nreplica that doesn't."
+              }
+            ]
           },
           "replica_healthy": {
             "type": "boolean",

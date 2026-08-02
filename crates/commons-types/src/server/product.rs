@@ -58,19 +58,65 @@ pub enum VersionTracking {
 	Absent,
 }
 
+/// Where a product publishes the masking manifests that say how to
+/// de-identify a restored copy of one of its databases.
+///
+/// Canopy holds this rather than the operator: what to mask is a property
+/// of the product, so an operator declaring a redacting replica says only
+/// that it redacts, never where its masking comes from.
+// spec: RST#the-masking-manifest
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, utoipa::ToSchema)]
+pub struct RedactionManifest {
+	/// Where the manifest for a given version lives. `{version}` is
+	/// substituted by the consumer with the version it reads out of the
+	/// data it restored.
+	pub url_template: &'static str,
+	/// Single-row, single-column SQL reading the deployment's own version
+	/// out of the restored database, to substitute into `url_template`.
+	pub version_query: &'static str,
+	/// Whether to retry at the `major.minor.0` base version when the
+	/// versioned URL 404s, for a product publishing per minor rather than
+	/// per patch.
+	pub fallback_to_base: bool,
+	/// The artefact type under which a version's manifest is registered, so
+	/// canopy can tell whether the URL it would hand out has actually been
+	/// published for that version.
+	pub artifact_type: &'static str,
+}
+
+impl RedactionManifest {
+	/// The manifest URL for a concrete version, substituting `{version}`.
+	///
+	/// Canopy uses this to corroborate the template against what a version
+	/// actually published; the consumer does its own substitution against
+	/// the version it reads out of the restored data, which may differ from
+	/// the one the server reports running.
+	pub fn url_for(&self, version: &node_semver::Version) -> String {
+		self.url_template.replace("{version}", &version.to_string())
+	}
+}
+
+/// Where Tamanu's dbt docs deploy publishes each version's manifest.
+const TAMANU_MASKING_MANIFEST_URL: &str =
+	"https://docs.data.bes.au/tamanu/v{version}/manifest.json";
+
 /// What canopy does for a product's servers.
 ///
 /// Reachability, health checks and backups are deliberately absent: checks
 /// are graded by the source that reports them, and backup types are
 /// advertised per-server by the agent, so both already work for any product.
 // spec: APP#capabilities
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize, utoipa::ToSchema)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, utoipa::ToSchema)]
 pub struct Caps {
 	/// How this product's application version is treated.
 	pub version_tracking: VersionTracking,
 	/// Whether this product's servers can be listed for end-user-facing
 	/// clients.
 	pub public_listing: bool,
+	/// Where this product's masking manifests live, when it publishes them.
+	/// A product without one cannot have a redacting replica restored: the
+	/// worklist withholds the entry rather than serving unmasked data.
+	pub redaction: Option<RedactionManifest>,
 }
 
 impl Product {
@@ -82,6 +128,12 @@ impl Product {
 			Self::Tamanu => Caps {
 				version_tracking: VersionTracking::Tracked,
 				public_listing: true,
+				redaction: Some(RedactionManifest {
+					url_template: TAMANU_MASKING_MANIFEST_URL,
+					version_query: "SELECT value FROM local_system_facts WHERE key = 'currentVersion'",
+					fallback_to_base: true,
+					artifact_type: "dbt-manifest",
+				}),
 			},
 			// A canopy instance reports its own build version, which canopy
 			// holds no release train for: presented, but graded against
@@ -89,10 +141,12 @@ impl Product {
 			Self::Canopy => Caps {
 				version_tracking: VersionTracking::Reported,
 				public_listing: false,
+				redaction: None,
 			},
 			Self::Senaite => Caps {
 				version_tracking: VersionTracking::Absent,
 				public_listing: false,
+				redaction: None,
 			},
 		}
 	}
@@ -240,5 +294,24 @@ mod tests {
 		assert!(Product::Canopy.has_versions());
 		assert!(Product::Tamanu.has_versions());
 		assert!(!Product::Senaite.has_versions());
+	}
+
+	/// The URL a version resolves to has to match what tamanu's dbt docs
+	/// deploy actually publishes, since that upload is the only thing
+	/// putting a manifest there.
+	#[test]
+	fn tamanu_manifest_resolves_to_the_published_location() {
+		let manifest = Product::Tamanu.caps().redaction.unwrap();
+		assert_eq!(
+			manifest.url_for(&node_semver::Version::parse("2.41.3").unwrap()),
+			"https://docs.data.bes.au/tamanu/v2.41.3/manifest.json"
+		);
+	}
+
+	#[test]
+	fn only_tamanu_can_be_redacted() {
+		assert!(Product::Tamanu.caps().redaction.is_some());
+		assert!(Product::Canopy.caps().redaction.is_none());
+		assert!(Product::Senaite.caps().redaction.is_none());
 	}
 }

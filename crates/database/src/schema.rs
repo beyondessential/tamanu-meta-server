@@ -120,6 +120,11 @@ diesel::table! {
 		reported_at -> Timestamptz,
 		health_details -> Nullable<Jsonb>,
 		run_id -> Nullable<Uuid>,
+		redaction_outcome -> Nullable<Text>,
+		redaction_manifest_version -> Nullable<Text>,
+		redaction_columns_masked -> Nullable<Int8>,
+		redaction_columns_skipped -> Nullable<Int8>,
+		redaction_error -> Nullable<Text>,
 	}
 }
 
@@ -452,6 +457,7 @@ diesel::table! {
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
 		params -> Jsonb,
+		redacts -> Bool,
 	}
 }
 

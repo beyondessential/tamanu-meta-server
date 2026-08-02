@@ -82,6 +82,11 @@ fn report(consumer: Uuid, group: Uuid, server: Uuid, outcome: RunOutcome) -> New
 		s3_received_payload_bytes: None,
 		health_details: None,
 		run_id: None,
+		redaction_outcome: None,
+		redaction_manifest_version: None,
+		redaction_columns_masked: None,
+		redaction_columns_skipped: None,
+		redaction_error: None,
 	}
 }
 

@@ -133,6 +133,27 @@ text_enum! {
 }
 
 text_enum! {
+	/// How far a replica's masking manifest got before the replica was
+	/// served.
+	///
+	/// A partial redaction is live: the manifest applied, but some of its
+	/// columns did not, leaving a mostly-masked replica with an
+	/// unidentified remainder in the clear. A failed one is not live at
+	/// all — the consumer holds the replica on the data it was already
+	/// serving.
+	pub enum RedactionOutcome {
+		/// Every column the manifest named was masked.
+		Complete = "complete",
+		/// The manifest applied, but some of its columns did not.
+		Partial = "partial",
+		/// No masking took effect.
+		Failed = "failed",
+	}
+	default = Failed;
+	error RedactionOutcomeFromStringError = "invalid redaction outcome; expected one of: complete, partial, failed";
+}
+
+text_enum! {
 	/// Which maintenance cycle a reported backup-repository maintenance run
 	/// performed.
 	pub enum MaintenanceKind {
@@ -392,6 +413,35 @@ pub mod semantics {
 	/// an entry from a server with no candidate version, and keys `once` to the
 	/// snapshot and target version together.
 	pub const MIGRATE: &str = "migrate";
+	/// The intent can de-identify the restored data before serving it: Canopy
+	/// resolves the masking manifest for the server's product into the
+	/// worklist entry, withholds an entry from a server whose product has no
+	/// manifest, and holds the replica to the redaction outcome reported back.
+	pub const REDACT: &str = "redact";
+}
+
+/// The parameters Canopy owns on behalf of the `redact` semantic.
+///
+/// An operator declaring a redacting replica says only that it redacts;
+/// where its masking comes from is a property of the server's product, so
+/// Canopy resolves these into the worklist itself and never takes an
+/// operator's value for them.
+// spec: RST#the-masking-manifest
+pub mod redaction_params {
+	/// `text` — where the masking manifest for a version lives, with
+	/// `{version}` substituted by the consumer against the data it restored.
+	/// A value here is what turns redaction on for the consumer.
+	pub const MANIFEST_URL: &str = "redaction_manifest_url";
+	/// `text` — SQL reading the deployment's own version out of the restored
+	/// database, to substitute into the manifest URL.
+	pub const VERSION_QUERY: &str = "redaction_version_query";
+	/// `boolean` — whether to retry at the `major.minor.0` base version when
+	/// the versioned manifest URL 404s.
+	pub const VERSION_FALLBACK_TO_BASE: &str = "redaction_version_fallback_to_base";
+
+	/// Every parameter Canopy owns for `redact`, for stripping operator
+	/// values and for resolving the worklist's.
+	pub const ALL: &[&str] = &[MANIFEST_URL, VERSION_QUERY, VERSION_FALLBACK_TO_BASE];
 }
 
 /// The data type of a restore-replica configuration parameter, which

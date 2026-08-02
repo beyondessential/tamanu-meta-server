@@ -98,6 +98,8 @@ The recognised semantics are:
 - **migrate** — the intent applies a Tamanu version's schema migrations to the replica it restores.
   Canopy names a target version on each of the intent's worklist entries and withholds an entry from a server that has no candidate version.
   `once` for such an intent is keyed to the snapshot and the target version together (see [Pre-upgrade migration testing](#pre-upgrade-migration-testing)).
+- **redact** — the intent can de-identify the restored data before serving it.
+  Canopy offers redaction as an option on each of the intent's replicas, supplies the masking manifest for the product being restored, and holds a redacting replica to the outcome of its redaction (see [Redaction](#redaction)).
 
 ### Parameters
 
@@ -105,6 +107,7 @@ An intent's parameter schema names the settings the consumer accepts for each re
 Each parameter has a type — a duration, a size in bytes, a boolean, an integer, or text — and may carry a default.
 Canopy uses the schema to collect values when a replica is declared, validates the values against it, stores them with the declaration, and returns them in the worklist so the consumer receives its per-replica settings.
 Canopy does not interpret parameter values beyond their type; they are settings passed through to the consumer.
+The exception is a parameter Canopy owns on behalf of a semantic it recognises: Canopy resolves such a parameter's value itself, the operator does not set it, and a value stored against the declaration for it is preserved but not sent while Canopy owns it (see [Redaction](#redaction)).
 
 Every parameter is optional: an operator may leave any one unset.
 The worklist carries a resolved value for each parameter the intent advertises, and only for those: an unset parameter that has a default is sent as its default, and an unset parameter without a default is sent as JSON `null`.
@@ -121,6 +124,7 @@ Each declaration carries:
 - an **intent** the chosen consumer advertises;
 - a human-readable **name**, distinct from every other declaration assigned to the same consumer;
 - **parameter values** for the intent's schema, defaulted where the schema provides one;
+- whether the replica **redacts**, offered only for an intent carrying `redact` (see [Redaction](#redaction));
 - an **overdue bound**: the maximum time a replica may go without meeting its intent's health expectation before Canopy considers it overdue, interpreted per the intent's semantics (see [Alerting](#alerting));
 - whether the declaration is **enabled**.
 
@@ -302,6 +306,51 @@ A failed migration test marks its target version as carrying a known issue, whic
 This is the gate an operator-filed known issue uses, so a failure found automatically and one found by hand have the same effect on a rollout.
 Clearing the issue is an operator action, and a later passing test does not clear it, because whether the resolution is a change to the migration, a change to the data, or an accepted limitation is a judgement.
 
+## Redaction
+
+An intent carrying the `redact` semantic can serve a replica with its data de-identified, so a queryable copy of a deployment's database can be given to people who should not see patient data.
+Redaction is an option on a replica rather than an intent of its own: one intent restores raw and redacted replicas alike, according to what each declaration asks for.
+
+A replica redacts only when an operator declares that it does, and a declaration that says nothing does not redact.
+A replica that does not redact serves the data as it was restored.
+
+The parameters through which a consumer is told what to mask belong to Canopy for any intent carrying `redact`: an operator sets whether a replica redacts, not where its masking comes from.
+A replica that does not redact is dispatched with those parameters unset.
+Whether a replica redacts is therefore answered by its declaration alone, which is what makes an unredacted replica of a redacting declaration a finding rather than an ambiguity.
+
+### The masking manifest
+
+What to mask is a property of the product being restored (see [APP](../servers/products.md)) rather than a choice the operator makes per replica.
+A *masking manifest* names the columns to mask and how each is masked, and a product Canopy can redact publishes one per version.
+
+Canopy holds, for each such product, the location of its manifests as a template naming the version, together with the query that reads a deployment's own version out of the restored data.
+Canopy resolves these settings into the worklist entry as it is dispatched, so a change to where a product publishes its manifests reaches every redacting replica without an operator revisiting a declaration.
+The consumer resolves the version against the data it restored — the version of the snapshot, which is not necessarily the version the server reports running now — and fetches the manifest for it.
+
+A redacting declaration contributes no worklist entry for a server whose product has no manifest, and that server surfaces as a gap on the declaration.
+A replica that cannot be redacted is not restored at all: an unredacted replica standing in for a redacted one is worse than no replica.
+
+Canopy corroborates a product's manifest template against the published artefacts it already holds per version.
+A redacting declaration covering servers whose versions have no published manifest is a gap, surfaced before a restore is attempted rather than discovered when one fails.
+
+### What a redaction reports
+
+Beyond the fields every report carries, a report for a redacting replica carries:
+
+- the **redaction outcome** — fully applied, partially applied, or failed;
+- the **manifest version** that was resolved and fetched;
+- how many columns were **masked**, and how many were **skipped**;
+- on a failure, a description of what went wrong.
+
+A partial redaction is one where the manifest was applied but some of its columns could not be, leaving a replica that is live and mostly masked with an unidentified remainder in the clear.
+A failed redaction is one where no masking took effect.
+
+A consumer serves a replica only once its redaction has fully or partially applied, so a failed redaction leaves the replica on the data it was already serving.
+The restore's health is reported as the consumer found it, independently of the redaction that follows: a snapshot that restored into a healthy database is reported healthy even when its redaction then failed, because the backup is good and the finding belongs to the redaction.
+A redaction that fails is therefore reported when it fails, rather than withheld until a replica the consumer will not serve goes live.
+
+Each replica's redaction outcome is presented alongside its restore health, so an operator reading the list of replicas sees which are redacted, which are only partly so, and which are serving data that was never masked.
+
 ## Alerting
 
 A failed or overdue restore-health report raises a restore-verification check on the affected server, subject to the same monitoring and incident gates as any other of that server's checks.
@@ -323,11 +372,20 @@ Nothing is wrong with the live server: it is running the version it always was, 
 Treating it as a failure would open an incident against a healthy deployment and put a migration problem in front of whoever is on call for outages, when the people who need it are the ones deciding whether that version ships.
 The version's readiness is where the finding does its work.
 
+A redaction that did not fully apply raises a redaction check on the affected server, under the same gates.
+The check is named for the type and intent, as restore-verification is, and carries the redaction outcome, the manifest version, and the counts of masked and skipped columns in its detail.
+It recovers when the next report for the same server, type, and intent redacts fully.
+
+The check is a warning rather than a failure, and does not escalate.
+The deployment is healthy and its data is where it should be; the finding is that a replica made from that data is not as safe to hand out as it was declared to be.
+That is for whoever gave out the replica to act on, not for whoever is on call for outages.
+
 ## Out of scope
 
-- How a consumer provisions, runs, names, or tears down a replica, or how it applies migrations to one.
+- How a consumer provisions, runs, names, or tears down a replica, or how it applies migrations or a masking manifest to one.
 - A consumer's runtime placement, storage sizing, or scheduling.
 - Producing reporting schemas, or any other artefact, from a migrated replica.
+- The contents of a masking manifest, and what each masking it names does to a value.
 - Deciding or scheduling when a deployment upgrades: verdicts inform that decision without making it.
 - Scoping object-storage credentials below the granularity of a group's repo: one repo holds all of a group's servers' snapshots, so credentials are necessarily group-wide while targeting and reporting are per-server.
 - Longer-lived or non-chained credentials: a consumer refreshes within a restore, so the per-issuance lifetime is not a constraint.

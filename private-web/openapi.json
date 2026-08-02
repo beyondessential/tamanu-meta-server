@@ -8252,6 +8252,17 @@
             "type": "boolean",
             "description": "Whether this product's servers can be listed for end-user-facing\nclients."
           },
+          "redaction": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RedactionManifest",
+                "description": "Where this product's masking manifests live, when it publishes them.\nA product without one cannot have a redacting replica restored: the\nworklist withholds the entry rather than serving unmasked data."
+              }
+            ]
+          },
           "version_tracking": {
             "$ref": "#/components/schemas/VersionTracking",
             "description": "How this product's application version is treated."
@@ -12752,6 +12763,75 @@
           }
         }
       },
+      "RedactionGap": {
+        "type": "object",
+        "description": "One server a redacting declaration covers but cannot redact.",
+        "required": [
+          "server_id",
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/RedactionGapReason",
+            "description": "Why it can't be redacted."
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The server that would be restored unmasked, and so isn't restored."
+          },
+          "server_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its display name, when known."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The version it reports, when the reason concerns one."
+          }
+        }
+      },
+      "RedactionGapReason": {
+        "type": "string",
+        "description": "Why a server a redacting declaration covers can't be redacted.\n\nEach of these withholds the server's worklist entry: a replica that\ncannot be redacted is not restored at all, since an unredacted replica\nstanding in for a redacted one is worse than no replica.",
+        "enum": [
+          "product_has_no_manifest",
+          "version_has_no_manifest"
+        ]
+      },
+      "RedactionManifest": {
+        "type": "object",
+        "description": "Where a product publishes the masking manifests that say how to\nde-identify a restored copy of one of its databases.\n\nCanopy holds this rather than the operator: what to mask is a property\nof the product, so an operator declaring a redacting replica says only\nthat it redacts, never where its masking comes from.",
+        "required": [
+          "url_template",
+          "version_query",
+          "fallback_to_base",
+          "artifact_type"
+        ],
+        "properties": {
+          "artifact_type": {
+            "type": "string",
+            "description": "The artefact type under which a version's manifest is registered, so\ncanopy can tell whether the URL it would hand out has actually been\npublished for that version."
+          },
+          "fallback_to_base": {
+            "type": "boolean",
+            "description": "Whether to retry at the `major.minor.0` base version when the\nversioned URL 404s, for a product publishing per minor rather than\nper patch."
+          },
+          "url_template": {
+            "type": "string",
+            "description": "Where the manifest for a given version lives. `{version}` is\nsubstituted by the consumer with the version it reads out of the\ndata it restored."
+          },
+          "version_query": {
+            "type": "string",
+            "description": "Single-row, single-column SQL reading the deployment's own version\nout of the restored database, to substitute into `url_template`."
+          }
+        }
+      },
       "RelatedVersionData": {
         "type": "object",
         "description": "Another patch version within the same release line as a version being\nviewed.",
@@ -12958,6 +13038,43 @@
             ],
             "description": "PostgreSQL version of the restored database, if reported."
           },
+          "redaction_columns_masked": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How many columns the manifest masked."
+          },
+          "redaction_columns_skipped": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How many columns it named but could not mask."
+          },
+          "redaction_error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the redaction failed, when it did."
+          },
+          "redaction_manifest_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The version whose manifest was fetched."
+          },
+          "redaction_outcome": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "How far the replica's masking manifest got, for a replica that\nredacts: `complete`, `partial`, or `failed`."
+          },
           "replica_healthy": {
             "type": [
               "boolean",
@@ -13078,12 +13195,19 @@
           "intent",
           "name",
           "params",
+          "redacts",
+          "can_redact",
+          "redaction_gaps",
           "enabled",
           "gap",
           "created_at",
           "updated_at"
         ],
         "properties": {
+          "can_redact": {
+            "type": "boolean",
+            "description": "True when the intent carries the `redact` semantic, so the declaration\ncan be switched to redacting."
+          },
           "consumer_device_id": {
             "type": "string",
             "format": "uuid",
@@ -13144,6 +13268,17 @@
             "type": "object",
             "description": "Operator-supplied parameter values (name → value). Values of\n`duration` and `bytes` parameters are formatted as human-friendly\nstrings (e.g. `2h 30m`, `20Gi`) when the intent's schema is known;\n`create` and `update` accept these strings back."
           },
+          "redaction_gaps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RedactionGap"
+            },
+            "description": "Servers this declaration covers that cannot currently be redacted:\neither their product publishes no masking manifest, or the version\nthey report has none published. Each is withheld from the worklist\nrather than restored unmasked. Empty unless the declaration redacts."
+          },
+          "redacts": {
+            "type": "boolean",
+            "description": "Whether the replica is served de-identified."
+          },
           "server_id": {
             "type": [
               "string",
@@ -13201,6 +13336,10 @@
           "params": {
             "type": "object",
             "description": "Parameter values for the intent (name → value), validated against the\nconsumer's advertised parameter schema. `duration` and `bytes`\nparameters accept human-unit strings (e.g. `2h 30m`, `20Gi`) as well\nas raw integer seconds/bytes. Defaults to empty."
+          },
+          "redacts": {
+            "type": "boolean",
+            "description": "Whether the replica is served de-identified. Accepted only for an\nintent carrying the `redact` semantic; Canopy resolves the masking\nmanifest itself from the server's product, so there is nothing else\nto set. Defaults to false."
           },
           "server_id": {
             "type": [
@@ -13280,6 +13419,10 @@
           "params": {
             "type": "object",
             "description": "New parameter values (name → value), validated against the intent's\nadvertised parameter schema. `duration` and `bytes` parameters accept\nhuman-unit strings (e.g. `2h 30m`, `20Gi`) as well as raw integer\nseconds/bytes. Defaults to empty."
+          },
+          "redacts": {
+            "type": "boolean",
+            "description": "Whether the replica is served de-identified. Accepted only for an\nintent carrying the `redact` semantic. Defaults to false."
           },
           "server_id": {
             "type": [
