@@ -2,8 +2,10 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import {
 	Alert,
+	Autocomplete,
 	Button,
 	Chip,
+	createFilterOptions,
 	Dialog,
 	DialogActions,
 	DialogContent,
@@ -22,7 +24,7 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import TimeAgo from "../components/TimeAgo";
@@ -31,6 +33,7 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import type { ApiResponse } from "../types";
 
 type PastPlan = ApiResponse<"upgrade_plans", "history">[number];
+type PlannableVersion = ApiResponse<"upgrade_plans", "targets">[number];
 
 /// Where every deployment is going. A group with no plan is listed too: one
 /// several minors behind with nothing recorded is what this view exists to
@@ -340,6 +343,42 @@ function PlannedFor({ date, late }: { date: string | null; late: boolean }) {
 	);
 }
 
+const SHORTLIST_MINORS = 10;
+
+const matchVersion = createFilterOptions<PlannableVersion>({
+	stringify: (option) => option.version,
+});
+
+/// The newest ready patch of each of the last ten minors. Every published
+/// version ahead is plannable, which runs to hundreds, so the list an operator
+/// scrolls is the recent releases and typing reaches the rest.
+///
+/// A minor with nothing clear of known issues still gets a row, flagged, rather
+/// than dropping out of the list unexplained.
+function recentMinors(options: PlannableVersion[]): PlannableVersion[] {
+	const picked = new Map<string, PlannableVersion>();
+	for (const option of options) {
+		const minor = option.version.split(".").slice(0, 2).join(".");
+		const held = picked.get(minor);
+		if (held ? held.ready || !option.ready : picked.size === SHORTLIST_MINORS) {
+			continue;
+		}
+		picked.set(minor, option);
+	}
+	return [...picked.values()];
+}
+
+function helperText(
+	groupId: string,
+	options: PlannableVersion[],
+	shortlist: PlannableVersion[],
+): string | undefined {
+	if (!groupId) return undefined;
+	if (options.length === 0) return "already on the newest";
+	if (options.length > shortlist.length) return "type for older";
+	return undefined;
+}
+
 /// Record where a deployment is going. The version picker offers only valid
 /// targets, so the operator cannot pick one the API would refuse.
 // spec: UPG#a-plan
@@ -363,6 +402,7 @@ function RecordPlan({
 	);
 
 	const options = targets.status === "ok" ? targets.data : [];
+	const shortlist = useMemo(() => recentMinors(options), [options]);
 
 	const submit = async () => {
 		if (!groupId || !versionId) return;
@@ -401,26 +441,45 @@ function RecordPlan({
 						</MenuItem>
 					))}
 				</TextField>
-				<TextField
-					select
+				<Autocomplete<PlannableVersion, false, false, false>
 					size="small"
-					label="Going to"
-					value={versionId}
+					sx={{ minWidth: 180 }}
 					disabled={!groupId || options.length === 0}
-					onChange={(e) => setVersionId(e.target.value)}
-					sx={{ minWidth: 140 }}
-					helperText={
-						groupId && options.length === 0
-							? "already on the newest"
-							: undefined
+					options={options}
+					value={options.find((option) => option.id === versionId) ?? null}
+					onChange={(_, option) => setVersionId(option?.id ?? "")}
+					getOptionLabel={(option) => option.version}
+					isOptionEqualToValue={(a, b) => a.id === b.id}
+					filterOptions={(all, state) =>
+						state.inputValue === "" ? shortlist : matchVersion(all, state)
 					}
-				>
-					{options.map((option) => (
-						<MenuItem key={option.id} value={option.id}>
-							{option.version}
-						</MenuItem>
-					))}
-				</TextField>
+					renderOption={(props, option) => (
+						<li {...props} key={option.id}>
+							<Stack
+								direction="row"
+								spacing={1}
+								sx={{ alignItems: "center" }}
+							>
+								<span>{option.version}</span>
+								{!option.ready && (
+									<Chip
+										size="small"
+										color="warning"
+										variant="outlined"
+										label="known issue"
+									/>
+								)}
+							</Stack>
+						</li>
+					)}
+					renderInput={(params) => (
+						<TextField
+							{...params}
+							label="Going to"
+							helperText={helperText(groupId, options, shortlist)}
+						/>
+					)}
+				/>
 				<TextField
 					size="small"
 					type="date"

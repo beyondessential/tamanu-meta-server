@@ -269,6 +269,10 @@ pub struct PlannableVersion {
 	pub id: Uuid,
 	/// Its semver.
 	pub version: String,
+	/// Whether it is clear of unresolved known issues, the same gate that keeps
+	/// a version off the public listings. A flagged version is still offered:
+	/// the issue may be resolved well before the planned date.
+	pub ready: bool,
 }
 
 /// The versions a group could be planned onto: published, and ahead of what it
@@ -300,7 +304,8 @@ pub async fn targets(
 		.await?
 		.effective_version;
 
-	let mut out: Vec<PlannableVersion> = database::versions::Version::get_all(&mut conn)
+	// get_all is already newest-first; keep that for the picker.
+	let ahead: Vec<database::versions::Version> = database::versions::Version::get_all(&mut conn)
 		.await?
 		.into_iter()
 		.filter(|version| {
@@ -308,14 +313,23 @@ pub async fn targets(
 				.as_ref()
 				.is_none_or(|running| version.as_semver() > running.0)
 		})
-		.map(|version| PlannableVersion {
-			id: version.id,
-			version: version.as_semver().to_string(),
-		})
 		.collect();
-	// get_all is already newest-first; keep that for the picker.
-	out.truncate(50);
-	Ok(Json(out))
+
+	let ids: Vec<Uuid> = ahead.iter().map(|version| version.id).collect();
+	let flagged =
+		database::version_known_issues::VersionKnownIssue::affected_versions(&mut conn, &ids)
+			.await?;
+
+	Ok(Json(
+		ahead
+			.into_iter()
+			.map(|version| PlannableVersion {
+				ready: !flagged.contains(&version.id),
+				id: version.id,
+				version: version.as_semver().to_string(),
+			})
+			.collect(),
+	))
 }
 
 /// Request body for recording where a group is going.

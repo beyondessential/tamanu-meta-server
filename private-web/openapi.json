@@ -12232,13 +12232,18 @@
         "description": "A version a group could be planned onto.",
         "required": [
           "id",
-          "version"
+          "version",
+          "ready"
         ],
         "properties": {
           "id": {
             "type": "string",
             "format": "uuid",
             "description": "The version's identifier, for `record`."
+          },
+          "ready": {
+            "type": "boolean",
+            "description": "Whether it is clear of unresolved known issues, the same gate that keeps\na version off the public listings. A flagged version is still offered:\nthe issue may be resolved well before the planned date."
           },
           "version": {
             "type": "string",
