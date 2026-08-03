@@ -259,6 +259,14 @@ test.describe("upgrades dashboard", () => {
 		await form.getByLabel("Deployment").click();
 		await page.getByRole("option", { name: "kamaka" }).click();
 
+		// Unfiltered, the list is the newest patch of each of the last ten minors:
+		// short enough to scroll, so the hundreds of plannable patches don't have
+		// to be.
+		await form.getByLabel("Going to").click();
+		await expect(page.getByRole("option")).toHaveCount(10);
+		await expect(page.getByRole("option").first()).toHaveText("2.65.5");
+		await expect(page.getByRole("option", { name: "2.54.0" })).toHaveCount(0);
+
 		await form.getByLabel("Going to").fill("2.54");
 		await page.getByRole("option", { name: "2.54.0" }).click();
 		await form.getByRole("button", { name: "Record" }).click();

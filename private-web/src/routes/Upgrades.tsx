@@ -5,6 +5,7 @@ import {
 	Autocomplete,
 	Button,
 	Chip,
+	createFilterOptions,
 	Dialog,
 	DialogActions,
 	DialogContent,
@@ -342,6 +343,37 @@ function PlannedFor({ date, late }: { date: string | null; late: boolean }) {
 	);
 }
 
+const SHORTLIST_MINORS = 10;
+
+const matchVersion = createFilterOptions<PlannableVersion>({
+	stringify: (option) => option.version,
+});
+
+/// The newest patch of each of the last ten minors. Every published version
+/// ahead is plannable, which runs to hundreds, so the list an operator scrolls
+/// is the recent releases and typing reaches the rest.
+function recentMinors(options: PlannableVersion[]): PlannableVersion[] {
+	const newest = new Map<string, PlannableVersion>();
+	for (const option of options) {
+		const minor = option.version.split(".").slice(0, 2).join(".");
+		if (!newest.has(minor)) {
+			newest.set(minor, option);
+			if (newest.size === SHORTLIST_MINORS) break;
+		}
+	}
+	return [...newest.values()];
+}
+
+function helperText(
+	groupId: string,
+	options: PlannableVersion[],
+): string | undefined {
+	if (!groupId) return undefined;
+	if (options.length === 0) return "already on the newest";
+	if (options.length > recentMinors(options).length) return "type for older";
+	return undefined;
+}
+
 /// Record where a deployment is going. The version picker offers only valid
 /// targets, so the operator cannot pick one the API would refuse.
 // spec: UPG#a-plan
@@ -412,15 +444,16 @@ function RecordPlan({
 					onChange={(_, option) => setVersionId(option?.id ?? "")}
 					getOptionLabel={(option) => option.version}
 					isOptionEqualToValue={(a, b) => a.id === b.id}
+					filterOptions={(all, state) =>
+						state.inputValue === ""
+							? recentMinors(all)
+							: matchVersion(all, state)
+					}
 					renderInput={(params) => (
 						<TextField
 							{...params}
 							label="Going to"
-							helperText={
-								groupId && options.length === 0
-									? "already on the newest"
-									: undefined
-							}
+							helperText={helperText(groupId, options)}
 						/>
 					)}
 				/>
