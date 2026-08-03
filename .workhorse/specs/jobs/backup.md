@@ -70,8 +70,12 @@ Canopy reconciles three sources — what a device reported, what credentials wer
 
 Backup alerts are raised at one of two scopes:
 
-- **Per-server** signals (staleness, never-backed-up, the report-gap, the size discrepancy) are subject to the server's monitoring gate: still recorded for visibility, but they contribute to an incident only when the server is monitored, because some servers are intentionally intermittent.
-- **Group-level** signals (repo corruption, maintenance failure, missing-snapshot reconciliation, preflight failures, and restore-verification — see the managed restore replicas spec, `RST`) page regardless of any member's monitoring state, because they are control-plane or data-safety concerns that belong to no single server.
+- **Per-server** signals (staleness, never-backed-up, the report-gap, the size discrepancy, the missing-snapshot reconciliation, and restore-verification — see the managed restore replicas spec, `RST`) are subject to the server's monitoring gate: still recorded for visibility, but they contribute to an incident only when the server is monitored, because some servers are intentionally intermittent.
+- **Group-level** signals (repo corruption, maintenance failure, preflight failures) page regardless of any member's monitoring state, because they are control-plane concerns that belong to no single server.
+
+A signal about one server is raised against that server, even when the condition it detects is a disagreement between the device's report and the group's repository.
+Two servers in a group failing the same check hold two separate alerts, and one server's recovery never clears another's.
 
 Each signal has a stable key by which operators silence or snooze it and by which the interface and notifications refer to it; the keys are a contract and are not renamed without migrating stored silences.
+Where an alert's text names the server it concerns, it names it the way an operator knows it, falling back to an identifier only when the server has neither a name nor a host.
 A signal recovers when the condition that raised it clears.

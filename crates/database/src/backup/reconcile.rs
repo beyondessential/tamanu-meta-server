@@ -6,9 +6,12 @@
 //! `backup_repo_snapshots`:
 //!
 //! - **report success but no recent snapshot** → `backup-reconcile-missing`
-//!   (`Error`, group-level, pages regardless of monitored). The case the
-//!   reports alone cannot catch — a device lying about success or data not
-//!   persisting.
+//!   (`Error`, per-server). The case the reports alone cannot catch — a device
+//!   lying about success or data not persisting. Detecting it needs the
+//!   group's repo inventory, but the finding is about the one server whose
+//!   report didn't hold up, so it is filed against that server: two servers in
+//!   a group can fail it independently, and one recovering must not clear the
+//!   other.
 //! - **recent snapshot but no report** → `backup-reconcile-report-gap`
 //!   (`Warning`, per-server, non-paging). The reporting path is broken, not
 //!   the backup.
@@ -87,6 +90,20 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 		}
 	}
 
+	// How each scanned server is named in alert text, resolved in one query
+	// rather than per finding.
+	let labels: HashMap<Uuid, String> = {
+		let ids: Vec<Uuid> = {
+			let mut s: std::collections::HashSet<Uuid> = rows.iter().map(|r| r.server_id).collect();
+			s.drain().collect()
+		};
+		Server::get_by_ids(db, &ids)
+			.await?
+			.iter()
+			.map(|s| (s.id, crate::backup::staleness::server_label(s)))
+			.collect()
+	};
+
 	// Latest comparable (reported, observed) sizes per (server, type). A server
 	// belongs to one group, so keys don't collide across groups.
 	let mut sized: HashMap<(Uuid, BackupType), (i64, i64)> = HashMap::new();
@@ -113,6 +130,12 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 
 		let missing_ref = format!("{}:{}", refs::RECONCILE_MISSING, row.r#type);
 		let gap_ref = format!("{}:{}", refs::RECONCILE_REPORT_GAP, row.r#type);
+		// A scanned server always exists (the scan joins servers), so the
+		// fallback is unreachable in practice — it just avoids a panic path.
+		let label = labels
+			.get(&row.server_id)
+			.cloned()
+			.unwrap_or_else(|| row.server_id.to_string());
 
 		match (report_fresh, snapshot_fresh) {
 			// Report says success but the data didn't land (or its row is
@@ -123,18 +146,17 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					db,
 					CheckFiling {
 						source: crate::statuses::CANOPY_SOURCE,
-						scope: Scope::Group(row.group_id),
-						device_id: None,
+						scope: Scope::Server(row.server_id),
+						device_id: row.device_id,
 						check: &missing_ref,
 						observed: CheckResult::Failed,
 						title: None,
 						message: &format!(
-							"Server {} reported a successful {} backup but no matching repo snapshot landed",
-							row.server_id, row.r#type,
+							"Server {label} reported a successful {} backup but no matching repo snapshot landed",
+							row.r#type,
 						),
 						detail: Some(serde_json::json!({
 							"type": row.r#type.to_string(),
-							"server_id": row.server_id,
 						})),
 						default_ceiling: CheckResult::Failed,
 						default_escalates: false,
@@ -146,19 +168,24 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 			}
 			// Both agree it's fine → clear any open missing alert.
 			(true, true) => {
-				if open_group_active(db, row.group_id, &missing_ref).await? {
+				if crate::backup::staleness::open_server_issue_active(
+					db,
+					row.server_id,
+					&missing_ref,
+				)
+				.await?
+				{
 					file_check(
 						db,
 						CheckFiling {
 							source: crate::statuses::CANOPY_SOURCE,
-							scope: Scope::Group(row.group_id),
-							device_id: None,
+							scope: Scope::Server(row.server_id),
+							device_id: row.device_id,
 							check: &missing_ref,
 							observed: CheckResult::Passed,
 							title: None,
 							message: &format!(
-								"Server {} backup report and repo snapshot agree again",
-								row.server_id
+								"Server {label} backup report and repo snapshot agree again"
 							),
 							detail: None,
 							default_ceiling: CheckResult::Failed,
@@ -169,12 +196,11 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					.await?;
 					filed += 1;
 				}
-				filed += clear_report_gap(db, row, &gap_ref).await?;
+				filed += clear_report_gap(db, row, &label, &gap_ref).await?;
 			}
 			// Snapshot landed but no recent report → the reporting path is
 			// broken. Per-server warning (non-paging).
 			(false, true) => {
-				let server = Server::get_by_id(db, row.server_id).await?;
 				file_check(
 					db,
 					CheckFiling {
@@ -185,8 +211,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 						observed: CheckResult::Warning,
 						title: None,
 						message: &format!(
-							"A fresh {} repo snapshot exists for {} but no backup run was reported",
-							row.r#type, server.id,
+							"A fresh {} repo snapshot exists for {label} but no backup run was reported",
+							row.r#type,
 						),
 						detail: Some(serde_json::json!({
 							"type": row.r#type.to_string(),
@@ -202,7 +228,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 			// Neither fresh → the staleness scan owns it; clear stale reconcile
 			// alerts.
 			(false, false) => {
-				filed += clear_report_gap(db, row, &gap_ref).await?;
+				filed += clear_report_gap(db, row, &label, &gap_ref).await?;
 			}
 			// (true, false) but the repo inventory is stale: skip the missing
 			// verdict.
@@ -214,7 +240,6 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 		let size_ref = format!("{}:{}", refs::RECONCILE_SIZE_MISMATCH, row.r#type);
 		match sized.get(&(row.server_id, row.r#type.clone())) {
 			Some(&(reported, observed)) if reported != observed => {
-				let server = Server::get_by_id(db, row.server_id).await?;
 				file_check(
 					db,
 					CheckFiling {
@@ -225,8 +250,8 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 						observed: CheckResult::Warning,
 						title: None,
 						message: &format!(
-							"Server {} reported a {} snapshot size of {reported} bytes but the repo holds {observed}",
-							server.id, row.r#type,
+							"Server {label} reported a {} snapshot size of {reported} bytes but the repo holds {observed}",
+							row.r#type,
 						),
 						detail: Some(serde_json::json!({
 							"type": row.r#type.to_string(),
@@ -243,7 +268,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 			}
 			// Agree, or no comparable run → clear any open mismatch.
 			_ => {
-				filed += clear_size_mismatch(db, row, &size_ref).await?;
+				filed += clear_size_mismatch(db, row, &label, &size_ref).await?;
 			}
 		}
 	}
@@ -255,6 +280,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 async fn clear_size_mismatch(
 	db: &mut AsyncPgConnection,
 	row: &ScanRow,
+	label: &str,
 	size_ref: &str,
 ) -> Result<usize> {
 	if !crate::backup::staleness::open_server_issue_active(db, row.server_id, size_ref).await? {
@@ -270,8 +296,8 @@ async fn clear_size_mismatch(
 			observed: CheckResult::Passed,
 			title: None,
 			message: &format!(
-				"Reported and repo {} snapshot sizes for {} agree again",
-				row.r#type, row.server_id
+				"Reported and repo {} snapshot sizes for {label} agree again",
+				row.r#type
 			),
 			detail: None,
 			default_ceiling: CheckResult::Warning,
@@ -288,6 +314,7 @@ async fn clear_size_mismatch(
 async fn clear_report_gap(
 	db: &mut AsyncPgConnection,
 	row: &ScanRow,
+	label: &str,
 	gap_ref: &str,
 ) -> Result<usize> {
 	if !crate::backup::staleness::open_server_issue_active(db, row.server_id, gap_ref).await? {
@@ -302,10 +329,7 @@ async fn clear_report_gap(
 			check: gap_ref,
 			observed: CheckResult::Passed,
 			title: None,
-			message: &format!(
-				"Backup reporting for {} ({}) recovered",
-				row.server_id, row.r#type
-			),
+			message: &format!("Backup reporting for {label} ({}) recovered", row.r#type),
 			detail: None,
 			default_ceiling: CheckResult::Warning,
 			default_escalates: false,
@@ -314,14 +338,6 @@ async fn clear_report_gap(
 	)
 	.await?;
 	Ok(1)
-}
-
-async fn open_group_active(
-	db: &mut AsyncPgConnection,
-	group_id: Uuid,
-	r#ref: &str,
-) -> Result<bool> {
-	crate::backup::staleness::open_group_issue_active(db, group_id, r#ref).await
 }
 
 /// Raw snapshot row: `(server_id, type, latest_snapshot_at, observed_at)`.

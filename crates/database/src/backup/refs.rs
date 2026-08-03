@@ -32,6 +32,12 @@ pub const RECONCILE_REPORT_GAP: &str = "backup-reconcile-report-gap";
 /// non-zero). Server-scoped, `Warning` (non-paging on its own).
 pub const RECONCILE_SIZE_MISMATCH: &str = "backup-reconcile-size-mismatch";
 
+/// A run reported success but no matching repo snapshot landed (the device
+/// lied or the upload didn't persist). Server-scoped, `Error`. Detecting it
+/// takes the group's repo inventory, but the finding is about the one server
+/// whose report didn't hold up, so it is filed against that server.
+pub const RECONCILE_MISSING: &str = "backup-reconcile-missing";
+
 // --- group-level (page regardless of any member's is_monitored) ---
 
 /// A group whose last successful maintenance run is older than the
@@ -43,10 +49,6 @@ pub const MAINTENANCE_STALE: &str = "backup-maintenance-stale";
 /// when maintenance is running but erroring. Group-scoped, `Error`. Clears
 /// when a newer run finishes successfully.
 pub const MAINTENANCE_ERROR: &str = "backup-maintenance-error";
-
-/// A run reported success but no matching repo snapshot landed (the device
-/// lied or the upload didn't persist). Group-scoped, `Error`.
-pub const RECONCILE_MISSING: &str = "backup-reconcile-missing";
 
 /// Repo corruption / poisoning detected by the inspection Job. Group-scoped,
 /// registers as an escalating failure. Raised by the inspection-Job component
@@ -73,9 +75,9 @@ pub const PREFLIGHT_ASSUME: &str = "preflight-assume";
 /// absent, or retention < 30 days). Group-scoped, `Critical`.
 pub const PREFLIGHT_OBJECT_LOCK: &str = "preflight-object-lock";
 
-/// Restore-verification (later/additive): PGRO reported a failed/stale
-/// restorability check. Group-scoped, `Error`. Routed through the same
-/// group-level helper.
+/// PGRO reported a failed/stale restorability check for one replica.
+/// Server-scoped, `Error`; the ref carries the `(type, intent)` dimension so
+/// each replica of a server recovers independently.
 pub const RESTORE_VERIFICATION: &str = "restore-verification";
 pub const MIGRATION_TEST: &str = "migration-test";
 

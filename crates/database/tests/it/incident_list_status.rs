@@ -81,7 +81,7 @@ async fn the_status_filter_selects_the_right_incidents() {
 		.expect("seed incidents");
 
 		let since = Timestamp::now() - SignedDuration::from_hours(7 * 24);
-		let mut ids = async |conn: &mut _, status| -> Vec<Uuid> {
+		let ids = async |conn: &mut _, status| -> Vec<Uuid> {
 			Incident::list_open_since(conn, since, None, status, 100)
 				.await
 				.expect("list")

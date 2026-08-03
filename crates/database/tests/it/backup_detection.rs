@@ -233,6 +233,31 @@ async fn server_issue(
 	.ok()
 }
 
+#[derive(QueryableByName, Debug)]
+struct MessageRow {
+	#[diesel(sql_type = sql_types::Text)]
+	message: String,
+}
+
+/// The alert text of a server-scoped issue, for asserting on how it reads.
+async fn issue_message(
+	conn: &mut AsyncPgConnection,
+	server_id: Uuid,
+	r#ref: &str,
+) -> Option<String> {
+	sql_query(
+		"SELECT message FROM issues \
+		 WHERE server_id = $1 AND source = $2 AND \"ref\" = $3",
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Text, _>(refs::CANOPY_SOURCE)
+	.bind::<sql_types::Text, _>(r#ref)
+	.get_result::<MessageRow>(conn)
+	.await
+	.ok()
+	.map(|r| r.message)
+}
+
 async fn group_issue(
 	conn: &mut AsyncPgConnection,
 	group_id: Uuid,
@@ -718,16 +743,20 @@ async fn reconcile_files_missing_when_report_fresh_but_no_snapshot() {
 			.expect("reconcile sweep");
 
 		let mref = typed_ref(refs::RECONCILE_MISSING, &pg);
-		let issue = group_issue(&mut conn, group_id, &mref)
+		let issue = server_issue(&mut conn, server_id, &mref)
 			.await
-			.expect("reconcile-missing issue filed (group-scoped)");
+			.expect("reconcile-missing issue filed against the server it concerns");
 		assert_eq!(issue.effective_result.as_deref(), Some("failed"));
 		assert!(issue.active);
-		// Group-level Error opens an incident.
+		assert!(
+			group_issue(&mut conn, group_id, &mref).await.is_none(),
+			"the finding is about one server, not the group",
+		);
+		// A per-server Error on a monitored server still opens an incident.
 		assert_eq!(
-			group_issue_open_links(&mut conn, group_id, &mref).await,
+			server_issue_open_links(&mut conn, server_id, &mref).await,
 			1,
-			"reconcile-missing is group-level and opens an incident",
+			"reconcile-missing opens an incident",
 		);
 	})
 	.await;
@@ -783,11 +812,152 @@ async fn reconcile_files_missing_when_report_fresh_and_the_pair_has_no_snapshot_
 			.expect("reconcile sweep");
 
 		let mref = typed_ref(refs::RECONCILE_MISSING, &pg);
-		let issue = group_issue(&mut conn, group_id, &mref)
+		let issue = server_issue(&mut conn, server_id, &mref)
 			.await
 			.expect("reconcile-missing issue filed for the pair with no snapshot");
 		assert_eq!(issue.effective_result.as_deref(), Some("failed"));
 		assert!(issue.active);
+	})
+	.await;
+}
+
+/// Two servers in one group failing the same check hold two separate alerts.
+/// While this was group-scoped they collided on one row, so whichever server
+/// the sweep reached last owned the message — and the healthy one's recovery
+/// filed a `Passed` that cleared the broken one's alert.
+#[tokio::test(flavor = "multi_thread")]
+async fn reconcile_missing_is_per_server_not_shared_across_the_group() {
+	TestDb::run(|mut conn, _url| async move {
+		let pg = BackupType::TamanuPostgres;
+		let interval = SignedDuration::from_hours(12);
+		let group_id = insert_group(&mut conn, "g").await;
+		let broken_id = insert_server(&mut conn, group_id, true).await;
+		let healthy_id = insert_server(&mut conn, group_id, true).await;
+		let device_id = insert_device(&mut conn).await;
+
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
+		insert_schedule(&mut conn, group_id, &pg, interval).await;
+		enable_capability(&mut conn, broken_id, &pg).await;
+		enable_capability(&mut conn, healthy_id, &pg).await;
+
+		// Both report success recently.
+		for sid in [broken_id, healthy_id] {
+			insert_backup_success_aged(
+				&mut conn,
+				device_id,
+				group_id,
+				sid,
+				&pg,
+				SignedDuration::from_hours(2),
+			)
+			.await;
+		}
+		// Only the healthy server's report is backed by a fresh snapshot; the
+		// broken one's snapshot is three days old.
+		BackupRepoSnapshot::upsert(
+			&mut conn,
+			group_id,
+			&format!("canopy@{healthy_id}:/data"),
+			Some(healthy_id),
+			Some(&pg),
+			Some(Timestamp::now() - SignedDuration::from_hours(2)),
+		)
+		.await
+		.expect("upsert healthy snapshot");
+		BackupRepoSnapshot::upsert(
+			&mut conn,
+			group_id,
+			&format!("canopy@{broken_id}:/data"),
+			Some(broken_id),
+			Some(&pg),
+			Some(Timestamp::now() - SignedDuration::from_hours(72)),
+		)
+		.await
+		.expect("upsert broken snapshot");
+
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan");
+		database::backup::reconcile::sweep(&mut conn, &rows)
+			.await
+			.expect("reconcile sweep");
+
+		let mref = typed_ref(refs::RECONCILE_MISSING, &pg);
+		let broken = server_issue(&mut conn, broken_id, &mref)
+			.await
+			.expect("the server whose snapshot is missing holds the alert");
+		assert_eq!(broken.effective_result.as_deref(), Some("failed"));
+		assert!(
+			broken.active,
+			"the healthy server in the same group must not clear it",
+		);
+		assert!(
+			server_issue(&mut conn, healthy_id, &mref).await.is_none(),
+			"the healthy server has no reconcile-missing alert of its own",
+		);
+	})
+	.await;
+}
+
+/// Alert text names the server the way an operator knows it, not by id.
+#[tokio::test(flavor = "multi_thread")]
+async fn reconcile_missing_names_the_server_rather_than_its_id() {
+	TestDb::run(|mut conn, _url| async move {
+		let pg = BackupType::TamanuPostgres;
+		let interval = SignedDuration::from_hours(12);
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id, true).await;
+		let device_id = insert_device(&mut conn).await;
+
+		sql_query("UPDATE servers SET name = 'kotare-central' WHERE id = $1")
+			.bind::<sql_types::Uuid, _>(server_id)
+			.execute(&mut conn)
+			.await
+			.expect("name the server");
+
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
+		insert_schedule(&mut conn, group_id, &pg, interval).await;
+		enable_capability(&mut conn, server_id, &pg).await;
+
+		insert_backup_success_aged(
+			&mut conn,
+			device_id,
+			group_id,
+			server_id,
+			&pg,
+			SignedDuration::from_hours(2),
+		)
+		.await;
+		BackupRepoSnapshot::upsert(
+			&mut conn,
+			group_id,
+			&format!("canopy@{server_id}:/data"),
+			Some(server_id),
+			Some(&pg),
+			Some(Timestamp::now() - SignedDuration::from_hours(72)),
+		)
+		.await
+		.expect("upsert stale snapshot");
+
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan");
+		database::backup::reconcile::sweep(&mut conn, &rows)
+			.await
+			.expect("reconcile sweep");
+
+		let mref = typed_ref(refs::RECONCILE_MISSING, &pg);
+		let message = issue_message(&mut conn, server_id, &mref)
+			.await
+			.expect("reconcile-missing issue filed");
+		assert!(
+			message.contains("kotare-central"),
+			"message names the server: {message}",
+		);
+		assert!(
+			!message.contains(&server_id.to_string()),
+			"message does not fall back to the id: {message}",
+		);
 	})
 	.await;
 }

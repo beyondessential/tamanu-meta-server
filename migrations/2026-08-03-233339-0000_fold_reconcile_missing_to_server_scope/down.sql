@@ -1,0 +1,4 @@
+-- Irreversible: the folded rows can be pushed back to their group, but which
+-- rows were group-scoped to begin with isn't recorded, and the incidents
+-- closed in step 3 can't be told apart from ones closed normally. Nothing to
+-- restore.
