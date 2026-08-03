@@ -328,3 +328,41 @@ async fn the_history_view_shows_a_withdrawn_plan_beside_a_replaced_one() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn every_version_ahead_is_offered_however_far_behind_the_group_is() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		// Ten minors of patch releases sit between the group and the newest, so
+		// the version it is actually going to is a long way down the list.
+		let mut rows = vec!["(2, 54, 0, 'x', 'published')".to_owned()];
+		for minor in 56..=65 {
+			for patch in 0..=5 {
+				rows.push(format!("(2, {minor}, {patch}, 'x', 'published')"));
+			}
+		}
+		conn.batch_execute(&format!(
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES {};
+			INSERT INTO server_groups (id, name, effective_version) VALUES
+				('cccccccc-0000-0000-0000-000000000001', 'kamaka', '2.53.0');",
+			rows.join(", ")
+		))
+		.await
+		.unwrap();
+
+		let targets: Vec<Value> = private
+			.post("/api/upgrade_plans/targets")
+			.json(&json!({ "group_id": GROUP }))
+			.await
+			.json();
+
+		assert!(
+			targets.iter().any(|v| v["version"] == "2.54.0"),
+			"a deployment moving to an older minor cannot pick it: offered {:?}",
+			targets
+				.iter()
+				.map(|v| v["version"].as_str().unwrap_or(""))
+				.collect::<Vec<_>>()
+		);
+	})
+	.await;
+}

@@ -235,4 +235,36 @@ test.describe("upgrades dashboard", () => {
 		// No date means nothing to be late against.
 		await expect(row).not.toContainText("late");
 	});
+
+	test("a version far behind the newest can still be planned", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await sql.query(
+			"UPDATE server_groups SET effective_version = '2.53.0' WHERE id = $1",
+			[group.id],
+		);
+		// Ten minors of patch releases sit between the deployment and the newest, so the
+		// version it is going to is a long way down the list.
+		await seedVersion(sql, { major: 2, minor: 54, patch: 0 });
+		for (let minor = 56; minor <= 65; minor++) {
+			for (let patch = 0; patch <= 5; patch++) {
+				await seedVersion(sql, { major: 2, minor, patch });
+			}
+		}
+
+		await page.goto("/upgrades");
+		const form = page.getByTestId("record-plan");
+		await form.getByLabel("Deployment").click();
+		await page.getByRole("option", { name: "kamaka" }).click();
+
+		await form.getByLabel("Going to").fill("2.54");
+		await page.getByRole("option", { name: "2.54.0" }).click();
+		await form.getByRole("button", { name: "Record" }).click();
+
+		await expect(
+			page.getByTestId("planned-upgrade-row").filter({ hasText: "kamaka" }),
+		).toContainText("2.54.0");
+	});
 });

@@ -2,6 +2,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import {
 	Alert,
+	Autocomplete,
 	Button,
 	Chip,
 	Dialog,
@@ -31,6 +32,7 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import type { ApiResponse } from "../types";
 
 type PastPlan = ApiResponse<"upgrade_plans", "history">[number];
+type PlannableVersion = ApiResponse<"upgrade_plans", "targets">[number];
 
 /// Where every deployment is going. A group with no plan is listed too: one
 /// several minors behind with nothing recorded is what this view exists to
@@ -401,26 +403,27 @@ function RecordPlan({
 						</MenuItem>
 					))}
 				</TextField>
-				<TextField
-					select
+				<Autocomplete<PlannableVersion, false, false, false>
 					size="small"
-					label="Going to"
-					value={versionId}
+					sx={{ minWidth: 180 }}
 					disabled={!groupId || options.length === 0}
-					onChange={(e) => setVersionId(e.target.value)}
-					sx={{ minWidth: 140 }}
-					helperText={
-						groupId && options.length === 0
-							? "already on the newest"
-							: undefined
-					}
-				>
-					{options.map((option) => (
-						<MenuItem key={option.id} value={option.id}>
-							{option.version}
-						</MenuItem>
-					))}
-				</TextField>
+					options={options}
+					value={options.find((option) => option.id === versionId) ?? null}
+					onChange={(_, option) => setVersionId(option?.id ?? "")}
+					getOptionLabel={(option) => option.version}
+					isOptionEqualToValue={(a, b) => a.id === b.id}
+					renderInput={(params) => (
+						<TextField
+							{...params}
+							label="Going to"
+							helperText={
+								groupId && options.length === 0
+									? "already on the newest"
+									: undefined
+							}
+						/>
+					)}
+				/>
 				<TextField
 					size="small"
 					type="date"

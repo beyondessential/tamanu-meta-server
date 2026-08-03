@@ -300,22 +300,22 @@ pub async fn targets(
 		.await?
 		.effective_version;
 
-	let mut out: Vec<PlannableVersion> = database::versions::Version::get_all(&mut conn)
-		.await?
-		.into_iter()
-		.filter(|version| {
-			running
-				.as_ref()
-				.is_none_or(|running| version.as_semver() > running.0)
-		})
-		.map(|version| PlannableVersion {
-			id: version.id,
-			version: version.as_semver().to_string(),
-		})
-		.collect();
 	// get_all is already newest-first; keep that for the picker.
-	out.truncate(50);
-	Ok(Json(out))
+	Ok(Json(
+		database::versions::Version::get_all(&mut conn)
+			.await?
+			.into_iter()
+			.filter(|version| {
+				running
+					.as_ref()
+					.is_none_or(|running| version.as_semver() > running.0)
+			})
+			.map(|version| PlannableVersion {
+				id: version.id,
+				version: version.as_semver().to_string(),
+			})
+			.collect(),
+	))
 }
 
 /// Request body for recording where a group is going.
