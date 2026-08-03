@@ -68,8 +68,8 @@ pub async fn add(
 - Database tests: `commons_tests::db::TestDb::run(|mut conn, _url| async move { ... })`
 - HTTP tests: `commons_tests::server::run(|conn, public, private| async move { ... })`
 - Device auth tests: `commons_tests::server::run_with_device_auth("role", |conn, cert, device_id, public, private| async move { ... })`
-- In public-server, for authenticated tests, add `mtls-certificate` header: `.add_header("mtls-certificate", &cert)`
-- In public-server, use `.add_header("mtls-certificate", &cert)` on test requests, do not set it on `public` or `private` server directly (these should not be `mut` in tests)
+- In public-server, authenticate a test request with the client-certificate header the harness trusts. Only one header is read, chosen per server; the test harness selects Envoy/XFCC, so it is `.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))`. A test that needs the nginx path instead (`mtls-certificate`) selects it explicitly with `commons_tests::server::run_with_device_auth_on(ClientCertHeader::Mtls, "role", …)`. Setting the wrong header is a 401, not a fallback.
+- In public-server, set that header on the individual test request, not on the `public` or `private` server directly (these should not be `mut` in tests)
 - Test both success and error scenarios (especially 404 cases for non-existent resources)
 - For database tests, use direct model functions instead of HTTP endpoints
 - Always include `use database::ModelName;` imports in test files

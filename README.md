@@ -146,7 +146,16 @@ $ just download-db canopy canopy-prod
 The `public-server` binary serves the public API and views, which are expected to be exposed to
 the internet (in production behind an ingress gateway or reverse proxy).
 
-The `mtls-certificate` (or `ssl-client-cert`) header should contain a PEM-encoded (optionally URL-encoded) X509 certificate.
+A client is identified by an X509 certificate presented in a header, PEM-encoded and optionally URL-encoded.
+
+Which header carries it depends on what terminates TLS in front of the server, and is chosen by `CANOPY_DEVICE_AUTH_CERT_HEADER`:
+
+- `mtls` (or `nginx`) — the `mtls-certificate` header, falling back to `ssl-client-cert`. The default, and the live ingress path.
+- `xfcc` (or `envoy`) — the `x-forwarded-client-cert` header, in Envoy's format.
+
+Exactly one header is read. The other is ignored rather than tried as a fallback, so a client that can set a header it isn't meant to cannot present an enrolled device's certificate and be resolved as that device — the certificate is a public key, not a secret, and nothing at this layer proves possession. An unrecognised value for the setting keeps the default rather than guessing.
+
+For the same reason, an `x-forwarded-client-cert` chain is read from its **last** element, which is the one the terminating proxy appended; an element a client put there first is not trusted.
 
 To get a certificate, run:
 
@@ -168,12 +177,19 @@ and then use curl like:
 $ curl -H "mtls-certificate: $MTLS_CERT" ...
 ```
 
+Against a server configured for XFCC, the same certificate goes in the Envoy header instead:
+
+```console
+$ curl -H "x-forwarded-client-cert: Cert=$MTLS_CERT" ...
+```
+
 #### In production
 
 In production, the header should be set from a client certificate, as terminated by a reverse proxy or load balancer, and any matching header on the incoming requests should be stripped.
 
 - Nginx: use the `$ssl_client_escaped_cert` variable.
 - Caddy: use the `{http.request.tls.client.certificate_pem}` placeholder.
+- Envoy: enable `forward_client_cert_details` with `set_current_client_cert_details.cert`, and set `CANOPY_DEVICE_AUTH_CERT_HEADER=xfcc` so that header is the one trusted.
 
 ### MCP
 
