@@ -101,8 +101,7 @@ test.describe("upgrades dashboard", () => {
 			.getByRole("button", { name: "Withdraw kamaka's plan" })
 			.click();
 
-		// Withdrawn, so it moves to the unplanned list and testing goes back to
-		// aiming at the newest version.
+		// Withdrawn, so it moves to the unplanned list and stops being tested.
 		await expect(
 			page
 				.getByTestId("unplanned-upgrade-row")

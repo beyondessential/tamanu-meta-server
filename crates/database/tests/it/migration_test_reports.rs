@@ -452,6 +452,19 @@ async fn record_snapshot(
 	.expect("record backup run");
 }
 
+/// The group's open plan, which is what names the version to migrate to.
+async fn plan_upgrade(conn: &mut AsyncPgConnection, group: Uuid, target: &Version) {
+	sql_query(
+		"INSERT INTO upgrade_plans (group_id, target_version_id, created_by)
+		 VALUES ($1, $2, 'test@example.com')",
+	)
+	.bind::<sql_types::Uuid, _>(group)
+	.bind::<sql_types::Uuid, _>(target.id)
+	.execute(conn)
+	.await
+	.expect("plan upgrade");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn an_untried_candidate_goes_overdue_and_a_tested_one_does_not() {
 	TestDb::run(|mut conn, _url| async move {
@@ -459,16 +472,7 @@ async fn an_untried_candidate_goes_overdue_and_a_tested_one_does_not() {
 		let group = insert_group(&mut conn).await;
 		let server = insert_server(&mut conn, group).await;
 		let target = insert_version(&mut conn, 63).await;
-		let running: commons_types::version::VersionStr = "2.62.0".parse().expect("parse");
-		database::reported_detail::ReportedDetail::record(
-			&mut conn,
-			server,
-			"test",
-			&serde_json::json!({}),
-			Some(&running),
-		)
-		.await
-		.expect("report version");
+		plan_upgrade(&mut conn, group, &target).await;
 		declare_migrate(&mut conn, consumer, group, 3600).await;
 		record_snapshot(&mut conn, consumer, group, server, "snap-old", 7200).await;
 
@@ -518,27 +522,8 @@ async fn a_group_shows_where_each_server_stands() {
 		let group = insert_group(&mut conn).await;
 		let tested = insert_server(&mut conn, group).await;
 		let untested = insert_server(&mut conn, group).await;
-		let current = insert_server(&mut conn, group).await;
 		let target = insert_version(&mut conn, 63).await;
-
-		let behind: commons_types::version::VersionStr = "2.62.0".parse().expect("parse");
-		let newest: commons_types::version::VersionStr = "2.63.0".parse().expect("parse");
-		for (server, running) in [
-			(tested, &behind),
-			(untested, &behind),
-			// Already on the newest published version, so nothing to test.
-			(current, &newest),
-		] {
-			database::reported_detail::ReportedDetail::record(
-				&mut conn,
-				server,
-				"test",
-				&serde_json::json!({}),
-				Some(running),
-			)
-			.await
-			.expect("report version");
-		}
+		plan_upgrade(&mut conn, group, &target).await;
 
 		let mut failing = report(consumer, group, tested, RunOutcome::Success);
 		failing.snapshot_id = Some("snap-1".into());
@@ -561,7 +546,7 @@ async fn a_group_shows_where_each_server_stands() {
 			.await
 			.expect("verdicts");
 
-		assert_eq!(verdicts.len(), 2, "the up-to-date server has no row");
+		assert_eq!(verdicts.len(), 2, "one row per server the plan covers");
 		let by_server: std::collections::HashMap<Uuid, _> =
 			verdicts.into_iter().map(|v| (v.server_id, v)).collect();
 

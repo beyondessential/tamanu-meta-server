@@ -2337,9 +2337,9 @@ export interface paths {
         /**
          * Where each of a group's servers stands against the version it would take
          *     next.
-         * @description One entry per server that has a candidate version. A server already on the
-         *     newest published version, running another product, or yet to report a
-         *     version has nothing to be tested against and is absent.
+         * @description One entry per server that has a candidate version, which is the version its
+         *     group's open plan names. A group with no plan, and a server running another
+         *     product, have nothing to be tested against and are absent.
          */
         post: operations["migration_tests_for_group"];
         delete?: never;

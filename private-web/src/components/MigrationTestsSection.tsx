@@ -62,8 +62,8 @@ export default function MigrationTestsSection({
 			<Paper variant="outlined" sx={{ p: 2 }} data-testid="migration-tests">
 				<SectionHeading />
 				<Typography variant="body2" color="text.secondary">
-					Every server here is on the newest version it can take, so there is
-					nothing to test against.
+					No upgrade plan is open for this deployment, so there is nothing to
+					test against.
 				</Typography>
 			</Paper>
 		);

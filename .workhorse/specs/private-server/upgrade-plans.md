@@ -20,7 +20,7 @@ Canopy already knows what every server runs and every version that exists.
 What it cannot derive is where a deployment is going: which minor a deployment moves to next is a decision made by people, weighing what the release contains against what the site can absorb.
 
 Left unrecorded, that decision costs twice.
-Pre-upgrade migration testing has to guess, and guesses the newest published version, which is the right default and the wrong answer for a deployment deliberately moving to something older (see [RST](../public-server/restore-replicas.md)).
+Pre-upgrade migration testing has nothing to aim at, so a deployment gets no answer about its own data until it says where it is going (see [RST](../public-server/restore-replicas.md)).
 And nobody can see at a glance which deployments are mid-plan, which are overdue to move, and which have no plan at all.
 
 ## A plan
@@ -59,8 +59,8 @@ The record of what a deployment planned, when it planned it for, and when it act
 
 ## What reads a plan
 
-Pre-upgrade migration testing takes its target from the open plan when a group has one, and falls back to the newest published version when it does not.
-A deployment planning to move to an older minor is then tested against that minor, and no restore is spent on a version nobody intends to apply.
+Pre-upgrade migration testing takes its target from the open plan, and a group with no plan is not tested at all.
+Recording a plan is what asks for the testing, and no restore is spent on a version nobody intends to apply.
 
 A plan changes what is tested, so changing one invalidates nothing already recorded: earlier verdicts stand against the versions they named, and the new target simply becomes the one that has not been tested yet.
 

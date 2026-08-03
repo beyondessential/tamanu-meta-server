@@ -222,15 +222,15 @@ Canopy knows the version each server reports running and the upgrade path it wou
 
 Canopy decides which versions are tested against which servers, rather than an operator naming each pair.
 
-A server's candidate is the version its group plans to move to, when a plan is open (see [UPG](../private-server/upgrade-plans.md)).
-Without a plan it is the newest published version the server could upgrade to: newer than the version it reports running, and on the upgrade path Canopy would serve it.
+A server's candidate is the version its group's open plan moves it to (see [UPG](../private-server/upgrade-plans.md)).
+A group with no open plan has no candidate, so none of its servers are tested.
+
+Recording a plan is what asks for the testing.
+A run costs hours of a consumer's capacity per server, and which minor a deployment moves to is not something Canopy can derive, so aiming at whatever is newest would spend that capacity on versions nobody has decided to take.
+A deployment that wants its data tested says where it is going, and gets an answer about the version it will actually apply.
 
 One candidate, not one per version along the path.
-Migrations are applied to the restored snapshot in sequence, so a run targeting the newest version applies every migration between the snapshot's version and that one, and exercises the whole chain an upgrade would.
-
-Which minor a deployment moves to is not something Canopy can derive, and testing every minor ahead of a server would cost a full restore each to cover the ones it does not choose.
-It does not need to: coverage accumulates on its own.
-Snapshots arrive daily and releases far less often, so every version is tested against a deployment's data while it is the newest, and a deployment that later settles on an older minor already has a result from when that version was current.
+Migrations are applied to the restored snapshot in sequence, so a run targeting the planned version applies every migration between the snapshot's version and that one, and exercises the whole chain an upgrade would.
 Where a chain does break, the failing migration named in the report identifies the step without a second run.
 
 Only a published version is a candidate, because a version's migrations reach a consumer as its published artefacts, and an unpublished version has none to fetch.
@@ -248,7 +248,7 @@ That window is where the answer is still cheap: the fleet is not moving yet, and
 It carries `check` alongside, so a single restore reports the replica's health and the migrations' outcome as two signals from one report.
 
 An intent carrying `migrate` is withheld from a server with no candidate version.
-An intent that verifies backups therefore does not also migrate: it would go undispatched for every server without a candidate, leaving the backups of any non-Tamanu product, and of any deployment already on the newest version available to it, unverified.
+An intent that verifies backups therefore does not also migrate: it would go undispatched for every server without a candidate, leaving the backups of any non-Tamanu product, and of every deployment with no plan open, unverified.
 An intent that keeps a replica queryable does not migrate either: a migrated replica sits at a version its deployment is not running, so a declaration promoted to it would give an operator a schema that does not match production.
 
 A verifying intent and a migrating intent restore the same snapshot separately.
