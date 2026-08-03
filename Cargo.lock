@@ -1197,6 +1197,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
+name = "base64"
+version = "0.23.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b25655df2c3cdd83c5e5b293b88acd880332b2ddadd7c30ac43144fdc0033da9"
+
+[[package]]
 name = "base64-simd"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1784,7 +1790,7 @@ dependencies = [
 name = "commons-types"
 version = "6.6.6"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.0",
  "commons-errors",
  "diesel",
  "jiff",
@@ -2158,7 +2164,7 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 name = "database"
 version = "6.6.6"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.0",
  "bestool-postgres",
  "clap",
  "commons-errors",
@@ -4988,7 +4994,7 @@ dependencies = [
  "axum",
  "axum-client-ip",
  "axum-server-timing",
- "base64 0.22.1",
+ "base64 0.23.0",
  "bestool-postgres",
  "canopy-mcp",
  "canopy-utoipa-axum",
@@ -5074,7 +5080,7 @@ dependencies = [
  "proc-macro-error-attr3",
  "proc-macro2",
  "quote",
- "syn 2.0.118",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -5106,7 +5112,7 @@ dependencies = [
  "axum",
  "axum-client-ip",
  "axum-test",
- "base64 0.22.1",
+ "base64 0.23.0",
  "canopy-mcp",
  "canopy-utoipa-axum",
  "clap",
@@ -6001,7 +6007,7 @@ checksum = "7bd22781911de0ca6debda95f073c8f18bec65d1a94f1fa9573f3102e514cea4"
 dependencies = [
  "ahash",
  "annotate-snippets",
- "base64 0.22.1",
+ "base64 0.21.7",
  "encoding_rs_io",
  "getrandom 0.3.4",
  "granit-parser",

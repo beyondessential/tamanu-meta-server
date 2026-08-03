@@ -12,7 +12,7 @@ authors = [
 ]
 
 [dependencies]
-base64 = "0.22.1"
+base64 = "0.23.0"
 commons-errors = { path = "../commons-errors" }
 diesel.workspace = true
 jiff.workspace = true
