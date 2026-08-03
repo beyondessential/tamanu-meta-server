@@ -1086,8 +1086,8 @@ async fn upgrade_plans_list_the_open_ones_and_keep_the_withdrawn_in_history() {
 		assert_eq!(plans[0]["late"], true, "the planned day has passed unmet");
 		assert_eq!(plans[0]["note"], "site can absorb 2.36 only");
 
-		// A group with nothing recorded is what testing aims at the newest
-		// version for, so it is returned rather than omitted.
+		// A group with nothing recorded gets no pre-upgrade testing, so it is
+		// returned rather than omitted.
 		let unplanned = list["groups_without_a_plan"]
 			.as_array()
 			.expect("unplanned groups");

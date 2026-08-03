@@ -1,14 +1,11 @@
 //! Candidate derivation: which version a server is asked to be tested against.
-//! The newest published one it could upgrade to, within its major, and only for
-//! Tamanu servers that have reported a version.
+//! The version its group's open plan names, and only for Tamanu servers.
 
-use commons_types::{
-	server::product::Product,
-	version::{VersionStatus, VersionStr},
-};
+use commons_tests::db::TestDb;
+use commons_types::{server::product::Product, version::VersionStatus};
 use database::{
-	migration_tests::{Candidate, candidates, upgrade_target},
-	reported_detail::ReportedDetail,
+	migration_tests::{Candidate, candidates},
+	upgrade_plans::UpgradePlan,
 	versions::{NewVersion, Version},
 };
 use diesel::{QueryableByName, SelectableHelper, sql_query, sql_types};
@@ -21,23 +18,18 @@ struct RowId {
 	id: Uuid,
 }
 
-fn reported(text: &str) -> VersionStr {
-	text.parse().expect("parse reported version")
-}
-
-async fn add_version(
+async fn publish(
 	conn: &mut diesel_async::AsyncPgConnection,
 	major: i32,
 	minor: i32,
 	patch: i32,
-	status: VersionStatus,
 ) -> Version {
 	diesel::insert_into(database::schema::versions::table)
 		.values(NewVersion {
 			major,
 			minor,
 			patch,
-			status,
+			status: VersionStatus::Published,
 			changelog: String::new(),
 			device_id: None,
 		})
@@ -47,28 +39,25 @@ async fn add_version(
 		.expect("insert version")
 }
 
-async fn publish(
-	conn: &mut diesel_async::AsyncPgConnection,
-	major: i32,
-	minor: i32,
-	patch: i32,
-) -> Version {
-	add_version(conn, major, minor, patch, VersionStatus::Published).await
+async fn insert_group(conn: &mut diesel_async::AsyncPgConnection, name: &str) -> Uuid {
+	let group: RowId = sql_query("INSERT INTO server_groups (name) VALUES ($1) RETURNING id")
+		.bind::<sql_types::Text, _>(name)
+		.get_result(conn)
+		.await
+		.expect("group");
+	group.id
 }
 
 async fn insert_server(
 	conn: &mut diesel_async::AsyncPgConnection,
+	group: Uuid,
 	host: &str,
 	product: Product,
 ) -> Uuid {
-	let group: RowId = sql_query("INSERT INTO server_groups (name) VALUES ('kamaka') RETURNING id")
-		.get_result(conn)
-		.await
-		.expect("group");
 	let server: RowId =
 		sql_query("INSERT INTO servers (host, group_id, product) VALUES ($1, $2, $3) RETURNING id")
 			.bind::<sql_types::Text, _>(host)
-			.bind::<sql_types::Uuid, _>(group.id)
+			.bind::<sql_types::Uuid, _>(group)
 			.bind::<sql_types::Text, _>(product.to_string())
 			.get_result(conn)
 			.await
@@ -76,94 +65,123 @@ async fn insert_server(
 	server.id
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn the_newest_published_version_ahead_of_the_server() {
-	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		publish(&mut conn, 2, 61, 0).await;
-		publish(&mut conn, 2, 62, 1).await;
-		publish(&mut conn, 2, 62, 4).await;
-		publish(&mut conn, 2, 63, 0).await;
-		let newest = publish(&mut conn, 2, 63, 2).await;
-		publish(&mut conn, 3, 0, 0).await;
-
-		let versions = Version::get_all(&mut conn).await.expect("versions");
-
-		assert_eq!(
-			upgrade_target(&reported("2.62.0"), &versions),
-			Some(newest.id),
-			"the newest patch of the newest minor, and nothing outside the major"
-		);
-	})
-	.await
+async fn plan(conn: &mut diesel_async::AsyncPgConnection, group: Uuid, target: &Version) {
+	UpgradePlan::record(conn, group, target.id, None, None, "someone@example.com")
+		.await
+		.expect("record plan");
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_newer_patch_of_the_current_minor_counts() {
-	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let patch = publish(&mut conn, 2, 62, 4).await;
-		let versions = Version::get_all(&mut conn).await.expect("versions");
-
-		assert_eq!(
-			upgrade_target(&reported("2.62.0"), &versions),
-			Some(patch.id),
-			"a patch upgrade is still an upgrade worth testing"
-		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn a_server_on_the_newest_version_has_no_candidates() {
-	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		publish(&mut conn, 2, 62, 0).await;
-		let versions = Version::get_all(&mut conn).await.expect("versions");
-
-		assert!(upgrade_target(&reported("2.62.0"), &versions).is_none());
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn drafts_are_not_candidates_on_their_own() {
-	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let draft = add_version(&mut conn, 2, 63, 0, VersionStatus::Draft).await;
-
-		let all = Version::get_all_including_drafts(&mut conn)
-			.await
-			.expect("versions");
-		assert_ne!(
-			upgrade_target(&reported("2.62.0"), &all),
-			Some(draft.id),
-			"an unpublished version has no artefacts to fetch, so nothing to test"
-		);
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn only_tamanu_servers_that_reported_a_version() {
-	commons_tests::db::TestDb::run(async |mut conn, _url| {
+async fn every_server_in_a_planned_group_is_a_candidate() {
+	TestDb::run(|mut conn, _url| async move {
 		let target = publish(&mut conn, 2, 63, 0).await;
+		let group = insert_group(&mut conn, "kamaka").await;
+		let central = insert_server(
+			&mut conn,
+			group,
+			"https://central.kamaka.example",
+			Product::Tamanu,
+		)
+		.await;
+		let facility = insert_server(
+			&mut conn,
+			group,
+			"https://facility.kamaka.example",
+			Product::Tamanu,
+		)
+		.await;
+		plan(&mut conn, group, &target).await;
 
-		let tamanu =
-			insert_server(&mut conn, "https://central.kamaka.example", Product::Tamanu).await;
-		let senaite =
-			insert_server(&mut conn, "https://lims.kamaka.example", Product::Senaite).await;
-		let silent =
-			insert_server(&mut conn, "https://quiet.kamaka.example", Product::Tamanu).await;
+		let mut found = candidates(&mut conn).await.expect("candidates");
+		found.sort_by_key(|c| c.server_id);
+		let mut want = vec![
+			Candidate {
+				server_id: central,
+				version_id: target.id,
+			},
+			Candidate {
+				server_id: facility,
+				version_id: target.id,
+			},
+		];
+		want.sort_by_key(|c| c.server_id);
 
-		let running = reported("2.62.0");
-		for server in [tamanu, senaite] {
-			ReportedDetail::record(
-				&mut conn,
-				server,
-				"test",
-				&serde_json::json!({}),
-				Some(&running),
-			)
+		assert_eq!(found, want, "the plan covers the whole deployment");
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_with_no_plan_has_no_candidates() {
+	TestDb::run(|mut conn, _url| async move {
+		publish(&mut conn, 2, 63, 0).await;
+		let group = insert_group(&mut conn, "drifting").await;
+		insert_server(
+			&mut conn,
+			group,
+			"https://central.drifting.example",
+			Product::Tamanu,
+		)
+		.await;
+
+		assert!(
+			candidates(&mut conn).await.expect("candidates").is_empty(),
+			"a restore costs hours, and nobody has said this deployment is moving"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_withdrawn_plan_stops_the_testing() {
+	TestDb::run(|mut conn, _url| async move {
+		let target = publish(&mut conn, 2, 63, 0).await;
+		let group = insert_group(&mut conn, "kamaka").await;
+		insert_server(
+			&mut conn,
+			group,
+			"https://central.kamaka.example",
+			Product::Tamanu,
+		)
+		.await;
+		plan(&mut conn, group, &target).await;
+
+		let open = UpgradePlan::open_for_group(&mut conn, group)
 			.await
-			.expect("record detail");
-		}
+			.expect("open plan")
+			.expect("a plan is open");
+		UpgradePlan::withdraw(&mut conn, open.id, "someone@example.com")
+			.await
+			.expect("withdraw");
+
+		assert!(
+			candidates(&mut conn).await.expect("candidates").is_empty(),
+			"the deployment stopped going there, so there is nothing to hold its data against"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn only_tamanu_servers() {
+	TestDb::run(|mut conn, _url| async move {
+		let target = publish(&mut conn, 2, 63, 0).await;
+		let group = insert_group(&mut conn, "kamaka").await;
+		let tamanu = insert_server(
+			&mut conn,
+			group,
+			"https://central.kamaka.example",
+			Product::Tamanu,
+		)
+		.await;
+		let senaite = insert_server(
+			&mut conn,
+			group,
+			"https://lims.kamaka.example",
+			Product::Senaite,
+		)
+		.await;
+		plan(&mut conn, group, &target).await;
 
 		let found = candidates(&mut conn).await.expect("candidates");
 
@@ -177,10 +195,6 @@ async fn only_tamanu_servers_that_reported_a_version() {
 		assert!(
 			!found.iter().any(|c| c.server_id == senaite),
 			"another product has no path through Tamanu's migrations"
-		);
-		assert!(
-			!found.iter().any(|c| c.server_id == silent),
-			"nothing to compare against without a reported version"
 		);
 	})
 	.await

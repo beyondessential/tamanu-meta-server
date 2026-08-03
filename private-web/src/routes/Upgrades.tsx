@@ -151,7 +151,8 @@ export default function Upgrades() {
 						No plan recorded
 					</Typography>
 					<Typography variant="body2" color="text.secondary">
-						pre-upgrade testing aims at the newest version for these
+						these get no pre-upgrade testing until a plan says where they are
+						going
 					</Typography>
 				</Stack>
 				{unplanned.length === 0 ? (
@@ -631,7 +632,7 @@ function WithdrawPlan({
 	const onClick = async () => {
 		if (
 			!window.confirm(
-				`Withdraw ${groupName}'s plan to move to ${targetVersion}? Pre-upgrade testing goes back to aiming at the newest version.`,
+				`Withdraw ${groupName}'s plan to move to ${targetVersion}? Pre-upgrade testing stops for this deployment until a new plan is recorded.`,
 			)
 		)
 			return;

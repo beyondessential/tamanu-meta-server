@@ -83,19 +83,19 @@ async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Se
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_plan_overrides_the_newest_version_as_the_test_target() {
+async fn a_plan_is_what_makes_a_version_the_test_target() {
 	TestDb::run(|mut conn, _url| async move {
 		let (group, server) = group_running(&mut conn, "2.60.0").await;
 		let intended = publish(&mut conn, 61, 2).await;
-		let newest = publish(&mut conn, 63, 0).await;
+		publish(&mut conn, 63, 0).await;
 
-		// With no plan, testing aims at the newest published version.
 		assert_eq!(
 			candidate_for(&mut conn, &server)
 				.await
 				.expect("candidate")
 				.map(|v| v.id),
-			Some(newest.id),
+			None,
+			"a newer version existing is not a reason to spend a restore on it"
 		);
 
 		UpgradePlan::record(
@@ -109,14 +109,13 @@ async fn a_plan_overrides_the_newest_version_as_the_test_target() {
 		.await
 		.expect("record plan");
 
-		// With one, it aims where the deployment says it is going.
 		assert_eq!(
 			candidate_for(&mut conn, &server)
 				.await
 				.expect("candidate")
 				.map(|v| v.id),
 			Some(intended.id),
-			"no restore is spent on a version nobody intends to apply"
+			"testing aims where the deployment says it is going"
 		);
 	})
 	.await

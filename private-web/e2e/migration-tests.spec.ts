@@ -6,6 +6,7 @@ import {
 	seedServer,
 	seedServerGroup,
 	seedStatus,
+	seedUpgradePlan,
 	seedVersion,
 } from "./seed";
 
@@ -34,6 +35,10 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 		for (const server of [failed, untested]) {
 			await seedStatus(sql, { serverId: server.id, version: "2.62.0" });
 		}
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+		});
 
 		// One server has been tried and its migrations failed; the other has not
 		// been tried yet.
@@ -72,17 +77,17 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 		await expect(untestedRow).toContainText("not yet tested");
 	});
 
-	test("says so when every server is already on the newest version", async ({
+	test("says so when the deployment has no open plan", async ({
 		page,
 		sql,
 	}) => {
-		const group = await seedServerGroup(sql, { name: "current" });
+		const group = await seedServerGroup(sql, { name: "unplanned" });
 		await seedVersion(sql, { major: 2, minor: 63, patch: 0 });
 		const server = await seedServer(sql, {
-			name: "up-to-date",
+			name: "unplanned-central",
 			groupId: group.id,
 		});
-		await seedStatus(sql, { serverId: server.id, version: "2.63.0" });
+		await seedStatus(sql, { serverId: server.id, version: "2.62.0" });
 
 		await page.goto(`/groups/${group.id}`);
 

@@ -9,7 +9,6 @@ use commons_types::{
 	backup::{BackupType, RestoreIntent, RunOutcome},
 	server::product::Product,
 	status::CheckResult,
-	version::{VersionStatus, VersionStr},
 };
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -21,7 +20,6 @@ use crate::{
 	backup::refs,
 	issues::{CheckFiling, Scope, file_check},
 	pg_duration::PgDuration,
-	reported_detail::ReportedDetail,
 	restore::BackupRestoreCheck,
 	restore::NewBackupRestoreCheck,
 	servers::Server,
@@ -37,65 +35,25 @@ pub struct Candidate {
 	pub version_id: Uuid,
 }
 
-/// The newest published version `reported` could upgrade to, if any.
-///
-/// Stays within the reported major, matching the update path Canopy serves a
-/// server. One version rather than every step along the path: migrations run
-/// against the restored snapshot in sequence, so targeting the newest applies
-/// every migration in between and exercises the whole chain.
-// spec: RST#candidate-versions
-pub fn upgrade_target(reported: &VersionStr, versions: &[Version]) -> Option<Uuid> {
-	let current = &reported.0;
-
-	versions
-		.iter()
-		.filter(|version| {
-			version.status == VersionStatus::Published && version.major == current.major as i32
-		})
-		.filter(|version| {
-			version.minor > current.minor as i32
-				|| (version.minor == current.minor as i32 && version.patch > current.patch as i32)
-		})
-		.max_by_key(|version| (version.minor, version.patch))
-		.map(|version| version.id)
-}
-
 /// The version `server` should be tested against, if any.
 ///
-/// Its group's planned target where there is one (see [`crate::upgrade_plans`]),
-/// otherwise the newest published version it could upgrade to.
+/// Its group's open plan names it (see [`crate::upgrade_plans`]), and a group
+/// with no plan has no candidate: a restore costs hours, and it is only worth
+/// spending on a version a deployment has said it intends to apply.
 ///
 /// Tamanu servers only: the migrations under test are Tamanu's, so no other
-/// product's server has an upgrade path through them. `None` also when the
-/// server has never reported a version, or is already on the newest published
-/// one.
+/// product's server has an upgrade path through them.
 // spec: RST#candidate-versions
 pub async fn candidate_for(db: &mut AsyncPgConnection, server: &Server) -> Result<Option<Version>> {
 	if server.product != Product::Tamanu {
 		return Ok(None);
 	}
 
-	// Where the deployment says it is going beats where Canopy would guess: a
-	// group deliberately moving to an older minor is held against that minor,
-	// and no restore is spent on a version nobody intends to apply.
-	if let Some(group_id) = server.group_id
-		&& let Some(planned) = crate::upgrade_plans::planned_target(db, group_id).await?
-	{
-		return Ok(Some(planned));
-	}
-
-	let Some(reported) = ReportedDetail::last_version(db, server.id).await? else {
+	let Some(group_id) = server.group_id else {
 		return Ok(None);
 	};
 
-	let versions = Version::get_all(db).await?;
-	let Some(version_id) = upgrade_target(&reported, &versions) else {
-		return Ok(None);
-	};
-
-	Ok(versions
-		.into_iter()
-		.find(|version| version.id == version_id))
+	crate::upgrade_plans::planned_target(db, group_id).await
 }
 
 /// Every candidate across the fleet, at most one per server.
@@ -471,9 +429,9 @@ async fn file_outcome(
 
 /// Where every server in `group` stands against the version it would take next.
 ///
-/// One row per server that has a candidate at all: a server on the newest
-/// version, running another product, or yet to report one has nothing to be
-/// tested against and so nothing to show.
+/// One row per server that has a candidate at all: with no open plan, or
+/// running another product, there is nothing to be tested against and so
+/// nothing to show.
 // spec: RST#verdicts
 pub async fn verdicts_for_group(
 	db: &mut AsyncPgConnection,

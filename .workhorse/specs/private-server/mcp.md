@@ -73,7 +73,7 @@ When the result is truncated to its bound, the result says so, so the client doe
 
 ### Planned upgrades
 
-**List upgrade plans** takes no input and returns where every deployment is going (see [UPG](upgrade-plans.md)): each group with an open plan, with the version it runs now, the version it plans to move to, the planned date where there is one, and whether that date has passed unmet; and separately the groups with nothing recorded, which pre-upgrade testing aims at the newest published version for.
+**List upgrade plans** takes no input and returns where every deployment is going (see [UPG](upgrade-plans.md)): each group with an open plan, with the version it runs now, the version it plans to move to, the planned date where there is one, and whether that date has passed unmet; and separately the groups with nothing recorded, which pre-upgrade testing does not cover.
 
 **Get upgrade plan history** takes a group identifier and returns every plan that group has had, newest first, each with its target, planned date, note, and how it stands: open, met, replaced by a later plan, or withdrawn.
 A plan carries the operator who recorded it, who last amended it, and who withdrew it, with the times of each.

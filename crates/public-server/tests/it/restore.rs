@@ -842,6 +842,19 @@ async fn report_version(conn: &mut AsyncPgConnection, server_id: Uuid, version: 
 	.expect("report version");
 }
 
+/// The group's open plan, which is what names the version to migrate to.
+async fn plan_upgrade(conn: &mut AsyncPgConnection, group: Uuid, version_id: Uuid) {
+	sql_query(
+		"INSERT INTO upgrade_plans (group_id, target_version_id, created_by)
+		 VALUES ($1, $2, 'test@example.com')",
+	)
+	.bind::<sql_types::Uuid, _>(group)
+	.bind::<sql_types::Uuid, _>(version_id)
+	.execute(conn)
+	.await
+	.expect("plan upgrade");
+}
+
 /// One intent that both verifies the restore and applies the migrations: the
 /// `migrate` semantic rides on the verifying intent so a single restore answers
 /// both questions.
@@ -857,7 +870,7 @@ async fn register_migrate_intent(public: &axum_test::TestServer, cert: &str) {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_migrate_entry_names_the_newest_version_the_server_could_take() {
+async fn a_migrate_entry_names_the_planned_version() {
 	commons_tests::server::run_with_device_auth(
 		"backup-restore",
 		async |mut conn, cert, device_id, public, _| {
@@ -867,7 +880,8 @@ async fn a_migrate_entry_names_the_newest_version_the_server_could_take() {
 			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
 			report_version(&mut conn, server, "2.62.0").await;
 			publish_version(&mut conn, 62, 0).await;
-			let newest = publish_version(&mut conn, 63, 2).await;
+			let planned = publish_version(&mut conn, 63, 2).await;
+			plan_upgrade(&mut conn, group, planned).await;
 			declare_replica(&mut conn, device_id, group, "verify").await;
 			register_migrate_intent(&public, &cert).await;
 
@@ -880,7 +894,7 @@ async fn a_migrate_entry_names_the_newest_version_the_server_could_take() {
 
 			assert_eq!(entries.len(), 1, "got {entries:?}");
 			assert_eq!(entries[0]["target_version"], "2.63.2");
-			assert_eq!(entries[0]["target_version_id"], newest.to_string());
+			assert_eq!(entries[0]["target_version_id"], planned.to_string());
 			assert_eq!(entries[0]["snapshot_id"], "snap-1");
 		},
 	)
@@ -888,7 +902,7 @@ async fn a_migrate_entry_names_the_newest_version_the_server_could_take() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_server_already_on_the_newest_version_gets_no_migrate_entry() {
+async fn a_group_with_no_plan_gets_no_migrate_entry() {
 	commons_tests::server::run_with_device_auth(
 		"backup-restore",
 		async |mut conn, cert, device_id, public, _| {
@@ -896,7 +910,7 @@ async fn a_server_already_on_the_newest_version_gets_no_migrate_entry() {
 			make_config(&mut conn, group, "ready").await;
 			let server = make_server(&mut conn, group).await;
 			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
-			report_version(&mut conn, server, "2.63.2").await;
+			report_version(&mut conn, server, "2.62.0").await;
 			publish_version(&mut conn, 63, 2).await;
 			declare_replica(&mut conn, device_id, group, "verify").await;
 			register_migrate_intent(&public, &cert).await;
@@ -910,7 +924,7 @@ async fn a_server_already_on_the_newest_version_gets_no_migrate_entry() {
 
 			assert!(
 				entries.is_empty(),
-				"nothing to migrate to, so no entry: got {entries:?}"
+				"nobody has said this deployment is moving, so no entry: got {entries:?}"
 			);
 		},
 	)
@@ -927,7 +941,8 @@ async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
 			let server = make_server(&mut conn, group).await;
 			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
 			report_version(&mut conn, server, "2.62.0").await;
-			let newest = publish_version(&mut conn, 63, 2).await;
+			let planned = publish_version(&mut conn, 63, 2).await;
+			plan_upgrade(&mut conn, group, planned).await;
 			declare_replica(&mut conn, device_id, group, "verify").await;
 			register_migrate_intent(&public, &cert).await;
 
@@ -969,7 +984,7 @@ async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
 					redaction_error: None,
 				},
 				database::migration_tests::NewMigrationTest {
-					target_version_id: newest,
+					target_version_id: planned,
 					total_elapsed: database::pg_duration::PgDuration(
 						jiff::SignedDuration::from_secs(30),
 					),
@@ -1006,7 +1021,8 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 			let server = make_server(&mut conn, group).await;
 			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
 			report_version(&mut conn, server, "2.62.0").await;
-			let newest = publish_version(&mut conn, 63, 2).await;
+			let planned = publish_version(&mut conn, 63, 2).await;
+			plan_upgrade(&mut conn, group, planned).await;
 			declare_replica(&mut conn, device_id, group, "verify").await;
 			register_migrate_intent(&public, &cert).await;
 
@@ -1049,7 +1065,7 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 
 			// The verdict is readable, and the timings survived the round trip.
 			assert_eq!(
-				database::migration_tests::verdict(&mut conn, server, newest)
+				database::migration_tests::verdict(&mut conn, server, planned)
 					.await
 					.expect("verdict"),
 				database::migration_tests::Verdict::Passed
