@@ -4,6 +4,7 @@ import {
 	seedServerGroup,
 	seedUpgradePlan,
 	seedVersion,
+	seedVersionKnownIssue,
 } from "./seed";
 
 test.describe("upgrades dashboard", () => {
@@ -274,5 +275,37 @@ test.describe("upgrades dashboard", () => {
 		await expect(
 			page.getByTestId("planned-upgrade-row").filter({ hasText: "kamaka" }),
 		).toContainText("2.54.0");
+	});
+
+	test("a minor is suggested at its newest patch clear of known issues", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await sql.query(
+			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
+			[group.id],
+		);
+		await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		await seedVersion(sql, { major: 2, minor: 61, patch: 1 });
+		await seedVersion(sql, { major: 2, minor: 61, patch: 2 });
+		await seedVersionKnownIssue(sql, { major: 2, minor: 61, patch: 2 });
+
+		await page.goto("/upgrades");
+		const form = page.getByTestId("record-plan");
+		await form.getByLabel("Deployment").click();
+		await page.getByRole("option", { name: "kamaka" }).click();
+		await form.getByLabel("Going to").click();
+
+		// The newest patch carries the issue, so the minor is suggested one back.
+		await expect(page.getByRole("option")).toHaveCount(1);
+		await expect(page.getByRole("option")).toHaveText("2.61.1");
+
+		// Still reachable by typing, and marked: an issue may be resolved well
+		// before the planned date.
+		await form.getByLabel("Going to").fill("2.61.2");
+		await expect(
+			page.getByRole("option").filter({ hasText: "2.61.2" }),
+		).toContainText("known issue");
 	});
 });

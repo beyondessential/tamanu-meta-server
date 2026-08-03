@@ -366,3 +366,44 @@ async fn every_version_ahead_is_offered_however_far_behind_the_group_is() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_target_under_an_open_known_issue_is_offered_but_flagged() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES
+				(2, 61, 0, 'x', 'published'),
+				(2, 61, 1, 'x', 'published'),
+				(2, 62, 0, 'x', 'published');
+			INSERT INTO server_groups (id, name, effective_version) VALUES
+				('cccccccc-0000-0000-0000-000000000001', 'kamaka', '2.60.0');
+			INSERT INTO version_known_issues (author, description, min_major, min_minor, min_patch)
+				VALUES ('someone@example.com', 'breaks on upgrade', 2, 61, 1);",
+		)
+		.await
+		.unwrap();
+
+		let targets: Vec<Value> = private
+			.post("/api/upgrade_plans/targets")
+			.json(&json!({ "group_id": GROUP }))
+			.await
+			.json();
+
+		let ready = |version: &str| {
+			targets
+				.iter()
+				.find(|v| v["version"] == version)
+				.unwrap_or_else(|| panic!("{version} is not offered: {targets:?}"))["ready"]
+				.as_bool()
+				.expect("ready")
+		};
+
+		// The issue covers 2.61.1 and every later patch in that minor; a
+		// deployment may still plan for it, so it is offered rather than hidden.
+		assert!(!ready("2.61.1"));
+		// Earlier patches and other minors are untouched by it.
+		assert!(ready("2.61.0"));
+		assert!(ready("2.62.0"));
+	})
+	.await;
+}

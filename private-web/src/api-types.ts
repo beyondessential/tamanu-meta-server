@@ -6778,6 +6778,12 @@ export interface components {
              * @description The version's identifier, for `record`.
              */
             id: string;
+            /**
+             * @description Whether it is clear of unresolved known issues, the same gate that keeps
+             *     a version off the public listings. A flagged version is still offered:
+             *     the issue may be resolved well before the planned date.
+             */
+            ready: boolean;
             /** @description Its semver. */
             version: string;
         };

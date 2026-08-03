@@ -349,19 +349,23 @@ const matchVersion = createFilterOptions<PlannableVersion>({
 	stringify: (option) => option.version,
 });
 
-/// The newest patch of each of the last ten minors. Every published version
-/// ahead is plannable, which runs to hundreds, so the list an operator scrolls
-/// is the recent releases and typing reaches the rest.
+/// The newest ready patch of each of the last ten minors. Every published
+/// version ahead is plannable, which runs to hundreds, so the list an operator
+/// scrolls is the recent releases and typing reaches the rest.
+///
+/// A minor with nothing clear of known issues still gets a row, flagged, rather
+/// than dropping out of the list unexplained.
 function recentMinors(options: PlannableVersion[]): PlannableVersion[] {
-	const newest = new Map<string, PlannableVersion>();
+	const picked = new Map<string, PlannableVersion>();
 	for (const option of options) {
 		const minor = option.version.split(".").slice(0, 2).join(".");
-		if (!newest.has(minor)) {
-			newest.set(minor, option);
-			if (newest.size === SHORTLIST_MINORS) break;
+		const held = picked.get(minor);
+		if (held ? held.ready || !option.ready : picked.size === SHORTLIST_MINORS) {
+			continue;
 		}
+		picked.set(minor, option);
 	}
-	return [...newest.values()];
+	return [...picked.values()];
 }
 
 function helperText(
@@ -449,6 +453,25 @@ function RecordPlan({
 							? recentMinors(all)
 							: matchVersion(all, state)
 					}
+					renderOption={(props, option) => (
+						<li {...props} key={option.id}>
+							<Stack
+								direction="row"
+								spacing={1}
+								sx={{ alignItems: "center" }}
+							>
+								<span>{option.version}</span>
+								{!option.ready && (
+									<Chip
+										size="small"
+										color="warning"
+										variant="outlined"
+										label="known issue"
+									/>
+								)}
+							</Stack>
+						</li>
+					)}
 					renderInput={(params) => (
 						<TextField
 							{...params}
