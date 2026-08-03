@@ -24,7 +24,7 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import TimeAgo from "../components/TimeAgo";
@@ -371,10 +371,11 @@ function recentMinors(options: PlannableVersion[]): PlannableVersion[] {
 function helperText(
 	groupId: string,
 	options: PlannableVersion[],
+	shortlist: PlannableVersion[],
 ): string | undefined {
 	if (!groupId) return undefined;
 	if (options.length === 0) return "already on the newest";
-	if (options.length > recentMinors(options).length) return "type for older";
+	if (options.length > shortlist.length) return "type for older";
 	return undefined;
 }
 
@@ -401,6 +402,7 @@ function RecordPlan({
 	);
 
 	const options = targets.status === "ok" ? targets.data : [];
+	const shortlist = useMemo(() => recentMinors(options), [options]);
 
 	const submit = async () => {
 		if (!groupId || !versionId) return;
@@ -449,9 +451,7 @@ function RecordPlan({
 					getOptionLabel={(option) => option.version}
 					isOptionEqualToValue={(a, b) => a.id === b.id}
 					filterOptions={(all, state) =>
-						state.inputValue === ""
-							? recentMinors(all)
-							: matchVersion(all, state)
+						state.inputValue === "" ? shortlist : matchVersion(all, state)
 					}
 					renderOption={(props, option) => (
 						<li {...props} key={option.id}>
@@ -476,7 +476,7 @@ function RecordPlan({
 						<TextField
 							{...params}
 							label="Going to"
-							helperText={helperText(groupId, options)}
+							helperText={helperText(groupId, options, shortlist)}
 						/>
 					)}
 				/>
