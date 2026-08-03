@@ -25,8 +25,12 @@ import {
 import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
+import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
+import type { ApiResponse } from "../types";
+
+type PastPlan = ApiResponse<"upgrade_plans", "history">[number];
 
 /// Where every deployment is going. A group with no plan is listed too: one
 /// several minors behind with nothing recorded is what this view exists to
@@ -37,6 +41,7 @@ export default function Upgrades() {
 	const isAdmin = useIsAdmin() === true;
 	const [tick, setTick] = useState(0);
 	const fleet = useApi("upgrade_plans", "fleet", {}, [tick]);
+	const past = useApi("upgrade_plans", "history", {}, [tick]);
 
 	if (fleet.status === "loading" || fleet.status === "idle") {
 		return <LinearProgress />;
@@ -173,7 +178,102 @@ export default function Upgrades() {
 					</Table>
 				)}
 			</Paper>
+
+			<PastPlans plans={past.status === "ok" ? past.data : []} />
 		</Stack>
+	);
+}
+
+/// What each deployment planned before, and how it ended. A withdrawn plan is
+/// readable here or nowhere: a deployment that stopped going somewhere leaves
+/// no other mark on the fleet.
+// spec: UPG#the-dashboard
+function PastPlans({ plans }: { plans: PastPlan[] }) {
+	if (plans.length === 0) return null;
+
+	return (
+		<Paper variant="outlined" sx={{ p: 2 }} data-testid="past-plans">
+			<Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: "baseline" }}>
+				<Typography variant="h6" component="h2">
+					Past plans
+				</Typography>
+				<Typography variant="body2" color="text.secondary">
+					where each deployment was going before, and how it ended
+				</Typography>
+			</Stack>
+			<Table size="small">
+				<TableHead>
+					<TableRow>
+						<TableCell>Deployment</TableCell>
+						<TableCell>Was going to</TableCell>
+						<TableCell>Planned for</TableCell>
+						<TableCell>Ended</TableCell>
+						<TableCell>Note</TableCell>
+					</TableRow>
+				</TableHead>
+				<TableBody>
+					{plans.map((row) => (
+						<TableRow key={row.plan.id} data-testid="past-plan-row">
+							<TableCell>
+								<RouterLink to={`/servers/groups/${row.group_id}`}>
+									{row.group_name}
+								</RouterLink>
+							</TableCell>
+							<TableCell>{row.target_version}</TableCell>
+							<TableCell>{row.plan.planned_for ?? ""}</TableCell>
+							<TableCell>
+								<Stack
+									direction="row"
+									spacing={0.5}
+									sx={{ alignItems: "center" }}
+								>
+									<OutcomeChip
+										outcome={row.outcome}
+										withdrawnBy={row.plan.withdrawn_by}
+									/>
+									<Typography variant="body2" color="text.secondary">
+										<TimeAgo timestamp={row.ended_at} />
+									</Typography>
+								</Stack>
+							</TableCell>
+							<TableCell>{row.plan.note ?? ""}</TableCell>
+						</TableRow>
+					))}
+				</TableBody>
+			</Table>
+		</Paper>
+	);
+}
+
+/// How a plan ended. Withdrawn reads differently from met: the deployment
+/// stopped going there rather than arriving.
+function OutcomeChip({
+	outcome,
+	withdrawnBy,
+}: {
+	outcome: PastPlan["outcome"];
+	withdrawnBy: string | null;
+}) {
+	if (outcome === "met") {
+		return <Chip size="small" color="success" label="met" />;
+	}
+	if (outcome === "withdrawn") {
+		return (
+			<Tooltip
+				title={
+					withdrawnBy
+						? `withdrawn by ${withdrawnBy}; the upgrade did not happen`
+						: "the deployment stopped going there; the upgrade did not happen"
+				}
+			>
+				<Chip size="small" color="warning" variant="outlined" label="withdrawn" />
+			</Tooltip>
+		);
+	}
+	return (
+		<Tooltip title="a later plan took its place">
+			<Chip size="small" variant="outlined" label="replaced" />
+		</Tooltip>
 	);
 }
 

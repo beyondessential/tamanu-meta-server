@@ -41,7 +41,8 @@ Changing the target is not an amendment: where a deployment is going is what the
 A plan that has been met or replaced is history and is no longer amendable.
 
 Plans are managed through the operator interface and are audited.
-Deleting a plan says the deployment is no longer going there; it does not say the upgrade happened.
+Withdrawing a plan says the deployment is no longer going there; it does not say the upgrade happened.
+A withdrawn plan is retained and records who withdrew it and when: a deployment that was going somewhere and stopped is part of the same history as one that arrived, and it frees the group to be planned somewhere else.
 
 A planned date is a plan, not a deadline.
 Canopy neither schedules nor blocks anything on it, and a date that passes changes only how the plan is presented.
@@ -73,6 +74,10 @@ Groups with no plan are shown too: an unplanned deployment several minors behind
 
 A plan whose date has passed without being met is presented as late.
 Late is a presentational state and not an incident: an upgrade slipping is normal operational reality, and Canopy has no basis for treating a date someone typed as a failure of anything.
+
+The same view presents the plans that have closed, most recently closed first, so what a deployment planned before is readable beside what it plans now.
+Each shows where it was going, the date it was planned for, and how it closed: met, replaced by a later plan, or withdrawn with the operator who withdrew it and when.
+A withdrawn plan is otherwise unreadable anywhere, since a deployment that stopped going somewhere leaves no other mark on the fleet.
 
 ## Out of scope
 

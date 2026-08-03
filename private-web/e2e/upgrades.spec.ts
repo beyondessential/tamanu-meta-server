@@ -111,6 +111,49 @@ test.describe("upgrades dashboard", () => {
 		await expect(page.getByTestId("planned-upgrades")).toContainText(
 			"No deployment has a recorded plan",
 		);
+
+		// The plan is kept, so where kamaka was going stays readable.
+		const past = page
+			.getByTestId("past-plan-row")
+			.filter({ hasText: "kamaka" });
+		await expect(past).toContainText("2.61.0");
+		await expect(past).toContainText("withdrawn");
+	});
+
+	test("a plan replaced by a later one reads as replaced, not withdrawn", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await sql.query(
+			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
+			[group.id],
+		);
+		const first = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		const second = await seedVersion(sql, { major: 2, minor: 63, patch: 0 });
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: first.id,
+			note: "site can absorb 2.61 only",
+		});
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: second.id,
+			supersedes: true,
+		});
+
+		await page.goto("/upgrades");
+
+		const past = page.getByTestId("past-plan-row").filter({ hasText: "kamaka" });
+		await expect(past).toHaveCount(1);
+		await expect(past).toContainText("2.61.0");
+		await expect(past).toContainText("replaced");
+		await expect(past).toContainText("site can absorb 2.61 only");
+		// The plan that replaced it is where the deployment is going, so it stays
+		// out of the history.
+		await expect(
+			page.getByTestId("planned-upgrade-row").filter({ hasText: "kamaka" }),
+		).toContainText("2.63.0");
 	});
 
 	test("amending a plan changes its date and note but not where it is going", async ({

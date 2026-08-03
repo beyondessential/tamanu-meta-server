@@ -389,3 +389,122 @@ async fn a_met_plan_is_not_amendable() {
 	})
 	.await
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_withdrawn_plan_leaves_the_group_unplanned_but_stays_in_its_history() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, _server) = group_running(&mut conn, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+		let plan = UpgradePlan::record(&mut conn, group, target.id, None, None, "a@example.com")
+			.await
+			.expect("plan");
+
+		let withdrawn = UpgradePlan::withdraw(&mut conn, plan.id, "b@example.com")
+			.await
+			.expect("withdraw")
+			.expect("the open plan");
+		assert_eq!(withdrawn.withdrawn_by.as_deref(), Some("b@example.com"));
+		assert!(withdrawn.withdrawn_at.is_some());
+		assert!(
+			withdrawn.met_at.is_none(),
+			"withdrawing does not say the upgrade happened"
+		);
+
+		assert!(
+			UpgradePlan::open_for_group(&mut conn, group)
+				.await
+				.expect("open")
+				.is_none(),
+			"the group is no longer going anywhere"
+		);
+		assert!(
+			planned_target(&mut conn, group)
+				.await
+				.expect("target")
+				.is_none(),
+			"testing falls back to the newest published version"
+		);
+
+		let history = UpgradePlan::history_for_group(&mut conn, group)
+			.await
+			.expect("history");
+		assert_eq!(history.len(), 1, "the plan is retained");
+		assert_eq!(history[0].id, plan.id);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_withdrawn_plan_does_not_hold_the_group_s_open_slot() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, _server) = group_running(&mut conn, "2.60.0").await;
+		let first = publish(&mut conn, 61, 0).await;
+		let second = publish(&mut conn, 62, 0).await;
+
+		let plan = UpgradePlan::record(&mut conn, group, first.id, None, None, "a@example.com")
+			.await
+			.expect("first plan");
+		UpgradePlan::withdraw(&mut conn, plan.id, "b@example.com")
+			.await
+			.expect("withdraw");
+
+		let replacement =
+			UpgradePlan::record(&mut conn, group, second.id, None, None, "a@example.com")
+				.await
+				.expect("a group that withdrew a plan can record another");
+		assert_eq!(
+			UpgradePlan::open_for_group(&mut conn, group)
+				.await
+				.expect("open")
+				.map(|p| p.id),
+			Some(replacement.id)
+		);
+
+		let withdrawn = UpgradePlan::history_for_group(&mut conn, group)
+			.await
+			.expect("history")
+			.into_iter()
+			.find(|p| p.id == plan.id)
+			.expect("the withdrawn plan is still history");
+		assert!(
+			withdrawn.superseded_at.is_none(),
+			"it was withdrawn, not replaced"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_withdrawn_plan_is_not_amendable_or_withdrawable_twice() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, _server) = group_running(&mut conn, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+		let plan = UpgradePlan::record(&mut conn, group, target.id, None, None, "a@example.com")
+			.await
+			.expect("plan");
+		UpgradePlan::withdraw(&mut conn, plan.id, "b@example.com")
+			.await
+			.expect("withdraw");
+
+		assert!(
+			UpgradePlan::amend(
+				&mut conn,
+				plan.id,
+				Some(date(2026, 8, 1)),
+				None,
+				"c@example.com"
+			)
+			.await
+			.is_err(),
+			"a withdrawn plan is history and stands as it was"
+		);
+		assert!(
+			UpgradePlan::withdraw(&mut conn, plan.id, "c@example.com")
+				.await
+				.expect("second withdraw")
+				.is_none(),
+			"withdrawing again changes nothing and does not restamp who withdrew it"
+		);
+	})
+	.await
+}

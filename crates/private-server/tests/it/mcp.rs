@@ -128,6 +128,8 @@ async fn initialize_and_list_tools() {
 			"find_restore_replicas",
 			"get_restore_replica",
 			"get_backup_defaults",
+			"list_upgrade_plans",
+			"get_upgrade_plan_history",
 		] {
 			assert!(body.contains(tool), "tools/list missing {tool}: {body}");
 		}
@@ -1051,6 +1053,64 @@ async fn get_restore_replica_checks_are_the_replicas_own_newest() {
 			"the quiet replica's own check must survive a noisy neighbour: {detail}",
 		);
 		assert_eq!(checks[0]["snapshot_id"], "quiet-snap");
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn upgrade_plans_list_the_open_ones_and_keep_the_withdrawn_in_history() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		seed(&mut conn).await;
+		conn.batch_execute(&format!(
+			"UPDATE server_groups SET effective_version = '2.34.1' WHERE id = '{GROUP}'; \
+			 INSERT INTO server_groups (id, name, effective_version) VALUES \
+				('44444444-4444-4444-4444-444444444444', 'Drifting', '2.34.1'); \
+			 INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES \
+				('55555555-5555-5555-5555-555555555555', 2, 36, 0, 'x', 'published'), \
+				('66666666-6666-6666-6666-666666666666', 2, 40, 0, 'x', 'published'); \
+			 INSERT INTO upgrade_plans (group_id, target_version_id, created_by, withdrawn_at, withdrawn_by) VALUES \
+				('{GROUP}', '66666666-6666-6666-6666-666666666666', 'someone@example.com', NOW(), 'someone@example.com'); \
+			 INSERT INTO upgrade_plans (group_id, target_version_id, planned_for, note, created_by) VALUES \
+				('{GROUP}', '55555555-5555-5555-5555-555555555555', DATE '2020-01-01', 'site can absorb 2.36 only', 'someone@example.com');"
+		))
+		.await
+		.expect("seed plans");
+
+		let list = call_tool!(private, "list_upgrade_plans", serde_json::json!({}));
+		let plans = list["plans"].as_array().expect("plans");
+		assert_eq!(plans.len(), 1, "one group has an open plan: {list}");
+		assert_eq!(plans[0]["group_name"], "Prod Group");
+		assert_eq!(plans[0]["current_version"], "2.34.1");
+		assert_eq!(plans[0]["target_version"], "2.36.0");
+		assert_eq!(plans[0]["planned_for"], "2020-01-01");
+		assert_eq!(plans[0]["late"], true, "the planned day has passed unmet");
+		assert_eq!(plans[0]["note"], "site can absorb 2.36 only");
+
+		// A group with nothing recorded is what testing aims at the newest
+		// version for, so it is returned rather than omitted.
+		let unplanned = list["groups_without_a_plan"]
+			.as_array()
+			.expect("unplanned groups");
+		assert!(
+			unplanned.iter().any(|g| g["group_name"] == "Drifting"),
+			"missing the unplanned group: {list}"
+		);
+
+		let history = call_tool!(
+			private,
+			"get_upgrade_plan_history",
+			serde_json::json!({ "group_id": GROUP })
+		);
+		let plans = history["plans"].as_array().expect("history");
+		assert_eq!(plans.len(), 2);
+		let withdrawn = plans
+			.iter()
+			.find(|p| p["outcome"] == "withdrawn")
+			.unwrap_or_else(|| panic!("no withdrawn plan in {history}"));
+		assert_eq!(withdrawn["target_version"], "2.40.0");
+		assert_eq!(withdrawn["withdrawn_by"], "someone@example.com");
+		assert!(!withdrawn["ended_at"].is_null());
+		assert!(plans.iter().any(|p| p["outcome"] == "open"));
 	})
 	.await
 }

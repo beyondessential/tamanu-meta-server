@@ -727,6 +727,8 @@ diesel::table! {
 		superseded_at -> Nullable<Timestamptz>,
 		amended_by -> Nullable<Text>,
 		amended_at -> Nullable<Timestamptz>,
+		withdrawn_at -> Nullable<Timestamptz>,
+		withdrawn_by -> Nullable<Text>,
 	}
 }
 
