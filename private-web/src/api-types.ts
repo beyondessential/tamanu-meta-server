@@ -3534,6 +3534,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/upgrade_plans/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The plans that have closed, across the fleet.
+         * @description A deployment that stopped going somewhere leaves no other mark on the fleet,
+         *     so a withdrawn plan is readable here or nowhere.
+         */
+        post: operations["upgrade_plans_history"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/upgrade_plans/record": {
         parameters: {
             query?: never;
@@ -6692,6 +6713,24 @@ export interface components {
             slack_open_delay?: number | null;
             tags?: null | components["schemas"]["TagMap"];
         };
+        /** @description One plan that has closed, in the fleet's plan history. */
+        PastPlan: {
+            /** @description When it closed. */
+            ended_at: string;
+            /**
+             * Format: uuid
+             * @description The group it was for.
+             */
+            group_id: string;
+            /** @description Its name, so the view reads without a second lookup. */
+            group_name: string;
+            /** @description How it closed. */
+            outcome: components["schemas"]["PlanOutcome"];
+            /** @description The plan itself. */
+            plan: components["schemas"]["UpgradePlan"];
+            /** @description Where the plan was going, as semver. */
+            target_version: string;
+        };
         /** @description Why a server is being paused. */
         PauseArgs: {
             /** @description Why, recorded so whoever finds the pause later knows what it was for. */
@@ -6727,6 +6766,11 @@ export interface components {
             /** @description Backup type requested. */
             type: string;
         };
+        /**
+         * @description How a plan stands: still where the group is going, or the way it closed.
+         * @enum {string}
+         */
+        PlanOutcome: "open" | "met" | "replaced" | "withdrawn";
         /** @description A version a group could be planned onto. */
         PlannableVersion: {
             /**
@@ -13988,6 +14032,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UpgradePlan"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    upgrade_plans_history: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Closed plans, most recently closed first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PastPlan"][];
                 };
             };
             401: {

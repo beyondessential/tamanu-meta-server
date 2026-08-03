@@ -1224,8 +1224,20 @@ export async function seedUpgradePlan(
 		plannedFor?: string | null;
 		note?: string | null;
 		createdBy?: string;
+		/** Retire the group's open plan first, as recording a second one does.
+		 * A group holds one open plan at a time, so a second insert without this
+		 * breaks the unique index. */
+		supersedes?: boolean;
 	},
 ): Promise<void> {
+	if (opts.supersedes) {
+		await sql.query(
+			`UPDATE upgrade_plans SET superseded_at = NOW()
+			 WHERE group_id = $1
+			   AND met_at IS NULL AND superseded_at IS NULL AND withdrawn_at IS NULL`,
+			[opts.groupId],
+		);
+	}
 	await sql.query(
 		`INSERT INTO upgrade_plans (group_id, target_version_id, planned_for, note, created_by)
 		 VALUES ($1, $2, $3::date, $4, $5)`,

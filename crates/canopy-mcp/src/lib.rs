@@ -15,10 +15,11 @@
 //! so the verdicts match what the operator UI and the alerting sweep present.
 //!
 //! Tools are grouped into domain modules (`servers`, `groups`, `versions`,
-//! `fleet`, `backups`, `restore`, `incidents`), each contributing its own tool
-//! router (via rmcp's `#[tool_router(router = ..., vis = "pub(crate)")]`) that
-//! [`CanopyMcp::new`] combines into the single stored `ToolRouter`. `util`
-//! holds helpers shared across more than one of those modules.
+//! `fleet`, `backups`, `restore`, `incidents`, `upgrade_plans`), each
+//! contributing its own tool router (via rmcp's
+//! `#[tool_router(router = ..., vis = "pub(crate)")]`) that [`CanopyMcp::new`]
+//! combines into the single stored `ToolRouter`. `util` holds helpers shared
+//! across more than one of those modules.
 
 mod backups;
 mod fleet;
@@ -26,6 +27,7 @@ mod groups;
 mod incidents;
 mod restore;
 mod servers;
+mod upgrade_plans;
 mod util;
 mod versions;
 
@@ -56,7 +58,8 @@ impl CanopyMcp {
 				+ Self::fleet_router()
 				+ Self::backups_router()
 				+ Self::restore_router()
-				+ Self::incidents_router(),
+				+ Self::incidents_router()
+				+ Self::upgrade_plans_router(),
 		}
 	}
 
@@ -71,8 +74,14 @@ impl ServerHandler for CanopyMcp {
 		let mut info = ServerInfo::default();
 		info.instructions = Some(
 			"Read-only access to the Canopy fleet: servers, groups, health/status, Tamanu \
-			 versions, backups, and incidents/issues. All data is live. Use find_* to locate \
-			 entities and get_* for detail; fleet_summary and find_backup_problems for triage.\n\n\
+			 versions, planned upgrades, backups, and incidents/issues. All data is live. Use \
+			 find_* to locate entities and get_* for detail; fleet_summary and \
+			 find_backup_problems for triage.\n\n\
+			 Upgrade plans: a plan is a group's recorded intention to move to a version. A \
+			 planned date is a plan rather than a deadline, so one that has passed (`late`) is \
+			 normal operational reality rather than an incident. list_upgrade_plans gives what \
+			 every deployment is going to next; get_upgrade_plan_history gives what a group \
+			 planned before, including plans an operator withdrew.\n\n\
 			 Products: a server's `product` is the application it runs (tamanu, senaite, or \
 			 canopy itself), and its `kind` is its role within that product. The version tools \
 			 cover Tamanu's releases; a server whose product has no application version reports \

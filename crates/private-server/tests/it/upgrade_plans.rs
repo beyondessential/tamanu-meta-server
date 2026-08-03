@@ -247,3 +247,84 @@ async fn amending_a_withdrawn_plan_is_refused() {
 	})
 	.await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_history_view_shows_a_withdrawn_plan_beside_a_replaced_one() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
+				('cccccccc-0000-0000-0000-0000000000f1', 2, 61, 0, 'x', 'published'),
+				('cccccccc-0000-0000-0000-0000000000f2', 2, 63, 0, 'x', 'published');
+			INSERT INTO server_groups (id, name, effective_version) VALUES
+				('cccccccc-0000-0000-0000-000000000001', 'kamaka', '2.60.0');",
+		)
+		.await
+		.unwrap();
+
+		let replaced: Value = private
+			.post("/api/upgrade_plans/record")
+			.json(&json!({
+				"group_id": GROUP,
+				"target_version_id": "cccccccc-0000-0000-0000-0000000000f1",
+				"planned_for": "2020-01-01",
+				"note": "site can absorb 2.61 only",
+			}))
+			.await
+			.json();
+
+		let withdrawn: Value = private
+			.post("/api/upgrade_plans/record")
+			.json(&json!({
+				"group_id": GROUP,
+				"target_version_id": "cccccccc-0000-0000-0000-0000000000f2",
+			}))
+			.await
+			.json();
+		private
+			.post("/api/upgrade_plans/withdraw")
+			.json(&json!({ "id": withdrawn["id"] }))
+			.await
+			.assert_status_ok();
+
+		let history: Vec<Value> = private
+			.post("/api/upgrade_plans/history")
+			.json(&json!({}))
+			.await
+			.json();
+		assert_eq!(history.len(), 2, "both closed plans are readable");
+
+		// Most recently closed first: the withdrawal happened after the
+		// replacement it followed.
+		assert_eq!(history[0]["plan"]["id"], withdrawn["id"]);
+		assert_eq!(history[0]["outcome"], "withdrawn");
+		assert_eq!(history[0]["target_version"], "2.63.0");
+		assert_eq!(history[0]["group_name"], "kamaka");
+		assert!(
+			!history[0]["plan"]["withdrawn_by"].is_null(),
+			"who withdrew it is part of the record"
+		);
+		assert_eq!(history[0]["ended_at"], history[0]["plan"]["withdrawn_at"]);
+
+		assert_eq!(history[1]["plan"]["id"], replaced["id"]);
+		assert_eq!(history[1]["outcome"], "replaced");
+		assert_eq!(history[1]["plan"]["planned_for"], "2020-01-01");
+		assert_eq!(history[1]["plan"]["note"], "site can absorb 2.61 only");
+
+		// An open plan is not history.
+		private
+			.post("/api/upgrade_plans/record")
+			.json(&json!({
+				"group_id": GROUP,
+				"target_version_id": "cccccccc-0000-0000-0000-0000000000f1",
+			}))
+			.await
+			.assert_status_ok();
+		let history: Vec<Value> = private
+			.post("/api/upgrade_plans/history")
+			.json(&json!({}))
+			.await
+			.json();
+		assert_eq!(history.len(), 2);
+	})
+	.await;
+}

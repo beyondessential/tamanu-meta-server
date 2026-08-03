@@ -1,19 +1,26 @@
+use std::collections::HashMap;
+
 use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
-use database::upgrade_plans::UpgradePlan;
-use jiff::{Zoned, civil::Date};
+use database::upgrade_plans::{PlanOutcome, UpgradePlan};
+use jiff::{Timestamp, Zoned, civil::Date};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::state::AppState;
 
+/// The history is for reading, not paging: enough to cover what the fleet has
+/// planned recently without shipping every plan ever recorded.
+const HISTORY_LIMIT: i64 = 100;
+
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(fleet))
+		.routes(routes!(history))
 		.routes(routes!(targets))
 		.routes(routes!(for_group))
 		.routes(routes!(record))
@@ -141,6 +148,81 @@ fn roll_up(per_server: &[database::migration_tests::GroupVerdict]) -> &'static s
 		return "nottested";
 	}
 	"passed"
+}
+
+/// One plan that has closed, in the fleet's plan history.
+#[derive(Serialize, ToSchema)]
+pub struct PastPlan {
+	/// The plan itself.
+	pub plan: UpgradePlan,
+	/// The group it was for.
+	pub group_id: Uuid,
+	/// Its name, so the view reads without a second lookup.
+	pub group_name: String,
+	/// Where the plan was going, as semver.
+	pub target_version: String,
+	/// How it closed.
+	pub outcome: PlanOutcome,
+	/// When it closed.
+	#[schema(value_type = String)]
+	pub ended_at: Timestamp,
+}
+
+/// The plans that have closed, across the fleet.
+///
+/// A deployment that stopped going somewhere leaves no other mark on the fleet,
+/// so a withdrawn plan is readable here or nowhere.
+// spec: UPG#the-dashboard
+#[utoipa::path(
+	post,
+	path = "/history",
+	operation_id = "upgrade_plans_history",
+	tag = "upgrade_plans",
+	security(("tailscale-admin" = [])),
+	responses(
+		(status = 200, description = "Closed plans, most recently closed first.", body = Vec<PastPlan>),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 403, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn history(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+) -> Result<Json<Vec<PastPlan>>> {
+	let mut conn = state.db.get().await?;
+	let plans = UpgradePlan::closed_recent(&mut conn, HISTORY_LIMIT).await?;
+
+	let group_ids: Vec<Uuid> = plans.iter().map(|plan| plan.group_id).collect();
+	let group_names: HashMap<Uuid, String> =
+		database::server_groups::ServerGroup::list_by_ids(&mut conn, &group_ids)
+			.await?
+			.into_iter()
+			.map(|group| (group.id, group.name))
+			.collect();
+	// Including drafts: a target yanked since the plan was recorded still has to
+	// render as the version the deployment was going to.
+	let versions: HashMap<Uuid, String> =
+		database::versions::Version::get_all_including_drafts(&mut conn)
+			.await?
+			.into_iter()
+			.map(|version| (version.id, version.as_semver().to_string()))
+			.collect();
+
+	Ok(Json(
+		plans
+			.into_iter()
+			.filter_map(|plan| {
+				Some(PastPlan {
+					group_id: plan.group_id,
+					group_name: group_names.get(&plan.group_id).cloned()?,
+					target_version: versions.get(&plan.target_version_id).cloned()?,
+					outcome: database::upgrade_plans::outcome(&plan),
+					ended_at: database::upgrade_plans::ended_at(&plan)?,
+					plan,
+				})
+			})
+			.collect(),
+	))
 }
 
 /// Request body for reading one group's plans. Named apart from the

@@ -75,6 +75,10 @@ Groups with no plan are shown too: an unplanned deployment several minors behind
 A plan whose date has passed without being met is presented as late.
 Late is a presentational state and not an incident: an upgrade slipping is normal operational reality, and Canopy has no basis for treating a date someone typed as a failure of anything.
 
+The same view presents the plans that have closed, most recently closed first, so what a deployment planned before is readable beside what it plans now.
+Each shows where it was going, the date it was planned for, and how it closed: met, replaced by a later plan, or withdrawn with the operator who withdrew it and when.
+A withdrawn plan is otherwise unreadable anywhere, since a deployment that stopped going somewhere leaves no other mark on the fleet.
+
 ## Out of scope
 
 - Performing, scheduling, or triggering an upgrade.

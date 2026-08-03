@@ -161,6 +161,28 @@ impl UpgradePlan {
 			.map_err(AppError::from)
 	}
 
+	/// Plans that have closed across the fleet, most recently closed first.
+	// spec: UPG#the-dashboard
+	pub async fn closed_recent(db: &mut AsyncPgConnection, limit: i64) -> Result<Vec<Self>> {
+		use crate::schema::upgrade_plans::dsl;
+
+		dsl::upgrade_plans
+			.select(Self::as_select())
+			.filter(
+				dsl::met_at
+					.is_not_null()
+					.or(dsl::superseded_at.is_not_null())
+					.or(dsl::withdrawn_at.is_not_null()),
+			)
+			.order(diesel::dsl::sql::<diesel::sql_types::Timestamptz>(
+				"greatest(met_at, superseded_at, withdrawn_at) desc",
+			))
+			.limit(limit)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Every open plan across the fleet, newest first.
 	// spec: UPG#the-dashboard
 	pub async fn all_open(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
@@ -238,6 +260,45 @@ impl UpgradePlan {
 			.optional()
 			.map_err(AppError::from)
 	}
+}
+
+/// How a plan stands: still where the group is going, or the way it closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum PlanOutcome {
+	/// Where the group is going.
+	Open,
+	/// The group's reported version reached the target.
+	Met,
+	/// A later plan took its place.
+	Replaced,
+	/// An operator said the deployment is no longer going there.
+	Withdrawn,
+}
+
+/// How a plan stands.
+///
+/// Met wins over the rest: a plan the group reached is met however it was
+/// stamped afterwards.
+// spec: UPG#a-plan
+pub fn outcome(plan: &UpgradePlan) -> PlanOutcome {
+	if plan.met_at.is_some() {
+		PlanOutcome::Met
+	} else if plan.withdrawn_at.is_some() {
+		PlanOutcome::Withdrawn
+	} else if plan.superseded_at.is_some() {
+		PlanOutcome::Replaced
+	} else {
+		PlanOutcome::Open
+	}
+}
+
+/// When a plan closed, for one that has.
+pub fn ended_at(plan: &UpgradePlan) -> Option<Timestamp> {
+	[plan.met_at, plan.withdrawn_at, plan.superseded_at]
+		.into_iter()
+		.flatten()
+		.max()
 }
 
 /// Close every open plan whose group has reached its target, returning how many

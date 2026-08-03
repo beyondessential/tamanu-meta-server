@@ -6907,6 +6907,56 @@
         ]
       }
     },
+    "/api/upgrade_plans/history": {
+      "post": {
+        "tags": [
+          "upgrade_plans"
+        ],
+        "summary": "The plans that have closed, across the fleet.",
+        "description": "A deployment that stopped going somewhere leaves no other mark on the fleet,\nso a withdrawn plan is readable here or nowhere.",
+        "operationId": "upgrade_plans_history",
+        "responses": {
+          "200": {
+            "description": "Closed plans, most recently closed first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PastPlan"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/upgrade_plans/record": {
       "post": {
         "tags": [
@@ -12072,6 +12122,45 @@
           }
         }
       },
+      "PastPlan": {
+        "type": "object",
+        "description": "One plan that has closed, in the fleet's plan history.",
+        "required": [
+          "plan",
+          "group_id",
+          "group_name",
+          "target_version",
+          "outcome",
+          "ended_at"
+        ],
+        "properties": {
+          "ended_at": {
+            "type": "string",
+            "description": "When it closed."
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group it was for."
+          },
+          "group_name": {
+            "type": "string",
+            "description": "Its name, so the view reads without a second lookup."
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/PlanOutcome",
+            "description": "How it closed."
+          },
+          "plan": {
+            "$ref": "#/components/schemas/UpgradePlan",
+            "description": "The plan itself."
+          },
+          "target_version": {
+            "type": "string",
+            "description": "Where the plan was going, as semver."
+          }
+        }
+      },
       "PauseArgs": {
         "type": "object",
         "description": "Why a server is being paused.",
@@ -12127,6 +12216,16 @@
             "description": "Backup type requested."
           }
         }
+      },
+      "PlanOutcome": {
+        "type": "string",
+        "description": "How a plan stands: still where the group is going, or the way it closed.",
+        "enum": [
+          "open",
+          "met",
+          "replaced",
+          "withdrawn"
+        ]
       },
       "PlannableVersion": {
         "type": "object",
