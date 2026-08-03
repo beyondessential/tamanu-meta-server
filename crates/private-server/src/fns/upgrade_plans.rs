@@ -367,10 +367,10 @@ pub struct WithdrawArgs {
 )]
 pub async fn withdraw(
 	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
+	admin: TailscaleAdmin,
 	Json(args): Json<WithdrawArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	UpgradePlan::delete(&mut conn, args.id).await?;
+	UpgradePlan::withdraw(&mut conn, args.id, &admin.0.login).await?;
 	Ok(Json(()))
 }

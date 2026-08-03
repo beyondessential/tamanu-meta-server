@@ -9120,6 +9120,10 @@ export interface components {
              * @description The version it intends to move to.
              */
             target_version_id: string;
+            /** @description When the plan was withdrawn, if it was. */
+            withdrawn_at?: string | null;
+            /** @description The operator who withdrew it. */
+            withdrawn_by?: string | null;
         };
         /**
          * @description Request to declaratively create or update a group's backup configuration,

@@ -52,6 +52,12 @@ pub struct UpgradePlan {
 	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
 	#[schema(value_type = Option<String>)]
 	pub amended_at: Option<Timestamp>,
+	/// When the plan was withdrawn, if it was.
+	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
+	#[schema(value_type = Option<String>)]
+	pub withdrawn_at: Option<Timestamp>,
+	/// The operator who withdrew it.
+	pub withdrawn_by: Option<String>,
 }
 
 impl UpgradePlan {
@@ -91,6 +97,7 @@ impl UpgradePlan {
 			.filter(dsl::group_id.eq(group_id))
 			.filter(dsl::met_at.is_null())
 			.filter(dsl::superseded_at.is_null())
+			.filter(dsl::withdrawn_at.is_null())
 			.set(dsl::superseded_at.eq(diesel::dsl::now))
 			.execute(db)
 			.await?;
@@ -130,6 +137,7 @@ impl UpgradePlan {
 			.filter(dsl::group_id.eq(group_id))
 			.filter(dsl::met_at.is_null())
 			.filter(dsl::superseded_at.is_null())
+			.filter(dsl::withdrawn_at.is_null())
 			.first(db)
 			.await
 			.optional()
@@ -162,6 +170,7 @@ impl UpgradePlan {
 			.select(Self::as_select())
 			.filter(dsl::met_at.is_null())
 			.filter(dsl::superseded_at.is_null())
+			.filter(dsl::withdrawn_at.is_null())
 			.order(dsl::created_at.desc())
 			.load(db)
 			.await
@@ -187,6 +196,7 @@ impl UpgradePlan {
 			.filter(dsl::id.eq(id))
 			.filter(dsl::met_at.is_null())
 			.filter(dsl::superseded_at.is_null())
+			.filter(dsl::withdrawn_at.is_null())
 			.set((
 				dsl::planned_for.eq(planned_for.map(jiff_diesel::Date::from)),
 				dsl::note.eq(note),
@@ -201,13 +211,32 @@ impl UpgradePlan {
 	}
 
 	/// Withdraw a plan: the deployment is no longer going there.
-	pub async fn delete(db: &mut AsyncPgConnection, id: Uuid) -> Result<()> {
+	///
+	/// The plan is retained. Where a deployment was going and the fact that it
+	/// stopped going there is what the history exists to record, and a withdrawn
+	/// plan reads differently from one that was met.
+	// spec: UPG#a-plan
+	pub async fn withdraw(
+		db: &mut AsyncPgConnection,
+		id: Uuid,
+		withdrawn_by: &str,
+	) -> Result<Option<Self>> {
 		use crate::schema::upgrade_plans::dsl;
 
-		diesel::delete(dsl::upgrade_plans.filter(dsl::id.eq(id)))
-			.execute(db)
-			.await?;
-		Ok(())
+		diesel::update(dsl::upgrade_plans)
+			.filter(dsl::id.eq(id))
+			.filter(dsl::met_at.is_null())
+			.filter(dsl::superseded_at.is_null())
+			.filter(dsl::withdrawn_at.is_null())
+			.set((
+				dsl::withdrawn_at.eq(diesel::dsl::now),
+				dsl::withdrawn_by.eq(withdrawn_by),
+			))
+			.returning(Self::as_select())
+			.get_result(db)
+			.await
+			.optional()
+			.map_err(AppError::from)
 	}
 }
 
@@ -273,6 +302,7 @@ pub async fn planned_target(db: &mut AsyncPgConnection, group_id: Uuid) -> Resul
 pub fn is_late(plan: &UpgradePlan, today: Date) -> bool {
 	plan.met_at.is_none()
 		&& plan.superseded_at.is_none()
+		&& plan.withdrawn_at.is_none()
 		&& plan.planned_for.is_some_and(|date| date < today)
 }
 

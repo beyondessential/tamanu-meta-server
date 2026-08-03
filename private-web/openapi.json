@@ -15956,6 +15956,20 @@
             "type": "string",
             "format": "uuid",
             "description": "The version it intends to move to."
+          },
+          "withdrawn_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When the plan was withdrawn, if it was."
+          },
+          "withdrawn_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The operator who withdrew it."
           }
         }
       },

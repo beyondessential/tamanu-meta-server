@@ -41,7 +41,8 @@ Changing the target is not an amendment: where a deployment is going is what the
 A plan that has been met or replaced is history and is no longer amendable.
 
 Plans are managed through the operator interface and are audited.
-Deleting a plan says the deployment is no longer going there; it does not say the upgrade happened.
+Withdrawing a plan says the deployment is no longer going there; it does not say the upgrade happened.
+A withdrawn plan is retained and records who withdrew it and when: a deployment that was going somewhere and stopped is part of the same history as one that arrived, and it frees the group to be planned somewhere else.
 
 A planned date is a plan, not a deadline.
 Canopy neither schedules nor blocks anything on it, and a date that passes changes only how the plan is presented.
