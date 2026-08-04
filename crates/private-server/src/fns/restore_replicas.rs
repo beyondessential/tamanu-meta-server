@@ -760,9 +760,10 @@ pub async fn create(
 /// `2h 30m`, `20Gi`), resolved to raw seconds/bytes and validated against the
 /// *new* consumer+intent's advertised parameter schema; as with `create`, an
 /// intent the new consumer doesn't currently advertise is accepted and the
-/// values pass through unvalidated, leaving the declaration with a gap. If
-/// the scope changes, any active restore-verification alert for the
-/// declaration's old scope is recovered. The name must be unique among the
+/// values pass through unvalidated, leaving the declaration with a gap. If the
+/// scope changes, the replica at the old scope stops being one Canopy derives
+/// checks for, so any active restore-verification finding against it recovers on
+/// the next periodic sweep. The name must be unique among the
 /// consumer's declarations. Requires the caller to be on the admin allow-list.
 /// Responds 400 if the name is blank or the overdue bound or a parameter value
 /// fails to parse or validate, 404 if the declaration does not exist, and 409
@@ -818,10 +819,11 @@ pub async fn update(
 /// Delete a restore replica declaration.
 ///
 /// Removes the declaration: the consumer stops being asked to maintain the
-/// replica and loses the backup access the declaration granted. Any active
-/// restore-verification alert for the declaration's scope is recovered, since
-/// nothing tracks that scope any more. The restore-health reports it collected
-/// are retained, detached from the deleted declaration. Requires the caller to
+/// replica and loses the backup access the declaration granted. Nothing asks for
+/// that replica any more, so it stops being one Canopy derives checks for and
+/// any active restore-verification finding against it recovers on the next
+/// periodic sweep. The restore-health reports it collected are retained,
+/// detached from the deleted declaration. Requires the caller to
 /// be on the admin allow-list. Responds 404 if the declaration does not exist.
 #[utoipa::path(
 	post,

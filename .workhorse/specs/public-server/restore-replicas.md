@@ -357,11 +357,15 @@ A failed or overdue restore-health report raises a restore-verification check on
 
 A server has one restore-verification check however many replicas it has.
 Each replica is an instance of that check, graded on its own and carrying its type, its intent, its declared name, and the snapshot in the check's detail (see [CHK](../monitoring/checks.md)), so a rule or silence written for one replica applies to only that replica.
+The detail names the replica by its type and intent together as well as separately, since a rule matches one variable at a time and a silence for a single replica has to pin both.
 The check reflects the most urgent of them, names the ones in trouble, and recovers when none is left degraded.
 
 A replica's state is the worse of what its latest report said and whether it has gone past its overdue bound; these are one judgement about the replica, not two competing ones.
-Canopy re-derives every one of a server's replicas from the declarations that currently cover it, on the same periodic sweep that decides overdue.
-So a replica whose declaration is deleted, disabled, or rescoped stops being one of the server's instances and needs no separate recovery, and a report's effect appears on the next sweep rather than the instant it lands — which is immaterial for a warning that pages nobody.
+Canopy re-derives a server's replicas on the same periodic sweep that decides overdue, from the declarations covering the server and from the reports it holds about it.
+A declaration covering the server names one of its replicas whatever its consumer currently advertises: an intent that stops being advertised is a gap, and a finding standing against a replica does not go away because the consumer that reported it stopped offering to.
+A replica the server has a report for is one of its replicas too, for as long as a declaration still asks for that replica somewhere in the server's group — which is what a consumer needs in order to report on it at all.
+So a report about a server its declaration does not name still surfaces against that server, and a replica nothing declares any more stops being one of the server's instances and needs no separate recovery: nothing can report on it again, so a finding held against it could never recover.
+A report's effect appears on the next sweep rather than the instant it lands, which is immaterial for a warning that pages nobody.
 
 A replica is also overdue — raising the same check on a periodic sweep, rather than waiting for a report that never arrives — when it has not met its intent's health expectation within the declaration's overdue bound.
 For an intent carrying `once`, the expectation is measured against the latest snapshot: the replica is overdue when the latest snapshot has gone unverified for longer than the bound, not merely because time has passed since an earlier snapshot was verified.
@@ -372,6 +376,7 @@ A failed migration test raises a migration-test check on the affected server, un
 It is one check per server with its replicas as instances, as restore-verification is, and carries the target version in the detail rather than the name.
 A server has one candidate at a time, so there is no second version whose result the first could mask, and a name per version would spawn a catalog policy per release.
 A replica whose candidate has not been tried within its overdue bound degrades the same check: untested and failed are both "this version is not known good against this deployment's data".
+A recorded verdict raises the check whatever declares that replica now, and a later verdict is what supersedes it: what a version's migrations did to a deployment's data is a fact about the version, not something a declaration has to keep asking about for it to remain true.
 
 The check is a warning rather than a failure, and does not escalate.
 Nothing is wrong with the live server: it is running the version it always was, serving patients, and the finding is about a version it has not taken yet.
@@ -379,8 +384,9 @@ Treating it as a failure would open an incident against a healthy deployment and
 The version's readiness is where the finding does its work.
 
 A redaction that did not fully apply raises a redaction check on the affected server, under the same gates.
-The check is named for the type and intent, as restore-verification is, and carries the redaction outcome, the manifest version, and the counts of masked and skipped columns in its detail.
-It recovers when the next report for the same server, type, and intent redacts fully.
+It is one check per server with its redacting replicas as instances, as restore-verification is, each carrying the redaction outcome, the manifest version, and the counts of masked and skipped columns in the check's detail.
+A replica is an instance of it only once it has reported a redaction outcome: a declaration that redacts but has produced no replica yet has nothing unmasked to report.
+An instance recovers when the replica's next report redacts fully, and the check when none of them is left degraded.
 
 The check is a warning rather than a failure, and does not escalate.
 The deployment is healthy and its data is where it should be; the finding is that a replica made from that data is not as safe to hand out as it was declared to be.

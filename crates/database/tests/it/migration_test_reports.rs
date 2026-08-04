@@ -681,3 +681,54 @@ async fn a_failed_restore_leaves_the_version_unjudged() {
 	})
 	.await
 }
+
+/// A verdict is a fact about a candidate version measured against a deployment's
+/// data, so it surfaces on its own: the report carries no replica reference, no
+/// declaration asks for the replica it came from, and there is no overdue bound
+/// anywhere. Deriving the check from declarations alone lost this outright.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_verdict_with_no_declaration_still_surfaces() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn).await;
+		let server = insert_server(&mut conn, group).await;
+		let target = insert_version(&mut conn, 63).await;
+
+		let unlinked = report(consumer, group, server, RunOutcome::Success);
+		assert!(
+			unlinked.replica_id.is_none(),
+			"nothing links it to a replica"
+		);
+		MigrationTest::record(
+			&mut conn,
+			unlinked,
+			NewMigrationTest {
+				target_version_id: target.id,
+				total_elapsed: secs(45),
+				failed_migration: Some("backfillNoteTypeIds".into()),
+				data_bytes_before: 10,
+				data_bytes_after: 10,
+				timings: vec![],
+			},
+		)
+		.await
+		.expect("record failure");
+
+		#[derive(QueryableByName)]
+		struct Count {
+			#[diesel(sql_type = sql_types::BigInt)]
+			count: i64,
+		}
+		let declarations: Count = sql_query("SELECT count(*) AS count FROM restore_replicas")
+			.get_result(&mut conn)
+			.await
+			.expect("count declarations");
+		assert_eq!(declarations.count, 0, "and no declaration asks for one");
+
+		let filed = migration_check(&mut conn, server)
+			.await
+			.expect("the verdict alone raises the check");
+		assert_eq!(filed.observed.as_deref(), Some("warning"));
+	})
+	.await
+}

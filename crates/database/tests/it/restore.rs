@@ -1380,3 +1380,352 @@ async fn a_version_without_a_published_manifest_is_a_redaction_gap() {
 	})
 	.await;
 }
+
+/// A consumer that stops advertising an intent leaves the declaration standing:
+/// the operator still asked for that replica, so the failed restore it last
+/// reported is still true and its finding must not quietly vanish. An intent
+/// nothing advertises is a gap, surfaced as one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_finding_survives_its_capability_being_withdrawn() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let server = insert_server(&mut conn, group).await;
+		RestoreConsumerCapability::register(
+			&mut conn,
+			consumer,
+			&[descriptor("verify", &["check"])],
+		)
+		.await
+		.expect("register caps");
+		RestoreReplica::create(
+			&mut conn,
+			new_replica(
+				consumer,
+				group,
+				Some(server),
+				RestoreIntent::from("verify"),
+				"nightly",
+			),
+		)
+		.await
+		.expect("create");
+
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			new_check(
+				consumer,
+				group,
+				server,
+				RestoreIntent::from("verify"),
+				RunOutcome::Failure,
+				false,
+			),
+		)
+		.await
+		.expect("record failure");
+		assert_eq!(active_restore_issues(&mut conn, group).await, 1);
+
+		// The consumer redeploys advertising nothing at all.
+		RestoreConsumerCapability::register(&mut conn, consumer, &[])
+			.await
+			.expect("withdraw caps");
+		assert_eq!(
+			active_restore_issues(&mut conn, group).await,
+			1,
+			"withdrawing the capability does not clear what the replica reported"
+		);
+	})
+	.await;
+}
+
+/// A report about a server the declaration doesn't name still surfaces. The
+/// ingest authorizes a report per (group, type), so a consumer maintaining one
+/// replica can report on any of the group's servers, and the finding belongs to
+/// the server the report is about.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_report_about_an_unnamed_server_still_surfaces() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let named = insert_server(&mut conn, group).await;
+		let other = insert_server(&mut conn, group).await;
+		let r = RestoreReplica::create(
+			&mut conn,
+			new_replica(
+				consumer,
+				group,
+				Some(named),
+				RestoreIntent::from("verify"),
+				"nightly",
+			),
+		)
+		.await
+		.expect("create");
+
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			new_check(
+				consumer,
+				group,
+				other,
+				RestoreIntent::from("verify"),
+				RunOutcome::Failure,
+				false,
+			),
+		)
+		.await
+		.expect("record failure");
+		assert_eq!(
+			active_restore_issues(&mut conn, group).await,
+			1,
+			"the finding is held against the server the report is about"
+		);
+
+		// And it goes when nothing declares the replica any more: no consumer can
+		// report on it again, so a finding held on it could never recover.
+		RestoreReplica::delete(&mut conn, r.id)
+			.await
+			.expect("delete");
+		assert_eq!(active_restore_issues(&mut conn, group).await, 0);
+	})
+	.await;
+}
+
+#[derive(diesel::QueryableByName)]
+struct NameRow {
+	#[diesel(sql_type = sql_types::Text)]
+	name: String,
+}
+
+/// Every canopy issue ref on a server matching a LIKE pattern.
+async fn issue_refs(conn: &mut AsyncPgConnection, server_id: Uuid, pattern: &str) -> Vec<String> {
+	sql_query(
+		"SELECT \"ref\" AS name FROM issues \
+		 WHERE server_id = $1 AND source = 'canopy' AND \"ref\" LIKE $2 ORDER BY \"ref\"",
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Text, _>(pattern)
+	.load::<NameRow>(conn)
+	.await
+	.expect("load issue refs")
+	.into_iter()
+	.map(|r| r.name)
+	.collect()
+}
+
+/// Every catalog entry matching a LIKE pattern — what an operator has to
+/// configure.
+async fn catalog_names(conn: &mut AsyncPgConnection, pattern: &str) -> Vec<String> {
+	sql_query(
+		"SELECT check_name AS name FROM check_policies \
+		 WHERE source = 'canopy' AND check_name LIKE $1 ORDER BY check_name",
+	)
+	.bind::<sql_types::Text, _>(pattern)
+	.load::<NameRow>(conn)
+	.await
+	.expect("load catalog names")
+	.into_iter()
+	.map(|r| r.name)
+	.collect()
+}
+
+#[derive(diesel::QueryableByName)]
+struct FiledRow {
+	#[diesel(sql_type = sql_types::Text)]
+	message: String,
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Jsonb>)]
+	detail: Option<serde_json::Value>,
+}
+
+async fn filed(conn: &mut AsyncPgConnection, server_id: Uuid, r#ref: &str) -> FiledRow {
+	sql_query(
+		"SELECT message, detail FROM issues \
+		 WHERE server_id = $1 AND source = 'canopy' AND \"ref\" = $2 AND active",
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Text, _>(r#ref)
+	.get_result::<FiledRow>(conn)
+	.await
+	.unwrap_or_else(|e| panic!("{ref} was filed for {server_id}: {e}"))
+}
+
+/// A server with several replicas holds one check of each kind, with the
+/// replicas as instances: the message names the ones in trouble, the detail
+/// carries them with their own results, and the catalog gains one entry per
+/// check rather than one per (type, intent) pair.
+#[tokio::test(flavor = "multi_thread")]
+async fn one_check_of_each_kind_per_server_with_the_replicas_as_instances() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let server = insert_server(&mut conn, group).await;
+		RestoreConsumerCapability::register(
+			&mut conn,
+			consumer,
+			&[
+				descriptor("verify", &["check"]),
+				descriptor("analytics", &["check"]),
+				descriptor("dr", &["check"]),
+			],
+		)
+		.await
+		.expect("register caps");
+
+		for (intent, name, redacts) in [
+			("verify", "nightly-verify", false),
+			("analytics", "analytics-copy", true),
+			("dr", "dr-standby", false),
+		] {
+			RestoreReplica::create(
+				&mut conn,
+				NewRestoreReplica {
+					redacts,
+					..new_replica(
+						consumer,
+						group,
+						Some(server),
+						RestoreIntent::from(intent),
+						name,
+					)
+				},
+			)
+			.await
+			.expect("declare replica");
+		}
+
+		// The verifying replica failed; the analytics one restored fine but came
+		// up with columns it should have masked; the standby is healthy.
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			new_check(
+				consumer,
+				group,
+				server,
+				RestoreIntent::from("verify"),
+				RunOutcome::Failure,
+				false,
+			),
+		)
+		.await
+		.expect("record verify");
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			NewBackupRestoreCheck {
+				redaction_outcome: Some(commons_types::backup::RedactionOutcome::Partial),
+				redaction_columns_masked: Some(40),
+				redaction_columns_skipped: Some(3),
+				..new_check(
+					consumer,
+					group,
+					server,
+					RestoreIntent::from("analytics"),
+					RunOutcome::Success,
+					true,
+				)
+			},
+		)
+		.await
+		.expect("record analytics");
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			new_check(
+				consumer,
+				group,
+				server,
+				RestoreIntent::from("dr"),
+				RunOutcome::Success,
+				true,
+			),
+		)
+		.await
+		.expect("record dr");
+
+		// And a candidate version whose migrations do not survive the data.
+		let version: RowId = sql_query(
+			"INSERT INTO versions (major, minor, patch, status) \
+			 VALUES (2, 63, 0, 'published') RETURNING id",
+		)
+		.get_result(&mut conn)
+		.await
+		.expect("insert version");
+		database::migration_tests::MigrationTest::record(
+			&mut conn,
+			new_check(
+				consumer,
+				group,
+				server,
+				RestoreIntent::from("migrate"),
+				RunOutcome::Success,
+				true,
+			),
+			database::migration_tests::NewMigrationTest {
+				target_version_id: version.id,
+				total_elapsed: PgDuration(SignedDuration::from_secs(45)),
+				failed_migration: Some("backfillNoteTypeIds".into()),
+				data_bytes_before: 10,
+				data_bytes_after: 10,
+				timings: vec![],
+			},
+		)
+		.await
+		.expect("record migration test");
+
+		database::restore::sweep_overdue(&mut conn)
+			.await
+			.expect("sweep");
+
+		for r#ref in ["restore-verification", "redaction", "migration-test"] {
+			assert_eq!(
+				issue_refs(&mut conn, server, &format!("{ref}%")).await,
+				vec![r#ref.to_string()],
+				"one {ref} check for the server, named for the condition only",
+			);
+			assert_eq!(
+				catalog_names(&mut conn, &format!("{ref}%")).await,
+				vec![r#ref.to_string()],
+				"one {ref} catalog entry to configure, not one per (type, intent)",
+			);
+		}
+
+		// Restore verification: three replicas considered, one of them degraded,
+		// and the message names it rather than the healthy ones.
+		let verification = filed(&mut conn, server, "restore-verification").await;
+		let detail = verification.detail.expect("detail");
+		assert_eq!(detail["total"], 3);
+		assert_eq!(detail["degraded"], 1);
+		let instances = detail["instances"].as_array().expect("instances");
+		assert_eq!(instances.len(), 1);
+		assert_eq!(instances[0]["intent"], "verify");
+		assert_eq!(instances[0]["replica"], "nightly-verify");
+		assert_eq!(instances[0]["replica_key"], "tamanu-postgres:verify");
+		assert!(
+			verification.message.contains("nightly-verify"),
+			"names the degraded replica: {}",
+			verification.message,
+		);
+		assert!(
+			!verification.message.contains("dr-standby"),
+			"and not the healthy ones: {}",
+			verification.message,
+		);
+
+		// Redaction only counts the replicas that reported one, so the check is
+		// about the analytics copy alone.
+		let redaction = filed(&mut conn, server, "redaction").await;
+		let detail = redaction.detail.expect("detail");
+		assert_eq!(detail["total"], 1);
+		assert_eq!(detail["instances"][0]["intent"], "analytics");
+		assert_eq!(detail["instances"][0]["columns_skipped"], 3);
+
+		// The migration finding carries the version in its detail, not its name.
+		let migration = filed(&mut conn, server, "migration-test").await;
+		let detail = migration.detail.expect("detail");
+		assert_eq!(detail["instances"][0]["target_version"], "2.63.0");
+		assert_eq!(
+			detail["instances"][0]["failed_migration"],
+			"backfillNoteTypeIds"
+		);
+	})
+	.await;
+}
