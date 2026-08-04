@@ -1,17 +1,23 @@
 //! Reconcile device **reports** against repo **inventory**: cross-check what
-//! devices reported (`backup_runs`) against what *actually landed* in the repo
-//! (`backup_repo_snapshots`).
+//! devices reported (`backup_runs`) against what inspection found in the repo
+//! (`backup_repo_observed_snapshots` for the individual snapshots,
+//! `backup_repo_snapshots` for the per-source summary).
 //!
-//! Per scanned `(server, type)`, resolved against the kopia source recorded in
-//! `backup_repo_snapshots`:
+//! Per scanned `(server, type)`:
 //!
-//! - **report success but no recent snapshot** → `backup-reconcile-missing`
-//!   (`Error`, per-server). The case the reports alone cannot catch — a device
-//!   lying about success or data not persisting. Detecting it needs the
-//!   group's repo inventory, but the finding is about the one server whose
+//! - **the reported snapshot is not in the repo** → `backup-reconcile-missing`
+//!   (`Warning`, per-server). The run named the snapshot it created and the
+//!   repository does not hold it: the case reports alone cannot catch, a device
+//!   lying about success or an upload that didn't persist. Detecting it needs
+//!   the group's repo inventory, but the finding is about the one server whose
 //!   report didn't hold up, so it is filed against that server: two servers in
 //!   a group can fail it independently, and one recovering must not clear the
 //!   other.
+//! - **the repo looks behind the report** → `backup-reconcile-recency`
+//!   (recorded only, never alerting). The newest snapshot for the source is
+//!   older than the moment the reported run froze its data. It compares
+//!   timestamps produced by two independent cadences, so it means "something
+//!   looks off" and cannot mean more than that.
 //! - **recent snapshot but no report** → `backup-reconcile-report-gap`
 //!   (`Warning`, per-server, non-paging). The reporting path is broken, not
 //!   the backup.
@@ -25,12 +31,21 @@
 //!   (`Warning`, per-server, non-paging). The device reported a snapshot size
 //!   that doesn't match what the repo holds.
 //!
-//! Freshness guard: if the repo inventory for the group is itself stale (its
-//! `observed_at` older than [`INVENTORY_STALE_AFTER`]), the "missing" verdict
-//! is skipped — a lagging inspector must not produce false "report lied"
-//! alerts.
+//! **Absence is only evidence once someone has looked.** Backups run on one
+//! cadence and inspection on a slower, independent one, so "the repo doesn't
+//! show it" routinely means "nobody has looked since". Every verdict about a
+//! run therefore requires an inspection *newer than that run*; where there
+//! isn't one, the instance is [`CheckResult::Skipped`] — neither passed nor
+//! failed — and a check with nothing decidable is not filed at all, so an
+//! already-open finding is left alone rather than cleared on the strength of a
+//! lagging inspector.
+//!
+//! Two things this cannot see, both because a repository leaves no record of an
+//! inspection that found nothing: a group whose repository inspection finds
+//! entirely empty, and a group whose snapshots have never been itemised.
+//! Corruption and staleness own those.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use commons_errors::Result;
 use commons_types::{backup::BackupType, status::CheckResult};
@@ -48,12 +63,16 @@ use crate::{
 	servers::Server,
 };
 
-/// How old a group's repo snapshot inventory (`observed_at`) may be before
-/// reconciliation refuses to conclude "missing". Tied to the inspection
-/// cadence floor (weekly for manual-only groups) plus a day of grace. If the
-/// inspector hasn't run recently we can't trust "no snapshot landed", so we
-/// defer to the inspection Job's own failure surfacing instead.
-pub const INVENTORY_STALE_AFTER: SignedDuration = SignedDuration::from_hours((7 + 1) * 24);
+/// Slack allowed when comparing a snapshot's recorded time against the moment
+/// the run that produced it says it froze its data.
+///
+/// The two are recorded by the same device from the same clock, and for a
+/// backup with nothing to dump beforehand they are the same instant recorded
+/// twice — so they can land either side of each other by a rounding or a
+/// scheduling hiccup. A real miss is a whole backup interval out, so a few
+/// minutes of slack costs nothing and stops a healthy pair being reported on a
+/// second's difference.
+const RECENCY_TOLERANCE: SignedDuration = SignedDuration::from_mins(5);
 
 /// Snapshot freshness + observed-at for one `(server, type)`, from
 /// `backup_repo_snapshots`.
@@ -67,6 +86,7 @@ struct SnapInfo {
 /// [`ScanRow`]s that [`crate::backup::staleness::scan_rows`] produced (the
 /// caller passes them in so the staleness scan and reconciliation share one
 /// pass). Returns the number of events filed.
+// spec: BKJ#detection
 pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize> {
 	if rows.is_empty() {
 		return Ok(0);
@@ -80,10 +100,11 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 	};
 	let snaps = snapshot_info(db, &group_ids).await?;
 
-	// Inventory freshness is a property of the *group's* inspection, not of any
-	// one pair's snapshot row: the inspection Job only writes a row for sources
-	// it actually finds, so the pair with nothing in the repo — precisely the
-	// one the "missing" verdict exists for — has no row of its own to date.
+	// When the group was last inspected, which is what makes a snapshot's
+	// absence mean anything. It is a property of the *group's* inspection, not
+	// of any one pair's snapshot row: the inspection Job only writes a row for
+	// sources it actually finds, so the pair with nothing in the repo — exactly
+	// the one a "missing" verdict is about — has no row of its own to date.
 	let mut inspected_at: HashMap<Uuid, Timestamp> = HashMap::new();
 	for gid in &group_ids {
 		if let Some(at) =
@@ -91,6 +112,29 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 		{
 			inspected_at.insert(*gid, at);
 		}
+	}
+
+	// The itemised snapshots each group's repo holds, with when they were
+	// observed. Both halves come from the same table so the evidence and its
+	// freshness can never disagree: a group with no rows has no observation to
+	// reason from, whatever the per-source summaries say.
+	let mut observed_snapshots: HashMap<Uuid, (HashSet<String>, Timestamp)> = HashMap::new();
+	for gid in &group_ids {
+		let (ids, at) =
+			crate::backups::BackupRepoObservedSnapshot::observed_ids_for_group(db, *gid).await?;
+		if let Some(at) = at {
+			observed_snapshots.insert(*gid, (ids, at));
+		}
+	}
+
+	// The run behind each pair's `last_success_at`, for the fields the scan
+	// doesn't carry: the snapshot id the device named, when it reported, and
+	// when it froze its data.
+	let mut latest_success: HashMap<(Uuid, BackupType), crate::backups::BackupRun> = HashMap::new();
+	for gid in &group_ids {
+		latest_success.extend(
+			crate::backups::BackupRun::latest_success_by_server_type_for_group(db, *gid).await?,
+		);
 	}
 
 	// How each scanned server is named in alert text, resolved in one query
@@ -160,12 +204,25 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 			refs::RECONCILE_SIZE_MISMATCH,
 		)
 		.await?;
+		// The recency check's ceiling holds its effective result at passed, so
+		// it is never "active" and there is no open finding to key off. What it
+		// leaves behind instead is an observation, which has to be brought up to
+		// date once the repo catches up.
+		let recency_recorded = crate::backup::staleness::server_check_observed_degraded(
+			db,
+			server_id,
+			refs::RECONCILE_RECENCY,
+		)
+		.await?;
 
 		let mut missing_instances: Vec<CheckInstance> = Vec::with_capacity(server_rows.len());
+		let mut recency_instances: Vec<CheckInstance> = Vec::with_capacity(server_rows.len());
 		let mut gap_instances: Vec<CheckInstance> = Vec::with_capacity(server_rows.len());
 		let mut size_instances: Vec<CheckInstance> = Vec::with_capacity(server_rows.len());
 		let mut any_missing = false;
-		let mut any_decidable = false;
+		let mut any_missing_decidable = false;
+		let mut any_recency_decidable = false;
+		let mut any_behind = false;
 		let mut any_gap = false;
 		let mut any_size = false;
 
@@ -178,31 +235,77 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 			let snapshot_fresh = snap
 				.and_then(|s| s.latest_snapshot_at)
 				.is_some_and(|t| now.duration_since(t) <= grace);
-			let inventory_fresh = inspected_at
-				.get(&row.group_id)
-				.is_some_and(|at| now.duration_since(*at) <= INVENTORY_STALE_AFTER);
+			let run = latest_success.get(&(row.server_id, row.r#type.clone()));
 
-			// Report says success but the data didn't land. Only concluded when
-			// the repo inventory is fresh enough to be trusted; a lagging
-			// inspector must not produce false "report lied" findings, and a
-			// type whose inventory is stale is left out of the check rather
-			// than counted healthy.
-			let missing = report_fresh && !snapshot_fresh && inventory_fresh;
-			let missing_undecidable = report_fresh && !snapshot_fresh && !inventory_fresh;
-			any_missing |= missing;
-			any_decidable |= !missing_undecidable;
+			// The device named the snapshot it created and the repo doesn't hold
+			// it. Skipped unless every condition for the absence to *mean*
+			// something holds: the run named a snapshot, it is recent enough
+			// that retention cannot have expired that snapshot since, and the
+			// repo's snapshots were itemised after the run was reported. The
+			// report time is the bound there rather than the moment the data was
+			// frozen, because a snapshot is in the repo by the time its run is
+			// reported, so an inspection after that point would have seen it.
+			//
+			// A type with no reported success is skipped too: there is no claim
+			// to hold the repo to, so the check didn't run. Staleness and
+			// `backup-never` own the server that reports nothing.
+			let missing = match run.and_then(|r| r.snapshot_id.as_deref().map(|id| (r, id))) {
+				Some((run, id)) if report_fresh => observed_snapshots
+					.get(&row.group_id)
+					.filter(|(_, at)| *at > run.reported_at)
+					.map(|(ids, _)| !ids.contains(id)),
+				_ => None,
+			};
+			any_missing |= missing == Some(true);
+			any_missing_decidable |= missing.is_some();
+			let mut missing_detail = serde_json::Map::new();
+			missing_detail.insert("type".into(), row.r#type.to_string().into());
+			if let Some(id) = run.and_then(|r| r.snapshot_id.as_deref()) {
+				missing_detail.insert("snapshot_id".into(), id.into());
+			}
 			missing_instances.push(CheckInstance {
 				label: row.r#type.to_string(),
-				observed: if missing {
-					CheckResult::Failed
-				} else if missing_undecidable {
-					CheckResult::Skipped
-				} else {
-					CheckResult::Passed
+				observed: match missing {
+					Some(true) => CheckResult::Warning,
+					Some(false) => CheckResult::Passed,
+					None => CheckResult::Skipped,
 				},
-				detail: Some(serde_json::json!({
-					"type": row.r#type.to_string(),
-				})),
+				detail: Some(serde_json::Value::Object(missing_detail)),
+			});
+
+			// The repo's newest snapshot for the source is older than the moment
+			// the reported run froze its data. Decidable only where the run
+			// reported that moment and the source was inspected since the run:
+			// the report time is *after* the snapshot was written, so it is no
+			// lower bound on how new the repo's newest snapshot should be, and
+			// judging against it would call every healthy server behind.
+			let behind = run.and_then(|run| {
+				run.snapshot_taken_at
+					.filter(|_| {
+						inspected_at
+							.get(&row.group_id)
+							.is_some_and(|at| *at > run.reported_at)
+					})
+					.map(|taken| {
+						snap.and_then(|s| s.latest_snapshot_at)
+							.is_none_or(|newest| newest < taken - RECENCY_TOLERANCE)
+					})
+			});
+			any_behind |= behind == Some(true);
+			any_recency_decidable |= behind.is_some();
+			let mut recency_detail = serde_json::Map::new();
+			recency_detail.insert("type".into(), row.r#type.to_string().into());
+			if let Some(at) = snap.and_then(|s| s.latest_snapshot_at) {
+				recency_detail.insert("latest_snapshot_at".into(), at.to_string().into());
+			}
+			recency_instances.push(CheckInstance {
+				label: row.r#type.to_string(),
+				observed: match behind {
+					Some(true) => CheckResult::Warning,
+					Some(false) => CheckResult::Passed,
+					None => CheckResult::Skipped,
+				},
+				detail: Some(serde_json::Value::Object(recency_detail)),
 			});
 
 			// Snapshot landed but no recent report → the reporting path is
@@ -243,11 +346,10 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 			});
 		}
 
-		// A stale repo inventory makes the missing verdict undecidable, not
-		// resolved: when it is stale for every type there is nothing to
-		// conclude, so leave whatever state is already there rather than
-		// clearing an open finding on the strength of a lagging inspector.
-		if any_missing || (missing_open && any_decidable) {
+		// Nothing decidable means nothing to conclude: leave whatever state is
+		// already there rather than clearing an open finding on the strength of
+		// an inspection that predates the runs it would be clearing.
+		if any_missing || (missing_open && any_missing_decidable) {
 			let total = missing_instances.len();
 			file_check_instances(
 				db,
@@ -265,11 +367,50 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				&|degraded| match degraded {
 					[] => format!("Server {label} backup reports and repo snapshots agree again"),
 					[one] => format!(
-						"Server {label} reported a successful {} backup but no matching repo snapshot landed",
+						"Server {label} reported a successful {} backup but its snapshot is not in the repo",
 						one.label
 					),
 					many => format!(
-						"Server {label} reported {} of its {total} backups successful with no matching repo snapshot: {}",
+						"Server {label} reported {} of its {total} backups successful with snapshots the repo doesn't hold: {}",
+						many.len(),
+						label_list(many),
+					),
+				},
+			)
+			.await?;
+			filed += 1;
+		}
+
+		// Filed when there is something to say, or something already said that
+		// this pass can retract — the same shape as the arms above, keyed on
+		// the last observation rather than on an open finding, because this
+		// check never has one.
+		if any_behind || (recency_recorded && any_recency_decidable) {
+			let total = recency_instances.len();
+			file_check_instances(
+				db,
+				InstancedCheckFiling {
+					source: crate::statuses::CANOPY_SOURCE,
+					scope: Scope::Server(server_id),
+					device_id,
+					check: refs::RECONCILE_RECENCY,
+					title: None,
+					instances: recency_instances,
+					// Recorded and visible, never alerting: this compares
+					// timestamps from two independent cadences, which supports
+					// "the repo looks behind" and not "a backup is missing".
+					default_ceiling: CheckResult::Passed,
+					default_escalates: false,
+					documentation: Some(refs::RECONCILE_RECENCY_DOC),
+				},
+				&|degraded| match degraded {
+					[] => format!("Repo snapshots for {label} are as new as the runs it reported"),
+					[one] => format!(
+						"The repo holds no {} snapshot for {label} as new as the run it reported",
+						one.label
+					),
+					many => format!(
+						"The repo holds no snapshot as new as the reported run for {} of {label}'s {total} backups: {}",
 						many.len(),
 						label_list(many),
 					),

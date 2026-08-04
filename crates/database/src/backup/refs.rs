@@ -16,6 +16,10 @@
 //! unrecoverable, or unprotected rather than merely late. Operators can
 //! raise any individual check to a failure through its policy; that is
 //! their call to make, not a default to ship.
+//!
+//! A check whose evidence only supports "something looks off" registers lower
+//! still, at a `Passed` ceiling: recorded and visible, never alerting
+//! ([`RECONCILE_RECENCY`]).
 
 /// The event source for every backup alert. Re-exported from
 /// [`crate::statuses::CANOPY_SOURCE`] so both the reachability sweep and the
@@ -43,11 +47,19 @@ pub const RECONCILE_REPORT_GAP: &str = "backup-reconcile-report-gap";
 /// non-zero). Server-scoped, `Warning` (non-paging on its own).
 pub const RECONCILE_SIZE_MISMATCH: &str = "backup-reconcile-size-mismatch";
 
-/// A run reported success but no matching repo snapshot landed (the device
-/// lied or the upload didn't persist). Server-scoped, `Warning`. Detecting it
-/// takes the group's repo inventory, but the finding is about the one server
-/// whose report didn't hold up, so it is filed against that server.
+/// A run reported a snapshot id the group's repository does not hold — the
+/// device claimed a snapshot that isn't there, so either the report was false
+/// or the upload didn't persist. Server-scoped, `Warning`. Detecting it takes
+/// the group's repo inventory, but the finding is about the one server whose
+/// report didn't hold up, so it is filed against that server.
 pub const RECONCILE_MISSING: &str = "backup-reconcile-missing";
+
+/// The repository holds no snapshot for a server's source as new as the run it
+/// reported. Server-scoped, and registered at a `Passed` ceiling: recorded and
+/// visible, never alerting. It compares timestamps across two independent
+/// cadences and so means "something looks off", not "a backup is missing" —
+/// [`RECONCILE_MISSING`] is the one that establishes that.
+pub const RECONCILE_RECENCY: &str = "backup-reconcile-recency";
 
 // --- group-level (page regardless of any member's is_monitored) ---
 
@@ -178,15 +190,35 @@ Read the run's error in the group's backups panel. Common causes: credential exp
 
 pub const RECONCILE_MISSING_DOC: &str = "## Description
 
-A run reported success but no matching snapshot landed in the repository — the device's report and the repo disagree.
+The device reported a run and named the snapshot it created, and that snapshot is not among the ones repository inspection found. The report and the repository disagree about a specific snapshot, not about timing.
+
+Only the latest successful run per backup type is checked, and only while it is recent enough that retention could not have expired its snapshot, and only where the repository was inspected after the run was reported. Any type that fails one of those conditions is skipped rather than guessed at: the check never concludes from an inspection that predates the run it is judging.
 
 ## Results
 
-- **warn** — reported snapshot absent from the repo.
+- **warn** — the snapshot id the device reported is absent from the repository.
+- **skipped** — the device named no snapshot, the run is too old to distinguish absence from retention, or the repository has not been inspected since the run was reported.
 
 ## Solve
 
-Treat the backup as not having happened. Check the device's kopia logs for upload failures after the snapshot was cut, and re-run the backup.";
+Treat the backup as not having happened. Check the device's kopia logs for upload failures after the snapshot was cut, and re-run the backup. The reported snapshot id is in the check's detail, so `kopia snapshot list` for the source confirms it either way.";
+
+pub const RECONCILE_RECENCY_DOC: &str = "## Description
+
+The newest snapshot repository inspection found for this server's source is older than the moment the device's latest run says it froze its data.
+
+This is a comparison of two timestamps, not a lookup: the inventory records when snapshots were taken, not which ones exist, so this can say the repository looks behind and no more. It never alerts. What it is worth is context — a server showing this alongside a staleness or size signal is worth looking at, and one showing it alone usually means an inspection landed mid-upload.
+
+`backup-reconcile-missing` is the check that establishes a reported backup is actually absent.
+
+## Results
+
+- **warn** (recorded only) — the repository holds nothing for the source as new as the reported run.
+- **skipped** — the run reported no moment its data was frozen (which leaves nothing to compare against), or the repository has not been inspected since the run was reported.
+
+## Solve
+
+Nothing on its own. Read it next to the server's other backup signals.";
 
 pub const CORRUPTION_DOC: &str = "## Description
 
