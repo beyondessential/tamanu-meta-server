@@ -21,6 +21,8 @@ Tamanu deployments on Kubernetes run no bestool (`alertd`), so they push no stat
 - **Identity is set manually, not auto-discovered** (for now). On server create/edit: "is this server in Kubernetes? → which cluster + namespace?" Canopy then queries that cluster/namespace, lists the central servers and facilities running there, and the operator picks which one this record is. Auto-discovery may come later.
 - **Checks come from a new `kubernetes` source** (Canopy-populated by pulling, not the reserved `canopy` source), so general cluster-health checks can grow under it. Distinct from device-pushed sources.
 - **Reachability excluded for this source** (mode `off`) — keeps the single "a device reported recently" definition. "Is this server up?" is a dedicated k8s liveness check (ingress/Gateway + live front-end API), not the reachability signal.
+- **Harvested Tamanu DB checks are filed under `alertd`** (the source a VM Tamanu server uses), so a k8s server and a VM server share one catalog entry and one policy per check — sync/FHIR health means the same thing regardless of substrate. `alertd` is therefore a source with both pushed and Canopy-injected origins.
+- **Harvest failure is a single Canopy-wide failure, not per-server noise.** A Canopy-wide check per cluster covers connection + permissions (modelled like the backup-storage-identity self-alert). When Canopy can't reach a cluster, that check is the actionable failure; the affected servers' pulled/harvested checks go **broken** (unconfirmed) but are graded so they don't fail, so the fleet isn't polluted.
 
 ## Check suite
 
