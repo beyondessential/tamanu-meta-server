@@ -59,8 +59,10 @@ fn validate_object_lock(
 	}
 }
 
-/// Raise the shared-identity self-alert (registers as an escalating
-/// failure → notifies immediately).
+/// Raise the shared-identity self-alert. A broken identity blocks every
+/// backup and restore in the fleet, but no live service is down, so it
+/// registers at a warning ceiling like the rest of the backup sphere — see
+/// the alerting section of the BKJ spec.
 async fn file_identity_alert(
 	db: &mut diesel_async::AsyncPgConnection,
 	msg: &str,
@@ -69,8 +71,8 @@ async fn file_identity_alert(
 		db,
 		refs::PREFLIGHT_IDENTITY,
 		CheckResult::Failed,
-		CheckResult::Failed,
-		true,
+		CheckResult::Warning,
+		false,
 		Some(refs::PREFLIGHT_IDENTITY_DOC),
 		"Canopy IRSA identity broken",
 		msg,
@@ -105,8 +107,8 @@ async fn recover_identity_alert(
 				title: None,
 				message: "caller identity ok",
 				detail: None,
-				default_ceiling: CheckResult::Failed,
-				default_escalates: true,
+				default_ceiling: CheckResult::Warning,
+				default_escalates: false,
 				documentation: Some(refs::PREFLIGHT_IDENTITY_DOC),
 			},
 		)
@@ -253,7 +255,7 @@ async fn deep_check_group(
 					title: None,
 					message: "maintenance-role access ok",
 					detail: None,
-					default_ceiling: CheckResult::Failed,
+					default_ceiling: CheckResult::Warning,
 					default_escalates: false,
 					documentation: Some(refs::PREFLIGHT_ASSUME_DOC),
 				},
@@ -273,7 +275,7 @@ async fn deep_check_group(
 					title: Some("backup maintenance-role access failed"),
 					message: &msg,
 					detail: None,
-					default_ceiling: CheckResult::Failed,
+					default_ceiling: CheckResult::Warning,
 					default_escalates: false,
 					documentation: Some(refs::PREFLIGHT_ASSUME_DOC),
 				},

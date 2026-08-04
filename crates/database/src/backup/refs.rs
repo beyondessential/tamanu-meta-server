@@ -5,6 +5,17 @@
 //! `silenced_refs` mechanism, and the UI / Slack reference them, so they are a
 //! contract: do not rename without a coordinated migration of any stored
 //! silences.
+//!
+//! **Severity rule (BKJ#alerting): a backup check never defaults to a
+//! failure.** A failure means a live service is down and gets a fast
+//! human response; a late or unverified backup is not that, and the fleet
+//! has layered backups so one missed run is not an emergency. Everything
+//! here registers at a warning ceiling and does not escalate, with exactly
+//! three exceptions — [`CORRUPTION`], [`ROTATION_BROKEN`], and
+//! [`PREFLIGHT_OBJECT_LOCK`] — where the backups are already gone,
+//! unrecoverable, or unprotected rather than merely late. Operators can
+//! raise any individual check to a failure through its policy; that is
+//! their call to make, not a default to ship.
 
 /// The event source for every backup alert. Re-exported from
 /// [`crate::statuses::CANOPY_SOURCE`] so both the reachability sweep and the
@@ -14,12 +25,12 @@ pub use crate::statuses::CANOPY_SOURCE;
 // --- per-server (obey the is_monitored gate via NewEvent::save) ---
 
 /// A prior successful backup exists but none recent (success older than 2×
-/// the expected interval). Server-scoped, `Error`.
+/// the expected interval). Server-scoped, `Warning`.
 pub const STALENESS: &str = "backup-staleness";
 
 /// No successful backup ever, and the server has been expected long enough
 /// (past the `max(min_first_seen, schedule_created)` anchor + grace).
-/// Server-scoped, `Error`.
+/// Server-scoped, `Warning`.
 pub const NEVER: &str = "backup-never";
 
 /// A fresh repo snapshot exists for the server's source but no recent run was
@@ -33,7 +44,7 @@ pub const RECONCILE_REPORT_GAP: &str = "backup-reconcile-report-gap";
 pub const RECONCILE_SIZE_MISMATCH: &str = "backup-reconcile-size-mismatch";
 
 /// A run reported success but no matching repo snapshot landed (the device
-/// lied or the upload didn't persist). Server-scoped, `Error`. Detecting it
+/// lied or the upload didn't persist). Server-scoped, `Warning`. Detecting it
 /// takes the group's repo inventory, but the finding is about the one server
 /// whose report didn't hold up, so it is filed against that server.
 pub const RECONCILE_MISSING: &str = "backup-reconcile-missing";
@@ -41,18 +52,20 @@ pub const RECONCILE_MISSING: &str = "backup-reconcile-missing";
 // --- group-level (page regardless of any member's is_monitored) ---
 
 /// A group whose last successful maintenance run is older than the
-/// maintenance-cadence threshold. Group-scoped, `Error`.
+/// maintenance-cadence threshold. Group-scoped, `Warning`.
 pub const MAINTENANCE_STALE: &str = "backup-maintenance-stale";
 
 /// A group whose most recently *finished* maintenance run failed. Distinct
 /// from [`MAINTENANCE_STALE`] (which fires on absence of success): this fires
-/// when maintenance is running but erroring. Group-scoped, `Error`. Clears
+/// when maintenance is running but erroring. Group-scoped, `Warning`. Clears
 /// when a newer run finishes successfully.
 pub const MAINTENANCE_ERROR: &str = "backup-maintenance-error";
 
 /// Repo corruption / poisoning detected by the inspection Job. Group-scoped,
-/// registers as an escalating failure. Raised by the inspection-Job component
-/// via [`crate::issues::file_check`]; this constant is the contract.
+/// `Error`, escalating — one of the three backup checks that defaults to a
+/// failure, because the backups are already damaged rather than late. Raised
+/// by the inspection-Job component via [`crate::issues::file_check`]; this
+/// constant is the contract.
 pub const CORRUPTION: &str = "backup-corruption";
 
 /// A rotation left the repo openable by neither the committed passphrase nor
@@ -62,21 +75,25 @@ pub const CORRUPTION: &str = "backup-corruption";
 pub const ROTATION_BROKEN: &str = "backup-rotation-broken";
 
 /// Canopy's own `sts:GetCallerIdentity` failed — the shared IRSA identity is
-/// broken. `Critical`. Filed once against the nil/meta server (one fact about
-/// canopy, not one per group); recovery also clears any group-scoped issues
-/// left from when this alert fanned out per group.
+/// broken, so no backup credential can be minted for anyone. `Warning`: it
+/// blocks the whole backup system without any live service being down. Filed
+/// once against the nil/meta server (one fact about canopy, not one per
+/// group); recovery also clears any group-scoped issues left from when this
+/// alert fanned out per group.
 pub const PREFLIGHT_IDENTITY: &str = "preflight-identity";
 
 /// Cross-account `AssumeRole` or the read-only no-op S3 call failed for a
-/// group (either the backup or restore leg). Group-scoped, `Error`.
+/// group (either the backup or restore leg). Group-scoped, `Warning`.
 pub const PREFLIGHT_ASSUME: &str = "preflight-assume";
 
 /// The bucket's Object-Lock configuration is missing or weakened (mode
-/// absent, or retention < 30 days). Group-scoped, `Critical`.
+/// absent, or retention < 30 days). Group-scoped, `Error`, escalating — one
+/// of the three backup checks that defaults to a failure: the backups that
+/// exist are no longer protected from deletion.
 pub const PREFLIGHT_OBJECT_LOCK: &str = "preflight-object-lock";
 
 /// PGRO reported a failed/stale restorability check for one replica.
-/// Server-scoped, `Error`; the ref carries the `(type, intent)` dimension so
+/// Server-scoped, `Warning`; the ref carries the `(type, intent)` dimension so
 /// each replica of a server recovers independently.
 pub const RESTORE_VERIFICATION: &str = "restore-verification";
 pub const MIGRATION_TEST: &str = "migration-test";
@@ -93,7 +110,7 @@ The server has backed this type up successfully before, but not recently: the la
 
 ## Results
 
-- **fail** — no successful run within 2\u{d7} the expected interval; recovers on the next successful run.
+- **warn** — no successful run within 2\u{d7} the expected interval; recovers on the next successful run.
 
 ## Solve
 
@@ -105,7 +122,7 @@ The server is expected to back this type up but has never reported a single succ
 
 ## Results
 
-- **fail** — no success ever, past the enrolment/schedule grace; recovers on the first successful run.
+- **warn** — no success ever, past the enrolment/schedule grace; recovers on the first successful run.
 
 ## Solve
 
@@ -141,7 +158,7 @@ The group's repository maintenance (compaction, blob GC) hasn't succeeded within
 
 ## Results
 
-- **fail** — last successful maintenance run is older than the cadence threshold; recovers on the next success.
+- **warn** — last successful maintenance run is older than the cadence threshold; recovers on the next success.
 
 ## Solve
 
@@ -153,7 +170,7 @@ The group's most recently finished repository maintenance run failed (distinct f
 
 ## Results
 
-- **fail** — latest finished run errored; clears when a newer run finishes successfully.
+- **warn** — latest finished run errored; clears when a newer run finishes successfully.
 
 ## Solve
 
@@ -165,7 +182,7 @@ A run reported success but no matching snapshot landed in the repository — the
 
 ## Results
 
-- **fail** — reported snapshot absent from the repo.
+- **warn** — reported snapshot absent from the repo.
 
 ## Solve
 
@@ -203,7 +220,7 @@ Canopy's own AWS identity (`sts:GetCallerIdentity` under the shared IRSA role) f
 
 ## Results
 
-- **fail** — the identity call errors. Escalates: every backup and restore across the fleet is blocked.
+- **warn** — the identity call errors. Every backup and restore across the fleet is blocked, but no live service is down.
 
 ## Solve
 
@@ -215,7 +232,7 @@ Cross-account `AssumeRole` (or the read-only no-op S3 probe) failed for this gro
 
 ## Results
 
-- **fail** — the group's role can't be assumed or can't reach its bucket.
+- **warn** — the group's role can't be assumed or can't reach its bucket.
 
 ## Solve
 
@@ -239,7 +256,7 @@ The managed restore replica for this (server, type, intent) reported a failed or
 
 ## Results
 
-- **fail** — the replica couldn't restore or verify the latest snapshot.
+- **warn** — the replica couldn't restore or verify the latest snapshot.
 
 ## Solve
 

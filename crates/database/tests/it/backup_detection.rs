@@ -210,10 +210,17 @@ async fn insert_backup_success_aged(
 /// if any.
 #[derive(QueryableByName, Debug)]
 struct IssueRow {
+	/// What the sweep observed. Unaffected by policy — a backup check still
+	/// observes a failure even though its ceiling caps the effect to a
+	/// warning.
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+	observed_result: Option<String>,
 	#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
 	effective_result: Option<String>,
 	#[diesel(sql_type = sql_types::Bool)]
 	active: bool,
+	#[diesel(sql_type = sql_types::Bool)]
+	escalates: bool,
 }
 
 async fn server_issue(
@@ -222,7 +229,7 @@ async fn server_issue(
 	r#ref: &str,
 ) -> Option<IssueRow> {
 	sql_query(
-		"SELECT effective_result, active FROM issues \
+		"SELECT observed_result, effective_result, active, escalates FROM issues \
 		 WHERE server_id = $1 AND source = $2 AND \"ref\" = $3",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
@@ -264,7 +271,7 @@ async fn group_issue(
 	r#ref: &str,
 ) -> Option<IssueRow> {
 	sql_query(
-		"SELECT effective_result, active FROM issues \
+		"SELECT observed_result, effective_result, active, escalates FROM issues \
 		 WHERE server_group_id = $1 AND source = $2 AND \"ref\" = $3",
 	)
 	.bind::<sql_types::Uuid, _>(group_id)
@@ -537,13 +544,21 @@ async fn sweep_files_staleness_for_monitored_server_with_old_success() {
 		let issue = server_issue(&mut conn, server_id, &sref)
 			.await
 			.expect("staleness issue filed");
-		assert_eq!(issue.effective_result.as_deref(), Some("failed"));
+		// The sweep still observes a failure; the shipped ceiling is what caps
+		// it to a warning, so an operator raising the ceiling gets the failure
+		// back without a code change.
+		assert_eq!(issue.observed_result.as_deref(), Some("failed"));
+		assert_eq!(
+			issue.effective_result.as_deref(),
+			Some("warning"),
+			"a late backup is not a live-service failure",
+		);
+		assert!(!issue.escalates);
 		assert!(issue.active, "staleness issue is active");
-		// Error opens an incident; monitored server contributes.
 		assert_eq!(
 			server_issue_open_links(&mut conn, server_id, &sref).await,
-			1,
-			"monitored staleness opens/joins an incident",
+			0,
+			"a warning does not open an incident on its own",
 		);
 	})
 	.await;
@@ -746,17 +761,21 @@ async fn reconcile_files_missing_when_report_fresh_but_no_snapshot() {
 		let issue = server_issue(&mut conn, server_id, &mref)
 			.await
 			.expect("reconcile-missing issue filed against the server it concerns");
-		assert_eq!(issue.effective_result.as_deref(), Some("failed"));
+		assert_eq!(issue.observed_result.as_deref(), Some("failed"));
+		assert_eq!(
+			issue.effective_result.as_deref(),
+			Some("warning"),
+			"no backup signal is a failure by default",
+		);
 		assert!(issue.active);
 		assert!(
 			group_issue(&mut conn, group_id, &mref).await.is_none(),
 			"the finding is about one server, not the group",
 		);
-		// A per-server Error on a monitored server still opens an incident.
 		assert_eq!(
 			server_issue_open_links(&mut conn, server_id, &mref).await,
-			1,
-			"reconcile-missing opens an incident",
+			0,
+			"a warning does not open an incident on its own",
 		);
 	})
 	.await;
@@ -815,7 +834,8 @@ async fn reconcile_files_missing_when_report_fresh_and_the_pair_has_no_snapshot_
 		let issue = server_issue(&mut conn, server_id, &mref)
 			.await
 			.expect("reconcile-missing issue filed for the pair with no snapshot");
-		assert_eq!(issue.effective_result.as_deref(), Some("failed"));
+		assert_eq!(issue.observed_result.as_deref(), Some("failed"));
+		assert_eq!(issue.effective_result.as_deref(), Some("warning"));
 		assert!(issue.active);
 	})
 	.await;
@@ -886,7 +906,8 @@ async fn reconcile_missing_is_per_server_not_shared_across_the_group() {
 		let broken = server_issue(&mut conn, broken_id, &mref)
 			.await
 			.expect("the server whose snapshot is missing holds the alert");
-		assert_eq!(broken.effective_result.as_deref(), Some("failed"));
+		assert_eq!(broken.observed_result.as_deref(), Some("failed"));
+		assert_eq!(broken.effective_result.as_deref(), Some("warning"));
 		assert!(
 			broken.active,
 			"the healthy server in the same group must not clear it",
@@ -1357,12 +1378,17 @@ async fn sweep_files_maintenance_error_when_latest_run_failed_then_clears_on_suc
 		let issue = group_issue(&mut conn, group_id, refs::MAINTENANCE_ERROR)
 			.await
 			.expect("maintenance-error issue filed");
-		assert_eq!(issue.effective_result.as_deref(), Some("failed"));
-		assert!(issue.active, "failure issue is active");
+		assert_eq!(issue.observed_result.as_deref(), Some("failed"));
+		assert_eq!(
+			issue.effective_result.as_deref(),
+			Some("warning"),
+			"a repository that misses maintenance stays fully restorable",
+		);
+		assert!(issue.active, "the issue is still active");
 		assert_eq!(
 			group_issue_open_links(&mut conn, group_id, refs::MAINTENANCE_ERROR).await,
-			1,
-			"maintenance failure opens an incident",
+			0,
+			"a warning does not open an incident on its own",
 		);
 		// Staleness must NOT fire for a freshly-created group.
 		assert!(
@@ -1450,6 +1476,107 @@ async fn in_flight_run_does_not_clear_an_open_maintenance_error() {
 				.active,
 			"an in-flight run must not clear the failure issue",
 		);
+	})
+	.await;
+}
+
+/// The severity rule, checked against what the sweeps actually seed into the
+/// catalog rather than against any single assertion: no backup check ships as
+/// a failure, and none escalates. A check that ships as a failure sends tech
+/// support looking for a live-service outage that isn't happening.
+///
+/// Only the checks reachable from this crate's sweeps are covered — corruption,
+/// rotation-broken, and object-lock are filed from the `jobs` crate and are the
+/// three deliberate exceptions, so they are listed here and exempted rather
+/// than asserted on.
+// spec: BKJ#alerting
+#[tokio::test(flavor = "multi_thread")]
+async fn backup_sweeps_seed_no_check_that_defaults_to_a_failure() {
+	#[derive(QueryableByName, Debug)]
+	struct PolicyRow {
+		#[diesel(sql_type = sql_types::Text)]
+		check_name: String,
+		#[diesel(sql_type = sql_types::Text)]
+		ceiling: String,
+		#[diesel(sql_type = sql_types::Bool)]
+		escalates: bool,
+	}
+
+	/// The only backup-sphere checks allowed to default to an escalating
+	/// failure: the backups are already gone, unrecoverable, or unprotected,
+	/// rather than merely late. Adding to this list is a decision to make with
+	/// the people who answer the alerts, not a default to ship.
+	const MAY_FAIL: [&str; 3] = [
+		refs::CORRUPTION,
+		refs::ROTATION_BROKEN,
+		refs::PREFLIGHT_OBJECT_LOCK,
+	];
+
+	TestDb::run(|mut conn, _url| async move {
+		let pg = BackupType::TamanuPostgres;
+		let interval = SignedDuration::from_hours(12);
+		let group_id = insert_group(&mut conn, "g").await;
+		let stale_server = insert_server(&mut conn, group_id, true).await;
+		let never_server = insert_server(&mut conn, group_id, true).await;
+		let device_id = insert_device(&mut conn).await;
+
+		// Nine days: past MAINTENANCE_STALE_AFTER, so the group with no
+		// maintenance run at all also files maintenance-stale.
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(9 * 24)).await;
+		insert_schedule(&mut conn, group_id, &pg, interval).await;
+		enable_capability(&mut conn, stale_server, &pg).await;
+		enable_capability(&mut conn, never_server, &pg).await;
+
+		// One server with an old success (staleness), one that never succeeded
+		// (never), and a group with no maintenance run (maintenance-stale).
+		insert_backup_success_aged(
+			&mut conn,
+			device_id,
+			group_id,
+			stale_server,
+			&pg,
+			SignedDuration::from_hours(72),
+		)
+		.await;
+
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan");
+		database::backup::staleness::sweep(&mut conn, &rows)
+			.await
+			.expect("staleness sweep");
+		database::backup::reconcile::sweep(&mut conn, &rows)
+			.await
+			.expect("reconcile sweep");
+
+		let catalog: Vec<PolicyRow> = sql_query(
+			"SELECT check_name, ceiling, escalates FROM check_policies \
+			 WHERE source = $1 ORDER BY check_name",
+		)
+		.bind::<sql_types::Text, _>(refs::CANOPY_SOURCE)
+		.load(&mut conn)
+		.await
+		.expect("load catalog");
+
+		let covered: Vec<&PolicyRow> = catalog
+			.iter()
+			.filter(|r| !MAY_FAIL.contains(&r.check_name.as_str()))
+			.collect();
+		assert!(
+			covered.len() >= 3,
+			"the sweeps should have seeded the staleness, never, and \
+			 maintenance checks; got {:?}",
+			catalog.iter().map(|r| &r.check_name).collect::<Vec<_>>(),
+		);
+		for row in covered {
+			assert_eq!(
+				(row.ceiling.as_str(), row.escalates),
+				("warning", false),
+				"{} must ship as a non-escalating warning: a failure means a \
+				 live service is down, and a backup problem is not that",
+				row.check_name,
+			);
+		}
 	})
 	.await;
 }

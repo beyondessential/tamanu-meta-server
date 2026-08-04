@@ -158,7 +158,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 						detail: Some(serde_json::json!({
 							"type": row.r#type.to_string(),
 						})),
-						default_ceiling: CheckResult::Failed,
+						default_ceiling: CheckResult::Warning,
 						default_escalates: false,
 						documentation: Some(refs::RECONCILE_MISSING_DOC),
 					},
@@ -188,7 +188,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 								"Server {label} backup report and repo snapshot agree again"
 							),
 							detail: None,
-							default_ceiling: CheckResult::Failed,
+							default_ceiling: CheckResult::Warning,
 							default_escalates: false,
 							documentation: Some(refs::RECONCILE_MISSING_DOC),
 						},
