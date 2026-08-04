@@ -521,7 +521,9 @@ impl NewEvent {
 /// Open (or recover) a **group-scoped** issue, bypassing the per-server
 /// `is_monitored` gate. This is the single entrypoint for control-plane
 /// concerns that are not attributable to any one server — backup corruption,
-/// upstream preflight failures, reconcile-missing, restore-verification.
+/// maintenance failures, upstream preflight failures. A finding that names a
+/// server belongs on that server even when detecting it took group-wide
+/// state; scope is not the lever for making something page.
 ///
 /// Mirrors [`NewEvent::save`] but keys the issue on
 /// `(server_group_id, source, ref)` instead of `(server_id, …)`:

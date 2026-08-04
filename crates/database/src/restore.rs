@@ -465,7 +465,7 @@ impl RestoreConsumerCapability {
 	}
 }
 
-/// The stable group-level alert ref for one replica's restore-health. Per
+/// The stable alert ref for one replica's restore-health. Per
 /// `(server, type, intent)` so each replica recovers independently (one
 /// intent's healthy report must not clear another's failure on the same
 /// server).
