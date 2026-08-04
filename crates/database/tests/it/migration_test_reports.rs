@@ -585,7 +585,7 @@ async fn restore_check(conn: &mut AsyncPgConnection, server: Uuid) -> Option<Fil
 	sql_query(
 		"SELECT i.observed_result AS observed, i.effective_result AS effective, i.escalates
 		 FROM issues i
-		 WHERE i.server_id = $1 AND i.ref LIKE 'restore-verification:%' AND i.active = true",
+		 WHERE i.server_id = $1 AND i.ref = 'restore-verification' AND i.active = true",
 	)
 	.bind::<sql_types::Uuid, _>(server)
 	.get_result(conn)

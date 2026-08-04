@@ -158,6 +158,26 @@ fn descriptor(intent: &str, semantics: &[&str]) -> IntentDescriptor {
 	}
 }
 
+/// Declare the replica a report is about, group-wide. The ingest only accepts a
+/// report a declaration authorizes, and the sweep only derives instances for
+/// declared replicas, so a report standing on its own is a state production
+/// cannot reach.
+async fn declare(conn: &mut AsyncPgConnection, consumer: Uuid, group: Uuid, intent: &str) -> Uuid {
+	RestoreReplica::create(
+		conn,
+		new_replica(
+			consumer,
+			group,
+			None,
+			RestoreIntent::from(intent),
+			&format!("{intent}-all"),
+		),
+	)
+	.await
+	.expect("declare replica")
+	.id
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn create_list_get_roundtrip() {
 	TestDb::run(|mut conn, _url| async move {
@@ -435,8 +455,9 @@ async fn record_report_raises_then_recovers() {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
 		let server = insert_server(&mut conn, group).await;
+		declare(&mut conn, consumer, group, "verify").await;
 
-		// A failed report raises a per-(server,type,intent) group issue.
+		// A failed report degrades the server's restore-verification check.
 		BackupRestoreCheck::record_report(
 			&mut conn,
 			new_check(
@@ -487,6 +508,7 @@ async fn record_report_files_server_scoped_with_stable_name() {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
 		let server = insert_server(&mut conn, group).await;
+		declare(&mut conn, consumer, group, "verify").await;
 
 		BackupRestoreCheck::record_report(
 			&mut conn,
@@ -501,9 +523,13 @@ async fn record_report_files_server_scoped_with_stable_name() {
 		)
 		.await
 		.expect("record failure");
+		database::restore::sweep_overdue(&mut conn)
+			.await
+			.expect("sweep");
 
-		// The check is server-scoped with a stable name: the server is the
-		// scope (issues.server_id), not baked into the check name.
+		// The check is server-scoped and named for the condition alone: the
+		// server is the scope (issues.server_id) and the replica an instance,
+		// neither of them baked into the check name.
 		let rows: Vec<VerifRow> = sql_query(
 			"SELECT check_name, server_id, server_group_id FROM issues \
 			 WHERE source = 'canopy' AND ref = 'restore-verification' AND active",
@@ -512,10 +538,7 @@ async fn record_report_files_server_scoped_with_stable_name() {
 		.await
 		.expect("load");
 		assert_eq!(rows.len(), 1);
-		assert_eq!(
-			rows[0].check_name,
-			"restore-verification:tamanu-postgres:verify",
-		);
+		assert_eq!(rows[0].check_name, "restore-verification");
 		assert_eq!(rows[0].server_id, Some(server));
 		assert_eq!(rows[0].server_group_id, None);
 	})
@@ -528,6 +551,7 @@ async fn record_report_unhealthy_success_still_raises() {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
 		let server = insert_server(&mut conn, group).await;
+		declare(&mut conn, consumer, group, "verify").await;
 
 		// Restore succeeded but the database wasn't healthy → still a failure.
 		BackupRestoreCheck::record_report(
@@ -925,7 +949,9 @@ async fn disabling_recovers_the_stale_alert() {
 }
 
 /// Re-enabling is not a recovery event of its own: the sweep picks the
-/// declaration back up and re-raises if it is still overdue.
+/// declaration back up and the replica's latest report is still the last word on
+/// it, so a finding that stood before the replica was decommissioned stands
+/// again after it is put back.
 #[tokio::test(flavor = "multi_thread")]
 async fn re_enabling_does_not_recover_anything() {
 	TestDb::run(|mut conn, _url| async move {
@@ -944,16 +970,6 @@ async fn re_enabling_does_not_recover_anything() {
 		)
 		.await
 		.expect("create");
-		let disabled = RestoreReplica::update(
-			&mut conn,
-			r.id,
-			RestoreReplicaUpdate {
-				enabled: false,
-				..update_from(&r)
-			},
-		)
-		.await
-		.expect("disable");
 
 		BackupRestoreCheck::record_report(
 			&mut conn,
@@ -970,6 +986,22 @@ async fn re_enabling_does_not_recover_anything() {
 		.expect("record failure");
 		assert_eq!(active_restore_issues(&mut conn, group).await, 1);
 
+		let disabled = RestoreReplica::update(
+			&mut conn,
+			r.id,
+			RestoreReplicaUpdate {
+				enabled: false,
+				..update_from(&r)
+			},
+		)
+		.await
+		.expect("disable");
+		assert_eq!(
+			active_restore_issues(&mut conn, group).await,
+			0,
+			"decommissioning the replica takes its finding with it"
+		);
+
 		RestoreReplica::update(
 			&mut conn,
 			disabled.id,
@@ -983,7 +1015,7 @@ async fn re_enabling_does_not_recover_anything() {
 		assert_eq!(
 			active_restore_issues(&mut conn, group).await,
 			1,
-			"re-enabling must not silently clear a live alert"
+			"re-enabling is not a recovery: the failed report still stands"
 		);
 	})
 	.await;

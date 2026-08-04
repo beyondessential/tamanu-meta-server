@@ -1,0 +1,4 @@
+-- Irreversible: the per-(type, intent) rows that lost the collapse are deleted,
+-- and which pair each survivor came from isn't recoverable from the collapsed
+-- name. A silence's guard could be read back out of the rewritten rules, but the
+-- ceiling it gave up cannot. Nothing to restore.

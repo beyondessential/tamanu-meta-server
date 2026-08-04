@@ -649,6 +649,31 @@ pub(crate) async fn server_check_observed_degraded(
 	Ok(n > 0)
 }
 
+/// Every server with a currently-open, active `(canopy, ref)` issue for one of
+/// these checks.
+///
+/// A sweep that re-derives its checks from current state has to visit these
+/// servers even when it derives nothing for them: a check whose last instance is
+/// gone is recovered by being filed as passing, and a server nobody visits is a
+/// check left open with nothing that could ever clear it.
+pub(crate) async fn servers_with_open_checks(
+	db: &mut AsyncPgConnection,
+	checks: &[&str],
+) -> Result<Vec<Uuid>> {
+	use crate::schema::issues::dsl;
+	let ids: Vec<Option<Uuid>> = dsl::issues
+		.select(dsl::server_id)
+		.distinct()
+		.filter(dsl::server_id.is_not_null())
+		.filter(dsl::source.eq(refs::CANOPY_SOURCE))
+		.filter(dsl::ref_.eq_any(checks.to_vec()))
+		.filter(dsl::active.eq(true))
+		.filter(dsl::resolved_at.is_null())
+		.load(db)
+		.await?;
+	Ok(ids.into_iter().flatten().collect())
+}
+
 /// Whether a group-scoped `(canopy, ref)` issue is currently open + active.
 pub(crate) async fn open_group_issue_active(
 	db: &mut AsyncPgConnection,

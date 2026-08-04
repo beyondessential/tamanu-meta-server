@@ -269,19 +269,19 @@ impl RestoreReplica {
 			Err(e) => return Err(AppError::from(e)),
 		};
 
-		// Nothing to clear by hand when the scope moves, the declaration is
-		// disabled, or it is deleted: `sweep_overdue` rebuilds each server's
-		// restore checks from its live declarations every pass, so a
-		// declaration that stops covering a server simply stops being one of
-		// its instances and the check re-files without it. That is what
-		// recomputing buys over accumulating.
+		// Nothing to clear by hand when the scope moves or the declaration is
+		// disabled: `sweep_overdue` re-derives each server's restore checks
+		// every pass, and a key stops being derivable once neither a
+		// declaration nor a still-coverable report yields it, so the check
+		// re-files without it. That is what recomputing buys over accumulating.
 		Ok(result)
 	}
 
 	/// Delete a declaration. Its restore checks need no explicit recovery: the
-	/// next [`sweep_overdue`] pass rebuilds each server's checks from its live
-	/// declarations, so a deleted one stops being an instance and the check
-	/// re-files without it.
+	/// next [`sweep_overdue`] pass re-derives each server's checks, and with the
+	/// declaration gone its key is derivable only while another declaration
+	/// still covers the `(group, type)` a report could arrive on — so a replica
+	/// nothing tracks any more drops out and the check re-files without it.
 	///
 	/// Restore-health reports the declaration collected are retained: the FK
 	/// from `backup_restore_checks` is `ON DELETE SET NULL`, so each report
@@ -296,9 +296,8 @@ impl RestoreReplica {
 			if n == 0 {
 				return Err(AppError::DatabaseQuery(DieselError::NotFound));
 			}
-			// See `update`: the next sweep rebuilds the server's restore
-			// checks from its live declarations, so a deleted one drops out on
-			// its own.
+			// See `update`: the next sweep re-derives the server's restore
+			// checks, so a deleted declaration drops out on its own.
 			Ok(())
 		})
 		.await
@@ -696,21 +695,23 @@ impl BackupRestoreCheck {
 			.map_err(AppError::from)
 	}
 
-	/// The latest report per `(server, type, intent)` in a group, whatever its
-	/// outcome — what the sweep needs to know each replica's *current* state,
-	/// as opposed to when it was last healthy.
+	/// The latest report per `(server, type, intent)` across the fleet, whatever
+	/// its outcome — what the sweep needs to know each replica's *current*
+	/// state, as opposed to when it was last healthy.
+	///
+	/// Fleet-wide rather than per group because the sweep derives its instances
+	/// from these keys as well as from declarations, so it cannot know which
+	/// groups to ask about until it has them.
 	///
 	/// Carries the whole row so the redaction fields come along: a report says
 	/// both whether the restore came up healthy and whether its masking
 	/// applied, and those are two checks off one report.
-	pub async fn latest_by_key_for_group(
+	pub async fn latest_by_key(
 		db: &mut AsyncPgConnection,
-		group_id: Uuid,
 	) -> Result<HashMap<(Uuid, BackupType, RestoreIntent), Self>> {
 		use crate::schema::backup_restore_checks::dsl;
 		let rows: Vec<Self> = dsl::backup_restore_checks
 			.select(Self::as_select())
-			.filter(dsl::group_id.eq(group_id))
 			.filter(dsl::server_id.is_not_null())
 			.distinct_on((dsl::server_id, dsl::type_, dsl::intent))
 			.order_by((
@@ -718,6 +719,7 @@ impl BackupRestoreCheck {
 				dsl::type_,
 				dsl::intent,
 				dsl::observed_at.desc(),
+				dsl::id.desc(),
 			))
 			.load(db)
 			.await?;
@@ -796,15 +798,72 @@ impl BackupRestoreCheck {
 	}
 }
 
-/// Overdue restore-verification sweep: for every enabled declaration with an
-/// overdue bound whose intent the consumer still advertises with the `check`
-/// semantic, raise the `restore-verification` alert for any concrete
-/// `(server, type, intent)` that is overdue. Overdue is measured per the intent's
-/// semantics: a `once` intent is overdue when the latest snapshot has gone
-/// unverified for longer than the bound; any other `check` intent is overdue
-/// when it has no healthy report within the bound. Recovery is driven by the
-/// next healthy report ([`BackupRestoreCheck::record_report`]), so this only
-/// raises. Returns the number of overdue alerts filed.
+/// One replica key: a `(type, intent)` pair on one server. Both dimensions are
+/// open-ended strings, so the set of keys is discovered, never enumerated.
+type ReplicaKey = (Uuid, BackupType, RestoreIntent);
+
+/// What the sweep has gathered about one replica key before it grades it.
+#[derive(Default)]
+struct KeyWork {
+	/// The operator's name for the declaration covering this key, when one does.
+	declared_as: Option<String>,
+	/// A `migrate` declaration covers it, so restore health is not what it is
+	/// for — whether its candidate version applies is.
+	migrates: bool,
+	/// Whether the key's latest report is allowed to drive its checks: either a
+	/// declaration covers the key, or its `(group, type)` is still covered, so
+	/// another report could yet arrive to change the answer.
+	reports_count: bool,
+	/// Past its declaration's overdue bound.
+	overdue: bool,
+	/// That bound was measured against the latest snapshot (a `once` intent).
+	once: bool,
+	/// A `migrate` declaration's candidate has gone untried past the bound:
+	/// `(target version, snapshot)`.
+	untried: Option<(String, String)>,
+}
+
+/// The instances one server's three restore checks are filed from.
+#[derive(Default)]
+struct ServerInstances {
+	verification: Vec<CheckInstance>,
+	redaction: Vec<CheckInstance>,
+	migration: Vec<CheckInstance>,
+}
+
+/// The restore checks' sole filer: re-derive every server's
+/// `restore-verification`, `redaction` and `migration-test` checks from what
+/// Canopy currently holds, and file the ones that have something to say.
+///
+/// Each of a server's replicas is one instance of each check rather than a
+/// check of its own (see the Names section of the CHK spec), and an instance's
+/// result is the worse of what its latest report said and whether it has gone
+/// past its declaration's overdue bound: one judgement about the replica, not
+/// two writers racing on one name.
+///
+/// A replica key is derived from recorded facts as much as from live
+/// declarations, because a finding has to survive the thing that produced it
+/// going quiet. A key `(server, type, intent)` yields instances when:
+///
+/// - an enabled declaration covers it on that server, whatever its consumer
+///   currently advertises. A capability that stops being advertised is a gap,
+///   surfaced as one; it is not grounds for a standing finding to disappear.
+///   Only the overdue judgement needs the intent's semantics, so that is the
+///   only thing gated on them. Or,
+/// - Canopy holds a report for it and an enabled declaration still asks for that
+///   replica somewhere in the server's group, so a report about a server the
+///   declaration does not currently name still counts. Once no declaration asks
+///   for the replica at all, nothing can report on it again
+///   ([`RestoreReplica::authorizes`] is what a consumer has to satisfy to
+///   report), so a finding held on it could never recover: it stops being
+///   derived rather than being pinned open with no way out. Or,
+/// - Canopy holds a migration verdict for it, which yields a `migration-test`
+///   instance whatever declares the replica now. A failed migration is a fact
+///   about a candidate version measured against this deployment's data, not a
+///   deadline on a declaration, and what supersedes it is a later verdict.
+///
+/// Returns the number of checks this pass left degraded.
+// spec: RST#alerting
 pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 	use crate::schema::restore_replicas::dsl;
 	let now = Timestamp::now();
@@ -812,12 +871,28 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 	// Every enabled declaration, not just the ones with an overdue bound: this
 	// sweep is the sole filer of the restore checks, so a declaration without a
 	// bound still needs its latest report's health reflected. A missing bound
-	// means "never overdue", not "never checked".
+	// means "never overdue", not "never checked". Ordered so that when two
+	// declarations cover one key, which of them names the instance is stable.
 	let declarations: Vec<RestoreReplica> = dsl::restore_replicas
 		.select(RestoreReplica::as_select())
 		.filter(dsl::enabled.eq(true))
+		.order_by((dsl::name, dsl::id))
 		.load(db)
 		.await?;
+
+	// The recorded facts, fleet-wide and one query each.
+	let latest_reports = BackupRestoreCheck::latest_by_key(db).await?;
+	let latest_verdicts = crate::migration_tests::latest_verdict_by_key(db).await?;
+
+	// The replicas an enabled declaration still asks for, wherever in their group
+	// they sit. A report is derivable into an instance while its replica is still
+	// declared somewhere in the group, so a report about a server the declaration
+	// does not currently name is not lost — but a replica nothing declares any
+	// more stops being derived.
+	let declared: HashSet<(Uuid, BackupType, RestoreIntent)> = declarations
+		.iter()
+		.map(|d| (d.group_id, d.r#type.clone(), d.intent.clone()))
+		.collect();
 
 	// Per-consumer descriptors (to read semantics) and per-group anchors.
 	let mut capability_cache: HashMap<Uuid, HashMap<RestoreIntent, IntentDescriptor>> =
@@ -830,24 +905,11 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 	> = HashMap::new();
 	let mut latest_snapshot_cache: HashMap<Uuid, HashMap<(Uuid, BackupType), BackupRun>> =
 		HashMap::new();
-	let mut latest_report_cache: HashMap<
-		Uuid,
-		HashMap<(Uuid, BackupType, RestoreIntent), BackupRestoreCheck>,
-	> = HashMap::new();
 
-	// Instances accumulate per (server, check) and are filed once at the end:
-	// one restore-verification check per server, with its replicas as
-	// instances, rather than one check per (type, intent). See the Names
-	// section of the CHK spec.
-	let mut verification: HashMap<Uuid, Vec<CheckInstance>> = HashMap::new();
-	let mut redaction: HashMap<Uuid, Vec<CheckInstance>> = HashMap::new();
-	let mut migration: HashMap<Uuid, Vec<CheckInstance>> = HashMap::new();
-	let mut server_order: Vec<Uuid> = Vec::new();
-	let mut seen_servers: HashSet<Uuid> = HashSet::new();
+	let mut work: HashMap<ReplicaKey, KeyWork> = HashMap::new();
+	let mut servers: HashMap<Uuid, crate::servers::Server> = HashMap::new();
 
-	for d in declarations {
-		// Skip declarations the consumer can't satisfy — those are gaps, not
-		// restore-health findings. Only `check` intents are held to a bound.
+	for d in &declarations {
 		let capabilities = match capability_cache.entry(d.consumer_device_id) {
 			Entry::Occupied(e) => e.into_mut(),
 			Entry::Vacant(e) => e.insert(
@@ -858,27 +920,21 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 					.collect(),
 			),
 		};
-		let Some(descriptor) = capabilities.get(&d.intent) else {
-			continue;
-		};
-		if !descriptor.has_semantic(semantics::CHECK) {
-			continue;
-		}
-		let once = descriptor.has_semantic(semantics::ONCE);
-		let migrates = descriptor.has_semantic(semantics::MIGRATE);
+		let descriptor = capabilities.get(&d.intent);
+		let checks = descriptor.is_some_and(|desc| desc.has_semantic(semantics::CHECK));
+		let once = descriptor.is_some_and(|desc| desc.has_semantic(semantics::ONCE));
+		let migrates = descriptor.is_some_and(|desc| desc.has_semantic(semantics::MIGRATE));
 
-		let servers: Vec<crate::servers::Server> = match d.server_id {
-			Some(sid) => {
-				let s = crate::servers::Server::get_by_id(db, sid).await.ok();
-				match s {
-					Some(s) if s.group_id == Some(d.group_id) && s.deleted_at.is_none() => {
-						vec![s]
-					}
-					_ => vec![],
-				}
-			}
+		let covered_servers: Vec<crate::servers::Server> = match d.server_id {
+			Some(sid) => match crate::servers::Server::get_by_id(db, sid).await.ok() {
+				Some(s) if s.group_id == Some(d.group_id) && s.deleted_at.is_none() => vec![s],
+				_ => vec![],
+			},
 			None => crate::servers::Server::list_live_in_group(db, d.group_id).await?,
 		};
+		if covered_servers.is_empty() {
+			continue;
+		}
 
 		if let Entry::Vacant(e) = healthy_cache.entry(d.group_id) {
 			e.insert(BackupRestoreCheck::latest_healthy_by_key_for_group(db, d.group_id).await?);
@@ -891,147 +947,330 @@ pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
 				d.group_id,
 				BackupRun::latest_success_by_server_type_for_group(db, d.group_id).await?,
 			);
-			latest_report_cache.insert(
-				d.group_id,
-				BackupRestoreCheck::latest_by_key_for_group(db, d.group_id).await?,
-			);
 		}
 
-		for server in servers {
+		for server in covered_servers {
 			let sid = server.id;
-			if seen_servers.insert(sid) {
-				server_order.push(sid);
-			}
-			let label = replica_label(&d);
 			let key = (sid, d.r#type.clone(), d.intent.clone());
-			let latest = latest_report_cache[&d.group_id].get(&key);
 
-			if migrates {
-				let instance = migration_instance(
-					db,
-					&d,
-					&server,
-					&label,
-					&latest_snapshot_cache[&d.group_id],
-					now,
-					d.overdue_after,
-				)
-				.await?;
-				if let Some(instance) = instance {
-					migration.entry(sid).or_default().push(instance);
-				}
-				continue;
-			}
-
+			// A `migrate` intent is overdue on its own terms: the question is
+			// whether the candidate version has been tried against the latest
+			// snapshot, not whether the replica restored.
+			let untried = if migrates && checks {
+				untried_candidate(db, d, &server, &latest_snapshot_cache[&d.group_id], now).await?
+			} else {
+				None
+			};
 			// Overdue is a property of the bound, so a declaration without one
 			// is never overdue — but its latest report's health still counts.
-			let overdue = match d.overdue_after {
-				None => false,
-				Some(overdue_after) if once => {
-					// A `once` intent is overdue only when a snapshot exists to
-					// verify, it is not the last one verified, and it has stood
-					// past the bound.
-					match latest_snapshot_cache[&d.group_id].get(&(sid, d.r#type.clone())) {
-						None => false,
-						Some(run) => {
-							let verified = verified_snapshot_cache[&d.group_id].get(&key);
-							let already = matches!(
-								(verified, run.snapshot_id.as_ref()),
-								(Some(v), Some(s)) if v == s
-							);
-							// Measured from the report, not `run.anchor()`: the
-							// question is how long this snapshot has gone
-							// unverified since it became available to verify,
-							// which is when it landed — not how old the data
-							// inside it is.
-							!already && now.duration_since(run.reported_at) > overdue_after.0
-						}
-					}
-				}
-				Some(overdue_after) => match healthy_cache[&d.group_id].get(&key) {
-					Some(last) => now.duration_since(*last) > overdue_after.0,
-					None => true,
-				},
+			let overdue = match (migrates, checks, d.overdue_after) {
+				(false, true, Some(bound)) => is_overdue(
+					&key,
+					bound,
+					once,
+					now,
+					&healthy_cache[&d.group_id],
+					&verified_snapshot_cache[&d.group_id],
+					&latest_snapshot_cache[&d.group_id],
+				),
+				_ => false,
 			};
 
-			// The replica's state is the worse of what its latest report said
-			// and whether it has gone overdue. These used to be two writers
-			// racing on one check name; now they are one instance's result.
-			let reported_unhealthy =
-				latest.is_some_and(|r| r.outcome != RunOutcome::Success || !r.replica_healthy);
-			let observed = if reported_unhealthy || overdue {
-				CheckResult::Failed
-			} else {
-				CheckResult::Passed
-			};
-			let why = if reported_unhealthy {
-				latest
-					.and_then(|r| r.error.clone())
-					.unwrap_or_else(|| "restored database did not come up healthy".into())
-			} else if overdue && once {
-				"latest snapshot not verified within its overdue bound".into()
-			} else if overdue {
-				"no healthy restore verification within its overdue bound".into()
-			} else {
-				"healthy".into()
-			};
-			verification.entry(sid).or_default().push(CheckInstance {
-				label: label.clone(),
-				observed,
-				detail: Some(serde_json::json!({
-					"type": d.r#type.to_string(),
-					"intent": d.intent.to_string(),
-					"replica": d.name,
-					"snapshot_id": latest.and_then(|r| r.snapshot_id.clone()),
-					"overdue": overdue,
-					"latest_snapshot_unverified": overdue && once,
-					"why": why,
-				})),
-			});
-
-			// Redaction is its own signal off the same report: a replica can
-			// restore healthily and still come up with data that was meant to
-			// be masked and isn't. Only a declaration that redacts has one.
-			if d.redacts {
-				if let Some(instance) = redaction_instance(&d, &label, latest) {
-					redaction.entry(sid).or_default().push(instance);
-				}
+			servers.entry(sid).or_insert(server);
+			let w = work.entry(key).or_default();
+			if w.declared_as.is_none() {
+				w.declared_as = Some(d.name.clone());
+			}
+			w.reports_count = true;
+			w.migrates |= migrates;
+			w.overdue |= overdue;
+			w.once |= overdue && once;
+			if untried.is_some() {
+				w.untried = untried;
 			}
 		}
 	}
 
-	let mut filed = 0usize;
-	for sid in server_order {
-		let label = crate::backup::staleness::server_label(
-			&crate::servers::Server::get_by_id(db, sid).await?,
+	// Keys Canopy holds a report for on a server no declaration currently names,
+	// which stay derivable while the replica itself is still declared.
+	for (key, report) in &latest_reports {
+		let declaration = (
+			report.group_id,
+			report.r#type.clone(),
+			report.intent.clone(),
 		);
-		if let Some(instances) = verification.remove(&sid) {
-			filed += file_verification(db, sid, &label, instances).await?;
+		if work.contains_key(key) || !declared.contains(&declaration) {
+			continue;
 		}
-		if let Some(instances) = redaction.remove(&sid) {
-			filed += file_redaction(db, sid, &label, instances).await?;
+		if live_server(db, &mut servers, key.0).await?.is_none() {
+			continue;
 		}
-		if let Some(instances) = migration.remove(&sid) {
-			filed += file_migration(db, sid, &label, instances).await?;
+		work.entry(key.clone()).or_default().reports_count = true;
+	}
+
+	// Keys with a recorded verdict, which stand whatever covers them now.
+	for key in latest_verdicts.keys() {
+		if work.contains_key(key) {
+			continue;
+		}
+		if live_server(db, &mut servers, key.0).await?.is_none() {
+			continue;
+		}
+		work.entry(key.clone()).or_default();
+	}
+
+	// Grade every key into its server's instances, in a stable order so a
+	// check's message and detail don't reshuffle between passes.
+	let mut keys: Vec<ReplicaKey> = work.keys().cloned().collect();
+	keys.sort_by_key(|(sid, r#type, intent)| (*sid, r#type.to_string(), intent.to_string()));
+
+	let mut per_server: HashMap<Uuid, ServerInstances> = HashMap::new();
+	let mut server_order: Vec<Uuid> = Vec::new();
+	for key in keys {
+		let w = &work[&key];
+		let (sid, r#type, intent) = (key.0, &key.1, &key.2);
+		let label = match &w.declared_as {
+			Some(name) => format!("{name} ({type} / {intent})"),
+			None => format!("{type} / {intent}"),
+		};
+		let latest = if w.reports_count {
+			latest_reports.get(&key)
+		} else {
+			None
+		};
+		let instances = per_server.entry(sid).or_insert_with(|| {
+			server_order.push(sid);
+			ServerInstances::default()
+		});
+
+		// A declaration for something other than migrating is a replica whose
+		// restore health is expected; so is any key with a report to read.
+		if (w.declared_as.is_some() && !w.migrates) || latest.is_some() {
+			instances
+				.verification
+				.push(verification_instance(&key, &label, w, latest));
+		}
+		if let Some(instance) = redaction_instance(&key, &label, w, latest) {
+			instances.redaction.push(instance);
+		}
+		if let Some(instance) = migration_instance(&key, &label, w, latest_verdicts.get(&key)) {
+			instances.migration.push(instance);
 		}
 	}
 
-	Ok(filed)
+	// Servers whose checks are open but which derived nothing this pass: their
+	// last replica is gone, and a server nobody visits is a check left open with
+	// nothing that could ever clear it.
+	for sid in crate::backup::staleness::servers_with_open_checks(
+		db,
+		&[
+			refs::RESTORE_VERIFICATION,
+			refs::REDACTION,
+			refs::MIGRATION_TEST,
+		],
+	)
+	.await?
+	{
+		if per_server.contains_key(&sid) || live_server(db, &mut servers, sid).await?.is_none() {
+			continue;
+		}
+		per_server.insert(sid, ServerInstances::default());
+		server_order.push(sid);
+	}
+
+	let mut degraded = 0usize;
+	for sid in server_order {
+		let found = per_server.remove(&sid).expect("entered with its server");
+		let label = crate::backup::staleness::server_label(
+			servers.get(&sid).expect("cached when the key was derived"),
+		);
+		degraded += file_verification(db, sid, &label, found.verification).await?;
+		degraded += file_redaction(db, sid, &label, found.redaction).await?;
+		degraded += file_migration(db, sid, &label, found.migration).await?;
+	}
+
+	Ok(degraded)
 }
 
-/// How one replica is named in a check's message and detail: the operator's own
-/// label for the declaration, qualified by what it covers, since a server can
-/// have several replicas of the same type under different intents.
-fn replica_label(d: &RestoreReplica) -> String {
-	format!("{} ({} / {})", d.name, d.r#type, d.intent)
+/// A live server by id, cached across the sweep. `None` when it is gone or
+/// soft-deleted, in which case its keys are not worth deriving: nothing holds a
+/// check against a server that isn't there.
+async fn live_server<'a>(
+	db: &mut AsyncPgConnection,
+	cache: &'a mut HashMap<Uuid, crate::servers::Server>,
+	server_id: Uuid,
+) -> Result<Option<&'a crate::servers::Server>> {
+	if let Entry::Vacant(e) = cache.entry(server_id) {
+		match crate::servers::Server::get_by_id(db, server_id).await {
+			Ok(server) if server.deleted_at.is_none() => {
+				e.insert(server);
+			}
+			_ => return Ok(None),
+		}
+	}
+	Ok(cache.get(&server_id))
+}
+
+/// Whether one replica key has gone past its bound, per its intent's semantics.
+fn is_overdue(
+	key: &ReplicaKey,
+	bound: PgDuration,
+	once: bool,
+	now: Timestamp,
+	healthy: &HashMap<(Uuid, BackupType, RestoreIntent), Timestamp>,
+	verified: &HashMap<(Uuid, BackupType, RestoreIntent), String>,
+	snapshots: &HashMap<(Uuid, BackupType), BackupRun>,
+) -> bool {
+	if !once {
+		return match healthy.get(key) {
+			Some(last) => now.duration_since(*last) > bound.0,
+			None => true,
+		};
+	}
+
+	// A `once` intent is overdue only when a snapshot exists to verify, it is
+	// not the last one verified, and it has stood past the bound.
+	match snapshots.get(&(key.0, key.1.clone())) {
+		None => false,
+		Some(run) => {
+			let already = matches!(
+				(verified.get(key), run.snapshot_id.as_ref()),
+				(Some(v), Some(s)) if v == s
+			);
+			// Measured from the report, not `run.anchor()`: the question is how
+			// long this snapshot has gone unverified since it became available
+			// to verify, which is when it landed — not how old the data inside
+			// it is.
+			!already && now.duration_since(run.reported_at) > bound.0
+		}
+	}
+}
+
+/// Whether a `migrate` declaration's server has left its candidate version
+/// untried past the bound, and against which snapshot.
+///
+/// `None` when there is nothing to be overdue about: no candidate version, no
+/// snapshot to migrate, a verdict already recorded for the pair, or still inside
+/// the bound. A recorded verdict reaches the check through
+/// [`crate::migration_tests::latest_verdict_by_key`] instead, so it is not this
+/// path's business.
+// spec: RST#alerting
+async fn untried_candidate(
+	db: &mut AsyncPgConnection,
+	declaration: &RestoreReplica,
+	server: &crate::servers::Server,
+	snapshots: &HashMap<(Uuid, BackupType), BackupRun>,
+	now: Timestamp,
+) -> Result<Option<(String, String)>> {
+	let Some(bound) = declaration.overdue_after else {
+		return Ok(None);
+	};
+	let Some(version) = crate::migration_tests::candidate_for(db, server).await? else {
+		return Ok(None);
+	};
+	let Some(run) = snapshots.get(&(server.id, declaration.r#type.clone())) else {
+		return Ok(None);
+	};
+	let Some(snapshot_id) = run.snapshot_id.as_ref() else {
+		return Ok(None);
+	};
+	if crate::migration_tests::has_verdict(db, server.id, snapshot_id, version.id).await? {
+		return Ok(None);
+	}
+	// Measured from when the snapshot landed, which is when it became available
+	// to migrate, not how old the data inside it is.
+	if now.duration_since(run.reported_at) <= bound.0 {
+		return Ok(None);
+	}
+	Ok(Some((
+		version.as_semver().to_string(),
+		snapshot_id.to_owned(),
+	)))
+}
+
+/// The fields every instance of a restore check carries, whichever check it is:
+/// what identifies the replica, for an operator reading the detail and for a
+/// rule or silence written against one replica.
+///
+/// `replica_key` is the two dimensions joined, because a rule condition takes
+/// one variable and a silence for one replica has to pin both (see
+/// [`crate::check_policies::Condition`]).
+fn instance_identity(key: &ReplicaKey, declared_as: Option<&String>) -> serde_json::Value {
+	let (_, r#type, intent) = key;
+	serde_json::json!({
+		"type": r#type.to_string(),
+		"intent": intent.to_string(),
+		"replica_key": format!("{type}:{intent}"),
+		"replica": declared_as,
+	})
+}
+
+/// Merge `extra` into an instance's identity fields.
+fn instance_detail(
+	key: &ReplicaKey,
+	declared_as: Option<&String>,
+	extra: serde_json::Value,
+) -> Option<serde_json::Value> {
+	let mut detail = instance_identity(key, declared_as);
+	let (Some(object), Some(extra)) = (detail.as_object_mut(), extra.as_object()) else {
+		return Some(detail);
+	};
+	for (k, v) in extra {
+		object.insert(k.clone(), v.clone());
+	}
+	Some(detail)
+}
+
+/// One replica's restore-verification instance: the worse of what its latest
+/// report said and whether it has gone past its bound.
+fn verification_instance(
+	key: &ReplicaKey,
+	label: &str,
+	work: &KeyWork,
+	latest: Option<&BackupRestoreCheck>,
+) -> CheckInstance {
+	let reported_unhealthy =
+		latest.is_some_and(|r| r.outcome != RunOutcome::Success || !r.replica_healthy);
+	let observed = if reported_unhealthy || work.overdue {
+		CheckResult::Failed
+	} else {
+		CheckResult::Passed
+	};
+	let why = if reported_unhealthy {
+		latest
+			.and_then(|r| r.error.clone())
+			.unwrap_or_else(|| "restored database did not come up healthy".into())
+	} else if work.overdue && work.once {
+		"latest snapshot not verified within its overdue bound".into()
+	} else if work.overdue {
+		"no healthy restore verification within its overdue bound".into()
+	} else {
+		"healthy".into()
+	};
+	CheckInstance {
+		label: label.to_owned(),
+		observed,
+		detail: instance_detail(
+			key,
+			work.declared_as.as_ref(),
+			serde_json::json!({
+				"snapshot_id": latest.and_then(|r| r.snapshot_id.clone()),
+				"overdue": work.overdue,
+				"latest_snapshot_unverified": work.overdue && work.once,
+				"why": why,
+			}),
+		),
+	}
 }
 
 /// The redaction instance for one replica, from its latest report. `None` when
-/// the replica has not reported a redaction outcome yet — nothing observed is
-/// not the same as redacted.
+/// the replica has not reported a redaction outcome, since nothing observed is
+/// not the same as redacted — and a declaration that redacts but has never
+/// reported has produced no replica to be unmasked.
 fn redaction_instance(
-	d: &RestoreReplica,
+	key: &ReplicaKey,
 	label: &str,
+	work: &KeyWork,
 	latest: Option<&BackupRestoreCheck>,
 ) -> Option<CheckInstance> {
 	let latest = latest?;
@@ -1043,16 +1282,84 @@ fn redaction_instance(
 	Some(CheckInstance {
 		label: label.to_owned(),
 		observed,
-		detail: Some(serde_json::json!({
-			"type": d.r#type.to_string(),
-			"intent": d.intent.to_string(),
-			"replica": d.name,
-			"outcome": outcome.to_string(),
-			"manifest_version": latest.redaction_manifest_version,
-			"columns_masked": latest.redaction_columns_masked,
-			"columns_skipped": latest.redaction_columns_skipped,
-			"error": latest.redaction_error,
-		})),
+		detail: instance_detail(
+			key,
+			work.declared_as.as_ref(),
+			serde_json::json!({
+				"outcome": outcome.to_string(),
+				"manifest_version": latest.redaction_manifest_version,
+				"columns_masked": latest.redaction_columns_masked,
+				"columns_skipped": latest.redaction_columns_skipped,
+				"error": latest.redaction_error,
+				"why": outcome.to_string(),
+			}),
+		),
+	})
+}
+
+/// The migration-test instance for one replica: what its latest verdict said,
+/// or that its candidate has gone untried past the bound. Untested and failed
+/// are both "this version is not known good against this deployment's data", so
+/// they are one instance and the more urgent of the two wins.
+///
+/// `None` when there is neither a verdict nor a bound gone past: a replica with
+/// nothing to test is not a passing test.
+// spec: RST#alerting
+fn migration_instance(
+	key: &ReplicaKey,
+	label: &str,
+	work: &KeyWork,
+	verdict: Option<&crate::migration_tests::KeyVerdict>,
+) -> Option<CheckInstance> {
+	// The version named is whichever side answered: the verdict names the one it
+	// was reached against, the bound names the candidate it is still waiting for.
+	let (observed, why, target_version, snapshot, failed_migration) = match (verdict, &work.untried)
+	{
+		(Some(v), _) if v.verdict == crate::migration_tests::Verdict::Failed => (
+			CheckResult::Warning,
+			match &v.failed_migration {
+				Some(migration) => {
+					format!("migration {migration} failed applying {}", v.target_version)
+				}
+				None => format!(
+					"the restore never got as far as migrating {}",
+					v.target_version
+				),
+			},
+			Some(v.target_version.clone()),
+			v.snapshot_id.clone(),
+			v.failed_migration.clone(),
+		),
+		(_, Some((version, snapshot))) => (
+			CheckResult::Warning,
+			format!("migrations for {version} not tried within the overdue bound"),
+			Some(version.clone()),
+			Some(snapshot.clone()),
+			None,
+		),
+		(Some(v), None) => (
+			CheckResult::Passed,
+			format!("migrations for {} applied", v.target_version),
+			Some(v.target_version.clone()),
+			v.snapshot_id.clone(),
+			None,
+		),
+		(None, None) => return None,
+	};
+
+	Some(CheckInstance {
+		label: label.to_owned(),
+		observed,
+		detail: instance_detail(
+			key,
+			work.declared_as.as_ref(),
+			serde_json::json!({
+				"target_version": target_version,
+				"failed_migration": failed_migration,
+				"snapshot_id": snapshot,
+				"why": why,
+			}),
+		),
 	})
 }
 
@@ -1063,19 +1370,16 @@ async fn file_verification(
 	instances: Vec<CheckInstance>,
 ) -> Result<usize> {
 	let total = instances.len();
-	file_check_instances(
+	file_restore_check(
 		db,
-		InstancedCheckFiling {
-			source: crate::statuses::CANOPY_SOURCE,
-			scope: Scope::Server(server_id),
-			device_id: None,
-			check: refs::RESTORE_VERIFICATION,
-			title: Some("restore verification failed"),
-			instances,
-			default_ceiling: CheckResult::Warning,
-			default_escalates: false,
-			documentation: Some(refs::RESTORE_VERIFICATION_DOC),
+		server_id,
+		RestoreCheck {
+			r#ref: refs::RESTORE_VERIFICATION,
+			documentation: refs::RESTORE_VERIFICATION_DOC,
+			title: "restore verification failed",
+			gone: &format!("No restore replica of {label} is tracked any more"),
 		},
+		instances,
 		&|degraded| match degraded {
 			[] => format!("Every restore replica of {label} is verifying healthily"),
 			[one] => format!(
@@ -1090,8 +1394,7 @@ async fn file_verification(
 			),
 		},
 	)
-	.await?;
-	Ok(1)
+	.await
 }
 
 async fn file_redaction(
@@ -1101,19 +1404,16 @@ async fn file_redaction(
 	instances: Vec<CheckInstance>,
 ) -> Result<usize> {
 	let total = instances.len();
-	file_check_instances(
+	file_restore_check(
 		db,
-		InstancedCheckFiling {
-			source: crate::statuses::CANOPY_SOURCE,
-			scope: Scope::Server(server_id),
-			device_id: None,
-			check: refs::REDACTION,
-			title: Some("redaction incomplete"),
-			instances,
-			default_ceiling: CheckResult::Warning,
-			default_escalates: false,
-			documentation: Some(refs::REDACTION_DOC),
+		server_id,
+		RestoreCheck {
+			r#ref: refs::REDACTION,
+			documentation: refs::REDACTION_DOC,
+			title: "redaction incomplete",
+			gone: &format!("No redacting replica of {label} is tracked any more"),
 		},
+		instances,
 		&|degraded| match degraded {
 			[] => format!("Every redacting replica of {label} is fully masked"),
 			[one] => format!(
@@ -1128,8 +1428,7 @@ async fn file_redaction(
 			),
 		},
 	)
-	.await?;
-	Ok(1)
+	.await
 }
 
 async fn file_migration(
@@ -1139,19 +1438,16 @@ async fn file_migration(
 	instances: Vec<CheckInstance>,
 ) -> Result<usize> {
 	let total = instances.len();
-	file_check_instances(
+	file_restore_check(
 		db,
-		InstancedCheckFiling {
-			source: crate::statuses::CANOPY_SOURCE,
-			scope: Scope::Server(server_id),
-			device_id: None,
-			check: refs::MIGRATION_TEST,
-			title: Some("migration test overdue"),
-			instances,
-			default_ceiling: CheckResult::Warning,
-			default_escalates: false,
-			documentation: Some(refs::MIGRATION_TEST_DOC),
+		server_id,
+		RestoreCheck {
+			r#ref: refs::MIGRATION_TEST,
+			documentation: refs::MIGRATION_TEST_DOC,
+			title: "candidate version not known good",
+			gone: &format!("No candidate version is under test against {label}'s data"),
 		},
+		instances,
 		&|degraded| match degraded {
 			[] => format!("Candidate versions have been migration-tested against {label}"),
 			[one] => format!(
@@ -1166,8 +1462,86 @@ async fn file_migration(
 			),
 		},
 	)
-	.await?;
-	Ok(1)
+	.await
+}
+
+/// The fixed parts of one restore check: what it is called, the documentation it
+/// ships with, its headline when degraded, and what it says once a server has no
+/// instances of it left.
+struct RestoreCheck<'a> {
+	r#ref: &'a str,
+	documentation: &'a str,
+	title: &'a str,
+	gone: &'a str,
+}
+
+/// File one of a server's restore checks from its instances, and say whether it
+/// came out degraded.
+///
+/// Nothing is filed for a check that has nothing degraded and nothing open: a
+/// server that has never had one of these findings does not need a passing row
+/// and a catalog entry for it. A check that *is* open and has run out of
+/// instances is recovered on its own — with no instances there is nothing left
+/// to grade, so it is filed as the plain passing check it has become rather
+/// than left open with nothing that could ever clear it.
+async fn file_restore_check(
+	db: &mut AsyncPgConnection,
+	server_id: Uuid,
+	check: RestoreCheck<'_>,
+	instances: Vec<CheckInstance>,
+	message: &(dyn Fn(&[GradedInstance]) -> String + Sync),
+) -> Result<usize> {
+	let RestoreCheck {
+		r#ref,
+		documentation,
+		title,
+		gone,
+	} = check;
+	let any_degraded = instances.iter().any(|i| i.observed != CheckResult::Passed);
+	if !any_degraded
+		&& !crate::backup::staleness::open_server_issue_active(db, server_id, r#ref).await?
+	{
+		return Ok(0);
+	}
+
+	let issue = if instances.is_empty() {
+		crate::issues::file_check(
+			db,
+			crate::issues::CheckFiling {
+				source: crate::statuses::CANOPY_SOURCE,
+				scope: Scope::Server(server_id),
+				device_id: None,
+				check: r#ref,
+				observed: CheckResult::Passed,
+				title: None,
+				message: gone,
+				detail: None,
+				default_ceiling: CheckResult::Warning,
+				default_escalates: false,
+				documentation: Some(documentation),
+			},
+		)
+		.await?
+	} else {
+		file_check_instances(
+			db,
+			InstancedCheckFiling {
+				source: crate::statuses::CANOPY_SOURCE,
+				scope: Scope::Server(server_id),
+				device_id: None,
+				check: r#ref,
+				title: Some(title),
+				instances,
+				default_ceiling: CheckResult::Warning,
+				default_escalates: false,
+				documentation: Some(documentation),
+			},
+			message,
+		)
+		.await?
+	};
+
+	Ok(usize::from(issue.active))
 }
 
 /// A degraded instance's `why`, for a single-instance message.
@@ -1191,79 +1565,4 @@ fn instance_labels(instances: &[GradedInstance]) -> String {
 		.map(|i| i.label.as_str())
 		.collect::<Vec<_>>()
 		.join(", ")
-}
-
-/// The migration-test instance for one `migrate` declaration: whether the
-/// server's candidate version has been tried against its latest snapshot within
-/// the bound.
-///
-/// `None` when the server has nothing to be overdue about — no candidate
-/// version, no snapshot to migrate, a verdict already recorded, or still inside
-/// the bound. An instance that would say "fine" is not emitted, because a
-/// declaration with nothing to test is not a passing test.
-// spec: RST#alerting
-async fn migration_instance(
-	db: &mut AsyncPgConnection,
-	declaration: &RestoreReplica,
-	server: &crate::servers::Server,
-	label: &str,
-	latest: &HashMap<(Uuid, BackupType), BackupRun>,
-	now: Timestamp,
-	overdue_after: Option<PgDuration>,
-) -> Result<Option<CheckInstance>> {
-	let Some(version) = crate::migration_tests::candidate_for(db, server).await? else {
-		return Ok(None);
-	};
-	let Some(run) = latest.get(&(server.id, declaration.r#type.clone())) else {
-		return Ok(None);
-	};
-	let Some(snapshot_id) = run.snapshot_id.as_ref() else {
-		return Ok(None);
-	};
-
-	let semver = version.as_semver();
-	let verdict =
-		crate::migration_tests::verdict_for(db, server.id, snapshot_id, version.id).await?;
-
-	// A recorded verdict answers the check outright; without one, the bound
-	// decides. Measured from when the snapshot landed, which is when it became
-	// available to migrate, not how old the data inside it is.
-	let (observed, why, failed_migration) = match verdict {
-		Some(Some(migration)) => (
-			CheckResult::Warning,
-			format!("migration {migration} failed applying {semver}"),
-			Some(migration),
-		),
-		Some(None) => (
-			CheckResult::Passed,
-			format!("migrations for {semver} applied"),
-			None,
-		),
-		// Untested: only the overdue bound can make that a finding, and a
-		// declaration without one is never overdue. A recorded verdict above
-		// answers regardless of the bound — a failed migration is a fact about
-		// the candidate version, not a deadline.
-		None => match overdue_after {
-			Some(bound) if now.duration_since(run.reported_at) > bound.0 => (
-				CheckResult::Warning,
-				format!("migrations for {semver} not tried within the overdue bound"),
-				None,
-			),
-			_ => return Ok(None),
-		},
-	};
-
-	Ok(Some(CheckInstance {
-		label: label.to_owned(),
-		observed,
-		detail: Some(serde_json::json!({
-			"target_version": semver.to_string(),
-			"failed_migration": failed_migration,
-			"snapshot_id": snapshot_id,
-			"type": declaration.r#type.to_string(),
-			"intent": declaration.intent.to_string(),
-			"replica": declaration.name,
-			"why": why,
-		})),
-	}))
 }

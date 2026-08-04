@@ -4,6 +4,8 @@
 //! Candidacy here is the version axis only. Whether a server has a snapshot to
 //! restore and migrate is settled when a consumer's worklist is built.
 
+use std::collections::HashMap;
+
 use commons_errors::Result;
 use commons_types::{
 	backup::{BackupType, RestoreIntent, RunOutcome},
@@ -172,8 +174,6 @@ impl MigrationTest {
 		test: NewMigrationTest,
 	) -> Result<i64> {
 		let server_id = report.server_id;
-		let r#type = report.r#type.clone();
-		let intent = report.intent.clone();
 		let target_version_id = test.target_version_id;
 		let failed_migration = test.failed_migration.clone();
 
@@ -226,8 +226,6 @@ impl MigrationTest {
 			file_outcome(
 				db,
 				server_id,
-				&r#type,
-				&intent,
 				target_version_id,
 				failed_migration.as_deref(),
 			)
@@ -323,29 +321,11 @@ pub async fn has_verdict(
 	snapshot_id: &str,
 	target_version_id: Uuid,
 ) -> Result<bool> {
-	Ok(verdict_for(db, server_id, snapshot_id, target_version_id)
-		.await?
-		.is_some())
-}
-
-/// The recorded verdict for one `(server, snapshot, candidate version)`, if a
-/// test has run: `Some(Some(migration))` when a migration failed,
-/// `Some(None)` when they all applied, `None` when it hasn't been tried.
-///
-/// The sweep needs the verdict itself, not just its existence: it is the sole
-/// filer of the `migration-test` check, so a failed verdict has to reach it
-/// (see [`crate::restore::sweep_overdue`]).
-pub async fn verdict_for(
-	db: &mut AsyncPgConnection,
-	server_id: Uuid,
-	snapshot_id: &str,
-	target_version_id: Uuid,
-) -> Result<Option<Option<String>>> {
 	use crate::schema::{backup_restore_checks, migration_tests};
 
-	let existing: Option<Option<String>> = migration_tests::table
+	let existing: Option<i64> = migration_tests::table
 		.inner_join(backup_restore_checks::table)
-		.select(migration_tests::failed_migration)
+		.select(migration_tests::check_id)
 		.filter(migration_tests::target_version_id.eq(target_version_id))
 		.filter(backup_restore_checks::server_id.eq(server_id))
 		.filter(backup_restore_checks::snapshot_id.eq(snapshot_id))
@@ -353,15 +333,94 @@ pub async fn verdict_for(
 		.await
 		.optional()?;
 
-	Ok(existing)
+	Ok(existing.is_some())
 }
 
-/// Raise or recover the server's migration-test check, and hold the target
-/// version back when its migrations failed.
+/// The latest recorded verdict for one replica key.
+#[derive(Debug, Clone)]
+pub struct KeyVerdict {
+	/// The version whose migrations were tried, as semver.
+	pub target_version: String,
+	/// The migration that failed, when one did.
+	pub failed_migration: Option<String>,
+	/// The snapshot they were tried against.
+	pub snapshot_id: Option<String>,
+	/// Whether they all applied. Read the same way [`latest_test`] reads it: a
+	/// report whose restore never got as far as migrating is a failure too.
+	pub verdict: Verdict,
+}
+
+/// The latest verdict per `(server, type, intent)` across the fleet.
 ///
-/// A warning that does not escalate. The server is running the version it
-/// always was and is serving patients; the finding is about a version it has
-/// not taken, so it belongs to whoever decides whether that version ships
+/// The `migration-test` check is derived from these as well as from
+/// declarations: a failed migration is a fact about a candidate version
+/// measured against a deployment's data, so it stands whether or not a
+/// declaration still asks for the test, and what supersedes it is a later
+/// verdict (see [`crate::restore::sweep_overdue`]).
+pub async fn latest_verdict_by_key(
+	db: &mut AsyncPgConnection,
+) -> Result<HashMap<(Uuid, BackupType, RestoreIntent), KeyVerdict>> {
+	use crate::schema::{backup_restore_checks as checks, migration_tests as tests, versions};
+
+	type Row = (
+		Option<Uuid>,
+		BackupType,
+		RestoreIntent,
+		(i32, i32, i32),
+		Option<String>,
+		Option<String>,
+		RunOutcome,
+	);
+
+	let rows: Vec<Row> = tests::table
+		.inner_join(checks::table)
+		.inner_join(versions::table)
+		.select((
+			checks::server_id,
+			checks::type_,
+			checks::intent,
+			(versions::major, versions::minor, versions::patch),
+			tests::failed_migration,
+			checks::snapshot_id,
+			checks::outcome,
+		))
+		.filter(checks::server_id.is_not_null())
+		.distinct_on((checks::server_id, checks::type_, checks::intent))
+		.order_by((
+			checks::server_id,
+			checks::type_,
+			checks::intent,
+			checks::observed_at.desc(),
+			checks::id.desc(),
+		))
+		.load(db)
+		.await?;
+
+	Ok(rows
+		.into_iter()
+		.filter_map(
+			|(server_id, r#type, intent, version, failed_migration, snapshot_id, outcome)| {
+				let verdict = match (outcome, &failed_migration) {
+					(RunOutcome::Success, None) => Verdict::Passed,
+					_ => Verdict::Failed,
+				};
+				let (major, minor, patch) = version;
+				server_id.map(|sid| {
+					(
+						(sid, r#type, intent),
+						KeyVerdict {
+							target_version: format!("{major}.{minor}.{patch}"),
+							failed_migration,
+							snapshot_id,
+							verdict,
+						},
+					)
+				})
+			},
+		)
+		.collect())
+}
+
 /// Record the consequence of a migration test: a failed one raises a known
 /// issue against the candidate version, which is what holds it back from
 /// rollout.
@@ -371,12 +430,10 @@ pub async fn verdict_for(
 /// verdict recorded here and the overdue bound are two ways the same check can
 /// be degraded, and only the sweep sees all of a server's replicas at once.
 /// This path reads the verdict back from storage on the next pass (see
-/// [`verdict_for`]).
+/// [`latest_verdict_by_key`]).
 async fn file_outcome(
 	db: &mut AsyncPgConnection,
 	server_id: Uuid,
-	_type: &BackupType,
-	_intent: &RestoreIntent,
 	target_version_id: Uuid,
 	failed_migration: Option<&str>,
 ) -> Result<()> {
