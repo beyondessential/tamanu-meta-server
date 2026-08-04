@@ -2,10 +2,10 @@
 
 Children spawned from the k8s-health-checks brainstorm. The parent stays the umbrella; these carry the work. Two research spikes come first because their outcomes constrain the implementation cards, which will be added here as the design firms up.
 
-## Research spike: cluster authentication mechanism
+## Research spike: cluster authentication mechanism · H1
 
 Determine how Canopy authenticates to and reads from external Kubernetes clusters, so the implementation can settle its credential storage and connection code. The target clusters are all AWS EKS with OIDC identities; there is one external cluster today and at least one more expected, so the mechanism must support multiple. Canopy also runs in one EKS cluster itself and should be able to read Tamanu instances co-resident there via an in-cluster RBAC policy that reaches beyond its own namespace. Weigh the layer the auth should live at — Kubernetes-level delegation or a tunnel, network-level access, or Canopy owning an OIDC/IAM flow to mint a short-lived per-cluster token and pull directly — against operability and least-privilege read-only access. Output: a chosen mechanism, the RBAC/permissions Canopy needs, and how per-cluster credentials are stored and rotated, feeding the cluster-registration settings page.
 
-## Research spike: Tamanu Kubernetes namespace layout
+## Research spike: Tamanu Kubernetes namespace layout · J1
 
 Map what actually exists in a Tamanu Kubernetes namespace and where, from the perspective of what Canopy needs for its checks and setup. Canopy needs, per namespace (one server group at one rank): the list of central servers and facilities running there for the server-identity picker; each server's workloads by duty (central tasks, central sync, central API replicas, facility processes/tasks) for readiness, crashloop/restart, and resource-pressure checks; the ingress or Gateway resource and front-end API for the liveness check; the PVCs for the storage check; each instance's own Postgres and the CNPG-managed Kubernetes secret backing it for the DB-check harvest; and the facility name/ID/prefix used to locate a facility's databases and containers. The card describes that required-inputs list, then works out where each piece lives in the namespace and how it's labelled or named, so the implementation can query it reliably.
