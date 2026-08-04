@@ -48,11 +48,12 @@ pub mod views;
 
 pub use backups::{
 	BackupCredentialIssuance, BackupMaintenanceRun, BackupMaintenanceRunFilters,
-	BackupRecoveryVerification, BackupRepoSnapshot, BackupRepoStats, BackupRequest, BackupRun,
-	BackupRunFilters, BackupRunProgress, BackupTypeDefault, MaintenanceOutcomeFilter,
-	NewBackupCredentialIssuance, NewBackupRun, NewBackupRunProgress, NewBackupTypeDefault,
-	NewServerGroupBackupConfig, NewServerGroupBackupSchedule, RetentionPolicy,
-	ServerBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
+	BackupRecoveryVerification, BackupRepoObservedSnapshot, BackupRepoSnapshot, BackupRepoStats,
+	BackupRequest, BackupRun, BackupRunFilters, BackupRunProgress, BackupTypeDefault,
+	MaintenanceOutcomeFilter, NewBackupCredentialIssuance, NewBackupRun, NewBackupRunProgress,
+	NewBackupTypeDefault, NewObservedSnapshot, NewServerGroupBackupConfig,
+	NewServerGroupBackupSchedule, RetentionPolicy, ServerBackupCapability, ServerGroupBackupConfig,
+	ServerGroupBackupSchedule,
 };
 pub use bestool_snippets::{BestoolSnippet, NewBestoolSnippet};
 pub use commons_types::backup::{

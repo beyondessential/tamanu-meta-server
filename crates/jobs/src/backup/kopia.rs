@@ -269,6 +269,20 @@ pub fn type_from_path(path: &str) -> Option<String> {
 	}
 }
 
+/// One snapshot found in the repo, as the inventory records it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnapshotEntry {
+	/// The snapshot manifest id — what bestool reports as its `snapshot_id`.
+	pub id: String,
+	/// Full kopia source `user@host:path` the snapshot belongs to.
+	pub source: String,
+	/// RFC3339 timestamp of when the snapshot was taken, when the manifest
+	/// carries one.
+	pub snapshot_at: Option<String>,
+	/// Logical size (`rootEntry.summ.size`), the figure a device reports.
+	pub logical_bytes: i64,
+}
+
 /// Reduced view of a snapshot-manifest list, used by the inspect kind.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Inspected {
@@ -276,9 +290,9 @@ pub struct Inspected {
 	pub source_count: i32,
 	pub logical_bytes: i64,
 	pub sources: Vec<SourceEntry>,
-	/// `(snapshot id, logical size)` for every snapshot with a non-empty id,
-	/// for matching back to the device runs that produced them.
-	pub snapshots: Vec<(String, i64)>,
+	/// Every snapshot with a non-empty id, for matching back to the device runs
+	/// that reported creating them.
+	pub snapshots: Vec<SnapshotEntry>,
 }
 
 /// Reduce a parsed snapshot-manifest list to per-source latest entries + counts
@@ -311,7 +325,12 @@ pub fn inspect_manifests(manifests: &[Manifest]) -> Inspected {
 	let snapshots = manifests
 		.iter()
 		.filter(|m| !m.id.is_empty())
-		.map(|m| (m.id.clone(), m.root_entry.summ.size))
+		.map(|m| SnapshotEntry {
+			id: m.id.clone(),
+			source: m.source.full(),
+			snapshot_at: m.start_time.clone(),
+			logical_bytes: m.root_entry.summ.size,
+		})
 		.collect();
 
 	Inspected {
@@ -720,9 +739,9 @@ pub struct InspectOutcome {
 	/// Physical (stored) bytes from `kopia content stats`; `None` if unparseable.
 	pub physical_bytes: Option<i64>,
 	pub sources: Vec<SourceEntry>,
-	/// `(snapshot id, logical size)` for every snapshot, matched back to the
-	/// device runs that produced them by the completion logic.
-	pub snapshots: Vec<(String, i64)>,
+	/// Every snapshot in the repo, recorded as the inventory and matched back to
+	/// the device runs that produced them by the completion logic.
+	pub snapshots: Vec<SnapshotEntry>,
 }
 
 /// Connect, list snapshots, read physical stats, and verify (read-only). A
@@ -860,7 +879,15 @@ mod tests {
 		]"#;
 		let manifests: Vec<Manifest> = serde_json::from_str(json).unwrap();
 		let got = inspect_manifests(&manifests);
-		assert_eq!(got.snapshots, vec![("k9c0ffee".to_string(), 1490)]);
+		assert_eq!(
+			got.snapshots,
+			vec![SnapshotEntry {
+				id: "k9c0ffee".to_string(),
+				source: "canopy@srv-1:tamanu-postgres".to_string(),
+				snapshot_at: Some("2026-06-18T13:00:00Z".to_string()),
+				logical_bytes: 1490,
+			}]
+		);
 	}
 
 	#[test]
