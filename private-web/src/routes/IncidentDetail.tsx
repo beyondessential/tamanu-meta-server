@@ -30,12 +30,15 @@ import ResolverAvatar from "../components/ResolverAvatar";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { humanDuration } from "../lib/humanDuration";
 import {
+	CHECK_RESULT_ORDER,
 	RESOLVED_REASONS,
 	RESOLVED_REASON_LABEL,
 	isIncidentLingering,
+	type CheckResult,
 	type IncidentIssueData,
 	type IncidentNoteData,
 	type IncidentWithIssues,
+	type IssueData,
 	type ResolvedReason,
 } from "../types";
 
@@ -404,6 +407,24 @@ type TimelineEntry =
 	| { kind: "issue"; at: number; issue: IncidentIssueData }
 	| { kind: "note"; at: number; note: IncidentNoteData };
 
+const CHECK_RESULT_RANK = new Map(
+	CHECK_RESULT_ORDER.map((result, index) => [result, index]),
+);
+
+/// Where an issue sits in the severity ranking, by its *effective* result —
+/// the graded one everything else acts on, so a check an operator capped at
+/// warning ranks as a warning here too.
+///
+/// An issue with no recorded result predates the check-state model and has no
+/// severity to rank on, so it sorts below everything graded rather than above
+/// it, which is where an unknown lands if you index it directly.
+function issueSeverityRank(issue: IssueData): number {
+	const rank = issue.effective_result
+		? CHECK_RESULT_RANK.get(issue.effective_result as CheckResult)
+		: undefined;
+	return rank ?? CHECK_RESULT_ORDER.length;
+}
+
 function Timeline({
 	issues,
 	notes,
@@ -425,7 +446,19 @@ function Timeline({
 			note: n,
 		})),
 	];
-	entries.sort((a, b) => b.at - a.at);
+	// Issues above notes, ranked by severity so whatever is failing is at the
+	// top of the incident and an operator doesn't have to read a whole
+	// chronology to find it. Ties, and notes among themselves, fall back to
+	// most recent first.
+	entries.sort((a, b) => {
+		if (a.kind !== b.kind) return a.kind === "issue" ? -1 : 1;
+		if (a.kind === "issue" && b.kind === "issue") {
+			const bySeverity =
+				issueSeverityRank(a.issue.issue) - issueSeverityRank(b.issue.issue);
+			if (bySeverity !== 0) return bySeverity;
+		}
+		return b.at - a.at;
+	});
 
 	if (entries.length === 0) {
 		return <MuiAlert severity="info">No timeline entries yet.</MuiAlert>;

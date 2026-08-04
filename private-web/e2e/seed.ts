@@ -629,6 +629,32 @@ export async function seedIncident(
 	return { id };
 }
 
+/** Add an operator note to an incident's timeline. */
+export async function seedIncidentNote(
+	sql: Sql,
+	opts: {
+		incidentId: string;
+		author?: string;
+		body?: string;
+		/** ISO 8601; defaults to NOW(). */
+		createdAt?: string;
+	},
+): Promise<{ id: string }> {
+	const id = randomUUID();
+	await sql.query(
+		`INSERT INTO incident_notes (id, incident_id, author, body, created_at)
+		 VALUES ($1, $2, $3, $4, COALESCE($5::timestamptz, NOW()))`,
+		[
+			id,
+			opts.incidentId,
+			opts.author ?? "operator@example.com",
+			opts.body ?? "a note",
+			opts.createdAt ?? null,
+		],
+	);
+	return { id };
+}
+
 export interface SeededVersion {
 	id: string;
 	major: number;
