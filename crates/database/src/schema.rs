@@ -62,6 +62,16 @@ diesel::table! {
 }
 
 diesel::table! {
+	backup_repo_observed_snapshots (group_id, snapshot_id) {
+		group_id -> Uuid,
+		snapshot_id -> Text,
+		source -> Text,
+		snapshot_at -> Nullable<Timestamptz>,
+		observed_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	backup_repo_snapshots (group_id, source) {
 		group_id -> Uuid,
 		source -> Text,
@@ -770,6 +780,7 @@ diesel::joinable!(artifacts -> versions (version_id));
 diesel::joinable!(backup_credential_issuances -> devices (device_id));
 diesel::joinable!(backup_credential_issuances -> server_groups (group_id));
 diesel::joinable!(backup_maintenance_runs -> server_groups (group_id));
+diesel::joinable!(backup_repo_observed_snapshots -> server_groups (group_id));
 diesel::joinable!(backup_repo_snapshots -> server_groups (group_id));
 diesel::joinable!(backup_repo_snapshots -> servers (server_id));
 diesel::joinable!(backup_repo_stats -> server_groups (group_id));
@@ -834,6 +845,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	backup_credential_issuances,
 	backup_recovery_verifications,
 	backup_maintenance_runs,
+	backup_repo_observed_snapshots,
 	backup_repo_snapshots,
 	backup_repo_stats,
 	backup_requests,

@@ -624,6 +624,31 @@ pub(crate) async fn open_server_issue_active(
 	Ok(n > 0)
 }
 
+/// Whether a server-scoped `(canopy, ref)` check last *observed* something
+/// other than a pass.
+///
+/// The active flag follows the effective result, so a check whose policy holds
+/// it below alerting is never active however degraded its observations. This is
+/// what a sweep asks in its place, to know whether it has a recorded
+/// observation to bring up to date.
+pub(crate) async fn server_check_observed_degraded(
+	db: &mut AsyncPgConnection,
+	server_id: Uuid,
+	r#ref: &str,
+) -> Result<bool> {
+	use crate::schema::issues::dsl;
+	let n: i64 = dsl::issues
+		.filter(dsl::server_id.eq(server_id))
+		.filter(dsl::source.eq(refs::CANOPY_SOURCE))
+		.filter(dsl::ref_.eq(r#ref))
+		.filter(dsl::observed_result.is_not_null())
+		.filter(dsl::observed_result.ne(CheckResult::Passed.to_string()))
+		.count()
+		.get_result(db)
+		.await?;
+	Ok(n > 0)
+}
+
 /// Whether a group-scoped `(canopy, ref)` issue is currently open + active.
 pub(crate) async fn open_group_issue_active(
 	db: &mut AsyncPgConnection,

@@ -42,7 +42,8 @@ This is the escrow the operator recovery ceremony verifies (see [BKO](../private
 Canopy periodically inspects each group's repo against the storage directly, independent of what devices reported:
 
 - it verifies repo integrity, and a failed verification is repo corruption;
-- it inventories the repo — the latest snapshot per source — as the ground truth a device's report is reconciled against;
+- it inventories the repo as the ground truth a device's report is reconciled against: the latest snapshot per source, and the identity of every snapshot it found, so a run's reported snapshot can be looked up rather than inferred from timestamps.
+  The inventory describes the repository as it stands at that inspection, so a snapshot expired by retention stops being recorded;
 - it records repo size, logical and physical, and the storage cost basis for display;
 - it records each snapshot's logical size and matches it to the device run that produced it by snapshot id, so the repo's own size stands in when a run reported none, and is cross-checked against the size a run did report. A snapshot's recorded size is written once, because a snapshot is immutable.
 
@@ -59,10 +60,15 @@ Pruning is fleet-wide and independent of any group's maintenance, so it never wa
 
 ## Detection
 
-Canopy reconciles three sources — what a device reported, what credentials were issued, and what actually landed in the repo — and alerts on disagreement:
+Canopy reconciles three sources — what a device reported, what credentials were issued, and what actually landed in the repo — and surfaces where they disagree:
 
 - **staleness** — a server with a prior successful backup but none recent, or one that has never backed up though it has been expected long enough. Recency is the age of the *data*, measured from the moment the backup froze what it captured (see [BAK](../public-server/backup.md)), falling back to the run's report time when it reported no such moment. So a backup that took many hours to upload is aged from when it was taken, and a server whose data is a day old is not counted fresh because its upload finished minutes ago. Both which run counts as the latest success and how old that success is use the same measure, so a server's freshness never travels backwards as new runs arrive.
-- **reconcile** — a device reported a successful backup but no matching snapshot landed (the report is false or the upload didn't persist), or a fresh snapshot exists but no recent report (the reporting path is broken). These are measured from report times, not from when data was frozen, because they assert that the reporting path itself is working rather than anything about the age of the data.
+- **reconcile** — a device reported a successful backup naming the snapshot it created and the repository does not hold that snapshot (the report is false or the upload didn't persist), or a fresh snapshot exists but no recent report (the reporting path is broken).
+  These assert that the reporting path itself is working rather than anything about the age of the data.
+  A snapshot's absence is only evidence once someone has looked: no verdict is reached from an inventory older than the run it would contradict, and a run whose snapshot could have been expired by retention since it was reported is not judged at all.
+  Where a verdict cannot be reached the signal is neither passing nor failing, and one that cannot be reached for any of a server's backup types leaves whatever was already raised standing rather than clearing it.
+- **snapshot recency** — the newest snapshot the repository holds for a server's source is older than the moment the device's latest run says it froze its data.
+  Backups and repository inspection run on independent cadences, so this compares two observations that are routinely out of step with nothing wrong; it is recorded and presented for context but never alerts, and it is only reached where the run reported the moment its data was frozen and the source has been inspected since.
 - **size** — a device reported a snapshot size that disagrees with the size the same snapshot occupies in the repo; only compared when both sizes are known and non-zero.
 - **maintenance** — a group whose maintenance is overdue, or whose most recent maintenance failed.
 
@@ -75,6 +81,9 @@ Backup signals therefore default to a warning and do not escalate, and an operat
 
 Three signals are the exception, and default to an escalating failure: repo corruption, a rotation that left the repository openable by neither passphrase, and object-lock protection that is missing or weakened.
 Each of these means the backups are already gone, unrecoverable, or unprotected, rather than merely late.
+
+A signal whose evidence supports only that something looks off, rather than that anything is wrong, ranks below a warning: it is recorded and presented with what it observed, and never alerts.
+Snapshot recency is one, and its wording says what was observed rather than what it implies, so an operator reading it is not told a backup is missing on the strength of two timestamps.
 
 Backup alerts are raised at one of two scopes:
 

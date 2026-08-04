@@ -95,6 +95,26 @@ pub(crate) async fn complete_inspect(
 		.map_err(|err| err.to_string())?;
 	}
 
+	// The itemised set behind those per-source summaries: which snapshots the
+	// repo actually holds, by the ids devices report. Reconciliation looks a
+	// reported snapshot up in here instead of inferring its fate from
+	// timestamps.
+	let observed: Vec<database::NewObservedSnapshot> = outcome
+		.snapshots
+		.iter()
+		.map(|s| database::NewObservedSnapshot {
+			snapshot_id: s.id.clone(),
+			source: s.source.clone(),
+			snapshot_at: s
+				.snapshot_at
+				.as_deref()
+				.and_then(|t| Timestamp::from_str(t).ok()),
+		})
+		.collect();
+	database::BackupRepoObservedSnapshot::replace_for_group(db, group_id, &observed)
+		.await
+		.map_err(|err| err.to_string())?;
+
 	database::backups::BackupRepoStats::upsert_repo_fields(
 		db,
 		group_id,
@@ -108,7 +128,12 @@ pub(crate) async fn complete_inspect(
 
 	// Fill each device run's snapshot size from the repo (write-once, matched by
 	// snapshot id). The size-discrepancy check reads it back off `backup_runs`.
-	database::backups::BackupRun::backfill_snapshot_logical_bytes(db, group_id, &outcome.snapshots)
+	let sizes: Vec<(String, i64)> = outcome
+		.snapshots
+		.iter()
+		.map(|s| (s.id.clone(), s.logical_bytes))
+		.collect();
+	database::backups::BackupRun::backfill_snapshot_logical_bytes(db, group_id, &sizes)
 		.await
 		.map_err(|err| err.to_string())?;
 
@@ -333,6 +358,83 @@ mod tests {
 				assert_eq!(rows[0].effective_result.as_deref(), Some("failed"));
 				assert!(rows[0].escalates);
 				assert!(rows[0].active, "corruption issue is active");
+			})
+			.await;
+		}
+
+		fn inspect_outcome(snapshots: Vec<crate::backup::kopia::SnapshotEntry>) -> InspectOutcome {
+			InspectOutcome {
+				verify_ok: true,
+				snapshot_count: snapshots.len() as i32,
+				source_count: 1,
+				logical_bytes: 0,
+				physical_bytes: None,
+				sources: vec![],
+				snapshots,
+			}
+		}
+
+		fn snapshot(id: &str, at: &str, size: i64) -> crate::backup::kopia::SnapshotEntry {
+			crate::backup::kopia::SnapshotEntry {
+				id: id.into(),
+				source: "canopy@srv:tamanu-postgres".into(),
+				snapshot_at: Some(at.into()),
+				logical_bytes: size,
+			}
+		}
+
+		/// The observed-snapshot set is the repo as it stands: an inspection
+		/// records what it found and drops what it no longer finds, so a
+		/// snapshot retention has expired stops being matchable.
+		#[tokio::test(flavor = "multi_thread")]
+		async fn inspect_records_observed_snapshots_and_drops_departed_ones() {
+			TestDb::run(|mut conn, _url| async move {
+				let group_id = insert_group(&mut conn, "g").await;
+
+				complete_inspect(
+					&mut conn,
+					group_id,
+					&inspect_outcome(vec![
+						snapshot("k1", "2026-06-18T12:00:00Z", 10),
+						snapshot("k2", "2026-06-18T13:00:00Z", 20),
+					]),
+				)
+				.await
+				.expect("first inspect");
+
+				let (ids, observed_at) =
+					database::BackupRepoObservedSnapshot::observed_ids_for_group(
+						&mut conn, group_id,
+					)
+					.await
+					.expect("read observed ids");
+				assert_eq!(ids.len(), 2);
+				assert!(ids.contains("k1") && ids.contains("k2"));
+				assert!(observed_at.is_some(), "the observation is stamped");
+
+				// k1 has since been expired by retention; k3 is new.
+				complete_inspect(
+					&mut conn,
+					group_id,
+					&inspect_outcome(vec![
+						snapshot("k2", "2026-06-18T13:00:00Z", 20),
+						snapshot("k3", "2026-06-19T13:00:00Z", 30),
+					]),
+				)
+				.await
+				.expect("second inspect");
+
+				let (ids, _) = database::BackupRepoObservedSnapshot::observed_ids_for_group(
+					&mut conn, group_id,
+				)
+				.await
+				.expect("read observed ids again");
+				assert_eq!(ids.len(), 2);
+				assert!(
+					!ids.contains("k1"),
+					"a snapshot the repo no longer holds is not still recorded",
+				);
+				assert!(ids.contains("k2") && ids.contains("k3"));
 			})
 			.await;
 		}

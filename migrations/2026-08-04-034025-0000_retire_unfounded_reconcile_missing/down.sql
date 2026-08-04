@@ -1,0 +1,3 @@
+-- Irreversible: the state these findings held before they were retired isn't
+-- recorded, and reopening them would re-assert a condition nothing established.
+-- Nothing to restore.

@@ -21,9 +21,9 @@ use database::backup::staleness::{ScanRow, StalenessVerdict};
 use database::diesel_async::AsyncPgConnection;
 use database::pg_duration::PgDuration;
 use database::{
-	BackupConfigStatus, BackupPurpose, BackupRepoSnapshot, BackupRun, NewBackupRun,
-	NewServerGroupBackupConfig, NewServerGroupBackupSchedule, RunOutcome, ServerBackupCapability,
-	ServerGroupBackupConfig, ServerGroupBackupSchedule,
+	BackupConfigStatus, BackupPurpose, BackupRepoObservedSnapshot, BackupRepoSnapshot, BackupRun,
+	NewBackupRun, NewObservedSnapshot, NewServerGroupBackupConfig, NewServerGroupBackupSchedule,
+	RunOutcome, ServerBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
 };
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::RunQueryDsl;
@@ -202,6 +202,85 @@ async fn insert_backup_success_aged(
 	.execute(conn)
 	.await
 	.expect("backdate reported_at");
+}
+
+/// Record a `purpose='backup'` success `age` ago that names the snapshot it
+/// created and says when it froze its data — what the reconcile checks need
+/// before they will decide anything.
+async fn insert_backup_success_with_snapshot(
+	conn: &mut AsyncPgConnection,
+	device_id: Uuid,
+	group_id: Uuid,
+	server_id: Uuid,
+	ty: &BackupType,
+	age: SignedDuration,
+	snapshot_id: &str,
+) {
+	let id = Uuid::new_v4();
+	BackupRun::record(
+		conn,
+		NewBackupRun {
+			id,
+			device_id,
+			group_id,
+			server_id: Some(server_id),
+			r#type: ty.clone(),
+			purpose: BackupPurpose::Backup,
+			outcome: RunOutcome::Success,
+			error: None,
+			bytes_uploaded: Some(42),
+			snapshot_id: Some(snapshot_id.into()),
+			s3_sent_raw_bytes: None,
+			s3_sent_payload_bytes: None,
+			s3_received_raw_bytes: None,
+			s3_received_payload_bytes: None,
+			snapshot_taken_at: Some(Timestamp::now() - age),
+		},
+	)
+	.await
+	.expect("record backup run");
+	let secs = age.as_secs();
+	sql_query(
+		"UPDATE backup_runs SET reported_at = NOW() - ($2 || ' seconds')::INTERVAL WHERE id = $1",
+	)
+	.bind::<sql_types::Uuid, _>(id)
+	.bind::<sql_types::Text, _>(secs.to_string())
+	.execute(conn)
+	.await
+	.expect("backdate reported_at");
+}
+
+/// Stand in for an inspection that itemised the group's repo just now and found
+/// exactly these snapshots.
+async fn record_observed_snapshots(
+	conn: &mut AsyncPgConnection,
+	group_id: Uuid,
+	snapshot_ids: &[&str],
+) {
+	let observed: Vec<NewObservedSnapshot> = snapshot_ids
+		.iter()
+		.map(|id| NewObservedSnapshot {
+			snapshot_id: (*id).into(),
+			source: "canopy@repo:/data".into(),
+			snapshot_at: None,
+		})
+		.collect();
+	BackupRepoObservedSnapshot::replace_for_group(conn, group_id, &observed)
+		.await
+		.expect("record observed snapshots");
+}
+
+/// Back-date every observation of a group's snapshots, so the itemised set is
+/// older than the runs being reconciled against it.
+async fn age_observed_snapshots(conn: &mut AsyncPgConnection, group_id: Uuid) {
+	sql_query(
+		"UPDATE backup_repo_observed_snapshots SET observed_at = NOW() - INTERVAL '30 days' \
+		 WHERE group_id = $1",
+	)
+	.bind::<sql_types::Uuid, _>(group_id)
+	.execute(conn)
+	.await
+	.expect("age observed snapshots");
 }
 
 // --- issue / incident assertion helpers -------------------------------------
@@ -777,8 +856,11 @@ async fn reconcile_files_report_gap_when_snapshot_fresh_but_no_report() {
 	.await;
 }
 
+/// The finding the check's name has always claimed: the device named the
+/// snapshot it created and the repository doesn't hold it. Decided by looking
+/// the id up, not by comparing timestamps.
 #[tokio::test(flavor = "multi_thread")]
-async fn reconcile_files_missing_when_report_fresh_but_no_snapshot() {
+async fn reconcile_files_missing_when_the_reported_snapshot_is_absent_from_the_repo() {
 	TestDb::run(|mut conn, _url| async move {
 		let pg = BackupType::TamanuPostgres;
 		let interval = SignedDuration::from_hours(12);
@@ -790,31 +872,20 @@ async fn reconcile_files_missing_when_report_fresh_but_no_snapshot() {
 		insert_schedule(&mut conn, group_id, &pg, interval).await;
 		enable_capability(&mut conn, server_id, &pg).await;
 
-		// Fresh report (2h old, within grace)...
-		insert_backup_success_aged(
+		// A recent run naming the snapshot it cut...
+		insert_backup_success_with_snapshot(
 			&mut conn,
 			device_id,
 			group_id,
 			server_id,
 			&pg,
 			SignedDuration::from_hours(2),
+			"snap-reported",
 		)
 		.await;
-		// ...but the only snapshot row is stale-snapshot/fresh-inventory: a repo
-		// row observed just now (inventory fresh) whose latest_snapshot_at is
-		// old → "report says success but data didn't land".
-		let source = format!("canopy@{server_id}:/data");
-		let old_snap = Timestamp::now() - SignedDuration::from_hours(72);
-		BackupRepoSnapshot::upsert(
-			&mut conn,
-			group_id,
-			&source,
-			Some(server_id),
-			Some(&pg),
-			Some(old_snap),
-		)
-		.await
-		.expect("upsert snapshot");
+		// ...and an inspection since that run which found other snapshots but
+		// not that one.
+		record_observed_snapshots(&mut conn, group_id, &["snap-elsewhere"]).await;
 
 		let rows = database::backup::staleness::scan_rows(&mut conn)
 			.await
@@ -827,7 +898,7 @@ async fn reconcile_files_missing_when_report_fresh_but_no_snapshot() {
 		let issue = server_issue(&mut conn, server_id, mref)
 			.await
 			.expect("reconcile-missing issue filed against the server it concerns");
-		assert_eq!(issue.observed_result.as_deref(), Some("failed"));
+		assert_eq!(issue.observed_result.as_deref(), Some("warning"));
 		assert_eq!(
 			issue.effective_result.as_deref(),
 			Some("warning"),
@@ -843,17 +914,31 @@ async fn reconcile_files_missing_when_report_fresh_but_no_snapshot() {
 			0,
 			"a warning does not open an incident on its own",
 		);
+
+		let message = issue_message(&mut conn, server_id, mref)
+			.await
+			.expect("message recorded");
+		assert!(
+			message.contains("its snapshot is not in the repo"),
+			"the message describes the lookup that was made: {message}",
+		);
+		let detail = issue_detail(&mut conn, server_id, mref)
+			.await
+			.expect("detail recorded");
+		assert_eq!(
+			detail["instances"][0]["snapshot_id"], "snap-reported",
+			"the id looked up is in the detail: {detail}",
+		);
 	})
 	.await;
 }
 
-/// The case the "missing" verdict exists for: a device reports success while
-/// nothing lands in the repo, so the inspection job — which only writes rows
-/// for sources it actually finds — never creates a snapshot row for the pair.
-/// Inventory freshness has to come from the *group's* last inspection, not
-/// from the absent row, or the alert can never fire.
+/// The inspection job only writes a per-source inventory row for sources it
+/// actually finds, so the pair a "missing" verdict is about has no row of its
+/// own. The itemised snapshot set is what decides the case, and it belongs to
+/// the group rather than to any one pair.
 #[tokio::test(flavor = "multi_thread")]
-async fn reconcile_files_missing_when_report_fresh_and_the_pair_has_no_snapshot_row() {
+async fn reconcile_files_missing_when_the_pair_has_no_snapshot_row_at_all() {
 	TestDb::run(|mut conn, _url| async move {
 		let pg = BackupType::TamanuPostgres;
 		let interval = SignedDuration::from_hours(12);
@@ -866,28 +951,29 @@ async fn reconcile_files_missing_when_report_fresh_and_the_pair_has_no_snapshot_
 		insert_schedule(&mut conn, group_id, &pg, interval).await;
 		enable_capability(&mut conn, server_id, &pg).await;
 
-		// Fresh report for our server...
-		insert_backup_success_aged(
+		insert_backup_success_with_snapshot(
 			&mut conn,
 			device_id,
 			group_id,
 			server_id,
 			&pg,
 			SignedDuration::from_hours(2),
+			"snap-reported",
 		)
 		.await;
-		// ...and the inspector ran recently, but only found another server's
-		// source — nothing for ours.
+		// The inspector ran since the report, but only found another server's
+		// source — nothing for ours, so ours has no inventory row.
 		BackupRepoSnapshot::upsert(
 			&mut conn,
 			group_id,
 			&format!("canopy@{other_id}:/data"),
 			Some(other_id),
 			Some(&pg),
-			Some(Timestamp::now() - SignedDuration::from_hours(2)),
+			Some(Timestamp::now() - SignedDuration::from_hours(1)),
 		)
 		.await
 		.expect("upsert other server's snapshot");
+		record_observed_snapshots(&mut conn, group_id, &["snap-of-the-other-server"]).await;
 
 		let rows = database::backup::staleness::scan_rows(&mut conn)
 			.await
@@ -900,9 +986,187 @@ async fn reconcile_files_missing_when_report_fresh_and_the_pair_has_no_snapshot_
 		let issue = server_issue(&mut conn, server_id, mref)
 			.await
 			.expect("reconcile-missing issue filed for the pair with no snapshot");
-		assert_eq!(issue.observed_result.as_deref(), Some("failed"));
+		assert_eq!(issue.observed_result.as_deref(), Some("warning"));
 		assert_eq!(issue.effective_result.as_deref(), Some("warning"));
 		assert!(issue.active);
+	})
+	.await;
+}
+
+/// The regression that motivated splitting this check in two. Inspection runs
+/// on its own, slower cadence, so for a server backing up more often than the
+/// repo is inspected the newest snapshot on record is routinely older than the
+/// last run — with nothing wrong. A verdict measured against `now` instead of
+/// against the run it contradicts turned that into an alert on every healthy
+/// server in the fleet.
+// spec: BKJ#detection
+#[tokio::test(flavor = "multi_thread")]
+async fn reconcile_leaves_a_healthy_server_alone_when_inspection_lags_the_backup_cadence() {
+	TestDb::run(|mut conn, _url| async move {
+		let pg = BackupType::TamanuPostgres;
+		// Backs up every 6h; the repo is inspected weekly.
+		let interval = SignedDuration::from_hours(6);
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id, true).await;
+		let device_id = insert_device(&mut conn).await;
+
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(24 * 30)).await;
+		insert_schedule(&mut conn, group_id, &pg, interval).await;
+		enable_capability(&mut conn, server_id, &pg).await;
+
+		insert_backup_success_with_snapshot(
+			&mut conn,
+			device_id,
+			group_id,
+			server_id,
+			&pg,
+			SignedDuration::from_hours(2),
+			"snap-two-hours-ago",
+		)
+		.await;
+
+		// The last inspection was three days ago and, of course, found the
+		// snapshot that existed then.
+		let three_days = SignedDuration::from_hours(72);
+		BackupRepoSnapshot::upsert(
+			&mut conn,
+			group_id,
+			&format!("canopy@{server_id}:/data"),
+			Some(server_id),
+			Some(&pg),
+			Some(Timestamp::now() - three_days),
+		)
+		.await
+		.expect("upsert snapshot");
+		record_observed_snapshots(&mut conn, group_id, &["snap-three-days-ago"]).await;
+		sql_query(
+			"UPDATE backup_repo_snapshots SET observed_at = NOW() - INTERVAL '72 hours' \
+			 WHERE group_id = $1",
+		)
+		.bind::<sql_types::Uuid, _>(group_id)
+		.execute(&mut conn)
+		.await
+		.expect("age the inventory to the last inspection");
+		age_observed_snapshots(&mut conn, group_id).await;
+
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan");
+		database::backup::reconcile::sweep(&mut conn, &rows)
+			.await
+			.expect("reconcile sweep");
+
+		assert!(
+			server_issue(&mut conn, server_id, refs::RECONCILE_MISSING)
+				.await
+				.is_none(),
+			"a slower inspection cadence is not evidence a backup is missing",
+		);
+		assert!(
+			server_issue(&mut conn, server_id, refs::RECONCILE_RECENCY)
+				.await
+				.is_none(),
+			"and nothing is recorded either: no inspection has looked since the run",
+		);
+	})
+	.await;
+}
+
+/// The timestamp comparison is kept for context, and kept from alerting: it is
+/// recorded with what it observed while its effective result stays passed.
+#[tokio::test(flavor = "multi_thread")]
+async fn reconcile_records_the_recency_observation_without_alerting() {
+	TestDb::run(|mut conn, _url| async move {
+		let pg = BackupType::TamanuPostgres;
+		let interval = SignedDuration::from_hours(12);
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id, true).await;
+		let device_id = insert_device(&mut conn).await;
+
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
+		insert_schedule(&mut conn, group_id, &pg, interval).await;
+		enable_capability(&mut conn, server_id, &pg).await;
+
+		insert_backup_success_with_snapshot(
+			&mut conn,
+			device_id,
+			group_id,
+			server_id,
+			&pg,
+			SignedDuration::from_hours(2),
+			"snap-reported",
+		)
+		.await;
+		// Inspected since the run, and holding the reported snapshot — so there
+		// is nothing missing — but the newest snapshot time on record for the
+		// source is older than the run.
+		BackupRepoSnapshot::upsert(
+			&mut conn,
+			group_id,
+			&format!("canopy@{server_id}:/data"),
+			Some(server_id),
+			Some(&pg),
+			Some(Timestamp::now() - SignedDuration::from_hours(72)),
+		)
+		.await
+		.expect("upsert snapshot");
+		record_observed_snapshots(&mut conn, group_id, &["snap-reported"]).await;
+
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan");
+		database::backup::reconcile::sweep(&mut conn, &rows)
+			.await
+			.expect("reconcile sweep");
+
+		let rref = refs::RECONCILE_RECENCY;
+		let issue = server_issue(&mut conn, server_id, rref)
+			.await
+			.expect("the observation is recorded");
+		assert_eq!(
+			issue.observed_result.as_deref(),
+			Some("warning"),
+			"what was seen is recorded as seen",
+		);
+		assert_eq!(
+			issue.effective_result.as_deref(),
+			Some("passed"),
+			"a timestamp comparison never ranks as an alert",
+		);
+		assert!(!issue.active);
+		assert_eq!(server_issue_open_links(&mut conn, server_id, rref).await, 0,);
+
+		assert!(
+			server_issue(&mut conn, server_id, refs::RECONCILE_MISSING)
+				.await
+				.is_none(),
+			"the repo holds the reported snapshot, so nothing is missing",
+		);
+
+		// The next inspection catches up. The observation has to come with it:
+		// this check is never active, so nothing else would ever retract it.
+		BackupRepoSnapshot::upsert(
+			&mut conn,
+			group_id,
+			&format!("canopy@{server_id}:/data"),
+			Some(server_id),
+			Some(&pg),
+			Some(Timestamp::now() - SignedDuration::from_hours(1)),
+		)
+		.await
+		.expect("refresh snapshot");
+		database::backup::reconcile::sweep(&mut conn, &rows)
+			.await
+			.expect("second reconcile sweep");
+		assert_eq!(
+			server_issue(&mut conn, server_id, rref)
+				.await
+				.expect("still recorded")
+				.observed_result
+				.as_deref(),
+			Some("passed"),
+			"the recorded observation is brought up to date once the repo catches up",
+		);
 	})
 	.await;
 }
@@ -926,40 +1190,21 @@ async fn reconcile_missing_is_per_server_not_shared_across_the_group() {
 		enable_capability(&mut conn, broken_id, &pg).await;
 		enable_capability(&mut conn, healthy_id, &pg).await;
 
-		// Both report success recently.
-		for sid in [broken_id, healthy_id] {
-			insert_backup_success_aged(
+		// Both report success recently, each naming its own snapshot.
+		for (sid, snap) in [(broken_id, "snap-broken"), (healthy_id, "snap-healthy")] {
+			insert_backup_success_with_snapshot(
 				&mut conn,
 				device_id,
 				group_id,
 				sid,
 				&pg,
 				SignedDuration::from_hours(2),
+				snap,
 			)
 			.await;
 		}
-		// Only the healthy server's report is backed by a fresh snapshot; the
-		// broken one's snapshot is three days old.
-		BackupRepoSnapshot::upsert(
-			&mut conn,
-			group_id,
-			&format!("canopy@{healthy_id}:/data"),
-			Some(healthy_id),
-			Some(&pg),
-			Some(Timestamp::now() - SignedDuration::from_hours(2)),
-		)
-		.await
-		.expect("upsert healthy snapshot");
-		BackupRepoSnapshot::upsert(
-			&mut conn,
-			group_id,
-			&format!("canopy@{broken_id}:/data"),
-			Some(broken_id),
-			Some(&pg),
-			Some(Timestamp::now() - SignedDuration::from_hours(72)),
-		)
-		.await
-		.expect("upsert broken snapshot");
+		// The repo holds only the healthy server's snapshot.
+		record_observed_snapshots(&mut conn, group_id, &["snap-healthy"]).await;
 
 		let rows = database::backup::staleness::scan_rows(&mut conn)
 			.await
@@ -972,7 +1217,7 @@ async fn reconcile_missing_is_per_server_not_shared_across_the_group() {
 		let broken = server_issue(&mut conn, broken_id, mref)
 			.await
 			.expect("the server whose snapshot is missing holds the alert");
-		assert_eq!(broken.observed_result.as_deref(), Some("failed"));
+		assert_eq!(broken.observed_result.as_deref(), Some("warning"));
 		assert_eq!(broken.effective_result.as_deref(), Some("warning"));
 		assert!(
 			broken.active,
@@ -1006,25 +1251,17 @@ async fn reconcile_missing_names_the_server_rather_than_its_id() {
 		insert_schedule(&mut conn, group_id, &pg, interval).await;
 		enable_capability(&mut conn, server_id, &pg).await;
 
-		insert_backup_success_aged(
+		insert_backup_success_with_snapshot(
 			&mut conn,
 			device_id,
 			group_id,
 			server_id,
 			&pg,
 			SignedDuration::from_hours(2),
+			"snap-reported",
 		)
 		.await;
-		BackupRepoSnapshot::upsert(
-			&mut conn,
-			group_id,
-			&format!("canopy@{server_id}:/data"),
-			Some(server_id),
-			Some(&pg),
-			Some(Timestamp::now() - SignedDuration::from_hours(72)),
-		)
-		.await
-		.expect("upsert stale snapshot");
+		record_observed_snapshots(&mut conn, group_id, &["snap-elsewhere"]).await;
 
 		let rows = database::backup::staleness::scan_rows(&mut conn)
 			.await
@@ -1049,9 +1286,9 @@ async fn reconcile_missing_names_the_server_rather_than_its_id() {
 	.await;
 }
 
-/// The freshness guard still holds: a group the inspector has never run
-/// against has no inventory to conclude "nothing landed" from, so the missing
-/// verdict defers to the inspection job's own failure surfacing.
+/// A group the inspector has never run against has nothing to conclude
+/// "missing" from: absence of a snapshot from an inventory nobody has written
+/// says only that nobody has looked.
 #[tokio::test(flavor = "multi_thread")]
 async fn reconcile_skips_missing_when_the_group_was_never_inspected() {
 	TestDb::run(|mut conn, _url| async move {
@@ -1064,16 +1301,17 @@ async fn reconcile_skips_missing_when_the_group_was_never_inspected() {
 		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
 		insert_schedule(&mut conn, group_id, &pg, interval).await;
 		enable_capability(&mut conn, server_id, &pg).await;
-		insert_backup_success_aged(
+		insert_backup_success_with_snapshot(
 			&mut conn,
 			device_id,
 			group_id,
 			server_id,
 			&pg,
 			SignedDuration::from_hours(2),
+			"snap-reported",
 		)
 		.await;
-		// No `backup_repo_snapshots` rows at all for the group.
+		// No inventory rows of either kind for the group.
 
 		let rows = database::backup::staleness::scan_rows(&mut conn)
 			.await
@@ -1094,14 +1332,20 @@ async fn reconcile_skips_missing_when_the_group_was_never_inspected() {
 				.is_none(),
 			"and no per-server finding either",
 		);
+		assert!(
+			server_issue(&mut conn, server_id, refs::RECONCILE_RECENCY)
+				.await
+				.is_none(),
+			"nor is a recency observation recorded from an inventory that doesn't exist",
+		);
 	})
 	.await;
 }
 
-/// A stale repo inventory makes the missing verdict undecidable, not resolved.
-/// With every type undecidable there is nothing to conclude, so an already-open
-/// finding stays open rather than being cleared on the strength of a lagging
-/// inspector.
+/// An inventory older than the run makes the missing verdict undecidable, not
+/// resolved. With every type undecidable there is nothing to conclude, so an
+/// already-open finding stays open rather than being cleared on the strength of
+/// a lagging inspector.
 #[tokio::test(flavor = "multi_thread")]
 async fn reconcile_leaves_an_open_missing_alone_when_the_inventory_goes_stale() {
 	TestDb::run(|mut conn, _url| async move {
@@ -1114,27 +1358,20 @@ async fn reconcile_leaves_an_open_missing_alone_when_the_inventory_goes_stale() 
 		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
 		insert_schedule(&mut conn, group_id, &pg, interval).await;
 		enable_capability(&mut conn, server_id, &pg).await;
-		insert_backup_success_aged(
+		insert_backup_success_with_snapshot(
 			&mut conn,
 			device_id,
 			group_id,
 			server_id,
 			&pg,
 			SignedDuration::from_hours(2),
+			"snap-reported",
 		)
 		.await;
 
-		// Fresh inventory, stale snapshot → the finding is raised.
-		BackupRepoSnapshot::upsert(
-			&mut conn,
-			group_id,
-			&format!("canopy@{server_id}:/data"),
-			Some(server_id),
-			Some(&pg),
-			Some(Timestamp::now() - SignedDuration::from_hours(72)),
-		)
-		.await
-		.expect("upsert stale snapshot");
+		// Inspected since the run, and the reported snapshot isn't there → the
+		// finding is raised.
+		record_observed_snapshots(&mut conn, group_id, &["snap-elsewhere"]).await;
 
 		let rows = database::backup::staleness::scan_rows(&mut conn)
 			.await
@@ -1149,16 +1386,9 @@ async fn reconcile_leaves_an_open_missing_alone_when_the_inventory_goes_stale() 
 				.active,
 		);
 
-		// Now the inspector falls behind: back-date every observation past the
-		// inventory-staleness bound.
-		sql_query(
-			"UPDATE backup_repo_snapshots SET observed_at = NOW() - INTERVAL '30 days' \
-			 WHERE group_id = $1",
-		)
-		.bind::<sql_types::Uuid, _>(group_id)
-		.execute(&mut conn)
-		.await
-		.expect("age the inventory");
+		// Now the inspector falls behind: every observation predates the run it
+		// would be judging.
+		age_observed_snapshots(&mut conn, group_id).await;
 
 		database::backup::reconcile::sweep(&mut conn, &rows)
 			.await
@@ -1656,6 +1886,11 @@ async fn backup_sweeps_seed_no_check_that_defaults_to_a_failure() {
 		refs::PREFLIGHT_OBJECT_LOCK,
 	];
 
+	/// Checks that ship lower than a warning, at a ceiling of `passed`:
+	/// recorded and visible, never alerting, because their evidence supports
+	/// "something looks off" and nothing firmer.
+	const RECORDED_ONLY: [&str; 1] = [refs::RECONCILE_RECENCY];
+
 	TestDb::run(|mut conn, _url| async move {
 		let pg = BackupType::TamanuPostgres;
 		let interval = SignedDuration::from_hours(12);
@@ -1713,11 +1948,17 @@ async fn backup_sweeps_seed_no_check_that_defaults_to_a_failure() {
 			catalog.iter().map(|r| &r.check_name).collect::<Vec<_>>(),
 		);
 		for row in covered {
+			let expected = if RECORDED_ONLY.contains(&row.check_name.as_str()) {
+				("passed", false)
+			} else {
+				("warning", false)
+			};
 			assert_eq!(
 				(row.ceiling.as_str(), row.escalates),
-				("warning", false),
-				"{} must ship as a non-escalating warning: a failure means a \
-				 live service is down, and a backup problem is not that",
+				expected,
+				"{} must ship no more urgently than a non-escalating warning: a \
+				 failure means a live service is down, and a backup problem is \
+				 not that",
 				row.check_name,
 			);
 		}

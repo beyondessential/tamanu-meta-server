@@ -8,7 +8,7 @@
 //! logic (STS issuance, scheduler loops, operator UI) lives in the
 //! public-server, `jobs`, and private-server components.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use commons_errors::{AppError, Result};
 use commons_types::backup::{
@@ -2189,6 +2189,141 @@ impl BackupRepoSnapshot {
 			.optional()
 			.map_err(AppError::from)?;
 		Ok(row.map(|r| r.observed_at))
+	}
+}
+
+// ---------------------------------------------------------------------------
+// backup_repo_observed_snapshots — every snapshot the last inspection saw
+// ---------------------------------------------------------------------------
+
+/// One snapshot found in a group's repository during inspection, identified the
+/// way the device that created it identifies it (`backup_runs.snapshot_id`).
+///
+/// Where [`BackupRepoSnapshot`] summarises a source ("the newest snapshot for
+/// this source is from 04:00"), this is the itemised set behind that summary, so
+/// a run's reported snapshot can be looked up rather than inferred from
+/// timestamps.
+#[derive(Debug, Clone, Queryable, Selectable)]
+#[diesel(table_name = crate::schema::backup_repo_observed_snapshots)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct BackupRepoObservedSnapshot {
+	/// ID of the server group whose repository holds the snapshot.
+	pub group_id: Uuid,
+	/// The snapshot's own id, unique within the repository, as a device reports
+	/// it on the run that created it.
+	pub snapshot_id: String,
+	/// Raw source identifier the snapshot belongs to, as recorded in the
+	/// repository.
+	pub source: String,
+	/// When the snapshot was taken, if the repository records it.
+	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
+	pub snapshot_at: Option<Timestamp>,
+	/// When the inspection that observed this snapshot ran.
+	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
+	pub observed_at: Timestamp,
+}
+
+/// One snapshot an inspection observed, for [`BackupRepoObservedSnapshot::replace_for_group`].
+#[derive(Debug, Clone)]
+pub struct NewObservedSnapshot {
+	pub snapshot_id: String,
+	pub source: String,
+	pub snapshot_at: Option<Timestamp>,
+}
+
+impl BackupRepoObservedSnapshot {
+	/// Replace a group's observed-snapshot set with what an inspection found.
+	///
+	/// The rows describe the repository as it stands, not a history: a snapshot
+	/// retention has expired is gone from the repository and must be gone from
+	/// here too, or reconciliation would keep matching runs against snapshots
+	/// that no longer exist. So everything not in this listing is dropped, which
+	/// also bounds the table at the size of the repository.
+	///
+	/// The whole batch carries one `observed_at`, and rows still holding an
+	/// earlier one are what the listing didn't mention. Callers must pass a
+	/// complete listing.
+	pub async fn replace_for_group(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		observed: &[NewObservedSnapshot],
+	) -> Result<()> {
+		use crate::schema::backup_repo_observed_snapshots::dsl;
+		use diesel::upsert::excluded;
+
+		let stamp = jiff_diesel::Timestamp::from(Timestamp::now());
+
+		// Chunked so a repository with tens of thousands of snapshots doesn't
+		// build one statement past Postgres's bind-parameter limit.
+		for chunk in observed.chunks(500) {
+			let values: Vec<_> = chunk
+				.iter()
+				.map(|s| {
+					(
+						dsl::group_id.eq(group_id),
+						dsl::snapshot_id.eq(&s.snapshot_id),
+						dsl::source.eq(&s.source),
+						dsl::snapshot_at.eq(jiff_diesel::NullableTimestamp::from(s.snapshot_at)),
+						dsl::observed_at.eq(stamp),
+					)
+				})
+				.collect();
+			diesel::insert_into(dsl::backup_repo_observed_snapshots)
+				.values(values)
+				.on_conflict((dsl::group_id, dsl::snapshot_id))
+				.do_update()
+				.set((
+					dsl::source.eq(excluded(dsl::source)),
+					dsl::snapshot_at.eq(excluded(dsl::snapshot_at)),
+					dsl::observed_at.eq(stamp),
+				))
+				.execute(db)
+				.await
+				.map_err(AppError::from)?;
+		}
+
+		diesel::delete(
+			dsl::backup_repo_observed_snapshots
+				.filter(dsl::group_id.eq(group_id))
+				.filter(dsl::observed_at.lt(stamp)),
+		)
+		.execute(db)
+		.await
+		.map_err(AppError::from)?;
+		Ok(())
+	}
+
+	/// The snapshot ids the last inspection observed in a group's repository,
+	/// with when it observed them.
+	///
+	/// The timestamp is what makes the set usable as evidence: an id's absence
+	/// only means something if the observation is newer than the run being
+	/// reconciled. `None` (no rows) means there is no observation to reason
+	/// from — either the group has never been inspected, or an inspection found
+	/// the repository empty, which are indistinguishable here.
+	pub async fn observed_ids_for_group(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+	) -> Result<(HashSet<String>, Option<Timestamp>)> {
+		use crate::schema::backup_repo_observed_snapshots::dsl;
+
+		let rows: Vec<(String, jiff_diesel::Timestamp)> = dsl::backup_repo_observed_snapshots
+			.filter(dsl::group_id.eq(group_id))
+			.select((dsl::snapshot_id, dsl::observed_at))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		let mut ids = HashSet::with_capacity(rows.len());
+		let mut latest: Option<Timestamp> = None;
+		for (id, observed_at) in rows {
+			let observed_at = Timestamp::from(observed_at);
+			if latest.is_none_or(|l| observed_at > l) {
+				latest = Some(observed_at);
+			}
+			ids.insert(id);
+		}
+		Ok((ids, latest))
 	}
 }
 
