@@ -27,7 +27,10 @@ use uuid::Uuid;
 
 use crate::{
 	backup::refs,
-	issues::{CheckFiling, Scope, file_check},
+	issues::{
+		CheckFiling, CheckInstance, GradedInstance, InstancedCheckFiling, Scope, file_check,
+		file_check_instances,
+	},
 	servers::Server,
 };
 
@@ -276,151 +279,179 @@ pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 		.collect())
 }
 
-fn type_suffix(ty: &BackupType) -> String {
-	format!(":{ty}")
+/// Read an instance's `last_success_at` back out of its detail for the
+/// message. The detail is the one place the specifics live now that the
+/// message summarises across types.
+fn last_success_of(instance: &GradedInstance) -> String {
+	instance
+		.detail
+		.as_ref()
+		.and_then(|d| d.get("last_success_at"))
+		.and_then(|v| v.as_str())
+		.unwrap_or("never")
+		.to_owned()
 }
 
-/// Run the full staleness sweep over a pre-computed scan: classify
-/// every scanned `(server, type)` and file/clear the per-server
-/// `backup-staleness` / `backup-never` issues, then the group-level
-/// `backup-maintenance-stale`. Returns the number of events filed.
+/// Join instance labels for a message, in the order they were graded (most
+/// urgent first). Shared with [`crate::backup::reconcile`] so every backup
+/// check names its degraded instances the same way.
+pub(super) fn label_list(instances: &[GradedInstance]) -> String {
+	instances
+		.iter()
+		.map(|i| i.label.as_str())
+		.collect::<Vec<_>>()
+		.join(", ")
+}
+
+/// Run the full staleness sweep over a pre-computed scan: classify every
+/// scanned `(server, type)`, then file one `backup-staleness` and one
+/// `backup-never` check *per server* with the types as instances, and the
+/// group-level `backup-maintenance-stale`. Returns the number of events
+/// filed.
+///
+/// A server backing up four things has one staleness check, not four: the
+/// types it is stale for are instances of that check (see the Names section
+/// of the CHK spec), so an operator configures staleness once and writes a
+/// rule on `check.type` where a particular type warrants different handling.
 pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize> {
 	let now = Timestamp::now();
 	let mut filed = 0usize;
 
+	// Group the scan by server, preserving first-seen order so the sweep stays
+	// deterministic.
+	let mut by_server: HashMap<Uuid, Vec<&ScanRow>> = HashMap::new();
+	let mut order: Vec<Uuid> = Vec::new();
 	for row in rows {
-		// The ref is per-(server, type): the (server_id, source, ref) issue key
-		// must distinguish types, so the type is folded into the ref suffix.
-		let staleness_ref = format!("{}{}", refs::STALENESS, type_suffix(&row.r#type));
-		let never_ref = format!("{}{}", refs::NEVER, type_suffix(&row.r#type));
+		by_server
+			.entry(row.server_id)
+			.or_insert_with(|| {
+				order.push(row.server_id);
+				Vec::new()
+			})
+			.push(row);
+	}
 
-		let was_active = open_server_issue_active(db, row.server_id, &staleness_ref).await?;
-		let verdict = row.classify(now, was_active);
-
-		let server = Server::get_by_id(db, row.server_id).await?;
+	for server_id in order {
+		let server_rows = &by_server[&server_id];
+		let device_id = server_rows.iter().find_map(|r| r.device_id);
+		let server = Server::get_by_id(db, server_id).await?;
 		let label = server_label(&server);
 
-		match verdict {
-			StalenessVerdict::Stale => {
-				let grace = row.grace();
-				file_check(
-					db,
-					CheckFiling {
-						source: crate::statuses::CANOPY_SOURCE,
-						scope: Scope::Server(row.server_id),
-						device_id: row.device_id,
-						check: &staleness_ref,
-						observed: CheckResult::Failed,
-						title: None,
-						message: &format!(
-							"Server {label} has no successful {} backup newer than {} (last success {})",
-							row.r#type,
-							fmt_dur(grace),
-							row.last_success_at
-								.map(|t| t.to_string())
-								.unwrap_or_else(|| "never".into()),
-						),
-						detail: Some(serde_json::json!({
-							"type": row.r#type.to_string(),
-							"grace_secs": grace.as_secs(),
-							"last_success_at": row.last_success_at.map(|t| t.to_string()),
-						})),
-						default_ceiling: CheckResult::Warning,
-						default_escalates: false,
-						documentation: Some(refs::STALENESS_DOC),
-					},
-				)
-				.await?;
-				filed += 1;
-			}
-			StalenessVerdict::Recovered => {
-				file_check(
-					db,
-					CheckFiling {
-						source: crate::statuses::CANOPY_SOURCE,
-						scope: Scope::Server(row.server_id),
-						device_id: row.device_id,
-						check: &staleness_ref,
-						observed: CheckResult::Passed,
-						title: None,
-						message: &format!(
-							"Server {label} reported a successful {} backup again",
-							row.r#type
-						),
-						detail: None,
-						default_ceiling: CheckResult::Warning,
-						default_escalates: false,
-						documentation: Some(refs::STALENESS_DOC),
-					},
-				)
-				.await?;
-				filed += 1;
-			}
-			StalenessVerdict::Never => {
-				// `backup-never` clears on first success (it transitions to OK,
-				// not Recovered — there's no recovery message for it). Only file
-				// while it's still never-backed-up.
-				//
-				// Warning, not failure: a server that has *never* backed up
-				// (freshly set up, or blocked by an upstream issue) shouldn't
-				// open an incident. A *missed* backup — a server that was
-				// backing up and stopped (`Stale`, above) — is the failure
-				// that pages.
-				file_check(
-					db,
-					CheckFiling {
-						source: crate::statuses::CANOPY_SOURCE,
-						scope: Scope::Server(row.server_id),
-						device_id: row.device_id,
-						check: &never_ref,
-						observed: CheckResult::Warning,
-						title: None,
-						message: &format!(
-							"Server {label} has never reported a successful {} backup (expected since {})",
-							row.r#type,
-							row.anchor(),
-						),
-						detail: Some(serde_json::json!({
-							"type": row.r#type.to_string(),
-							"expected_since": row.anchor().to_string(),
-						})),
-						default_ceiling: CheckResult::Warning,
-						default_escalates: false,
-						documentation: Some(refs::NEVER_DOC),
-					},
-				)
-				.await?;
-				filed += 1;
-			}
-			StalenessVerdict::Ok => {
-				// If a `backup-never` is open but the server has now backed up,
-				// clear it.
-				if row.last_success_at.is_some()
-					&& open_server_issue_active(db, row.server_id, &never_ref).await?
-				{
-					file_check(
-						db,
-						CheckFiling {
-							source: crate::statuses::CANOPY_SOURCE,
-							scope: Scope::Server(row.server_id),
-							device_id: row.device_id,
-							check: &never_ref,
-							observed: CheckResult::Passed,
-							title: None,
-							message: &format!(
-								"Server {label} reported its first successful {} backup",
-								row.r#type
-							),
-							detail: None,
-							default_ceiling: CheckResult::Warning,
-							default_escalates: false,
-							documentation: Some(refs::NEVER_DOC),
-						},
-					)
-					.await?;
-					filed += 1;
-				}
-			}
+		// Both flags are per-server now that the check is: whether this
+		// server's staleness (or never) check is currently degraded at all.
+		let stale_open = open_server_issue_active(db, server_id, refs::STALENESS).await?;
+		let never_open = open_server_issue_active(db, server_id, refs::NEVER).await?;
+
+		let mut stale_instances: Vec<CheckInstance> = Vec::with_capacity(server_rows.len());
+		let mut never_instances: Vec<CheckInstance> = Vec::with_capacity(server_rows.len());
+		let mut any_stale = false;
+		let mut any_never = false;
+
+		for row in server_rows {
+			let verdict = row.classify(now, stale_open);
+			let grace = row.grace();
+
+			let stale = verdict == StalenessVerdict::Stale;
+			any_stale |= stale;
+			stale_instances.push(CheckInstance {
+				label: row.r#type.to_string(),
+				observed: if stale {
+					CheckResult::Failed
+				} else {
+					CheckResult::Passed
+				},
+				detail: Some(serde_json::json!({
+					"type": row.r#type.to_string(),
+					"grace_secs": grace.as_secs(),
+					"last_success_at": row.last_success_at.map(|t| t.to_string()),
+				})),
+			});
+
+			// A server that has *never* backed up (freshly set up, or blocked
+			// upstream) is a different condition from one that was backing up
+			// and stopped, so it is its own check rather than an instance of
+			// staleness.
+			let never = verdict == StalenessVerdict::Never;
+			any_never |= never;
+			never_instances.push(CheckInstance {
+				label: row.r#type.to_string(),
+				observed: if never {
+					CheckResult::Warning
+				} else {
+					CheckResult::Passed
+				},
+				detail: Some(serde_json::json!({
+					"type": row.r#type.to_string(),
+					"expected_since": row.anchor().to_string(),
+				})),
+			});
+		}
+
+		// File when something is degraded, or when the check is open and needs
+		// clearing. A healthy server with nothing open has nothing to say.
+		if any_stale || stale_open {
+			let total = stale_instances.len();
+			file_check_instances(
+				db,
+				InstancedCheckFiling {
+					source: crate::statuses::CANOPY_SOURCE,
+					scope: Scope::Server(server_id),
+					device_id,
+					check: refs::STALENESS,
+					title: None,
+					instances: stale_instances,
+					default_ceiling: CheckResult::Warning,
+					default_escalates: false,
+					documentation: Some(refs::STALENESS_DOC),
+				},
+				&|degraded| match degraded {
+					[] => format!("Server {label} is backing up on schedule again"),
+					[one] => format!(
+						"Server {label} has no recent {} backup (last success {})",
+						one.label,
+						last_success_of(one),
+					),
+					many => format!(
+						"Server {label} has no recent backup for {} of its {total} types: {}",
+						many.len(),
+						label_list(many),
+					),
+				},
+			)
+			.await?;
+			filed += 1;
+		}
+
+		if any_never || never_open {
+			let total = never_instances.len();
+			file_check_instances(
+				db,
+				InstancedCheckFiling {
+					source: crate::statuses::CANOPY_SOURCE,
+					scope: Scope::Server(server_id),
+					device_id,
+					check: refs::NEVER,
+					title: None,
+					instances: never_instances,
+					default_ceiling: CheckResult::Warning,
+					default_escalates: false,
+					documentation: Some(refs::NEVER_DOC),
+				},
+				&|degraded| match degraded {
+					[] => format!("Server {label} has now backed up everything expected of it"),
+					[one] => format!(
+						"Server {label} has never reported a successful {} backup",
+						one.label
+					),
+					many => format!(
+						"Server {label} has never backed up {} of its {total} types: {}",
+						many.len(),
+						label_list(many),
+					),
+				},
+			)
+			.await?;
+			filed += 1;
 		}
 	}
 

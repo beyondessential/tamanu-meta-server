@@ -396,6 +396,26 @@ impl CheckPolicy {
 		observed: CheckResult,
 		ctx: &EvaluationContext<'_>,
 	) -> Result<GradedResult> {
+		let entry = Self::fleet_grading(db, source, check_name).await?;
+		Ok(Self::grade(
+			entry.as_ref(),
+			source,
+			check_name,
+			observed,
+			ctx,
+		))
+	}
+
+	/// One check's catalog entry, in the form [`Self::grade`] takes. `None`
+	/// means the check has no catalog row yet. Load this once when grading
+	/// several instances of the same check (see
+	/// [`crate::issues::file_check_instances`]) so the catalog is read once
+	/// rather than once per instance.
+	pub async fn fleet_grading(
+		db: &mut AsyncPgConnection,
+		source: &str,
+		check_name: &str,
+	) -> Result<Option<FleetGrading>> {
 		use crate::schema::check_policies::dsl;
 		let row: Option<(String, bool, Option<JsonValue>, bool)> = dsl::check_policies
 			.select((
@@ -408,14 +428,7 @@ impl CheckPolicy {
 			.first(db)
 			.await
 			.optional()?;
-		let entry = row.map(FleetGrading::from_row);
-		Ok(Self::grade(
-			entry.as_ref(),
-			source,
-			check_name,
-			observed,
-			ctx,
-		))
+		Ok(row.map(FleetGrading::from_row))
 	}
 
 	/// The pure half of [`Self::apply`]: grade `observed` through an

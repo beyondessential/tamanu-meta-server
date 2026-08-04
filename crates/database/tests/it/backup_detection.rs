@@ -265,6 +265,76 @@ async fn issue_message(
 	.map(|r| r.message)
 }
 
+#[derive(QueryableByName, Debug)]
+struct NameRow {
+	#[diesel(sql_type = sql_types::Text)]
+	name: String,
+}
+
+/// Every canopy issue ref on a server matching a LIKE pattern. Used to assert
+/// a check has exactly one entry rather than one per instance.
+async fn issues_matching(
+	conn: &mut AsyncPgConnection,
+	server_id: Uuid,
+	pattern: &str,
+) -> Vec<String> {
+	sql_query(
+		"SELECT \"ref\" AS name FROM issues \
+		 WHERE server_id = $1 AND source = $2 AND \"ref\" LIKE $3 ORDER BY \"ref\"",
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Text, _>(refs::CANOPY_SOURCE)
+	.bind::<sql_types::Text, _>(pattern)
+	.load::<NameRow>(conn)
+	.await
+	.expect("load issue refs")
+	.into_iter()
+	.map(|r| r.name)
+	.collect()
+}
+
+/// Every catalog entry matching a LIKE pattern — what an operator would have
+/// to configure.
+async fn catalog_names(conn: &mut AsyncPgConnection, pattern: &str) -> Vec<String> {
+	sql_query(
+		"SELECT check_name AS name FROM check_policies \
+		 WHERE source = $1 AND check_name LIKE $2 ORDER BY check_name",
+	)
+	.bind::<sql_types::Text, _>(refs::CANOPY_SOURCE)
+	.bind::<sql_types::Text, _>(pattern)
+	.load::<NameRow>(conn)
+	.await
+	.expect("load catalog names")
+	.into_iter()
+	.map(|r| r.name)
+	.collect()
+}
+
+#[derive(QueryableByName, Debug)]
+struct DetailRow {
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Jsonb>)]
+	detail: Option<serde_json::Value>,
+}
+
+/// A check's stored detail, which is where the per-instance results live.
+async fn issue_detail(
+	conn: &mut AsyncPgConnection,
+	server_id: Uuid,
+	r#ref: &str,
+) -> Option<serde_json::Value> {
+	sql_query(
+		"SELECT detail FROM issues \
+		 WHERE server_id = $1 AND source = $2 AND \"ref\" = $3",
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Text, _>(refs::CANOPY_SOURCE)
+	.bind::<sql_types::Text, _>(r#ref)
+	.get_result::<DetailRow>(conn)
+	.await
+	.ok()
+	.and_then(|r| r.detail)
+}
+
 async fn group_issue(
 	conn: &mut AsyncPgConnection,
 	group_id: Uuid,
@@ -327,10 +397,6 @@ async fn group_issue_open_links(conn: &mut AsyncPgConnection, group_id: Uuid, r#
 
 // The per-(server,type) ref suffix that `sweep` folds onto STALENESS/NEVER and
 // reconcile folds onto its refs (`:{type}`).
-fn typed_ref(base: &str, ty: &BackupType) -> String {
-	format!("{base}:{ty}")
-}
-
 // ===========================================================================
 // Case 1 — `classify` boundaries (pure, no DB)
 // ===========================================================================
@@ -540,8 +606,8 @@ async fn sweep_files_staleness_for_monitored_server_with_old_success() {
 			.await
 			.expect("sweep");
 
-		let sref = typed_ref(refs::STALENESS, &pg);
-		let issue = server_issue(&mut conn, server_id, &sref)
+		let sref = refs::STALENESS;
+		let issue = server_issue(&mut conn, server_id, sref)
 			.await
 			.expect("staleness issue filed");
 		// The sweep still observes a failure; the shipped ceiling is what caps
@@ -556,7 +622,7 @@ async fn sweep_files_staleness_for_monitored_server_with_old_success() {
 		assert!(!issue.escalates);
 		assert!(issue.active, "staleness issue is active");
 		assert_eq!(
-			server_issue_open_links(&mut conn, server_id, &sref).await,
+			server_issue_open_links(&mut conn, server_id, sref).await,
 			0,
 			"a warning does not open an incident on its own",
 		);
@@ -584,8 +650,8 @@ async fn sweep_files_never_for_server_that_never_succeeded() {
 			.await
 			.expect("sweep");
 
-		let nref = typed_ref(refs::NEVER, &pg);
-		let issue = server_issue(&mut conn, server_id, &nref)
+		let nref = refs::NEVER;
+		let issue = server_issue(&mut conn, server_id, nref)
 			.await
 			.expect("never issue filed");
 		// Never-reported is a warning (so first-time setup doesn't open an
@@ -594,7 +660,7 @@ async fn sweep_files_never_for_server_that_never_succeeded() {
 		assert!(issue.active);
 		// Staleness ref must NOT be filed when there's never been a success.
 		assert!(
-			server_issue(&mut conn, server_id, &typed_ref(refs::STALENESS, &pg))
+			server_issue(&mut conn, server_id, refs::STALENESS)
 				.await
 				.is_none(),
 			"never path does not also file backup-staleness",
@@ -637,15 +703,15 @@ async fn unmonitored_staleness_records_issue_but_no_incident_link() {
 			.await
 			.expect("sweep");
 
-		let sref = typed_ref(refs::STALENESS, &pg);
+		let sref = refs::STALENESS;
 		// Issue/event is still recorded unconditionally.
-		let issue = server_issue(&mut conn, server_id, &sref)
+		let issue = server_issue(&mut conn, server_id, sref)
 			.await
 			.expect("issue still recorded for unmonitored server");
 		assert!(issue.active);
 		// ...but it must NOT contribute to any incident (is_monitored gate).
 		assert_eq!(
-			server_issue_open_links(&mut conn, server_id, &sref).await,
+			server_issue_open_links(&mut conn, server_id, sref).await,
 			0,
 			"unmonitored staleness must not open/join an incident",
 		);
@@ -691,8 +757,8 @@ async fn reconcile_files_report_gap_when_snapshot_fresh_but_no_report() {
 			.await
 			.expect("reconcile sweep");
 
-		let gref = typed_ref(refs::RECONCILE_REPORT_GAP, &pg);
-		let issue = server_issue(&mut conn, server_id, &gref)
+		let gref = refs::RECONCILE_REPORT_GAP;
+		let issue = server_issue(&mut conn, server_id, gref)
 			.await
 			.expect("report-gap issue filed");
 		assert_eq!(
@@ -703,7 +769,7 @@ async fn reconcile_files_report_gap_when_snapshot_fresh_but_no_report() {
 		assert!(issue.active);
 		// Warning never opens an incident on its own.
 		assert_eq!(
-			server_issue_open_links(&mut conn, server_id, &gref).await,
+			server_issue_open_links(&mut conn, server_id, gref).await,
 			0,
 			"Warning report-gap does not open an incident by itself",
 		);
@@ -757,8 +823,8 @@ async fn reconcile_files_missing_when_report_fresh_but_no_snapshot() {
 			.await
 			.expect("reconcile sweep");
 
-		let mref = typed_ref(refs::RECONCILE_MISSING, &pg);
-		let issue = server_issue(&mut conn, server_id, &mref)
+		let mref = refs::RECONCILE_MISSING;
+		let issue = server_issue(&mut conn, server_id, mref)
 			.await
 			.expect("reconcile-missing issue filed against the server it concerns");
 		assert_eq!(issue.observed_result.as_deref(), Some("failed"));
@@ -769,11 +835,11 @@ async fn reconcile_files_missing_when_report_fresh_but_no_snapshot() {
 		);
 		assert!(issue.active);
 		assert!(
-			group_issue(&mut conn, group_id, &mref).await.is_none(),
+			group_issue(&mut conn, group_id, mref).await.is_none(),
 			"the finding is about one server, not the group",
 		);
 		assert_eq!(
-			server_issue_open_links(&mut conn, server_id, &mref).await,
+			server_issue_open_links(&mut conn, server_id, mref).await,
 			0,
 			"a warning does not open an incident on its own",
 		);
@@ -830,8 +896,8 @@ async fn reconcile_files_missing_when_report_fresh_and_the_pair_has_no_snapshot_
 			.await
 			.expect("reconcile sweep");
 
-		let mref = typed_ref(refs::RECONCILE_MISSING, &pg);
-		let issue = server_issue(&mut conn, server_id, &mref)
+		let mref = refs::RECONCILE_MISSING;
+		let issue = server_issue(&mut conn, server_id, mref)
 			.await
 			.expect("reconcile-missing issue filed for the pair with no snapshot");
 		assert_eq!(issue.observed_result.as_deref(), Some("failed"));
@@ -902,8 +968,8 @@ async fn reconcile_missing_is_per_server_not_shared_across_the_group() {
 			.await
 			.expect("reconcile sweep");
 
-		let mref = typed_ref(refs::RECONCILE_MISSING, &pg);
-		let broken = server_issue(&mut conn, broken_id, &mref)
+		let mref = refs::RECONCILE_MISSING;
+		let broken = server_issue(&mut conn, broken_id, mref)
 			.await
 			.expect("the server whose snapshot is missing holds the alert");
 		assert_eq!(broken.observed_result.as_deref(), Some("failed"));
@@ -913,7 +979,7 @@ async fn reconcile_missing_is_per_server_not_shared_across_the_group() {
 			"the healthy server in the same group must not clear it",
 		);
 		assert!(
-			server_issue(&mut conn, healthy_id, &mref).await.is_none(),
+			server_issue(&mut conn, healthy_id, mref).await.is_none(),
 			"the healthy server has no reconcile-missing alert of its own",
 		);
 	})
@@ -967,8 +1033,8 @@ async fn reconcile_missing_names_the_server_rather_than_its_id() {
 			.await
 			.expect("reconcile sweep");
 
-		let mref = typed_ref(refs::RECONCILE_MISSING, &pg);
-		let message = issue_message(&mut conn, server_id, &mref)
+		let mref = refs::RECONCILE_MISSING;
+		let message = issue_message(&mut conn, server_id, mref)
 			.await
 			.expect("reconcile-missing issue filed");
 		assert!(
@@ -1017,14 +1083,92 @@ async fn reconcile_skips_missing_when_the_group_was_never_inspected() {
 			.expect("reconcile sweep");
 
 		assert!(
-			group_issue(
-				&mut conn,
-				group_id,
-				&typed_ref(refs::RECONCILE_MISSING, &pg)
-			)
-			.await
-			.is_none(),
+			group_issue(&mut conn, group_id, refs::RECONCILE_MISSING)
+				.await
+				.is_none(),
 			"an uninspected group must not be accused of losing backups",
+		);
+		assert!(
+			server_issue(&mut conn, server_id, refs::RECONCILE_MISSING)
+				.await
+				.is_none(),
+			"and no per-server finding either",
+		);
+	})
+	.await;
+}
+
+/// A stale repo inventory makes the missing verdict undecidable, not resolved.
+/// With every type undecidable there is nothing to conclude, so an already-open
+/// finding stays open rather than being cleared on the strength of a lagging
+/// inspector.
+#[tokio::test(flavor = "multi_thread")]
+async fn reconcile_leaves_an_open_missing_alone_when_the_inventory_goes_stale() {
+	TestDb::run(|mut conn, _url| async move {
+		let pg = BackupType::TamanuPostgres;
+		let interval = SignedDuration::from_hours(12);
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id, true).await;
+		let device_id = insert_device(&mut conn).await;
+
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
+		insert_schedule(&mut conn, group_id, &pg, interval).await;
+		enable_capability(&mut conn, server_id, &pg).await;
+		insert_backup_success_aged(
+			&mut conn,
+			device_id,
+			group_id,
+			server_id,
+			&pg,
+			SignedDuration::from_hours(2),
+		)
+		.await;
+
+		// Fresh inventory, stale snapshot → the finding is raised.
+		BackupRepoSnapshot::upsert(
+			&mut conn,
+			group_id,
+			&format!("canopy@{server_id}:/data"),
+			Some(server_id),
+			Some(&pg),
+			Some(Timestamp::now() - SignedDuration::from_hours(72)),
+		)
+		.await
+		.expect("upsert stale snapshot");
+
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan");
+		database::backup::reconcile::sweep(&mut conn, &rows)
+			.await
+			.expect("first sweep");
+		assert!(
+			server_issue(&mut conn, server_id, refs::RECONCILE_MISSING)
+				.await
+				.expect("finding raised")
+				.active,
+		);
+
+		// Now the inspector falls behind: back-date every observation past the
+		// inventory-staleness bound.
+		sql_query(
+			"UPDATE backup_repo_snapshots SET observed_at = NOW() - INTERVAL '30 days' \
+			 WHERE group_id = $1",
+		)
+		.bind::<sql_types::Uuid, _>(group_id)
+		.execute(&mut conn)
+		.await
+		.expect("age the inventory");
+
+		database::backup::reconcile::sweep(&mut conn, &rows)
+			.await
+			.expect("second sweep");
+		assert!(
+			server_issue(&mut conn, server_id, refs::RECONCILE_MISSING)
+				.await
+				.expect("finding still present")
+				.active,
+			"a lagging inspector must not clear an open finding",
 		);
 	})
 	.await;
@@ -1063,9 +1207,9 @@ async fn reconcile_clears_report_gap_when_report_and_snapshot_agree() {
 		database::backup::reconcile::sweep(&mut conn, &rows)
 			.await
 			.expect("first reconcile");
-		let gref = typed_ref(refs::RECONCILE_REPORT_GAP, &pg);
+		let gref = refs::RECONCILE_REPORT_GAP;
 		assert!(
-			server_issue(&mut conn, server_id, &gref)
+			server_issue(&mut conn, server_id, gref)
 				.await
 				.expect("report-gap open")
 				.active,
@@ -1089,7 +1233,7 @@ async fn reconcile_clears_report_gap_when_report_and_snapshot_agree() {
 			.await
 			.expect("second reconcile");
 
-		let issue = server_issue(&mut conn, server_id, &gref)
+		let issue = server_issue(&mut conn, server_id, gref)
 			.await
 			.expect("report-gap still present (now cleared)");
 		assert!(
@@ -1140,8 +1284,8 @@ async fn reconcile_files_size_mismatch_when_reported_size_differs_from_repo() {
 			.await
 			.expect("reconcile sweep");
 
-		let sref = typed_ref(refs::RECONCILE_SIZE_MISMATCH, &pg);
-		let issue = server_issue(&mut conn, server_id, &sref)
+		let sref = refs::RECONCILE_SIZE_MISMATCH;
+		let issue = server_issue(&mut conn, server_id, sref)
 			.await
 			.expect("size-mismatch issue filed");
 		assert_eq!(
@@ -1151,7 +1295,7 @@ async fn reconcile_files_size_mismatch_when_reported_size_differs_from_repo() {
 		);
 		assert!(issue.active);
 		assert_eq!(
-			server_issue_open_links(&mut conn, server_id, &sref).await,
+			server_issue_open_links(&mut conn, server_id, sref).await,
 			0,
 			"Warning size-mismatch does not open an incident by itself",
 		);
@@ -1195,9 +1339,9 @@ async fn reconcile_clears_size_mismatch_when_latest_sizes_agree() {
 		database::backup::reconcile::sweep(&mut conn, &rows)
 			.await
 			.expect("first reconcile");
-		let sref = typed_ref(refs::RECONCILE_SIZE_MISMATCH, &pg);
+		let sref = refs::RECONCILE_SIZE_MISMATCH;
 		assert!(
-			server_issue(&mut conn, server_id, &sref)
+			server_issue(&mut conn, server_id, sref)
 				.await
 				.expect("size-mismatch open")
 				.active,
@@ -1230,7 +1374,7 @@ async fn reconcile_clears_size_mismatch_when_latest_sizes_agree() {
 			.await
 			.expect("second reconcile");
 
-		let issue = server_issue(&mut conn, server_id, &sref)
+		let issue = server_issue(&mut conn, server_id, sref)
 			.await
 			.expect("size-mismatch still present (now cleared)");
 		assert!(
@@ -1577,6 +1721,124 @@ async fn backup_sweeps_seed_no_check_that_defaults_to_a_failure() {
 				row.check_name,
 			);
 		}
+	})
+	.await;
+}
+
+/// One check per server, whatever it backs up. A server stale on three of its
+/// four types holds a single `backup-staleness` check naming all three, not
+/// three checks — and the catalog has one entry to configure, not three.
+// spec: CHK#names
+#[tokio::test(flavor = "multi_thread")]
+async fn staleness_is_one_check_per_server_with_the_types_as_instances() {
+	TestDb::run(|mut conn, _url| async move {
+		let interval = SignedDuration::from_hours(12);
+		let stale_types = [
+			BackupType::TamanuPostgres,
+			BackupType::Custom("tamanu-config".into()),
+			BackupType::Custom("caddy-config".into()),
+		];
+		let fresh_type = BackupType::Custom("postgres-config".into());
+
+		let group_id = insert_group(&mut conn, "g").await;
+		let server_id = insert_server(&mut conn, group_id, true).await;
+		let device_id = insert_device(&mut conn).await;
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
+
+		for ty in stale_types.iter().chain(std::iter::once(&fresh_type)) {
+			insert_schedule(&mut conn, group_id, ty, interval).await;
+			enable_capability(&mut conn, server_id, ty).await;
+		}
+		// Three types last succeeded three days ago (stale), one an hour ago.
+		for ty in &stale_types {
+			insert_backup_success_aged(
+				&mut conn,
+				device_id,
+				group_id,
+				server_id,
+				ty,
+				SignedDuration::from_hours(72),
+			)
+			.await;
+		}
+		insert_backup_success_aged(
+			&mut conn,
+			device_id,
+			group_id,
+			server_id,
+			&fresh_type,
+			SignedDuration::from_hours(1),
+		)
+		.await;
+
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan");
+		assert_eq!(rows.len(), 4, "four scanned (server, type) pairs");
+		database::backup::staleness::sweep(&mut conn, &rows)
+			.await
+			.expect("sweep");
+
+		// Exactly one staleness issue for the server, and no parameterised
+		// variants alongside it.
+		let issues = issues_matching(&mut conn, server_id, "backup-staleness%").await;
+		assert_eq!(
+			issues,
+			vec![refs::STALENESS.to_string()],
+			"one staleness check per server, named for the condition only",
+		);
+
+		let issue = server_issue(&mut conn, server_id, refs::STALENESS)
+			.await
+			.expect("staleness issue filed");
+		assert_eq!(issue.observed_result.as_deref(), Some("failed"));
+		assert_eq!(issue.effective_result.as_deref(), Some("warning"));
+
+		// The message names the types it is stale for, and the detail carries
+		// them with their own results — the thing a name per type used to say.
+		let message = issue_message(&mut conn, server_id, refs::STALENESS)
+			.await
+			.expect("message");
+		for ty in &stale_types {
+			assert!(
+				message.contains(&ty.to_string()),
+				"message names {ty}: {message}",
+			);
+		}
+		assert!(
+			!message.contains(&fresh_type.to_string()),
+			"the fresh type is not named: {message}",
+		);
+
+		let detail = issue_detail(&mut conn, server_id, refs::STALENESS)
+			.await
+			.expect("detail");
+		assert_eq!(detail["total"], 4, "four instances were considered");
+		assert_eq!(detail["degraded"], 3, "three of them are stale");
+		let listed: Vec<&str> = detail["instances"]
+			.as_array()
+			.expect("instances array")
+			.iter()
+			.map(|i| i["type"].as_str().expect("type"))
+			.collect();
+		for ty in &stale_types {
+			assert!(
+				listed.contains(&ty.to_string().as_str()),
+				"detail lists {ty}"
+			);
+		}
+		assert!(
+			!listed.contains(&fresh_type.to_string().as_str()),
+			"detail omits the healthy type",
+		);
+
+		// And the catalog gained one entry, not one per type.
+		let catalog = catalog_names(&mut conn, "backup-staleness%").await;
+		assert_eq!(
+			catalog,
+			vec![refs::STALENESS.to_string()],
+			"one catalog entry to configure, not one per backup type",
+		);
 	})
 	.await;
 }
