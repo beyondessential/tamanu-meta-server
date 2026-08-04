@@ -42,10 +42,14 @@ Two families per k8s server:
 - **Canopy's own cluster** (in-cluster): supports Tamanu test/dev instances co-resident with Canopy. A worker gains an RBAC policy to reach beyond its own namespace (kubelet etc.). Supported on principle; secondary.
 - **External clusters** (the real target): design for **multiple**; one today, more later. All AWS EKS with OIDC identities. Auth layer undecided — could be k8s-layer delegation/tunnel, network layer, or Canopy owning OIDC/IAM to mint a per-cluster token and pull directly. **Open — needs research.**
 
+## Config surface
+
+- **Cluster registration** is a Canopy settings page, managed in-app rather than by environment variables. Wizard-style: the admin enters the cluster's details and Canopy tests the connection on add, so bad details are caught up front. The per-server k8s form's cluster picker draws from this registry.
+- **DB harvest credentials** come from the cluster, not per-server config. Tamanu's k8s setup uses CNPG, which stores each instance's Postgres credentials as a Kubernetes secret in the instance's namespace. Canopy discovers the databases available and the secret backing each, so registering the cluster is enough to harvest.
+
 ## Open questions
 
-- The check suite: what conditions the `kubernetes` source determines per server (pods/deployments readiness, crashloops/restarts, per-container health, per-instance Postgres, PVC/storage, resource pressure/OOM, the "server live" check).
-- The "some bestool checks somehow" gap: which bestool-only checks (backups, migrations, disk, cert expiry) still matter for k8s servers, and how they're covered.
-- Cluster auth mechanism (EKS OIDC/IRSA vs alternatives).
-- How the server↔workload identity mapping stays valid as namespace contents drift.
-- How/where cluster connection credentials are stored and configured.
+- Cluster auth mechanism (EKS OIDC vs alternatives) — moved to a research spike (see card-plan).
+- Exact Tamanu k8s namespace layout and where each check input lives — moved to a research spike (see card-plan).
+- How the server↔workload identity mapping stays valid as namespace contents drift (facility added/removed/renamed after the operator picks the identity).
+- When to bring backups into Canopy (AWS-level + CNPG Barman) — deliberately deferred.
