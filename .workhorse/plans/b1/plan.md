@@ -51,5 +51,8 @@ Two families per k8s server:
 
 - Cluster auth mechanism (EKS OIDC vs alternatives) — moved to a research spike (see card-plan).
 - Exact Tamanu k8s namespace layout and where each check input lives — moved to a research spike (see card-plan).
-- How the server↔workload identity mapping stays valid as namespace contents drift (facility added/removed/renamed after the operator picks the identity).
 - When to bring backups into Canopy (AWS-level + CNPG Barman) — deliberately deferred.
+
+## Resolved: identity stability
+
+The namespace is the stable identity. A namespace changing means the server is gone, not that its identity drifted, so Canopy doesn't reconcile or protect against reassignment — that's an intentional operator act. The only guard needed is the reachability failure when the configured namespace is absent. A namespace disappearing and reappearing under the same name is picked back up, which is fine and intended.
