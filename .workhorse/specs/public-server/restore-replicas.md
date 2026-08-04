@@ -355,8 +355,13 @@ Each replica's redaction outcome is presented alongside its restore health, so a
 
 A failed or overdue restore-health report raises a restore-verification check on the affected server, subject to the same monitoring and incident gates as any other of that server's checks.
 
-Restore-health is tracked independently per server, type, and intent: the affected server is the check's scope, and the type and intent name it, so one replica's failed restore does not mask or merge with another's, and the snapshot is carried in the check's detail.
-The check recovers when the next report for the same server, type, and intent is healthy.
+A server has one restore-verification check however many replicas it has.
+Each replica is an instance of that check, graded on its own and carrying its type, its intent, its declared name, and the snapshot in the check's detail (see [CHK](../monitoring/checks.md)), so a rule or silence written for one replica applies to only that replica.
+The check reflects the most urgent of them, names the ones in trouble, and recovers when none is left degraded.
+
+A replica's state is the worse of what its latest report said and whether it has gone past its overdue bound; these are one judgement about the replica, not two competing ones.
+Canopy re-derives every one of a server's replicas from the declarations that currently cover it, on the same periodic sweep that decides overdue.
+So a replica whose declaration is deleted, disabled, or rescoped stops being one of the server's instances and needs no separate recovery, and a report's effect appears on the next sweep rather than the instant it lands — which is immaterial for a warning that pages nobody.
 
 A replica is also overdue — raising the same check on a periodic sweep, rather than waiting for a report that never arrives — when it has not met its intent's health expectation within the declaration's overdue bound.
 For an intent carrying `once`, the expectation is measured against the latest snapshot: the replica is overdue when the latest snapshot has gone unverified for longer than the bound, not merely because time has passed since an earlier snapshot was verified.
@@ -364,8 +369,9 @@ For an intent without `once`, it is measured against wall-clock time since the l
 Overdue applies only to intents carrying `check`.
 
 A failed migration test raises a migration-test check on the affected server, under the same gates, because that server is on the upgrade path to the version that failed.
-The check is named for the type and intent, as restore-verification is, and carries the target version in its detail rather than its name.
+It is one check per server with its replicas as instances, as restore-verification is, and carries the target version in the detail rather than the name.
 A server has one candidate at a time, so there is no second version whose result the first could mask, and a name per version would spawn a catalog policy per release.
+A replica whose candidate has not been tried within its overdue bound degrades the same check: untested and failed are both "this version is not known good against this deployment's data".
 
 The check is a warning rather than a failure, and does not escalate.
 Nothing is wrong with the live server: it is running the version it always was, serving patients, and the finding is about a version it has not taken yet.

@@ -670,10 +670,10 @@ pub(crate) async fn open_group_issue_active(
 
 /// How an alert message names a server: the name an operator knows it by,
 /// qualified with its host when both are known, falling back to the host
-/// alone and finally to the id. Shared with [`crate::backup::reconcile`] so
-/// every backup alert names servers the same way.
+/// alone and finally to the id. Shared across every canopy-determined check
+/// so they all name servers the same way — never interpolate a bare id.
 // spec: BKJ#alerting
-pub(super) fn server_label(server: &Server) -> String {
+pub fn server_label(server: &Server) -> String {
 	let host = server.host.as_ref().map(|h| h.0.to_string());
 	match (&server.name, host) {
 		(Some(n), Some(h)) if !n.is_empty() => format!("{n} ({h})"),

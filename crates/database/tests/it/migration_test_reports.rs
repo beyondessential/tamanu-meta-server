@@ -231,11 +231,17 @@ struct FiledCheck {
 	escalates: bool,
 }
 
+/// The server's migration-test check as it stands.
+///
+/// Sweeps first: `sweep_overdue` is the sole filer of the restore checks, so a
+/// recorded verdict reaches the check on the next pass rather than at the
+/// moment it is recorded (see `BackupRestoreCheck::record_report`).
 async fn migration_check(conn: &mut AsyncPgConnection, server: Uuid) -> Option<FiledCheck> {
+	database::restore::sweep_overdue(conn).await.expect("sweep");
 	sql_query(
 		"SELECT i.observed_result AS observed, i.effective_result AS effective, i.escalates
 		 FROM issues i
-		 WHERE i.server_id = $1 AND i.ref LIKE 'migration-test:%' AND i.active = true",
+		 WHERE i.server_id = $1 AND i.ref = 'migration-test' AND i.active = true",
 	)
 	.bind::<sql_types::Uuid, _>(server)
 	.get_result(conn)

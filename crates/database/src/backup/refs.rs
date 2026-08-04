@@ -104,14 +104,22 @@ pub const PREFLIGHT_ASSUME: &str = "preflight-assume";
 /// exist are no longer protected from deletion.
 pub const PREFLIGHT_OBJECT_LOCK: &str = "preflight-object-lock";
 
-/// PGRO reported a failed/stale restorability check for one replica.
-/// Server-scoped, `Warning`; the ref carries the `(type, intent)` dimension so
-/// each replica of a server recovers independently.
+/// A restore replica reported unhealthy, or has gone past its overdue bound.
+/// Server-scoped, `Warning`. One check per server: each of its replicas is an
+/// instance carrying its own `type`, `intent`, and replica name in the detail,
+/// so an operator configures restore-verification once rather than once per
+/// `(type, intent)` pair. Filed only by `crate::restore::sweep_overdue`.
 pub const RESTORE_VERIFICATION: &str = "restore-verification";
+
+/// A candidate version's migrations failed against a replica of a server's
+/// data, or have not been tried within the replica's overdue bound.
+/// Server-scoped, `Warning`, one check per server with its replicas as
+/// instances.
 pub const MIGRATION_TEST: &str = "migration-test";
 
 /// The masking manifest for a redacting replica did not fully apply.
-/// Server-scoped, `Warning`, does not escalate.
+/// Server-scoped, `Warning`, does not escalate. One check per server with its
+/// redacting replicas as instances.
 pub const REDACTION: &str = "redaction";
 
 // --- shipped documentation (seeded into the catalog on first filing) ---

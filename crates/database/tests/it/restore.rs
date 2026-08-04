@@ -21,13 +21,18 @@ struct Count {
 	count: i64,
 }
 
-/// Count active `restore-verification:*` check-states across a group's
-/// servers. The checks are server-scoped now, so join through `servers`.
+/// Count active `restore-verification` check-states across a group's servers.
+///
+/// Sweeps first: `sweep_overdue` is the sole filer of the restore checks and
+/// rebuilds each server's from its live declarations, so what a recorded report
+/// or a deleted declaration did shows up on the next pass rather than at the
+/// moment it happened.
 async fn active_restore_issues(conn: &mut AsyncPgConnection, group: Uuid) -> i64 {
+	database::restore::sweep_overdue(conn).await.expect("sweep");
 	sql_query(
 		"SELECT count(*) AS count FROM issues i \
 		 JOIN servers s ON s.id = i.server_id \
-		 WHERE s.group_id = $1 AND i.ref LIKE 'restore-verification:%' AND i.active = true",
+		 WHERE s.group_id = $1 AND i.ref = 'restore-verification' AND i.active = true",
 	)
 	.bind::<sql_types::Uuid, _>(group)
 	.get_result::<Count>(conn)
@@ -501,7 +506,7 @@ async fn record_report_files_server_scoped_with_stable_name() {
 		// scope (issues.server_id), not baked into the check name.
 		let rows: Vec<VerifRow> = sql_query(
 			"SELECT check_name, server_id, server_group_id FROM issues \
-			 WHERE source = 'canopy' AND ref LIKE 'restore-verification:%' AND active",
+			 WHERE source = 'canopy' AND ref = 'restore-verification' AND active",
 		)
 		.load(&mut conn)
 		.await
@@ -1019,9 +1024,8 @@ async fn delete_recovers_stale_alert_for_removed_scope() {
 		.expect("record failure");
 		assert_eq!(active_restore_issues(&mut conn, group).await, 1);
 
-		// Deleting the declaration removes the only thing tracking that key.
-		// The sweep only walks current declarations, so without recovery the
-		// alert would never clear.
+		// Deleting the declaration removes the only thing tracking that
+		// replica, so the next sweep rebuilds the server's check without it.
 		RestoreReplica::delete(&mut conn, r.id)
 			.await
 			.expect("delete");

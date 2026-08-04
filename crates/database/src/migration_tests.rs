@@ -8,7 +8,6 @@ use commons_errors::Result;
 use commons_types::{
 	backup::{BackupType, RestoreIntent, RunOutcome},
 	server::product::Product,
-	status::CheckResult,
 };
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -17,13 +16,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-	backup::refs,
-	issues::{CheckFiling, Scope, file_check},
-	pg_duration::PgDuration,
-	restore::BackupRestoreCheck,
-	restore::NewBackupRestoreCheck,
-	servers::Server,
-	version_known_issues::VersionKnownIssue,
+	backup::refs, pg_duration::PgDuration, restore::BackupRestoreCheck,
+	restore::NewBackupRestoreCheck, servers::Server, version_known_issues::VersionKnownIssue,
 	versions::Version,
 };
 
@@ -329,11 +323,29 @@ pub async fn has_verdict(
 	snapshot_id: &str,
 	target_version_id: Uuid,
 ) -> Result<bool> {
+	Ok(verdict_for(db, server_id, snapshot_id, target_version_id)
+		.await?
+		.is_some())
+}
+
+/// The recorded verdict for one `(server, snapshot, candidate version)`, if a
+/// test has run: `Some(Some(migration))` when a migration failed,
+/// `Some(None)` when they all applied, `None` when it hasn't been tried.
+///
+/// The sweep needs the verdict itself, not just its existence: it is the sole
+/// filer of the `migration-test` check, so a failed verdict has to reach it
+/// (see [`crate::restore::sweep_overdue`]).
+pub async fn verdict_for(
+	db: &mut AsyncPgConnection,
+	server_id: Uuid,
+	snapshot_id: &str,
+	target_version_id: Uuid,
+) -> Result<Option<Option<String>>> {
 	use crate::schema::{backup_restore_checks, migration_tests};
 
-	let existing: Option<i64> = migration_tests::table
+	let existing: Option<Option<String>> = migration_tests::table
 		.inner_join(backup_restore_checks::table)
-		.select(migration_tests::check_id)
+		.select(migration_tests::failed_migration)
 		.filter(migration_tests::target_version_id.eq(target_version_id))
 		.filter(backup_restore_checks::server_id.eq(server_id))
 		.filter(backup_restore_checks::snapshot_id.eq(snapshot_id))
@@ -341,7 +353,7 @@ pub async fn has_verdict(
 		.await
 		.optional()?;
 
-	Ok(existing.is_some())
+	Ok(existing)
 }
 
 /// Raise or recover the server's migration-test check, and hold the target
@@ -350,68 +362,28 @@ pub async fn has_verdict(
 /// A warning that does not escalate. The server is running the version it
 /// always was and is serving patients; the finding is about a version it has
 /// not taken, so it belongs to whoever decides whether that version ships
-/// rather than to whoever is on call for outages.
-// spec: RST#alerting
+/// Record the consequence of a migration test: a failed one raises a known
+/// issue against the candidate version, which is what holds it back from
+/// rollout.
+///
+/// The `migration-test` check itself is filed by
+/// [`crate::restore::sweep_overdue`], the sole filer of the restore checks: the
+/// verdict recorded here and the overdue bound are two ways the same check can
+/// be degraded, and only the sweep sees all of a server's replicas at once.
+/// This path reads the verdict back from storage on the next pass (see
+/// [`verdict_for`]).
 async fn file_outcome(
 	db: &mut AsyncPgConnection,
 	server_id: Uuid,
-	r#type: &BackupType,
-	intent: &RestoreIntent,
+	_type: &BackupType,
+	_intent: &RestoreIntent,
 	target_version_id: Uuid,
 	failed_migration: Option<&str>,
 ) -> Result<()> {
-	let version = Version::get_by_id(db, target_version_id).await?;
-	let semver = version.as_semver();
-	// Named per (type, intent) like restore-verification, so the catalog holds
-	// one policy rather than one per release. The version rides in the detail.
-	let r#ref = format!("{}:{}:{}", refs::MIGRATION_TEST, r#type, intent);
-
 	let Some(migration) = failed_migration else {
-		file_check(
-			db,
-			CheckFiling {
-				source: crate::statuses::CANOPY_SOURCE,
-				scope: Scope::Server(server_id),
-				device_id: None,
-				check: &r#ref,
-				observed: CheckResult::Passed,
-				title: None,
-				message: &format!("Migrations for {semver} applied against server {server_id}"),
-				detail: Some(serde_json::json!({ "target_version": semver.to_string() })),
-				default_ceiling: CheckResult::Warning,
-				default_escalates: false,
-				documentation: Some(refs::MIGRATION_TEST_DOC),
-			},
-		)
-		.await?;
 		return Ok(());
 	};
-
-	file_check(
-		db,
-		CheckFiling {
-			source: crate::statuses::CANOPY_SOURCE,
-			scope: Scope::Server(server_id),
-			device_id: None,
-			check: &r#ref,
-			observed: CheckResult::Warning,
-			title: Some("migration test failed"),
-			message: &format!(
-				"Migration {migration} failed applying {semver} to a replica of server {server_id}"
-			),
-			detail: Some(serde_json::json!({
-				"target_version": semver.to_string(),
-				"failed_migration": migration,
-				"type": r#type.to_string(),
-				"intent": intent.to_string(),
-			})),
-			default_ceiling: CheckResult::Warning,
-			default_escalates: false,
-			documentation: Some(refs::MIGRATION_TEST_DOC),
-		},
-	)
-	.await?;
-
+	let version = Version::get_by_id(db, target_version_id).await?;
 	let affected = (version.major, version.minor, version.patch);
 	if !VersionKnownIssue::unresolved_for_server(db, affected, server_id).await? {
 		VersionKnownIssue::add(
