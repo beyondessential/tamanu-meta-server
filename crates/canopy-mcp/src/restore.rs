@@ -216,7 +216,7 @@ impl CanopyMcp {
 	/// exact `(server, type, intent)` (from
 	/// `BackupRestoreCheck::latest_healthy_by_key_for_group`). Does not compute
 	/// an overdue verdict — that logic lives solely in
-	/// `database::restore::sweep_overdue`, which alone owns the once-vs-check
+	/// `database::restore::sweep_restore_checks`, which alone owns the once-vs-check
 	/// semantics distinction.
 	async fn restore_replica_outs(
 		&self,

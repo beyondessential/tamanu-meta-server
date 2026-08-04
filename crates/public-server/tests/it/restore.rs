@@ -651,12 +651,19 @@ async fn restore_verification_records_and_raises_alert() {
 				.await,
 				1,
 			);
+
+			// The report is recorded on ingest; the checks it feeds are filed by
+			// the sweep, which is their sole filer (see BackupRestoreCheck::
+			// record_report).
+			database::restore::sweep_restore_checks(&mut conn)
+				.await
+				.expect("sweep");
 			assert_eq!(
 				count(
 					&mut conn,
 					"SELECT count(*) AS count FROM issues i \
 					 JOIN servers s ON s.id = i.server_id \
-					 WHERE s.group_id = $1 AND i.ref LIKE 'restore-verification:%' AND i.active = true",
+					 WHERE s.group_id = $1 AND i.ref = 'restore-verification' AND i.active = true",
 					group,
 				)
 				.await,
@@ -667,7 +674,7 @@ async fn restore_verification_records_and_raises_alert() {
 					&mut conn,
 					"SELECT count(*) AS count FROM issues i \
 					 JOIN servers s ON s.id = i.server_id \
-					 WHERE s.group_id = $1 AND i.ref LIKE 'redaction:%'",
+					 WHERE s.group_id = $1 AND i.ref = 'redaction'",
 					group,
 				)
 				.await,
@@ -724,12 +731,16 @@ async fn a_partial_redaction_warns_while_the_restore_stays_healthy() {
 				1,
 				"the reported redaction is stored first-class",
 			);
+
+			database::restore::sweep_restore_checks(&mut conn)
+				.await
+				.expect("sweep");
 			assert_eq!(
 				count(
 					&mut conn,
 					"SELECT count(*) AS count FROM issues i \
 					 JOIN servers s ON s.id = i.server_id \
-					 WHERE s.group_id = $1 AND i.ref LIKE 'redaction:%' AND i.active = true",
+					 WHERE s.group_id = $1 AND i.ref = 'redaction' AND i.active = true",
 					group,
 				)
 				.await,
@@ -741,7 +752,7 @@ async fn a_partial_redaction_warns_while_the_restore_stays_healthy() {
 					&mut conn,
 					"SELECT count(*) AS count FROM issues i \
 					 JOIN servers s ON s.id = i.server_id \
-					 WHERE s.group_id = $1 AND i.ref LIKE 'restore-verification:%' AND i.active = true",
+					 WHERE s.group_id = $1 AND i.ref = 'restore-verification' AND i.active = true",
 					group,
 				)
 				.await,
@@ -785,10 +796,13 @@ async fn a_failed_redaction_warns_and_then_recovers_when_it_applies() {
 				.json(&report("failed", Some("manifest host unreachable")))
 				.await
 				.assert_status(http::StatusCode::NO_CONTENT);
+			database::restore::sweep_restore_checks(&mut conn)
+				.await
+				.expect("sweep");
 
 			const ACTIVE_REDACTION_CHECKS: &str = "SELECT count(*) AS count FROM issues i \
 				 JOIN servers s ON s.id = i.server_id \
-				 WHERE s.group_id = $1 AND i.ref LIKE 'redaction:%' AND i.active = true";
+				 WHERE s.group_id = $1 AND i.ref = 'redaction' AND i.active = true";
 			assert_eq!(
 				count(&mut conn, ACTIVE_REDACTION_CHECKS, group).await,
 				1,
@@ -801,6 +815,9 @@ async fn a_failed_redaction_warns_and_then_recovers_when_it_applies() {
 				.json(&report("complete", None))
 				.await
 				.assert_status(http::StatusCode::NO_CONTENT);
+			database::restore::sweep_restore_checks(&mut conn)
+				.await
+				.expect("sweep");
 			assert_eq!(
 				count(&mut conn, ACTIVE_REDACTION_CHECKS, group).await,
 				0,

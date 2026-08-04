@@ -57,6 +57,7 @@ A name that encodes a parameter turns one configurable check into as many entrie
 Where a target has several instances of one condition, Canopy holds one state for the check, as it does for every (target, source, check).
 
 Each instance is graded through policy on its own, against its own detail, so a rule or silence written for one instance applies to only that instance.
+Where it takes more than one field to say which instance this is, the detail carries those fields joined into one as well as separately, because a rule condition matches a single variable and a silence for one instance has to pin all of them.
 The check's effective result is then the most urgent across the instances that were not skipped, and its detail carries every instance that is not passing, each with its own result, so an operator can see which ones are in trouble without opening anything else.
 Its message names those instances.
 The check recovers when no instance is left degraded.

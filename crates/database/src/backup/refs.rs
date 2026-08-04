@@ -104,14 +104,22 @@ pub const PREFLIGHT_ASSUME: &str = "preflight-assume";
 /// exist are no longer protected from deletion.
 pub const PREFLIGHT_OBJECT_LOCK: &str = "preflight-object-lock";
 
-/// PGRO reported a failed/stale restorability check for one replica.
-/// Server-scoped, `Warning`; the ref carries the `(type, intent)` dimension so
-/// each replica of a server recovers independently.
+/// A restore replica reported unhealthy, or has gone past its overdue bound.
+/// Server-scoped, `Warning`. One check per server: each of its replicas is an
+/// instance carrying its own `type`, `intent`, and replica name in the detail,
+/// so an operator configures restore-verification once rather than once per
+/// `(type, intent)` pair. Filed only by `crate::restore::sweep_restore_checks`.
 pub const RESTORE_VERIFICATION: &str = "restore-verification";
+
+/// A candidate version's migrations failed against a replica of a server's
+/// data, or have not been tried within the replica's overdue bound.
+/// Server-scoped, `Warning`, one check per server with its replicas as
+/// instances.
 pub const MIGRATION_TEST: &str = "migration-test";
 
 /// The masking manifest for a redacting replica did not fully apply.
-/// Server-scoped, `Warning`, does not escalate.
+/// Server-scoped, `Warning`, does not escalate. One check per server with its
+/// redacting replicas as instances.
 pub const REDACTION: &str = "redaction";
 
 // --- shipped documentation (seeded into the catalog on first filing) ---
@@ -284,23 +292,23 @@ Restore the bucket's Object-Lock configuration to GOVERNANCE mode with at least 
 
 pub const RESTORE_VERIFICATION_DOC: &str = "## Description
 
-The managed restore replica for this (server, type, intent) reported a failed or stale restorability check.
+One of this server's managed restore replicas reported a failed restorability check, or has gone past its overdue bound without a healthy one. The server has one of these checks however many replicas it has: each replica is an instance of it, named in the detail by its type, its intent, and the declaration's own name.
 
 ## Results
 
-- **warn** — the replica couldn't restore or verify the latest snapshot.
+- **warn** — a replica couldn't restore, or couldn't verify the latest snapshot within its bound.
 
 ## Solve
 
-Check the restore consumer's report detail: restore errors point at the snapshot or credentials, staleness at the consumer itself.";
+Read the detail for the replicas named: restore errors point at the snapshot or credentials, staleness at the consumer itself. To handle one replica differently from the rest, write a rule or silence against its `check.replica_key` rather than the check as a whole.";
 
 pub const MIGRATION_TEST_DOC: &str = "## Description
 
-A candidate version's schema migrations were applied to a restore replica of this server's data, and one of them failed. The server itself is unaffected: it is still running the version it was, and the finding is about a version it has not taken.
+A candidate version's schema migrations were applied to a restore replica of this server's data and one of them failed, or the candidate has gone untried past the replica's overdue bound. The server itself is unaffected: it is still running the version it was, and the finding is about a version it has not taken. The version under test is in the detail rather than the check name, so a release doesn't spawn a catalog entry of its own.
 
 ## Results
 
-- **warn**: the migrations did not complete against this deployment's data. The version carries a known issue and is held back from rollout.
+- **warn**: the migrations did not complete against this deployment's data, or have not been tried against it in time. A failure carries a known issue against the version and holds it back from rollout.
 
 ## Solve
 
@@ -308,7 +316,7 @@ Read the failing migration named in the report detail. The fix belongs to the mi
 
 pub const REDACTION_DOC: &str = "## Description
 
-A replica of this server's data was declared to be served de-identified, and its masking manifest did not fully apply. The server itself is unaffected — this is about the copy, not the deployment.
+A replica of this server's data was declared to be served de-identified, and its masking manifest did not fully apply. The server itself is unaffected — this is about the copy, not the deployment. The server has one of these checks however many redacting replicas it has, each an instance named in the detail by its type, its intent, and the declaration's own name.
 
 ## Results
 

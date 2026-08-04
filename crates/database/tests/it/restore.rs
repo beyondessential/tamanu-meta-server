@@ -21,13 +21,20 @@ struct Count {
 	count: i64,
 }
 
-/// Count active `restore-verification:*` check-states across a group's
-/// servers. The checks are server-scoped now, so join through `servers`.
+/// Count active `restore-verification` check-states across a group's servers.
+///
+/// Sweeps first: `sweep_restore_checks` is the sole filer of the restore checks and
+/// rebuilds each server's from its live declarations, so what a recorded report
+/// or a deleted declaration did shows up on the next pass rather than at the
+/// moment it happened.
 async fn active_restore_issues(conn: &mut AsyncPgConnection, group: Uuid) -> i64 {
+	database::restore::sweep_restore_checks(conn)
+		.await
+		.expect("sweep");
 	sql_query(
 		"SELECT count(*) AS count FROM issues i \
 		 JOIN servers s ON s.id = i.server_id \
-		 WHERE s.group_id = $1 AND i.ref LIKE 'restore-verification:%' AND i.active = true",
+		 WHERE s.group_id = $1 AND i.ref = 'restore-verification' AND i.active = true",
 	)
 	.bind::<sql_types::Uuid, _>(group)
 	.get_result::<Count>(conn)
@@ -151,6 +158,26 @@ fn descriptor(intent: &str, semantics: &[&str]) -> IntentDescriptor {
 		semantics: semantics.iter().map(|s| (*s).to_owned()).collect(),
 		params: Default::default(),
 	}
+}
+
+/// Declare the replica a report is about, group-wide. The ingest only accepts a
+/// report a declaration authorizes, and the sweep only derives instances for
+/// declared replicas, so a report standing on its own is a state production
+/// cannot reach.
+async fn declare(conn: &mut AsyncPgConnection, consumer: Uuid, group: Uuid, intent: &str) -> Uuid {
+	RestoreReplica::create(
+		conn,
+		new_replica(
+			consumer,
+			group,
+			None,
+			RestoreIntent::from(intent),
+			&format!("{intent}-all"),
+		),
+	)
+	.await
+	.expect("declare replica")
+	.id
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -430,8 +457,9 @@ async fn record_report_raises_then_recovers() {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
 		let server = insert_server(&mut conn, group).await;
+		declare(&mut conn, consumer, group, "verify").await;
 
-		// A failed report raises a per-(server,type,intent) group issue.
+		// A failed report degrades the server's restore-verification check.
 		BackupRestoreCheck::record_report(
 			&mut conn,
 			new_check(
@@ -482,6 +510,7 @@ async fn record_report_files_server_scoped_with_stable_name() {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
 		let server = insert_server(&mut conn, group).await;
+		declare(&mut conn, consumer, group, "verify").await;
 
 		BackupRestoreCheck::record_report(
 			&mut conn,
@@ -496,21 +525,22 @@ async fn record_report_files_server_scoped_with_stable_name() {
 		)
 		.await
 		.expect("record failure");
+		database::restore::sweep_restore_checks(&mut conn)
+			.await
+			.expect("sweep");
 
-		// The check is server-scoped with a stable name: the server is the
-		// scope (issues.server_id), not baked into the check name.
+		// The check is server-scoped and named for the condition alone: the
+		// server is the scope (issues.server_id) and the replica an instance,
+		// neither of them baked into the check name.
 		let rows: Vec<VerifRow> = sql_query(
 			"SELECT check_name, server_id, server_group_id FROM issues \
-			 WHERE source = 'canopy' AND ref LIKE 'restore-verification:%' AND active",
+			 WHERE source = 'canopy' AND ref = 'restore-verification' AND active",
 		)
 		.load(&mut conn)
 		.await
 		.expect("load");
 		assert_eq!(rows.len(), 1);
-		assert_eq!(
-			rows[0].check_name,
-			"restore-verification:tamanu-postgres:verify",
-		);
+		assert_eq!(rows[0].check_name, "restore-verification");
 		assert_eq!(rows[0].server_id, Some(server));
 		assert_eq!(rows[0].server_group_id, None);
 	})
@@ -523,6 +553,7 @@ async fn record_report_unhealthy_success_still_raises() {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
 		let server = insert_server(&mut conn, group).await;
+		declare(&mut conn, consumer, group, "verify").await;
 
 		// Restore succeeded but the database wasn't healthy → still a failure.
 		BackupRestoreCheck::record_report(
@@ -544,7 +575,7 @@ async fn record_report_unhealthy_success_still_raises() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn sweep_overdue_raises_for_stale_replica_but_skips_gaps() {
+async fn sweep_restore_checks_raises_for_stale_replica_but_skips_gaps() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
@@ -585,7 +616,7 @@ async fn sweep_overdue_raises_for_stale_replica_but_skips_gaps() {
 			.await
 			.expect("analytics decl");
 
-		let filed = database::restore::sweep_overdue(&mut conn)
+		let filed = database::restore::sweep_restore_checks(&mut conn)
 			.await
 			.expect("sweep");
 		assert_eq!(filed, 1, "only the supported declaration is overdue");
@@ -646,7 +677,9 @@ async fn sweep_once_is_snapshot_driven() {
 
 		// No snapshot exists yet → nothing to verify, so not overdue.
 		assert_eq!(
-			database::restore::sweep_overdue(&mut conn).await.unwrap(),
+			database::restore::sweep_restore_checks(&mut conn)
+				.await
+				.unwrap(),
 			0,
 			"no snapshot → not overdue"
 		);
@@ -654,7 +687,9 @@ async fn sweep_once_is_snapshot_driven() {
 		// A snapshot older than the bound, never verified → overdue.
 		insert_old_success_run(&mut conn, consumer, group, server, "snap-1", 2).await;
 		assert_eq!(
-			database::restore::sweep_overdue(&mut conn).await.unwrap(),
+			database::restore::sweep_restore_checks(&mut conn)
+				.await
+				.unwrap(),
 			1,
 			"old unverified snapshot → overdue"
 		);
@@ -678,7 +713,9 @@ async fn sweep_once_is_snapshot_driven() {
 		.await
 		.expect("record healthy");
 		assert_eq!(
-			database::restore::sweep_overdue(&mut conn).await.unwrap(),
+			database::restore::sweep_restore_checks(&mut conn)
+				.await
+				.unwrap(),
 			0,
 			"verified latest snapshot → not overdue"
 		);
@@ -920,7 +957,9 @@ async fn disabling_recovers_the_stale_alert() {
 }
 
 /// Re-enabling is not a recovery event of its own: the sweep picks the
-/// declaration back up and re-raises if it is still overdue.
+/// declaration back up and the replica's latest report is still the last word on
+/// it, so a finding that stood before the replica was decommissioned stands
+/// again after it is put back.
 #[tokio::test(flavor = "multi_thread")]
 async fn re_enabling_does_not_recover_anything() {
 	TestDb::run(|mut conn, _url| async move {
@@ -939,16 +978,6 @@ async fn re_enabling_does_not_recover_anything() {
 		)
 		.await
 		.expect("create");
-		let disabled = RestoreReplica::update(
-			&mut conn,
-			r.id,
-			RestoreReplicaUpdate {
-				enabled: false,
-				..update_from(&r)
-			},
-		)
-		.await
-		.expect("disable");
 
 		BackupRestoreCheck::record_report(
 			&mut conn,
@@ -965,6 +994,22 @@ async fn re_enabling_does_not_recover_anything() {
 		.expect("record failure");
 		assert_eq!(active_restore_issues(&mut conn, group).await, 1);
 
+		let disabled = RestoreReplica::update(
+			&mut conn,
+			r.id,
+			RestoreReplicaUpdate {
+				enabled: false,
+				..update_from(&r)
+			},
+		)
+		.await
+		.expect("disable");
+		assert_eq!(
+			active_restore_issues(&mut conn, group).await,
+			0,
+			"decommissioning the replica takes its finding with it"
+		);
+
 		RestoreReplica::update(
 			&mut conn,
 			disabled.id,
@@ -978,7 +1023,7 @@ async fn re_enabling_does_not_recover_anything() {
 		assert_eq!(
 			active_restore_issues(&mut conn, group).await,
 			1,
-			"re-enabling must not silently clear a live alert"
+			"re-enabling is not a recovery: the failed report still stands"
 		);
 	})
 	.await;
@@ -1019,9 +1064,8 @@ async fn delete_recovers_stale_alert_for_removed_scope() {
 		.expect("record failure");
 		assert_eq!(active_restore_issues(&mut conn, group).await, 1);
 
-		// Deleting the declaration removes the only thing tracking that key.
-		// The sweep only walks current declarations, so without recovery the
-		// alert would never clear.
+		// Deleting the declaration removes the only thing tracking that
+		// replica, so the next sweep rebuilds the server's check without it.
 		RestoreReplica::delete(&mut conn, r.id)
 			.await
 			.expect("delete");
@@ -1340,6 +1384,355 @@ async fn a_version_without_a_published_manifest_is_a_redaction_gap() {
 				.expect("gap")
 				.is_none(),
 			"a version whose manifest is published is no gap"
+		);
+	})
+	.await;
+}
+
+/// A consumer that stops advertising an intent leaves the declaration standing:
+/// the operator still asked for that replica, so the failed restore it last
+/// reported is still true and its finding must not quietly vanish. An intent
+/// nothing advertises is a gap, surfaced as one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_finding_survives_its_capability_being_withdrawn() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let server = insert_server(&mut conn, group).await;
+		RestoreConsumerCapability::register(
+			&mut conn,
+			consumer,
+			&[descriptor("verify", &["check"])],
+		)
+		.await
+		.expect("register caps");
+		RestoreReplica::create(
+			&mut conn,
+			new_replica(
+				consumer,
+				group,
+				Some(server),
+				RestoreIntent::from("verify"),
+				"nightly",
+			),
+		)
+		.await
+		.expect("create");
+
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			new_check(
+				consumer,
+				group,
+				server,
+				RestoreIntent::from("verify"),
+				RunOutcome::Failure,
+				false,
+			),
+		)
+		.await
+		.expect("record failure");
+		assert_eq!(active_restore_issues(&mut conn, group).await, 1);
+
+		// The consumer redeploys advertising nothing at all.
+		RestoreConsumerCapability::register(&mut conn, consumer, &[])
+			.await
+			.expect("withdraw caps");
+		assert_eq!(
+			active_restore_issues(&mut conn, group).await,
+			1,
+			"withdrawing the capability does not clear what the replica reported"
+		);
+	})
+	.await;
+}
+
+/// A report about a server the declaration doesn't name still surfaces. The
+/// ingest authorizes a report per (group, type), so a consumer maintaining one
+/// replica can report on any of the group's servers, and the finding belongs to
+/// the server the report is about.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_report_about_an_unnamed_server_still_surfaces() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let named = insert_server(&mut conn, group).await;
+		let other = insert_server(&mut conn, group).await;
+		let r = RestoreReplica::create(
+			&mut conn,
+			new_replica(
+				consumer,
+				group,
+				Some(named),
+				RestoreIntent::from("verify"),
+				"nightly",
+			),
+		)
+		.await
+		.expect("create");
+
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			new_check(
+				consumer,
+				group,
+				other,
+				RestoreIntent::from("verify"),
+				RunOutcome::Failure,
+				false,
+			),
+		)
+		.await
+		.expect("record failure");
+		assert_eq!(
+			active_restore_issues(&mut conn, group).await,
+			1,
+			"the finding is held against the server the report is about"
+		);
+
+		// And it goes when nothing declares the replica any more: no consumer can
+		// report on it again, so a finding held on it could never recover.
+		RestoreReplica::delete(&mut conn, r.id)
+			.await
+			.expect("delete");
+		assert_eq!(active_restore_issues(&mut conn, group).await, 0);
+	})
+	.await;
+}
+
+#[derive(diesel::QueryableByName)]
+struct NameRow {
+	#[diesel(sql_type = sql_types::Text)]
+	name: String,
+}
+
+/// Every canopy issue ref on a server matching a LIKE pattern.
+async fn issue_refs(conn: &mut AsyncPgConnection, server_id: Uuid, pattern: &str) -> Vec<String> {
+	sql_query(
+		"SELECT \"ref\" AS name FROM issues \
+		 WHERE server_id = $1 AND source = 'canopy' AND \"ref\" LIKE $2 ORDER BY \"ref\"",
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Text, _>(pattern)
+	.load::<NameRow>(conn)
+	.await
+	.expect("load issue refs")
+	.into_iter()
+	.map(|r| r.name)
+	.collect()
+}
+
+/// Every catalog entry matching a LIKE pattern — what an operator has to
+/// configure.
+async fn catalog_names(conn: &mut AsyncPgConnection, pattern: &str) -> Vec<String> {
+	sql_query(
+		"SELECT check_name AS name FROM check_policies \
+		 WHERE source = 'canopy' AND check_name LIKE $1 ORDER BY check_name",
+	)
+	.bind::<sql_types::Text, _>(pattern)
+	.load::<NameRow>(conn)
+	.await
+	.expect("load catalog names")
+	.into_iter()
+	.map(|r| r.name)
+	.collect()
+}
+
+#[derive(diesel::QueryableByName)]
+struct FiledRow {
+	#[diesel(sql_type = sql_types::Text)]
+	message: String,
+	#[diesel(sql_type = sql_types::Nullable<sql_types::Jsonb>)]
+	detail: Option<serde_json::Value>,
+}
+
+async fn filed(conn: &mut AsyncPgConnection, server_id: Uuid, r#ref: &str) -> FiledRow {
+	sql_query(
+		"SELECT message, detail FROM issues \
+		 WHERE server_id = $1 AND source = 'canopy' AND \"ref\" = $2 AND active",
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Text, _>(r#ref)
+	.get_result::<FiledRow>(conn)
+	.await
+	.unwrap_or_else(|e| panic!("{ref} was filed for {server_id}: {e}"))
+}
+
+/// A server with several replicas holds one check of each kind, with the
+/// replicas as instances: the message names the ones in trouble, the detail
+/// carries them with their own results, and the catalog gains one entry per
+/// check rather than one per (type, intent) pair.
+#[tokio::test(flavor = "multi_thread")]
+async fn one_check_of_each_kind_per_server_with_the_replicas_as_instances() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let server = insert_server(&mut conn, group).await;
+		RestoreConsumerCapability::register(
+			&mut conn,
+			consumer,
+			&[
+				descriptor("verify", &["check"]),
+				descriptor("analytics", &["check"]),
+				descriptor("dr", &["check"]),
+			],
+		)
+		.await
+		.expect("register caps");
+
+		for (intent, name, redacts) in [
+			("verify", "nightly-verify", false),
+			("analytics", "analytics-copy", true),
+			("dr", "dr-standby", false),
+		] {
+			RestoreReplica::create(
+				&mut conn,
+				NewRestoreReplica {
+					redacts,
+					..new_replica(
+						consumer,
+						group,
+						Some(server),
+						RestoreIntent::from(intent),
+						name,
+					)
+				},
+			)
+			.await
+			.expect("declare replica");
+		}
+
+		// The verifying replica failed; the analytics one restored fine but came
+		// up with columns it should have masked; the standby is healthy.
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			new_check(
+				consumer,
+				group,
+				server,
+				RestoreIntent::from("verify"),
+				RunOutcome::Failure,
+				false,
+			),
+		)
+		.await
+		.expect("record verify");
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			NewBackupRestoreCheck {
+				redaction_outcome: Some(commons_types::backup::RedactionOutcome::Partial),
+				redaction_columns_masked: Some(40),
+				redaction_columns_skipped: Some(3),
+				..new_check(
+					consumer,
+					group,
+					server,
+					RestoreIntent::from("analytics"),
+					RunOutcome::Success,
+					true,
+				)
+			},
+		)
+		.await
+		.expect("record analytics");
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			new_check(
+				consumer,
+				group,
+				server,
+				RestoreIntent::from("dr"),
+				RunOutcome::Success,
+				true,
+			),
+		)
+		.await
+		.expect("record dr");
+
+		// And a candidate version whose migrations do not survive the data.
+		let version: RowId = sql_query(
+			"INSERT INTO versions (major, minor, patch, status) \
+			 VALUES (2, 63, 0, 'published') RETURNING id",
+		)
+		.get_result(&mut conn)
+		.await
+		.expect("insert version");
+		database::migration_tests::MigrationTest::record(
+			&mut conn,
+			new_check(
+				consumer,
+				group,
+				server,
+				RestoreIntent::from("migrate"),
+				RunOutcome::Success,
+				true,
+			),
+			database::migration_tests::NewMigrationTest {
+				target_version_id: version.id,
+				total_elapsed: PgDuration(SignedDuration::from_secs(45)),
+				failed_migration: Some("backfillNoteTypeIds".into()),
+				data_bytes_before: 10,
+				data_bytes_after: 10,
+				timings: vec![],
+			},
+		)
+		.await
+		.expect("record migration test");
+
+		database::restore::sweep_restore_checks(&mut conn)
+			.await
+			.expect("sweep");
+
+		for r#ref in ["restore-verification", "redaction", "migration-test"] {
+			assert_eq!(
+				issue_refs(&mut conn, server, &format!("{ref}%")).await,
+				vec![r#ref.to_string()],
+				"one {ref} check for the server, named for the condition only",
+			);
+			assert_eq!(
+				catalog_names(&mut conn, &format!("{ref}%")).await,
+				vec![r#ref.to_string()],
+				"one {ref} catalog entry to configure, not one per (type, intent)",
+			);
+		}
+
+		// Restore verification: three replicas considered, one of them degraded,
+		// and the message names it rather than the healthy ones.
+		let verification = filed(&mut conn, server, "restore-verification").await;
+		let detail = verification.detail.expect("detail");
+		assert_eq!(detail["total"], 3);
+		assert_eq!(detail["degraded"], 1);
+		let instances = detail["instances"].as_array().expect("instances");
+		assert_eq!(instances.len(), 1);
+		assert_eq!(instances[0]["intent"], "verify");
+		assert_eq!(instances[0]["replica"], "nightly-verify");
+		assert_eq!(instances[0]["replica_key"], "tamanu-postgres:verify");
+		assert!(
+			verification.message.contains("nightly-verify"),
+			"names the degraded replica: {}",
+			verification.message,
+		);
+		assert!(
+			!verification.message.contains("dr-standby"),
+			"and not the healthy ones: {}",
+			verification.message,
+		);
+
+		// Redaction only counts the replicas that reported one, so the check is
+		// about the analytics copy alone.
+		let redaction = filed(&mut conn, server, "redaction").await;
+		let detail = redaction.detail.expect("detail");
+		assert_eq!(detail["total"], 1);
+		assert_eq!(detail["instances"][0]["intent"], "analytics");
+		assert_eq!(detail["instances"][0]["columns_skipped"], 3);
+
+		// The migration finding carries the version in its detail, not its name.
+		let migration = filed(&mut conn, server, "migration-test").await;
+		let detail = migration.detail.expect("detail");
+		assert_eq!(detail["instances"][0]["target_version"], "2.63.0");
+		assert_eq!(
+			detail["instances"][0]["failed_migration"],
+			"backfillNoteTypeIds"
 		);
 	})
 	.await;

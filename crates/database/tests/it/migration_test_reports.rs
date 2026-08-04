@@ -231,11 +231,19 @@ struct FiledCheck {
 	escalates: bool,
 }
 
+/// The server's migration-test check as it stands.
+///
+/// Sweeps first: `sweep_restore_checks` is the sole filer of the restore checks, so a
+/// recorded verdict reaches the check on the next pass rather than at the
+/// moment it is recorded (see `BackupRestoreCheck::record_report`).
 async fn migration_check(conn: &mut AsyncPgConnection, server: Uuid) -> Option<FiledCheck> {
+	database::restore::sweep_restore_checks(conn)
+		.await
+		.expect("sweep");
 	sql_query(
 		"SELECT i.observed_result AS observed, i.effective_result AS effective, i.escalates
 		 FROM issues i
-		 WHERE i.server_id = $1 AND i.ref LIKE 'migration-test:%' AND i.active = true",
+		 WHERE i.server_id = $1 AND i.ref = 'migration-test' AND i.active = true",
 	)
 	.bind::<sql_types::Uuid, _>(server)
 	.get_result(conn)
@@ -476,7 +484,7 @@ async fn an_untried_candidate_goes_overdue_and_a_tested_one_does_not() {
 		declare_migrate(&mut conn, consumer, group, 3600).await;
 		record_snapshot(&mut conn, consumer, group, server, "snap-old", 7200).await;
 
-		let filed = database::restore::sweep_overdue(&mut conn)
+		let filed = database::restore::sweep_restore_checks(&mut conn)
 			.await
 			.expect("sweep");
 		assert_eq!(filed, 1, "the candidate has gone untried past the bound");
@@ -505,7 +513,7 @@ async fn an_untried_candidate_goes_overdue_and_a_tested_one_does_not() {
 		.expect("record pass");
 
 		assert_eq!(
-			database::restore::sweep_overdue(&mut conn)
+			database::restore::sweep_restore_checks(&mut conn)
 				.await
 				.expect("sweep"),
 			0,
@@ -579,7 +587,7 @@ async fn restore_check(conn: &mut AsyncPgConnection, server: Uuid) -> Option<Fil
 	sql_query(
 		"SELECT i.observed_result AS observed, i.effective_result AS effective, i.escalates
 		 FROM issues i
-		 WHERE i.server_id = $1 AND i.ref LIKE 'restore-verification:%' AND i.active = true",
+		 WHERE i.server_id = $1 AND i.ref = 'restore-verification' AND i.active = true",
 	)
 	.bind::<sql_types::Uuid, _>(server)
 	.get_result(conn)
@@ -672,6 +680,57 @@ async fn a_failed_restore_leaves_the_version_unjudged() {
 			migration_check(&mut conn, server).await.is_none(),
 			"neither a pass nor a warning is filed"
 		);
+	})
+	.await
+}
+
+/// A verdict is a fact about a candidate version measured against a deployment's
+/// data, so it surfaces on its own: the report carries no replica reference, no
+/// declaration asks for the replica it came from, and there is no overdue bound
+/// anywhere. Deriving the check from declarations alone lost this outright.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_verdict_with_no_declaration_still_surfaces() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn).await;
+		let server = insert_server(&mut conn, group).await;
+		let target = insert_version(&mut conn, 63).await;
+
+		let unlinked = report(consumer, group, server, RunOutcome::Success);
+		assert!(
+			unlinked.replica_id.is_none(),
+			"nothing links it to a replica"
+		);
+		MigrationTest::record(
+			&mut conn,
+			unlinked,
+			NewMigrationTest {
+				target_version_id: target.id,
+				total_elapsed: secs(45),
+				failed_migration: Some("backfillNoteTypeIds".into()),
+				data_bytes_before: 10,
+				data_bytes_after: 10,
+				timings: vec![],
+			},
+		)
+		.await
+		.expect("record failure");
+
+		#[derive(QueryableByName)]
+		struct Count {
+			#[diesel(sql_type = sql_types::BigInt)]
+			count: i64,
+		}
+		let declarations: Count = sql_query("SELECT count(*) AS count FROM restore_replicas")
+			.get_result(&mut conn)
+			.await
+			.expect("count declarations");
+		assert_eq!(declarations.count, 0, "and no declaration asks for one");
+
+		let filed = migration_check(&mut conn, server)
+			.await
+			.expect("the verdict alone raises the check");
+		assert_eq!(filed.observed.as_deref(), Some("warning"));
 	})
 	.await
 }
