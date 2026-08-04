@@ -899,12 +899,105 @@ pub struct CheckFiling<'a> {
 /// error (critical when the policy escalates), warning/broken →
 /// warning; passed and skipped record healthy state and close.
 pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -> Result<Issue> {
-	use crate::check_policies::{CheckPolicy, EvaluationContext};
+	let instance = CheckInstance {
+		label: String::new(),
+		observed: filing.observed,
+		detail: filing.detail.clone(),
+	};
+	let message = filing.message;
+	file_check_instances(
+		conn,
+		InstancedCheckFiling {
+			source: filing.source,
+			scope: filing.scope,
+			device_id: filing.device_id,
+			check: filing.check,
+			title: filing.title,
+			default_ceiling: filing.default_ceiling,
+			default_escalates: filing.default_escalates,
+			documentation: filing.documentation,
+			instances: vec![instance],
+		},
+		&|_| message.to_string(),
+	)
+	.await
+}
+
+/// One instance of a check the target has several of: one of a server's
+/// backup types, one of its restore intents.
+///
+/// Instances exist so a check can stay a single named category — see the
+/// Names section of the CHK spec. Never spell an instance into the check
+/// name.
+#[derive(Debug, Clone)]
+pub struct CheckInstance {
+	/// How this instance is named in the check's message, e.g. the backup
+	/// type. Not read by policy — the fields policy matches on live in
+	/// `detail`.
+	pub label: String,
+	/// What this instance observed this pass.
+	pub observed: CheckResult,
+	/// This instance's own fields. Policy rules reach them as `check.*`, so
+	/// whatever identifies the instance (`type`, `intent`, …) must be in
+	/// here for an operator to be able to grade or silence it on its own.
+	pub detail: Option<serde_json::Value>,
+}
+
+/// What grading an instance produced, for building the check's message.
+#[derive(Debug, Clone)]
+pub struct GradedInstance {
+	pub label: String,
+	pub observed: CheckResult,
+	pub effective: CheckResult,
+	pub detail: Option<serde_json::Value>,
+}
+
+/// A check filed from several instances. Everything except the per-instance
+/// fields is shared, because there is one check and one catalog entry
+/// however many instances the target has.
+pub struct InstancedCheckFiling<'a> {
+	pub source: &'a str,
+	pub scope: Scope,
+	pub device_id: Option<Uuid>,
+	pub check: &'a str,
+	pub title: Option<&'a str>,
+	pub instances: Vec<CheckInstance>,
+	pub default_ceiling: CheckResult,
+	pub default_escalates: bool,
+	pub documentation: Option<&'a str>,
+}
+
+/// File one check from several instances of its condition, grading each
+/// instance on its own and settling on the most urgent of them.
+///
+/// This is what keeps a check a category instead of a name per instance: one
+/// catalog entry, one state, one thing for an operator to configure, however
+/// many backup types or restore intents the target has. Because each instance
+/// is graded separately against its own detail, a rule or silence written for
+/// one instance still applies to only that instance.
+///
+/// Skipped instances (a silence matched) drop out of the aggregate entirely
+/// rather than counting as healthy. If every instance is skipped, so is the
+/// check.
+///
+/// `message` is called with the instances that are not passing, most urgent
+/// first, and is what the operator reads; it gets an empty slice when
+/// everything is healthy, which is the recovery message.
+pub async fn file_check_instances(
+	conn: &mut AsyncPgConnection,
+	filing: InstancedCheckFiling<'_>,
+	message: &(dyn Fn(&[GradedInstance]) -> String + Sync),
+) -> Result<Issue> {
+	use crate::check_policies::{CheckPolicy, EvaluationContext, ScopedCheckPolicy};
 
 	let source = filing.source;
 	debug_assert!(
 		matches!(filing.scope, Scope::Server(_)) || source == crate::statuses::CANOPY_SOURCE,
 		"group- and canopy-wide filings are canopy's own",
+	);
+	debug_assert!(
+		!filing.instances.is_empty(),
+		"a filing with no instances says nothing; skip the call instead",
 	);
 	CheckPolicy::register(
 		conn,
@@ -916,22 +1009,6 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 	)
 	.await?;
 
-	// Rule-evaluation context: the check's detail (with the normalised
-	// result injected, mirroring status ingestion), no report-wide
-	// extras, and the server's tags where there is a server. Filings
-	// whose observation policy shouldn't touch (an operator explicitly
-	// raising a manual condition) still flow through so the catalog row
-	// and stamps exist, but manual entries register at a failed ceiling
-	// so the operator's chosen result passes through ungraded by default.
-	let mut check_extra = filing
-		.detail
-		.as_ref()
-		.and_then(|d| d.as_object().cloned())
-		.unwrap_or_default();
-	check_extra.insert(
-		"result".into(),
-		serde_json::Value::String(filing.observed.to_string()),
-	);
 	let status_extra = serde_json::Map::new();
 	let (tags, scope_server, scope_group): (
 		std::collections::HashMap<String, serde_json::Value>,
@@ -953,33 +1030,107 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 		Scope::Group(group_id) => (Default::default(), None, Some(group_id)),
 		Scope::Global => (Default::default(), None, None),
 	};
-	let ctx = EvaluationContext {
-		status_extra: &status_extra,
-		check_extra: &check_extra,
-		tags: &tags,
-	};
-	let graded = CheckPolicy::apply_scoped(
-		conn,
-		source,
-		filing.check,
-		filing.observed,
-		&ctx,
-		scope_server,
-		scope_group,
-	)
-	.await?;
+
+	// The catalog entry and the scoped chain are properties of the check, not
+	// of any one instance: read them once and grade purely from there, so a
+	// server with a dozen backup types still costs two queries.
+	let fleet = CheckPolicy::fleet_grading(conn, source, filing.check).await?;
+	let chain =
+		ScopedCheckPolicy::chain_for(conn, source, filing.check, scope_server, scope_group).await?;
+
+	let mut graded_instances: Vec<GradedInstance> = Vec::with_capacity(filing.instances.len());
+	let mut escalates = false;
+	for instance in &filing.instances {
+		// Rule-evaluation context: the instance's detail (with the normalised
+		// result injected, mirroring status ingestion), no report-wide extras,
+		// and the server's tags where there is a server.
+		let mut check_extra = instance
+			.detail
+			.as_ref()
+			.and_then(|d| d.as_object().cloned())
+			.unwrap_or_default();
+		check_extra.insert(
+			"result".into(),
+			serde_json::Value::String(instance.observed.to_string()),
+		);
+		let ctx = EvaluationContext {
+			status_extra: &status_extra,
+			check_extra: &check_extra,
+			tags: &tags,
+		};
+		let fleet_graded = CheckPolicy::grade(
+			fleet.as_ref(),
+			source,
+			filing.check,
+			instance.observed,
+			&ctx,
+		);
+		let graded = CheckPolicy::chain_scoped(fleet_graded, &chain, &ctx);
+		escalates |= graded.escalates;
+		graded_instances.push(GradedInstance {
+			label: instance.label.clone(),
+			observed: instance.observed,
+			effective: graded.effective,
+			detail: instance.detail.clone(),
+		});
+	}
+
+	// The check settles on its most urgent instance. A skipped instance is
+	// silenced, not healthy, so it neither drags the check down nor props it
+	// up; a check whose instances are all skipped is itself skipped.
+	let considered: Vec<&GradedInstance> = graded_instances
+		.iter()
+		.filter(|i| i.effective != CheckResult::Skipped)
+		.collect();
+	let effective = considered
+		.iter()
+		.map(|i| i.effective)
+		.min_by_key(|r| r.urgency_rank())
+		.unwrap_or(CheckResult::Skipped);
+
+	// The observed result is always recorded as observed, so it spans every
+	// instance including the silenced ones: silencing a check changes what
+	// Canopy acts on, never what it saw.
+	let observed = graded_instances
+		.iter()
+		.map(|i| i.observed)
+		.min_by_key(|r| r.urgency_rank())
+		.unwrap_or(CheckResult::Skipped);
+
+	let mut degraded: Vec<GradedInstance> = considered
+		.iter()
+		.filter(|i| i.effective != CheckResult::Passed)
+		.map(|i| (*i).clone())
+		.collect();
+	degraded.sort_by_key(|i| i.effective.urgency_rank());
+
+	let detail = instance_detail(&graded_instances, &degraded);
+	let rendered = message(&degraded);
 
 	let active = matches!(
-		graded.effective,
+		effective,
 		CheckResult::Failed | CheckResult::Warning | CheckResult::Broken
 	);
 	let description = if active { filing.title } else { None };
 	let stamp = CheckStateStamp {
 		check: filing.check.to_string(),
-		observed: filing.observed,
-		effective: graded.effective,
-		escalates: graded.escalates,
-		detail: filing.detail.clone(),
+		observed,
+		effective,
+		escalates,
+		detail: detail.clone(),
+	};
+	let filing = CheckFiling {
+		source,
+		scope: filing.scope,
+		device_id: filing.device_id,
+		check: filing.check,
+		observed,
+		title: filing.title,
+		message: &rendered,
+		detail,
+		default_ceiling: filing.default_ceiling,
+		default_escalates: filing.default_escalates,
+		documentation: filing.documentation,
 	};
 
 	match filing.scope {
@@ -1019,6 +1170,49 @@ pub async fn file_check(conn: &mut AsyncPgConnection, filing: CheckFiling<'_>) -
 			.await
 		}
 	}
+}
+
+/// The detail an instanced check stores: every instance that is not passing,
+/// each with its own result, plus how many there were in total. That is what
+/// lets an operator see which backup types a server is stale for without
+/// opening anything else — the thing a check name per type used to convey.
+///
+/// A single unlabelled instance is an ordinary check filed through this path,
+/// so its detail passes straight through unchanged.
+fn instance_detail(
+	all: &[GradedInstance],
+	degraded: &[GradedInstance],
+) -> Option<serde_json::Value> {
+	if let [only] = all
+		&& only.label.is_empty()
+	{
+		return only.detail.clone();
+	}
+	if degraded.is_empty() {
+		return None;
+	}
+	let instances: Vec<serde_json::Value> = degraded
+		.iter()
+		.map(|i| {
+			let mut obj = i
+				.detail
+				.as_ref()
+				.and_then(|d| d.as_object().cloned())
+				.unwrap_or_default();
+			obj.insert(
+				"result".into(),
+				serde_json::Value::String(i.effective.to_string()),
+			);
+			obj.entry("instance")
+				.or_insert_with(|| serde_json::Value::String(i.label.clone()));
+			serde_json::Value::Object(obj)
+		})
+		.collect();
+	Some(serde_json::json!({
+		"instances": instances,
+		"degraded": degraded.len(),
+		"total": all.len(),
+	}))
 }
 
 /// One rollup input row: `(server_id, source, check_name, effective_result)`.

@@ -40,8 +40,11 @@ use jiff::{SignedDuration, Timestamp};
 use uuid::Uuid;
 
 use crate::{
-	backup::{refs, staleness::ScanRow},
-	issues::{CheckFiling, Scope, file_check},
+	backup::{
+		refs,
+		staleness::{ScanRow, label_list},
+	},
+	issues::{CheckInstance, InstancedCheckFiling, Scope, file_check_instances},
 	servers::Server,
 };
 
@@ -113,231 +116,234 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 		);
 	}
 
-	let mut filed = 0usize;
+	// One check per server, not one per backup type: group the scan by server
+	// and grade each type as an instance (see the Names section of the CHK
+	// spec).
+	let mut by_server: HashMap<Uuid, Vec<&ScanRow>> = HashMap::new();
+	let mut order: Vec<Uuid> = Vec::new();
 	for row in rows {
-		let grace = row.expected_interval.saturating_mul(2);
-		let report_fresh = row
-			.last_success_at
-			.is_some_and(|t| now.duration_since(t) <= grace);
+		by_server
+			.entry(row.server_id)
+			.or_insert_with(|| {
+				order.push(row.server_id);
+				Vec::new()
+			})
+			.push(row);
+	}
 
-		let snap = snaps.get(&(row.server_id, row.r#type.clone()));
-		let snapshot_fresh = snap
-			.and_then(|s| s.latest_snapshot_at)
-			.is_some_and(|t| now.duration_since(t) <= grace);
-		let inventory_fresh = inspected_at
-			.get(&row.group_id)
-			.is_some_and(|at| now.duration_since(*at) <= INVENTORY_STALE_AFTER);
-
-		let missing_ref = format!("{}:{}", refs::RECONCILE_MISSING, row.r#type);
-		let gap_ref = format!("{}:{}", refs::RECONCILE_REPORT_GAP, row.r#type);
+	let mut filed = 0usize;
+	for server_id in order {
+		let server_rows = &by_server[&server_id];
+		let device_id = server_rows.iter().find_map(|r| r.device_id);
 		// A scanned server always exists (the scan joins servers), so the
 		// fallback is unreachable in practice — it just avoids a panic path.
 		let label = labels
-			.get(&row.server_id)
+			.get(&server_id)
 			.cloned()
-			.unwrap_or_else(|| row.server_id.to_string());
+			.unwrap_or_else(|| server_id.to_string());
 
-		match (report_fresh, snapshot_fresh) {
-			// Report says success but the data didn't land (or its row is
-			// missing). Only conclude this when the repo inventory is fresh
-			// enough.
-			(true, false) if inventory_fresh => {
-				file_check(
-					db,
-					CheckFiling {
-						source: crate::statuses::CANOPY_SOURCE,
-						scope: Scope::Server(row.server_id),
-						device_id: row.device_id,
-						check: &missing_ref,
-						observed: CheckResult::Failed,
-						title: None,
-						message: &format!(
-							"Server {label} reported a successful {} backup but no matching repo snapshot landed",
-							row.r#type,
-						),
-						detail: Some(serde_json::json!({
-							"type": row.r#type.to_string(),
-						})),
-						default_ceiling: CheckResult::Warning,
-						default_escalates: false,
-						documentation: Some(refs::RECONCILE_MISSING_DOC),
-					},
-				)
-				.await?;
-				filed += 1;
-			}
-			// Both agree it's fine → clear any open missing alert.
-			(true, true) => {
-				if crate::backup::staleness::open_server_issue_active(
-					db,
-					row.server_id,
-					&missing_ref,
-				)
-				.await?
-				{
-					file_check(
-						db,
-						CheckFiling {
-							source: crate::statuses::CANOPY_SOURCE,
-							scope: Scope::Server(row.server_id),
-							device_id: row.device_id,
-							check: &missing_ref,
-							observed: CheckResult::Passed,
-							title: None,
-							message: &format!(
-								"Server {label} backup report and repo snapshot agree again"
-							),
-							detail: None,
-							default_ceiling: CheckResult::Warning,
-							default_escalates: false,
-							documentation: Some(refs::RECONCILE_MISSING_DOC),
-						},
-					)
-					.await?;
-					filed += 1;
-				}
-				filed += clear_report_gap(db, row, &label, &gap_ref).await?;
-			}
+		let missing_open = crate::backup::staleness::open_server_issue_active(
+			db,
+			server_id,
+			refs::RECONCILE_MISSING,
+		)
+		.await?;
+		let gap_open = crate::backup::staleness::open_server_issue_active(
+			db,
+			server_id,
+			refs::RECONCILE_REPORT_GAP,
+		)
+		.await?;
+		let size_open = crate::backup::staleness::open_server_issue_active(
+			db,
+			server_id,
+			refs::RECONCILE_SIZE_MISMATCH,
+		)
+		.await?;
+
+		let mut missing_instances: Vec<CheckInstance> = Vec::with_capacity(server_rows.len());
+		let mut gap_instances: Vec<CheckInstance> = Vec::with_capacity(server_rows.len());
+		let mut size_instances: Vec<CheckInstance> = Vec::with_capacity(server_rows.len());
+		let mut any_missing = false;
+		let mut any_decidable = false;
+		let mut any_gap = false;
+		let mut any_size = false;
+
+		for row in server_rows {
+			let grace = row.expected_interval.saturating_mul(2);
+			let report_fresh = row
+				.last_success_at
+				.is_some_and(|t| now.duration_since(t) <= grace);
+			let snap = snaps.get(&(row.server_id, row.r#type.clone()));
+			let snapshot_fresh = snap
+				.and_then(|s| s.latest_snapshot_at)
+				.is_some_and(|t| now.duration_since(t) <= grace);
+			let inventory_fresh = inspected_at
+				.get(&row.group_id)
+				.is_some_and(|at| now.duration_since(*at) <= INVENTORY_STALE_AFTER);
+
+			// Report says success but the data didn't land. Only concluded when
+			// the repo inventory is fresh enough to be trusted; a lagging
+			// inspector must not produce false "report lied" findings, and a
+			// type whose inventory is stale is left out of the check rather
+			// than counted healthy.
+			let missing = report_fresh && !snapshot_fresh && inventory_fresh;
+			let missing_undecidable = report_fresh && !snapshot_fresh && !inventory_fresh;
+			any_missing |= missing;
+			any_decidable |= !missing_undecidable;
+			missing_instances.push(CheckInstance {
+				label: row.r#type.to_string(),
+				observed: if missing {
+					CheckResult::Failed
+				} else if missing_undecidable {
+					CheckResult::Skipped
+				} else {
+					CheckResult::Passed
+				},
+				detail: Some(serde_json::json!({
+					"type": row.r#type.to_string(),
+				})),
+			});
+
 			// Snapshot landed but no recent report → the reporting path is
-			// broken. Per-server warning (non-paging).
-			(false, true) => {
-				file_check(
-					db,
-					CheckFiling {
-						source: crate::statuses::CANOPY_SOURCE,
-						scope: Scope::Server(row.server_id),
-						device_id: row.device_id,
-						check: &gap_ref,
-						observed: CheckResult::Warning,
-						title: None,
-						message: &format!(
-							"A fresh {} repo snapshot exists for {label} but no backup run was reported",
-							row.r#type,
-						),
-						detail: Some(serde_json::json!({
-							"type": row.r#type.to_string(),
-						})),
-						default_ceiling: CheckResult::Warning,
-						default_escalates: false,
-						documentation: Some(refs::RECONCILE_REPORT_GAP_DOC),
-					},
-				)
-				.await?;
-				filed += 1;
+			// broken, not the backup.
+			let gap = !report_fresh && snapshot_fresh;
+			any_gap |= gap;
+			gap_instances.push(CheckInstance {
+				label: row.r#type.to_string(),
+				observed: if gap {
+					CheckResult::Warning
+				} else {
+					CheckResult::Passed
+				},
+				detail: Some(serde_json::json!({
+					"type": row.r#type.to_string(),
+				})),
+			});
+
+			// Size discrepancy: orthogonal to freshness. Compare the latest run
+			// that has both a reported and an observed size.
+			let sizes = sized.get(&(row.server_id, row.r#type.clone()));
+			let mismatch = sizes.is_some_and(|(reported, observed)| reported != observed);
+			any_size |= mismatch;
+			let mut size_detail = serde_json::Map::new();
+			size_detail.insert("type".into(), row.r#type.to_string().into());
+			if let Some(&(reported, observed)) = sizes {
+				size_detail.insert("reported_bytes".into(), reported.into());
+				size_detail.insert("observed_bytes".into(), observed.into());
 			}
-			// Neither fresh → the staleness scan owns it; clear stale reconcile
-			// alerts.
-			(false, false) => {
-				filed += clear_report_gap(db, row, &label, &gap_ref).await?;
-			}
-			// (true, false) but the repo inventory is stale: skip the missing
-			// verdict.
-			(true, false) => {}
+			size_instances.push(CheckInstance {
+				label: row.r#type.to_string(),
+				observed: if mismatch {
+					CheckResult::Warning
+				} else {
+					CheckResult::Passed
+				},
+				detail: Some(serde_json::Value::Object(size_detail)),
+			});
 		}
 
-		// Size discrepancy: orthogonal to freshness. Compare the latest run that
-		// has both a reported and an observed size.
-		let size_ref = format!("{}:{}", refs::RECONCILE_SIZE_MISMATCH, row.r#type);
-		match sized.get(&(row.server_id, row.r#type.clone())) {
-			Some(&(reported, observed)) if reported != observed => {
-				file_check(
-					db,
-					CheckFiling {
-						source: crate::statuses::CANOPY_SOURCE,
-						scope: Scope::Server(row.server_id),
-						device_id: row.device_id,
-						check: &size_ref,
-						observed: CheckResult::Warning,
-						title: None,
-						message: &format!(
-							"Server {label} reported a {} snapshot size of {reported} bytes but the repo holds {observed}",
-							row.r#type,
-						),
-						detail: Some(serde_json::json!({
-							"type": row.r#type.to_string(),
-							"reported_bytes": reported,
-							"observed_bytes": observed,
-						})),
-						default_ceiling: CheckResult::Warning,
-						default_escalates: false,
-						documentation: Some(refs::RECONCILE_SIZE_MISMATCH_DOC),
-					},
-				)
-				.await?;
-				filed += 1;
-			}
-			// Agree, or no comparable run → clear any open mismatch.
-			_ => {
-				filed += clear_size_mismatch(db, row, &label, &size_ref).await?;
-			}
+		// A stale repo inventory makes the missing verdict undecidable, not
+		// resolved: when it is stale for every type there is nothing to
+		// conclude, so leave whatever state is already there rather than
+		// clearing an open finding on the strength of a lagging inspector.
+		if any_missing || (missing_open && any_decidable) {
+			let total = missing_instances.len();
+			file_check_instances(
+				db,
+				InstancedCheckFiling {
+					source: crate::statuses::CANOPY_SOURCE,
+					scope: Scope::Server(server_id),
+					device_id,
+					check: refs::RECONCILE_MISSING,
+					title: None,
+					instances: missing_instances,
+					default_ceiling: CheckResult::Warning,
+					default_escalates: false,
+					documentation: Some(refs::RECONCILE_MISSING_DOC),
+				},
+				&|degraded| match degraded {
+					[] => format!("Server {label} backup reports and repo snapshots agree again"),
+					[one] => format!(
+						"Server {label} reported a successful {} backup but no matching repo snapshot landed",
+						one.label
+					),
+					many => format!(
+						"Server {label} reported {} of its {total} backups successful with no matching repo snapshot: {}",
+						many.len(),
+						label_list(many),
+					),
+				},
+			)
+			.await?;
+			filed += 1;
+		}
+
+		if any_gap || gap_open {
+			let total = gap_instances.len();
+			file_check_instances(
+				db,
+				InstancedCheckFiling {
+					source: crate::statuses::CANOPY_SOURCE,
+					scope: Scope::Server(server_id),
+					device_id,
+					check: refs::RECONCILE_REPORT_GAP,
+					title: None,
+					instances: gap_instances,
+					default_ceiling: CheckResult::Warning,
+					default_escalates: false,
+					documentation: Some(refs::RECONCILE_REPORT_GAP_DOC),
+				},
+				&|degraded| match degraded {
+					[] => format!("Backup reporting for {label} recovered"),
+					[one] => format!(
+						"A fresh {} repo snapshot exists for {label} but no backup run was reported",
+						one.label
+					),
+					many => format!(
+						"Fresh repo snapshots exist for {} of {label}'s {total} types with no backup run reported: {}",
+						many.len(),
+						label_list(many),
+					),
+				},
+			)
+			.await?;
+			filed += 1;
+		}
+
+		if any_size || size_open {
+			let total = size_instances.len();
+			file_check_instances(
+				db,
+				InstancedCheckFiling {
+					source: crate::statuses::CANOPY_SOURCE,
+					scope: Scope::Server(server_id),
+					device_id,
+					check: refs::RECONCILE_SIZE_MISMATCH,
+					title: None,
+					instances: size_instances,
+					default_ceiling: CheckResult::Warning,
+					default_escalates: false,
+					documentation: Some(refs::RECONCILE_SIZE_MISMATCH_DOC),
+				},
+				&|degraded| match degraded {
+					[] => format!("Reported and repo snapshot sizes for {label} agree again"),
+					[one] => format!(
+						"Server {label} reported a {} snapshot size that disagrees with the repo",
+						one.label
+					),
+					many => format!(
+						"Server {label} reported snapshot sizes disagreeing with the repo for {} of its {total} types: {}",
+						many.len(),
+						label_list(many),
+					),
+				},
+			)
+			.await?;
+			filed += 1;
 		}
 	}
 	Ok(filed)
-}
-
-/// Clear an open per-server size-mismatch issue when the sizes agree again (or
-/// there's no longer a comparable run to disagree).
-async fn clear_size_mismatch(
-	db: &mut AsyncPgConnection,
-	row: &ScanRow,
-	label: &str,
-	size_ref: &str,
-) -> Result<usize> {
-	if !crate::backup::staleness::open_server_issue_active(db, row.server_id, size_ref).await? {
-		return Ok(0);
-	}
-	file_check(
-		db,
-		CheckFiling {
-			source: crate::statuses::CANOPY_SOURCE,
-			scope: Scope::Server(row.server_id),
-			device_id: row.device_id,
-			check: size_ref,
-			observed: CheckResult::Passed,
-			title: None,
-			message: &format!(
-				"Reported and repo {} snapshot sizes for {label} agree again",
-				row.r#type
-			),
-			detail: None,
-			default_ceiling: CheckResult::Warning,
-			default_escalates: false,
-			documentation: Some(refs::RECONCILE_SIZE_MISMATCH_DOC),
-		},
-	)
-	.await?;
-	Ok(1)
-}
-
-/// Clear an open per-server report-gap issue when the report path is healthy
-/// again (or the pair is genuinely stale and the staleness scan owns it).
-async fn clear_report_gap(
-	db: &mut AsyncPgConnection,
-	row: &ScanRow,
-	label: &str,
-	gap_ref: &str,
-) -> Result<usize> {
-	if !crate::backup::staleness::open_server_issue_active(db, row.server_id, gap_ref).await? {
-		return Ok(0);
-	}
-	file_check(
-		db,
-		CheckFiling {
-			source: crate::statuses::CANOPY_SOURCE,
-			scope: Scope::Server(row.server_id),
-			device_id: row.device_id,
-			check: gap_ref,
-			observed: CheckResult::Passed,
-			title: None,
-			message: &format!("Backup reporting for {label} ({}) recovered", row.r#type),
-			detail: None,
-			default_ceiling: CheckResult::Warning,
-			default_escalates: false,
-			documentation: Some(refs::RECONCILE_REPORT_GAP_DOC),
-		},
-	)
-	.await?;
-	Ok(1)
 }
 
 /// Raw snapshot row: `(server_id, type, latest_snapshot_at, observed_at)`.

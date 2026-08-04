@@ -84,6 +84,11 @@ Backup alerts are raised at one of two scopes:
 A signal about one server is raised against that server, even when the condition it detects is a disagreement between the device's report and the group's repository.
 Two servers in a group failing the same check hold two separate alerts, and one server's recovery never clears another's.
 
+Each signal is one check, whatever the deployment backs up.
+A server backing up its database, its configuration, and its reverse-proxy configuration has one staleness signal, not one per backup type — the types it is stale for are carried in the signal's detail and named in its text, and the signal is graded per type before it settles on the most urgent of them, as any check with instances is (see [CHK](../monitoring/checks.md)).
+So an operator configures staleness once for the fleet and, where a particular type warrants different treatment, writes a rule for that type rather than acquiring another check to configure.
+The same holds for the restore signals, which have both a backup type and a restore intent.
+
 Each signal has a stable key by which operators silence or snooze it and by which the interface and notifications refer to it; the keys are a contract and are not renamed without migrating stored silences.
 Where an alert's text names the server it concerns, it names it the way an operator knows it, falling back to an identifier only when the server has neither a name nor a host.
 A signal recovers when the condition that raised it clears.

@@ -1,0 +1,3 @@
+-- Irreversible: the per-type rows that lost the collapse are deleted, and
+-- which type each survivor came from isn't recoverable from the collapsed name.
+-- Nothing to restore.

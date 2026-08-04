@@ -43,6 +43,24 @@ Its **ingest mode** governs whether the device API accepts the source's reports 
 
 New sources default to `on` and `allow`. A source that isn't ingested (`ignore` or `deny`) is excluded from reachability regardless of its reachability mode — there is no fresh data to judge it by.
 
+## Names
+
+A check's name is a category, not an instance.
+It names the condition being checked, and it is the unit an operator configures once and then reasons about across the whole fleet.
+
+Anything that varies between instances of the same condition — which backup configuration, which restore intent, which certificate — belongs in the check's detail, and never in its name.
+Detail is where policy rules read from, so an operator can grade or silence one instance differently from the rest without a catalog entry for each.
+A name that encodes a parameter turns one configurable check into as many entries as there are instances, and a catalog that has to be configured that many times has stopped being a way to get your eyes on things efficiently.
+
+### Checks with instances
+
+Where a target has several instances of one condition, Canopy holds one state for the check, as it does for every (target, source, check).
+
+Each instance is graded through policy on its own, against its own detail, so a rule or silence written for one instance applies to only that instance.
+The check's effective result is then the most urgent across the instances that were not skipped, and its detail carries every instance that is not passing, each with its own result, so an operator can see which ones are in trouble without opening anything else.
+Its message names those instances.
+The check recovers when no instance is left degraded.
+
 ## Results
 
 A check's result is one of, in decreasing order of urgency:
