@@ -270,7 +270,7 @@ impl RestoreReplica {
 		};
 
 		// Nothing to clear by hand when the scope moves or the declaration is
-		// disabled: `sweep_overdue` re-derives each server's restore checks
+		// disabled: `sweep_restore_checks` re-derives each server's restore checks
 		// every pass, and a key stops being derivable once neither a
 		// declaration nor a still-coverable report yields it, so the check
 		// re-files without it. That is what recomputing buys over accumulating.
@@ -278,7 +278,7 @@ impl RestoreReplica {
 	}
 
 	/// Delete a declaration. Its restore checks need no explicit recovery: the
-	/// next [`sweep_overdue`] pass re-derives each server's checks, and with the
+	/// next [`sweep_restore_checks`] pass re-derives each server's checks, and with the
 	/// declaration gone its key is derivable only while another declaration
 	/// still covers the `(group, type)` a report could arrive on — so a replica
 	/// nothing tracks any more drops out and the check re-files without it.
@@ -621,7 +621,7 @@ impl BackupRestoreCheck {
 	/// Record a restore-health report.
 	///
 	/// Recording is all this does: the checks the report feeds —
-	/// `restore-verification` and `redaction` — are filed by [`sweep_overdue`],
+	/// `restore-verification` and `redaction` — are filed by [`sweep_restore_checks`],
 	/// which is their sole filer. A replica's state is the worse of what its
 	/// latest report said and whether it has gone overdue, and only the sweep
 	/// holds every one of a server's replicas at once; this path holds one. Two
@@ -864,7 +864,7 @@ struct ServerInstances {
 ///
 /// Returns the number of checks this pass left degraded.
 // spec: RST#alerting
-pub async fn sweep_overdue(db: &mut AsyncPgConnection) -> Result<usize> {
+pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 	use crate::schema::restore_replicas::dsl;
 	let now = Timestamp::now();
 

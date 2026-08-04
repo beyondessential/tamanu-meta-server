@@ -356,7 +356,7 @@ pub struct KeyVerdict {
 /// declarations: a failed migration is a fact about a candidate version
 /// measured against a deployment's data, so it stands whether or not a
 /// declaration still asks for the test, and what supersedes it is a later
-/// verdict (see [`crate::restore::sweep_overdue`]).
+/// verdict (see [`crate::restore::sweep_restore_checks`]).
 pub async fn latest_verdict_by_key(
 	db: &mut AsyncPgConnection,
 ) -> Result<HashMap<(Uuid, BackupType, RestoreIntent), KeyVerdict>> {
@@ -426,7 +426,7 @@ pub async fn latest_verdict_by_key(
 /// rollout.
 ///
 /// The `migration-test` check itself is filed by
-/// [`crate::restore::sweep_overdue`], the sole filer of the restore checks: the
+/// [`crate::restore::sweep_restore_checks`], the sole filer of the restore checks: the
 /// verdict recorded here and the overdue bound are two ways the same check can
 /// be degraded, and only the sweep sees all of a server's replicas at once.
 /// This path reads the verdict back from storage on the next pass (see

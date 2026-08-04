@@ -108,7 +108,7 @@ pub const PREFLIGHT_OBJECT_LOCK: &str = "preflight-object-lock";
 /// Server-scoped, `Warning`. One check per server: each of its replicas is an
 /// instance carrying its own `type`, `intent`, and replica name in the detail,
 /// so an operator configures restore-verification once rather than once per
-/// `(type, intent)` pair. Filed only by `crate::restore::sweep_overdue`.
+/// `(type, intent)` pair. Filed only by `crate::restore::sweep_restore_checks`.
 pub const RESTORE_VERIFICATION: &str = "restore-verification";
 
 /// A candidate version's migrations failed against a replica of a server's

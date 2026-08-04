@@ -655,7 +655,7 @@ async fn restore_verification_records_and_raises_alert() {
 			// The report is recorded on ingest; the checks it feeds are filed by
 			// the sweep, which is their sole filer (see BackupRestoreCheck::
 			// record_report).
-			database::restore::sweep_overdue(&mut conn)
+			database::restore::sweep_restore_checks(&mut conn)
 				.await
 				.expect("sweep");
 			assert_eq!(
@@ -732,7 +732,7 @@ async fn a_partial_redaction_warns_while_the_restore_stays_healthy() {
 				"the reported redaction is stored first-class",
 			);
 
-			database::restore::sweep_overdue(&mut conn)
+			database::restore::sweep_restore_checks(&mut conn)
 				.await
 				.expect("sweep");
 			assert_eq!(
@@ -796,7 +796,7 @@ async fn a_failed_redaction_warns_and_then_recovers_when_it_applies() {
 				.json(&report("failed", Some("manifest host unreachable")))
 				.await
 				.assert_status(http::StatusCode::NO_CONTENT);
-			database::restore::sweep_overdue(&mut conn)
+			database::restore::sweep_restore_checks(&mut conn)
 				.await
 				.expect("sweep");
 
@@ -815,7 +815,7 @@ async fn a_failed_redaction_warns_and_then_recovers_when_it_applies() {
 				.json(&report("complete", None))
 				.await
 				.assert_status(http::StatusCode::NO_CONTENT);
-			database::restore::sweep_overdue(&mut conn)
+			database::restore::sweep_restore_checks(&mut conn)
 				.await
 				.expect("sweep");
 			assert_eq!(

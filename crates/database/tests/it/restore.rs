@@ -23,12 +23,14 @@ struct Count {
 
 /// Count active `restore-verification` check-states across a group's servers.
 ///
-/// Sweeps first: `sweep_overdue` is the sole filer of the restore checks and
+/// Sweeps first: `sweep_restore_checks` is the sole filer of the restore checks and
 /// rebuilds each server's from its live declarations, so what a recorded report
 /// or a deleted declaration did shows up on the next pass rather than at the
 /// moment it happened.
 async fn active_restore_issues(conn: &mut AsyncPgConnection, group: Uuid) -> i64 {
-	database::restore::sweep_overdue(conn).await.expect("sweep");
+	database::restore::sweep_restore_checks(conn)
+		.await
+		.expect("sweep");
 	sql_query(
 		"SELECT count(*) AS count FROM issues i \
 		 JOIN servers s ON s.id = i.server_id \
@@ -523,7 +525,7 @@ async fn record_report_files_server_scoped_with_stable_name() {
 		)
 		.await
 		.expect("record failure");
-		database::restore::sweep_overdue(&mut conn)
+		database::restore::sweep_restore_checks(&mut conn)
 			.await
 			.expect("sweep");
 
@@ -573,7 +575,7 @@ async fn record_report_unhealthy_success_still_raises() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn sweep_overdue_raises_for_stale_replica_but_skips_gaps() {
+async fn sweep_restore_checks_raises_for_stale_replica_but_skips_gaps() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
@@ -614,7 +616,7 @@ async fn sweep_overdue_raises_for_stale_replica_but_skips_gaps() {
 			.await
 			.expect("analytics decl");
 
-		let filed = database::restore::sweep_overdue(&mut conn)
+		let filed = database::restore::sweep_restore_checks(&mut conn)
 			.await
 			.expect("sweep");
 		assert_eq!(filed, 1, "only the supported declaration is overdue");
@@ -675,7 +677,9 @@ async fn sweep_once_is_snapshot_driven() {
 
 		// No snapshot exists yet → nothing to verify, so not overdue.
 		assert_eq!(
-			database::restore::sweep_overdue(&mut conn).await.unwrap(),
+			database::restore::sweep_restore_checks(&mut conn)
+				.await
+				.unwrap(),
 			0,
 			"no snapshot → not overdue"
 		);
@@ -683,7 +687,9 @@ async fn sweep_once_is_snapshot_driven() {
 		// A snapshot older than the bound, never verified → overdue.
 		insert_old_success_run(&mut conn, consumer, group, server, "snap-1", 2).await;
 		assert_eq!(
-			database::restore::sweep_overdue(&mut conn).await.unwrap(),
+			database::restore::sweep_restore_checks(&mut conn)
+				.await
+				.unwrap(),
 			1,
 			"old unverified snapshot → overdue"
 		);
@@ -707,7 +713,9 @@ async fn sweep_once_is_snapshot_driven() {
 		.await
 		.expect("record healthy");
 		assert_eq!(
-			database::restore::sweep_overdue(&mut conn).await.unwrap(),
+			database::restore::sweep_restore_checks(&mut conn)
+				.await
+				.unwrap(),
 			0,
 			"verified latest snapshot → not overdue"
 		);
@@ -1671,7 +1679,7 @@ async fn one_check_of_each_kind_per_server_with_the_replicas_as_instances() {
 		.await
 		.expect("record migration test");
 
-		database::restore::sweep_overdue(&mut conn)
+		database::restore::sweep_restore_checks(&mut conn)
 			.await
 			.expect("sweep");
 

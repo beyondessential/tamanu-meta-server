@@ -233,11 +233,13 @@ struct FiledCheck {
 
 /// The server's migration-test check as it stands.
 ///
-/// Sweeps first: `sweep_overdue` is the sole filer of the restore checks, so a
+/// Sweeps first: `sweep_restore_checks` is the sole filer of the restore checks, so a
 /// recorded verdict reaches the check on the next pass rather than at the
 /// moment it is recorded (see `BackupRestoreCheck::record_report`).
 async fn migration_check(conn: &mut AsyncPgConnection, server: Uuid) -> Option<FiledCheck> {
-	database::restore::sweep_overdue(conn).await.expect("sweep");
+	database::restore::sweep_restore_checks(conn)
+		.await
+		.expect("sweep");
 	sql_query(
 		"SELECT i.observed_result AS observed, i.effective_result AS effective, i.escalates
 		 FROM issues i
@@ -482,7 +484,7 @@ async fn an_untried_candidate_goes_overdue_and_a_tested_one_does_not() {
 		declare_migrate(&mut conn, consumer, group, 3600).await;
 		record_snapshot(&mut conn, consumer, group, server, "snap-old", 7200).await;
 
-		let filed = database::restore::sweep_overdue(&mut conn)
+		let filed = database::restore::sweep_restore_checks(&mut conn)
 			.await
 			.expect("sweep");
 		assert_eq!(filed, 1, "the candidate has gone untried past the bound");
@@ -511,7 +513,7 @@ async fn an_untried_candidate_goes_overdue_and_a_tested_one_does_not() {
 		.expect("record pass");
 
 		assert_eq!(
-			database::restore::sweep_overdue(&mut conn)
+			database::restore::sweep_restore_checks(&mut conn)
 				.await
 				.expect("sweep"),
 			0,
