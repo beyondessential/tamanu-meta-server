@@ -47,6 +47,17 @@ Two families per k8s server:
 - **Cluster registration** is a Canopy settings page, managed in-app rather than by environment variables. Wizard-style: the admin enters the cluster's details and Canopy tests the connection on add, so bad details are caught up front. The per-server k8s form's cluster picker draws from this registry.
 - **DB harvest credentials** come from the cluster, not per-server config. Tamanu's k8s setup uses CNPG, which stores each instance's Postgres credentials as a Kubernetes secret in the instance's namespace. Canopy discovers the databases available and the secret backing each, so registering the cluster is enough to harvest.
 
+## Specs written on this card
+
+This card is the tracking issue/PR; it holds the specs, and the implementation sub-cards merge into it. Specs so far:
+
+- **New:** `monitoring/kubernetes.md` (id `K8S`) — the umbrella: deployment shape, Kubernetes servers and identity picker, cluster registry, pulled infra checks (`kubernetes` source), harvested DB checks (`alertd` source), reachability for k8s servers, and cluster-connection failure handling.
+- **Fold** into `private-server/self-alerts.md` — the per-cluster connection/permissions self-alert (escalating).
+- **Fold** into `monitoring/checks.md` — `kubernetes` added to the reserved sources, the notion of Canopy-populated sources, and Canopy-determined reachability for pulled servers.
+- **Fold** into `public-server/statuses.md` — `alertd` has two origins (device push and Canopy harvest).
+
+Behavioural level only: auth mechanism and exact namespace resource names are left to the two spikes (H1, J1).
+
 ## Open questions
 
 - Cluster auth mechanism (EKS OIDC vs alternatives) — moved to a research spike (see card-plan).

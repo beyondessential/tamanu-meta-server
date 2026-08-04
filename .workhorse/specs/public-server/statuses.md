@@ -18,6 +18,7 @@ The payload carries:
   Transitionally optional: a push without a source is attributed to `alertd`.
   The field will become mandatory; new reporters must send it.
   The reserved source names (see [CHK](../monitoring/checks.md), "Sources") are rejected.
+  The `alertd` source is also populated by Canopy itself for Kubernetes servers it harvests, so a device push is one of two origins for it (see [K8S](../monitoring/kubernetes.md)).
 - **health** — the source's complete set of checks: for each, the check's name, exactly one result (`passed`, `warning`, `failed`, `broken`, or `skipped`), and any further detail fields, which are recorded verbatim against the check.
   The set may be empty, meaning the source currently has no checks — which recovers every check it previously reported.
 - any further top-level fields, recorded verbatim as the status's server-wide detail.
