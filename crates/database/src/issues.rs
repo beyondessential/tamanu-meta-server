@@ -1892,6 +1892,7 @@ async fn re_evaluate_incident_membership(
 					.await
 					.optional()?;
 					if let Some(closed) = closed {
+						release_remaining_members(conn, closed.id, transition_time).await?;
 						enqueue_slack_resolve_inner(conn, &closed, by).await?;
 					}
 				} else {
@@ -2414,6 +2415,9 @@ pub async fn sweep_lingering_incidents(db: &mut AsyncPgConnection) -> Result<usi
 						.returning(Incident::as_select())
 						.get_result(conn)
 						.await?;
+				// Backdated to the close, matching `closed_at`: the linger is
+				// damping machinery, not part of the incident's span.
+				release_remaining_members(conn, closed_incident.id, closing_at).await?;
 				enqueue_slack_resolve_inner(conn, &closed_incident, None).await?;
 				Ok(true)
 			})
@@ -2423,6 +2427,38 @@ pub async fn sweep_lingering_incidents(db: &mut AsyncPgConnection) -> Result<usi
 		}
 	}
 	Ok(closed)
+}
+
+/// Stamp `left_at` on every issue still attached to `incident_id`, so no
+/// membership row outlives the incident it names.
+///
+/// A close only retires the `incidents` row: the current issue's own leave is
+/// stamped by the leave arm, but sub-failure contributors are held attached
+/// for context and nothing ever released them. Their rows then claimed a
+/// membership that had ended, which is both untrue — the membership ran from
+/// `joined_at` to the close, and `left_at` is where that end is recorded — and
+/// the thing that used to strand an issue permanently outside the incident
+/// workflow.
+///
+/// Call after the close, with the same timestamp the close was recorded at, so
+/// the membership ends exactly when the incident did. Idempotent: a row that
+/// already left keeps its own earlier stamp.
+async fn release_remaining_members(
+	conn: &mut AsyncPgConnection,
+	incident_id: Uuid,
+	at: Timestamp,
+) -> Result<()> {
+	use crate::schema::incident_issues;
+
+	diesel::update(
+		incident_issues::table
+			.filter(incident_issues::incident_id.eq(incident_id))
+			.filter(incident_issues::left_at.is_null()),
+	)
+	.set(incident_issues::left_at.eq(jiff_diesel::Timestamp::from(at)))
+	.execute(conn)
+	.await?;
+	Ok(())
 }
 
 /// Is this issue currently a live member of an incident that is still open?
@@ -3586,6 +3622,10 @@ impl Incident {
 					.returning(Incident::as_select())
 					.get_result(conn)
 					.await?;
+			// The per-issue resolves above drive most members out through the
+			// leave arm, but one already carrying `resolved_at` is skipped to
+			// keep its audit trail, and never leaves. Release whatever is left.
+			release_remaining_members(conn, incident.id, now).await?;
 			enqueue_slack_resolve(conn, &incident, by).await?;
 			Ok(incident)
 		})
