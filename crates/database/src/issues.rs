@@ -1794,12 +1794,23 @@ async fn re_evaluate_incident_membership(
 			}
 		}
 		(true, _, true) => {
+			// Must match `is_issue_in_open_incident`'s definition of live
+			// membership, incident `closed_at` included: an issue can hold an
+			// unstamped row on a *closed* incident (a close doesn't stamp the
+			// members that never left) at the same time as a live row on an
+			// open one. Filtering on `left_at` alone lets this pick the
+			// stranded row, and the leave then stamps the wrong membership and
+			// weighs `remaining_open` against a long-closed incident —
+			// abandoning the open one with no live members and no Slack
+			// resolve.
 			let open_link: IncidentIssue = incident_issues::table
+				.inner_join(incidents::table.on(incidents::id.eq(incident_issues::incident_id)))
 				.select(IncidentIssue::as_select())
 				.filter(
 					incident_issues::issue_id
 						.eq(issue.id)
-						.and(incident_issues::left_at.is_null()),
+						.and(incident_issues::left_at.is_null())
+						.and(incidents::closed_at.is_null()),
 				)
 				.for_update()
 				.first(conn)
@@ -2414,14 +2425,28 @@ pub async fn sweep_lingering_incidents(db: &mut AsyncPgConnection) -> Result<usi
 	Ok(closed)
 }
 
+/// Is this issue currently a live member of an incident that is still open?
+///
+/// Both halves matter. `left_at IS NULL` alone is not membership in an *open*
+/// incident: closing an incident doesn't stamp `left_at` on the members that
+/// never left (a sub-failure contributor is held attached for context, and
+/// the close paths only touch the `incidents` row), so those rows outlive
+/// their incident. Counting them made a stranded issue look permanently
+/// attached, and `re_evaluate_incident_membership` then read `was_in = true`
+/// for an issue with nothing open — landing every subsequent effective
+/// failure in the no-op arm instead of opening an incident. The server went
+/// red with nothing paging, permanently, since no later event could clear the
+/// stale row.
 async fn is_issue_in_open_incident(db: &mut AsyncPgConnection, issue_id: Uuid) -> Result<bool> {
-	use crate::schema::incident_issues;
+	use crate::schema::{incident_issues, incidents};
 
 	let count: i64 = incident_issues::table
+		.inner_join(incidents::table.on(incidents::id.eq(incident_issues::incident_id)))
 		.filter(
 			incident_issues::issue_id
 				.eq(issue_id)
-				.and(incident_issues::left_at.is_null()),
+				.and(incident_issues::left_at.is_null())
+				.and(incidents::closed_at.is_null()),
 		)
 		.count()
 		.get_result(db)

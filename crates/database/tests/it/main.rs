@@ -26,6 +26,7 @@ mod incident_open_race;
 mod incident_reeval_queue;
 mod incident_result_semantics;
 mod incident_stats;
+mod incident_stranded_membership;
 mod issue_list_filters;
 mod mcp_tokens;
 mod migration_test_candidates;
