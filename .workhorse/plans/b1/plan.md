@@ -22,6 +22,19 @@ Tamanu deployments on Kubernetes run no bestool (`alertd`), so they push no stat
 - **Checks come from a new `kubernetes` source** (Canopy-populated by pulling, not the reserved `canopy` source), so general cluster-health checks can grow under it. Distinct from device-pushed sources.
 - **Reachability excluded for this source** (mode `off`) — keeps the single "a device reported recently" definition. "Is this server up?" is a dedicated k8s liveness check (ingress/Gateway + live front-end API), not the reachability signal.
 
+## Check suite
+
+Two families per k8s server:
+
+1. **Infra checks — pulled from the kube API.** Server live (ingress/Gateway + front-end API answers), workloads ready (expected replicas ready), crashlooping/restarts, Postgres instance healthy, storage/PVC, resource pressure (OOM/eviction). These also replace bestool's systemd service-level checks: k8s liveness/health is a better signal than "is this service up", and FHIR/sync are covered via the database anyway. Container-composition checks aren't needed — trust k8s' own tracking; crashloop/restart + workloads-ready cover the shape.
+2. **Tamanu database checks — harvested via embedded bestool.** The valuable part of bestool (sync system metrics/checks, FHIR processing, and the rest of the Tamanu DB-level checks). Approach: integrate the published `bestool-alertd` crate as a **Rust library** inside a Canopy worker, connect it to each instance's own Postgres, run the checks, and inject the results directly into Canopy — no device-API push, no bestool binary running in-cluster.
+
+### Out of scope now
+
+- **Backups.** K8s backups run at two layers (AWS-level, and Postgres via the CNPG Barman plugin), covered externally and not integrated in Canopy. Bringing them into Canopy is a separate future effort.
+- **bestool systemd service checks** — superseded by k8s liveness/health.
+- **Container-composition checks** — covered by crashloop/restart + workloads-ready.
+
 ## Access to clusters
 
 - **Canopy's own cluster** (in-cluster): supports Tamanu test/dev instances co-resident with Canopy. A worker gains an RBAC policy to reach beyond its own namespace (kubelet etc.). Supported on principle; secondary.
