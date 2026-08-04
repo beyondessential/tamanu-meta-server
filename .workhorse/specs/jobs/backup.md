@@ -68,6 +68,14 @@ Canopy reconciles three sources — what a device reported, what credentials wer
 
 ## Alerting
 
+**No backup signal is a failure by default.**
+A failure in Canopy means a live service is down, and it is acted on within minutes; a backup that is late, unreconciled, or unverified is not that.
+The fleet's backups are layered, so a single missed run — a six-hourly backup that slips one cycle and succeeds on the next — is something to look at, not something to wake anyone for.
+Backup signals therefore default to a warning and do not escalate, and an operator may raise an individual one to a failure through its policy in consultation with the people who answer the resulting alerts.
+
+Three signals are the exception, and default to an escalating failure: repo corruption, a rotation that left the repository openable by neither passphrase, and object-lock protection that is missing or weakened.
+Each of these means the backups are already gone, unrecoverable, or unprotected, rather than merely late.
+
 Backup alerts are raised at one of two scopes:
 
 - **Per-server** signals (staleness, never-backed-up, the report-gap, the size discrepancy, the missing-snapshot reconciliation, and restore-verification — see the managed restore replicas spec, `RST`) are subject to the server's monitoring gate: still recorded for visibility, but they contribute to an incident only when the server is monitored, because some servers are intentionally intermittent.

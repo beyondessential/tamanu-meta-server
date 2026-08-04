@@ -1,0 +1,3 @@
+-- Irreversible: which catalog rows carried which ceiling before the reset
+-- isn't recorded, and the re-graded issues and closed incidents can't be told
+-- apart from ones that reached that state normally. Nothing to restore.
