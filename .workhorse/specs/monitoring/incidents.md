@@ -28,6 +28,10 @@ Lingering damps reporter flapping, not operator action: a last failure leaving t
 The membership history — which issues joined and left, and when — is kept and presented as the incident's timeline.
 An issue can leave and rejoin the same incident.
 
+The timeline leads with what is worst rather than what is newest: issues are ordered by effective result, most severe first, and issues sharing a result are ordered most recent first.
+An issue with no recorded result is ordered below every graded one.
+Notes are ordered most recent first and sit below every issue.
+
 Operator actions that change what counts (monitoring toggles, group membership changes, policy and silence changes) re-evaluate the affected issues' incident membership.
 
 Membership evaluation is asynchronous. A report records its issue state immediately; the resulting open, join, leave, or close follows within a short bounded delay rather than synchronously with the report. Membership is therefore eventually consistent with the current issue state.
