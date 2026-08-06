@@ -209,6 +209,7 @@ Reports are retained indefinitely as an audit trail.
 
 Canopy derives each restore's duration from the interval between its first credential issuance and its report.
 A restore for which credentials were issued but no report has arrived is shown as in progress while the credentials remain valid, otherwise as a restore whose outcome is unknown; this surfaces in-flight and terminated-without-report restores in the operator view, including those under intents that produce no health report.
+The derivation covers consumers only: a device belonging to one of the group's servers takes restore credentials for its own purposes (a clone refresh, an operator's manual restore) and never reports, so its issuances derive no restore activity.
 
 ## Pre-upgrade migration testing
 

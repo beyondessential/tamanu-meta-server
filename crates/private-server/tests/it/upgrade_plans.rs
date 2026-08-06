@@ -146,6 +146,75 @@ async fn an_attempt_in_flight_shows_beside_the_verdict() {
 	.await;
 }
 
+/// A member server taking restore credentials (a clone refresh, a manual
+/// restore) never reports, so its expired issuances must not read as a test run
+/// that ended without reporting.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_member_servers_own_restore_is_not_an_attempt() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
+				('cccccccc-0000-0000-0000-0000000000f1', 2, 61, 0, 'x', 'published');
+			INSERT INTO server_groups (id, name, effective_version) VALUES
+				('cccccccc-0000-0000-0000-000000000001', 'kamaka', '2.60.0');
+			INSERT INTO devices (id, role) VALUES
+				('cccccccc-0000-0000-0000-0000000000d0', 'backup-restore'),
+				('cccccccc-0000-0000-0000-0000000000d1', 'server');
+			INSERT INTO servers (id, name, host, kind, group_id, device_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a0', 'clone',
+				 'https://clone.example.com', 'central',
+				 'cccccccc-0000-0000-0000-000000000001',
+				 'cccccccc-0000-0000-0000-0000000000d1');
+			INSERT INTO upgrade_plans (group_id, target_version_id) VALUES
+				('cccccccc-0000-0000-0000-000000000001',
+				 'cccccccc-0000-0000-0000-0000000000f1');
+			INSERT INTO backup_credential_issuances
+				(device_id, group_id, type, purpose, run_id, issued_at, expires_at,
+				 sts_assumed_role, bucket, prefix)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d1',
+				'cccccccc-0000-0000-0000-000000000001', 'tamanu-postgres', 'restore',
+				'cccccccc-0000-0000-0000-0000000000e1',
+				NOW() - INTERVAL '3 hours', NOW() - INTERVAL '2 hours',
+				'arn:aws:iam::1:role/r', 'b', '')",
+		)
+		.await
+		.unwrap();
+
+		let fleet: Vec<Value> = private
+			.post("/api/upgrade_plans/fleet")
+			.json(&json!({}))
+			.await
+			.json();
+		let row = fleet.iter().find(|r| r["group_id"] == GROUP).unwrap();
+		assert!(
+			row["attempt"].is_null(),
+			"a member server's own restore is not the pipeline"
+		);
+
+		// The same expired-unreported issuance from the consumer is the signal.
+		conn.batch_execute(
+			"INSERT INTO backup_credential_issuances
+				(device_id, group_id, type, purpose, issued_at, expires_at,
+				 sts_assumed_role, bucket, prefix)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d0',
+				'cccccccc-0000-0000-0000-000000000001', 'tamanu-postgres', 'restore',
+				NOW() - INTERVAL '3 hours', NOW() - INTERVAL '2 hours',
+				'arn:aws:iam::1:role/r', 'b', '')",
+		)
+		.await
+		.unwrap();
+
+		let fleet: Vec<Value> = private
+			.post("/api/upgrade_plans/fleet")
+			.json(&json!({}))
+			.await
+			.json();
+		let row = fleet.iter().find(|r| r["group_id"] == GROUP).unwrap();
+		assert_eq!(row["attempt"], "ended_without_report");
+	})
+	.await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn amend_changes_the_date_and_note_without_replacing_the_plan() {
 	commons_tests::server::run(async |mut conn, _, private| {
