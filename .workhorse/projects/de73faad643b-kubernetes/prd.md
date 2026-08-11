@@ -74,9 +74,16 @@ Two things it buys:
 
 Concurrency is the more valuable of the two and the less contentious, since it blocks collisions rather than people.
 
+### Durability
+
+This is the first state Canopy *authors* rather than observes. Everything else it holds is reported by devices or derived from what they report, so it can be relearnt by asking the fleet again. Once the file system stops being the source of truth, the inventory has no second copy.
+
+That puts it squarely in the recovery escrow ([BKJ](../../specs/jobs/backup.md) *Recovery escrow*), which already carries the group, server, configuration, schedule, and capability records needed to recover without Canopy. Inventory state, desired versions included, is the same class of thing: what you need to rebuild a deployment when Canopy is gone.
+
 ### Cards
 
 - Canopy holds the inventory state, including the desired version, per group and rank
+- Inventory state is added to the recovery escrow
 - **Separately**, an Ansible plugin, or whatever mechanism fits, that makes Canopy the inventory source instead of the file system
 - Canopy refusing to serve inventory, with the concurrency check as the first policy on it
 - The production maintenance and upgrade unlock, on the same mechanism
