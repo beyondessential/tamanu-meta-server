@@ -69,7 +69,8 @@ Whether a server is serving, as opposed to present, is the **Server live** check
 
 ## When Canopy cannot reach a cluster
 
-Canopy keeps one Canopy-wide check per registered cluster for the cluster's connection and permissions, reported as a self-alert (see [SELF](../private-server/self-alerts.md)).
-When Canopy cannot reach a cluster or lacks the permissions to read it, that check is the single actionable failure for the cluster.
+Canopy keeps one Canopy-wide check for Kubernetes cluster connectivity, with each registered cluster an instance of it (see [CHK](checks.md), "Checks with instances"), reported as a self-alert (see [SELF](../private-server/self-alerts.md)).
+A cluster Canopy cannot reach, or lacks the permissions to read, is a failing instance; the check's detail names every such cluster, and it recovers when every registered cluster is reachable again.
+This one check, escalating so it notifies at once, is the actionable failure for a cluster going away.
 
-While a cluster is unreachable, the pulled and harvested checks of the servers on it are broken — their conditions unconfirmed — and are not raised to failures, so an unreachable cluster surfaces as its one Canopy-wide failure rather than flooding every server on it.
+While a cluster is unreachable, the pulled and harvested checks of the servers on it are broken — their conditions unconfirmed — and are not raised to failures, so an unreachable cluster surfaces through this one check rather than flooding every server on it.
