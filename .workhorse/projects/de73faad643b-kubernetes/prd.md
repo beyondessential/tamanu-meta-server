@@ -14,7 +14,7 @@ Two things gate everything else, and neither blocks the other, so both start now
 
 **Migration testing is the critical path.** It is the only component with code already in the ground, and proving it end to end also proves the managed-restore machinery that the reporting-schema pipeline reuses. Nothing downstream is worth building against an unproven replica.
 
-**Discovery is blocked on people, not code.** Analytics and Maui have to be in the room, which makes it calendar-bound rather than effort-bound. It starts immediately even though it delivers late; if it slips, the entire reporting half of the project slips with it.
+**Discovery is blocked on people, not code.** It needs the analytics team's time, which makes it calendar-bound rather than effort-bound. It starts immediately even though it delivers late; if it slips, the entire reporting half of the project slips with it.
 
 The rest falls out of those two:
 
@@ -78,7 +78,7 @@ Reporting schemas are produced by a DBT-based system, run against a replica of t
 
 ### Discovery
 
-Precondition for the rest of this component — needs the analytics team and the Maui team.
+Precondition for the rest of this component — needs the analytics team, who own Maui and the DBT system.
 
 - How reporting schemas are currently created, and by whom
 - How they are tested, and against what replica
@@ -134,6 +134,6 @@ Answerable by someone who already knows, and worth asking before this project sh
 
 Needs real work to answer:
 
-- Which of "fully in Canopy" and "managed from Canopy" the reporting-schema pipeline takes — blocked on discovery with analytics and Maui
+- Which of "fully in Canopy" and "managed from Canopy" the reporting-schema pipeline takes — blocked on discovery with the analytics team
 - How much of migration testing is actually left, which the spec-against-code audit answers and nothing else will
 - How much of the Ansible inventory Canopy holds, and in what form: the desired version alone, or the full inventory state for Linux deployments
