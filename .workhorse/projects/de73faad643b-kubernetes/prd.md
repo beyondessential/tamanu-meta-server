@@ -6,7 +6,7 @@ VitiOps runs the actual deployments of Tamanu and its related software onto prod
 Too much of that is still hand-driven: a migration is proven by someone restoring a database and running it, a reporting schema arrives as a SQL file handed between teams, and a release is a checklist of steps that mostly could run themselves.
 This project moves that burden into Canopy, so the fleet's deployment work is commissioned, tracked, and reported on automatically, and a human only does the parts that genuinely need a human decision.
 
-**This is a multi-repo project.** Canopy is where the work is commissioned, tracked, and reported, but the code lands wherever the job is done: Canopy, bestool, Seedling, and Tamanu. Cards are shaped here and move to their respective workspace when work starts on them. A component being someone else's repo does not put it outside the project.
+**This is a multi-repo project.** Canopy is where the work is commissioned, tracked, and reported, but the code lands wherever the job is done: Canopy, bestool, Seedling, Tamanu, and ops. Cards are shaped here and move to their respective workspace when work starts on them. A component being someone else's repo does not put it outside the project.
 
 ## Sequencing
 
@@ -18,8 +18,9 @@ Two things gate everything else, and neither blocks the other, so both start now
 
 The rest falls out of those two:
 
-- **Now, unblocked** — migration testing end to end; reporting-schema discovery; the release-process audit, which is a paper exercise with no dependencies; quick wins
+- **Now, unblocked** — migration testing end to end; reporting-schema discovery; Canopy holding desired versions and inventory state; the release-process audit, which is a paper exercise with no dependencies; quick wins
 - **Once migration testing is proven** — migration testing in the RC cycle
+- **Once Canopy holds inventory state** — the Ansible plugin that makes Canopy the inventory source
 - **Once discovery lands** — deployment artefacts, whose shape depends on what the pipeline produces and who produces it, then the reporting-schema pipeline itself
 - **Last** — applying artefacts, which needs artefacts to exist and the bestool-or-Seedling question answered
 
@@ -34,6 +35,42 @@ Finish it and prove it end to end.
 - Reporting: verdict, target version, which migration failed and its error, and how long the chain took — the duration matters as much as the pass/fail, because a migration that succeeds but overruns the upgrade window is still a blocker
 - Operator-facing surface: where a VitiOps person looks to see whether a version is safe for a deployment before scheduling its window
 - Detailed shape of the remaining gaps can be filled in during card shaping, once the spec/code audit is done
+
+## Desired versions and Ansible inventory
+
+The ops repo's Ansible configuration is the source of truth for deploying Linux servers. Because it is a git repo, it drifts: with this many deployments and this many people working at once, changes get made locally and never pushed or raised as a PR. This is routine, not exceptional.
+
+Two consequences, both of which have bitten:
+
+- **Incident response against stale truth.** A DevOps engineer responding to an incident reads an older Ansible configuration than the one actually applied to the server, and works from it
+- **Misapplied upgrades.** A configuration edited locally for an experiment and not reverted before a playbook run has upgraded deployments that were not scheduled for it. No deployment has been fully upgraded by accident, but the first half of an upgrade has been applied and then reverted. The only control is a local file, so this is easy to fall into and we remain permissive about it
+
+### What Canopy holds
+
+Canopy already learns each server's *current* Tamanu version through health checks, and that stays the truth of what is on the server. The gap is the *desired* version: what we intend that deployment to be on. Holding both makes drift visible rather than implicit.
+
+- The desired version per deployment, sitting alongside migration testing and the intent-to-upgrade plans this project already builds on
+- More broadly, the Ansible inventory state for deployments with Linux servers, of which the Tamanu version is one field
+
+### Deployment and rank
+
+Terminology needs care here, because "deployment" means different things to different audiences:
+
+- Canopy models a **server group**, holding all of a deployment's servers across every rank, and a **rank** on each server (production, clone, demo, test, dev)
+- To VitiOps and the deployment team, a **deployment** is usually one rank within a group: production and demo in the same group are two deployments
+- To project managers, all of those servers are one deployment
+- Canopy addresses this as group plus rank, and inventory state is held per group and rank, matching the VitiOps sense
+
+### Cards
+
+- Canopy holds the inventory state, including the desired version, per group and rank
+- **Separately**, an Ansible plugin, or whatever mechanism fits, that makes Canopy the inventory source instead of the file system
+
+Longer term this is the foundation for Canopy controlling upgrades directly, which is not this project.
+
+### Side benefit: a public Ansible repo
+
+Worth calling out even if no work happens on it this cycle. Once inventory state lives in Canopy, no private information remains in the Ansible configuration. The same was done separately for the Pulumi configuration. That clears the way to make the Ansible repo public on GitHub, which we have been asked to do before and which carries potential financial benefits. An external incentive stacked on top of the in-scope ones.
 
 ## Reporting schemas
 
@@ -99,3 +136,4 @@ Needs real work to answer:
 
 - Which of "fully in Canopy" and "managed from Canopy" the reporting-schema pipeline takes — blocked on discovery with analytics and Maui
 - How much of migration testing is actually left, which the spec-against-code audit answers and nothing else will
+- How much of the Ansible inventory Canopy holds, and in what form: the desired version alone, or the full inventory state for Linux deployments
