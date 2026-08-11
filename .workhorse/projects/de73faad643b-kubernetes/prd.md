@@ -89,7 +89,13 @@ The deliverable here is Canopy itself working better. Everything above lands in 
 
 ## Open questions
 
-- Which of "fully in Canopy" and "managed from Canopy" the reporting-schema pipeline takes — blocked on discovery with analytics and Maui
-- Where artefact application lands: bestool, Seedling, or both
-- Whether seed snapshots become a Canopy-tracked concept or stay entirely in the Tamanu repo
+Answerable by someone who already knows, and worth asking before this project shapes any cards:
+
 - Whether the release-issue automation is already complete
+- Whether seed snapshots become a Canopy-tracked concept or stay entirely in the Tamanu repo — a Seedling call
+- Where artefact application lands: bestool, Seedling, or both
+
+Needs real work to answer:
+
+- Which of "fully in Canopy" and "managed from Canopy" the reporting-schema pipeline takes — blocked on discovery with analytics and Maui
+- How much of migration testing is actually left, which the spec-against-code audit answers and nothing else will
