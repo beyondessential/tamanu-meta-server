@@ -66,11 +66,11 @@ A new concept: artefacts that are specific to a single deployment, rather than p
 
 ## Applying artefacts
 
-Not necessarily Canopy code; likely bestool (where the artefact is consumed) or Seedling.
+Not Canopy code. This lands in **both bestool and Seedling**: the transition to Seedling is long, and bestool stays the consumer for the whole of it, so a bestool-only implementation strands every deployment that has not moved yet and a Seedling-only one serves nobody today.
 
 - Apply a reporting artefact directly to the deployment's database, with no manual SQL-running step
 - Report application back to Canopy so the deployment's current reporting-schema state is known, not assumed
-- Which repo this lands in is an open question, but it's in this project's scope either way
+- **Two cards, one per repo**, implementing the same behaviour against different consumers. Both are shaped here and move to their respective workspace when work starts on them
 
 ## Release and RC process
 
@@ -93,7 +93,6 @@ Answerable by someone who already knows, and worth asking before this project sh
 
 - Whether the release-issue automation is already complete
 - Whether seed snapshots become a Canopy-tracked concept or stay entirely in the Tamanu repo — a Seedling call
-- Where artefact application lands: bestool, Seedling, or both
 
 Needs real work to answer:
 
