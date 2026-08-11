@@ -60,8 +60,8 @@ Behavioural level only: auth mechanism and exact namespace resource names are le
 
 ## Open questions
 
-- Cluster auth mechanism (EKS OIDC vs alternatives) — moved to a research spike (see card-plan).
-- Exact Tamanu k8s namespace layout and where each check input lives — moved to a research spike (see card-plan).
+- Cluster auth mechanism (EKS OIDC vs alternatives) — moved to a research spike (see the card breakdown).
+- Exact Tamanu k8s namespace layout and where each check input lives — moved to a research spike (see the card breakdown).
 - When to bring backups into Canopy (AWS-level + CNPG Barman) — deliberately deferred.
 
 ## Resolved: identity stability
