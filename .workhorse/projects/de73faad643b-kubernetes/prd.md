@@ -6,6 +6,8 @@ VitiOps runs the actual deployments of Tamanu and its related software onto prod
 Too much of that is still hand-driven: a migration is proven by someone restoring a database and running it, a reporting schema arrives as a SQL file handed between teams, and a release is a checklist of steps that mostly could run themselves.
 This project moves that burden into Canopy, so the fleet's deployment work is commissioned, tracked, and reported on automatically, and a human only does the parts that genuinely need a human decision.
 
+**This is a multi-repo project.** Canopy is where the work is commissioned, tracked, and reported, but the code lands wherever the job is done: Canopy, bestool, Seedling, and Tamanu. Cards are shaped here and move to their respective workspace when work starts on them. A component being someone else's repo does not put it outside the project.
+
 ## Sequencing
 
 Two things gate everything else, and neither blocks the other, so both start now.
@@ -78,7 +80,7 @@ Goal: everything except the release trigger itself is automated. The trigger sta
 
 - Audit the current release process end to end and enumerate what is still manual and could be automated. Creating a release issue is believed to already be automated away — confirm before treating it as done
 - **Migration testing in the RC** — run migration testing as part of the release candidate (regression-testing candidate) cycle, and track the results in Canopy, so a candidate's effect on real deployment data is known before it's a release
-- **Seed snapshots** stay a Tamanu concern. Canopy does not track or consume them, and migration testing runs against restored deployment data rather than a seed snapshot, which is the point of it. Out of scope for this project
+- **Seed snapshots** remain a Tamanu-repo concept and are not pulled into Canopy: Canopy does not track or consume them, and migration testing runs against restored deployment data rather than a seed snapshot, which is the point of it. In scope for this project, with the work landing in the Tamanu repo
 
 ## Quick wins
 
