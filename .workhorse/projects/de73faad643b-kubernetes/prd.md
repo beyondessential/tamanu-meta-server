@@ -20,7 +20,7 @@ The rest falls out of those two:
 
 - **Now, unblocked** — migration testing end to end; reporting-schema discovery; Canopy holding desired versions and inventory state; the release-process audit, which is a paper exercise with no dependencies; quick wins
 - **Once migration testing is proven** — migration testing in the RC cycle
-- **Once Canopy holds inventory state** — the Ansible plugin that makes Canopy the inventory source
+- **Once Canopy holds inventory state** — the Ansible plugin that makes Canopy the inventory source, then the refusal policies that ride on it
 - **Once discovery lands** — deployment artefacts, whose shape depends on what the pipeline produces and who produces it, then the reporting-schema pipeline itself
 - **Last** — applying artefacts, which needs artefacts to exist and the bestool-or-Seedling question answered
 
@@ -63,10 +63,23 @@ Terminology needs care here, because "deployment" means different things to diff
 
 Canopy's own language is not yet consistent about this, and the inventory work is where it starts to bite. Settling it is a quick-win card, below.
 
+### Canopy as a control point
+
+Once the plugin pulls inventory from Canopy, Canopy can decline to serve it. That is the whole mechanism: nothing has to wrap or intercept the Ansible run itself, which is the expensive way to get the same control. The plugin asks, and Canopy says no.
+
+Two things it buys:
+
+- **Concurrency.** On every run, not just privileged ones. Someone else is already mid-upgrade on this deployment, or changing its settings, so this run is refused and told who to talk to. Today nothing knows that another person is working on the same deployment
+- **Authorisation.** Whether this person may do production maintenance or a production upgrade at all, expressed as an unlock inside Canopy
+
+Concurrency is the more valuable of the two and the less contentious, since it blocks collisions rather than people.
+
 ### Cards
 
 - Canopy holds the inventory state, including the desired version, per group and rank
 - **Separately**, an Ansible plugin, or whatever mechanism fits, that makes Canopy the inventory source instead of the file system
+- Canopy refusing to serve inventory, with the concurrency check as the first policy on it
+- The production maintenance and upgrade unlock, on the same mechanism
 
 Longer term this is the foundation for Canopy controlling upgrades directly, which is not this project.
 
