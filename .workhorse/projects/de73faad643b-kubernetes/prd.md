@@ -61,6 +61,8 @@ Terminology needs care here, because "deployment" means different things to diff
 - To project managers, all of those servers are one deployment
 - Canopy addresses this as group plus rank, and inventory state is held per group and rank, matching the VitiOps sense
 
+Canopy's own language is not yet consistent about this, and the inventory work is where it starts to bite. Settling it is a quick-win card, below.
+
 ### Cards
 
 - Canopy holds the inventory state, including the desired version, per group and rank
@@ -125,6 +127,7 @@ The deliverable here is Canopy itself working better. Everything above lands in 
 
 - Sweep the Canopy Workhorse board for existing small issues that reduce friction in automated workflows, and pull the relevant ones into this project
 - **Bug audit** — a Canopy bug audit was carried out; check whether it was completed and finish it off if not
+- **Settle what a deployment, group, and rank each mean**, then make the UI, specs, and code agree. Today they do not: `servers/products.md` takes a server's deployment from its group, which is the project-manager sense, while VitiOps means a single rank within a group. Pick the sense Canopy uses, name the other one, and apply it consistently. No dependencies, and it clears the ground for the inventory work above
 
 ## Open questions
 
