@@ -78,7 +78,7 @@ Goal: everything except the release trigger itself is automated. The trigger sta
 
 - Audit the current release process end to end and enumerate what is still manual and could be automated. Creating a release issue is believed to already be automated away — confirm before treating it as done
 - **Migration testing in the RC** — run migration testing as part of the release candidate (regression-testing candidate) cycle, and track the results in Canopy, so a candidate's effect on real deployment data is known before it's a release
-- **Seed snapshots** — a separate Seedling concept living in the Tamanu repo. Relationship to Canopy's migration testing needs to be worked out: whether Canopy tracks them, uses them, or leaves them alone
+- **Seed snapshots** stay a Tamanu concern. Canopy does not track or consume them, and migration testing runs against restored deployment data rather than a seed snapshot, which is the point of it. Out of scope for this project
 
 ## Quick wins
 
@@ -92,7 +92,6 @@ The deliverable here is Canopy itself working better. Everything above lands in 
 Answerable by someone who already knows, and worth asking before this project shapes any cards:
 
 - Whether the release-issue automation is already complete
-- Whether seed snapshots become a Canopy-tracked concept or stay entirely in the Tamanu repo — a Seedling call
 
 Needs real work to answer:
 
