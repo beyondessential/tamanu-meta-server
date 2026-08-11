@@ -1,10 +1,25 @@
-# VitiOps deployment automation
+# Automate Everything
 
 ## Overview
 
 VitiOps runs the actual deployments of Tamanu and its related software onto production servers, plus the pre-production work around them — cloning, upgrade testing, release candidates.
 Too much of that is still hand-driven: a migration is proven by someone restoring a database and running it, a reporting schema arrives as a SQL file handed between teams, and a release is a checklist of steps that mostly could run themselves.
 This project moves that burden into Canopy, so the fleet's deployment work is commissioned, tracked, and reported on automatically, and a human only does the parts that genuinely need a human decision.
+
+## Sequencing
+
+Two things gate everything else, and neither blocks the other, so both start now.
+
+**Migration testing is the critical path.** It is the only component with code already in the ground, and proving it end to end also proves the managed-restore machinery that the reporting-schema pipeline reuses. Nothing downstream is worth building against an unproven replica.
+
+**Discovery is blocked on people, not code.** Analytics and Maui have to be in the room, which makes it calendar-bound rather than effort-bound. It starts immediately even though it delivers late; if it slips, the entire reporting half of the project slips with it.
+
+The rest falls out of those two:
+
+- **Now, unblocked** — migration testing end to end; reporting-schema discovery; the release-process audit, which is a paper exercise with no dependencies; quick wins
+- **Once migration testing is proven** — migration testing in the RC cycle
+- **Once discovery lands** — deployment artefacts, whose shape depends on what the pipeline produces and who produces it, then the reporting-schema pipeline itself
+- **Last** — applying artefacts, which needs artefacts to exist and the bestool-or-Seedling question answered
 
 ## Migration testing
 
@@ -65,9 +80,9 @@ Goal: everything except the release trigger itself is automated. The trigger sta
 - **Migration testing in the RC** — run migration testing as part of the release candidate (regression-testing candidate) cycle, and track the results in Canopy, so a candidate's effect on real deployment data is known before it's a release
 - **Seed snapshots** — a separate Seedling concept living in the Tamanu repo. Relationship to Canopy's migration testing needs to be worked out: whether Canopy tracks them, uses them, or leaves them alone
 
-## Canopy smoothing
+## Quick wins
 
-Smaller work that makes the automation above tolerable to operate.
+The deliverable here is Canopy itself working better. Everything above lands in Canopy and is operated through it, so friction in Canopy is friction in the whole project. This is fill-in work that runs alongside the rest rather than waiting on it.
 
 - Sweep the Canopy Workhorse board for existing small issues that reduce friction in automated workflows, and pull the relevant ones into this project
 - **Bug audit** — a Canopy bug audit was carried out; check whether it was completed and finish it off if not
