@@ -499,6 +499,46 @@ test.describe("restore replicas", () => {
 		expect(rows).toHaveLength(1);
 	});
 
+	test("a second replica of one scope is declared under its own name", async ({
+		page,
+		sql,
+	}) => {
+		const consumer = await seedDevice(sql, { role: "backup-restore" });
+		await seedRestoreConsumerCapability(sql, {
+			deviceId: consumer.id,
+			intents: ["verify"],
+		});
+		const groupId = await groupWithBackups(sql, "twice-group");
+		await seedRestoreReplica(sql, {
+			consumerDeviceId: consumer.id,
+			groupId,
+			intent: "verify",
+			name: "twice-group-verify",
+		});
+
+		await page.goto(`/groups/${groupId}/backups`);
+		await page.getByRole("button", { name: /declare replica/i }).click();
+		const dialog = page.getByRole("dialog");
+
+		// The scope is the one already declared, so the suggested name counts
+		// past the one in use rather than arriving already taken.
+		await expect(dialog.getByLabel("Name")).toHaveValue("twice-group-verify-2");
+		await dialog.getByRole("button", { name: /^declare$/i }).click();
+
+		// Both stand: the scope repeats, the names do not.
+		await expect(
+			page.getByRole("row", { name: /twice-group-verify-2/ }),
+		).toBeVisible();
+		const rows = await sql.query<{ name: string }>(
+			"SELECT name FROM restore_replicas WHERE group_id = $1 ORDER BY name",
+			[groupId],
+		);
+		expect(rows.map((r) => r.name)).toEqual([
+			"twice-group-verify",
+			"twice-group-verify-2",
+		]);
+	});
+
 	test("the intent dropdown offers only intents the consumer registered", async ({
 		page,
 		sql,
@@ -798,7 +838,7 @@ test.describe("restore replicas", () => {
 		expect(rows[0]!.intent).toBe("analytics");
 	});
 
-	test("editing a declaration's scope onto an existing declaration's scope conflicts", async ({
+	test("editing a declaration onto an existing declaration's scope is allowed, but not onto its name", async ({
 		page,
 		sql,
 	}) => {
@@ -824,19 +864,32 @@ test.describe("restore replicas", () => {
 		await page.goto(`/groups/${groupId}/backups`);
 		await page.getByRole("button", { name: "edit movable" }).click();
 
+		// Retargeting onto the other declaration's scope leaves two replicas of
+		// one scope, which is what the name is there to tell apart.
 		const dialog = page.getByRole("dialog");
 		await dialog.getByLabel("Intent").click();
 		await page.getByRole("option", { name: "verify" }).click();
 		await dialog.getByRole("button", { name: /^save$/i }).click();
 
-		await expect(dialog.getByRole("alert")).toBeVisible();
-		// The dialog stays open and the declaration keeps its original intent.
-		await expect(dialog).toBeVisible();
-		const rows = await sql.query<{ intent: string }>(
+		await expect(dialog).toBeHidden();
+		let rows = await sql.query<{ intent: string }>(
 			"SELECT intent FROM restore_replicas WHERE name = 'movable'",
 		);
 		expect(rows).toHaveLength(1);
-		expect(rows[0]!.intent).toBe("analytics");
+		expect(rows[0]!.intent).toBe("verify");
+
+		// Taking the other declaration's name is what's refused.
+		await page.getByRole("button", { name: "edit movable" }).click();
+		const renaming = page.getByRole("dialog");
+		await renaming.getByLabel("Name").fill("taken-scope");
+		await renaming.getByRole("button", { name: /^save$/i }).click();
+
+		await expect(renaming.getByRole("alert")).toContainText(/name/i);
+		await expect(renaming).toBeVisible();
+		rows = await sql.query<{ intent: string }>(
+			"SELECT intent FROM restore_replicas WHERE name = 'movable'",
+		);
+		expect(rows).toHaveLength(1);
 	});
 
 	test("a restore check surfaces a replica url as a link", async ({

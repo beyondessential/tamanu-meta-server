@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use commons_types::{
 	Uuid,
-	backup::{BackupType, IntentDescriptor, RestoreIntent, RunOutcome},
+	backup::{IntentDescriptor, RestoreIntent, RunOutcome},
 };
 use database::{
 	devices::Device,
@@ -245,10 +245,8 @@ impl CanopyMcp {
 			caps.insert(*id, set);
 		}
 
-		let mut healthy_by_group: HashMap<
-			Uuid,
-			HashMap<(Uuid, BackupType, RestoreIntent), Timestamp>,
-		> = HashMap::new();
+		let mut healthy_by_group: HashMap<Uuid, HashMap<database::restore::ReplicaKey, Timestamp>> =
+			HashMap::new();
 		for gid in &group_ids {
 			let map = BackupRestoreCheck::latest_healthy_by_key_for_group(conn, *gid)
 				.await
@@ -265,7 +263,14 @@ impl CanopyMcp {
 				let last_healthy_at = r.server_id.and_then(|sid| {
 					healthy_by_group
 						.get(&r.group_id)
-						.and_then(|m| m.get(&(sid, r.r#type.clone(), r.intent.clone())))
+						.and_then(|m| {
+							m.get(&(
+								sid,
+								r.r#type.clone(),
+								r.intent.clone(),
+								Some(r.name.clone()),
+							))
+						})
 						.copied()
 				});
 				RestoreReplicaOut {

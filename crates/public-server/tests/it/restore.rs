@@ -199,7 +199,7 @@ async fn worklist_expands_group_wide_to_each_server() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn worklist_dedupes_server_specific_over_group_wide() {
+async fn worklist_dispatches_every_named_replica_of_a_server() {
 	commons_tests::server::run_with_device_auth(
 		"backup-restore",
 		async |mut conn, cert, device_id, public, _| {
@@ -208,7 +208,7 @@ async fn worklist_dedupes_server_specific_over_group_wide() {
 			let server = make_server(&mut conn, group).await;
 			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
 			// Both a whole-group and a server-specific declaration of the same
-			// (type, intent) cover this server.
+			// (type, intent) cover this server, under names of their own.
 			declare_replica(&mut conn, device_id, group, "verify").await;
 			declare_replica_server(&mut conn, device_id, group, server, "verify").await;
 			public
@@ -226,9 +226,16 @@ async fn worklist_dedupes_server_specific_over_group_wide() {
 				.await;
 			resp.assert_status_ok();
 			let entries: Vec<serde_json::Value> = resp.json();
-			// Deduped to a single entry for the server, not two.
-			assert_eq!(entries.len(), 1, "got {entries:?}");
-			assert_eq!(entries[0]["server_id"], server.to_string());
+			// Two named replicas of that server, so two entries: the name is what
+			// tells them apart, and neither stands in for the other.
+			assert_eq!(entries.len(), 2, "got {entries:?}");
+			assert!(entries.iter().all(|e| e["server_id"] == server.to_string()));
+			let mut names: Vec<&str> = entries
+				.iter()
+				.map(|e| e["name"].as_str().unwrap())
+				.collect();
+			names.sort_unstable();
+			assert_eq!(names, ["verify-decl", "verify-server-decl"]);
 		},
 	)
 	.await;
@@ -284,11 +291,15 @@ async fn worklist_once_suppresses_verified_snapshot_until_newer() {
 				.json();
 			assert_eq!(entries.len(), 1, "got {entries:?}");
 
-			// Report snap-1 verified healthy → a `once` intent drops it.
+			// Report snap-1 verified healthy → a `once` intent drops it. The
+			// report names the replica it came from, as a consumer's does: the
+			// name is part of a replica's identity, so a report that named no
+			// declaration settles nothing for one.
 			public
 				.post("/restore-verification")
 				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
+					"replica_id": entries[0]["replica_id"],
 					"group": group,
 					"server_id": server,
 					"type": "tamanu-postgres",
@@ -976,6 +987,7 @@ async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
 				&mut conn,
 				database::restore::NewBackupRestoreCheck {
 					replica_id: None,
+					replica_name: None,
 					consumer_device_id: device_id,
 					group_id: group,
 					server_id: Some(server),

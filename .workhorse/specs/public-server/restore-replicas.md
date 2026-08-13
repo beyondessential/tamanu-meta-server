@@ -131,7 +131,13 @@ Each declaration carries:
 A declaration's intent must be one the chosen consumer advertises (see [Consumer capabilities](#consumer-capabilities)); a declaration whose intent is unadvertised is a gap, surfaced to the operator and never dispatched.
 
 The name identifies the replica to the consumer that maintains it and to the operator reading the list, so a consumer's declarations must not share one.
-Two declarations that differ only by intent are a distinct scope but still need distinct names, and Canopy refuses the second rather than accepting an ambiguous pair.
+It is the only thing a declaration is unique on: an operator may declare as many replicas of one group, type, intent, and server as they have uses for — a raw one alongside a redacted one, a nightly one alongside a weekly one — and Canopy tells them apart by name alone.
+A declaration that reuses a name already assigned to that consumer is refused rather than accepted as an ambiguous pair.
+
+The name is part of a replica's identity rather than a label on it, so each named replica is dispatched, reported on, and alerted on separately.
+A whole-group declaration and a server-specific one that both cover a server are two of that server's replicas, and each gets its own worklist entry.
+A report identifies the declaration it came from, and Canopy records that declaration's name alongside the group, server, type, and intent it already keeps, so the report goes on naming its replica once the declaration is retired.
+A report that names no declaration stands as a replica of its own rather than attaching to one, since nothing identifies which of a scope's replicas it concerns.
 
 A declaration scoped to a whole group expands to one replica per current server in that group.
 Servers joining or leaving a group change what the consumer is asked to maintain, with no per-server operator action.
@@ -359,6 +365,7 @@ A failed or overdue restore-health report raises a restore-verification check on
 A server has one restore-verification check however many replicas it has.
 Each replica is an instance of that check, graded on its own and carrying its type, its intent, its declared name, and the snapshot in the check's detail (see [CHK](../monitoring/checks.md)), so a rule or silence written for one replica applies to only that replica.
 The detail names the replica by its type and intent together as well as separately, since a rule matches one variable at a time and a silence for a single replica has to pin both.
+Two replicas of one type and intent on one server are two instances, told apart by their names, so one of them failing leaves its siblings' results untouched.
 The check reflects the most urgent of them, names the ones in trouble, and recovers when none is left degraded.
 
 A replica's state is the worse of what its latest report said and whether it has gone past its overdue bound; these are one judgement about the replica, not two competing ones.

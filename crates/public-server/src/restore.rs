@@ -204,18 +204,22 @@ async fn worklist(
 		.into_iter()
 		.filter(|d| descriptors.contains_key(&d.intent))
 		.collect::<Vec<_>>();
-	// Process server-specific declarations before group-wide ones so a
-	// server-scoped declaration wins the dedup over a group-wide one covering
-	// the same (server, type, intent).
+	// Process server-specific declarations before group-wide ones so entries
+	// arrive in a stable order whatever the declarations' creation order.
 	declarations.sort_by_key(|d| d.server_id.is_none());
 
 	let mut out: Vec<WorklistEntry> = Vec::new();
-	let mut seen: HashSet<(Uuid, String, String)> = HashSet::new();
+	// One entry per named replica per server. Several declarations may cover one
+	// (server, type, intent) — a raw one and a redacted one, a nightly one and a
+	// weekly one — and are told apart by name, so the name is what the dedup
+	// keys on. A group-wide and a server-scoped declaration with different names
+	// are two replicas of that server, and both are dispatched.
+	let mut seen: HashSet<(Uuid, String)> = HashSet::new();
 	// Per-group caches so a group referenced by several declarations is resolved
 	// once: the latest produced snapshot per (server, type), and the latest
 	// healthy-verified snapshot per (server, type, intent) for `once` suppression.
 	let mut snapshot_cache: HashMap<Uuid, HashMap<(Uuid, BackupType), BackupRun>> = HashMap::new();
-	let mut verified_cache: HashMap<Uuid, HashMap<(Uuid, BackupType, RestoreIntent), String>> =
+	let mut verified_cache: HashMap<Uuid, HashMap<database::restore::ReplicaKey, String>> =
 		HashMap::new();
 
 	for d in declarations {
@@ -266,7 +270,7 @@ async fn worklist(
 
 		let region = cfg.region.clone().unwrap_or_else(deployment_default_region);
 		for server in servers {
-			let key = (server.id, d.r#type.to_string(), d.intent.to_string());
+			let key = (server.id, d.name.clone());
 			if !seen.insert(key) {
 				continue;
 			}
@@ -314,7 +318,15 @@ async fn worklist(
 					}
 					(Some(_), None) => false,
 					(None, snapshot) => {
-						let key = (server.id, d.r#type.clone(), d.intent.clone());
+						// Keyed by name as well: each named replica of a scope
+						// verifies its own snapshot, so one of them settling does
+						// not take its siblings off the worklist.
+						let key = (
+							server.id,
+							d.r#type.clone(),
+							d.intent.clone(),
+							Some(d.name.clone()),
+						);
 						matches!((verified.get(&key), snapshot), (Some(v), Some(s)) if v == s)
 					}
 				};
@@ -709,6 +721,8 @@ async fn verification(
 
 	let report = NewBackupRestoreCheck {
 		replica_id: args.replica_id,
+		// Resolved from `replica_id` when the report is recorded.
+		replica_name: None,
 		consumer_device_id,
 		group_id: args.group,
 		server_id: Some(args.server_id),
