@@ -12,6 +12,7 @@ This project moves that burden into Canopy, so the fleet's deployment work is co
 - Card to figure out *ongoing* QA for canopy+deployment+ansible+etc, not just this work, but in the future
 - Staging deployments?
 - Out of the golden path?
+- Happy to deliver less 
 
 ## Sequencing
 
