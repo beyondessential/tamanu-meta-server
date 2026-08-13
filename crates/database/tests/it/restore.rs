@@ -1272,6 +1272,38 @@ async fn name_is_unique_per_consumer() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn diag_conflict_messages() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+
+		RestoreReplica::create(
+			&mut conn,
+			new_replica(consumer, group, None, RestoreIntent::from("verify"), "alpha"),
+		)
+		.await
+		.expect("first");
+
+		// Same scope, different name -> scope collision.
+		let scope = RestoreReplica::create(
+			&mut conn,
+			new_replica(consumer, group, None, RestoreIntent::from("verify"), "beta"),
+		)
+		.await;
+		eprintln!("SCOPE-COLLISION MESSAGE: {scope:?}");
+
+		// Different scope (intent), same name -> name collision.
+		let name = RestoreReplica::create(
+			&mut conn,
+			new_replica(consumer, group, None, RestoreIntent::from("standby"), "alpha"),
+		)
+		.await;
+		panic!("SCOPE={scope:?} NAME={name:?}");
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn blank_name_is_rejected() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
