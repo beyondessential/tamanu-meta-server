@@ -544,9 +544,10 @@ async fn credentials(
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct VerificationArgs {
 	/// The declaration this report concerns, taken from the worklist entry's
-	/// `replica_id`. Optional so a report is still accepted when the
-	/// declaration was retired while the restore was in flight.
-	pub replica_id: Option<Uuid>,
+	/// `replica_id`. Required: several replicas can share one group, server,
+	/// type, and intent, so a report that named no declaration could not be
+	/// attributed to one of them.
+	pub replica_id: Uuid,
 	/// The server group whose backup was restored.
 	pub group: Uuid,
 	/// The server whose backup was restored.
@@ -692,6 +693,11 @@ pub struct MigrationTimingArgs {
 /// Authorization matches `POST /restore-credentials`: the device must hold an
 /// enabled restore declaration covering the reported group and type,
 /// otherwise the request is rejected with 403.
+///
+/// The report names the declaration it is about, and that declaration must
+/// still exist and belong to the calling consumer. A replica nothing declares
+/// any more is not one Canopy tracks, so a report naming a retired declaration
+/// is refused rather than recorded against a replica that could never recover.
 #[utoipa::path(
 	post,
 	path = "/restore-verification",
@@ -700,7 +706,8 @@ pub struct MigrationTimingArgs {
 	request_body = VerificationArgs,
 	responses(
 		(status = 204, description = "Report recorded."),
-		(status = 403, description = "No enabled declaration authorizes this (group, type).", body = ProblemDetailsSchema),
+		(status = 403, description = "No enabled declaration authorizes this (group, type), or the named declaration belongs to another consumer.", body = ProblemDetailsSchema),
+		(status = 404, description = "The named declaration does not exist.", body = ProblemDetailsSchema),
 	),
 )]
 async fn verification(
@@ -719,8 +726,21 @@ async fn verification(
 		});
 	}
 
+	// The report says which replica it is about, and only its own consumer may
+	// speak for it: the name resolved from here is what separates a scope's
+	// replicas, so a report attributed to the wrong one would grade a replica
+	// on a restore that was never its.
+	let declaration = RestoreReplica::get(&mut conn, args.replica_id)
+		.await
+		.map_err(|_| AppError::NotFound("no such restore replica declaration".into()))?;
+	if declaration.consumer_device_id != consumer_device_id {
+		return Err(AppError::AuthInsufficientPermissions {
+			required: "the named restore-replica declaration to be this consumer's own".into(),
+		});
+	}
+
 	let report = NewBackupRestoreCheck {
-		replica_id: args.replica_id,
+		replica_id: Some(args.replica_id),
 		// Resolved from `replica_id` when the report is recorded.
 		replica_name: None,
 		consumer_device_id,

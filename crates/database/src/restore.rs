@@ -637,8 +637,10 @@ pub struct NewBackupRestoreCheck {
 /// reached the declaration but not its name would be indistinguishable from
 /// its siblings' once the declaration is retired.
 ///
-/// A report naming no declaration, or one already retired, keeps a `None` name
-/// rather than failing: the report is still a fact about the restore.
+/// The ingest requires a report to name a declaration that exists, so the name
+/// is always found on that path. A report recorded without one keeps a `None`
+/// name: the DB layer is also where the reports predating the requirement sit,
+/// and they are still facts about a restore.
 pub(crate) async fn stamp_replica_name(
 	db: &mut AsyncPgConnection,
 	new: NewBackupRestoreCheck,

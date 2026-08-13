@@ -714,7 +714,7 @@
           "restore"
         ],
         "summary": "Report the outcome of a restore attempt and the replica's health.",
-        "description": "Records a verification report for a restore the device performed from its\nworklist. Send one report per attempt, on success and on failure alike. A\nreport with a `success` outcome and `replica_healthy: true` marks the\nsnapshot as verified; for run-once intents this is what removes the entry\nfrom `GET /restore-worklist` until a newer snapshot appears.\n\nAuthorization matches `POST /restore-credentials`: the device must hold an\nenabled restore declaration covering the reported group and type,\notherwise the request is rejected with 403.",
+        "description": "Records a verification report for a restore the device performed from its\nworklist. Send one report per attempt, on success and on failure alike. A\nreport with a `success` outcome and `replica_healthy: true` marks the\nsnapshot as verified; for run-once intents this is what removes the entry\nfrom `GET /restore-worklist` until a newer snapshot appears.\n\nAuthorization matches `POST /restore-credentials`: the device must hold an\nenabled restore declaration covering the reported group and type,\notherwise the request is rejected with 403.\n\nThe report names the declaration it is about, and that declaration must\nstill exist and belong to the calling consumer. A replica nothing declares\nany more is not one Canopy tracks, so a report naming a retired declaration\nis refused rather than recorded against a replica that could never recover.",
         "operationId": "verification",
         "requestBody": {
           "content": {
@@ -731,7 +731,17 @@
             "description": "Report recorded."
           },
           "403": {
-            "description": "No enabled declaration authorizes this (group, type).",
+            "description": "No enabled declaration authorizes this (group, type), or the named declaration belongs to another consumer.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The named declaration does not exist.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2672,6 +2682,7 @@
         "type": "object",
         "description": "Report of a restore attempt and the health of the resulting replica.",
         "required": [
+          "replica_id",
           "group",
           "server_id",
           "type",
@@ -2742,12 +2753,9 @@
             "description": "Whether the restored database came up healthy and passed readiness\nchecks. A replica only counts as verified when the outcome is\n`success` and this is `true`."
           },
           "replica_id": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "type": "string",
             "format": "uuid",
-            "description": "The declaration this report concerns, taken from the worklist entry's\n`replica_id`. Optional so a report is still accepted when the\ndeclaration was retired while the restore was in flight."
+            "description": "The declaration this report concerns, taken from the worklist entry's\n`replica_id`. Required: several replicas can share one group, server,\ntype, and intent, so a report that named no declaration could not be\nattributed to one of them."
           },
           "run_id": {
             "type": [

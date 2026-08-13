@@ -137,7 +137,8 @@ A declaration that reuses a name already assigned to that consumer is refused ra
 The name is part of a replica's identity rather than a label on it, so each named replica is dispatched, reported on, and alerted on separately.
 A whole-group declaration and a server-specific one that both cover a server are two of that server's replicas, and each gets its own worklist entry.
 A report identifies the declaration it came from, and Canopy records that declaration's name alongside the group, server, type, and intent it already keeps, so the report goes on naming its replica once the declaration is retired.
-A report that names no declaration stands as a replica of its own rather than attaching to one, since nothing identifies which of a scope's replicas it concerns.
+Naming a declaration is required of every report, because several replicas can share a group, server, type, and intent, and a report that named none could not be attributed to one of them.
+The declaration must still exist and belong to the reporting consumer; a report naming a retired declaration is refused, since a replica nothing declares any more is not one Canopy tracks and a finding recorded against it could never recover.
 
 A declaration scoped to a whole group expands to one replica per current server in that group.
 Servers joining or leaving a group change what the consumer is asked to maintain, with no per-server operator action.

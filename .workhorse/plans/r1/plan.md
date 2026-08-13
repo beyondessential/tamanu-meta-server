@@ -68,3 +68,14 @@ change beyond the reported symptom and follows directly from the intent.
 **Two consumers declaring the same scope was already possible** (the dropped indexes keyed on
 consumer), and their reports already shared a `ReplicaKey`. Carrying the name narrows this but
 does not close it, since names are unique per consumer rather than fleet-wide.
+
+**A report must name a declaration that exists and is the caller's own.** `replica_id` was
+optional so a report still landed when its declaration was retired mid-restore. With several
+replicas per scope, a report naming none cannot be attributed to one of them, and recording it
+would hold a finding against a replica nothing declares — which RST already says stops being an
+instance precisely because nothing could ever recover it. So the field is required, an unknown
+declaration is a 404, and another consumer's is a 403. The consumer that loses its declaration
+mid-restore now has its report refused rather than recorded namelessly.
+
+Reports predating this still carry no name, so `ReplicaKey` keeps an optional name and the DB
+layer can still record one without. Nothing new joins that class.

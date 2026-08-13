@@ -44,8 +44,11 @@ name is what a collision is reported against.
 
 - [x] A report carries the declaration's name, resolved from `replica_id` at record time
       (verifies spec: RST)
-- [x] A report that names no declaration stands as its own replica rather than attaching to a
-      named one (verifies spec: RST)
+- [x] A report that names no declaration is refused (verifies spec: RST)
+- [x] A report naming a retired declaration is refused, and nothing is recorded
+      (verifies spec: RST)
+- [x] A report naming another consumer's declaration is refused, and nothing is recorded
+      (verifies spec: RST)
 - [ ] A report recorded before the declaration is deleted goes on naming its replica once
       `replica_id` is nulled (verifies spec: RST)
 
