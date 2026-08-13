@@ -204,18 +204,22 @@ async fn worklist(
 		.into_iter()
 		.filter(|d| descriptors.contains_key(&d.intent))
 		.collect::<Vec<_>>();
-	// Process server-specific declarations before group-wide ones so a
-	// server-scoped declaration wins the dedup over a group-wide one covering
-	// the same (server, type, intent).
+	// Process server-specific declarations before group-wide ones so entries
+	// arrive in a stable order whatever the declarations' creation order.
 	declarations.sort_by_key(|d| d.server_id.is_none());
 
 	let mut out: Vec<WorklistEntry> = Vec::new();
-	let mut seen: HashSet<(Uuid, String, String)> = HashSet::new();
+	// One entry per named replica per server. Several declarations may cover one
+	// (server, type, intent) — a raw one and a redacted one, a nightly one and a
+	// weekly one — and are told apart by name, so the name is what the dedup
+	// keys on. A group-wide and a server-scoped declaration with different names
+	// are two replicas of that server, and both are dispatched.
+	let mut seen: HashSet<(Uuid, String)> = HashSet::new();
 	// Per-group caches so a group referenced by several declarations is resolved
 	// once: the latest produced snapshot per (server, type), and the latest
 	// healthy-verified snapshot per (server, type, intent) for `once` suppression.
 	let mut snapshot_cache: HashMap<Uuid, HashMap<(Uuid, BackupType), BackupRun>> = HashMap::new();
-	let mut verified_cache: HashMap<Uuid, HashMap<(Uuid, BackupType, RestoreIntent), String>> =
+	let mut verified_cache: HashMap<Uuid, HashMap<database::restore::ReplicaKey, String>> =
 		HashMap::new();
 
 	for d in declarations {
@@ -266,7 +270,7 @@ async fn worklist(
 
 		let region = cfg.region.clone().unwrap_or_else(deployment_default_region);
 		for server in servers {
-			let key = (server.id, d.r#type.to_string(), d.intent.to_string());
+			let key = (server.id, d.name.clone());
 			if !seen.insert(key) {
 				continue;
 			}
@@ -314,7 +318,15 @@ async fn worklist(
 					}
 					(Some(_), None) => false,
 					(None, snapshot) => {
-						let key = (server.id, d.r#type.clone(), d.intent.clone());
+						// Keyed by name as well: each named replica of a scope
+						// verifies its own snapshot, so one of them settling does
+						// not take its siblings off the worklist.
+						let key = (
+							server.id,
+							d.r#type.clone(),
+							d.intent.clone(),
+							Some(d.name.clone()),
+						);
 						matches!((verified.get(&key), snapshot), (Some(v), Some(s)) if v == s)
 					}
 				};
@@ -532,9 +544,10 @@ async fn credentials(
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct VerificationArgs {
 	/// The declaration this report concerns, taken from the worklist entry's
-	/// `replica_id`. Optional so a report is still accepted when the
-	/// declaration was retired while the restore was in flight.
-	pub replica_id: Option<Uuid>,
+	/// `replica_id`. Required: several replicas can share one group, server,
+	/// type, and intent, so a report that named no declaration could not be
+	/// attributed to one of them.
+	pub replica_id: Uuid,
 	/// The server group whose backup was restored.
 	pub group: Uuid,
 	/// The server whose backup was restored.
@@ -680,6 +693,11 @@ pub struct MigrationTimingArgs {
 /// Authorization matches `POST /restore-credentials`: the device must hold an
 /// enabled restore declaration covering the reported group and type,
 /// otherwise the request is rejected with 403.
+///
+/// The report names the declaration it is about, and that declaration must
+/// still exist and belong to the calling consumer. A replica nothing declares
+/// any more is not one Canopy tracks, so a report naming a retired declaration
+/// is refused rather than recorded against a replica that could never recover.
 #[utoipa::path(
 	post,
 	path = "/restore-verification",
@@ -688,7 +706,8 @@ pub struct MigrationTimingArgs {
 	request_body = VerificationArgs,
 	responses(
 		(status = 204, description = "Report recorded."),
-		(status = 403, description = "No enabled declaration authorizes this (group, type).", body = ProblemDetailsSchema),
+		(status = 403, description = "No enabled declaration authorizes this (group, type), or the named declaration belongs to another consumer.", body = ProblemDetailsSchema),
+		(status = 404, description = "The named declaration does not exist.", body = ProblemDetailsSchema),
 	),
 )]
 async fn verification(
@@ -707,8 +726,23 @@ async fn verification(
 		});
 	}
 
+	// The report says which replica it is about, and only its own consumer may
+	// speak for it: the name resolved from here is what separates a scope's
+	// replicas, so a report attributed to the wrong one would grade a replica
+	// on a restore that was never its.
+	let declaration = RestoreReplica::get(&mut conn, args.replica_id)
+		.await
+		.map_err(|_| AppError::NotFound("no such restore replica declaration".into()))?;
+	if declaration.consumer_device_id != consumer_device_id {
+		return Err(AppError::AuthInsufficientPermissions {
+			required: "the named restore-replica declaration to be this consumer's own".into(),
+		});
+	}
+
 	let report = NewBackupRestoreCheck {
-		replica_id: args.replica_id,
+		replica_id: Some(args.replica_id),
+		// Resolved from `replica_id` when the report is recorded.
+		replica_name: None,
 		consumer_device_id,
 		group_id: args.group,
 		server_id: Some(args.server_id),

@@ -7,6 +7,12 @@ use diesel::{sql_query, sql_types};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use uuid::Uuid;
 
+#[derive(diesel::QueryableByName)]
+struct RowId {
+	#[diesel(sql_type = sql_types::Uuid)]
+	id: Uuid,
+}
+
 async fn make_group(conn: &mut AsyncPgConnection) -> Uuid {
 	let id = Uuid::new_v4();
 	sql_query("INSERT INTO server_groups (id, name) VALUES ($1, 'restore-test-group')")
@@ -70,18 +76,19 @@ async fn declare_replica(
 	consumer: Uuid,
 	group_id: Uuid,
 	intent: &str,
-) {
+) -> Uuid {
 	sql_query(
 		"INSERT INTO restore_replicas (consumer_device_id, group_id, type, intent, name) \
-		 VALUES ($1, $2, 'tamanu-postgres', $3, $4)",
+		 VALUES ($1, $2, 'tamanu-postgres', $3, $4) RETURNING id",
 	)
 	.bind::<sql_types::Uuid, _>(consumer)
 	.bind::<sql_types::Uuid, _>(group_id)
 	.bind::<sql_types::Text, _>(intent)
 	.bind::<sql_types::Text, _>(format!("{intent}-decl"))
-	.execute(conn)
+	.get_result::<RowId>(conn)
 	.await
-	.expect("insert declaration");
+	.expect("insert declaration")
+	.id
 }
 
 async fn declare_replica_server(
@@ -199,7 +206,7 @@ async fn worklist_expands_group_wide_to_each_server() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn worklist_dedupes_server_specific_over_group_wide() {
+async fn worklist_dispatches_every_named_replica_of_a_server() {
 	commons_tests::server::run_with_device_auth(
 		"backup-restore",
 		async |mut conn, cert, device_id, public, _| {
@@ -208,7 +215,7 @@ async fn worklist_dedupes_server_specific_over_group_wide() {
 			let server = make_server(&mut conn, group).await;
 			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
 			// Both a whole-group and a server-specific declaration of the same
-			// (type, intent) cover this server.
+			// (type, intent) cover this server, under names of their own.
 			declare_replica(&mut conn, device_id, group, "verify").await;
 			declare_replica_server(&mut conn, device_id, group, server, "verify").await;
 			public
@@ -226,9 +233,16 @@ async fn worklist_dedupes_server_specific_over_group_wide() {
 				.await;
 			resp.assert_status_ok();
 			let entries: Vec<serde_json::Value> = resp.json();
-			// Deduped to a single entry for the server, not two.
-			assert_eq!(entries.len(), 1, "got {entries:?}");
-			assert_eq!(entries[0]["server_id"], server.to_string());
+			// Two named replicas of that server, so two entries: the name is what
+			// tells them apart, and neither stands in for the other.
+			assert_eq!(entries.len(), 2, "got {entries:?}");
+			assert!(entries.iter().all(|e| e["server_id"] == server.to_string()));
+			let mut names: Vec<&str> = entries
+				.iter()
+				.map(|e| e["name"].as_str().unwrap())
+				.collect();
+			names.sort_unstable();
+			assert_eq!(names, ["verify-decl", "verify-server-decl"]);
 		},
 	)
 	.await;
@@ -284,11 +298,15 @@ async fn worklist_once_suppresses_verified_snapshot_until_newer() {
 				.json();
 			assert_eq!(entries.len(), 1, "got {entries:?}");
 
-			// Report snap-1 verified healthy → a `once` intent drops it.
+			// Report snap-1 verified healthy → a `once` intent drops it. The
+			// report names the replica it came from, as a consumer's does: the
+			// name is part of a replica's identity, so a report that named no
+			// declaration settles nothing for one.
 			public
 				.post("/restore-verification")
 				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
+					"replica_id": entries[0]["replica_id"],
 					"group": group,
 					"server_id": server,
 					"type": "tamanu-postgres",
@@ -601,6 +619,9 @@ async fn restore_verification_without_declaration_is_403() {
 				.post("/restore-verification")
 				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
+					// Nothing is declared, so authorization refuses before the
+					// declaration this names is ever looked for.
+					"replica_id": Uuid::new_v4(),
 					"group": group,
 					"server_id": server,
 					"type": "tamanu-postgres",
@@ -616,8 +637,63 @@ async fn restore_verification_without_declaration_is_403() {
 	.await;
 }
 
+/// A report has to say which replica it is about, and that replica has to be
+/// one that still exists: several replicas can share a scope, so a report
+/// naming a retired declaration could not be attributed to any of them, and
+/// recording it would hold a finding against a replica nothing declares.
 #[tokio::test(flavor = "multi_thread")]
-async fn restore_verification_records_and_raises_alert() {
+async fn restore_verification_naming_a_retired_declaration_is_404() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			let server = make_server(&mut conn, group).await;
+			// A second declaration keeps the consumer authorized for the
+			// (group, type) after the one being reported on is retired.
+			declare_replica(&mut conn, device_id, group, "verify").await;
+			let retired = declare_replica(&mut conn, device_id, group, "analytics").await;
+			sql_query("DELETE FROM restore_replicas WHERE id = $1")
+				.bind::<sql_types::Uuid, _>(retired)
+				.execute(&mut conn)
+				.await
+				.expect("retire declaration");
+
+			public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"replica_id": retired,
+					"group": group,
+					"server_id": server,
+					"type": "tamanu-postgres",
+					"intent": "analytics",
+					"outcome": "failure",
+					"replica_healthy": false,
+					"observed_at": "2026-06-30T00:00:00Z",
+				}))
+				.await
+				.assert_status(http::StatusCode::NOT_FOUND);
+
+			assert_eq!(
+				count(
+					&mut conn,
+					"SELECT count(*) AS count FROM backup_restore_checks WHERE group_id = $1",
+					group,
+				)
+				.await,
+				0,
+				"nothing recorded",
+			);
+		},
+	)
+	.await;
+}
+
+/// The name resolved from the declaration is what separates a scope's
+/// replicas, so a consumer may only speak for its own declarations — otherwise
+/// a report would grade someone else's replica on a restore that was never its.
+#[tokio::test(flavor = "multi_thread")]
+async fn restore_verification_naming_another_consumers_declaration_is_403() {
 	commons_tests::server::run_with_device_auth(
 		"backup-restore",
 		async |mut conn, cert, device_id, public, _| {
@@ -625,10 +701,58 @@ async fn restore_verification_records_and_raises_alert() {
 			let server = make_server(&mut conn, group).await;
 			declare_replica(&mut conn, device_id, group, "verify").await;
 
+			let other: RowId =
+				sql_query("INSERT INTO devices (role) VALUES ('backup-restore') RETURNING id")
+					.get_result(&mut conn)
+					.await
+					.expect("other consumer");
+			let theirs = declare_replica(&mut conn, other.id, group, "analytics").await;
+
 			public
 				.post("/restore-verification")
 				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
+					"replica_id": theirs,
+					"group": group,
+					"server_id": server,
+					"type": "tamanu-postgres",
+					"intent": "analytics",
+					"outcome": "failure",
+					"replica_healthy": false,
+					"observed_at": "2026-06-30T00:00:00Z",
+				}))
+				.await
+				.assert_status(http::StatusCode::FORBIDDEN);
+
+			assert_eq!(
+				count(
+					&mut conn,
+					"SELECT count(*) AS count FROM backup_restore_checks WHERE group_id = $1",
+					group,
+				)
+				.await,
+				0,
+				"nothing recorded",
+			);
+		},
+	)
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn restore_verification_records_and_raises_alert() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			let server = make_server(&mut conn, group).await;
+			let replica = declare_replica(&mut conn, device_id, group, "verify").await;
+
+			public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"replica_id": replica,
 					"group": group,
 					"server_id": server,
 					"type": "tamanu-postgres",
@@ -695,12 +819,13 @@ async fn a_partial_redaction_warns_while_the_restore_stays_healthy() {
 		async |mut conn, cert, device_id, public, _| {
 			let group = make_group(&mut conn).await;
 			let server = make_server(&mut conn, group).await;
-			declare_replica(&mut conn, device_id, group, "analytics").await;
+			let replica = declare_replica(&mut conn, device_id, group, "analytics").await;
 
 			public
 				.post("/restore-verification")
 				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 				.json(&serde_json::json!({
+					"replica_id": replica,
 					"group": group,
 					"server_id": server,
 					"type": "tamanu-postgres",
@@ -774,10 +899,11 @@ async fn a_failed_redaction_warns_and_then_recovers_when_it_applies() {
 		async |mut conn, cert, device_id, public, _| {
 			let group = make_group(&mut conn).await;
 			let server = make_server(&mut conn, group).await;
-			declare_replica(&mut conn, device_id, group, "analytics").await;
+			let replica = declare_replica(&mut conn, device_id, group, "analytics").await;
 
 			let report = |outcome: &'static str, error: Option<&'static str>| {
 				serde_json::json!({
+					"replica_id": replica,
 					"group": group,
 					"server_id": server,
 					"type": "tamanu-postgres",
@@ -976,6 +1102,7 @@ async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
 				&mut conn,
 				database::restore::NewBackupRestoreCheck {
 					replica_id: None,
+					replica_name: None,
 					consumer_device_id: device_id,
 					group_id: group,
 					server_id: Some(server),

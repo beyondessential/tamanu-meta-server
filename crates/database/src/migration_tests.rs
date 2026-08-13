@@ -350,7 +350,7 @@ pub struct KeyVerdict {
 	pub verdict: Verdict,
 }
 
-/// The latest verdict per `(server, type, intent)` across the fleet.
+/// The latest verdict per `(server, type, intent, name)` across the fleet.
 ///
 /// The `migration-test` check is derived from these as well as from
 /// declarations: a failed migration is a fact about a candidate version
@@ -359,13 +359,14 @@ pub struct KeyVerdict {
 /// verdict (see [`crate::restore::sweep_restore_checks`]).
 pub async fn latest_verdict_by_key(
 	db: &mut AsyncPgConnection,
-) -> Result<HashMap<(Uuid, BackupType, RestoreIntent), KeyVerdict>> {
+) -> Result<HashMap<crate::restore::ReplicaKey, KeyVerdict>> {
 	use crate::schema::{backup_restore_checks as checks, migration_tests as tests, versions};
 
 	type Row = (
 		Option<Uuid>,
 		BackupType,
 		RestoreIntent,
+		Option<String>,
 		(i32, i32, i32),
 		Option<String>,
 		Option<String>,
@@ -379,19 +380,30 @@ pub async fn latest_verdict_by_key(
 			checks::server_id,
 			checks::type_,
 			checks::intent,
+			checks::replica_name,
 			(versions::major, versions::minor, versions::patch),
 			tests::failed_migration,
 			checks::snapshot_id,
 			checks::outcome,
 		))
 		.filter(checks::server_id.is_not_null())
-		.distinct_on((checks::server_id, checks::type_, checks::intent))
+		.distinct_on((
+			checks::server_id,
+			checks::type_,
+			checks::intent,
+			checks::replica_name,
+		))
+		// The recency tiebreak is one raw fragment because diesel only proves
+		// `DISTINCT ON`/`ORDER BY` agreement for tuples up to five elements, and
+		// the four key columns plus these two would be six.
 		.order_by((
 			checks::server_id,
 			checks::type_,
 			checks::intent,
-			checks::observed_at.desc(),
-			checks::id.desc(),
+			checks::replica_name,
+			diesel::dsl::sql::<diesel::sql_types::Untyped>(
+				"backup_restore_checks.observed_at DESC, backup_restore_checks.id DESC",
+			),
 		))
 		.load(db)
 		.await?;
@@ -399,7 +411,16 @@ pub async fn latest_verdict_by_key(
 	Ok(rows
 		.into_iter()
 		.filter_map(
-			|(server_id, r#type, intent, version, failed_migration, snapshot_id, outcome)| {
+			|(
+				server_id,
+				r#type,
+				intent,
+				replica_name,
+				version,
+				failed_migration,
+				snapshot_id,
+				outcome,
+			)| {
 				let verdict = match (outcome, &failed_migration) {
 					(RunOutcome::Success, None) => Verdict::Passed,
 					_ => Verdict::Failed,
@@ -407,7 +428,7 @@ pub async fn latest_verdict_by_key(
 				let (major, minor, patch) = version;
 				server_id.map(|sid| {
 					(
-						(sid, r#type, intent),
+						(sid, r#type, intent, replica_name),
 						KeyVerdict {
 							target_version: format!("{major}.{minor}.{patch}"),
 							failed_migration,

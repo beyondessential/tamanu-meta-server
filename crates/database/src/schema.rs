@@ -135,6 +135,7 @@ diesel::table! {
 		redaction_columns_masked -> Nullable<Int8>,
 		redaction_columns_skipped -> Nullable<Int8>,
 		redaction_error -> Nullable<Text>,
+		replica_name -> Nullable<Text>,
 	}
 }
 

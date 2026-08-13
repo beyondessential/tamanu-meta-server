@@ -395,7 +395,7 @@ async fn update_changes_intent_and_round_trips() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn update_scope_collision_conflicts() {
+async fn only_the_name_collides_not_the_scope() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group = insert_group(&mut conn).await;
 		let consumer = insert_consumer(&mut conn).await;
@@ -412,7 +412,7 @@ async fn update_scope_collision_conflicts() {
 		.await;
 
 		// Retargeting b's intent onto a's (consumer, group, type, intent, server)
-		// scope collides.
+		// scope is allowed: the two keep their own names.
 		private
 			.post("/api/restore_replicas/update")
 			.json(&serde_json::json!({
@@ -423,6 +423,24 @@ async fn update_scope_collision_conflicts() {
 				"type": "tamanu-postgres",
 				"intent": "verify",
 				"name": "analytics-decl",
+				"overdue_after": null,
+				"params": {},
+				"enabled": true,
+			}))
+			.await
+			.assert_status_ok();
+
+		// Taking the other declaration's name is what's refused.
+		private
+			.post("/api/restore_replicas/update")
+			.json(&serde_json::json!({
+				"id": b,
+				"consumer_device_id": consumer,
+				"group_id": group,
+				"server_id": null,
+				"type": "tamanu-postgres",
+				"intent": "verify",
+				"name": "verify-decl",
 				"overdue_after": null,
 				"params": {},
 				"enabled": true,

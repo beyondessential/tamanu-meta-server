@@ -2419,10 +2419,11 @@ export interface paths {
          *     advertised schema for the intent and stored raw. If the intent is not
          *     currently advertised, the values are accepted as-is and the declaration is
          *     created with a gap. The name must be unique among the consumer's
-         *     declarations. Requires the caller to be on the admin allow-list. Responds
-         *     400 if the name is blank or the overdue bound or a parameter value fails to
-         *     parse or validate, and 409 if a matching declaration already exists or the
-         *     consumer already has a declaration with that name.
+         *     declarations, and is the only thing that must be: several replicas of one
+         *     group, type, intent, and server are allowed, told apart by name. Requires
+         *     the caller to be on the admin allow-list. Responds 400 if the name is blank
+         *     or the overdue bound or a parameter value fails to parse or validate, and
+         *     409 if the consumer already has a declaration with that name.
          */
         post: operations["restore_replicas_create"];
         delete?: never;
@@ -2500,11 +2501,13 @@ export interface paths {
          *     values pass through unvalidated, leaving the declaration with a gap. If the
          *     scope changes, the replica at the old scope stops being one Canopy derives
          *     checks for, so any active restore-verification finding against it recovers on
-         *     the next periodic sweep. The name must be unique among the
-         *     consumer's declarations. Requires the caller to be on the admin allow-list.
-         *     Responds 400 if the name is blank or the overdue bound or a parameter value
-         *     fails to parse or validate, 404 if the declaration does not exist, and 409
-         *     if the new scope or name collides with another declaration.
+         *     the next periodic sweep. The name must be unique among the consumer's
+         *     declarations; the new scope is free to match another declaration's, since
+         *     the name is what tells two replicas of one scope apart. Requires the caller
+         *     to be on the admin allow-list. Responds 400 if the name is blank or the
+         *     overdue bound or a parameter value fails to parse or validate, 404 if the
+         *     declaration does not exist, and 409 if the name collides with another of
+         *     the consumer's declarations.
          */
         post: operations["restore_replicas_update"];
         delete?: never;
@@ -7606,9 +7609,9 @@ export interface components {
          *
          *     Replaces every field, including scope: the consumer, group, server,
          *     backup type, and intent can all be changed in the same call as the name,
-         *     overdue bound, parameter values, and enabled flag. A scope that collides
-         *     with another declaration's `(consumer, group, type, intent, server)` maps
-         *     to `409`.
+         *     overdue bound, parameter values, and enabled flag. Only a name already used
+         *     by another of the consumer's declarations maps to `409`; the scope may
+         *     match another declaration's.
          */
         RestoreReplicasUpdateArgs: {
             /**
@@ -12601,7 +12604,7 @@ export interface operations {
                     "application/json": components["schemas"]["RestoreReplicaView"];
                 };
             };
-            /** @description A matching declaration already exists, or the consumer already has one with that name. */
+            /** @description The consumer already has a declaration with that name. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12693,7 +12696,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
-            /** @description The new scope or name collides with another declaration. */
+            /** @description The name collides with another of the consumer's declarations. */
             409: {
                 headers: {
                     [name: string]: unknown;

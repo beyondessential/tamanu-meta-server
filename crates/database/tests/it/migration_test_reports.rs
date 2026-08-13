@@ -65,6 +65,7 @@ async fn insert_version(conn: &mut AsyncPgConnection, minor: i32) -> Version {
 fn report(consumer: Uuid, group: Uuid, server: Uuid, outcome: RunOutcome) -> NewBackupRestoreCheck {
 	NewBackupRestoreCheck {
 		replica_id: None,
+		replica_name: None,
 		consumer_device_id: consumer,
 		group_id: group,
 		server_id: Some(server),

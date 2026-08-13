@@ -302,6 +302,7 @@ export default function RestoreReplicasSection({
 						reload();
 					}}
 					consumers={consumers.status === "ok" ? consumers.data : []}
+					existing={replicas.status === "ok" ? replicas.data : []}
 				/>
 			)}
 
@@ -759,11 +760,13 @@ function CreateReplicaDialog({
 	onClose,
 	onCreated,
 	consumers,
+	existing,
 }: {
 	groupId: string;
 	onClose: () => void;
 	onCreated: () => void;
 	consumers: RestoreConsumerView[];
+	existing: RestoreReplicaView[];
 }) {
 	const { servers, typeOptions, groupName } = useGroupScopeData(groupId);
 
@@ -817,9 +820,21 @@ function CreateReplicaDialog({
 	const serverName = selectedServer
 		? (selectedServer.name ?? selectedServer.display_host ?? selectedServer.id)
 		: "";
-	const suggestedName = kebabCase(
+	const baseName = kebabCase(
 		[groupName, serverName, intent].filter(Boolean).join("-"),
 	);
+	// Several replicas of one scope are allowed and told apart by name, so the
+	// same scope suggests the same base twice. Count past the consumer's names
+	// already in use rather than handing the operator a name that's taken.
+	const taken = new Set(
+		existing
+			.filter((r) => r.consumer_device_id === consumerId)
+			.map((r) => r.name),
+	);
+	let suggestedName = baseName;
+	for (let n = 2; baseName && taken.has(suggestedName); n++) {
+		suggestedName = `${baseName}-${n}`;
+	}
 	useEffect(() => {
 		if (!nameEdited) setName(suggestedName);
 	}, [suggestedName, nameEdited]);

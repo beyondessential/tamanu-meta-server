@@ -619,9 +619,9 @@ async fn seed_restore_replicas(conn: &mut impl SimpleAsyncConnection) {
 			('{REPLICA_SERVER_SCOPED}', '{CONSUMER}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'verify', 'server-scoped'), \
 			('{REPLICA_GAP}', '{CONSUMER}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'analytics', 'server-scoped-gap'); \
 		 INSERT INTO backup_restore_checks \
-			(replica_id, consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome, replica_healthy, observed_at) \
+			(replica_id, replica_name, consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome, replica_healthy, observed_at) \
 			VALUES \
-			('{REPLICA_SERVER_SCOPED}', '{CONSUMER}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'verify', 'snap-1', 'success', true, NOW() - interval '30 minutes');"
+			('{REPLICA_SERVER_SCOPED}', 'server-scoped', '{CONSUMER}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'verify', 'snap-1', 'success', true, NOW() - interval '30 minutes');"
 	))
 	.await
 	.expect("seed restore replicas");

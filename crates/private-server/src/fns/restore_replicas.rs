@@ -197,9 +197,9 @@ pub struct RestoreReplicasCreateArgs {
 ///
 /// Replaces every field, including scope: the consumer, group, server,
 /// backup type, and intent can all be changed in the same call as the name,
-/// overdue bound, parameter values, and enabled flag. A scope that collides
-/// with another declaration's `(consumer, group, type, intent, server)` maps
-/// to `409`.
+/// overdue bound, parameter values, and enabled flag. Only a name already used
+/// by another of the consumer's declarations maps to `409`; the scope may
+/// match another declaration's.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct RestoreReplicasUpdateArgs {
 	/// Identifier of the declaration to update.
@@ -701,10 +701,11 @@ pub async fn checks(
 /// advertised schema for the intent and stored raw. If the intent is not
 /// currently advertised, the values are accepted as-is and the declaration is
 /// created with a gap. The name must be unique among the consumer's
-/// declarations. Requires the caller to be on the admin allow-list. Responds
-/// 400 if the name is blank or the overdue bound or a parameter value fails to
-/// parse or validate, and 409 if a matching declaration already exists or the
-/// consumer already has a declaration with that name.
+/// declarations, and is the only thing that must be: several replicas of one
+/// group, type, intent, and server are allowed, told apart by name. Requires
+/// the caller to be on the admin allow-list. Responds 400 if the name is blank
+/// or the overdue bound or a parameter value fails to parse or validate, and
+/// 409 if the consumer already has a declaration with that name.
 #[utoipa::path(
 	post,
 	path = "/create",
@@ -714,7 +715,7 @@ pub async fn checks(
 	request_body = RestoreReplicasCreateArgs,
 	responses(
 		(status = 200, body = RestoreReplicaView),
-		(status = 409, description = "A matching declaration already exists, or the consumer already has one with that name.", body = ProblemDetailsSchema),
+		(status = 409, description = "The consumer already has a declaration with that name.", body = ProblemDetailsSchema),
 	),
 )]
 pub async fn create(
@@ -763,11 +764,13 @@ pub async fn create(
 /// values pass through unvalidated, leaving the declaration with a gap. If the
 /// scope changes, the replica at the old scope stops being one Canopy derives
 /// checks for, so any active restore-verification finding against it recovers on
-/// the next periodic sweep. The name must be unique among the
-/// consumer's declarations. Requires the caller to be on the admin allow-list.
-/// Responds 400 if the name is blank or the overdue bound or a parameter value
-/// fails to parse or validate, 404 if the declaration does not exist, and 409
-/// if the new scope or name collides with another declaration.
+/// the next periodic sweep. The name must be unique among the consumer's
+/// declarations; the new scope is free to match another declaration's, since
+/// the name is what tells two replicas of one scope apart. Requires the caller
+/// to be on the admin allow-list. Responds 400 if the name is blank or the
+/// overdue bound or a parameter value fails to parse or validate, 404 if the
+/// declaration does not exist, and 409 if the name collides with another of
+/// the consumer's declarations.
 #[utoipa::path(
 	post,
 	path = "/update",
@@ -778,7 +781,7 @@ pub async fn create(
 	responses(
 		(status = 200, body = RestoreReplicaView),
 		(status = 404, body = ProblemDetailsSchema),
-		(status = 409, description = "The new scope or name collides with another declaration.", body = ProblemDetailsSchema),
+		(status = 409, description = "The name collides with another of the consumer's declarations.", body = ProblemDetailsSchema),
 	),
 )]
 pub async fn update(

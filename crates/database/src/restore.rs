@@ -137,22 +137,27 @@ fn normalize_name(name: String) -> Result<String> {
 	Ok(trimmed.to_owned())
 }
 
-/// Turn a unique violation into a `409` that names the collision actually hit —
-/// a declaration's scope and its name are separately unique, and the operator
-/// needs to know which one to change.
+/// Turn a unique violation into a `409` naming what the operator has to change.
+///
+/// The name is the only thing a declaration is unique on: an operator may
+/// declare as many replicas of one `(group, type, intent, server)` as they have
+/// uses for, and tells them apart by name.
 fn unique_violation(info: &dyn diesel::result::DatabaseErrorInformation) -> AppError {
 	match info.constraint_name() {
-		Some("restore_replicas_consumer_name") => {
+		Some("restore_replicas_consumer_name") | None => {
 			AppError::Conflict("this consumer already has a restore replica with that name".into())
 		}
-		_ => AppError::Conflict("a matching restore replica is already declared".into()),
+		Some(other) => {
+			AppError::Conflict(format!("this declaration collides with another ({other})"))
+		}
 	}
 }
 
 impl RestoreReplica {
-	/// Create a declaration. A duplicate `(consumer, group, type, intent,
-	/// server)` scope, or a name already used by another of the consumer's
-	/// declarations, maps to `409`.
+	/// Create a declaration. A name already used by another of the consumer's
+	/// declarations maps to `409`. The scope is deliberately not unique: several
+	/// replicas of one `(group, type, intent, server)` are allowed, told apart
+	/// by name.
 	pub async fn create(db: &mut AsyncPgConnection, new: NewRestoreReplica) -> Result<Self> {
 		use crate::schema::restore_replicas::dsl;
 		let new = NewRestoreReplica {
@@ -225,10 +230,9 @@ impl RestoreReplica {
 			.ok_or(AppError::DatabaseQuery(DieselError::NotFound))
 	}
 
-	/// Edit every field of a declaration, including its scope. A scope change
-	/// that collides with another declaration's `(consumer, group, type,
-	/// intent, server)`, or a name already used by another of the consumer's
-	/// declarations, maps to `409`, same as [`Self::create`]. If the scope
+	/// Edit every field of a declaration, including its scope. A name already
+	/// used by another of the consumer's declarations maps to `409`, same as
+	/// [`Self::create`]; the scope itself is free to collide. If the scope
 	/// (group, server, or type/intent) moves, or the declaration is disabled,
 	/// any active restore-verification alert keyed to the *old* scope is
 	/// recovered — the overdue sweep only walks current *enabled* declarations,
@@ -517,6 +521,12 @@ pub struct BackupRestoreCheck {
 	/// The replica declaration this report is for, if it was made against
 	/// a declared replica. `None` for reports not tied to a declaration.
 	pub replica_id: Option<Uuid>,
+	/// The declaration's name when the report was recorded. Several replicas can
+	/// share one `(server, type, intent)`, so this is what tells them apart —
+	/// held here rather than read through `replica_id` so a report keeps naming
+	/// its replica once the declaration is retired. `None` for a report that
+	/// named no declaration.
+	pub replica_name: Option<String>,
 	/// The device (restore consumer) that submitted this report.
 	pub consumer_device_id: Uuid,
 	/// The server group this report belongs to.
@@ -591,6 +601,10 @@ pub struct BackupRestoreCheck {
 #[diesel(table_name = crate::schema::backup_restore_checks)]
 pub struct NewBackupRestoreCheck {
 	pub replica_id: Option<Uuid>,
+	/// Left unset by callers: [`BackupRestoreCheck::record_report`] resolves it
+	/// from `replica_id` so a report always carries the name the declaration had
+	/// when it was made.
+	pub replica_name: Option<String>,
 	pub consumer_device_id: Uuid,
 	pub group_id: Uuid,
 	pub server_id: Option<Uuid>,
@@ -617,6 +631,37 @@ pub struct NewBackupRestoreCheck {
 	pub redaction_error: Option<String>,
 }
 
+/// Fill in a report's `replica_name` from the declaration it names, so the
+/// report identifies its replica on its own. Several replicas can share one
+/// `(server, type, intent)` and are told apart by name, so a report that
+/// reached the declaration but not its name would be indistinguishable from
+/// its siblings' once the declaration is retired.
+///
+/// The ingest requires a report to name a declaration that exists, so the name
+/// is always found on that path. A report recorded without one keeps a `None`
+/// name: the DB layer is also where the reports predating the requirement sit,
+/// and they are still facts about a restore.
+pub(crate) async fn stamp_replica_name(
+	db: &mut AsyncPgConnection,
+	new: NewBackupRestoreCheck,
+) -> Result<NewBackupRestoreCheck> {
+	use crate::schema::restore_replicas::dsl;
+	let Some(replica_id) = new.replica_id else {
+		return Ok(new);
+	};
+	let name: Option<String> = dsl::restore_replicas
+		.select(dsl::name)
+		.filter(dsl::id.eq(replica_id))
+		.first(db)
+		.await
+		.optional()
+		.map_err(AppError::from)?;
+	Ok(NewBackupRestoreCheck {
+		replica_name: name,
+		..new
+	})
+}
+
 impl BackupRestoreCheck {
 	/// Record a restore-health report.
 	///
@@ -635,6 +680,7 @@ impl BackupRestoreCheck {
 		new: NewBackupRestoreCheck,
 	) -> Result<i64> {
 		use crate::schema::backup_restore_checks::dsl;
+		let new = stamp_replica_name(db, new).await?;
 		diesel::insert_into(dsl::backup_restore_checks)
 			.values(new)
 			.returning(dsl::id)
@@ -695,9 +741,9 @@ impl BackupRestoreCheck {
 			.map_err(AppError::from)
 	}
 
-	/// The latest report per `(server, type, intent)` across the fleet, whatever
-	/// its outcome — what the sweep needs to know each replica's *current*
-	/// state, as opposed to when it was last healthy.
+	/// The latest report per `(server, type, intent, name)` across the fleet,
+	/// whatever its outcome — what the sweep needs to know each replica's
+	/// *current* state, as opposed to when it was last healthy.
 	///
 	/// Fleet-wide rather than per group because the sweep derives its instances
 	/// from these keys as well as from declarations, so it cannot know which
@@ -706,38 +752,48 @@ impl BackupRestoreCheck {
 	/// Carries the whole row so the redaction fields come along: a report says
 	/// both whether the restore came up healthy and whether its masking
 	/// applied, and those are two checks off one report.
-	pub async fn latest_by_key(
-		db: &mut AsyncPgConnection,
-	) -> Result<HashMap<(Uuid, BackupType, RestoreIntent), Self>> {
+	pub async fn latest_by_key(db: &mut AsyncPgConnection) -> Result<HashMap<ReplicaKey, Self>> {
 		use crate::schema::backup_restore_checks::dsl;
 		let rows: Vec<Self> = dsl::backup_restore_checks
 			.select(Self::as_select())
 			.filter(dsl::server_id.is_not_null())
-			.distinct_on((dsl::server_id, dsl::type_, dsl::intent))
+			.distinct_on((dsl::server_id, dsl::type_, dsl::intent, dsl::replica_name))
+			// The recency tiebreak is one raw fragment because diesel only proves
+			// `DISTINCT ON`/`ORDER BY` agreement for tuples up to five elements,
+			// and the four key columns plus these two would be six.
 			.order_by((
 				dsl::server_id,
 				dsl::type_,
 				dsl::intent,
-				dsl::observed_at.desc(),
-				dsl::id.desc(),
+				dsl::replica_name,
+				diesel::dsl::sql::<diesel::sql_types::Untyped>("observed_at DESC, id DESC"),
 			))
 			.load(db)
 			.await?;
 		Ok(rows
 			.into_iter()
 			.filter_map(|r| {
-				r.server_id
-					.map(|sid| ((sid, r.r#type.clone(), r.intent.clone()), r))
+				r.server_id.map(|sid| {
+					(
+						(
+							sid,
+							r.r#type.clone(),
+							r.intent.clone(),
+							r.replica_name.clone(),
+						),
+						r,
+					)
+				})
 			})
 			.collect())
 	}
 
-	/// Latest *healthy* report timestamp per `(server, type, intent)` in a
+	/// Latest *healthy* report timestamp per `(server, type, intent, name)` in a
 	/// group — the freshness anchor the overdue sweep compares against.
 	pub async fn latest_healthy_by_key_for_group(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
-	) -> Result<HashMap<(Uuid, BackupType, RestoreIntent), Timestamp>> {
+	) -> Result<HashMap<ReplicaKey, Timestamp>> {
 		use crate::schema::backup_restore_checks::dsl;
 		let rows: Vec<Self> = dsl::backup_restore_checks
 			.select(Self::as_select())
@@ -745,11 +801,12 @@ impl BackupRestoreCheck {
 			.filter(dsl::server_id.is_not_null())
 			.filter(dsl::outcome.eq(RunOutcome::Success))
 			.filter(dsl::replica_healthy.eq(true))
-			.distinct_on((dsl::server_id, dsl::type_, dsl::intent))
+			.distinct_on((dsl::server_id, dsl::type_, dsl::intent, dsl::replica_name))
 			.order_by((
 				dsl::server_id,
 				dsl::type_,
 				dsl::intent,
+				dsl::replica_name,
 				dsl::observed_at.desc(),
 			))
 			.load(db)
@@ -757,20 +814,30 @@ impl BackupRestoreCheck {
 		Ok(rows
 			.into_iter()
 			.filter_map(|r| {
-				r.server_id
-					.map(|sid| ((sid, r.r#type.clone(), r.intent.clone()), r.observed_at))
+				r.server_id.map(|sid| {
+					(
+						(
+							sid,
+							r.r#type.clone(),
+							r.intent.clone(),
+							r.replica_name.clone(),
+						),
+						r.observed_at,
+					)
+				})
 			})
 			.collect())
 	}
 
 	/// The snapshot id of the most recent *healthy* report per
-	/// `(server, type, intent)` in a group — the anchor for `once` suppression
-	/// (a snapshot is already verified when this equals the latest snapshot) and
-	/// snapshot-driven overdue. Reports without a snapshot id are ignored.
+	/// `(server, type, intent, name)` in a group — the anchor for `once`
+	/// suppression (a snapshot is already verified when this equals the latest
+	/// snapshot) and snapshot-driven overdue. Reports without a snapshot id are
+	/// ignored.
 	pub async fn latest_healthy_snapshot_by_key_for_group(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
-	) -> Result<HashMap<(Uuid, BackupType, RestoreIntent), String>> {
+	) -> Result<HashMap<ReplicaKey, String>> {
 		use crate::schema::backup_restore_checks::dsl;
 		let rows: Vec<Self> = dsl::backup_restore_checks
 			.select(Self::as_select())
@@ -779,11 +846,12 @@ impl BackupRestoreCheck {
 			.filter(dsl::snapshot_id.is_not_null())
 			.filter(dsl::outcome.eq(RunOutcome::Success))
 			.filter(dsl::replica_healthy.eq(true))
-			.distinct_on((dsl::server_id, dsl::type_, dsl::intent))
+			.distinct_on((dsl::server_id, dsl::type_, dsl::intent, dsl::replica_name))
 			.order_by((
 				dsl::server_id,
 				dsl::type_,
 				dsl::intent,
+				dsl::replica_name,
 				dsl::observed_at.desc(),
 			))
 			.load(db)
@@ -791,22 +859,33 @@ impl BackupRestoreCheck {
 		Ok(rows
 			.into_iter()
 			.filter_map(|r| match (r.server_id, r.snapshot_id) {
-				(Some(sid), Some(snap)) => Some(((sid, r.r#type.clone(), r.intent.clone()), snap)),
+				(Some(sid), Some(snap)) => Some((
+					(sid, r.r#type.clone(), r.intent.clone(), r.replica_name),
+					snap,
+				)),
 				_ => None,
 			})
 			.collect())
 	}
 }
 
-/// One replica key: a `(type, intent)` pair on one server. Both dimensions are
-/// open-ended strings, so the set of keys is discovered, never enumerated.
-type ReplicaKey = (Uuid, BackupType, RestoreIntent);
+/// One replica key: a named `(type, intent)` replica on one server. Every
+/// dimension bar the server is an open-ended string, so the set of keys is
+/// discovered, never enumerated.
+///
+/// The name is part of the key because an operator may declare several replicas
+/// of one `(group, type, intent, server)` and tell them apart by name; without
+/// it two of them would grade as one instance and their reports would overwrite
+/// each other. It is `None` only for a report that named no declaration.
+pub type ReplicaKey = (Uuid, BackupType, RestoreIntent, Option<String>);
 
 /// What the sweep has gathered about one replica key before it grades it.
 #[derive(Default)]
 struct KeyWork {
-	/// The operator's name for the declaration covering this key, when one does.
-	declared_as: Option<String>,
+	/// An enabled declaration covers this key on its server. The operator's name
+	/// for it is in the key itself; this is only whether one is currently asking
+	/// for the replica, which a key derived from a report alone is not.
+	declared: bool,
 	/// A `migrate` declaration covers it, so restore health is not what it is
 	/// for — whether its candidate version applies is.
 	migrates: bool,
@@ -897,12 +976,8 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 	// Per-consumer descriptors (to read semantics) and per-group anchors.
 	let mut capability_cache: HashMap<Uuid, HashMap<RestoreIntent, IntentDescriptor>> =
 		HashMap::new();
-	let mut healthy_cache: HashMap<Uuid, HashMap<(Uuid, BackupType, RestoreIntent), Timestamp>> =
-		HashMap::new();
-	let mut verified_snapshot_cache: HashMap<
-		Uuid,
-		HashMap<(Uuid, BackupType, RestoreIntent), String>,
-	> = HashMap::new();
+	let mut healthy_cache: HashMap<Uuid, HashMap<ReplicaKey, Timestamp>> = HashMap::new();
+	let mut verified_snapshot_cache: HashMap<Uuid, HashMap<ReplicaKey, String>> = HashMap::new();
 	let mut latest_snapshot_cache: HashMap<Uuid, HashMap<(Uuid, BackupType), BackupRun>> =
 		HashMap::new();
 
@@ -951,7 +1026,12 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 
 		for server in covered_servers {
 			let sid = server.id;
-			let key = (sid, d.r#type.clone(), d.intent.clone());
+			let key = (
+				sid,
+				d.r#type.clone(),
+				d.intent.clone(),
+				Some(d.name.clone()),
+			);
 
 			// A `migrate` intent is overdue on its own terms: the question is
 			// whether the candidate version has been tried against the latest
@@ -978,9 +1058,7 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 
 			servers.entry(sid).or_insert(server);
 			let w = work.entry(key).or_default();
-			if w.declared_as.is_none() {
-				w.declared_as = Some(d.name.clone());
-			}
+			w.declared = true;
 			w.reports_count = true;
 			w.migrates |= migrates;
 			w.overdue |= overdue;
@@ -1022,14 +1100,21 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 	// Grade every key into its server's instances, in a stable order so a
 	// check's message and detail don't reshuffle between passes.
 	let mut keys: Vec<ReplicaKey> = work.keys().cloned().collect();
-	keys.sort_by_key(|(sid, r#type, intent)| (*sid, r#type.to_string(), intent.to_string()));
+	keys.sort_by_key(|(sid, r#type, intent, name)| {
+		(
+			*sid,
+			r#type.to_string(),
+			intent.to_string(),
+			name.clone().unwrap_or_default(),
+		)
+	});
 
 	let mut per_server: HashMap<Uuid, ServerInstances> = HashMap::new();
 	let mut server_order: Vec<Uuid> = Vec::new();
 	for key in keys {
 		let w = &work[&key];
-		let (sid, r#type, intent) = (key.0, &key.1, &key.2);
-		let label = match &w.declared_as {
+		let (sid, r#type, intent, declared_as) = (key.0, &key.1, &key.2, &key.3);
+		let label = match declared_as {
 			Some(name) => format!("{name} ({type} / {intent})"),
 			None => format!("{type} / {intent}"),
 		};
@@ -1045,12 +1130,12 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 
 		// A declaration for something other than migrating is a replica whose
 		// restore health is expected; so is any key with a report to read.
-		if (w.declared_as.is_some() && !w.migrates) || latest.is_some() {
+		if (w.declared && !w.migrates) || latest.is_some() {
 			instances
 				.verification
 				.push(verification_instance(&key, &label, w, latest));
 		}
-		if let Some(instance) = redaction_instance(&key, &label, w, latest) {
+		if let Some(instance) = redaction_instance(&key, &label, latest) {
 			instances.redaction.push(instance);
 		}
 		if let Some(instance) = migration_instance(&key, &label, w, latest_verdicts.get(&key)) {
@@ -1117,8 +1202,8 @@ fn is_overdue(
 	bound: PgDuration,
 	once: bool,
 	now: Timestamp,
-	healthy: &HashMap<(Uuid, BackupType, RestoreIntent), Timestamp>,
-	verified: &HashMap<(Uuid, BackupType, RestoreIntent), String>,
+	healthy: &HashMap<ReplicaKey, Timestamp>,
+	verified: &HashMap<ReplicaKey, String>,
 	snapshots: &HashMap<(Uuid, BackupType), BackupRun>,
 ) -> bool {
 	if !once {
@@ -1195,8 +1280,8 @@ async fn untried_candidate(
 /// `replica_key` is the two dimensions joined, because a rule condition takes
 /// one variable and a silence for one replica has to pin both (see
 /// [`crate::check_policies::Condition`]).
-fn instance_identity(key: &ReplicaKey, declared_as: Option<&String>) -> serde_json::Value {
-	let (_, r#type, intent) = key;
+fn instance_identity(key: &ReplicaKey) -> serde_json::Value {
+	let (_, r#type, intent, declared_as) = key;
 	serde_json::json!({
 		"type": r#type.to_string(),
 		"intent": intent.to_string(),
@@ -1206,12 +1291,8 @@ fn instance_identity(key: &ReplicaKey, declared_as: Option<&String>) -> serde_js
 }
 
 /// Merge `extra` into an instance's identity fields.
-fn instance_detail(
-	key: &ReplicaKey,
-	declared_as: Option<&String>,
-	extra: serde_json::Value,
-) -> Option<serde_json::Value> {
-	let mut detail = instance_identity(key, declared_as);
+fn instance_detail(key: &ReplicaKey, extra: serde_json::Value) -> Option<serde_json::Value> {
+	let mut detail = instance_identity(key);
 	let (Some(object), Some(extra)) = (detail.as_object_mut(), extra.as_object()) else {
 		return Some(detail);
 	};
@@ -1252,7 +1333,6 @@ fn verification_instance(
 		observed,
 		detail: instance_detail(
 			key,
-			work.declared_as.as_ref(),
 			serde_json::json!({
 				"snapshot_id": latest.and_then(|r| r.snapshot_id.clone()),
 				"overdue": work.overdue,
@@ -1270,7 +1350,6 @@ fn verification_instance(
 fn redaction_instance(
 	key: &ReplicaKey,
 	label: &str,
-	work: &KeyWork,
 	latest: Option<&BackupRestoreCheck>,
 ) -> Option<CheckInstance> {
 	let latest = latest?;
@@ -1284,7 +1363,6 @@ fn redaction_instance(
 		observed,
 		detail: instance_detail(
 			key,
-			work.declared_as.as_ref(),
 			serde_json::json!({
 				"outcome": outcome.to_string(),
 				"manifest_version": latest.redaction_manifest_version,
@@ -1352,7 +1430,6 @@ fn migration_instance(
 		observed,
 		detail: instance_detail(
 			key,
-			work.declared_as.as_ref(),
 			serde_json::json!({
 				"target_version": target_version,
 				"failed_migration": failed_migration,

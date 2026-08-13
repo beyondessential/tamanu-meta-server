@@ -43,7 +43,13 @@ async fn active_restore_issues(conn: &mut AsyncPgConnection, group: Uuid) -> i64
 	.count
 }
 
-fn new_check(
+/// A report naming the declaration it came from, as a real consumer's does: it
+/// takes `replica_id` from its worklist entry, and `record_report` resolves the
+/// declaration's name from it. The name is part of a replica's identity, so a
+/// report that named no declaration stands as its own unnamed replica rather
+/// than attaching to one.
+fn new_check_for(
+	replica: Option<Uuid>,
 	consumer: Uuid,
 	group: Uuid,
 	server: Uuid,
@@ -52,7 +58,8 @@ fn new_check(
 	healthy: bool,
 ) -> NewBackupRestoreCheck {
 	NewBackupRestoreCheck {
-		replica_id: None,
+		replica_id: replica,
+		replica_name: None,
 		consumer_device_id: consumer,
 		group_id: group,
 		server_id: Some(server),
@@ -76,6 +83,19 @@ fn new_check(
 		redaction_columns_skipped: None,
 		redaction_error: None,
 	}
+}
+
+/// A report that names no declaration — what a consumer sends when the
+/// declaration was retired mid-restore.
+fn new_check(
+	consumer: Uuid,
+	group: Uuid,
+	server: Uuid,
+	intent: RestoreIntent,
+	outcome: RunOutcome,
+	healthy: bool,
+) -> NewBackupRestoreCheck {
+	new_check_for(None, consumer, group, server, intent, outcome, healthy)
 }
 
 #[derive(diesel::QueryableByName)]
@@ -225,7 +245,7 @@ async fn create_list_get_roundtrip() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn duplicate_scope_conflicts_but_server_scope_is_separate() {
+async fn one_scope_takes_several_declarations_told_apart_by_name() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
@@ -244,15 +264,23 @@ async fn duplicate_scope_conflicts_but_server_scope_is_separate() {
 		.await
 		.expect("group-wide");
 
-		// Same (consumer, group, type, intent) group-wide scope → 409.
-		let dup = RestoreReplica::create(
+		// The same (consumer, group, type, intent) scope again under its own
+		// name: an operator may keep as many replicas of one thing as they have
+		// uses for, and the name is what tells them apart.
+		RestoreReplica::create(
 			&mut conn,
-			new_replica(consumer, group, None, RestoreIntent::from("verify"), "dup"),
+			new_replica(
+				consumer,
+				group,
+				None,
+				RestoreIntent::from("verify"),
+				"group-wide-nightly",
+			),
 		)
-		.await;
-		assert!(matches!(dup, Err(AppError::Conflict(_))), "got {dup:?}");
+		.await
+		.expect("a second declaration of one scope, under its own name");
 
-		// A server-scoped declaration for the same tuple is tracked separately.
+		// A server-scoped declaration for the same tuple sits alongside them.
 		RestoreReplica::create(
 			&mut conn,
 			new_replica(
@@ -265,6 +293,23 @@ async fn duplicate_scope_conflicts_but_server_scope_is_separate() {
 		)
 		.await
 		.expect("server-scoped coexists with group-wide");
+
+		// Only the name is refused.
+		let clash = RestoreReplica::create(
+			&mut conn,
+			new_replica(
+				consumer,
+				group,
+				None,
+				RestoreIntent::from("verify"),
+				"group-wide",
+			),
+		)
+		.await;
+		assert!(
+			matches!(&clash, Err(AppError::Conflict(m)) if m.contains("name")),
+			"got {clash:?}"
+		);
 	})
 	.await;
 }
@@ -457,12 +502,13 @@ async fn record_report_raises_then_recovers() {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
 		let server = insert_server(&mut conn, group).await;
-		declare(&mut conn, consumer, group, "verify").await;
+		let replica = declare(&mut conn, consumer, group, "verify").await;
 
 		// A failed report degrades the server's restore-verification check.
 		BackupRestoreCheck::record_report(
 			&mut conn,
-			new_check(
+			new_check_for(
+				Some(replica),
 				consumer,
 				group,
 				server,
@@ -478,7 +524,8 @@ async fn record_report_raises_then_recovers() {
 		// A success-and-healthy report for the same key recovers it.
 		BackupRestoreCheck::record_report(
 			&mut conn,
-			new_check(
+			new_check_for(
+				Some(replica),
 				consumer,
 				group,
 				server,
@@ -510,11 +557,12 @@ async fn record_report_files_server_scoped_with_stable_name() {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
 		let server = insert_server(&mut conn, group).await;
-		declare(&mut conn, consumer, group, "verify").await;
+		let replica = declare(&mut conn, consumer, group, "verify").await;
 
 		BackupRestoreCheck::record_report(
 			&mut conn,
-			new_check(
+			new_check_for(
+				Some(replica),
 				consumer,
 				group,
 				server,
@@ -553,12 +601,13 @@ async fn record_report_unhealthy_success_still_raises() {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
 		let server = insert_server(&mut conn, group).await;
-		declare(&mut conn, consumer, group, "verify").await;
+		let replica = declare(&mut conn, consumer, group, "verify").await;
 
 		// Restore succeeded but the database wasn't healthy → still a failure.
 		BackupRestoreCheck::record_report(
 			&mut conn,
-			new_check(
+			new_check_for(
+				Some(replica),
 				consumer,
 				group,
 				server,
@@ -671,7 +720,7 @@ async fn sweep_once_is_snapshot_driven() {
 			"verify-srv",
 		);
 		verify.overdue_after = Some(PgDuration(SignedDuration::from_secs(3600)));
-		RestoreReplica::create(&mut conn, verify)
+		let verify = RestoreReplica::create(&mut conn, verify)
 			.await
 			.expect("verify decl");
 
@@ -700,7 +749,8 @@ async fn sweep_once_is_snapshot_driven() {
 			&mut conn,
 			NewBackupRestoreCheck {
 				snapshot_id: Some("snap-1".into()),
-				..new_check(
+				..new_check_for(
+					Some(verify.id),
 					consumer,
 					group,
 					server,
@@ -806,7 +856,7 @@ async fn update_can_change_scope_including_intent() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn update_scope_collision_conflicts() {
+async fn update_onto_another_declarations_scope_is_allowed() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
@@ -823,9 +873,9 @@ async fn update_scope_collision_conflicts() {
 		.await
 		.expect("create b");
 
-		// Retargeting b's intent onto a's scope collides with a's group-wide
-		// declaration.
-		let result = RestoreReplica::update(
+		// Retargeting b's intent onto a's scope leaves two replicas of one
+		// scope, which is allowed: they keep their own names.
+		let updated = RestoreReplica::update(
 			&mut conn,
 			b.id,
 			RestoreReplicaUpdate {
@@ -833,10 +883,24 @@ async fn update_scope_collision_conflicts() {
 				..update_from(&b)
 			},
 		)
+		.await
+		.expect("retarget onto a's scope");
+		assert_eq!(updated.intent, RestoreIntent::from("verify"));
+		assert_eq!(updated.name, "b");
+
+		// Taking a's name is what's refused.
+		let clash = RestoreReplica::update(
+			&mut conn,
+			b.id,
+			RestoreReplicaUpdate {
+				name: "a".into(),
+				..update_from(&updated)
+			},
+		)
 		.await;
 		assert!(
-			matches!(result, Err(AppError::Conflict(_))),
-			"got {result:?}"
+			matches!(&clash, Err(AppError::Conflict(m)) if m.contains("name")),
+			"got {clash:?}"
 		);
 	})
 	.await;
@@ -864,7 +928,8 @@ async fn update_moving_scope_recovers_stale_alert_at_old_key() {
 		// Raise an active alert at the declaration's (server, type, verify) key.
 		BackupRestoreCheck::record_report(
 			&mut conn,
-			new_check(
+			new_check_for(
+				Some(r.id),
 				consumer,
 				group,
 				server,
@@ -924,7 +989,8 @@ async fn disabling_recovers_the_stale_alert() {
 
 		BackupRestoreCheck::record_report(
 			&mut conn,
-			new_check(
+			new_check_for(
+				Some(r.id),
 				consumer,
 				group,
 				server,
@@ -981,7 +1047,8 @@ async fn re_enabling_does_not_recover_anything() {
 
 		BackupRestoreCheck::record_report(
 			&mut conn,
-			new_check(
+			new_check_for(
+				Some(r.id),
 				consumer,
 				group,
 				server,
@@ -1051,7 +1118,8 @@ async fn delete_recovers_stale_alert_for_removed_scope() {
 		// Raise an active alert at the declaration's (server, type, verify) key.
 		BackupRestoreCheck::record_report(
 			&mut conn,
-			new_check(
+			new_check_for(
+				Some(r.id),
 				consumer,
 				group,
 				server,
@@ -1406,7 +1474,7 @@ async fn a_finding_survives_its_capability_being_withdrawn() {
 		)
 		.await
 		.expect("register caps");
-		RestoreReplica::create(
+		let nightly = RestoreReplica::create(
 			&mut conn,
 			new_replica(
 				consumer,
@@ -1421,7 +1489,8 @@ async fn a_finding_survives_its_capability_being_withdrawn() {
 
 		BackupRestoreCheck::record_report(
 			&mut conn,
-			new_check(
+			new_check_for(
+				Some(nightly.id),
 				consumer,
 				group,
 				server,
@@ -1558,6 +1627,98 @@ async fn filed(conn: &mut AsyncPgConnection, server_id: Uuid, r#ref: &str) -> Fi
 	.unwrap_or_else(|e| panic!("{ref} was filed for {server_id}: {e}"))
 }
 
+/// Two replicas of one `(type, intent)` on one server are two instances, not
+/// one: they are told apart by name, so each grades on its own report and one
+/// failing does not tar the other.
+#[tokio::test(flavor = "multi_thread")]
+async fn same_scope_replicas_grade_separately_by_name() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "g").await;
+		let server = insert_server(&mut conn, group).await;
+		RestoreConsumerCapability::register(
+			&mut conn,
+			consumer,
+			&[descriptor("verify", &["check"])],
+		)
+		.await
+		.expect("register caps");
+
+		// Same consumer, group, type, intent and server — only the name differs.
+		let mut ids = Vec::new();
+		for name in ["nightly", "weekly"] {
+			ids.push(
+				RestoreReplica::create(
+					&mut conn,
+					new_replica(
+						consumer,
+						group,
+						Some(server),
+						RestoreIntent::from("verify"),
+						name,
+					),
+				)
+				.await
+				.expect("declare replica")
+				.id,
+			);
+		}
+
+		// The nightly one failed, the weekly one is healthy.
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			new_check_for(
+				Some(ids[0]),
+				consumer,
+				group,
+				server,
+				RestoreIntent::from("verify"),
+				RunOutcome::Failure,
+				false,
+			),
+		)
+		.await
+		.expect("record nightly");
+		BackupRestoreCheck::record_report(
+			&mut conn,
+			new_check_for(
+				Some(ids[1]),
+				consumer,
+				group,
+				server,
+				RestoreIntent::from("verify"),
+				RunOutcome::Success,
+				true,
+			),
+		)
+		.await
+		.expect("record weekly");
+
+		database::restore::sweep_restore_checks(&mut conn)
+			.await
+			.expect("sweep");
+
+		let verification = filed(&mut conn, server, "restore-verification").await;
+		let detail = verification.detail.expect("detail");
+		assert_eq!(detail["total"], 2, "two replicas, not one merged key");
+		assert_eq!(detail["degraded"], 1);
+		let instances = detail["instances"].as_array().expect("instances");
+		assert_eq!(instances.len(), 1);
+		assert_eq!(instances[0]["replica"], "nightly");
+		assert!(
+			verification.message.contains("nightly"),
+			"names the failing replica: {}",
+			verification.message,
+		);
+		assert!(
+			!verification.message.contains("weekly"),
+			"and not its healthy sibling: {}",
+			verification.message,
+		);
+	})
+	.await;
+}
+
 /// A server with several replicas holds one check of each kind, with the
 /// replicas as instances: the message names the ones in trouble, the detail
 /// carries them with their own results, and the catalog gains one entry per
@@ -1580,12 +1741,13 @@ async fn one_check_of_each_kind_per_server_with_the_replicas_as_instances() {
 		.await
 		.expect("register caps");
 
+		let mut declared = std::collections::HashMap::new();
 		for (intent, name, redacts) in [
 			("verify", "nightly-verify", false),
 			("analytics", "analytics-copy", true),
 			("dr", "dr-standby", false),
 		] {
-			RestoreReplica::create(
+			let r = RestoreReplica::create(
 				&mut conn,
 				NewRestoreReplica {
 					redacts,
@@ -1600,13 +1762,15 @@ async fn one_check_of_each_kind_per_server_with_the_replicas_as_instances() {
 			)
 			.await
 			.expect("declare replica");
+			declared.insert(intent, r.id);
 		}
 
 		// The verifying replica failed; the analytics one restored fine but came
 		// up with columns it should have masked; the standby is healthy.
 		BackupRestoreCheck::record_report(
 			&mut conn,
-			new_check(
+			new_check_for(
+				Some(declared["verify"]),
 				consumer,
 				group,
 				server,
@@ -1623,7 +1787,8 @@ async fn one_check_of_each_kind_per_server_with_the_replicas_as_instances() {
 				redaction_outcome: Some(commons_types::backup::RedactionOutcome::Partial),
 				redaction_columns_masked: Some(40),
 				redaction_columns_skipped: Some(3),
-				..new_check(
+				..new_check_for(
+					Some(declared["analytics"]),
 					consumer,
 					group,
 					server,
@@ -1637,7 +1802,8 @@ async fn one_check_of_each_kind_per_server_with_the_replicas_as_instances() {
 		.expect("record analytics");
 		BackupRestoreCheck::record_report(
 			&mut conn,
-			new_check(
+			new_check_for(
+				Some(declared["dr"]),
 				consumer,
 				group,
 				server,
