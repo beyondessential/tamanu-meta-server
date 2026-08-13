@@ -87,7 +87,7 @@ That puts it squarely in the recovery escrow ([BKJ](../../specs/jobs/backup.md) 
 - **Separately**, an Ansible plugin, or whatever mechanism fits, that makes Canopy the inventory source instead of the file system
 - Canopy refusing to serve inventory, with the concurrency check as the first policy on it
 - The production maintenance and upgrade unlock, on the same mechanism
-- 
+- iCal feed f
 
 Longer term this is the foundation for Canopy controlling upgrades directly, which is not this project.
 
