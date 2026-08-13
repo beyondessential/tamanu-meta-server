@@ -8,6 +8,9 @@ This project moves that burden into Canopy, so the fleet's deployment work is co
 
 **This is a multi-repo project.** Canopy is where the work is commissioned, tracked, and reported, but the code lands wherever the job is done: Canopy, bestool, Seedling, Tamanu, and ops. Cards are shaped here and move to their respective workspace when work starts on them. A component being someone else's repo does not put it outside the project.
 
+## QA
+
+
 ## Sequencing
 
 Two things gate everything else, and neither blocks the other, so both start now.
