@@ -22,6 +22,29 @@
 
 use serde_json::{Value, json};
 
+/// Cap on the `message` variable. It's the only unbounded variable a
+/// workflow receives — a check filing's message is free text (command
+/// output, a stack trace, a list of every stale backup) — and Slack rejects
+/// an oversized webhook payload with "The message content exceeded the size
+/// limit.", which the drainer then retries to exhaustion so the incident
+/// never pages. Cap it well under Slack's message length limit, leaving the
+/// workflow room to frame it with the other variables and the `link`.
+const MAX_MESSAGE_LEN: usize = 2000;
+
+/// Truncate to at most `max` characters, appending a marker when it had to
+/// cut. Counts characters, not bytes, so it never splits a multi-byte
+/// character, and the result's character count never exceeds `max`.
+fn truncate(text: &str, max: usize) -> String {
+	if text.chars().count() <= max {
+		return text.to_string();
+	}
+	const SUFFIX: &str = "… (truncated)";
+	let keep = max.saturating_sub(SUFFIX.chars().count());
+	let mut out: String = text.chars().take(keep).collect();
+	out.push_str(SUFFIX);
+	out
+}
+
 /// `urgency` is the result-derived label for the workflow's `severity`
 /// variable: Critical (escalating failure), Error (failure), Warning.
 pub fn incident_open(
@@ -35,7 +58,7 @@ pub fn incident_open(
 		"server": server_label,
 		"severity": urgency,
 		"source_ref": format!("{source}/{issue_ref}"),
-		"message": message,
+		"message": truncate(message, MAX_MESSAGE_LEN),
 	})
 }
 
@@ -49,4 +72,37 @@ pub fn incident_resolve(server_label: &str, by: Option<&str>) -> Value {
 		// operator was usually involved; canopy just can't attribute it.
 		"by": by.unwrap_or("the healthcheck recovering"),
 	})
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn short_message_passes_through_untouched() {
+		let payload = incident_open("Prod", "Error", "canopy", "reachability", "boom");
+		assert_eq!(payload["message"], "boom");
+	}
+
+	#[test]
+	fn oversized_message_is_truncated_with_marker() {
+		let long = "x".repeat(MAX_MESSAGE_LEN * 3);
+		let payload = incident_open("Prod", "Error", "canopy", "reachability", &long);
+		let got = payload["message"].as_str().unwrap();
+		assert_eq!(
+			got.chars().count(),
+			MAX_MESSAGE_LEN,
+			"truncated message fills the cap exactly, never exceeds it",
+		);
+		assert!(got.ends_with("… (truncated)"), "cut is marked; got: {got}");
+	}
+
+	#[test]
+	fn truncate_respects_char_boundaries() {
+		// Multi-byte characters must not be split mid-byte.
+		let emoji = "🔥".repeat(MAX_MESSAGE_LEN * 2);
+		let got = truncate(&emoji, MAX_MESSAGE_LEN);
+		assert!(got.chars().count() <= MAX_MESSAGE_LEN);
+		assert!(got.ends_with("… (truncated)"));
+	}
 }
