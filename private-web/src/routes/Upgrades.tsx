@@ -85,7 +85,7 @@ export default function Upgrades() {
 						No deployment has a recorded plan.
 					</Typography>
 				) : (
-					<Table size="small">
+					<Table size="small" sx={TIGHT_TABLE}>
 						<TableHead>
 							<TableRow>
 								<TableCell>Deployment</TableCell>
@@ -181,7 +181,7 @@ export default function Upgrades() {
 							Every deployment has a plan.
 						</Typography>
 					) : (
-						<Table size="small">
+						<Table size="small" sx={TIGHT_TABLE}>
 							<TableHead>
 								<TableRow>
 									<TableCell>Deployment</TableCell>
@@ -226,7 +226,7 @@ function PastPlans({ plans }: { plans: PastPlan[] }) {
 			caption="where each deployment was going before, and how it ended"
 			testId="past-plans"
 		>
-			<Table size="small">
+			<Table size="small" sx={TIGHT_TABLE}>
 				<TableHead>
 					<TableRow>
 						<TableCell>Deployment</TableCell>
@@ -532,6 +532,11 @@ const WHEN_FIELDS = {
 };
 
 const NOTE_TEXT = { maxWidth: 240 };
+
+const TIGHT_TABLE = {
+	"& td, & th": { width: "1%", whiteSpace: "nowrap" },
+	"& td:last-child, & th:last-child": { width: "auto" },
+};
 
 const ZONES = Intl.supportedValuesOf("timeZone");
 
