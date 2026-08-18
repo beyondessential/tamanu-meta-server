@@ -137,6 +137,7 @@ test.describe("upgrades dashboard", () => {
 		).toBeVisible();
 
 		// The plan is kept, so where kamaka was going stays readable.
+		await page.getByRole("button", { name: "Show past plans" }).click();
 		const past = page
 			.getByTestId("past-plan-row")
 			.filter({ hasText: "kamaka" });
@@ -167,6 +168,7 @@ test.describe("upgrades dashboard", () => {
 		});
 
 		await page.goto("/upgrades");
+		await page.getByRole("button", { name: "Show past plans" }).click();
 
 		const past = page.getByTestId("past-plan-row").filter({ hasText: "kamaka" });
 		await expect(past).toHaveCount(1);

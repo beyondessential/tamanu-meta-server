@@ -1,5 +1,6 @@
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
+import EditNoteIcon from "@mui/icons-material/EditNote";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import {
@@ -50,7 +51,6 @@ export default function Upgrades() {
 	usePageTitle("Upgrades");
 	const isAdmin = useIsAdmin() === true;
 	const [tick, setTick] = useState(0);
-	const [showUnplanned, setShowUnplanned] = useState(false);
 	const fleet = useApi("upgrade_plans", "fleet", {}, [tick]);
 	const past = useApi("upgrade_plans", "history", {}, [tick]);
 
@@ -161,9 +161,7 @@ export default function Upgrades() {
 									{row.plan?.note && (
 										<TableRow data-testid="planned-upgrade-note">
 											<TableCell colSpan={isAdmin ? 7 : 6} sx={NOTE_CELL}>
-												<Typography variant="body2" color="text.secondary">
-													{row.plan.note}
-												</Typography>
+												<PlanNote note={row.plan.note} />
 											</TableCell>
 										</TableRow>
 									)}
@@ -174,38 +172,16 @@ export default function Upgrades() {
 				)}
 			</Paper>
 
-			<Paper variant="outlined" sx={{ p: 2 }} data-testid="unplanned-upgrades">
-				<Stack
-					direction="row"
-					spacing={1}
-					sx={{ alignItems: "baseline", cursor: "pointer" }}
-					onClick={() => setShowUnplanned((shown) => !shown)}
-				>
-					<IconButton
-						size="small"
-						aria-label={
-							showUnplanned
-								? "Hide deployments with no plan"
-								: "Show deployments with no plan"
-						}
-						aria-expanded={showUnplanned}
-					>
-						{showUnplanned ? (
-							<ExpandLessIcon fontSize="small" />
-						) : (
-							<ExpandMoreIcon fontSize="small" />
-						)}
-					</IconButton>
-					<Typography variant="h6" component="h2">
-						No plan recorded
-					</Typography>
-					<Typography variant="body2" color="text.secondary">
-						{unplanned.length === 1
-							? "1 deployment gets no pre-upgrade testing until a plan says where it is going"
-							: `${unplanned.length} deployments get no pre-upgrade testing until a plan says where they are going`}
-					</Typography>
-				</Stack>
-				<Collapse in={showUnplanned}>
+			<Disclosure
+				title="No plan recorded"
+				subject="deployments with no plan"
+				caption={
+					unplanned.length === 1
+						? "1 deployment gets no pre-upgrade testing until a plan says where it is going"
+						: `${unplanned.length} deployments get no pre-upgrade testing until a plan says where they are going`
+				}
+				testId="unplanned-upgrades"
+			>
 					{unplanned.length === 0 ? (
 						<Typography variant="body2" color="text.secondary">
 							Every deployment has a plan.
@@ -235,8 +211,7 @@ export default function Upgrades() {
 							</TableBody>
 						</Table>
 					)}
-				</Collapse>
-			</Paper>
+			</Disclosure>
 
 			<PastPlans plans={past.status === "ok" ? past.data : []} />
 		</Stack>
@@ -251,15 +226,12 @@ function PastPlans({ plans }: { plans: PastPlan[] }) {
 	if (plans.length === 0) return null;
 
 	return (
-		<Paper variant="outlined" sx={{ p: 2 }} data-testid="past-plans">
-			<Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: "baseline" }}>
-				<Typography variant="h6" component="h2">
-					Past plans
-				</Typography>
-				<Typography variant="body2" color="text.secondary">
-					where each deployment was going before, and how it ended
-				</Typography>
-			</Stack>
+		<Disclosure
+			title="Past plans"
+			subject="past plans"
+			caption="where each deployment was going before, and how it ended"
+			testId="past-plans"
+		>
 			<Table size="small">
 				<TableHead>
 					<TableRow>
@@ -309,9 +281,7 @@ function PastPlans({ plans }: { plans: PastPlan[] }) {
 							{row.plan.note && (
 								<TableRow data-testid="past-plan-note">
 									<TableCell colSpan={5} sx={NOTE_CELL}>
-										<Typography variant="body2" color="text.secondary">
-											{row.plan.note}
-										</Typography>
+										<PlanNote note={row.plan.note} />
 									</TableCell>
 								</TableRow>
 							)}
@@ -319,7 +289,7 @@ function PastPlans({ plans }: { plans: PastPlan[] }) {
 					))}
 				</TableBody>
 			</Table>
-		</Paper>
+		</Disclosure>
 	);
 }
 
@@ -415,6 +385,64 @@ function PlannedFor({ date, late }: { date: string | null; late: boolean }) {
 		<Tooltip title="the planned day has passed and the deployment has not moved">
 			<Chip size="small" color="warning" variant="outlined" label={`${date} (late)`} />
 		</Tooltip>
+	);
+}
+
+/// A section the operator opens when they want it. Both of these answer a
+/// question that is worth having on the page and not worth reading every time.
+function Disclosure({
+	title,
+	subject,
+	caption,
+	testId,
+	children,
+}: {
+	title: string;
+	subject: string;
+	caption: string;
+	testId: string;
+	children: React.ReactNode;
+}) {
+	const [open, setOpen] = useState(false);
+	return (
+		<Paper variant="outlined" sx={{ p: 2 }} data-testid={testId}>
+			<Stack
+				direction="row"
+				spacing={1}
+				sx={{ alignItems: "baseline", cursor: "pointer" }}
+				onClick={() => setOpen((shown) => !shown)}
+			>
+				<IconButton
+					size="small"
+					aria-label={`${open ? "Hide" : "Show"} ${subject}`}
+					aria-expanded={open}
+				>
+					{open ? (
+						<ExpandLessIcon fontSize="small" />
+					) : (
+						<ExpandMoreIcon fontSize="small" />
+					)}
+				</IconButton>
+				<Typography variant="h6" component="h2">
+					{title}
+				</Typography>
+				<Typography variant="body2" color="text.secondary">
+					{caption}
+				</Typography>
+			</Stack>
+			<Collapse in={open}>{children}</Collapse>
+		</Paper>
+	);
+}
+
+/// What an operator needed the next reader to know, under the row it belongs
+/// to. The icon is what stops a short note reading as another deployment.
+function PlanNote({ note }: { note: string }) {
+	return (
+		<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
+			<EditNoteIcon fontSize="small" sx={{ opacity: 0.55 }} />
+			<Typography variant="body2">{note}</Typography>
+		</Stack>
 	);
 }
 
@@ -514,9 +542,15 @@ const PLAN_FORM = {
 	alignItems: "start",
 };
 
+const WHEN_FIELDS = {
+	display: "grid",
+	gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+	columnGap: 1.5,
+};
+
 const NOTED_ROW = { "& td": { borderBottom: 0 } };
 
-const NOTE_CELL = { pt: 0 };
+const NOTE_CELL = { pt: 0, pl: 2, color: "text.secondary" };
 
 /// Clearable so an hour that is no longer settled comes off without the
 /// operator having to clear each segment of the field.
@@ -809,7 +843,7 @@ function EditPlan({
 				</DialogTitle>
 				<DialogContent>
 					<Stack spacing={2} sx={{ mt: 1 }}>
-						<Stack direction="row" spacing={1}>
+						<Box sx={WHEN_FIELDS}>
 							<TextField
 								size="small"
 								type="date"
@@ -826,7 +860,7 @@ function EditPlan({
 								slotProps={CLOCK_SLOTS}
 							/>
 							<ZoneField value={zone} onChange={setZone} disabled={!time} />
-						</Stack>
+						</Box>
 						<TextField
 							size="small"
 							label="Note"
