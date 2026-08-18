@@ -28,9 +28,6 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
-import { TimePicker } from "@mui/x-date-pickers";
-import type { Dayjs } from "dayjs";
-import dayjs from "dayjs";
 import { Fragment, useMemo, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
@@ -525,14 +522,6 @@ function zonePart(
 	}
 }
 
-/// The wire carries a bare wall clock (`HH:MM:SS`); the picker wants a moment.
-/// The day it is pinned to is arbitrary and never leaves this file.
-const parseClock = (time: string | null): Dayjs | null =>
-	time ? dayjs(`2000-01-01T${time}`) : null;
-
-const formatClock = (time: Dayjs | null): string | null =>
-	time?.isValid() ? time.format("HH:mm") : null;
-
 const PLAN_FORM = {
 	display: "grid",
 	gridTemplateColumns: "repeat(5, minmax(150px, 1fr)) auto",
@@ -557,13 +546,6 @@ const NOTE_TEXT = {
 	pl: 1,
 	color: "text.secondary",
 };
-
-/// Clearable so an hour that is no longer settled comes off without the
-/// operator having to clear each segment of the field.
-const CLOCK_SLOTS = {
-	textField: { size: "small", fullWidth: true },
-	field: { clearable: true },
-} as const;
 
 const ZONES = Intl.supportedValuesOf("timeZone");
 
@@ -644,7 +626,7 @@ function RecordPlan({
 	const [groupId, setGroupId] = useState("");
 	const [versionId, setVersionId] = useState("");
 	const [plannedFor, setPlannedFor] = useState("");
-	const [plannedTime, setPlannedTime] = useState<Dayjs | null>(null);
+	const [plannedTime, setPlannedTime] = useState("");
 	const [zone, setZone] = useState(DEFAULT_ZONE);
 	const [note, setNote] = useState("");
 	const record = useApiAction("upgrade_plans", "record");
@@ -664,13 +646,13 @@ function RecordPlan({
 			group_id: groupId,
 			target_version_id: versionId,
 			planned_for: plannedFor || null,
-			planned_time: plannedFor ? formatClock(plannedTime) : null,
+			planned_time: plannedFor ? plannedTime || null : null,
 			planned_zone: plannedFor && plannedTime ? zone : null,
 			note: note || null,
 		});
 		setVersionId("");
 		setPlannedFor("");
-		setPlannedTime(null);
+		setPlannedTime("");
 		setNote("");
 		onRecorded();
 	};
@@ -743,12 +725,14 @@ function RecordPlan({
 						onChange={(e) => setPlannedFor(e.target.value)}
 						slotProps={{ inputLabel: { shrink: true } }}
 					/>
-					<TimePicker
+					<TextField
+						size="small"
+						type="time"
 						label="Time"
 						value={plannedTime}
 						disabled={!plannedFor}
-						onChange={setPlannedTime}
-						slotProps={CLOCK_SLOTS}
+						onChange={(e) => setPlannedTime(e.target.value)}
+						slotProps={{ inputLabel: { shrink: true } }}
 					/>
 					<ZoneField value={zone} onChange={setZone} disabled={!plannedTime} />
 					<TextField
@@ -800,7 +784,7 @@ function EditPlan({
 }) {
 	const [open, setOpen] = useState(false);
 	const [date, setDate] = useState("");
-	const [time, setTime] = useState<Dayjs | null>(null);
+	const [time, setTime] = useState("");
 	const [zone, setZone] = useState(DEFAULT_ZONE);
 	const [text, setText] = useState("");
 	const amend = useApiAction("upgrade_plans", "amend");
@@ -809,7 +793,7 @@ function EditPlan({
 	// the form showing what it held last time.
 	const start = () => {
 		setDate(plannedFor ?? "");
-		setTime(parseClock(plannedTime));
+		setTime(plannedTime?.slice(0, 5) ?? "");
 		setZone(plannedZone ?? DEFAULT_ZONE);
 		setText(note ?? "");
 		setOpen(true);
@@ -819,7 +803,7 @@ function EditPlan({
 		await amend.call({
 			id: planId,
 			planned_for: date || null,
-			planned_time: date ? formatClock(time) : null,
+			planned_time: date ? time || null : null,
 			planned_zone: date && time ? zone : null,
 			note: text || null,
 		});
@@ -858,12 +842,14 @@ function EditPlan({
 								onChange={(e) => setDate(e.target.value)}
 								slotProps={{ inputLabel: { shrink: true } }}
 							/>
-							<TimePicker
+							<TextField
+								size="small"
+								type="time"
 								label="Time"
 								value={time}
 								disabled={!date}
-								onChange={setTime}
-								slotProps={CLOCK_SLOTS}
+								onChange={(e) => setTime(e.target.value)}
+								slotProps={{ inputLabel: { shrink: true } }}
 							/>
 							<ZoneField value={zone} onChange={setZone} disabled={!time} />
 						</Box>

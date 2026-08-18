@@ -1,4 +1,3 @@
-import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
@@ -7,21 +6,6 @@ import {
 	seedVersion,
 	seedVersionKnownIssue,
 } from "./seed";
-
-/** The time field is sectioned (hours/minutes/meridiem), so it is typed into
- * rather than filled. `clock` is the digits and meridiem in order, e.g.
- * "1200AM". */
-async function typeTime(
-	scope: Locator,
-	page: Page,
-	clock: string,
-): Promise<void> {
-	await scope
-		.getByRole("group", { name: "Time" })
-		.getByRole("spinbutton", { name: "Hours" })
-		.click();
-	await page.keyboard.type(clock);
-}
 
 test.describe("upgrades dashboard", () => {
 	test.beforeEach(async ({ sql }) => {
@@ -368,12 +352,12 @@ test.describe("upgrades dashboard", () => {
 
 		await page.getByRole("button", { name: "Edit kamaka's plan" }).click();
 		const dialog = page.getByTestId("edit-plan");
-		await expect(dialog.getByRole("group", { name: "Time" })).toContainText(
-			/12:\s*00\s*AM/,
+		await expect(dialog.getByLabel("Time", { exact: true })).toHaveValue(
+			"00:00",
 		);
 		await expect(dialog.getByLabel("Timezone")).toHaveValue("Pacific/Fiji");
 
-		await typeTime(dialog, page, "0730PM");
+		await dialog.getByLabel("Time", { exact: true }).fill("19:30");
 		await dialog.getByLabel("Timezone").fill("Pacific/Nauru");
 		await page.getByRole("option", { name: "Pacific/Nauru" }).click();
 		await dialog.getByRole("button", { name: "Save" }).click();
@@ -399,7 +383,7 @@ test.describe("upgrades dashboard", () => {
 		await form.getByLabel("Going to").click();
 		await page.getByRole("option", { name: "2.61.0" }).click();
 		await form.getByLabel("Planned for").fill("2030-04-05");
-		await typeTime(form, page, "1100PM");
+		await form.getByLabel("Time", { exact: true }).fill("23:00");
 		// Fiji is where most of the fleet is, so it stands unless changed.
 		await expect(form.getByLabel("Timezone")).toHaveValue("Pacific/Fiji");
 		await form.getByRole("button", { name: "Record" }).click();
@@ -412,8 +396,7 @@ test.describe("upgrades dashboard", () => {
 		// An hour that is no longer settled comes off without losing the day.
 		await page.getByRole("button", { name: "Edit kamaka's plan" }).click();
 		const dialog = page.getByTestId("edit-plan");
-		await dialog.getByRole("group", { name: "Time" }).hover();
-		await dialog.getByRole("button", { name: "Clear", exact: true }).click();
+		await dialog.getByLabel("Time", { exact: true }).fill("");
 		await dialog.getByRole("button", { name: "Save" }).click();
 
 		await expect(row).toContainText("2030-04-05");
