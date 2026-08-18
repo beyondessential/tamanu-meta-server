@@ -519,7 +519,7 @@ function zonePart(
 const PLAN_FORM = {
 	display: "grid",
 	gridTemplateColumns:
-		"minmax(0, 1.2fr) minmax(0, 1fr) 180px 140px 170px minmax(0, 1.4fr) auto",
+		"minmax(0, 1.15fr) minmax(0, 1.15fr) 155px 136px 150px minmax(0, 1.2fr) auto",
 	columnGap: 1.5,
 	rowGap: 1,
 	alignItems: "start",
