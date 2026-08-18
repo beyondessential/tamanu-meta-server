@@ -74,9 +74,10 @@ A plan changes what is tested, so changing one invalidates nothing already recor
 Canopy presents planned upgrades across the fleet in one view, so the question "what is moving, and when" is answered without reading each group.
 
 For each group with an open plan it shows the target version, the version the group is on now, the planned date and hour where there are ones, and the pre-upgrade verdict for that target, so an operator sees both the intent and whether the deployment's data survives it.
-The hour is shown with the place its zone names, since which deployment's midnight it is is the whole question a reader has.
+The hour is shown with its zone abbreviated, since which deployment's midnight it is is the whole question a reader has.
+A plan's note reads on its own line under the row rather than in a column, so a note long enough to be worth writing is long enough to read.
 Where an attempt is under way it shows that too, since a restore takes hours and a verdict of not-yet-tested otherwise looks the same whether the pipeline is working or has stopped.
-Groups with no plan are shown too: an unplanned deployment several minors behind is the thing this view exists to surface.
+Groups with no plan are shown too, behind a disclosure that names how many there are: an unplanned deployment several minors behind is the thing this view exists to surface, and the count surfaces it without the list crowding out what is actually moving.
 
 A plan whose date has passed without being met is presented as late.
 Late is judged on the day alone: an upgrade that has not started by the hour someone wrote down is not yet late by any measure worth surfacing.

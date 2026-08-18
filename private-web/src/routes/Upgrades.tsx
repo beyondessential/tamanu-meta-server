@@ -1,10 +1,13 @@
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
+import ExpandLessIcon from "@mui/icons-material/ExpandLess";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import {
 	Alert,
 	Autocomplete,
 	Button,
 	Chip,
+	Collapse,
 	createFilterOptions,
 	Dialog,
 	DialogActions,
@@ -24,7 +27,10 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
-import { useMemo, useState } from "react";
+import { TimePicker } from "@mui/x-date-pickers";
+import type { Dayjs } from "dayjs";
+import dayjs from "dayjs";
+import { Fragment, useMemo, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import TimeAgo from "../components/TimeAgo";
@@ -43,6 +49,7 @@ export default function Upgrades() {
 	usePageTitle("Upgrades");
 	const isAdmin = useIsAdmin() === true;
 	const [tick, setTick] = useState(0);
+	const [showUnplanned, setShowUnplanned] = useState(false);
 	const fleet = useApi("upgrade_plans", "fleet", {}, [tick]);
 	const past = useApi("upgrade_plans", "history", {}, [tick]);
 
@@ -90,64 +97,76 @@ export default function Upgrades() {
 								<TableCell>Data survives it</TableCell>
 								<TableCell>Planned for</TableCell>
 								<TableCell>Time</TableCell>
-								<TableCell>Note</TableCell>
 								{isAdmin && <TableCell />}
 							</TableRow>
 						</TableHead>
 						<TableBody>
 							{planned.map((row) => (
-								<TableRow key={row.group_id} data-testid="planned-upgrade-row">
-									<TableCell>
-										<RouterLink to={`/servers/groups/${row.group_id}`}>
-											{row.group_name}
-										</RouterLink>
-									</TableCell>
-									<TableCell>{row.current_version ?? "unknown"}</TableCell>
-									<TableCell>{row.target_version}</TableCell>
-									<TableCell>
-										<Stack
-											direction="row"
-											spacing={0.5}
-											sx={{ alignItems: "center" }}
-										>
-											<VerdictChip verdict={row.verdict} />
-											<AttemptChip attempt={row.attempt} />
-										</Stack>
-									</TableCell>
-									<TableCell>
-										<PlannedFor
-											date={row.plan?.planned_for ?? null}
-											late={row.late}
-										/>
-									</TableCell>
-									<TableCell>
-										<PlannedTime
-											time={row.plan?.planned_time ?? null}
-											zone={row.plan?.planned_zone ?? null}
-										/>
-									</TableCell>
-									<TableCell>{row.plan?.note ?? ""}</TableCell>
-									{isAdmin && (
-										<TableCell align="right">
-											<EditPlan
-												planId={row.plan?.id ?? ""}
-												groupName={row.group_name}
-												targetVersion={row.target_version ?? ""}
-												plannedFor={row.plan?.planned_for ?? null}
-												plannedTime={row.plan?.planned_time ?? null}
-												plannedZone={row.plan?.planned_zone ?? null}
-												note={row.plan?.note ?? null}
-												onAmended={() => setTick((t) => t + 1)}
-											/>
-											<WithdrawPlan
-												planId={row.plan?.id ?? ""}
-												groupName={row.group_name}
-												targetVersion={row.target_version ?? ""}
-												onWithdrawn={() => setTick((t) => t + 1)}
+								<Fragment key={row.group_id}>
+									<TableRow
+										data-testid="planned-upgrade-row"
+										sx={row.plan?.note ? NOTED_ROW : undefined}
+									>
+										<TableCell>
+											<RouterLink to={`/servers/groups/${row.group_id}`}>
+												{row.group_name}
+											</RouterLink>
+										</TableCell>
+										<TableCell>{row.current_version ?? "unknown"}</TableCell>
+										<TableCell>{row.target_version}</TableCell>
+										<TableCell>
+											<Stack
+												direction="row"
+												spacing={0.5}
+												sx={{ alignItems: "center" }}
+											>
+												<VerdictChip verdict={row.verdict} />
+												<AttemptChip attempt={row.attempt} />
+											</Stack>
+										</TableCell>
+										<TableCell>
+											<PlannedFor
+												date={row.plan?.planned_for ?? null}
+												late={row.late}
 											/>
 										</TableCell>
+										<TableCell>
+											<PlannedTime
+												time={row.plan?.planned_time ?? null}
+												zone={row.plan?.planned_zone ?? null}
+											/>
+										</TableCell>
+										{isAdmin && (
+											<TableCell align="right">
+												<EditPlan
+													planId={row.plan?.id ?? ""}
+													groupName={row.group_name}
+													targetVersion={row.target_version ?? ""}
+													plannedFor={row.plan?.planned_for ?? null}
+													plannedTime={row.plan?.planned_time ?? null}
+													plannedZone={row.plan?.planned_zone ?? null}
+													note={row.plan?.note ?? null}
+													onAmended={() => setTick((t) => t + 1)}
+												/>
+												<WithdrawPlan
+													planId={row.plan?.id ?? ""}
+													groupName={row.group_name}
+													targetVersion={row.target_version ?? ""}
+													onWithdrawn={() => setTick((t) => t + 1)}
+												/>
+											</TableCell>
+										)}
+									</TableRow>
+									{row.plan?.note && (
+										<TableRow data-testid="planned-upgrade-note">
+											<TableCell colSpan={isAdmin ? 7 : 6} sx={NOTE_CELL}>
+												<Typography variant="body2" color="text.secondary">
+													{row.plan.note}
+												</Typography>
+											</TableCell>
+										</TableRow>
 									)}
-								</TableRow>
+								</Fragment>
 							))}
 						</TableBody>
 					</Table>
@@ -155,41 +174,67 @@ export default function Upgrades() {
 			</Paper>
 
 			<Paper variant="outlined" sx={{ p: 2 }} data-testid="unplanned-upgrades">
-				<Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: "baseline" }}>
+				<Stack
+					direction="row"
+					spacing={1}
+					sx={{ alignItems: "baseline", cursor: "pointer" }}
+					onClick={() => setShowUnplanned((shown) => !shown)}
+				>
+					<IconButton
+						size="small"
+						aria-label={
+							showUnplanned
+								? "Hide deployments with no plan"
+								: "Show deployments with no plan"
+						}
+						aria-expanded={showUnplanned}
+					>
+						{showUnplanned ? (
+							<ExpandLessIcon fontSize="small" />
+						) : (
+							<ExpandMoreIcon fontSize="small" />
+						)}
+					</IconButton>
 					<Typography variant="h6" component="h2">
 						No plan recorded
 					</Typography>
 					<Typography variant="body2" color="text.secondary">
-						these get no pre-upgrade testing until a plan says where they are
-						going
+						{unplanned.length === 1
+							? "1 deployment gets no pre-upgrade testing until a plan says where it is going"
+							: `${unplanned.length} deployments get no pre-upgrade testing until a plan says where they are going`}
 					</Typography>
 				</Stack>
-				{unplanned.length === 0 ? (
-					<Typography variant="body2" color="text.secondary">
-						Every deployment has a plan.
-					</Typography>
-				) : (
-					<Table size="small">
-						<TableHead>
-							<TableRow>
-								<TableCell>Deployment</TableCell>
-								<TableCell>Running</TableCell>
-							</TableRow>
-						</TableHead>
-						<TableBody>
-							{unplanned.map((row) => (
-								<TableRow key={row.group_id} data-testid="unplanned-upgrade-row">
-									<TableCell>
-										<RouterLink to={`/servers/groups/${row.group_id}`}>
-											{row.group_name}
-										</RouterLink>
-									</TableCell>
-									<TableCell>{row.current_version ?? "unknown"}</TableCell>
+				<Collapse in={showUnplanned}>
+					{unplanned.length === 0 ? (
+						<Typography variant="body2" color="text.secondary">
+							Every deployment has a plan.
+						</Typography>
+					) : (
+						<Table size="small">
+							<TableHead>
+								<TableRow>
+									<TableCell>Deployment</TableCell>
+									<TableCell>Running</TableCell>
 								</TableRow>
-							))}
-						</TableBody>
-					</Table>
-				)}
+							</TableHead>
+							<TableBody>
+								{unplanned.map((row) => (
+									<TableRow
+										key={row.group_id}
+										data-testid="unplanned-upgrade-row"
+									>
+										<TableCell>
+											<RouterLink to={`/servers/groups/${row.group_id}`}>
+												{row.group_name}
+											</RouterLink>
+										</TableCell>
+										<TableCell>{row.current_version ?? "unknown"}</TableCell>
+									</TableRow>
+								))}
+							</TableBody>
+						</Table>
+					)}
+				</Collapse>
 			</Paper>
 
 			<PastPlans plans={past.status === "ok" ? past.data : []} />
@@ -222,42 +267,54 @@ function PastPlans({ plans }: { plans: PastPlan[] }) {
 						<TableCell>Planned for</TableCell>
 						<TableCell>Time</TableCell>
 						<TableCell>Ended</TableCell>
-						<TableCell>Note</TableCell>
 					</TableRow>
 				</TableHead>
 				<TableBody>
 					{plans.map((row) => (
-						<TableRow key={row.plan.id} data-testid="past-plan-row">
-							<TableCell>
-								<RouterLink to={`/servers/groups/${row.group_id}`}>
-									{row.group_name}
-								</RouterLink>
-							</TableCell>
-							<TableCell>{row.target_version}</TableCell>
-							<TableCell>{row.plan.planned_for ?? ""}</TableCell>
-							<TableCell>
-								<PlannedTime
-									time={row.plan.planned_time ?? null}
-									zone={row.plan.planned_zone ?? null}
-								/>
-							</TableCell>
-							<TableCell>
-								<Stack
-									direction="row"
-									spacing={0.5}
-									sx={{ alignItems: "center" }}
-								>
-									<OutcomeChip
-										outcome={row.outcome}
-										withdrawnBy={row.plan.withdrawn_by}
+						<Fragment key={row.plan.id}>
+							<TableRow
+								data-testid="past-plan-row"
+								sx={row.plan.note ? NOTED_ROW : undefined}
+							>
+								<TableCell>
+									<RouterLink to={`/servers/groups/${row.group_id}`}>
+										{row.group_name}
+									</RouterLink>
+								</TableCell>
+								<TableCell>{row.target_version}</TableCell>
+								<TableCell>{row.plan.planned_for ?? ""}</TableCell>
+								<TableCell>
+									<PlannedTime
+										time={row.plan.planned_time ?? null}
+										zone={row.plan.planned_zone ?? null}
 									/>
-									<Typography variant="body2" color="text.secondary">
-										<TimeAgo timestamp={row.ended_at} />
-									</Typography>
-								</Stack>
-							</TableCell>
-							<TableCell>{row.plan.note ?? ""}</TableCell>
-						</TableRow>
+								</TableCell>
+								<TableCell>
+									<Stack
+										direction="row"
+										spacing={0.5}
+										sx={{ alignItems: "center" }}
+									>
+										<OutcomeChip
+											outcome={row.outcome}
+											withdrawnBy={row.plan.withdrawn_by}
+										/>
+										<Typography variant="body2" color="text.secondary">
+											<TimeAgo timestamp={row.ended_at} />
+										</Typography>
+									</Stack>
+								</TableCell>
+							</TableRow>
+							{row.plan.note && (
+								<TableRow data-testid="past-plan-note">
+									<TableCell colSpan={5} sx={NOTE_CELL}>
+										<Typography variant="body2" color="text.secondary">
+											{row.plan.note}
+										</Typography>
+									</TableCell>
+								</TableRow>
+							)}
+						</Fragment>
 					))}
 				</TableBody>
 			</Table>
@@ -389,16 +446,49 @@ function clockTime(time: string): string {
 	return `${hour}:${String(minutes).padStart(2, "0")}${suffix}`;
 }
 
-const zoneLabel = (zone: string) =>
-	(zone.split("/").pop() ?? zone).replace(/_/g, " ");
+/// tzdata dropped invented abbreviations in 2017, so the zones the fleet sits
+/// in report themselves as `+12` and CLDR only offers `GMT+12`. These are the
+/// abbreviations the region uses in writing, for the zones Canopy actually
+/// sees. Australia and New Zealand are absent on purpose: CLDR has real
+/// DST-aware ones for those, and they win below.
+const ZONE_ABBREVIATIONS: Record<string, string> = {
+	"Pacific/Fiji": "FJT",
+	"Pacific/Nauru": "NRT",
+	"Pacific/Tarawa": "GILT",
+	"Pacific/Guadalcanal": "SBT",
+	"Pacific/Port_Moresby": "PGT",
+	"Pacific/Efate": "VUT",
+	"Pacific/Apia": "WST",
+	"Pacific/Tongatapu": "TOT",
+	"Pacific/Palau": "PWT",
+	"Asia/Karachi": "PKT",
+	"Asia/Dili": "TLT",
+	"Indian/Maldives": "MVT",
+};
 
-function zoneOffset(zone: string): string | null {
+/// What to call the zone in a table cell. CLDR first, since it is DST-aware
+/// where it has an answer, then the region's own abbreviation, then the place.
+function zoneLabel(zone: string): string {
+	const short = zoneShortName(zone);
+	if (short && !short.startsWith("GMT") && !short.startsWith("UTC")) {
+		return short;
+	}
+	return (
+		ZONE_ABBREVIATIONS[zone] ?? (zone.split("/").pop() ?? zone).replace(/_/g, " ")
+	);
+}
+
+const zoneShortName = (zone: string) => zonePart(zone, "short");
+
+const zoneOffset = (zone: string) => zonePart(zone, "shortOffset");
+
+function zonePart(
+	zone: string,
+	timeZoneName: "short" | "shortOffset",
+): string | null {
 	try {
 		return (
-			new Intl.DateTimeFormat("en", {
-				timeZone: zone,
-				timeZoneName: "shortOffset",
-			})
+			new Intl.DateTimeFormat("en", { timeZone: zone, timeZoneName })
 				.formatToParts(new Date())
 				.find((part) => part.type === "timeZoneName")?.value ?? null
 		);
@@ -406,6 +496,25 @@ function zoneOffset(zone: string): string | null {
 		return null;
 	}
 }
+
+/// The wire carries a bare wall clock (`HH:MM:SS`); the picker wants a moment.
+/// The day it is pinned to is arbitrary and never leaves this file.
+const parseClock = (time: string | null): Dayjs | null =>
+	time ? dayjs(`2000-01-01T${time}`) : null;
+
+const formatClock = (time: Dayjs | null): string | null =>
+	time?.isValid() ? time.format("HH:mm") : null;
+
+const NOTED_ROW = { "& td": { borderBottom: 0 } };
+
+const NOTE_CELL = { pt: 0 };
+
+/// Clearable so an hour that is no longer settled comes off without the
+/// operator having to clear each segment of the field.
+const CLOCK_SLOTS = {
+	textField: { size: "small", sx: { width: 200 } },
+	field: { clearable: true },
+} as const;
 
 const ZONES = Intl.supportedValuesOf("timeZone");
 
@@ -487,7 +596,7 @@ function RecordPlan({
 	const [groupId, setGroupId] = useState("");
 	const [versionId, setVersionId] = useState("");
 	const [plannedFor, setPlannedFor] = useState("");
-	const [plannedTime, setPlannedTime] = useState("");
+	const [plannedTime, setPlannedTime] = useState<Dayjs | null>(null);
 	const [zone, setZone] = useState(DEFAULT_ZONE);
 	const [note, setNote] = useState("");
 	const record = useApiAction("upgrade_plans", "record");
@@ -507,13 +616,13 @@ function RecordPlan({
 			group_id: groupId,
 			target_version_id: versionId,
 			planned_for: plannedFor || null,
-			planned_time: plannedFor ? plannedTime || null : null,
+			planned_time: plannedFor ? formatClock(plannedTime) : null,
 			planned_zone: plannedFor && plannedTime ? zone : null,
 			note: note || null,
 		});
 		setVersionId("");
 		setPlannedFor("");
-		setPlannedTime("");
+		setPlannedTime(null);
 		setNote("");
 		onRecorded();
 	};
@@ -523,102 +632,102 @@ function RecordPlan({
 			<Typography variant="h6" component="h2" gutterBottom>
 				Record a plan
 			</Typography>
-			<Stack
-				direction="row"
-				spacing={1}
-				useFlexGap
-				sx={{ alignItems: "flex-start", flexWrap: "wrap" }}
-			>
-				<TextField
-					select
-					size="small"
-					label="Deployment"
-					value={groupId}
-					onChange={(e) => {
-						setGroupId(e.target.value);
-						setVersionId("");
-					}}
-					sx={{ minWidth: 180 }}
+			<Stack spacing={1.5}>
+				<Stack
+					direction="row"
+					spacing={1}
+					useFlexGap
+					sx={{ alignItems: "flex-start", flexWrap: "wrap" }}
 				>
-					{groups.map((group) => (
-						<MenuItem key={group.id} value={group.id}>
-							{group.name}
-						</MenuItem>
-					))}
-				</TextField>
-				<Autocomplete<PlannableVersion, false, false, false>
-					size="small"
-					sx={{ minWidth: 180 }}
-					disabled={!groupId || options.length === 0}
-					options={options}
-					value={options.find((option) => option.id === versionId) ?? null}
-					onChange={(_, option) => setVersionId(option?.id ?? "")}
-					getOptionLabel={(option) => option.version}
-					isOptionEqualToValue={(a, b) => a.id === b.id}
-					filterOptions={(all, state) =>
-						state.inputValue === "" ? shortlist : matchVersion(all, state)
-					}
-					renderOption={(props, option) => (
-						<li {...props} key={option.id}>
-							<Stack
-								direction="row"
-								spacing={1}
-								sx={{ alignItems: "center" }}
-							>
-								<span>{option.version}</span>
-								{!option.ready && (
-									<Chip
-										size="small"
-										color="warning"
-										variant="outlined"
-										label="known issue"
-									/>
-								)}
-							</Stack>
-						</li>
-					)}
-					renderInput={(params) => (
-						<TextField
-							{...params}
-							label="Going to"
-							helperText={helperText(groupId, options, shortlist)}
-						/>
-					)}
-				/>
-				<TextField
-					size="small"
-					type="date"
-					label="Planned for"
-					value={plannedFor}
-					onChange={(e) => setPlannedFor(e.target.value)}
-					slotProps={{ inputLabel: { shrink: true } }}
-				/>
-				<TextField
-					size="small"
-					type="time"
-					label="Time"
-					value={plannedTime}
-					disabled={!plannedFor}
-					onChange={(e) => setPlannedTime(e.target.value)}
-					slotProps={{ inputLabel: { shrink: true } }}
-					sx={{ width: 155 }}
-				/>
-				<ZoneField value={zone} onChange={setZone} disabled={!plannedTime} />
-				<TextField
-					size="small"
-					label="Note"
-					value={note}
-					onChange={(e) => setNote(e.target.value)}
-					sx={{ flex: 1 }}
-				/>
-				<Button
-					variant="contained"
-					disabled={!groupId || !versionId || record.pending}
-					onClick={submit}
-					sx={{ mt: 0.25 }}
-				>
-					Record
-				</Button>
+					<TextField
+						select
+						size="small"
+						label="Deployment"
+						value={groupId}
+						onChange={(e) => {
+							setGroupId(e.target.value);
+							setVersionId("");
+						}}
+						sx={{ minWidth: 180 }}
+					>
+						{groups.map((group) => (
+							<MenuItem key={group.id} value={group.id}>
+								{group.name}
+							</MenuItem>
+						))}
+					</TextField>
+						<Autocomplete<PlannableVersion, false, false, false>
+							size="small"
+							sx={{ minWidth: 180 }}
+							disabled={!groupId || options.length === 0}
+							options={options}
+							value={options.find((option) => option.id === versionId) ?? null}
+							onChange={(_, option) => setVersionId(option?.id ?? "")}
+							getOptionLabel={(option) => option.version}
+							isOptionEqualToValue={(a, b) => a.id === b.id}
+							filterOptions={(all, state) =>
+								state.inputValue === "" ? shortlist : matchVersion(all, state)
+							}
+							renderOption={(props, option) => (
+								<li {...props} key={option.id}>
+									<Stack
+										direction="row"
+										spacing={1}
+										sx={{ alignItems: "center" }}
+									>
+										<span>{option.version}</span>
+										{!option.ready && (
+											<Chip
+												size="small"
+												color="warning"
+												variant="outlined"
+												label="known issue"
+											/>
+										)}
+									</Stack>
+							</li>
+						)}
+						renderInput={(params) => (
+							<TextField
+								{...params}
+								label="Going to"
+								helperText={helperText(groupId, options, shortlist)}
+							/>
+						)}
+					/>
+					<TextField
+						size="small"
+						type="date"
+						label="Planned for"
+						value={plannedFor}
+						onChange={(e) => setPlannedFor(e.target.value)}
+						slotProps={{ inputLabel: { shrink: true } }}
+					/>
+					<TimePicker
+						label="Time"
+						value={plannedTime}
+						disabled={!plannedFor}
+						onChange={setPlannedTime}
+						slotProps={CLOCK_SLOTS}
+					/>
+					<ZoneField value={zone} onChange={setZone} disabled={!plannedTime} />
+				</Stack>
+				<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+					<TextField
+						size="small"
+						label="Note"
+						value={note}
+						onChange={(e) => setNote(e.target.value)}
+						sx={{ flex: 1 }}
+					/>
+					<Button
+						variant="contained"
+						disabled={!groupId || !versionId || record.pending}
+						onClick={submit}
+					>
+						Record
+					</Button>
+				</Stack>
 			</Stack>
 			{record.error && (
 				<Alert severity="error" sx={{ mt: 1 }}>
@@ -654,7 +763,7 @@ function EditPlan({
 }) {
 	const [open, setOpen] = useState(false);
 	const [date, setDate] = useState("");
-	const [time, setTime] = useState("");
+	const [time, setTime] = useState<Dayjs | null>(null);
 	const [zone, setZone] = useState(DEFAULT_ZONE);
 	const [text, setText] = useState("");
 	const amend = useApiAction("upgrade_plans", "amend");
@@ -663,7 +772,7 @@ function EditPlan({
 	// the form showing what it held last time.
 	const start = () => {
 		setDate(plannedFor ?? "");
-		setTime(plannedTime?.slice(0, 5) ?? "");
+		setTime(parseClock(plannedTime));
 		setZone(plannedZone ?? DEFAULT_ZONE);
 		setText(note ?? "");
 		setOpen(true);
@@ -673,7 +782,7 @@ function EditPlan({
 		await amend.call({
 			id: planId,
 			planned_for: date || null,
-			planned_time: date ? time || null : null,
+			planned_time: date ? formatClock(time) : null,
 			planned_zone: date && time ? zone : null,
 			note: text || null,
 		});
@@ -712,15 +821,12 @@ function EditPlan({
 								onChange={(e) => setDate(e.target.value)}
 								slotProps={{ inputLabel: { shrink: true } }}
 							/>
-							<TextField
-								size="small"
-								type="time"
+							<TimePicker
 								label="Time"
 								value={time}
 								disabled={!date}
-								onChange={(e) => setTime(e.target.value)}
-								slotProps={{ inputLabel: { shrink: true } }}
-								sx={{ width: 155 }}
+								onChange={setTime}
+								slotProps={CLOCK_SLOTS}
 							/>
 							<ZoneField value={zone} onChange={setZone} disabled={!time} />
 						</Stack>

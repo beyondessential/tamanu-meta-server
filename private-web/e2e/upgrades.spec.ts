@@ -1,3 +1,4 @@
+import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
@@ -6,6 +7,21 @@ import {
 	seedVersion,
 	seedVersionKnownIssue,
 } from "./seed";
+
+/** The time field is sectioned (hours/minutes/meridiem), so it is typed into
+ * rather than filled. `clock` is the digits and meridiem in order, e.g.
+ * "1200AM". */
+async function typeTime(
+	scope: Locator,
+	page: Page,
+	clock: string,
+): Promise<void> {
+	await scope
+		.getByRole("group", { name: "Time" })
+		.getByRole("spinbutton", { name: "Hours" })
+		.click();
+	await page.keyboard.type(clock);
+}
 
 test.describe("upgrades dashboard", () => {
 	test.beforeEach(async ({ sql }) => {
@@ -43,14 +59,19 @@ test.describe("upgrades dashboard", () => {
 			.filter({ hasText: "kamaka" });
 		await expect(plannedRow).toContainText("2.60.0");
 		await expect(plannedRow).toContainText("2.61.0");
-		await expect(plannedRow).toContainText("site can absorb 2.61 only");
+		await expect(page.getByTestId("planned-upgrade-note")).toContainText(
+			"site can absorb 2.61 only",
+		);
 		await expect(plannedRow).toContainText("late");
 		// The plan says where it is going; the verdict says whether the data
 		// survives getting there. Untested until a consumer reports.
 		await expect(plannedRow).toContainText("not yet tested");
 
 		// The deployment with nothing recorded is the one this view exists to
-		// surface, so it is listed rather than omitted.
+		// surface, so it is listed rather than omitted, behind a disclosure.
+		await page
+			.getByRole("button", { name: "Show deployments with no plan" })
+			.click();
 		await expect(
 			page
 				.getByTestId("unplanned-upgrade-row")
@@ -103,14 +124,17 @@ test.describe("upgrades dashboard", () => {
 			.click();
 
 		// Withdrawn, so it moves to the unplanned list and stops being tested.
+		await expect(page.getByTestId("planned-upgrades")).toContainText(
+			"No deployment has a recorded plan",
+		);
+		await page
+			.getByRole("button", { name: "Show deployments with no plan" })
+			.click();
 		await expect(
 			page
 				.getByTestId("unplanned-upgrade-row")
 				.filter({ hasText: "kamaka" }),
 		).toBeVisible();
-		await expect(page.getByTestId("planned-upgrades")).toContainText(
-			"No deployment has a recorded plan",
-		);
 
 		// The plan is kept, so where kamaka was going stays readable.
 		const past = page
@@ -148,7 +172,9 @@ test.describe("upgrades dashboard", () => {
 		await expect(past).toHaveCount(1);
 		await expect(past).toContainText("2.61.0");
 		await expect(past).toContainText("replaced");
-		await expect(past).toContainText("site can absorb 2.61 only");
+		await expect(page.getByTestId("past-plan-note")).toContainText(
+			"site can absorb 2.61 only",
+		);
 		// The plan that replaced it is where the deployment is going, so it stays
 		// out of the history.
 		await expect(
@@ -181,7 +207,8 @@ test.describe("upgrades dashboard", () => {
 		const row = page
 			.getByTestId("planned-upgrade-row")
 			.filter({ hasText: "kamaka" });
-		await expect(row).toContainText("waiting on the site");
+		const note = page.getByTestId("planned-upgrade-note");
+		await expect(note).toContainText("waiting on the site");
 
 		await page.getByRole("button", { name: "Edit kamaka's plan" }).click();
 		const dialog = page.getByTestId("edit-plan");
@@ -197,7 +224,7 @@ test.describe("upgrades dashboard", () => {
 		await dialog.getByLabel("Note").fill("site confirmed the window");
 		await dialog.getByRole("button", { name: "Save" }).click();
 
-		await expect(row).toContainText("site confirmed the window");
+		await expect(note).toContainText("site confirmed the window");
 		await expect(row).toContainText("2020-03-03");
 		// Same plan, same destination: amending is not a replacement.
 		await expect(row).toContainText("2.61.0");
@@ -335,19 +362,21 @@ test.describe("upgrades dashboard", () => {
 			.getByTestId("planned-upgrade-row")
 			.filter({ hasText: "kamaka" });
 		// Whose midnight it is, without the reader having to know the deployment.
-		await expect(row).toContainText("12am Fiji");
+		await expect(row).toContainText("12am FJT");
 
 		await page.getByRole("button", { name: "Edit kamaka's plan" }).click();
 		const dialog = page.getByTestId("edit-plan");
-		await expect(dialog.getByLabel("Time", { exact: true })).toHaveValue("00:00");
+		await expect(dialog.getByRole("group", { name: "Time" })).toContainText(
+			/12:\s*00\s*AM/,
+		);
 		await expect(dialog.getByLabel("Timezone")).toHaveValue("Pacific/Fiji");
 
-		await dialog.getByLabel("Time", { exact: true }).fill("19:30");
+		await typeTime(dialog, page, "0730PM");
 		await dialog.getByLabel("Timezone").fill("Pacific/Nauru");
 		await page.getByRole("option", { name: "Pacific/Nauru" }).click();
 		await dialog.getByRole("button", { name: "Save" }).click();
 
-		await expect(row).toContainText("7:30pm Nauru");
+		await expect(row).toContainText("7:30pm NRT");
 	});
 
 	test("a plan can be recorded with an hour, and the hour taken back off", async ({
@@ -368,7 +397,7 @@ test.describe("upgrades dashboard", () => {
 		await form.getByLabel("Going to").click();
 		await page.getByRole("option", { name: "2.61.0" }).click();
 		await form.getByLabel("Planned for").fill("2030-04-05");
-		await form.getByLabel("Time", { exact: true }).fill("23:00");
+		await typeTime(form, page, "1100PM");
 		// Fiji is where most of the fleet is, so it stands unless changed.
 		await expect(form.getByLabel("Timezone")).toHaveValue("Pacific/Fiji");
 		await form.getByRole("button", { name: "Record" }).click();
@@ -376,15 +405,16 @@ test.describe("upgrades dashboard", () => {
 		const row = page
 			.getByTestId("planned-upgrade-row")
 			.filter({ hasText: "kamaka" });
-		await expect(row).toContainText("11pm Fiji");
+		await expect(row).toContainText("11pm FJT");
 
 		// An hour that is no longer settled comes off without losing the day.
 		await page.getByRole("button", { name: "Edit kamaka's plan" }).click();
 		const dialog = page.getByTestId("edit-plan");
-		await dialog.getByLabel("Time", { exact: true }).fill("");
+		await dialog.getByRole("group", { name: "Time" }).hover();
+		await dialog.getByRole("button", { name: "Clear", exact: true }).click();
 		await dialog.getByRole("button", { name: "Save" }).click();
 
 		await expect(row).toContainText("2030-04-05");
-		await expect(row).not.toContainText("Fiji");
+		await expect(row).not.toContainText("FJT");
 	});
 });
