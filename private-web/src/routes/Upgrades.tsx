@@ -509,7 +509,8 @@ const formatClock = (time: Dayjs | null): string | null =>
 const PLAN_FORM = {
 	display: "grid",
 	gridTemplateColumns: "repeat(5, minmax(150px, 1fr)) auto",
-	gap: 1.5,
+	columnGap: 1.5,
+	rowGap: 1,
 	alignItems: "start",
 };
 
