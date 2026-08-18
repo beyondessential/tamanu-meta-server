@@ -28,7 +28,7 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
-import { Fragment, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import TimeAgo from "../components/TimeAgo";
@@ -94,16 +94,16 @@ export default function Upgrades() {
 								<TableCell>Data survives it</TableCell>
 								<TableCell>Planned for</TableCell>
 								<TableCell>Time</TableCell>
+								<TableCell>Note</TableCell>
 								{isAdmin && <TableCell />}
 							</TableRow>
 						</TableHead>
 						<TableBody>
 							{planned.map((row) => (
-								<Fragment key={row.group_id}>
-									<TableRow
-										data-testid="planned-upgrade-row"
-										sx={row.plan?.note ? NOTED_ROW : undefined}
-									>
+								<TableRow
+									key={row.group_id}
+									data-testid="planned-upgrade-row"
+								>
 										<TableCell>
 											<RouterLink to={`/servers/groups/${row.group_id}`}>
 												{row.group_name}
@@ -133,6 +133,12 @@ export default function Upgrades() {
 												zone={row.plan?.planned_zone ?? null}
 											/>
 										</TableCell>
+										<TableCell>
+											<PlanNote
+												note={row.plan?.note ?? null}
+												testId="planned-upgrade-note"
+											/>
+										</TableCell>
 										{isAdmin && (
 											<TableCell align="right">
 												<EditPlan
@@ -153,15 +159,7 @@ export default function Upgrades() {
 												/>
 											</TableCell>
 										)}
-									</TableRow>
-									{row.plan?.note && (
-										<TableRow data-testid="planned-upgrade-note">
-											<TableCell colSpan={isAdmin ? 7 : 6} sx={NOTE_CELL}>
-												<PlanNote note={row.plan.note} />
-											</TableCell>
-										</TableRow>
-									)}
-								</Fragment>
+								</TableRow>
 							))}
 						</TableBody>
 					</Table>
@@ -236,15 +234,12 @@ function PastPlans({ plans }: { plans: PastPlan[] }) {
 						<TableCell>Planned for</TableCell>
 						<TableCell>Time</TableCell>
 						<TableCell>Ended</TableCell>
+						<TableCell>Note</TableCell>
 					</TableRow>
 				</TableHead>
 				<TableBody>
 					{plans.map((row) => (
-						<Fragment key={row.plan.id}>
-							<TableRow
-								data-testid="past-plan-row"
-								sx={row.plan.note ? NOTED_ROW : undefined}
-							>
+						<TableRow key={row.plan.id} data-testid="past-plan-row">
 								<TableCell>
 									<RouterLink to={`/servers/groups/${row.group_id}`}>
 										{row.group_name}
@@ -273,15 +268,13 @@ function PastPlans({ plans }: { plans: PastPlan[] }) {
 										</Typography>
 									</Stack>
 								</TableCell>
+								<TableCell>
+									<PlanNote
+										note={row.plan.note}
+										testId="past-plan-note"
+									/>
+								</TableCell>
 							</TableRow>
-							{row.plan.note && (
-								<TableRow data-testid="past-plan-note">
-									<TableCell colSpan={5} sx={NOTE_CELL}>
-										<PlanNote note={row.plan.note} />
-									</TableCell>
-								</TableRow>
-							)}
-						</Fragment>
 					))}
 				</TableBody>
 			</Table>
@@ -432,13 +425,16 @@ function Disclosure({
 }
 
 /// What an operator needed the next reader to know, under the row it belongs
-/// to. Indented under the row and hung off a rule, so a short note reads as
-/// part of the row above rather than as another deployment.
-function PlanNote({ note }: { note: string }) {
+/// to. Held to one line so a long note cannot set the row height for every
+/// other deployment; the whole of it is on hover.
+function PlanNote({ note, testId }: { note: string | null; testId: string }) {
+	if (!note) return null;
 	return (
-		<Typography variant="body2" sx={NOTE_TEXT}>
-			{note}
-		</Typography>
+		<Tooltip title={note}>
+			<Typography variant="body2" noWrap sx={NOTE_TEXT} data-testid={testId}>
+				{note}
+			</Typography>
+		</Tooltip>
 	);
 }
 
@@ -524,7 +520,7 @@ function zonePart(
 
 const PLAN_FORM = {
 	display: "grid",
-	gridTemplateColumns: "repeat(5, minmax(150px, 1fr)) auto",
+	gridTemplateColumns: "repeat(6, minmax(0, 1fr)) auto",
 	columnGap: 1.5,
 	rowGap: 1,
 	alignItems: "start",
@@ -536,16 +532,7 @@ const WHEN_FIELDS = {
 	columnGap: 1.5,
 };
 
-const NOTED_ROW = { "& td": { borderBottom: 0 } };
-
-const NOTE_CELL = { pt: 0, pl: 6 };
-
-const NOTE_TEXT = {
-	borderLeft: 2,
-	borderColor: "divider",
-	pl: 1,
-	color: "text.secondary",
-};
+const NOTE_TEXT = { maxWidth: 240 };
 
 const ZONES = Intl.supportedValuesOf("timeZone");
 
@@ -740,7 +727,6 @@ function RecordPlan({
 						label="Note"
 						value={note}
 						onChange={(e) => setNote(e.target.value)}
-						sx={{ gridColumn: "1 / -2" }}
 					/>
 					<Button
 						variant="contained"

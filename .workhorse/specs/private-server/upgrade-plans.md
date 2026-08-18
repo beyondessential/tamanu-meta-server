@@ -75,7 +75,7 @@ Canopy presents planned upgrades across the fleet in one view, so the question "
 
 For each group with an open plan it shows the target version, the version the group is on now, the planned date and hour where there are ones, and the pre-upgrade verdict for that target, so an operator sees both the intent and whether the deployment's data survives it.
 The hour is shown with its zone abbreviated, since which deployment's midnight it is is the whole question a reader has.
-A plan's note reads on its own line under the row rather than in a column, so a note long enough to be worth writing is long enough to read.
+A note is held to one line with the rest on hover, so one long note does not set the height of every other row.
 Where an attempt is under way it shows that too, since a restore takes hours and a verdict of not-yet-tested otherwise looks the same whether the pipeline is working or has stopped.
 Groups with no plan are shown too, behind a disclosure that names how many there are: an unplanned deployment several minors behind is the thing this view exists to surface, and the count surfaces it without the list crowding out what is actually moving.
 
