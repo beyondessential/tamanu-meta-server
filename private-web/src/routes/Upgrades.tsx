@@ -5,6 +5,7 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import {
 	Alert,
 	Autocomplete,
+	Box,
 	Button,
 	Chip,
 	Collapse,
@@ -505,6 +506,13 @@ const parseClock = (time: string | null): Dayjs | null =>
 const formatClock = (time: Dayjs | null): string | null =>
 	time?.isValid() ? time.format("HH:mm") : null;
 
+const PLAN_FORM = {
+	display: "grid",
+	gridTemplateColumns: "repeat(5, minmax(150px, 1fr)) auto",
+	gap: 1.5,
+	alignItems: "start",
+};
+
 const NOTED_ROW = { "& td": { borderBottom: 0 } };
 
 const NOTE_CELL = { pt: 0 };
@@ -512,7 +520,7 @@ const NOTE_CELL = { pt: 0 };
 /// Clearable so an hour that is no longer settled comes off without the
 /// operator having to clear each segment of the field.
 const CLOCK_SLOTS = {
-	textField: { size: "small", sx: { width: 200 } },
+	textField: { size: "small", fullWidth: true },
 	field: { clearable: true },
 } as const;
 
@@ -536,7 +544,6 @@ function ZoneField({
 	return (
 		<Autocomplete<string, false, true, false>
 			size="small"
-			sx={{ minWidth: 170 }}
 			disabled={disabled}
 			disableClearable
 			options={ZONES}
@@ -632,13 +639,7 @@ function RecordPlan({
 			<Typography variant="h6" component="h2" gutterBottom>
 				Record a plan
 			</Typography>
-			<Stack spacing={1.5}>
-				<Stack
-					direction="row"
-					spacing={1}
-					useFlexGap
-					sx={{ alignItems: "flex-start", flexWrap: "wrap" }}
-				>
+			<Box sx={PLAN_FORM}>
 					<TextField
 						select
 						size="small"
@@ -648,7 +649,6 @@ function RecordPlan({
 							setGroupId(e.target.value);
 							setVersionId("");
 						}}
-						sx={{ minWidth: 180 }}
 					>
 						{groups.map((group) => (
 							<MenuItem key={group.id} value={group.id}>
@@ -658,7 +658,6 @@ function RecordPlan({
 					</TextField>
 						<Autocomplete<PlannableVersion, false, false, false>
 							size="small"
-							sx={{ minWidth: 180 }}
 							disabled={!groupId || options.length === 0}
 							options={options}
 							value={options.find((option) => option.id === versionId) ?? null}
@@ -711,14 +710,12 @@ function RecordPlan({
 						slotProps={CLOCK_SLOTS}
 					/>
 					<ZoneField value={zone} onChange={setZone} disabled={!plannedTime} />
-				</Stack>
-				<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 					<TextField
 						size="small"
 						label="Note"
 						value={note}
 						onChange={(e) => setNote(e.target.value)}
-						sx={{ flex: 1 }}
+						sx={{ gridColumn: "1 / -2" }}
 					/>
 					<Button
 						variant="contained"
@@ -727,8 +724,7 @@ function RecordPlan({
 					>
 						Record
 					</Button>
-				</Stack>
-			</Stack>
+			</Box>
 			{record.error && (
 				<Alert severity="error" sx={{ mt: 1 }}>
 					{record.error.message}
