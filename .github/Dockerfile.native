@@ -1,5 +1,5 @@
 FROM debian:bookworm-slim AS certs
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata && rm -rf /var/lib/apt/lists/*
 
 # The backups bin drives kopia as in-process subprocesses, so the image must
 # carry the kopia CLI. buildx pulls the matching arch of this base per target
@@ -13,6 +13,10 @@ RUN addgroup -g 1000 tamanu && adduser -D -u 1000 -G tamanu tamanu
 
 # rustls-platform-verifier reads the system trust store; busybox:glibc has none.
 COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+
+# jiff resolves IANA zone names against the system tzdb, which busybox:glibc
+# also lacks. TZif files are arch-neutral, so the certs stage is a fine source.
+COPY --from=certs /usr/share/zoneinfo /usr/share/zoneinfo
 
 # kopia is a static binary, so it runs as-is in busybox:glibc. The backups bin
 # spawns it via a bare `kopia` (PATH lookup), so /usr/bin is correct.
