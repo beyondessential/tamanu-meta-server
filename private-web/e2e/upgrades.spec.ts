@@ -232,6 +232,8 @@ test.describe("upgrades dashboard", () => {
 			groupId: group.id,
 			targetVersionId: target.id,
 			plannedFor: "2020-01-01",
+			plannedTime: "02:00",
+			plannedZone: "Pacific/Fiji",
 		});
 
 		await page.goto("/upgrades");
@@ -243,10 +245,13 @@ test.describe("upgrades dashboard", () => {
 		await page.getByRole("button", { name: "Edit kamaka's plan" }).click();
 		const dialog = page.getByTestId("edit-plan");
 		await dialog.getByLabel("Planned for").fill("");
+		// The hour was an hour of that day, so it goes with it.
+		await expect(dialog.getByLabel("Time", { exact: true })).toHaveValue("");
 		await dialog.getByRole("button", { name: "Save" }).click();
 
 		// No date means nothing to be late against.
 		await expect(row).not.toContainText("late");
+		await expect(row).not.toContainText("FJT");
 	});
 
 	test("a version far behind the newest can still be planned", async ({

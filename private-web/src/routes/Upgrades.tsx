@@ -630,8 +630,8 @@ function RecordPlan({
 			group_id: groupId,
 			target_version_id: versionId,
 			planned_for: plannedFor || null,
-			planned_time: plannedFor ? plannedTime || null : null,
-			planned_zone: plannedFor && plannedTime ? zone : null,
+			planned_time: plannedTime || null,
+			planned_zone: plannedTime ? zone : null,
 			note: note || null,
 		});
 		setVersionId("");
@@ -706,7 +706,10 @@ function RecordPlan({
 						type="date"
 						label="Planned for"
 						value={plannedFor}
-						onChange={(e) => setPlannedFor(e.target.value)}
+						onChange={(e) => {
+							setPlannedFor(e.target.value);
+							if (!e.target.value) setPlannedTime("");
+						}}
 						slotProps={{ inputLabel: { shrink: true } }}
 					/>
 					<TextField
@@ -786,8 +789,8 @@ function EditPlan({
 		await amend.call({
 			id: planId,
 			planned_for: date || null,
-			planned_time: date ? time || null : null,
-			planned_zone: date && time ? zone : null,
+			planned_time: time || null,
+			planned_zone: time ? zone : null,
 			note: text || null,
 		});
 		setOpen(false);
@@ -822,7 +825,10 @@ function EditPlan({
 								type="date"
 								label="Planned for"
 								value={date}
-								onChange={(e) => setDate(e.target.value)}
+								onChange={(e) => {
+									setDate(e.target.value);
+									if (!e.target.value) setTime("");
+								}}
 								slotProps={{ inputLabel: { shrink: true } }}
 							/>
 							<TextField
