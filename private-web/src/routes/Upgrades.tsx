@@ -1,6 +1,5 @@
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
-import NotesIcon from "@mui/icons-material/Notes";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import {
@@ -436,14 +435,13 @@ function Disclosure({
 }
 
 /// What an operator needed the next reader to know, under the row it belongs
-/// to. The icon is what stops a short note reading as another deployment, and
-/// is deliberately not a pencil: the row's own pencil is the edit action.
+/// to. Indented under the row and hung off a rule, so a short note reads as
+/// part of the row above rather than as another deployment.
 function PlanNote({ note }: { note: string }) {
 	return (
-		<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
-			<NotesIcon fontSize="small" sx={{ opacity: 0.55 }} />
-			<Typography variant="body2">{note}</Typography>
-		</Stack>
+		<Typography variant="body2" sx={NOTE_TEXT}>
+			{note}
+		</Typography>
 	);
 }
 
@@ -551,7 +549,14 @@ const WHEN_FIELDS = {
 
 const NOTED_ROW = { "& td": { borderBottom: 0 } };
 
-const NOTE_CELL = { pt: 0, pl: 2, color: "text.secondary" };
+const NOTE_CELL = { pt: 0, pl: 6 };
+
+const NOTE_TEXT = {
+	borderLeft: 2,
+	borderColor: "divider",
+	pl: 1,
+	color: "text.secondary",
+};
 
 /// Clearable so an hour that is no longer settled comes off without the
 /// operator having to clear each segment of the field.
