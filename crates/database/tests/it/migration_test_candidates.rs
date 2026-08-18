@@ -5,7 +5,7 @@ use commons_tests::db::TestDb;
 use commons_types::{server::product::Product, version::VersionStatus};
 use database::{
 	migration_tests::{Candidate, candidates},
-	upgrade_plans::UpgradePlan,
+	upgrade_plans::{PlannedWhen, UpgradePlan},
 	versions::{NewVersion, Version},
 };
 use diesel::{QueryableByName, SelectableHelper, sql_query, sql_types};
@@ -66,9 +66,16 @@ async fn insert_server(
 }
 
 async fn plan(conn: &mut diesel_async::AsyncPgConnection, group: Uuid, target: &Version) {
-	UpgradePlan::record(conn, group, target.id, None, None, "someone@example.com")
-		.await
-		.expect("record plan");
+	UpgradePlan::record(
+		conn,
+		group,
+		target.id,
+		PlannedWhen::default(),
+		None,
+		"someone@example.com",
+	)
+	.await
+	.expect("record plan");
 }
 
 #[tokio::test(flavor = "multi_thread")]

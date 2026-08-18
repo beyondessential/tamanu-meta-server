@@ -8,12 +8,12 @@ use database::{
 	reported_detail::ReportedDetail,
 	server_groups::ServerGroup,
 	servers::Server,
-	upgrade_plans::{UpgradePlan, close_met_plans, is_late, planned_target},
+	upgrade_plans::{PlannedWhen, UpgradePlan, close_met_plans, is_late, planned_target},
 	versions::{NewVersion, Version},
 };
 use diesel::{QueryableByName, SelectableHelper, sql_query, sql_types};
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use jiff::civil::date;
+use jiff::civil::{date, time};
 use uuid::Uuid;
 
 #[derive(QueryableByName)]
@@ -102,7 +102,10 @@ async fn a_plan_is_what_makes_a_version_the_test_target() {
 			&mut conn,
 			group,
 			intended.id,
-			Some(date(2026, 8, 14)),
+			PlannedWhen {
+				date: Some(date(2026, 8, 14)),
+				..Default::default()
+			},
 			Some("site can absorb 2.61 only"),
 			"someone@example.com",
 		)
@@ -128,12 +131,26 @@ async fn recording_a_plan_retires_the_one_before_it() {
 		let first = publish(&mut conn, 61, 0).await;
 		let second = publish(&mut conn, 62, 0).await;
 
-		UpgradePlan::record(&mut conn, group, first.id, None, None, "a@example.com")
-			.await
-			.expect("first plan");
-		UpgradePlan::record(&mut conn, group, second.id, None, None, "a@example.com")
-			.await
-			.expect("second plan");
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			first.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("first plan");
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			second.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("second plan");
 
 		let open = UpgradePlan::open_for_group(&mut conn, group)
 			.await
@@ -163,8 +180,15 @@ async fn a_plan_cannot_aim_at_where_the_group_already_is() {
 		let (group, _server) = group_running(&mut conn, "2.62.0").await;
 		let behind = publish(&mut conn, 61, 0).await;
 
-		let refused =
-			UpgradePlan::record(&mut conn, group, behind.id, None, None, "a@example.com").await;
+		let refused = UpgradePlan::record(
+			&mut conn,
+			group,
+			behind.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await;
 		assert!(refused.is_err(), "a plan to go backwards is not a plan");
 	})
 	.await
@@ -175,9 +199,16 @@ async fn canopy_closes_a_plan_once_the_group_arrives() {
 	TestDb::run(|mut conn, _url| async move {
 		let (group, _server) = group_running(&mut conn, "2.60.0").await;
 		let target = publish(&mut conn, 61, 0).await;
-		UpgradePlan::record(&mut conn, group, target.id, None, None, "a@example.com")
-			.await
-			.expect("plan");
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			target.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("plan");
 
 		assert_eq!(
 			close_met_plans(&mut conn).await.expect("sweep"),
@@ -222,7 +253,10 @@ async fn a_date_that_has_passed_reads_as_late() {
 			&mut conn,
 			group,
 			target.id,
-			Some(date(2026, 7, 1)),
+			PlannedWhen {
+				date: Some(date(2026, 7, 1)),
+				..Default::default()
+			},
 			None,
 			"a@example.com",
 		)
@@ -232,9 +266,16 @@ async fn a_date_that_has_passed_reads_as_late() {
 		assert!(is_late(&plan, date(2026, 7, 30)));
 		assert!(!is_late(&plan, date(2026, 6, 30)));
 
-		let undated = UpgradePlan::record(&mut conn, group, target.id, None, None, "a@example.com")
-			.await
-			.expect("undated plan");
+		let undated = UpgradePlan::record(
+			&mut conn,
+			group,
+			target.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("undated plan");
 		assert!(
 			!is_late(&undated, date(2026, 7, 30)),
 			"no date means nothing to be late against"
@@ -253,7 +294,10 @@ async fn amending_a_plan_keeps_it_the_same_plan() {
 			&mut conn,
 			group,
 			target.id,
-			Some(date(2026, 7, 1)),
+			PlannedWhen {
+				date: Some(date(2026, 7, 1)),
+				..Default::default()
+			},
 			Some("waiting on the site"),
 			"a@example.com",
 		)
@@ -263,7 +307,10 @@ async fn amending_a_plan_keeps_it_the_same_plan() {
 		let amended = UpgradePlan::amend(
 			&mut conn,
 			plan.id,
-			Some(date(2026, 8, 14)),
+			PlannedWhen {
+				date: Some(date(2026, 8, 14)),
+				..Default::default()
+			},
 			Some("site confirmed the window"),
 			"b@example.com",
 		)
@@ -307,16 +354,25 @@ async fn amending_can_clear_the_date_and_note() {
 			&mut conn,
 			group,
 			target.id,
-			Some(date(2026, 7, 1)),
+			PlannedWhen {
+				date: Some(date(2026, 7, 1)),
+				..Default::default()
+			},
 			Some("waiting on the site"),
 			"a@example.com",
 		)
 		.await
 		.expect("plan");
 
-		let amended = UpgradePlan::amend(&mut conn, plan.id, None, None, "b@example.com")
-			.await
-			.expect("amend");
+		let amended = UpgradePlan::amend(
+			&mut conn,
+			plan.id,
+			PlannedWhen::default(),
+			None,
+			"b@example.com",
+		)
+		.await
+		.expect("amend");
 
 		assert!(
 			amended.planned_for.is_none(),
@@ -334,17 +390,34 @@ async fn a_replaced_plan_is_not_amendable() {
 		let first = publish(&mut conn, 61, 0).await;
 		let second = publish(&mut conn, 62, 0).await;
 
-		let replaced = UpgradePlan::record(&mut conn, group, first.id, None, None, "a@example.com")
-			.await
-			.expect("first plan");
-		UpgradePlan::record(&mut conn, group, second.id, None, None, "a@example.com")
-			.await
-			.expect("second plan");
+		let replaced = UpgradePlan::record(
+			&mut conn,
+			group,
+			first.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("first plan");
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			second.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("second plan");
 
 		let refused = UpgradePlan::amend(
 			&mut conn,
 			replaced.id,
-			Some(date(2026, 8, 1)),
+			PlannedWhen {
+				date: Some(date(2026, 8, 1)),
+				..Default::default()
+			},
 			None,
 			"b@example.com",
 		)
@@ -362,9 +435,16 @@ async fn a_met_plan_is_not_amendable() {
 	TestDb::run(|mut conn, _url| async move {
 		let (group, _server) = group_running(&mut conn, "2.60.0").await;
 		let target = publish(&mut conn, 61, 0).await;
-		let plan = UpgradePlan::record(&mut conn, group, target.id, None, None, "a@example.com")
-			.await
-			.expect("plan");
+		let plan = UpgradePlan::record(
+			&mut conn,
+			group,
+			target.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("plan");
 
 		sql_query("UPDATE server_groups SET effective_version = '2.61.0' WHERE id = $1")
 			.bind::<sql_types::Uuid, _>(group)
@@ -376,7 +456,10 @@ async fn a_met_plan_is_not_amendable() {
 		let refused = UpgradePlan::amend(
 			&mut conn,
 			plan.id,
-			Some(date(2026, 8, 1)),
+			PlannedWhen {
+				date: Some(date(2026, 8, 1)),
+				..Default::default()
+			},
 			None,
 			"b@example.com",
 		)
@@ -394,9 +477,16 @@ async fn a_withdrawn_plan_leaves_the_group_unplanned_but_stays_in_its_history() 
 	TestDb::run(|mut conn, _url| async move {
 		let (group, _server) = group_running(&mut conn, "2.60.0").await;
 		let target = publish(&mut conn, 61, 0).await;
-		let plan = UpgradePlan::record(&mut conn, group, target.id, None, None, "a@example.com")
-			.await
-			.expect("plan");
+		let plan = UpgradePlan::record(
+			&mut conn,
+			group,
+			target.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("plan");
 
 		let withdrawn = UpgradePlan::withdraw(&mut conn, plan.id, "b@example.com")
 			.await
@@ -440,17 +530,30 @@ async fn a_withdrawn_plan_does_not_hold_the_group_s_open_slot() {
 		let first = publish(&mut conn, 61, 0).await;
 		let second = publish(&mut conn, 62, 0).await;
 
-		let plan = UpgradePlan::record(&mut conn, group, first.id, None, None, "a@example.com")
-			.await
-			.expect("first plan");
+		let plan = UpgradePlan::record(
+			&mut conn,
+			group,
+			first.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("first plan");
 		UpgradePlan::withdraw(&mut conn, plan.id, "b@example.com")
 			.await
 			.expect("withdraw");
 
-		let replacement =
-			UpgradePlan::record(&mut conn, group, second.id, None, None, "a@example.com")
-				.await
-				.expect("a group that withdrew a plan can record another");
+		let replacement = UpgradePlan::record(
+			&mut conn,
+			group,
+			second.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("a group that withdrew a plan can record another");
 		assert_eq!(
 			UpgradePlan::open_for_group(&mut conn, group)
 				.await
@@ -478,9 +581,16 @@ async fn a_withdrawn_plan_is_not_amendable_or_withdrawable_twice() {
 	TestDb::run(|mut conn, _url| async move {
 		let (group, _server) = group_running(&mut conn, "2.60.0").await;
 		let target = publish(&mut conn, 61, 0).await;
-		let plan = UpgradePlan::record(&mut conn, group, target.id, None, None, "a@example.com")
-			.await
-			.expect("plan");
+		let plan = UpgradePlan::record(
+			&mut conn,
+			group,
+			target.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("plan");
 		UpgradePlan::withdraw(&mut conn, plan.id, "b@example.com")
 			.await
 			.expect("withdraw");
@@ -489,7 +599,10 @@ async fn a_withdrawn_plan_is_not_amendable_or_withdrawable_twice() {
 			UpgradePlan::amend(
 				&mut conn,
 				plan.id,
-				Some(date(2026, 8, 1)),
+				PlannedWhen {
+					date: Some(date(2026, 8, 1)),
+					..Default::default()
+				},
 				None,
 				"c@example.com"
 			)
@@ -503,6 +616,95 @@ async fn a_withdrawn_plan_is_not_amendable_or_withdrawable_twice() {
 				.expect("second withdraw")
 				.is_none(),
 			"withdrawing again changes nothing and does not restamp who withdrew it"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plan_can_carry_the_hour_it_starts() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, _server) = group_running(&mut conn, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+
+		let plan = UpgradePlan::record(
+			&mut conn,
+			group,
+			target.id,
+			PlannedWhen {
+				date: Some(date(2026, 8, 20)),
+				time: Some(time(0, 0, 0, 0)),
+				zone: Some("Pacific/Fiji".into()),
+			},
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("plan");
+
+		assert_eq!(plan.planned_time, Some(time(0, 0, 0, 0)));
+		assert_eq!(plan.planned_zone.as_deref(), Some("Pacific/Fiji"));
+
+		let amended = UpgradePlan::amend(
+			&mut conn,
+			plan.id,
+			PlannedWhen {
+				date: Some(date(2026, 8, 20)),
+				..Default::default()
+			},
+			None,
+			"b@example.com",
+		)
+		.await
+		.expect("amend");
+
+		assert!(
+			amended.planned_time.is_none() && amended.planned_zone.is_none(),
+			"an hour that is no longer settled can be taken off, leaving the day"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_hour_nobody_can_read_is_refused() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, _server) = group_running(&mut conn, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+
+		let mut refuses = async |when| {
+			UpgradePlan::record(&mut conn, group, target.id, when, None, "a@example.com").await
+		};
+
+		assert!(
+			refuses(PlannedWhen {
+				date: Some(date(2026, 8, 20)),
+				time: Some(time(19, 30, 0, 0)),
+				zone: None,
+			})
+			.await
+			.is_err(),
+			"a wall clock without a zone is readable only by whoever typed it"
+		);
+		assert!(
+			refuses(PlannedWhen {
+				date: None,
+				time: Some(time(19, 30, 0, 0)),
+				zone: Some("Pacific/Nauru".into()),
+			})
+			.await
+			.is_err(),
+			"an hour qualifies a day, so it needs one"
+		);
+		assert!(
+			refuses(PlannedWhen {
+				date: Some(date(2026, 8, 20)),
+				time: Some(time(19, 30, 0, 0)),
+				zone: Some("Pacific/Atlantis".into()),
+			})
+			.await
+			.is_err(),
+			"a zone nothing can resolve is not a zone"
 		);
 	})
 	.await

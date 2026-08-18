@@ -43,14 +43,19 @@ test.describe("upgrades dashboard", () => {
 			.filter({ hasText: "kamaka" });
 		await expect(plannedRow).toContainText("2.60.0");
 		await expect(plannedRow).toContainText("2.61.0");
-		await expect(plannedRow).toContainText("site can absorb 2.61 only");
+		await expect(page.getByTestId("planned-upgrade-note")).toContainText(
+			"site can absorb 2.61 only",
+		);
 		await expect(plannedRow).toContainText("late");
 		// The plan says where it is going; the verdict says whether the data
 		// survives getting there. Untested until a consumer reports.
 		await expect(plannedRow).toContainText("not yet tested");
 
 		// The deployment with nothing recorded is the one this view exists to
-		// surface, so it is listed rather than omitted.
+		// surface, so it is listed rather than omitted, behind a disclosure.
+		await page
+			.getByRole("button", { name: "Show deployments with no plan" })
+			.click();
 		await expect(
 			page
 				.getByTestId("unplanned-upgrade-row")
@@ -103,16 +108,20 @@ test.describe("upgrades dashboard", () => {
 			.click();
 
 		// Withdrawn, so it moves to the unplanned list and stops being tested.
+		await expect(page.getByTestId("planned-upgrades")).toContainText(
+			"No deployment has a recorded plan",
+		);
+		await page
+			.getByRole("button", { name: "Show deployments with no plan" })
+			.click();
 		await expect(
 			page
 				.getByTestId("unplanned-upgrade-row")
 				.filter({ hasText: "kamaka" }),
 		).toBeVisible();
-		await expect(page.getByTestId("planned-upgrades")).toContainText(
-			"No deployment has a recorded plan",
-		);
 
 		// The plan is kept, so where kamaka was going stays readable.
+		await page.getByRole("button", { name: "Show past plans" }).click();
 		const past = page
 			.getByTestId("past-plan-row")
 			.filter({ hasText: "kamaka" });
@@ -143,12 +152,15 @@ test.describe("upgrades dashboard", () => {
 		});
 
 		await page.goto("/upgrades");
+		await page.getByRole("button", { name: "Show past plans" }).click();
 
 		const past = page.getByTestId("past-plan-row").filter({ hasText: "kamaka" });
 		await expect(past).toHaveCount(1);
 		await expect(past).toContainText("2.61.0");
 		await expect(past).toContainText("replaced");
-		await expect(past).toContainText("site can absorb 2.61 only");
+		await expect(page.getByTestId("past-plan-note")).toContainText(
+			"site can absorb 2.61 only",
+		);
 		// The plan that replaced it is where the deployment is going, so it stays
 		// out of the history.
 		await expect(
@@ -181,7 +193,8 @@ test.describe("upgrades dashboard", () => {
 		const row = page
 			.getByTestId("planned-upgrade-row")
 			.filter({ hasText: "kamaka" });
-		await expect(row).toContainText("waiting on the site");
+		const note = page.getByTestId("planned-upgrade-note");
+		await expect(note).toContainText("waiting on the site");
 
 		await page.getByRole("button", { name: "Edit kamaka's plan" }).click();
 		const dialog = page.getByTestId("edit-plan");
@@ -197,7 +210,7 @@ test.describe("upgrades dashboard", () => {
 		await dialog.getByLabel("Note").fill("site confirmed the window");
 		await dialog.getByRole("button", { name: "Save" }).click();
 
-		await expect(row).toContainText("site confirmed the window");
+		await expect(note).toContainText("site confirmed the window");
 		await expect(row).toContainText("2020-03-03");
 		// Same plan, same destination: amending is not a replacement.
 		await expect(row).toContainText("2.61.0");
@@ -219,6 +232,8 @@ test.describe("upgrades dashboard", () => {
 			groupId: group.id,
 			targetVersionId: target.id,
 			plannedFor: "2020-01-01",
+			plannedTime: "02:00",
+			plannedZone: "Pacific/Fiji",
 		});
 
 		await page.goto("/upgrades");
@@ -230,10 +245,13 @@ test.describe("upgrades dashboard", () => {
 		await page.getByRole("button", { name: "Edit kamaka's plan" }).click();
 		const dialog = page.getByTestId("edit-plan");
 		await dialog.getByLabel("Planned for").fill("");
+		// The hour was an hour of that day, so it goes with it.
+		await expect(dialog.getByLabel("Time", { exact: true })).toHaveValue("");
 		await dialog.getByRole("button", { name: "Save" }).click();
 
 		// No date means nothing to be late against.
 		await expect(row).not.toContainText("late");
+		await expect(row).not.toContainText("FJT");
 	});
 
 	test("a version far behind the newest can still be planned", async ({
@@ -306,5 +324,91 @@ test.describe("upgrades dashboard", () => {
 		await expect(
 			page.getByRole("option").filter({ hasText: "2.61.2" }),
 		).toContainText("known issue");
+	});
+
+	test("the hour an upgrade starts reads beside the day", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await sql.query(
+			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
+			[group.id],
+		);
+		const target = await seedVersion(sql, {
+			major: 2,
+			minor: 61,
+			patch: 0,
+		});
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+			plannedFor: "2020-01-01",
+			plannedTime: "00:00",
+			plannedZone: "Pacific/Fiji",
+		});
+
+		await page.goto("/upgrades");
+		const row = page
+			.getByTestId("planned-upgrade-row")
+			.filter({ hasText: "kamaka" });
+		// Whose midnight it is, without the reader having to know the deployment.
+		await expect(row).toContainText("12am FJT");
+
+		await page.getByRole("button", { name: "Edit kamaka's plan" }).click();
+		const dialog = page.getByTestId("edit-plan");
+		await expect(dialog.getByLabel("Time", { exact: true })).toHaveValue(
+			"00:00",
+		);
+		await expect(dialog.getByLabel("Timezone")).toHaveValue("Pacific/Fiji");
+
+		await dialog.getByLabel("Time", { exact: true }).fill("19:30");
+		await dialog.getByLabel("Timezone").fill("Pacific/Nauru");
+		await page.getByRole("option", { name: "Pacific/Nauru" }).click();
+		await dialog.getByRole("button", { name: "Save" }).click();
+
+		await expect(row).toContainText("7:30pm NRT");
+	});
+
+	test("a plan can be recorded with an hour, and the hour taken back off", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await sql.query(
+			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
+			[group.id],
+		);
+		await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+
+		await page.goto("/upgrades");
+		const form = page.getByTestId("record-plan");
+		// Nothing to say about a deployment until one is named.
+		await expect(form.getByLabel("Planned for")).toBeDisabled();
+		await expect(form.getByLabel("Note")).toBeDisabled();
+
+		await form.getByLabel("Deployment").click();
+		await page.getByRole("option", { name: "kamaka" }).click();
+		await form.getByLabel("Going to").click();
+		await page.getByRole("option", { name: "2.61.0" }).click();
+		await form.getByLabel("Planned for").fill("2030-04-05");
+		await form.getByLabel("Time", { exact: true }).fill("23:00");
+		// Fiji is where most of the fleet is, so it stands unless changed.
+		await expect(form.getByLabel("Timezone")).toHaveValue("Pacific/Fiji");
+		await form.getByRole("button", { name: "Record" }).click();
+
+		const row = page
+			.getByTestId("planned-upgrade-row")
+			.filter({ hasText: "kamaka" });
+		await expect(row).toContainText("11pm FJT");
+
+		// An hour that is no longer settled comes off without losing the day.
+		await page.getByRole("button", { name: "Edit kamaka's plan" }).click();
+		const dialog = page.getByTestId("edit-plan");
+		await dialog.getByLabel("Time", { exact: true }).fill("");
+		await dialog.getByRole("button", { name: "Save" }).click();
+
+		await expect(row).toContainText("2030-04-05");
+		await expect(row).not.toContainText("FJT");
 	});
 });

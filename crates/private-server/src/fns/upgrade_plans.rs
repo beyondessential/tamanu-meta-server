@@ -5,8 +5,8 @@ use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
-use database::upgrade_plans::{PlanOutcome, UpgradePlan};
-use jiff::{Timestamp, Zoned, civil::Date};
+use database::upgrade_plans::{PlanOutcome, PlannedWhen, UpgradePlan};
+use jiff::{Timestamp, Zoned, civil::Date, civil::Time};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -342,6 +342,13 @@ pub struct RecordArgs {
 	/// The day it is expected to happen, as `YYYY-MM-DD`. Optional.
 	#[schema(value_type = Option<String>)]
 	pub planned_for: Option<Date>,
+	/// The hour it starts on that day, as `HH:MM`. Optional, and needs a day
+	/// and a zone.
+	#[schema(value_type = Option<String>)]
+	pub planned_time: Option<Time>,
+	/// The IANA zone the planned time is a wall clock in, such as
+	/// `Pacific/Fiji`. Required alongside a time.
+	pub planned_zone: Option<String>,
 	/// Anything the next reader needs to know. Optional.
 	pub note: Option<String>,
 }
@@ -380,7 +387,11 @@ pub async fn record(
 		&mut conn,
 		args.group_id,
 		args.target_version_id,
-		args.planned_for,
+		PlannedWhen {
+			date: args.planned_for,
+			time: args.planned_time,
+			zone: args.planned_zone,
+		},
 		note,
 		&admin.0.login,
 	)
@@ -396,6 +407,13 @@ pub struct AmendArgs {
 	/// The day it is expected to happen, as `YYYY-MM-DD`. Cleared when absent.
 	#[schema(value_type = Option<String>)]
 	pub planned_for: Option<Date>,
+	/// The hour it starts on that day, as `HH:MM`. Cleared when absent, and
+	/// needs a day and a zone.
+	#[schema(value_type = Option<String>)]
+	pub planned_time: Option<Time>,
+	/// The IANA zone the planned time is a wall clock in, such as
+	/// `Pacific/Fiji`. Required alongside a time.
+	pub planned_zone: Option<String>,
 	/// Anything the next reader needs to know. Cleared when absent.
 	pub note: Option<String>,
 }
@@ -431,8 +449,18 @@ pub async fn amend(
 		.as_deref()
 		.map(str::trim)
 		.filter(|n| !n.is_empty());
-	let plan =
-		UpgradePlan::amend(&mut conn, args.id, args.planned_for, note, &admin.0.login).await?;
+	let plan = UpgradePlan::amend(
+		&mut conn,
+		args.id,
+		PlannedWhen {
+			date: args.planned_for,
+			time: args.planned_time,
+			zone: args.planned_zone,
+		},
+		note,
+		&admin.0.login,
+	)
+	.await?;
 	Ok(Json(plan))
 }
 

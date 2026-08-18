@@ -740,6 +740,8 @@ diesel::table! {
 		amended_at -> Nullable<Timestamptz>,
 		withdrawn_at -> Nullable<Timestamptz>,
 		withdrawn_by -> Nullable<Text>,
+		planned_time -> Nullable<Time>,
+		planned_zone -> Nullable<Text>,
 	}
 }
 
