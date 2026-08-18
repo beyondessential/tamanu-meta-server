@@ -89,6 +89,7 @@ export default function Upgrades() {
 								<TableCell>Going to</TableCell>
 								<TableCell>Data survives it</TableCell>
 								<TableCell>Planned for</TableCell>
+								<TableCell>Time</TableCell>
 								<TableCell>Note</TableCell>
 								{isAdmin && <TableCell />}
 							</TableRow>
@@ -119,6 +120,12 @@ export default function Upgrades() {
 											late={row.late}
 										/>
 									</TableCell>
+									<TableCell>
+										<PlannedTime
+											time={row.plan?.planned_time ?? null}
+											zone={row.plan?.planned_zone ?? null}
+										/>
+									</TableCell>
 									<TableCell>{row.plan?.note ?? ""}</TableCell>
 									{isAdmin && (
 										<TableCell align="right">
@@ -127,6 +134,8 @@ export default function Upgrades() {
 												groupName={row.group_name}
 												targetVersion={row.target_version ?? ""}
 												plannedFor={row.plan?.planned_for ?? null}
+												plannedTime={row.plan?.planned_time ?? null}
+												plannedZone={row.plan?.planned_zone ?? null}
 												note={row.plan?.note ?? null}
 												onAmended={() => setTick((t) => t + 1)}
 											/>
@@ -211,6 +220,7 @@ function PastPlans({ plans }: { plans: PastPlan[] }) {
 						<TableCell>Deployment</TableCell>
 						<TableCell>Was going to</TableCell>
 						<TableCell>Planned for</TableCell>
+						<TableCell>Time</TableCell>
 						<TableCell>Ended</TableCell>
 						<TableCell>Note</TableCell>
 					</TableRow>
@@ -225,6 +235,12 @@ function PastPlans({ plans }: { plans: PastPlan[] }) {
 							</TableCell>
 							<TableCell>{row.target_version}</TableCell>
 							<TableCell>{row.plan.planned_for ?? ""}</TableCell>
+							<TableCell>
+								<PlannedTime
+									time={row.plan.planned_time ?? null}
+									zone={row.plan.planned_zone ?? null}
+								/>
+							</TableCell>
 							<TableCell>
 								<Stack
 									direction="row"
@@ -344,6 +360,84 @@ function PlannedFor({ date, late }: { date: string | null; late: boolean }) {
 	);
 }
 
+/// The hour a deployment moves, as the wall clock it was recorded as. Canopy
+/// holds no timezone for a group, so the zone travels with the time or the
+/// reader cannot tell whose midnight it is.
+function PlannedTime({
+	time,
+	zone,
+}: {
+	time: string | null;
+	zone: string | null;
+}) {
+	if (!time || !zone) return null;
+	const offset = zoneOffset(zone);
+	return (
+		<Tooltip title={offset ? `${zone} (${offset})` : zone}>
+			<span>
+				{clockTime(time)} {zoneLabel(zone)}
+			</span>
+		</Tooltip>
+	);
+}
+
+function clockTime(time: string): string {
+	const [hours, minutes] = time.split(":").map(Number);
+	const suffix = hours < 12 ? "am" : "pm";
+	const hour = hours % 12 === 0 ? 12 : hours % 12;
+	if (minutes === 0) return `${hour}${suffix}`;
+	return `${hour}:${String(minutes).padStart(2, "0")}${suffix}`;
+}
+
+const zoneLabel = (zone: string) =>
+	(zone.split("/").pop() ?? zone).replace(/_/g, " ");
+
+function zoneOffset(zone: string): string | null {
+	try {
+		return (
+			new Intl.DateTimeFormat("en", {
+				timeZone: zone,
+				timeZoneName: "shortOffset",
+			})
+				.formatToParts(new Date())
+				.find((part) => part.type === "timeZoneName")?.value ?? null
+		);
+	} catch {
+		return null;
+	}
+}
+
+const ZONES = Intl.supportedValuesOf("timeZone");
+
+/// Most of the fleet is on Fiji time, and an operator who leaves this alone is
+/// recording the zone they meant far more often than not.
+const DEFAULT_ZONE = "Pacific/Fiji";
+
+/// The zone a planned time is a wall clock in. Paired with the time field: a
+/// plan with no hour records no zone.
+function ZoneField({
+	value,
+	onChange,
+	disabled,
+}: {
+	value: string;
+	onChange: (zone: string) => void;
+	disabled: boolean;
+}) {
+	return (
+		<Autocomplete<string, false, true, false>
+			size="small"
+			sx={{ minWidth: 170 }}
+			disabled={disabled}
+			disableClearable
+			options={ZONES}
+			value={value}
+			onChange={(_, zone) => onChange(zone)}
+			renderInput={(params) => <TextField {...params} label="Timezone" />}
+		/>
+	);
+}
+
 const SHORTLIST_MINORS = 10;
 
 const matchVersion = createFilterOptions<PlannableVersion>({
@@ -393,6 +487,8 @@ function RecordPlan({
 	const [groupId, setGroupId] = useState("");
 	const [versionId, setVersionId] = useState("");
 	const [plannedFor, setPlannedFor] = useState("");
+	const [plannedTime, setPlannedTime] = useState("");
+	const [zone, setZone] = useState(DEFAULT_ZONE);
 	const [note, setNote] = useState("");
 	const record = useApiAction("upgrade_plans", "record");
 	const targets = useApi(
@@ -411,10 +507,13 @@ function RecordPlan({
 			group_id: groupId,
 			target_version_id: versionId,
 			planned_for: plannedFor || null,
+			planned_time: plannedFor ? plannedTime || null : null,
+			planned_zone: plannedFor && plannedTime ? zone : null,
 			note: note || null,
 		});
 		setVersionId("");
 		setPlannedFor("");
+		setPlannedTime("");
 		setNote("");
 		onRecorded();
 	};
@@ -424,7 +523,12 @@ function RecordPlan({
 			<Typography variant="h6" component="h2" gutterBottom>
 				Record a plan
 			</Typography>
-			<Stack direction="row" spacing={1} sx={{ alignItems: "flex-start" }}>
+			<Stack
+				direction="row"
+				spacing={1}
+				useFlexGap
+				sx={{ alignItems: "flex-start", flexWrap: "wrap" }}
+			>
 				<TextField
 					select
 					size="small"
@@ -491,6 +595,17 @@ function RecordPlan({
 				/>
 				<TextField
 					size="small"
+					type="time"
+					label="Time"
+					value={plannedTime}
+					disabled={!plannedFor}
+					onChange={(e) => setPlannedTime(e.target.value)}
+					slotProps={{ inputLabel: { shrink: true } }}
+					sx={{ width: 155 }}
+				/>
+				<ZoneField value={zone} onChange={setZone} disabled={!plannedTime} />
+				<TextField
+					size="small"
 					label="Note"
 					value={note}
 					onChange={(e) => setNote(e.target.value)}
@@ -523,6 +638,8 @@ function EditPlan({
 	groupName,
 	targetVersion,
 	plannedFor,
+	plannedTime,
+	plannedZone,
 	note,
 	onAmended,
 }: {
@@ -530,11 +647,15 @@ function EditPlan({
 	groupName: string;
 	targetVersion: string;
 	plannedFor: string | null;
+	plannedTime: string | null;
+	plannedZone: string | null;
 	note: string | null;
 	onAmended: () => void;
 }) {
 	const [open, setOpen] = useState(false);
 	const [date, setDate] = useState("");
+	const [time, setTime] = useState("");
+	const [zone, setZone] = useState(DEFAULT_ZONE);
 	const [text, setText] = useState("");
 	const amend = useApiAction("upgrade_plans", "amend");
 
@@ -542,6 +663,8 @@ function EditPlan({
 	// the form showing what it held last time.
 	const start = () => {
 		setDate(plannedFor ?? "");
+		setTime(plannedTime?.slice(0, 5) ?? "");
+		setZone(plannedZone ?? DEFAULT_ZONE);
 		setText(note ?? "");
 		setOpen(true);
 	};
@@ -550,6 +673,8 @@ function EditPlan({
 		await amend.call({
 			id: planId,
 			planned_for: date || null,
+			planned_time: date ? time || null : null,
+			planned_zone: date && time ? zone : null,
 			note: text || null,
 		});
 		setOpen(false);
@@ -578,14 +703,27 @@ function EditPlan({
 				</DialogTitle>
 				<DialogContent>
 					<Stack spacing={2} sx={{ mt: 1 }}>
-						<TextField
-							size="small"
-							type="date"
-							label="Planned for"
-							value={date}
-							onChange={(e) => setDate(e.target.value)}
-							slotProps={{ inputLabel: { shrink: true } }}
-						/>
+						<Stack direction="row" spacing={1}>
+							<TextField
+								size="small"
+								type="date"
+								label="Planned for"
+								value={date}
+								onChange={(e) => setDate(e.target.value)}
+								slotProps={{ inputLabel: { shrink: true } }}
+							/>
+							<TextField
+								size="small"
+								type="time"
+								label="Time"
+								value={time}
+								disabled={!date}
+								onChange={(e) => setTime(e.target.value)}
+								slotProps={{ inputLabel: { shrink: true } }}
+								sx={{ width: 155 }}
+							/>
+							<ZoneField value={zone} onChange={setZone} disabled={!time} />
+						</Stack>
 						<TextField
 							size="small"
 							label="Note"

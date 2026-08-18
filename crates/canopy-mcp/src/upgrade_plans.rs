@@ -8,7 +8,7 @@ use database::{
 	upgrade_plans::{PlanOutcome, UpgradePlan},
 	versions::Version,
 };
-use jiff::{Timestamp, Zoned, civil::Date};
+use jiff::{Timestamp, Zoned, civil::Date, civil::Time};
 use rmcp::{
 	handler::server::wrapper::Parameters,
 	model::{CallToolResult, ErrorData as McpError},
@@ -42,6 +42,10 @@ struct OpenPlan {
 	current_version: Option<VersionStr>,
 	target_version: String,
 	planned_for: Option<Date>,
+	/// The hour it starts on the planned day, as a wall clock in
+	/// `planned_zone`.
+	planned_time: Option<Time>,
+	planned_zone: Option<String>,
 	/// The planned day has passed and the deployment has not moved.
 	late: bool,
 	note: Option<String>,
@@ -62,6 +66,10 @@ struct HistoricPlan {
 	target_version: String,
 	outcome: PlanOutcome,
 	planned_for: Option<Date>,
+	/// The hour it started on the planned day, as a wall clock in
+	/// `planned_zone`.
+	planned_time: Option<Time>,
+	planned_zone: Option<String>,
 	note: Option<String>,
 	recorded_by: Option<String>,
 	recorded_at: Timestamp,
@@ -100,8 +108,10 @@ impl CanopyMcp {
 					group_name: group.name,
 					current_version: group.effective_version,
 					target_version: version_name(&versions, plan.target_version_id),
-					planned_for: plan.planned_for,
 					late: database::upgrade_plans::is_late(&plan, today),
+					planned_for: plan.planned_for,
+					planned_time: plan.planned_time,
+					planned_zone: plan.planned_zone,
 					note: plan.note,
 					recorded_by: plan.created_by,
 					recorded_at: plan.created_at,
@@ -145,6 +155,8 @@ impl CanopyMcp {
 				outcome: database::upgrade_plans::outcome(&plan),
 				ended_at: database::upgrade_plans::ended_at(&plan),
 				planned_for: plan.planned_for,
+				planned_time: plan.planned_time,
+				planned_zone: plan.planned_zone,
 				note: plan.note,
 				recorded_by: plan.created_by,
 				recorded_at: plan.created_at,

@@ -7663,6 +7663,20 @@
               "null"
             ],
             "description": "The day it is expected to happen, as `YYYY-MM-DD`. Cleared when absent."
+          },
+          "planned_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The hour it starts on that day, as `HH:MM`. Cleared when absent, and\nneeds a day and a zone."
+          },
+          "planned_zone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The IANA zone the planned time is a wall clock in, such as\n`Pacific/Fiji`. Required alongside a time."
           }
         }
       },
@@ -12749,6 +12763,20 @@
             ],
             "description": "The day it is expected to happen, as `YYYY-MM-DD`. Optional."
           },
+          "planned_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The hour it starts on that day, as `HH:MM`. Optional, and needs a day\nand a zone."
+          },
+          "planned_zone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The IANA zone the planned time is a wall clock in, such as\n`Pacific/Fiji`. Required alongside a time."
+          },
           "target_version_id": {
             "type": "string",
             "format": "uuid",
@@ -16048,6 +16076,20 @@
               "null"
             ],
             "description": "The day the upgrade is expected, where one is known."
+          },
+          "planned_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The hour it starts on that day, where one is known."
+          },
+          "planned_zone": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The IANA zone the planned time is a wall clock in."
           },
           "superseded_at": {
             "type": [

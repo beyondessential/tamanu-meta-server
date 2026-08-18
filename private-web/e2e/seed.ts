@@ -1277,6 +1277,8 @@ export async function seedUpgradePlan(
 		groupId: string;
 		targetVersionId: string;
 		plannedFor?: string | null;
+		plannedTime?: string | null;
+		plannedZone?: string | null;
 		note?: string | null;
 		createdBy?: string;
 		/** Retire the group's open plan first, as recording a second one does.
@@ -1294,12 +1296,15 @@ export async function seedUpgradePlan(
 		);
 	}
 	await sql.query(
-		`INSERT INTO upgrade_plans (group_id, target_version_id, planned_for, note, created_by)
-		 VALUES ($1, $2, $3::date, $4, $5)`,
+		`INSERT INTO upgrade_plans
+		   (group_id, target_version_id, planned_for, planned_time, planned_zone, note, created_by)
+		 VALUES ($1, $2, $3::date, $4::time, $5, $6, $7)`,
 		[
 			opts.groupId,
 			opts.targetVersionId,
 			opts.plannedFor ?? null,
+			opts.plannedTime ?? null,
+			opts.plannedZone ?? null,
 			opts.note ?? null,
 			opts.createdBy ?? "e2e@example.com",
 		],

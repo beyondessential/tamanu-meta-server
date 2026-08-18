@@ -4,7 +4,7 @@ id: UPG
 
 # Planned upgrades
 
-Canopy records where each deployment is going: the version a group intends to move to, and optionally when.
+Canopy records where each deployment is going: the version a group intends to move to, and optionally the day and hour.
 A plan makes the fleet's intended upgrades visible in one place, and it tells the rest of Canopy which version to hold a deployment's data against, so pre-upgrade testing exercises the version that will actually be applied rather than guessing.
 
 ## Scope
@@ -29,13 +29,18 @@ An operator records, per group:
 
 - the **target version**, which must be a published version newer than the group is running;
 - an optional **planned date**, the day the upgrade is expected to happen;
+- an optional **planned time**, the hour on that day the upgrade starts, with the **timezone** it is a wall clock in;
 - an optional **note**, for whatever an operator needs the next reader to know;
 - who recorded it and when.
+
+An hour is recorded with its zone or not at all, and it qualifies a day, so it needs one.
+Canopy holds no timezone for a group, and the fleet spans enough of the world that a bare wall clock is readable only by whoever typed it.
+A plan often has no hour: which night a deployment moves is frequently settled well before what time it starts.
 
 A group has at most one open plan.
 A group moves to one place next, so a second plan replaces the first rather than queueing behind it, and the replaced plan is retained as history.
 
-An open plan's date and note can be amended, and an amendment records who made it and when.
+An open plan's date, time, and note can be amended, and an amendment records who made it and when.
 A corrected date or a reworded note is the same plan better described, so it stays one plan rather than entering the history as a second.
 Changing the target is not an amendment: where a deployment is going is what the history exists to record, so a new target replaces the plan as any other second plan would.
 A plan that has been met or replaced is history and is no longer amendable.
@@ -68,15 +73,17 @@ A plan changes what is tested, so changing one invalidates nothing already recor
 
 Canopy presents planned upgrades across the fleet in one view, so the question "what is moving, and when" is answered without reading each group.
 
-For each group with an open plan it shows the target version, the version the group is on now, the planned date where there is one, and the pre-upgrade verdict for that target, so an operator sees both the intent and whether the deployment's data survives it.
+For each group with an open plan it shows the target version, the version the group is on now, the planned date and hour where there are ones, and the pre-upgrade verdict for that target, so an operator sees both the intent and whether the deployment's data survives it.
+The hour is shown with the place its zone names, since which deployment's midnight it is is the whole question a reader has.
 Where an attempt is under way it shows that too, since a restore takes hours and a verdict of not-yet-tested otherwise looks the same whether the pipeline is working or has stopped.
 Groups with no plan are shown too: an unplanned deployment several minors behind is the thing this view exists to surface.
 
 A plan whose date has passed without being met is presented as late.
+Late is judged on the day alone: an upgrade that has not started by the hour someone wrote down is not yet late by any measure worth surfacing.
 Late is a presentational state and not an incident: an upgrade slipping is normal operational reality, and Canopy has no basis for treating a date someone typed as a failure of anything.
 
 The same view presents the plans that have closed, most recently closed first, so what a deployment planned before is readable beside what it plans now.
-Each shows where it was going, the date it was planned for, and how it closed: met, replaced by a later plan, or withdrawn with the operator who withdrew it and when.
+Each shows where it was going, the date and hour it was planned for, and how it closed: met, replaced by a later plan, or withdrawn with the operator who withdrew it and when.
 A withdrawn plan is otherwise unreadable anywhere, since a deployment that stopped going somewhere leaves no other mark on the fleet.
 
 ## Out of scope

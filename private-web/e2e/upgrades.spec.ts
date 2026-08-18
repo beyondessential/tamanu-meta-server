@@ -307,4 +307,84 @@ test.describe("upgrades dashboard", () => {
 			page.getByRole("option").filter({ hasText: "2.61.2" }),
 		).toContainText("known issue");
 	});
+
+	test("the hour an upgrade starts reads beside the day", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await sql.query(
+			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
+			[group.id],
+		);
+		const target = await seedVersion(sql, {
+			major: 2,
+			minor: 61,
+			patch: 0,
+		});
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+			plannedFor: "2020-01-01",
+			plannedTime: "00:00",
+			plannedZone: "Pacific/Fiji",
+		});
+
+		await page.goto("/upgrades");
+		const row = page
+			.getByTestId("planned-upgrade-row")
+			.filter({ hasText: "kamaka" });
+		// Whose midnight it is, without the reader having to know the deployment.
+		await expect(row).toContainText("12am Fiji");
+
+		await page.getByRole("button", { name: "Edit kamaka's plan" }).click();
+		const dialog = page.getByTestId("edit-plan");
+		await expect(dialog.getByLabel("Time", { exact: true })).toHaveValue("00:00");
+		await expect(dialog.getByLabel("Timezone")).toHaveValue("Pacific/Fiji");
+
+		await dialog.getByLabel("Time", { exact: true }).fill("19:30");
+		await dialog.getByLabel("Timezone").fill("Pacific/Nauru");
+		await page.getByRole("option", { name: "Pacific/Nauru" }).click();
+		await dialog.getByRole("button", { name: "Save" }).click();
+
+		await expect(row).toContainText("7:30pm Nauru");
+	});
+
+	test("a plan can be recorded with an hour, and the hour taken back off", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await sql.query(
+			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
+			[group.id],
+		);
+		await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+
+		await page.goto("/upgrades");
+		const form = page.getByTestId("record-plan");
+		await form.getByLabel("Deployment").click();
+		await page.getByRole("option", { name: "kamaka" }).click();
+		await form.getByLabel("Going to").click();
+		await page.getByRole("option", { name: "2.61.0" }).click();
+		await form.getByLabel("Planned for").fill("2030-04-05");
+		await form.getByLabel("Time", { exact: true }).fill("23:00");
+		// Fiji is where most of the fleet is, so it stands unless changed.
+		await expect(form.getByLabel("Timezone")).toHaveValue("Pacific/Fiji");
+		await form.getByRole("button", { name: "Record" }).click();
+
+		const row = page
+			.getByTestId("planned-upgrade-row")
+			.filter({ hasText: "kamaka" });
+		await expect(row).toContainText("11pm Fiji");
+
+		// An hour that is no longer settled comes off without losing the day.
+		await page.getByRole("button", { name: "Edit kamaka's plan" }).click();
+		const dialog = page.getByTestId("edit-plan");
+		await dialog.getByLabel("Time", { exact: true }).fill("");
+		await dialog.getByRole("button", { name: "Save" }).click();
+
+		await expect(row).toContainText("2030-04-05");
+		await expect(row).not.toContainText("Fiji");
+	});
 });

@@ -3912,6 +3912,16 @@ export interface components {
             note?: string | null;
             /** @description The day it is expected to happen, as `YYYY-MM-DD`. Cleared when absent. */
             planned_for?: string | null;
+            /**
+             * @description The hour it starts on that day, as `HH:MM`. Cleared when absent, and
+             *     needs a day and a zone.
+             */
+            planned_time?: string | null;
+            /**
+             * @description The IANA zone the planned time is a wall clock in, such as
+             *     `Pacific/Fiji`. Required alongside a time.
+             */
+            planned_zone?: string | null;
         };
         /**
          * @description A downloadable artifact (for example an installer) associated with a
@@ -7109,6 +7119,16 @@ export interface components {
             /** @description The day it is expected to happen, as `YYYY-MM-DD`. Optional. */
             planned_for?: string | null;
             /**
+             * @description The hour it starts on that day, as `HH:MM`. Optional, and needs a day
+             *     and a zone.
+             */
+            planned_time?: string | null;
+            /**
+             * @description The IANA zone the planned time is a wall clock in, such as
+             *     `Pacific/Fiji`. Required alongside a time.
+             */
+            planned_zone?: string | null;
+            /**
              * Format: uuid
              * @description The published version it intends to move to.
              */
@@ -9168,6 +9188,10 @@ export interface components {
             note?: string | null;
             /** @description The day the upgrade is expected, where one is known. */
             planned_for?: string | null;
+            /** @description The hour it starts on that day, where one is known. */
+            planned_time?: string | null;
+            /** @description The IANA zone the planned time is a wall clock in. */
+            planned_zone?: string | null;
             /** @description When a newer plan replaced this one. */
             superseded_at?: string | null;
             /**

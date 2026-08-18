@@ -9,7 +9,7 @@ use commons_errors::{AppError, Result};
 use commons_types::version::VersionStr;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use jiff::{Timestamp, civil::Date};
+use jiff::{Timestamp, civil::Date, civil::Time, tz::TimeZone};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -30,6 +30,12 @@ pub struct UpgradePlan {
 	#[diesel(deserialize_as = jiff_diesel::NullableDate, serialize_as = jiff_diesel::NullableDate)]
 	#[schema(value_type = Option<String>)]
 	pub planned_for: Option<Date>,
+	/// The hour it starts on that day, where one is known.
+	#[diesel(deserialize_as = jiff_diesel::NullableTime, serialize_as = jiff_diesel::NullableTime)]
+	#[schema(value_type = Option<String>)]
+	pub planned_time: Option<Time>,
+	/// The IANA zone the planned time is a wall clock in.
+	pub planned_zone: Option<String>,
 	/// Whatever the operator needs the next reader to know.
 	pub note: Option<String>,
 	/// The operator who recorded it.
@@ -60,6 +66,41 @@ pub struct UpgradePlan {
 	pub withdrawn_by: Option<String>,
 }
 
+/// When an upgrade is expected: the day, and the hour on it where that is
+/// settled.
+///
+/// The zone travels with the time because Canopy holds none for a group, and a
+/// wall clock without one is readable only by whoever typed it.
+#[derive(Debug, Clone, Default)]
+pub struct PlannedWhen {
+	pub date: Option<Date>,
+	pub time: Option<Time>,
+	pub zone: Option<String>,
+}
+
+impl PlannedWhen {
+	fn checked(self) -> Result<Self> {
+		if self.time.is_some() != self.zone.is_some() {
+			return Err(AppError::BadRequest(
+				"a planned time needs the timezone it is a wall clock in".into(),
+			));
+		}
+		if self.time.is_some() && self.date.is_none() {
+			return Err(AppError::BadRequest(
+				"a planned time needs the day it is on".into(),
+			));
+		}
+		if let Some(zone) = &self.zone
+			&& TimeZone::get(zone).is_err()
+		{
+			return Err(AppError::BadRequest(format!(
+				"{zone} is not a known timezone"
+			)));
+		}
+		Ok(self)
+	}
+}
+
 impl UpgradePlan {
 	/// Record where a group is going, retiring any plan it already had.
 	///
@@ -70,12 +111,13 @@ impl UpgradePlan {
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
 		target_version_id: Uuid,
-		planned_for: Option<Date>,
+		when: PlannedWhen,
 		note: Option<&str>,
 		created_by: &str,
 	) -> Result<Self> {
 		use crate::schema::upgrade_plans::dsl;
 
+		let when = when.checked()?;
 		let target = Version::get_by_id(db, target_version_id).await?;
 		if target.status != commons_types::version::VersionStatus::Published {
 			return Err(AppError::BadRequest(
@@ -106,7 +148,9 @@ impl UpgradePlan {
 			.values((
 				dsl::group_id.eq(group_id),
 				dsl::target_version_id.eq(target_version_id),
-				dsl::planned_for.eq(planned_for.map(jiff_diesel::Date::from)),
+				dsl::planned_for.eq(when.date.map(jiff_diesel::Date::from)),
+				dsl::planned_time.eq(when.time.map(jiff_diesel::Time::from)),
+				dsl::planned_zone.eq(when.zone),
 				dsl::note.eq(note),
 				dsl::created_by.eq(created_by),
 			))
@@ -208,19 +252,22 @@ impl UpgradePlan {
 	pub async fn amend(
 		db: &mut AsyncPgConnection,
 		id: Uuid,
-		planned_for: Option<Date>,
+		when: PlannedWhen,
 		note: Option<&str>,
 		amended_by: &str,
 	) -> Result<Self> {
 		use crate::schema::upgrade_plans::dsl;
 
+		let when = when.checked()?;
 		diesel::update(dsl::upgrade_plans)
 			.filter(dsl::id.eq(id))
 			.filter(dsl::met_at.is_null())
 			.filter(dsl::superseded_at.is_null())
 			.filter(dsl::withdrawn_at.is_null())
 			.set((
-				dsl::planned_for.eq(planned_for.map(jiff_diesel::Date::from)),
+				dsl::planned_for.eq(when.date.map(jiff_diesel::Date::from)),
+				dsl::planned_time.eq(when.time.map(jiff_diesel::Time::from)),
+				dsl::planned_zone.eq(when.zone),
 				dsl::note.eq(note),
 				dsl::amended_by.eq(amended_by),
 				dsl::amended_at.eq(diesel::dsl::now),
