@@ -1,6 +1,6 @@
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
-import EditNoteIcon from "@mui/icons-material/EditNote";
+import NotesIcon from "@mui/icons-material/Notes";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import {
@@ -436,11 +436,12 @@ function Disclosure({
 }
 
 /// What an operator needed the next reader to know, under the row it belongs
-/// to. The icon is what stops a short note reading as another deployment.
+/// to. The icon is what stops a short note reading as another deployment, and
+/// is deliberately not a pencil: the row's own pencil is the edit action.
 function PlanNote({ note }: { note: string }) {
 	return (
 		<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
-			<EditNoteIcon fontSize="small" sx={{ opacity: 0.55 }} />
+			<NotesIcon fontSize="small" sx={{ opacity: 0.55 }} />
 			<Typography variant="body2">{note}</Typography>
 		</Stack>
 	);
