@@ -67,10 +67,8 @@ pub struct UpgradePlan {
 }
 
 /// When an upgrade is expected: the day, and the hour on it where that is
-/// settled.
-///
-/// The zone travels with the time because Canopy holds none for a group, and a
-/// wall clock without one is readable only by whoever typed it.
+/// settled. The zone travels with the time because Canopy holds none for a
+/// group.
 #[derive(Debug, Clone, Default)]
 pub struct PlannedWhen {
 	pub date: Option<Date>,

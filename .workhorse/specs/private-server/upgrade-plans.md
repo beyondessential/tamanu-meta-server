@@ -33,9 +33,8 @@ An operator records, per group:
 - an optional **note**, for whatever an operator needs the next reader to know;
 - who recorded it and when.
 
-An hour is recorded with its zone or not at all, and it qualifies a day, so it needs one.
-Canopy holds no timezone for a group, and the fleet spans enough of the world that a bare wall clock is readable only by whoever typed it.
-A plan often has no hour: which night a deployment moves is frequently settled well before what time it starts.
+An hour needs a day to sit on and a zone to be read in: Canopy holds no timezone for a group, and the fleet spans enough of the world that a bare wall clock means nothing to anyone but whoever typed it.
+Most plans have no hour, since which night a deployment moves is usually settled well before what time it starts.
 
 A group has at most one open plan.
 A group moves to one place next, so a second plan replaces the first rather than queueing behind it, and the replaced plan is retained as history.
@@ -74,13 +73,11 @@ A plan changes what is tested, so changing one invalidates nothing already recor
 Canopy presents planned upgrades across the fleet in one view, so the question "what is moving, and when" is answered without reading each group.
 
 For each group with an open plan it shows the target version, the version the group is on now, the planned date and hour where there are ones, and the pre-upgrade verdict for that target, so an operator sees both the intent and whether the deployment's data survives it.
-The hour is shown with its zone abbreviated, since which deployment's midnight it is is the whole question a reader has.
-A note is held to one line with the rest on hover, so one long note does not set the height of every other row.
+The hour carries its zone, abbreviated: whose midnight it is is the whole question a reader has.
 Where an attempt is under way it shows that too, since a restore takes hours and a verdict of not-yet-tested otherwise looks the same whether the pipeline is working or has stopped.
-Groups with no plan are shown too, behind a disclosure that names how many there are: an unplanned deployment several minors behind is the thing this view exists to surface, and the count surfaces it without the list crowding out what is actually moving.
+Groups with no plan are shown too, behind a disclosure that counts them: an unplanned deployment several minors behind is what this view exists to surface, and the count surfaces it without the list crowding out what is moving.
 
-A plan whose date has passed without being met is presented as late.
-Late is judged on the day alone: an upgrade that has not started by the hour someone wrote down is not yet late by any measure worth surfacing.
+A plan whose date has passed without being met is presented as late, judged on the day alone rather than the hour.
 Late is a presentational state and not an incident: an upgrade slipping is normal operational reality, and Canopy has no basis for treating a date someone typed as a failure of anything.
 
 The same view presents the plans that have closed, most recently closed first, so what a deployment planned before is readable beside what it plans now.

@@ -467,11 +467,9 @@ function clockTime(time: string): string {
 	return `${hour}:${String(minutes).padStart(2, "0")}${suffix}`;
 }
 
-/// tzdata dropped invented abbreviations in 2017, so the zones the fleet sits
-/// in report themselves as `+12` and CLDR only offers `GMT+12`. These are the
-/// abbreviations the region uses in writing, for the zones Canopy actually
-/// sees. Australia and New Zealand are absent on purpose: CLDR has real
-/// DST-aware ones for those, and they win below.
+/// tzdata dropped invented abbreviations in 2017, so these zones report
+/// themselves as `+12` and CLDR only offers `GMT+12`. Australia and New Zealand
+/// are absent on purpose: CLDR has real DST-aware ones for those.
 const ZONE_ABBREVIATIONS: Record<string, string> = {
 	"Pacific/Fiji": "FJT",
 	"Pacific/Nauru": "NRT",
@@ -536,8 +534,7 @@ const NOTE_TEXT = { maxWidth: 240 };
 
 const ZONES = Intl.supportedValuesOf("timeZone");
 
-/// Most of the fleet is on Fiji time, and an operator who leaves this alone is
-/// recording the zone they meant far more often than not.
+/// The zone most plans are in, so leaving it alone records what was meant.
 const DEFAULT_ZONE = "Pacific/Fiji";
 
 /// The zone a planned time is a wall clock in. Paired with the time field: a
