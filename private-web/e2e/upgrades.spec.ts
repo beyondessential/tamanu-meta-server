@@ -383,6 +383,10 @@ test.describe("upgrades dashboard", () => {
 
 		await page.goto("/upgrades");
 		const form = page.getByTestId("record-plan");
+		// Nothing to say about a deployment until one is named.
+		await expect(form.getByLabel("Planned for")).toBeDisabled();
+		await expect(form.getByLabel("Note")).toBeDisabled();
+
 		await form.getByLabel("Deployment").click();
 		await page.getByRole("option", { name: "kamaka" }).click();
 		await form.getByLabel("Going to").click();

@@ -518,7 +518,8 @@ function zonePart(
 
 const PLAN_FORM = {
 	display: "grid",
-	gridTemplateColumns: "repeat(6, minmax(0, 1fr)) auto",
+	gridTemplateColumns:
+		"minmax(0, 1.2fr) minmax(0, 1fr) 180px 140px 170px minmax(0, 1.4fr) auto",
 	columnGap: 1.5,
 	rowGap: 1,
 	alignItems: "start",
@@ -705,6 +706,7 @@ function RecordPlan({
 						size="small"
 						type="date"
 						label="Planned for"
+						disabled={!groupId}
 						value={plannedFor}
 						onChange={(e) => {
 							setPlannedFor(e.target.value);
@@ -725,6 +727,7 @@ function RecordPlan({
 					<TextField
 						size="small"
 						label="Note"
+						disabled={!groupId}
 						value={note}
 						onChange={(e) => setNote(e.target.value)}
 					/>
