@@ -117,7 +117,10 @@ export default function Upgrades() {
 												spacing={0.5}
 												sx={{ alignItems: "center" }}
 											>
-												<VerdictChip verdict={row.verdict} />
+												<VerdictChip
+													verdict={row.verdict}
+													testable={row.testable}
+												/>
 												<AttemptChip attempt={row.attempt} />
 											</Stack>
 										</TableCell>
@@ -316,7 +319,13 @@ function OutcomeChip({
 
 /// Whether the deployment's own data survives the planned version, rolled up
 /// from its servers. Pairing it with the plan is the point of this view.
-function VerdictChip({ verdict }: { verdict: string | null | undefined }) {
+function VerdictChip({
+	verdict,
+	testable,
+}: {
+	verdict: string | null | undefined;
+	testable: boolean | null | undefined;
+}) {
 	if (verdict === "passed") {
 		return <Chip size="small" color="success" label="passed" />;
 	}
@@ -324,6 +333,18 @@ function VerdictChip({ verdict }: { verdict: string | null | undefined }) {
 		return (
 			<Tooltip title="a server's data broke the migrations; the version is held back">
 				<Chip size="small" color="warning" label="failed" />
+			</Tooltip>
+		);
+	}
+	if (testable === false) {
+		return (
+			<Tooltip title="nothing is declared to migrate this deployment's data, so no test will run: declare a restore replica for it on the group's page">
+				<Chip
+					size="small"
+					color="warning"
+					variant="outlined"
+					label="not set up"
+				/>
 			</Tooltip>
 		);
 	}

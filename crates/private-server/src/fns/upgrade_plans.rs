@@ -52,6 +52,11 @@ pub struct PlannedUpgrade {
 	/// than folded into it: a restore takes hours, so a group mid-test would
 	/// otherwise read as untested for the whole window.
 	pub attempt: Option<crate::fns::migration_tests::AttemptState>,
+	/// Whether anything is declared to migrate this group's data. A plan on a
+	/// group with nothing declared is never dispatched, so its verdict would sit
+	/// at "not tested" indefinitely with nothing on its way. `null` without a
+	/// plan.
+	pub testable: Option<bool>,
 }
 
 /// Planned upgrades across the fleet.
@@ -109,11 +114,18 @@ pub async fn fleet(
 			}
 		};
 
-		let attempt = match &plan {
+		let testable = match &plan {
 			None => None,
-			Some(_) => {
+			Some(_) => Some(database::restore::group_migrates(&mut conn, group.id).await?),
+		};
+
+		// Issuances carry no intent, so another intent's restore traffic would
+		// read as a test under way.
+		let attempt = match testable {
+			Some(true) => {
 				crate::fns::migration_tests::attempt_state(&mut conn, group.id, now_ts).await?
 			}
+			_ => None,
 		};
 
 		out.push(PlannedUpgrade {
@@ -125,6 +137,7 @@ pub async fn fleet(
 			late,
 			verdict,
 			attempt,
+			testable,
 		});
 	}
 
