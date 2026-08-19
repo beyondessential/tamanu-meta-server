@@ -6823,6 +6823,13 @@ export interface components {
             /** @description The plan's target as semver. */
             target_version?: string | null;
             /**
+             * @description Whether anything is declared to migrate this group's data. A plan on a
+             *     group with nothing declared is never dispatched, so its verdict would sit
+             *     at "not tested" indefinitely with nothing on its way. `null` without a
+             *     plan.
+             */
+            testable?: boolean | null;
+            /**
              * @description Where the group's data stands against the planned version, rolled up from
              *     its servers: any failure makes the group a failure, since one server
              *     whose data breaks is enough to stop the upgrade. `null` without a plan.

@@ -75,6 +75,7 @@ Canopy presents planned upgrades across the fleet in one view, so the question "
 For each group with an open plan it shows the target version, the version the group is on now, the planned date and hour where there are ones, and the pre-upgrade verdict for that target, so an operator sees both the intent and whether the deployment's data survives it.
 The hour carries its zone, abbreviated: whose midnight it is is the whole question a reader has.
 Where an attempt is under way it shows that too, since a restore takes hours and a verdict of not-yet-tested otherwise looks the same whether the pipeline is working or has stopped.
+Where nothing is declared to migrate the group's data it says so in place of the verdict, since a plan on a deployment with no such declaration is never dispatched and a reader would otherwise wait on a result that cannot arrive.
 Groups with no plan are shown too, behind a disclosure that counts them: an unplanned deployment several minors behind is what this view exists to surface, and the count surfaces it without the list crowding out what is moving.
 
 A plan whose date has passed without being met is presented as late, judged on the day alone rather than the hour.

@@ -88,6 +88,82 @@ async fn a_target_behind_the_group_is_refused() {
 	.await;
 }
 
+/// A plan on a group with nothing declared to migrate its data is never
+/// dispatched, so the view says so rather than reporting it as merely untested.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plan_nothing_will_test_says_so() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
+				('cccccccc-0000-0000-0000-0000000000f1', 2, 61, 0, 'x', 'published');
+			INSERT INTO server_groups (id, name, effective_version) VALUES
+				('cccccccc-0000-0000-0000-000000000001', 'kamaka', '2.60.0');
+			INSERT INTO devices (id, role) VALUES
+				('cccccccc-0000-0000-0000-0000000000d0', 'backup-restore');
+			INSERT INTO restore_consumer_capabilities
+				(consumer_device_id, intent, semantics)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d0', 'analytics',
+				'[\"check\", \"url\"]');
+			INSERT INTO restore_replicas
+				(consumer_device_id, group_id, type, intent, name)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d0',
+				'cccccccc-0000-0000-0000-000000000001', 'tamanu-postgres', 'analytics',
+				'kamaka-analytics');
+			INSERT INTO upgrade_plans (group_id, target_version_id) VALUES
+				('cccccccc-0000-0000-0000-000000000001',
+				 'cccccccc-0000-0000-0000-0000000000f1');
+			INSERT INTO backup_credential_issuances
+				(device_id, group_id, type, purpose, issued_at, expires_at,
+				 sts_assumed_role, bucket, prefix)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d0',
+				'cccccccc-0000-0000-0000-000000000001', 'tamanu-postgres', 'restore',
+				NOW() - INTERVAL '20 minutes', NOW() + INTERVAL '40 minutes',
+				'arn:aws:iam::1:role/r', 'b', '')",
+		)
+		.await
+		.unwrap();
+
+		let fleet: Vec<Value> = private
+			.post("/api/upgrade_plans/fleet")
+			.json(&json!({}))
+			.await
+			.json();
+		let row = fleet.iter().find(|r| r["group_id"] == GROUP).unwrap();
+		assert_eq!(
+			row["testable"], false,
+			"an intent that does not migrate tests nothing"
+		);
+		assert!(
+			row["attempt"].is_null(),
+			"and its restores are not a migration test under way"
+		);
+
+		// A declaration on a migrating intent is what turns the plan into work.
+		conn.batch_execute(
+			"INSERT INTO restore_consumer_capabilities
+				(consumer_device_id, intent, semantics)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d0', 'upgrade', '[\"migrate\"]');
+			INSERT INTO restore_replicas
+				(consumer_device_id, group_id, type, intent, name)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d0',
+				'cccccccc-0000-0000-0000-000000000001', 'tamanu-postgres', 'upgrade',
+				'kamaka-upgrade');",
+		)
+		.await
+		.unwrap();
+
+		let fleet: Vec<Value> = private
+			.post("/api/upgrade_plans/fleet")
+			.json(&json!({}))
+			.await
+			.json();
+		let row = fleet.iter().find(|r| r["group_id"] == GROUP).unwrap();
+		assert_eq!(row["testable"], true);
+		assert_eq!(row["attempt"], "in_flight");
+	})
+	.await;
+}
+
 /// A restore takes hours, so a group mid-test must not read as untested: an
 /// issuance with no report yet is an attempt in flight.
 #[tokio::test(flavor = "multi_thread")]
@@ -100,6 +176,14 @@ async fn an_attempt_in_flight_shows_beside_the_verdict() {
 				('cccccccc-0000-0000-0000-000000000001', 'kamaka', '2.60.0');
 			INSERT INTO devices (id, role) VALUES
 				('cccccccc-0000-0000-0000-0000000000d0', 'backup-restore');
+			INSERT INTO restore_consumer_capabilities
+				(consumer_device_id, intent, semantics)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d0', 'upgrade', '[\"migrate\"]');
+			INSERT INTO restore_replicas
+				(consumer_device_id, group_id, type, intent, name)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d0',
+				'cccccccc-0000-0000-0000-000000000001', 'tamanu-postgres', 'upgrade',
+				'kamaka-upgrade');
 			INSERT INTO upgrade_plans (group_id, target_version_id) VALUES
 				('cccccccc-0000-0000-0000-000000000001',
 				 'cccccccc-0000-0000-0000-0000000000f1');",
@@ -165,6 +249,14 @@ async fn a_member_servers_own_restore_is_not_an_attempt() {
 				 'https://clone.example.com', 'central',
 				 'cccccccc-0000-0000-0000-000000000001',
 				 'cccccccc-0000-0000-0000-0000000000d1');
+			INSERT INTO restore_consumer_capabilities
+				(consumer_device_id, intent, semantics)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d0', 'upgrade', '[\"migrate\"]');
+			INSERT INTO restore_replicas
+				(consumer_device_id, group_id, type, intent, name)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d0',
+				'cccccccc-0000-0000-0000-000000000001', 'tamanu-postgres', 'upgrade',
+				'kamaka-upgrade');
 			INSERT INTO upgrade_plans (group_id, target_version_id) VALUES
 				('cccccccc-0000-0000-0000-000000000001',
 				 'cccccccc-0000-0000-0000-0000000000f1');

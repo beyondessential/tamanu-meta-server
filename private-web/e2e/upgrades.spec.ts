@@ -1,11 +1,33 @@
 import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
+	seedDevice,
+	seedRestoreConsumerCapability,
+	seedRestoreReplica,
 	seedServerGroup,
 	seedUpgradePlan,
 	seedVersion,
 	seedVersionKnownIssue,
 } from "./seed";
+
+/** Declare a replica on an intent that migrates, which is what makes a plan
+ * something the pipeline will act on. */
+async function declareUpgradeReplica(
+	sql: Parameters<typeof seedRestoreReplica>[0],
+	groupId: string,
+): Promise<void> {
+	const consumer = await seedDevice(sql, { role: "backup-restore" });
+	await seedRestoreConsumerCapability(sql, {
+		deviceId: consumer.id,
+		intents: [{ intent: "upgrade", semantics: ["check", "once", "migrate"] }],
+	});
+	await seedRestoreReplica(sql, {
+		consumerDeviceId: consumer.id,
+		groupId,
+		intent: "upgrade",
+		name: "upgrade",
+	});
+}
 
 test.describe("upgrades dashboard", () => {
 	test.beforeEach(async ({ sql }) => {
@@ -35,6 +57,7 @@ test.describe("upgrades dashboard", () => {
 			plannedFor: "2020-01-01",
 			note: "site can absorb 2.61 only",
 		});
+		await declareUpgradeReplica(sql, planned.id);
 
 		await page.goto("/upgrades");
 
@@ -64,6 +87,30 @@ test.describe("upgrades dashboard", () => {
 		await expect(page.getByTestId("unplanned-upgrades")).not.toContainText(
 			"kamaka",
 		);
+	});
+
+	test("says a plan with nothing declared to test it is not set up", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+			plannedFor: "2020-01-01",
+		});
+
+		await page.goto("/upgrades");
+
+		// Nothing is declared to migrate this group's data, so no test will ever
+		// run: saying "not yet tested" would leave a reader waiting on a result
+		// that cannot arrive.
+		const row = page
+			.getByTestId("planned-upgrade-row")
+			.filter({ hasText: "kamaka" });
+		await expect(row).toContainText("not set up");
+		await expect(row).not.toContainText("not yet tested");
 	});
 
 	test("says so when nothing is planned", async ({ page, sql }) => {

@@ -12323,6 +12323,13 @@
             ],
             "description": "The plan's target as semver."
           },
+          "testable": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether anything is declared to migrate this group's data. A plan on a\ngroup with nothing declared is never dispatched, so its verdict would sit\nat \"not tested\" indefinitely with nothing on its way. `null` without a\nplan."
+          },
           "verdict": {
             "type": [
               "string",
