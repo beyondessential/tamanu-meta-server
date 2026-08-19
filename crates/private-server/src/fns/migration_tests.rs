@@ -80,6 +80,12 @@ pub async fn attempt_state(
 ) -> Result<Option<AttemptState>> {
 	use database::backups::BackupCredentialIssuance;
 
+	// Issuances carry no intent, so another intent's restore traffic would read
+	// as a test under way.
+	if !database::restore::group_migrates(conn, group_id).await? {
+		return Ok(None);
+	}
+
 	let reports =
 		database::restore::BackupRestoreCheck::list_recent_for_group(conn, group_id, 50).await?;
 	// Member-server devices restore for their own purposes (clone refreshes,

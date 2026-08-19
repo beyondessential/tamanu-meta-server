@@ -100,6 +100,14 @@ async fn an_attempt_in_flight_shows_beside_the_verdict() {
 				('cccccccc-0000-0000-0000-000000000001', 'kamaka', '2.60.0');
 			INSERT INTO devices (id, role) VALUES
 				('cccccccc-0000-0000-0000-0000000000d0', 'backup-restore');
+			INSERT INTO restore_consumer_capabilities
+				(consumer_device_id, intent, semantics)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d0', 'upgrade', '[\"migrate\"]');
+			INSERT INTO restore_replicas
+				(consumer_device_id, group_id, type, intent, name)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d0',
+				'cccccccc-0000-0000-0000-000000000001', 'tamanu-postgres', 'upgrade',
+				'kamaka-upgrade');
 			INSERT INTO upgrade_plans (group_id, target_version_id) VALUES
 				('cccccccc-0000-0000-0000-000000000001',
 				 'cccccccc-0000-0000-0000-0000000000f1');",
@@ -165,6 +173,14 @@ async fn a_member_servers_own_restore_is_not_an_attempt() {
 				 'https://clone.example.com', 'central',
 				 'cccccccc-0000-0000-0000-000000000001',
 				 'cccccccc-0000-0000-0000-0000000000d1');
+			INSERT INTO restore_consumer_capabilities
+				(consumer_device_id, intent, semantics)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d0', 'upgrade', '[\"migrate\"]');
+			INSERT INTO restore_replicas
+				(consumer_device_id, group_id, type, intent, name)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d0',
+				'cccccccc-0000-0000-0000-000000000001', 'tamanu-postgres', 'upgrade',
+				'kamaka-upgrade');
 			INSERT INTO upgrade_plans (group_id, target_version_id) VALUES
 				('cccccccc-0000-0000-0000-000000000001',
 				 'cccccccc-0000-0000-0000-0000000000f1');
@@ -211,6 +227,55 @@ async fn a_member_servers_own_restore_is_not_an_attempt() {
 			.json();
 		let row = fleet.iter().find(|r| r["group_id"] == GROUP).unwrap();
 		assert_eq!(row["attempt"], "ended_without_report");
+	})
+	.await;
+}
+
+/// A group whose only declaration serves another intent restores on its own
+/// cadence, and none of that traffic is a migration test.
+#[tokio::test(flavor = "multi_thread")]
+async fn restores_for_another_intent_are_not_an_attempt() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES
+				('cccccccc-0000-0000-0000-0000000000f1', 2, 61, 0, 'x', 'published');
+			INSERT INTO server_groups (id, name, effective_version) VALUES
+				('cccccccc-0000-0000-0000-000000000001', 'kamaka', '2.60.0');
+			INSERT INTO devices (id, role) VALUES
+				('cccccccc-0000-0000-0000-0000000000d0', 'backup-restore');
+			INSERT INTO restore_consumer_capabilities
+				(consumer_device_id, intent, semantics)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d0', 'analytics',
+				'[\"check\", \"url\"]');
+			INSERT INTO restore_replicas
+				(consumer_device_id, group_id, type, intent, name)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d0',
+				'cccccccc-0000-0000-0000-000000000001', 'tamanu-postgres', 'analytics',
+				'kamaka-analytics');
+			INSERT INTO upgrade_plans (group_id, target_version_id) VALUES
+				('cccccccc-0000-0000-0000-000000000001',
+				 'cccccccc-0000-0000-0000-0000000000f1');
+			INSERT INTO backup_credential_issuances
+				(device_id, group_id, type, purpose, issued_at, expires_at,
+				 sts_assumed_role, bucket, prefix)
+			 VALUES ('cccccccc-0000-0000-0000-0000000000d0',
+				'cccccccc-0000-0000-0000-000000000001', 'tamanu-postgres', 'restore',
+				NOW() - INTERVAL '20 minutes', NOW() + INTERVAL '40 minutes',
+				'arn:aws:iam::1:role/r', 'b', '')",
+		)
+		.await
+		.unwrap();
+
+		let fleet: Vec<Value> = private
+			.post("/api/upgrade_plans/fleet")
+			.json(&json!({}))
+			.await
+			.json();
+		let row = fleet.iter().find(|r| r["group_id"] == GROUP).unwrap();
+		assert!(
+			row["attempt"].is_null(),
+			"an unreported analytics restore is not a migration test"
+		);
 	})
 	.await;
 }

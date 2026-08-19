@@ -445,6 +445,28 @@ impl RestoreConsumerCapability {
 	}
 }
 
+/// Whether any enabled declaration on `group_id` migrates what it restores.
+///
+/// The consumer's advertised `migrate` semantic decides, whatever the intent is
+/// named: only a migrating intent is dispatched a target version.
+// spec: RST#verdicts
+pub async fn group_migrates(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<bool> {
+	for replica in RestoreReplica::list_for_group(db, group_id).await? {
+		if !replica.enabled {
+			continue;
+		}
+		let advertised =
+			RestoreConsumerCapability::list_for_consumer(db, replica.consumer_device_id).await?;
+		if advertised
+			.iter()
+			.any(|d| d.intent == replica.intent && d.has_semantic(semantics::MIGRATE))
+		{
+			return Ok(true);
+		}
+	}
+	Ok(false)
+}
+
 /// Why a server a redacting declaration covers can't be redacted.
 ///
 /// Each of these withholds the server's worklist entry: a replica that
