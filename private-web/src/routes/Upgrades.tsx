@@ -105,7 +105,7 @@ export default function Upgrades() {
 									data-testid="planned-upgrade-row"
 								>
 										<TableCell>
-											<RouterLink to={`/servers/groups/${row.group_id}`}>
+											<RouterLink to={`/groups/${row.group_id}`}>
 												{row.group_name}
 											</RouterLink>
 										</TableCell>
@@ -195,7 +195,7 @@ export default function Upgrades() {
 										data-testid="unplanned-upgrade-row"
 									>
 										<TableCell>
-											<RouterLink to={`/servers/groups/${row.group_id}`}>
+											<RouterLink to={`/groups/${row.group_id}`}>
 												{row.group_name}
 											</RouterLink>
 										</TableCell>
@@ -241,7 +241,7 @@ function PastPlans({ plans }: { plans: PastPlan[] }) {
 					{plans.map((row) => (
 						<TableRow key={row.plan.id} data-testid="past-plan-row">
 								<TableCell>
-									<RouterLink to={`/servers/groups/${row.group_id}`}>
+									<RouterLink to={`/groups/${row.group_id}`}>
 										{row.group_name}
 									</RouterLink>
 								</TableCell>
