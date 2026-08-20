@@ -36,7 +36,14 @@ import {
 	Typography,
 } from "@mui/material";
 import { alpha, type Theme } from "@mui/material/styles";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+	type ReactElement,
+	type ReactNode,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import TimeAgo from "../components/TimeAgo";
@@ -527,7 +534,7 @@ function MonthGrid({
 							/>
 						))}
 						{overflow.length > 0 && (
-							<Tooltip
+							<CalendarTooltip
 								title={overflow
 									.map((entry) => `${entry.group} ${entry.version}`)
 									.join(", ")}
@@ -535,7 +542,7 @@ function MonthGrid({
 								<Typography variant="caption" sx={OVERFLOW_COUNT}>
 									+{overflow.length} more
 								</Typography>
-							</Tooltip>
+							</CalendarTooltip>
 						)}
 					</Box>
 				);
@@ -672,7 +679,7 @@ function CalendarEntry({
 	onEdit: (() => void) | null;
 }) {
 	return (
-		<Tooltip title={<EntryTooltip entry={entry} />}>
+		<CalendarTooltip title={<EntryTooltip entry={entry} />}>
 			<Box
 				{...(onEdit
 					? { component: "button" as const, type: "button", onClick: onEdit }
@@ -703,7 +710,7 @@ function CalendarEntry({
 					</Box>
 				</Box>
 			</Box>
-		</Tooltip>
+		</CalendarTooltip>
 	);
 }
 
@@ -718,7 +725,7 @@ function TimeBlock({
 	const { entry } = block;
 
 	return (
-		<Tooltip title={<EntryTooltip entry={entry} />}>
+		<CalendarTooltip title={<EntryTooltip entry={entry} />}>
 			<Box
 				{...(onEdit
 					? { component: "button" as const, type: "button", onClick: onEdit }
@@ -753,9 +760,42 @@ function TimeBlock({
 						: entry.time && clockRange(entry.time, entry.end)}
 				</Box>
 			</Box>
+		</CalendarTooltip>
+	);
+}
+
+/// Hover card for the calendar: prefers sitting above its entry (flipping when
+/// there's no room), never captures the pointer, and hides once its entry
+/// scrolls out of the grid's clip.
+function CalendarTooltip({
+	title,
+	children,
+}: {
+	title: ReactNode;
+	children: ReactElement;
+}) {
+	return (
+		<Tooltip
+			title={title}
+			placement="top"
+			disableInteractive
+			slotProps={CALENDAR_TOOLTIP_SLOTS}
+		>
+			{children}
 		</Tooltip>
 	);
 }
+
+const CALENDAR_TOOLTIP_SLOTS = {
+	popper: {
+		sx: {
+			'&[data-popper-reference-hidden]': {
+				visibility: "hidden",
+				pointerEvents: "none",
+			},
+		},
+	},
+} as const;
 
 function EntryTooltip({ entry }: { entry: Entry }) {
 	return (
@@ -997,7 +1037,8 @@ const DAY_NUMBER = {
 	height: 26,
 	display: "grid",
 	placeItems: "center",
-	fontSize: "0.68rem",
+	fontSize: "0.85rem",
+	fontWeight: 600,
 	lineHeight: 1,
 	pt: "1px",
 };
