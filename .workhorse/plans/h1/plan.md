@@ -68,25 +68,70 @@ and query traffic never crosses the network, only check results.
 
 This is a revision to the B1 plan, and N1 is scoped from it.
 
-### How the relay authenticates to Canopy
+### Transport: QUIC over the tailnet
 
-Preferred: a Tailscale sidecar on the relay pod, making the pod itself a tailnet node, so
-no cluster-level egress plumbing is needed in the Tamanu cluster. One tailnet node per
-cluster, not per facility. It dials Canopy's existing tailnet name and Canopy authorises
-it by tag.
+The relay needs a long-lived bidirectional connection, which the existing device API does
+not provide: it is HTTP request/response over axum handlers. So the device API is not the
+transport, whatever it contributes to identity.
 
-The alternative is reusing Canopy's device authentication (`device_auth/mtls.rs`,
-`pop.rs`, `tailnet.rs`) with the enrollment-token and challenge flow in
-`server_enrollment_tokens.rs` / `server_enrollment_challenges.rs`. This fits without
-straining the model: `devices` carries no `server_id`, association runs through the
-many-to-many `device_server_associations`, and a device with no server associations is
-already an ordinary case that `tailnet_sweeps` explicitly handles. A relay is therefore a
-device with a new `role` value, not a new principal type, and it inherits enrollment,
-rotation and connection tracking as they stand.
+QUIC over Tailscale, with the TLS layer carrying throwaway certificates. WireGuard already
+provides confidentiality and peer authentication, so the TLS handshake QUIC mandates is
+satisfied rather than relied on. QUIC's multiplexed streams let Canopy hold several
+outstanding requests to one relay without head-of-line blocking, and its connection
+migration survives network blips that would drop a TCP stream.
 
-The trade is that the sidecar route needs no PKI work at all, while the device route
-reuses machinery Canopy already operates and keeps relay identity in the same place as
-every other credentialed thing Canopy talks to.
+`quinn` is the implementation. The workspace already standardises on rustls with the
+`aws-lc-rs` provider, deliberately and with explicit Cargo.toml comments about not pulling
+in a second provider, so quinn must be configured onto that provider rather than
+defaulting to `ring`.
+
+### Authentication: the tailnet peer's tag
+
+Canopy resolves the QUIC connection's remote address through `TailnetDirectory::lookup`
+and checks the returned entry's tags. This is exactly what
+`commons-servers/src/device_auth/tailnet.rs` already does for HTTP requests: gate on
+`is_tailnet_ip`, look the address up in the directory, require a tag, then identify the
+peer. The only change is taking the address from the QUIC connection instead of axum's
+`ClientIp` extractor.
+
+The tag check is load-bearing rather than defence in depth. With certificate verification
+skipped, the tailnet ACL plus this check are the whole gate, so without it any tailnet node
+that can reach the port is a relay.
+
+Optional hardening, cheap and not a PKI: the relay generates a keypair at enrollment,
+Canopy stores its SPKI fingerprint against the relay record, and verification checks that
+pin. No CA, no chain, no rotation infrastructure, so an ACL mistake is not immediately
+fatal.
+
+### Identity model
+
+A relay fits Canopy's device model without straining it: `devices` carries no `server_id`,
+association runs through the many-to-many `device_server_associations`, and a device with
+no server associations is already an ordinary case that `tailnet_sweeps` explicitly
+handles. A relay is a device with a new `role` value, not a new principal type, and it
+inherits enrollment and connection tracking as they stand. Only the transport differs.
+
+### Both ends need a Tailscale sidecar
+
+The relay pod carries a sidecar, making the pod itself a tailnet node, so no cluster-level
+egress plumbing is needed in the Tamanu cluster. One tailnet node per cluster, not per
+facility.
+
+Canopy needs one too. Its current tailnet presence is the operator Ingress
+(`canopy/src/servers.ts`, `ingressClassName: 'tailscale'`), which is HTTP-shaped and
+cannot carry a QUIC listener. The sidecar goes on the singleton worker that owns the relay
+connections, which keeps the operator's Ingress and LoadBalancer paths out of the design
+entirely.
+
+**Both sidecars must run kernel-mode networking.** A Tailscale sidecar in userspace mode
+exposes a SOCKS5/HTTP proxy, which is TCP-only, so QUIC will not pass. Kernel mode means
+`TS_USERSPACE=false`, the `NET_ADMIN` capability, and a TUN device. There is precedent:
+the operator itself runs with `capabilities: { add: ['NET_ADMIN'] }` in
+`k8s-essentials/tailscale.ts`.
+
+This is the assumption most worth confirming against a real deployment before committing,
+because it is the one that would force a fallback to HTTP/2 bidirectional streaming over
+TCP.
 
 ### RBAC the relay needs
 
@@ -170,8 +215,10 @@ relay is down while the cluster is healthy.
 
 - **Whether the extra deployable is warranted** at a fleet of two clusters, versus the API
   server proxy fallback.
-- **Relay authentication to Canopy**: Tailscale sidecar and tag, or the existing device
-  enrollment and mTLS machinery with a new device role.
+- **Kernel-mode sidecar networking**, confirmed against a real deployment. If UDP cannot
+  be made to pass, the transport falls back to HTTP/2 bidirectional streaming over TCP.
+- **Whether to pin the relay's SPKI fingerprint** at enrollment, or rely on the tailnet
+  ACL and tag check alone.
 - **Canopy's own cluster**: relay like any other, or direct in-cluster reads with a
   widened ClusterRole.
 - **The relay's method set**, which is the security boundary and so needs designing
