@@ -77,9 +77,16 @@ it by tag.
 
 The alternative is reusing Canopy's device authentication (`device_auth/mtls.rs`,
 `pop.rs`, `tailnet.rs`) with the enrollment-token and challenge flow in
-`server_enrollment_tokens.rs` / `server_enrollment_challenges.rs`. The machinery fits, but
-Canopy models a device as belonging to a server and a relay is not a server, so it would
-need a distinct principal type. The sidecar route avoids new PKI entirely.
+`server_enrollment_tokens.rs` / `server_enrollment_challenges.rs`. This fits without
+straining the model: `devices` carries no `server_id`, association runs through the
+many-to-many `device_server_associations`, and a device with no server associations is
+already an ordinary case that `tailnet_sweeps` explicitly handles. A relay is therefore a
+device with a new `role` value, not a new principal type, and it inherits enrollment,
+rotation and connection tracking as they stand.
+
+The trade is that the sidecar route needs no PKI work at all, while the device route
+reuses machinery Canopy already operates and keeps relay identity in the same place as
+every other credentialed thing Canopy talks to.
 
 ### RBAC the relay needs
 
@@ -164,7 +171,7 @@ relay is down while the cluster is healthy.
 - **Whether the extra deployable is warranted** at a fleet of two clusters, versus the API
   server proxy fallback.
 - **Relay authentication to Canopy**: Tailscale sidecar and tag, or the existing device
-  enrollment and mTLS machinery with a new principal type.
+  enrollment and mTLS machinery with a new device role.
 - **Canopy's own cluster**: relay like any other, or direct in-cluster reads with a
   widened ClusterRole.
 - **The relay's method set**, which is the security boundary and so needs designing
