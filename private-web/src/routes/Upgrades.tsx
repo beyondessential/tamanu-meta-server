@@ -32,7 +32,7 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
-import { alpha } from "@mui/material/styles";
+import { alpha, type Theme } from "@mui/material/styles";
 import { useMemo, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
@@ -247,14 +247,18 @@ type Entry = {
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-/// Green is this theme's primary, so a met plan owns it and one still ahead
-/// takes the secondary blue: an operator reading the month should not have to
-/// look twice to tell what has happened from what has not.
-const TONES: Record<Tone, "secondary" | "warning" | "success"> = {
-	open: "secondary",
-	late: "warning",
-	done: "success",
-};
+/// Green is canopy's own, so a plan still ahead wears it. A met plan recedes to
+/// grey: it is history, and the month is read for what has yet to happen.
+function toneColour(theme: Theme, tone: Tone): string {
+	switch (tone) {
+		case "done":
+			return theme.palette.text.secondary;
+		case "late":
+			return theme.palette.warning.main;
+		default:
+			return theme.palette.primary.main;
+	}
+}
 
 /// Beyond this a day's entries would crowd the week out of shape, so the rest
 /// sit behind a count that names them.
@@ -417,7 +421,6 @@ function PlanCalendar({ fleet, past }: { fleet: FleetRow[]; past: PastPlan[] }) 
 }
 
 function CalendarEntry({ entry }: { entry: Entry }) {
-	const tone = TONES[entry.tone];
 	const headline =
 		entry.tone === "done"
 			? `${entry.group} reached ${entry.version}`
@@ -443,11 +446,16 @@ function CalendarEntry({ entry }: { entry: Entry }) {
 				data-testid="calendar-entry"
 				sx={(theme) => ({
 					...CALENDAR_ENTRY,
-					bgcolor: alpha(theme.palette[tone].main, 0.14),
-					"&:hover": { bgcolor: alpha(theme.palette[tone].main, 0.26) },
+					bgcolor: alpha(toneColour(theme, entry.tone), 0.14),
+					"&:hover": { bgcolor: alpha(toneColour(theme, entry.tone), 0.26) },
 				})}
 			>
-				<Box sx={{ ...ENTRY_BAR, bgcolor: `${tone}.main` }} />
+				<Box
+					sx={(theme) => ({
+						...ENTRY_BAR,
+						bgcolor: toneColour(theme, entry.tone),
+					})}
+				/>
 				<Box sx={ENTRY_LABEL}>
 					{entry.time && (
 						<>
