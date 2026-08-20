@@ -546,7 +546,45 @@ test.describe("upgrade calendar hours", () => {
 		// cost the version the room to render.
 		await entry.hover();
 		const tip = page.getByRole("tooltip");
-		await expect(tip).toContainText("10pm Pacific/Fiji");
+		await expect(tip).toContainText("10pm FJT (Pacific/Fiji)");
 		await expect(tip).toContainText("after the ward round");
+	});
+});
+
+test.describe("upgrade calendar editing", () => {
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("clicking an entry amends the plan in place", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await sql.query(
+			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
+			[group.id],
+		);
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+
+		const now = new Date();
+		const month = [
+			now.getFullYear(),
+			String(now.getMonth() + 1).padStart(2, "0"),
+		].join("-");
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+			plannedFor: `${month}-15`,
+		});
+
+		await page.goto("/upgrades");
+		await page.getByTestId("calendar-entry").click();
+
+		const dialog = page.getByTestId("edit-plan");
+		await expect(dialog).toContainText("kamaka");
+		await dialog.getByLabel("Planned for").fill(`${month}-17`);
+		await dialog.getByRole("button", { name: "Save" }).click();
+
+		await expect(
+			page.getByTestId("calendar-day").filter({ hasText: "kamaka" }),
+		).toHaveAttribute("data-date", `${month}-17`);
 	});
 });

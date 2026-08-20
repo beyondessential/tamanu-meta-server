@@ -84,6 +84,8 @@ export default function Upgrades() {
 			<PlanCalendar
 				fleet={fleet.data}
 				past={past.status === "ok" ? past.data : []}
+				isAdmin={isAdmin}
+				onAmended={() => setTick((t) => t + 1)}
 			/>
 
 			<Paper variant="outlined" sx={{ p: 2 }} data-testid="planned-upgrades">
@@ -234,7 +236,7 @@ type Day = { date: string; entries: Entry[] };
 type Tone = "open" | "late" | "done";
 
 type Entry = {
-	key: string;
+	planId: string;
 	date: string;
 	groupId: string;
 	group: string;
@@ -268,8 +270,19 @@ const ENTRIES_PER_DAY = 3;
 /// below answers what each plan says; this answers which week is busy and which
 /// two deployments land on the same night.
 // spec: UPG#the-dashboard
-function PlanCalendar({ fleet, past }: { fleet: FleetRow[]; past: PastPlan[] }) {
+function PlanCalendar({
+	fleet,
+	past,
+	isAdmin,
+	onAmended,
+}: {
+	fleet: FleetRow[];
+	past: PastPlan[];
+	isAdmin: boolean;
+	onAmended: () => void;
+}) {
 	const [monthsAhead, setMonthsAhead] = useState(0);
+	const [editing, setEditing] = useState<Entry | null>(null);
 	const today = localDate(new Date());
 
 	const entries = useMemo(() => {
@@ -277,7 +290,7 @@ function PlanCalendar({ fleet, past }: { fleet: FleetRow[]; past: PastPlan[] }) 
 		for (const row of fleet) {
 			if (!row.plan?.planned_for) continue;
 			all.push({
-				key: row.plan.id,
+				planId: row.plan.id,
 				date: row.plan.planned_for,
 				groupId: row.group_id,
 				group: row.group_name,
@@ -293,7 +306,7 @@ function PlanCalendar({ fleet, past }: { fleet: FleetRow[]; past: PastPlan[] }) 
 		for (const row of past) {
 			if (row.outcome !== "met" || !row.plan.planned_for) continue;
 			all.push({
-				key: row.plan.id,
+				planId: row.plan.id,
 				date: row.plan.planned_for,
 				groupId: row.group_id,
 				group: row.group_name,
@@ -399,7 +412,17 @@ function PlanCalendar({ fleet, past }: { fleet: FleetRow[]; past: PastPlan[] }) 
 								</Box>
 							</Box>
 							{day.entries.slice(0, ENTRIES_PER_DAY).map((entry) => (
-								<CalendarEntry key={entry.key} entry={entry} />
+								<CalendarEntry
+									key={entry.planId}
+									entry={entry}
+									// A met plan is history and no longer amendable, so it
+									// keeps the link out to the deployment instead.
+									onEdit={
+										isAdmin && entry.tone !== "done"
+											? () => setEditing(entry)
+											: null
+									}
+								/>
 							))}
 							{overflow.length > 0 && (
 								<Tooltip
@@ -416,11 +439,34 @@ function PlanCalendar({ fleet, past }: { fleet: FleetRow[]; past: PastPlan[] }) 
 					);
 				})}
 			</Box>
+
+			{editing && (
+				<EditPlanDialog
+					planId={editing.planId}
+					groupName={editing.group}
+					targetVersion={editing.version}
+					plannedFor={editing.date}
+					plannedTime={editing.time}
+					plannedZone={editing.zone}
+					note={editing.note}
+					onClose={() => setEditing(null)}
+					onAmended={() => {
+						setEditing(null);
+						onAmended();
+					}}
+				/>
+			)}
 		</Paper>
 	);
 }
 
-function CalendarEntry({ entry }: { entry: Entry }) {
+function CalendarEntry({
+	entry,
+	onEdit,
+}: {
+	entry: Entry;
+	onEdit: (() => void) | null;
+}) {
 	const headline =
 		entry.tone === "done"
 			? `${entry.group} reached ${entry.version}`
@@ -433,7 +479,7 @@ function CalendarEntry({ entry }: { entry: Entry }) {
 					{headline}
 					{entry.time && entry.zone && (
 						<Box sx={ENTRY_NOTE}>
-							{clockTime(entry.time)} {entry.zone}
+							{clockTime(entry.time)} {zoneLabel(entry.zone)} ({entry.zone})
 						</Box>
 					)}
 					{entry.note && <Box sx={ENTRY_NOTE}>{entry.note}</Box>}
@@ -441,14 +487,18 @@ function CalendarEntry({ entry }: { entry: Entry }) {
 			}
 		>
 			<Box
-				component={RouterLink}
-				to={`/groups/${entry.groupId}`}
+				{...(onEdit
+					? { component: "button" as const, type: "button", onClick: onEdit }
+					: { component: RouterLink, to: `/groups/${entry.groupId}` })}
 				data-testid="calendar-entry"
-				sx={(theme) => ({
-					...CALENDAR_ENTRY,
-					bgcolor: alpha(toneColour(theme, entry.tone), 0.14),
-					"&:hover": { bgcolor: alpha(toneColour(theme, entry.tone), 0.26) },
-				})}
+				sx={[
+					(theme) => ({
+						...CALENDAR_ENTRY,
+						bgcolor: alpha(toneColour(theme, entry.tone), 0.14),
+						"&:hover": { bgcolor: alpha(toneColour(theme, entry.tone), 0.26) },
+					}),
+					!!onEdit && ENTRY_BUTTON,
+				]}
 			>
 				<Box
 					sx={(theme) => ({
@@ -565,6 +615,17 @@ const CALENDAR_ENTRY = {
 	color: "text.primary",
 	fontSize: "0.68rem",
 	lineHeight: 1.6,
+};
+
+/// A button element brings its own font and chrome, which the pill has to undo
+/// to sit level with the ones that are still links.
+const ENTRY_BUTTON = {
+	border: 0,
+	width: "100%",
+	font: "inherit",
+	fontSize: "0.68rem",
+	textAlign: "left",
+	cursor: "pointer",
 };
 
 const ENTRY_NOTE = {
@@ -1164,7 +1225,40 @@ function EditPlan({
 	plannedZone,
 	note,
 	onAmended,
-}: {
+}: PlanFields & { onAmended: () => void }) {
+	const [open, setOpen] = useState(false);
+
+	return (
+		<>
+			<IconButton
+				size="small"
+				aria-label={`Edit ${groupName}'s plan`}
+				onClick={() => setOpen(true)}
+				disabled={!planId}
+			>
+				<EditIcon fontSize="small" />
+			</IconButton>
+			{open && (
+				<EditPlanDialog
+					planId={planId}
+					groupName={groupName}
+					targetVersion={targetVersion}
+					plannedFor={plannedFor}
+					plannedTime={plannedTime}
+					plannedZone={plannedZone}
+					note={note}
+					onClose={() => setOpen(false)}
+					onAmended={() => {
+						setOpen(false);
+						onAmended();
+					}}
+				/>
+			)}
+		</>
+	);
+}
+
+type PlanFields = {
 	planId: string;
 	groupName: string;
 	targetVersion: string;
@@ -1172,24 +1266,27 @@ function EditPlan({
 	plannedTime: string | null;
 	plannedZone: string | null;
 	note: string | null;
-	onAmended: () => void;
-}) {
-	const [open, setOpen] = useState(false);
-	const [date, setDate] = useState("");
-	const [time, setTime] = useState("");
-	const [zone, setZone] = useState(DEFAULT_ZONE);
-	const [text, setText] = useState("");
-	const amend = useApiAction("upgrade_plans", "amend");
+};
 
-	// Re-read the plan on each open so a row refreshed underneath doesn't leave
-	// the form showing what it held last time.
-	const start = () => {
-		setDate(plannedFor ?? "");
-		setTime(plannedTime?.slice(0, 5) ?? "");
-		setZone(plannedZone ?? DEFAULT_ZONE);
-		setText(note ?? "");
-		setOpen(true);
-	};
+/// The amendment form. Mounted only while it is open, so it always starts from
+/// the plan as it now stands rather than what it held the last time.
+// spec: UPG#a-plan
+function EditPlanDialog({
+	planId,
+	groupName,
+	targetVersion,
+	plannedFor,
+	plannedTime,
+	plannedZone,
+	note,
+	onClose,
+	onAmended,
+}: PlanFields & { onClose: () => void; onAmended: () => void }) {
+	const [date, setDate] = useState(plannedFor ?? "");
+	const [time, setTime] = useState(plannedTime?.slice(0, 5) ?? "");
+	const [zone, setZone] = useState(plannedZone ?? DEFAULT_ZONE);
+	const [text, setText] = useState(note ?? "");
+	const amend = useApiAction("upgrade_plans", "amend");
 
 	const save = async () => {
 		await amend.call({
@@ -1199,80 +1296,61 @@ function EditPlan({
 			planned_zone: time ? zone : null,
 			note: text || null,
 		});
-		setOpen(false);
 		onAmended();
 	};
 
 	return (
-		<>
-			<IconButton
-				size="small"
-				aria-label={`Edit ${groupName}'s plan`}
-				onClick={start}
-				disabled={!planId}
-			>
-				<EditIcon fontSize="small" />
-			</IconButton>
-			<Dialog
-				open={open}
-				onClose={() => setOpen(false)}
-				fullWidth
-				maxWidth="sm"
-				data-testid="edit-plan"
-			>
-				<DialogTitle>
-					{groupName} &rarr; {targetVersion}
-				</DialogTitle>
-				<DialogContent>
-					<Stack spacing={2} sx={{ mt: 1 }}>
-						<Box sx={WHEN_FIELDS}>
-							<TextField
-								size="small"
-								type="date"
-								label="Planned for"
-								value={date}
-								onChange={(e) => {
-									setDate(e.target.value);
-									if (!e.target.value) setTime("");
-								}}
-								slotProps={{ inputLabel: { shrink: true } }}
-							/>
-							<TextField
-								size="small"
-								type="time"
-								label="Time"
-								value={time}
-								disabled={!date}
-								onChange={(e) => setTime(e.target.value)}
-								slotProps={{ inputLabel: { shrink: true } }}
-							/>
-							<ZoneField value={zone} onChange={setZone} disabled={!time} />
-						</Box>
+		<Dialog open onClose={onClose} fullWidth maxWidth="sm" data-testid="edit-plan">
+			<DialogTitle>
+				{groupName} &rarr; {targetVersion}
+			</DialogTitle>
+			<DialogContent>
+				<Stack spacing={2} sx={{ mt: 1 }}>
+					<Box sx={WHEN_FIELDS}>
 						<TextField
 							size="small"
-							label="Note"
-							value={text}
-							onChange={(e) => setText(e.target.value)}
-							multiline
-							minRows={2}
+							type="date"
+							label="Planned for"
+							value={date}
+							onChange={(e) => {
+								setDate(e.target.value);
+								if (!e.target.value) setTime("");
+							}}
+							slotProps={{ inputLabel: { shrink: true } }}
 						/>
-						<Typography variant="body2" color="text.secondary">
-							To move {groupName} to a different version, record a new plan
-							instead. This one is kept as history.
-						</Typography>
-						{amend.error && (
-							<Alert severity="error">{amend.error.message}</Alert>
-						)}
-					</Stack>
-				</DialogContent>
-				<DialogActions>
-					<Button onClick={() => setOpen(false)}>Cancel</Button>
-					<Button variant="contained" onClick={save} disabled={amend.pending}>
-						Save
-					</Button>
-				</DialogActions>
-			</Dialog>
-		</>
+						<TextField
+							size="small"
+							type="time"
+							label="Time"
+							value={time}
+							disabled={!date}
+							onChange={(e) => setTime(e.target.value)}
+							slotProps={{ inputLabel: { shrink: true } }}
+						/>
+						<ZoneField value={zone} onChange={setZone} disabled={!time} />
+					</Box>
+					<TextField
+						size="small"
+						label="Note"
+						value={text}
+						onChange={(e) => setText(e.target.value)}
+						multiline
+						minRows={2}
+					/>
+					<Typography variant="body2" color="text.secondary">
+						To move {groupName} to a different version, record a new plan
+						instead. This one is kept as history.
+					</Typography>
+					{amend.error && <Alert severity="error">{amend.error.message}</Alert>}
+				</Stack>
+			</DialogContent>
+			<DialogActions>
+				<Button onClick={onClose}>Cancel</Button>
+				<Button variant="contained" onClick={save} disabled={amend.pending}>
+					Save
+				</Button>
+			</DialogActions>
+		</Dialog>
 	);
 }
 
