@@ -993,18 +993,19 @@ const CALENDAR_CELL = {
 };
 
 const DAY_NUMBER = {
-	width: 22,
-	height: 22,
+	width: 26,
+	height: 26,
 	display: "grid",
 	placeItems: "center",
-	fontSize: "0.7rem",
+	fontSize: "0.68rem",
 };
 
 const TODAY_NUMBER = {
+	width: 28,
+	height: 28,
 	bgcolor: "primary.dark",
 	color: "common.white",
 	borderRadius: "50%",
-	fontWeight: 600,
 };
 
 const CALENDAR_ENTRY = {
@@ -1064,7 +1065,7 @@ const DAY_BUTTON = {
 	border: 0,
 	bgcolor: "transparent",
 	font: "inherit",
-	fontSize: "0.7rem",
+	fontSize: "0.68rem",
 	cursor: "pointer",
 	p: 0,
 };
