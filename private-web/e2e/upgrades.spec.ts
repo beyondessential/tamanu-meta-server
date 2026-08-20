@@ -459,3 +459,49 @@ test.describe("upgrades dashboard", () => {
 		await expect(row).not.toContainText("FJT");
 	});
 });
+
+test.describe("upgrade calendar", () => {
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("shows a dated plan on the day it lands", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await sql.query(
+			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
+			[group.id],
+		);
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+
+		const now = new Date();
+		const day = new Date(now.getFullYear(), now.getMonth(), 15);
+		const iso = [
+			day.getFullYear(),
+			String(day.getMonth() + 1).padStart(2, "0"),
+			"15",
+		].join("-");
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+			plannedFor: iso,
+		});
+
+		await page.goto("/upgrades");
+
+		const cell = page
+			.getByTestId("upgrade-calendar")
+			.getByTestId("calendar-day")
+			.filter({ has: page.locator(`[data-testid="calendar-entry"]`) });
+		await expect(cell).toHaveAttribute("data-date", iso);
+		await expect(cell).toContainText("kamaka 2.61.0");
+
+		// The month the reader is looking at is named, and moves.
+		await expect(page.getByTestId("upgrade-calendar")).toContainText(
+			now.toLocaleDateString(undefined, { month: "long", year: "numeric" }),
+		);
+		await page.getByRole("button", { name: "next month" }).click();
+		await expect(page.getByTestId("calendar-entry")).toHaveCount(0);
+		await page.getByRole("button", { name: "Today" }).click();
+		await expect(page.getByTestId("calendar-entry")).toHaveCount(1);
+	});
+});

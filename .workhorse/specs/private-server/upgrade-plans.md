@@ -85,6 +85,27 @@ The same view presents the plans that have closed, most recently closed first, s
 Each shows where it was going, the date and hour it was planned for, and how it closed: met, replaced by a later plan, or withdrawn with the operator who withdrew it and when.
 A withdrawn plan is otherwise unreadable anywhere, since a deployment that stopped going somewhere leaves no other mark on the fleet.
 
+## The calendar feed
+
+Canopy publishes planned upgrades as an iCalendar feed a calendar application subscribes to, so the fleet's intent appears where people already look to see what a day holds.
+
+The feed is served by the internet-facing interface rather than the operator one, because the calendar services people use fetch a subscription unattended from their own infrastructure and cannot reach the operator network.
+Access is carried by a token in the URL: a calendar application has no way to be asked for a credential, so holding the URL is what grants the read.
+
+An operator mints a feed against a label saying whose calendar it is for, and the URL is shown once at minting and never again.
+A feed does not expire.
+A subscription that lapses stops updating without telling its subscriber, so a feed ends by being revoked, after which the URL serves nothing.
+Canopy records when each feed was last fetched, so one nobody subscribed to reads differently from one that is live.
+
+The calendar carries the plans that name a day, while a plan is where the deployment is going and after it has been met.
+A replaced or withdrawn plan leaves the calendar, since the deployment is no longer going there; a met one stays as the record of what landed.
+
+An entry names the deployment and the version it is going to, and carries what the plan records beyond the day: the version the deployment is on now, the note, and who planned it, or for a met plan the day it landed.
+A plan that names an hour is an entry at that hour, resolved from the zone the plan is a wall clock in so every subscriber reads the same instant whatever their own zone; a plan with only a day is an all-day entry.
+An entry marks nobody busy: a planned upgrade is something to know about rather than something that occupies whoever subscribed.
+
+An entry keeps its identity for the life of the plan, so amending a date moves the entry a subscriber already has rather than leaving them holding two.
+
 ## Out of scope
 
 - Performing, scheduling, or triggering an upgrade.

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub mod admins;
 pub mod backups;
 pub mod bestool;
+pub mod calendar_tokens;
 pub mod certificates;
 pub mod commons;
 pub mod devices;
@@ -57,6 +58,7 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 			.nest("/admins", admins::routes())
 			.nest("/backups", backups::routes())
 			.nest("/bestool", bestool::routes())
+			.nest("/calendar_tokens", calendar_tokens::routes())
 			.nest("/certificates", certificates::routes())
 			.nest("/commons", commons::routes())
 			.nest("/devices", devices::routes())

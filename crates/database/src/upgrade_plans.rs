@@ -241,6 +241,26 @@ impl UpgradePlan {
 			.map_err(AppError::from)
 	}
 
+	/// Plans that belong on a calendar: those with a day, still open or since
+	/// met.
+	///
+	/// A replaced or withdrawn plan is not where the deployment is going, so it
+	/// leaves the calendar; a met one stays as the record of what landed.
+	// spec: UPG#the-calendar-feed
+	pub async fn dated(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		use crate::schema::upgrade_plans::dsl;
+
+		dsl::upgrade_plans
+			.select(Self::as_select())
+			.filter(dsl::planned_for.is_not_null())
+			.filter(dsl::superseded_at.is_null())
+			.filter(dsl::withdrawn_at.is_null())
+			.order(dsl::planned_for.asc())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Amend an open plan's date and note.
 	///
 	/// The same plan better described, so it is not superseded and does not

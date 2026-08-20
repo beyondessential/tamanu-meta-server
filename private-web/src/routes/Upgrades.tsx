@@ -1,3 +1,6 @@
+import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
+import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
@@ -75,6 +78,11 @@ export default function Upgrades() {
 					onRecorded={() => setTick((t) => t + 1)}
 				/>
 			)}
+
+			<PlanCalendar
+				fleet={fleet.data}
+				past={past.status === "ok" ? past.data : []}
+			/>
 
 			<Paper variant="outlined" sx={{ p: 2 }} data-testid="planned-upgrades">
 				<Typography variant="h6" component="h2" gutterBottom>
@@ -214,6 +222,194 @@ export default function Upgrades() {
 		</Stack>
 	);
 }
+
+type FleetRow = ApiResponse<"upgrade_plans", "fleet">[number];
+
+type Day = { date: string; entries: Entry[] };
+
+type Entry = { key: string; groupId: string; label: string; done: boolean };
+
+const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/// The month a deployment moves, read the way anyone reads a month. The table
+/// below answers what each plan says; this answers which week is busy and which
+/// two deployments land on the same night.
+// spec: UPG#the-dashboard
+function PlanCalendar({ fleet, past }: { fleet: FleetRow[]; past: PastPlan[] }) {
+	const [monthsAhead, setMonthsAhead] = useState(0);
+	const today = localDate(new Date());
+
+	const entries = useMemo(() => {
+		const all: Array<Entry & { date: string }> = [];
+		for (const row of fleet) {
+			if (!row.plan?.planned_for) continue;
+			all.push({
+				key: row.plan.id,
+				date: row.plan.planned_for,
+				groupId: row.group_id,
+				label: `${row.group_name} ${row.target_version ?? ""}`.trim(),
+				done: false,
+			});
+		}
+		// Met plans stay on the calendar: what landed is half of what a month
+		// of upgrades looked like.
+		for (const row of past) {
+			if (row.outcome !== "met" || !row.plan.planned_for) continue;
+			all.push({
+				key: row.plan.id,
+				date: row.plan.planned_for,
+				groupId: row.group_id,
+				label: `${row.group_name} ${row.target_version}`,
+				done: true,
+			});
+		}
+		return all;
+	}, [fleet, past]);
+
+	const start = new Date();
+	start.setDate(1);
+	start.setMonth(start.getMonth() + monthsAhead);
+	const weeks = monthWeeks(start, entries);
+
+	return (
+		<Paper variant="outlined" sx={{ p: 2 }} data-testid="upgrade-calendar">
+			<Stack
+				direction="row"
+				spacing={1}
+				sx={{ alignItems: "center", mb: 1 }}
+			>
+				<Typography variant="h6" component="h2" sx={{ flexGrow: 1 }}>
+					{start.toLocaleDateString(undefined, {
+						month: "long",
+						year: "numeric",
+					})}
+				</Typography>
+				<Button
+					size="small"
+					component={RouterLink}
+					to="/settings/calendar-feeds"
+					startIcon={<CalendarMonthIcon />}
+				>
+					Subscribe
+				</Button>
+				<IconButton
+					size="small"
+					aria-label="previous month"
+					onClick={() => setMonthsAhead((m) => m - 1)}
+				>
+					<ChevronLeftIcon fontSize="small" />
+				</IconButton>
+				<Button size="small" onClick={() => setMonthsAhead(0)}>
+					Today
+				</Button>
+				<IconButton
+					size="small"
+					aria-label="next month"
+					onClick={() => setMonthsAhead((m) => m + 1)}
+				>
+					<ChevronRightIcon fontSize="small" />
+				</IconButton>
+			</Stack>
+
+			<Box sx={CALENDAR_GRID}>
+				{WEEKDAYS.map((day) => (
+					<Typography key={day} variant="caption" color="text.secondary">
+						{day}
+					</Typography>
+				))}
+				{weeks.flat().map((day) => (
+					<Box
+						key={day.date}
+						data-testid="calendar-day"
+						data-date={day.date}
+						sx={{
+							...CALENDAR_CELL,
+							opacity: day.date.slice(0, 7) === localDate(start).slice(0, 7) ? 1 : 0.4,
+							borderColor: day.date === today ? "primary.main" : "divider",
+						}}
+					>
+						<Typography variant="caption" color="text.secondary">
+							{Number(day.date.slice(8))}
+						</Typography>
+						{day.entries.map((entry) => (
+							<Tooltip key={entry.key} title={entry.label}>
+								<Chip
+									size="small"
+									clickable
+									component={RouterLink}
+									to={`/groups/${entry.groupId}`}
+									color={entry.done ? "success" : "primary"}
+									variant={entry.done ? "outlined" : "filled"}
+									label={entry.label}
+									data-testid="calendar-entry"
+									sx={CALENDAR_CHIP}
+								/>
+							</Tooltip>
+						))}
+					</Box>
+				))}
+			</Box>
+		</Paper>
+	);
+}
+
+/// The weeks covering `month`, Monday first, each day carrying the plans that
+/// fall on it. Leading and trailing days belong to the neighbouring months and
+/// are drawn faded rather than left blank, so a plan on the 1st or the 31st is
+/// never off the edge of the view.
+function monthWeeks(
+	month: Date,
+	entries: Array<Entry & { date: string }>,
+): Day[][] {
+	const first = new Date(month.getFullYear(), month.getMonth(), 1);
+	const cursor = new Date(first);
+	cursor.setDate(1 - ((first.getDay() + 6) % 7));
+
+	const weeks: Day[][] = [];
+	for (let week = 0; week < 6; week++) {
+		const days: Day[] = [];
+		for (let day = 0; day < 7; day++) {
+			const date = localDate(cursor);
+			days.push({ date, entries: entries.filter((e) => e.date === date) });
+			cursor.setDate(cursor.getDate() + 1);
+		}
+		weeks.push(days);
+		// A month spans six weeks only when it starts late enough to need one.
+		if (cursor.getMonth() !== month.getMonth() && week >= 4) break;
+	}
+	return weeks;
+}
+
+function localDate(at: Date): string {
+	return [
+		at.getFullYear(),
+		String(at.getMonth() + 1).padStart(2, "0"),
+		String(at.getDate()).padStart(2, "0"),
+	].join("-");
+}
+
+const CALENDAR_GRID = {
+	display: "grid",
+	gridTemplateColumns: "repeat(7, 1fr)",
+	gap: 0.5,
+};
+
+const CALENDAR_CELL = {
+	minHeight: 76,
+	p: 0.5,
+	border: 1,
+	borderRadius: 1,
+	display: "flex",
+	flexDirection: "column",
+	gap: 0.25,
+	overflow: "hidden",
+};
+
+const CALENDAR_CHIP = {
+	height: 18,
+	maxWidth: "100%",
+	"& .MuiChip-label": { px: 0.5, fontSize: "0.65rem" },
+};
 
 /// What each deployment planned before, and how it ended. A withdrawn plan is
 /// readable here or nowhere: a deployment that stopped going somewhere leaves

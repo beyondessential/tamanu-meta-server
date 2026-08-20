@@ -7,6 +7,7 @@ mod admins;
 mod backfill_registered_at_migration;
 mod backup_detection;
 mod backups;
+mod calendar_tokens;
 mod certificate_alerts;
 mod check_liveness;
 mod check_policies;

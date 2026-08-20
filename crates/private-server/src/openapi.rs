@@ -19,6 +19,7 @@ use utoipa::{
 		(name = "admins", description = "Admin email allow-list management."),
 		(name = "backups", description = "Group backup-repo onboarding, scheduling, and stats."),
 		(name = "bestool", description = "Bestool SQL snippet library."),
+		(name = "calendar_tokens", description = "Subscription feeds of planned upgrades, for calendar applications."),
 		(name = "certificates", description = "TLS certificates and public names: what each server holds, the pause and profile that govern them, and revocation."),
 		(name = "commons", description = "Shared configuration and identity helpers."),
 		(name = "devices", description = "Device registry, trust, and key management."),

@@ -821,6 +821,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/calendar_tokens/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List calendar feeds.
+         * @description Returns every feed that has ever been minted, newest first, including ones
+         *     that have since been revoked. Feed URLs are never included, only metadata.
+         */
+        post: operations["calendar_tokens_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/calendar_tokens/mint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint a calendar feed.
+         * @description Returns a subscription URL that reads planned upgrades, for pasting into a
+         *     calendar application. The URL appears only in this response and cannot be
+         *     retrieved again, so it must be copied out immediately. Anyone holding it can
+         *     read the feed, which is what lets a calendar service fetch it unattended.
+         *     Returns 400 if the supplied name is empty or only whitespace.
+         */
+        post: operations["calendar_tokens_mint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/calendar_tokens/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke a calendar feed.
+         * @description Immediately stops the URL serving. Subscribers keep whatever their calendar
+         *     last fetched until they remove the subscription. Revoking an already-revoked
+         *     feed succeeds without doing anything further. Returns 404 if no feed with
+         *     that id exists.
+         */
+        post: operations["calendar_tokens_revoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/certificates/authority": {
         parameters: {
             query?: never;
@@ -4355,6 +4423,37 @@ export interface components {
             value: string;
         };
         /**
+         * @description Metadata about a calendar feed. Never includes the token in its URL — that
+         *     is only ever returned once, at minting time.
+         */
+        CalendarTokenView: {
+            /**
+             * Format: date-time
+             * @description When it was minted.
+             */
+            created_at: string;
+            /** @description The login of the admin who minted it. */
+            created_by: string;
+            /**
+             * Format: uuid
+             * @description Unique identifier of the feed.
+             */
+            id: string;
+            /**
+             * Format: date-time
+             * @description When a calendar client last fetched it, or `null` if none ever has. May
+             *     lag the true last fetch by up to a minute.
+             */
+            last_used_at?: string | null;
+            /** @description Operator-chosen label for who or what subscribes to it. */
+            name: string;
+            /**
+             * Format: date-time
+             * @description When it was revoked, or `null` if it has not been.
+             */
+            revoked_at?: string | null;
+        };
+        /**
          * @description What canopy does for a product's servers.
          *
          *     Reachability, health checks and backups are deliberately absent: checks
@@ -6460,6 +6559,33 @@ export interface components {
             name: string;
         };
         /**
+         * @description Request body for minting a new calendar feed. Named apart from the MCP
+         *     one because utoipa keys component schemas by short name.
+         */
+        MintCalendarArgs: {
+            /**
+             * @description Operator-chosen label, e.g. whose calendar this is for. Cannot be empty
+             *     or only whitespace.
+             */
+            name: string;
+        };
+        /**
+         * @description The result of minting a calendar feed: its metadata plus the one-time URL.
+         *     This is the only response that will ever include the URL.
+         */
+        MintedCalendar: {
+            /** @description The feed's path on the public API host, for building the URL by hand. */
+            path: string;
+            /** @description Metadata about the newly minted feed. */
+            token: components["schemas"]["CalendarTokenView"];
+            /**
+             * @description The subscription URL. Shown once; never retrievable again. `null` when
+             *     the public API base URL is not configured, in which case `path` is all
+             *     there is to go on.
+             */
+            url?: string | null;
+        };
+        /**
          * @description The result of minting a new MCP access token: its metadata plus the
          *     one-time secret value. This is the only response that will ever include
          *     the secret.
@@ -7772,6 +7898,14 @@ export interface components {
             /**
              * Format: uuid
              * @description The id of the token to revoke.
+             */
+            id: string;
+        };
+        /** @description Request body for revoking a calendar feed. */
+        RevokeCalendarArgs: {
+            /**
+             * Format: uuid
+             * @description The id of the feed to revoke.
              */
             id: string;
         };
@@ -10531,6 +10665,136 @@ export interface operations {
                 };
             };
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    calendar_tokens_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description All calendar feeds, newest first, revoked included. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarTokenView"][];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    calendar_tokens_mint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MintCalendarArgs"];
+            };
+        };
+        responses: {
+            /** @description Freshly minted feed; the URL in this response is shown once. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MintedCalendar"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    calendar_tokens_revoke: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RevokeCalendarArgs"];
+            };
+        };
+        responses: {
+            /** @description Feed revoked (idempotent). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
