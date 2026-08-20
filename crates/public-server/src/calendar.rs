@@ -208,8 +208,13 @@ fn event(
 	} else if let Some(running) = &group.effective_version {
 		description.push(format!("Now on {running}"));
 	}
-	if let Some(note) = &plan.note {
-		description.push(note.clone());
+	if let Some(note) = plan
+		.note
+		.as_deref()
+		.map(str::trim)
+		.filter(|n| !n.is_empty())
+	{
+		description.push(note.to_owned());
 	}
 	if let Some(by) = &plan.created_by {
 		description.push(format!("Planned by {by}"));
