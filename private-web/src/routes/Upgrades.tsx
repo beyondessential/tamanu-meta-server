@@ -582,14 +582,21 @@ function TimeGrid({
 
 	return (
 		<Box sx={TIME_FRAME}>
-			<Box sx={{ display: "grid", gridTemplateColumns: columns }}>
+			<Box
+				sx={{
+					display: "grid",
+					gridTemplateColumns: columns,
+					borderBottom: 1,
+					borderColor: "divider",
+				}}
+			>
 				<Box />
 				{days.map((date) => (
 					<Box
 						key={date}
 						sx={[COLUMN_HEAD, marked(date)]}
 					>
-						<Box component="span" sx={COLUMN_WEEKDAY}>
+						<Box component="span" sx={WEEKDAY_LABEL}>
 							{weekdayOf(date)}
 						</Box>
 						<Box
@@ -991,13 +998,15 @@ const CALENDAR_GRID = {
 	overflow: "hidden",
 };
 
-const WEEKDAY_CELL = {
-	bgcolor: "background.paper",
+const WEEKDAY_LABEL = {
 	color: "text.secondary",
+	fontSize: "0.85rem",
+};
+
+const WEEKDAY_CELL = {
+	...WEEKDAY_LABEL,
+	bgcolor: "background.paper",
 	textAlign: "center",
-	textTransform: "uppercase",
-	letterSpacing: "0.08em",
-	fontSize: "0.65rem",
 	py: 0.75,
 };
 
@@ -1013,6 +1022,7 @@ const CALENDAR_CELL = {
 const DAY_NUMBER = {
 	width: 26,
 	height: 26,
+	color: "text.secondary",
 	display: "grid",
 	placeItems: "center",
 	fontSize: "0.85rem",
@@ -1100,7 +1110,7 @@ const TIME_FRAME = {
 
 const COLUMN_HEAD = {
 	display: "flex",
-	alignItems: "center",
+	alignItems: "baseline",
 	justifyContent: "center",
 	gap: 0.5,
 	py: 0.5,
@@ -1108,16 +1118,10 @@ const COLUMN_HEAD = {
 	borderColor: "divider",
 };
 
-const COLUMN_WEEKDAY = {
-	color: "text.secondary",
-	textTransform: "uppercase",
-	letterSpacing: "0.08em",
-	fontSize: "0.7rem",
-};
-
 const HOUR_LABEL = {
 	height: HOUR_HEIGHT,
 	display: "flex",
+	alignItems: "center",
 	justifyContent: "flex-end",
 	pr: 0.75,
 	color: "text.secondary",
@@ -1130,7 +1134,7 @@ const HOUR_COLUMN = (theme: Theme) => ({
 	borderLeft: 1,
 	borderColor: "divider",
 	minWidth: 0,
-	backgroundImage: `repeating-linear-gradient(to bottom, ${theme.palette.divider} 0 1px, transparent 1px ${HOUR_HEIGHT}px)`,
+	backgroundImage: `repeating-linear-gradient(to bottom, transparent 0 ${HOUR_HEIGHT - 1}px, ${theme.palette.divider} ${HOUR_HEIGHT - 1}px ${HOUR_HEIGHT}px)`,
 });
 
 const TIME_BLOCK = {
