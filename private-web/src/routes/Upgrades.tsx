@@ -602,28 +602,6 @@ function TimeGrid({
 				))}
 			</Box>
 
-			<Box sx={{ display: "grid", gridTemplateColumns: columns, ...ALLDAY_ROW }}>
-				<Box sx={GUTTER_LABEL}>all day</Box>
-				{days.map((date) => (
-					<Box
-						key={date}
-						data-testid="calendar-allday"
-						data-date={date}
-						sx={[ALLDAY_CELL, marked(date)]}
-					>
-						{entries
-							.filter((entry) => entry.date === date && !entry.time)
-							.map((entry) => (
-								<CalendarEntry
-									key={entry.planId}
-									entry={entry}
-									onEdit={editor(entry)}
-								/>
-							))}
-					</Box>
-				))}
-			</Box>
-
 			<Box ref={hours} sx={{ maxHeight: VISIBLE_HOURS * HOUR_HEIGHT, overflowY: "auto" }}>
 				<Box
 					sx={{
@@ -1133,33 +1111,6 @@ const COLUMN_WEEKDAY = {
 	color: "text.secondary",
 	textTransform: "uppercase",
 	letterSpacing: "0.08em",
-	fontSize: "0.7rem",
-};
-
-const ALLDAY_ROW = {
-	borderTop: 1,
-	borderBottom: 1,
-	borderColor: "divider",
-	minHeight: 32,
-};
-
-const ALLDAY_CELL = {
-	display: "flex",
-	flexDirection: "column",
-	gap: 0.25,
-	p: 0.5,
-	minWidth: 0,
-	borderLeft: 1,
-	borderColor: "divider",
-	"& > *": { fontSize: "0.75rem" },
-};
-
-const GUTTER_LABEL = {
-	display: "flex",
-	alignItems: "center",
-	justifyContent: "flex-end",
-	pr: 0.75,
-	color: "text.secondary",
 	fontSize: "0.7rem",
 };
 
