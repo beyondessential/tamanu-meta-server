@@ -998,6 +998,8 @@ const DAY_NUMBER = {
 	display: "grid",
 	placeItems: "center",
 	fontSize: "0.68rem",
+	lineHeight: 1,
+	pt: "1px",
 };
 
 const TODAY_NUMBER = {
@@ -1044,11 +1046,11 @@ const ENTRY_LABEL = {
 	whiteSpace: "nowrap",
 };
 
-const HOUR_HEIGHT = 34;
+const HOUR_HEIGHT = 40;
 
 const VISIBLE_HOURS = 11;
 
-const GUTTER = 52;
+const GUTTER = 58;
 
 const HOURS = [...Array(24).keys()];
 
@@ -1064,10 +1066,10 @@ const VIEW_BUTTON = {
 const DAY_BUTTON = {
 	border: 0,
 	bgcolor: "transparent",
-	font: "inherit",
-	fontSize: "0.68rem",
+	fontFamily: "inherit",
 	cursor: "pointer",
-	p: 0,
+	px: 0,
+	pb: 0,
 };
 
 const TIME_FRAME = {
@@ -1091,14 +1093,14 @@ const COLUMN_WEEKDAY = {
 	color: "text.secondary",
 	textTransform: "uppercase",
 	letterSpacing: "0.08em",
-	fontSize: "0.65rem",
+	fontSize: "0.7rem",
 };
 
 const ALLDAY_ROW = {
 	borderTop: 1,
 	borderBottom: 1,
 	borderColor: "divider",
-	minHeight: 28,
+	minHeight: 32,
 };
 
 const ALLDAY_CELL = {
@@ -1109,6 +1111,7 @@ const ALLDAY_CELL = {
 	minWidth: 0,
 	borderLeft: 1,
 	borderColor: "divider",
+	"& > *": { fontSize: "0.75rem" },
 };
 
 const GUTTER_LABEL = {
@@ -1117,7 +1120,7 @@ const GUTTER_LABEL = {
 	justifyContent: "flex-end",
 	pr: 0.75,
 	color: "text.secondary",
-	fontSize: "0.62rem",
+	fontSize: "0.7rem",
 };
 
 const HOUR_LABEL = {
@@ -1126,7 +1129,7 @@ const HOUR_LABEL = {
 	justifyContent: "flex-end",
 	pr: 0.75,
 	color: "text.secondary",
-	fontSize: "0.62rem",
+	fontSize: "0.7rem",
 	lineHeight: 1.2,
 };
 
@@ -1148,14 +1151,13 @@ const TIME_BLOCK = {
 	borderRadius: 0.75,
 	textDecoration: "none",
 	color: "text.primary",
-	fontSize: "0.68rem",
-	lineHeight: 1.4,
+	fontSize: "0.75rem",
+	lineHeight: 1.45,
 };
 
 const BLOCK_BUTTON = {
 	display: "block",
-	font: "inherit",
-	fontSize: "0.68rem",
+	fontFamily: "inherit",
 	textAlign: "left",
 	cursor: "pointer",
 };
@@ -1185,7 +1187,7 @@ const NOW_LINE = {
 const BLOCK_HOURS = {
 	...ENTRY_LABEL,
 	color: "text.secondary",
-	fontSize: "0.62rem",
+	fontSize: "0.68rem",
 };
 
 const OVERFLOW_COUNT = {
