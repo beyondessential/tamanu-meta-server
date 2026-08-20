@@ -505,3 +505,48 @@ test.describe("upgrade calendar", () => {
 		await expect(page.getByTestId("calendar-entry")).toHaveCount(1);
 	});
 });
+
+test.describe("upgrade calendar hours", () => {
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("an entry leads with the hour, and names the zone on hover", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await sql.query(
+			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
+			[group.id],
+		);
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+
+		const now = new Date();
+		const iso = [
+			now.getFullYear(),
+			String(now.getMonth() + 1).padStart(2, "0"),
+			"15",
+		].join("-");
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+			plannedFor: iso,
+			plannedTime: "22:00",
+			plannedZone: "Pacific/Fiji",
+			note: "after the ward round",
+		});
+
+		await page.goto("/upgrades");
+
+		const entry = page.getByTestId("calendar-entry");
+		await expect(entry).toHaveText("10pm kamaka 2.61.0");
+
+		// The zone is one hover away rather than in the cell, where it would
+		// cost the version the room to render.
+		await entry.hover();
+		const tip = page.getByRole("tooltip");
+		await expect(tip).toContainText("10pm Pacific/Fiji");
+		await expect(tip).toContainText("after the ward round");
+	});
+});

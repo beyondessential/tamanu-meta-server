@@ -239,6 +239,8 @@ type Entry = {
 	groupId: string;
 	group: string;
 	version: string;
+	time: string | null;
+	zone: string | null;
 	note: string | null;
 	tone: Tone;
 };
@@ -276,6 +278,8 @@ function PlanCalendar({ fleet, past }: { fleet: FleetRow[]; past: PastPlan[] }) 
 				groupId: row.group_id,
 				group: row.group_name,
 				version: row.target_version ?? "",
+				time: row.plan.planned_time,
+				zone: row.plan.planned_zone,
 				note: row.plan.note,
 				tone: row.late ? "late" : "open",
 			});
@@ -290,11 +294,17 @@ function PlanCalendar({ fleet, past }: { fleet: FleetRow[]; past: PastPlan[] }) 
 				groupId: row.group_id,
 				group: row.group_name,
 				version: row.target_version,
+				time: row.plan.planned_time,
+				zone: row.plan.planned_zone,
 				note: row.plan.note,
 				tone: "done",
 			});
 		}
-		return all.sort((a, b) => a.group.localeCompare(b.group));
+		return all.sort(
+			(a, b) =>
+				(a.time ?? "").localeCompare(b.time ?? "") ||
+				a.group.localeCompare(b.group),
+		);
 	}, [fleet, past]);
 
 	const start = new Date();
@@ -418,6 +428,11 @@ function CalendarEntry({ entry }: { entry: Entry }) {
 			title={
 				<>
 					{headline}
+					{entry.time && entry.zone && (
+						<Box sx={ENTRY_NOTE}>
+							{clockTime(entry.time)} {entry.zone}
+						</Box>
+					)}
 					{entry.note && <Box sx={ENTRY_NOTE}>{entry.note}</Box>}
 				</>
 			}
@@ -434,6 +449,13 @@ function CalendarEntry({ entry }: { entry: Entry }) {
 			>
 				<Box sx={{ ...ENTRY_BAR, bgcolor: `${tone}.main` }} />
 				<Box sx={ENTRY_LABEL}>
+					{entry.time && (
+						<>
+							<Box component="span" sx={{ color: "text.secondary" }}>
+								{clockTime(entry.time)}
+							</Box>{" "}
+						</>
+					)}
 					<Box component="span" sx={{ fontWeight: 500 }}>
 						{entry.group}
 					</Box>{" "}
