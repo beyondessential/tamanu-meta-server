@@ -10,6 +10,7 @@ import {
 	Autocomplete,
 	Box,
 	Button,
+	ButtonGroup,
 	Chip,
 	Collapse,
 	createFilterOptions,
@@ -31,6 +32,7 @@ import {
 	Tooltip,
 	Typography,
 } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import { useMemo, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
@@ -227,9 +229,33 @@ type FleetRow = ApiResponse<"upgrade_plans", "fleet">[number];
 
 type Day = { date: string; entries: Entry[] };
 
-type Entry = { key: string; groupId: string; label: string; done: boolean };
+/// How an entry reads at a glance: where a deployment is going, where it has
+/// gone, and where the day it named has been and passed.
+type Tone = "open" | "late" | "done";
+
+type Entry = {
+	key: string;
+	date: string;
+	groupId: string;
+	group: string;
+	version: string;
+	tone: Tone;
+};
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+/// Green is this theme's primary, so a met plan owns it and one still ahead
+/// takes the secondary blue: an operator reading the month should not have to
+/// look twice to tell what has happened from what has not.
+const TONES: Record<Tone, "secondary" | "warning" | "success"> = {
+	open: "secondary",
+	late: "warning",
+	done: "success",
+};
+
+/// Beyond this a day's entries would crowd the week out of shape, so the rest
+/// sit behind a count that names them.
+const ENTRIES_PER_DAY = 3;
 
 /// The month a deployment moves, read the way anyone reads a month. The table
 /// below answers what each plan says; this answers which week is busy and which
@@ -240,15 +266,16 @@ function PlanCalendar({ fleet, past }: { fleet: FleetRow[]; past: PastPlan[] }) 
 	const today = localDate(new Date());
 
 	const entries = useMemo(() => {
-		const all: Array<Entry & { date: string }> = [];
+		const all: Entry[] = [];
 		for (const row of fleet) {
 			if (!row.plan?.planned_for) continue;
 			all.push({
 				key: row.plan.id,
 				date: row.plan.planned_for,
 				groupId: row.group_id,
-				label: `${row.group_name} ${row.target_version ?? ""}`.trim(),
-				done: false,
+				group: row.group_name,
+				version: row.target_version ?? "",
+				tone: row.late ? "late" : "open",
 			});
 		}
 		// Met plans stay on the calendar: what landed is half of what a month
@@ -259,31 +286,39 @@ function PlanCalendar({ fleet, past }: { fleet: FleetRow[]; past: PastPlan[] }) 
 				key: row.plan.id,
 				date: row.plan.planned_for,
 				groupId: row.group_id,
-				label: `${row.group_name} ${row.target_version}`,
-				done: true,
+				group: row.group_name,
+				version: row.target_version,
+				tone: "done",
 			});
 		}
-		return all;
+		return all.sort((a, b) => a.group.localeCompare(b.group));
 	}, [fleet, past]);
 
 	const start = new Date();
 	start.setDate(1);
 	start.setMonth(start.getMonth() + monthsAhead);
+	const month = localDate(start).slice(0, 7);
 	const weeks = monthWeeks(start, entries);
+	const shown = entries.filter((entry) => entry.date.startsWith(month)).length;
 
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }} data-testid="upgrade-calendar">
-			<Stack
-				direction="row"
-				spacing={1}
-				sx={{ alignItems: "center", mb: 1 }}
-			>
-				<Typography variant="h6" component="h2" sx={{ flexGrow: 1 }}>
-					{start.toLocaleDateString(undefined, {
-						month: "long",
-						year: "numeric",
-					})}
-				</Typography>
+			<Stack direction="row" spacing={1} sx={{ alignItems: "center", mb: 1.5 }}>
+				<Box sx={{ flexGrow: 1, minWidth: 0 }}>
+					<Typography variant="h6" component="h2" sx={{ lineHeight: 1.25 }}>
+						{start.toLocaleDateString(undefined, { month: "long" })}{" "}
+						<Box component="span" sx={{ color: "text.secondary", fontWeight: 400 }}>
+							{start.getFullYear()}
+						</Box>
+					</Typography>
+					<Typography variant="caption" color="text.secondary">
+						{shown === 0
+							? "nothing planned this month"
+							: shown === 1
+								? "1 upgrade this month"
+								: `${shown} upgrades this month`}
+					</Typography>
+				</Box>
 				<Button
 					size="small"
 					component={RouterLink}
@@ -292,64 +327,114 @@ function PlanCalendar({ fleet, past }: { fleet: FleetRow[]; past: PastPlan[] }) 
 				>
 					Subscribe
 				</Button>
-				<IconButton
-					size="small"
-					aria-label="previous month"
-					onClick={() => setMonthsAhead((m) => m - 1)}
-				>
-					<ChevronLeftIcon fontSize="small" />
-				</IconButton>
-				<Button size="small" onClick={() => setMonthsAhead(0)}>
-					Today
-				</Button>
-				<IconButton
-					size="small"
-					aria-label="next month"
-					onClick={() => setMonthsAhead((m) => m + 1)}
-				>
-					<ChevronRightIcon fontSize="small" />
-				</IconButton>
+				<ButtonGroup size="small" variant="outlined" sx={{ flexShrink: 0 }}>
+					<Button
+						aria-label="previous month"
+						onClick={() => setMonthsAhead((m) => m - 1)}
+					>
+						<ChevronLeftIcon fontSize="small" />
+					</Button>
+					<Button onClick={() => setMonthsAhead(0)}>Today</Button>
+					<Button
+						aria-label="next month"
+						onClick={() => setMonthsAhead((m) => m + 1)}
+					>
+						<ChevronRightIcon fontSize="small" />
+					</Button>
+				</ButtonGroup>
 			</Stack>
 
 			<Box sx={CALENDAR_GRID}>
 				{WEEKDAYS.map((day) => (
-					<Typography key={day} variant="caption" color="text.secondary">
+					<Typography key={day} variant="caption" sx={WEEKDAY_CELL}>
 						{day}
 					</Typography>
 				))}
-				{weeks.flat().map((day) => (
-					<Box
-						key={day.date}
-						data-testid="calendar-day"
-						data-date={day.date}
-						sx={{
-							...CALENDAR_CELL,
-							opacity: day.date.slice(0, 7) === localDate(start).slice(0, 7) ? 1 : 0.4,
-							borderColor: day.date === today ? "primary.main" : "divider",
-						}}
-					>
-						<Typography variant="caption" color="text.secondary">
-							{Number(day.date.slice(8))}
-						</Typography>
-						{day.entries.map((entry) => (
-							<Tooltip key={entry.key} title={entry.label}>
-								<Chip
-									size="small"
-									clickable
-									component={RouterLink}
-									to={`/groups/${entry.groupId}`}
-									color={entry.done ? "success" : "primary"}
-									variant={entry.done ? "outlined" : "filled"}
-									label={entry.label}
-									data-testid="calendar-entry"
-									sx={CALENDAR_CHIP}
-								/>
-							</Tooltip>
-						))}
-					</Box>
-				))}
+				{weeks.flat().map((day) => {
+					const inMonth = day.date.startsWith(month);
+					const overflow = day.entries.slice(ENTRIES_PER_DAY);
+					return (
+						<Box
+							key={day.date}
+							data-testid="calendar-day"
+							data-date={day.date}
+							sx={(theme) => ({
+								...CALENDAR_CELL,
+								// Opaque: the 1px gridlines are the container's own
+								// background showing through the gaps, so a tinted cell
+								// would let them flood it.
+								bgcolor: inMonth
+									? "background.paper"
+									: theme.palette.mode === "dark"
+										? theme.palette.grey[900]
+										: theme.palette.grey[50],
+							})}
+						>
+							<Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+								<Box
+									sx={{
+										...DAY_NUMBER,
+										color: inMonth ? "text.secondary" : "text.disabled",
+										...(day.date === today ? TODAY_NUMBER : null),
+									}}
+								>
+									{Number(day.date.slice(8))}
+								</Box>
+							</Box>
+							{day.entries.slice(0, ENTRIES_PER_DAY).map((entry) => (
+								<CalendarEntry key={entry.key} entry={entry} />
+							))}
+							{overflow.length > 0 && (
+								<Tooltip
+									title={overflow
+										.map((entry) => `${entry.group} ${entry.version}`)
+										.join(", ")}
+								>
+									<Typography variant="caption" sx={OVERFLOW_COUNT}>
+										+{overflow.length} more
+									</Typography>
+								</Tooltip>
+							)}
+						</Box>
+					);
+				})}
 			</Box>
 		</Paper>
+	);
+}
+
+function CalendarEntry({ entry }: { entry: Entry }) {
+	const tone = TONES[entry.tone];
+	const title =
+		entry.tone === "done"
+			? `${entry.group} reached ${entry.version}`
+			: entry.tone === "late"
+				? `${entry.group} to ${entry.version}, and the day has passed`
+				: `${entry.group} to ${entry.version}`;
+
+	return (
+		<Tooltip title={title}>
+			<Box
+				component={RouterLink}
+				to={`/groups/${entry.groupId}`}
+				data-testid="calendar-entry"
+				sx={(theme) => ({
+					...CALENDAR_ENTRY,
+					bgcolor: alpha(theme.palette[tone].main, 0.14),
+					"&:hover": { bgcolor: alpha(theme.palette[tone].main, 0.26) },
+				})}
+			>
+				<Box sx={{ ...ENTRY_BAR, bgcolor: `${tone}.main` }} />
+				<Box sx={ENTRY_LABEL}>
+					<Box component="span" sx={{ fontWeight: 500 }}>
+						{entry.group}
+					</Box>{" "}
+					<Box component="span" sx={{ color: "text.secondary" }}>
+						{entry.version}
+					</Box>
+				</Box>
+			</Box>
+		</Tooltip>
 	);
 }
 
@@ -357,10 +442,7 @@ function PlanCalendar({ fleet, past }: { fleet: FleetRow[]; past: PastPlan[] }) 
 /// fall on it. Leading and trailing days belong to the neighbouring months and
 /// are drawn faded rather than left blank, so a plan on the 1st or the 31st is
 /// never off the edge of the view.
-function monthWeeks(
-	month: Date,
-	entries: Array<Entry & { date: string }>,
-): Day[][] {
+function monthWeeks(month: Date, entries: Entry[]): Day[][] {
 	const first = new Date(month.getFullYear(), month.getMonth(), 1);
 	const cursor = new Date(first);
 	cursor.setDate(1 - ((first.getDay() + 6) % 7));
@@ -390,25 +472,81 @@ function localDate(at: Date): string {
 
 const CALENDAR_GRID = {
 	display: "grid",
-	gridTemplateColumns: "repeat(7, 1fr)",
-	gap: 0.5,
-};
-
-const CALENDAR_CELL = {
-	minHeight: 76,
-	p: 0.5,
+	gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
+	gap: "1px",
+	bgcolor: "divider",
 	border: 1,
+	borderColor: "divider",
 	borderRadius: 1,
-	display: "flex",
-	flexDirection: "column",
-	gap: 0.25,
 	overflow: "hidden",
 };
 
-const CALENDAR_CHIP = {
-	height: 18,
-	maxWidth: "100%",
-	"& .MuiChip-label": { px: 0.5, fontSize: "0.65rem" },
+const WEEKDAY_CELL = {
+	bgcolor: "background.paper",
+	color: "text.secondary",
+	textAlign: "center",
+	textTransform: "uppercase",
+	letterSpacing: "0.08em",
+	fontSize: "0.65rem",
+	py: 0.75,
+};
+
+const CALENDAR_CELL = {
+	minHeight: 80,
+	p: 0.5,
+	display: "flex",
+	flexDirection: "column",
+	gap: 0.25,
+	minWidth: 0,
+};
+
+const DAY_NUMBER = {
+	width: 22,
+	height: 22,
+	display: "grid",
+	placeItems: "center",
+	fontSize: "0.7rem",
+};
+
+const TODAY_NUMBER = {
+	bgcolor: "primary.dark",
+	color: "common.white",
+	borderRadius: "50%",
+	fontWeight: 600,
+};
+
+const CALENDAR_ENTRY = {
+	display: "flex",
+	alignItems: "stretch",
+	gap: 0.5,
+	px: 0.5,
+	py: "2px",
+	borderRadius: 0.75,
+	minWidth: 0,
+	textDecoration: "none",
+	color: "text.primary",
+	fontSize: "0.68rem",
+	lineHeight: 1.6,
+};
+
+const ENTRY_BAR = {
+	width: 3,
+	borderRadius: 3,
+	flexShrink: 0,
+};
+
+const ENTRY_LABEL = {
+	minWidth: 0,
+	overflow: "hidden",
+	textOverflow: "ellipsis",
+	whiteSpace: "nowrap",
+};
+
+const OVERFLOW_COUNT = {
+	color: "text.secondary",
+	fontSize: "0.65rem",
+	pl: 0.5,
+	cursor: "default",
 };
 
 /// What each deployment planned before, and how it ended. A withdrawn plan is
