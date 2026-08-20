@@ -229,8 +229,8 @@ type FleetRow = ApiResponse<"upgrade_plans", "fleet">[number];
 
 type Day = { date: string; entries: Entry[] };
 
-/// How an entry reads at a glance: where a deployment is going, where it has
-/// gone, and where the day it named has been and passed.
+/// How an entry reads at a glance: still ahead, already met, or past the day it
+/// named.
 type Tone = "open" | "late" | "done";
 
 type Entry = {
@@ -408,9 +408,7 @@ function CalendarEntry({ entry }: { entry: Entry }) {
 	const title =
 		entry.tone === "done"
 			? `${entry.group} reached ${entry.version}`
-			: entry.tone === "late"
-				? `${entry.group} to ${entry.version}, and the day has passed`
-				: `${entry.group} to ${entry.version}`;
+			: `${entry.group} to ${entry.version}${entry.tone === "late" ? " (late)" : ""}`;
 
 	return (
 		<Tooltip title={title}>
