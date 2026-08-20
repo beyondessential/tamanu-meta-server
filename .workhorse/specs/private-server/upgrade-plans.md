@@ -96,11 +96,13 @@ An operator mints a feed against a label saying whose calendar it is for, and th
 A feed does not expire.
 A subscription that lapses stops updating without telling its subscriber, so a feed ends by being revoked, after which the URL serves nothing.
 Canopy records when each feed was last fetched, so one nobody subscribed to reads differently from one that is live.
+A feed nothing has fetched for two months raises an alert naming it, and the alert clears once every such feed is read again or revoked: an unexpiring URL that grants a read of the fleet's plans is worth keeping account of, and one nobody reads is outstanding for nothing.
 
 The calendar carries the plans that name a day, while a plan is where the deployment is going and after it has been met.
 A replaced or withdrawn plan leaves the calendar, since the deployment is no longer going there; a met one stays as the record of what landed.
 
-An entry names the deployment and the version it is going to, and carries what the plan records beyond the day: the version the deployment is on now, the note, and who planned it, or for a met plan the day it landed.
+An entry names the deployment and the version it is going to, and carries what the plan records beyond the day: the version the deployment is on now and the note, or for a met plan the day it landed.
+It does not carry who recorded the plan: the feed is read by anyone holding its URL, and an operator's address is no part of what a calendar needs.
 A plan that names an hour is an entry at that hour, resolved from the zone the plan is a wall clock in so every subscriber reads the same instant whatever their own zone; a plan with only a day is an all-day entry.
 An entry marks nobody busy: a planned upgrade is something to know about rather than something that occupies whoever subscribed.
 

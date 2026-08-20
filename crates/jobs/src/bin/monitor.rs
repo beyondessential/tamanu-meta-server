@@ -278,6 +278,14 @@ pub fn spawn() -> JoinHandle<()> {
 				Err(err) => error!("mcp token-expiry sweep failed: {err}"),
 			}
 
+			// Calendar feeds nobody is reading any more: an unexpiring URL that
+			// grants a read of the fleet's plans (see `sweep_dormant_feeds`).
+			match database::calendar_tokens::sweep_dormant_feeds(&mut db).await {
+				Ok(0) => {}
+				Ok(n) => debug!("filed {n} dormant calendar-feed events"),
+				Err(err) => error!("calendar feed dormancy sweep failed: {err}"),
+			}
+
 			// Group domains left outside Canopy's configured DNS zones — a zone
 			// dropped from the configuration, or a configuration that no longer
 			// parses. Read fresh each pass so restoring the configuration (and

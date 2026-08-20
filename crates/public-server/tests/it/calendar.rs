@@ -111,11 +111,11 @@ async fn a_dated_plan_is_an_all_day_entry() {
 			"an all-day entry ends on the following day: {body}"
 		);
 		assert!(
-			body.contains(
-				"DESCRIPTION:Now on 2.60.0\\nnight of the 14th\\nPlanned by someone@example.com"
-			),
+			body.contains("DESCRIPTION:Now on 2.60.0\\nnight of the 14th"),
 			"{body}"
 		);
+		// The feed is a public URL, so it carries no operator's address.
+		assert!(!body.contains("someone@example.com"), "{body}");
 		assert!(body.contains("TRANSP:TRANSPARENT"), "{body}");
 	})
 	.await

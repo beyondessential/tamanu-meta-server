@@ -16,6 +16,11 @@ use jiff::{SignedDuration, Timestamp};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+/// How long a feed goes unfetched before Canopy calls it dormant. A subscribed
+/// calendar polls at least daily, so silence this long means nothing is reading
+/// it and the URL is outstanding for nothing.
+pub const DORMANT_AFTER: SignedDuration = SignedDuration::from_hours(60 * 24);
+
 /// Recognizable prefix on the plaintext so a leaked feed URL is identifiable in
 /// secret scanning, and so operators can tell what a stray credential is for.
 pub const TOKEN_PREFIX: &str = "canopy_cal_";
@@ -126,6 +131,30 @@ impl CalendarToken {
 			.map_err(AppError::from)
 	}
 
+	/// Un-revoked feeds nothing has fetched in [`DORMANT_AFTER`], counting from
+	/// the last fetch or, for one never fetched, from minting.
+	pub async fn dormant(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		use crate::schema::calendar_tokens::dsl;
+
+		let cutoff = Timestamp::now()
+			.checked_sub(DORMANT_AFTER)
+			.map_err(|e| AppError::custom(format!("bad dormancy window: {e}")))?;
+		let cutoff = jiff_diesel::Timestamp::from(cutoff);
+
+		dsl::calendar_tokens
+			.select(Self::as_select())
+			.filter(dsl::revoked_at.is_null())
+			.filter(
+				dsl::last_used_at
+					.lt(cutoff)
+					.or(dsl::last_used_at.is_null().and(dsl::created_at.lt(cutoff))),
+			)
+			.order(dsl::created_at.asc())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Revoke a token, effective immediately; idempotent on an already-revoked
 	/// token. Errors (404) on an unknown id.
 	pub async fn revoke(db: &mut AsyncPgConnection, id: Uuid) -> Result<()> {
@@ -154,4 +183,77 @@ impl CalendarToken {
 		}
 		Ok(())
 	}
+}
+
+/// The `(CANOPY_SOURCE, ref)` alert key for dormant feeds. Like the backup refs,
+/// this is a contract: silences and Slack messages reference it.
+pub const DORMANT_REF: &str = "calendar-feed-dormant";
+
+pub const DORMANT_DOC: &str = "## Description
+
+One or more calendar feeds (the subscription URLs serving planned upgrades from the public API host) have gone unfetched long enough that nothing appears to be subscribed to them.
+
+A feed URL grants anyone holding it a read of the fleet's planned upgrades, and it does not expire. One nobody reads is a credential outstanding for nothing: it may be sitting in a calendar belonging to someone who has moved on.
+
+## Results
+
+- **fail** — an un-revoked feed has not been fetched in 60 days; recovers once every such feed is revoked or fetched again.
+
+## Solve
+
+Check with whoever the feed was minted for. If they still want it, resubscribing fetches it and clears this; otherwise revoke it in Settings. The message lists each feed by name and minter.";
+
+/// Dormant-feed alert, run from the monitor loop: a [self-alert](crate::self_alerts)
+/// — one coalescing record, one notification per raise/recovery, never one per
+/// group. Active while any un-revoked feed has gone unfetched for
+/// [`DORMANT_AFTER`]; recovers when none have. Idle sweeps write nothing.
+// spec: UPG#the-calendar-feed
+pub async fn sweep_dormant_feeds(db: &mut AsyncPgConnection) -> Result<usize> {
+	use commons_types::status::CheckResult;
+
+	let dormant = CalendarToken::dormant(db).await?;
+
+	if dormant.is_empty() {
+		return Ok(crate::self_alerts::recover(
+			db,
+			DORMANT_REF,
+			"every calendar feed is being read or revoked",
+		)
+		.await?
+		.map(|_| 1)
+		.unwrap_or(0));
+	}
+
+	let now = Timestamp::now();
+	let message = dormant
+		.iter()
+		.map(|feed| {
+			let since = feed.last_used_at.unwrap_or(feed.created_at);
+			let days = (now.duration_since(since).as_secs_f64() / 86_400.0).floor() as i64;
+			let what = if feed.last_used_at.is_some() {
+				"last fetched"
+			} else {
+				"never fetched since minting"
+			};
+			format!(
+				"Calendar feed \"{}\" (minted by {}) was {what} {days} days ago; \
+				 check whether it is still wanted, and revoke it in Settings if not.",
+				feed.name, feed.created_by,
+			)
+		})
+		.collect::<Vec<_>>()
+		.join("\n");
+
+	crate::self_alerts::raise(
+		db,
+		DORMANT_REF,
+		CheckResult::Failed,
+		CheckResult::Failed,
+		false,
+		Some(DORMANT_DOC),
+		"Calendar feed going unread",
+		&message,
+	)
+	.await?;
+	Ok(1)
 }

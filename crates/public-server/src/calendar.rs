@@ -216,9 +216,6 @@ fn event(
 	{
 		description.push(note.to_owned());
 	}
-	if let Some(by) = &plan.created_by {
-		description.push(format!("Planned by {by}"));
-	}
 	if !description.is_empty() {
 		line(
 			out,
