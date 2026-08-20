@@ -238,7 +238,30 @@ Relay liveness becomes the per-cluster connectivity self-alert K8S specifies. No
 diagnosis shifts: "cluster unreachable" becomes "relay not connected", which can mean the
 relay is down while the cluster is healthy.
 
-## Open items
+## Deferred to a follow-up design card: the relay's method set
+
+Out of scope for this spike, deliberately. Under this design the relay's method set is the
+security boundary, taking the role RBAC plays under direct access, so it warrants
+designing in one deliberate pass rather than accreting a method per check.
+
+The framing to start that card from. Two shapes, pulling against each other:
+
+- **Check-shaped** (`give me all check results for namespace X`). Canopy receives filed
+  results and nothing else, which is the tightest possible surface. Every new check needs a
+  relay release, so version skew bites on each iteration.
+- **Resource-shaped** (`list deployments in X`, `get PVCs for prefix Y`). Canopy keeps the
+  check logic and iterates without redeploying relays, but the surface drifts back toward
+  being an RBAC proxy, which is what the relay design exists to avoid.
+
+A candidate middle: resource-shaped for the `kubernetes` infra checks, whose inputs are
+plain objects and whose logic benefits from iteration, and check-shaped for the `alertd`
+harvest, where the point is that credentials and query traffic stay in the cluster. That
+splits along the same seam as the two check families in K8S.
+
+Note this decision also settles the relay's implementation language, because a
+check-shaped harvest requires embedding `bestool-alertd` as a Rust library.
+
+## To confirm before implementation
 
 - **Whether the extra deployable is warranted** at a fleet of two clusters, versus the API
   server proxy fallback.
@@ -249,8 +272,6 @@ relay is down while the cluster is healthy.
   ACL and tag check alone.
 - **Canopy's own cluster**: relay like any other, or direct in-cluster reads with a
   widened ClusterRole.
-- **The relay's method set**, which is the security boundary and so needs designing
-  deliberately rather than growing per check.
 - **Who deploys the relay** and how it is versioned against Canopy.
 - **K8S spec impact**: "Canopy reads each registered cluster with read-only access" and
   the registration page both change shape if registration becomes relay enrollment.
