@@ -129,9 +129,36 @@ exposes a SOCKS5/HTTP proxy, which is TCP-only, so QUIC will not pass. Kernel mo
 the operator itself runs with `capabilities: { add: ['NET_ADMIN'] }` in
 `k8s-essentials/tailscale.ts`.
 
-This is the assumption most worth confirming against a real deployment before committing,
-because it is the one that would force a fallback to HTTP/2 bidirectional streaming over
-TCP.
+Pod Security Standards do not block this. `restricted` is enforced only on `hnc-system`
+(`k8s-essentials/hnc/namespace.ts`); `tamanu-super` (`tamanu/k8s-infra/superns.ts`) and
+the deploy namespaces beneath it carry no PSS labels, and the enforcement does not
+propagate.
+
+The relay should get its own namespace rather than living in a Tamanu deploy namespace,
+following `first-officer` and `bestool-proxy`, so its pod spec is fully under Canopy's
+control.
+
+### Rejected for the relay end: tsnet
+
+tsnet embeds a Tailscale node in a Go program with no sidecar, no `NET_ADMIN` and no TUN,
+and it does support UDP: `ListenPacket(network, addr) (net.PacketConn, error)`, added in
+v1.68.0, taking `"udp"` / `"udp4"` / `"udp6"`. A `net.PacketConn` is what quic-go accepts,
+so QUIC over tsnet is viable in principle. `Dial` does not document UDP support, which
+matters because the relay is the QUIC client, so the outbound path would need verifying.
+
+Rejected for two reasons. First, it solves only half the problem: Canopy is Rust, so tsnet
+cannot serve its end, and Canopy needs a tailnet UDP socket for the listener regardless.
+The kernel-mode sidecar would be required on Canopy's worker anyway, so tsnet adds a Go
+component without removing the capability requirement.
+
+Second, a Go relay cannot embed `bestool-alertd` as a Rust library, which is the property
+B1 wanted so the harvest's checks cannot drift from what servers run elsewhere. Keeping it
+would need a Rust-to-Go FFI boundary, with cgo and two toolchains in the arm64 image build.
+
+Worth keeping available for one case: a future external cluster whose operator will not
+grant `NET_ADMIN`. tsnet would be an escape hatch for the relay end alone, affecting
+neither the Canopy end nor the protocol. This argues for keeping the relay's transport
+layer swappable, not for starting there.
 
 ### RBAC the relay needs
 
@@ -215,8 +242,9 @@ relay is down while the cluster is healthy.
 
 - **Whether the extra deployable is warranted** at a fleet of two clusters, versus the API
   server proxy fallback.
-- **Kernel-mode sidecar networking**, confirmed against a real deployment. If UDP cannot
-  be made to pass, the transport falls back to HTTP/2 bidirectional streaming over TCP.
+- **Kernel-mode sidecar networking**, confirmed against a real deployment. Admission does
+  not block it, but if UDP still cannot be made to pass, the fallbacks are tsnet at the
+  relay end or HTTP/2 bidirectional streaming over TCP for both.
 - **Whether to pin the relay's SPKI fingerprint** at enrollment, or rely on the tailnet
   ACL and tag check alone.
 - **Canopy's own cluster**: relay like any other, or direct in-cluster reads with a
