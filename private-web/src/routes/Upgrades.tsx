@@ -1,3 +1,4 @@
+import AddIcon from "@mui/icons-material/Add";
 import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
@@ -69,19 +70,20 @@ export default function Upgrades() {
 
 	return (
 		<Stack spacing={2}>
-			<Typography variant="h4" component="h1">
-				Upgrades
-			</Typography>
-
-			{isAdmin && (
-				<RecordPlan
-					groups={fleet.data.map((row) => ({
-						id: row.group_id,
-						name: row.group_name,
-					}))}
-					onRecorded={() => setTick((t) => t + 1)}
-				/>
-			)}
+			<Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
+				<Typography variant="h4" component="h1" sx={{ flexGrow: 1 }}>
+					Upgrades
+				</Typography>
+				{isAdmin && (
+					<RecordPlan
+						groups={fleet.data.map((row) => ({
+							id: row.group_id,
+							name: row.group_name,
+						}))}
+						onRecorded={() => setTick((t) => t + 1)}
+					/>
+				)}
+			</Stack>
 
 			<PlanCalendar
 				fleet={fleet.data}
@@ -1505,18 +1507,16 @@ function zonePart(
 	}
 }
 
-const PLAN_FORM = {
+const GOING_FIELDS = {
 	display: "grid",
-	gridTemplateColumns:
-		"minmax(0, 1fr) minmax(0, 1fr) 150px 112px 112px 140px minmax(0, 1fr) auto",
+	gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
 	columnGap: 1.5,
-	rowGap: 1,
 	alignItems: "start",
 };
 
 const WHEN_FIELDS = {
 	display: "grid",
-	gridTemplateColumns: "minmax(0, 1.1fr) 100px 100px minmax(0, 1.4fr)",
+	gridTemplateColumns: "minmax(0, 1fr) 136px 136px",
 	columnGap: 1.5,
 };
 
@@ -1602,6 +1602,42 @@ function RecordPlan({
 	groups: Array<{ id: string; name: string }>;
 	onRecorded: () => void;
 }) {
+	const [open, setOpen] = useState(false);
+
+	return (
+		<>
+			<Button
+				variant="contained"
+				startIcon={<AddIcon />}
+				onClick={() => setOpen(true)}
+			>
+				Record a plan
+			</Button>
+			{open && (
+				<RecordPlanDialog
+					groups={groups}
+					onClose={() => setOpen(false)}
+					onRecorded={() => {
+						setOpen(false);
+						onRecorded();
+					}}
+				/>
+			)}
+		</>
+	);
+}
+
+/// Mounted only while it is open, so it opens empty rather than holding what
+/// was typed the last time.
+function RecordPlanDialog({
+	groups,
+	onClose,
+	onRecorded,
+}: {
+	groups: Array<{ id: string; name: string }>;
+	onClose: () => void;
+	onRecorded: () => void;
+}) {
 	const [groupId, setGroupId] = useState("");
 	const [versionId, setVersionId] = useState("");
 	const [plannedFor, setPlannedFor] = useState("");
@@ -1632,37 +1668,37 @@ function RecordPlan({
 			planned_zone: plannedTime ? zone : null,
 			note: note || null,
 		});
-		setVersionId("");
-		setPlannedFor("");
-		setPlannedTime("");
-		setEndTime("");
-		setEndTyped(false);
-		setNote("");
 		onRecorded();
 	};
 
 	return (
-		<Paper variant="outlined" sx={{ p: 2 }} data-testid="record-plan">
-			<Typography variant="h6" component="h2" gutterBottom>
-				Record a plan
-			</Typography>
-			<Box sx={PLAN_FORM}>
-					<TextField
-						select
-						size="small"
-						label="Deployment"
-						value={groupId}
-						onChange={(e) => {
-							setGroupId(e.target.value);
-							setVersionId("");
-						}}
-					>
-						{groups.map((group) => (
-							<MenuItem key={group.id} value={group.id}>
-								{group.name}
-							</MenuItem>
-						))}
-					</TextField>
+		<Dialog
+			open
+			onClose={onClose}
+			fullWidth
+			maxWidth="sm"
+			data-testid="record-plan"
+		>
+			<DialogTitle>Record a plan</DialogTitle>
+			<DialogContent>
+				<Stack spacing={2} sx={{ mt: 1 }}>
+					<Box sx={GOING_FIELDS}>
+						<TextField
+							select
+							size="small"
+							label="Deployment"
+							value={groupId}
+							onChange={(e) => {
+								setGroupId(e.target.value);
+								setVersionId("");
+							}}
+						>
+							{groups.map((group) => (
+								<MenuItem key={group.id} value={group.id}>
+									{group.name}
+								</MenuItem>
+							))}
+						</TextField>
 						<Autocomplete<PlannableVersion, false, false, false>
 							size="small"
 							disabled={!groupId || options.length === 0}
@@ -1691,61 +1727,64 @@ function RecordPlan({
 											/>
 										)}
 									</Stack>
-							</li>
-						)}
-						renderInput={(params) => (
-							<TextField
-								{...params}
-								label="Going to"
-								helperText={helperText(groupId, options, shortlist)}
-							/>
-						)}
-					/>
-					<TextField
-						size="small"
-						type="date"
-						label="Planned for"
-						disabled={!groupId}
-						value={plannedFor}
-						onChange={(e) => {
-							setPlannedFor(e.target.value);
-							if (!e.target.value) {
-								setPlannedTime("");
-								setEndTime("");
-								setEndTyped(false);
-							}
-						}}
-						slotProps={{ inputLabel: { shrink: true } }}
-					/>
-					<TextField
-						size="small"
-						type="time"
-						label="Starts"
-						value={plannedTime}
-						disabled={!plannedFor}
-						onChange={(e) => {
-							setPlannedTime(e.target.value);
-							if (!e.target.value) {
-								setEndTime("");
-								setEndTyped(false);
-							} else if (!endTyped) {
-								setEndTime(anHourLater(e.target.value));
-							}
-						}}
-						slotProps={{ inputLabel: { shrink: true } }}
-					/>
-					<TextField
-						size="small"
-						type="time"
-						label="Ends"
-						value={endTime}
-						disabled={!plannedTime}
-						onChange={(e) => {
-							setEndTime(e.target.value);
-							setEndTyped(true);
-						}}
-						slotProps={{ inputLabel: { shrink: true } }}
-					/>
+								</li>
+							)}
+							renderInput={(params) => (
+								<TextField
+									{...params}
+									label="Going to"
+									helperText={helperText(groupId, options, shortlist)}
+								/>
+							)}
+						/>
+					</Box>
+					<Box sx={WHEN_FIELDS}>
+						<TextField
+							size="small"
+							type="date"
+							label="Planned for"
+							disabled={!groupId}
+							value={plannedFor}
+							onChange={(e) => {
+								setPlannedFor(e.target.value);
+								if (!e.target.value) {
+									setPlannedTime("");
+									setEndTime("");
+									setEndTyped(false);
+								}
+							}}
+							slotProps={{ inputLabel: { shrink: true } }}
+						/>
+						<TextField
+							size="small"
+							type="time"
+							label="Starts"
+							value={plannedTime}
+							disabled={!plannedFor}
+							onChange={(e) => {
+								setPlannedTime(e.target.value);
+								if (!e.target.value) {
+									setEndTime("");
+									setEndTyped(false);
+								} else if (!endTyped) {
+									setEndTime(anHourLater(e.target.value));
+								}
+							}}
+							slotProps={{ inputLabel: { shrink: true } }}
+						/>
+						<TextField
+							size="small"
+							type="time"
+							label="Ends"
+							value={endTime}
+							disabled={!plannedTime}
+							onChange={(e) => {
+								setEndTime(e.target.value);
+								setEndTyped(true);
+							}}
+							slotProps={{ inputLabel: { shrink: true } }}
+						/>
+					</Box>
 					<ZoneField value={zone} onChange={setZone} disabled={!plannedTime} />
 					<TextField
 						size="small"
@@ -1753,21 +1792,25 @@ function RecordPlan({
 						disabled={!groupId}
 						value={note}
 						onChange={(e) => setNote(e.target.value)}
+						multiline
+						minRows={2}
 					/>
-					<Button
-						variant="contained"
-						disabled={!groupId || !versionId || record.pending}
-						onClick={submit}
-					>
-						Record
-					</Button>
-			</Box>
-			{record.error && (
-				<Alert severity="error" sx={{ mt: 1 }}>
-					{record.error.message}
-				</Alert>
-			)}
-		</Paper>
+					{record.error && (
+						<Alert severity="error">{record.error.message}</Alert>
+					)}
+				</Stack>
+			</DialogContent>
+			<DialogActions>
+				<Button onClick={onClose}>Cancel</Button>
+				<Button
+					variant="contained"
+					disabled={!groupId || !versionId || record.pending}
+					onClick={submit}
+				>
+					Record
+				</Button>
+			</DialogActions>
+		</Dialog>
 	);
 }
 
@@ -1918,8 +1961,8 @@ function EditPlanDialog({
 							}}
 							slotProps={{ inputLabel: { shrink: true } }}
 						/>
-						<ZoneField value={zone} onChange={setZone} disabled={!time} />
 					</Box>
+					<ZoneField value={zone} onChange={setZone} disabled={!time} />
 					<TextField
 						size="small"
 						label="Note"

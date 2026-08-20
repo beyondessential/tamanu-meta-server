@@ -320,6 +320,7 @@ test.describe("upgrades dashboard", () => {
 		}
 
 		await page.goto("/upgrades");
+		await page.getByRole("button", { name: "Record a plan" }).click();
 		const form = page.getByTestId("record-plan");
 		await form.getByLabel("Deployment").click();
 		await page.getByRole("option", { name: "kamaka" }).click();
@@ -356,6 +357,7 @@ test.describe("upgrades dashboard", () => {
 		await seedVersionKnownIssue(sql, { major: 2, minor: 61, patch: 2 });
 
 		await page.goto("/upgrades");
+		await page.getByRole("button", { name: "Record a plan" }).click();
 		const form = page.getByTestId("record-plan");
 		await form.getByLabel("Deployment").click();
 		await page.getByRole("option", { name: "kamaka" }).click();
@@ -427,6 +429,7 @@ test.describe("upgrades dashboard", () => {
 		await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 
 		await page.goto("/upgrades");
+		await page.getByRole("button", { name: "Record a plan" }).click();
 		const form = page.getByTestId("record-plan");
 		// Nothing to say about a deployment until one is named.
 		await expect(form.getByLabel("Planned for")).toBeDisabled();
@@ -605,6 +608,7 @@ test.describe("upgrade windows", () => {
 		await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 
 		await page.goto("/upgrades");
+		await page.getByRole("button", { name: "Record a plan" }).click();
 		const form = page.getByTestId("record-plan");
 		await form.getByLabel("Deployment").click();
 		await page.getByRole("option", { name: "kamaka" }).click();
