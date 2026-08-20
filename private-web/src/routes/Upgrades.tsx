@@ -239,6 +239,7 @@ type Entry = {
 	groupId: string;
 	group: string;
 	version: string;
+	note: string | null;
 	tone: Tone;
 };
 
@@ -275,6 +276,7 @@ function PlanCalendar({ fleet, past }: { fleet: FleetRow[]; past: PastPlan[] }) 
 				groupId: row.group_id,
 				group: row.group_name,
 				version: row.target_version ?? "",
+				note: row.plan.note,
 				tone: row.late ? "late" : "open",
 			});
 		}
@@ -288,6 +290,7 @@ function PlanCalendar({ fleet, past }: { fleet: FleetRow[]; past: PastPlan[] }) 
 				groupId: row.group_id,
 				group: row.group_name,
 				version: row.target_version,
+				note: row.plan.note,
 				tone: "done",
 			});
 		}
@@ -405,13 +408,20 @@ function PlanCalendar({ fleet, past }: { fleet: FleetRow[]; past: PastPlan[] }) 
 
 function CalendarEntry({ entry }: { entry: Entry }) {
 	const tone = TONES[entry.tone];
-	const title =
+	const headline =
 		entry.tone === "done"
 			? `${entry.group} reached ${entry.version}`
 			: `${entry.group} to ${entry.version}${entry.tone === "late" ? " (late)" : ""}`;
 
 	return (
-		<Tooltip title={title}>
+		<Tooltip
+			title={
+				<>
+					{headline}
+					{entry.note && <Box sx={ENTRY_NOTE}>{entry.note}</Box>}
+				</>
+			}
+		>
 			<Box
 				component={RouterLink}
 				to={`/groups/${entry.groupId}`}
@@ -525,6 +535,11 @@ const CALENDAR_ENTRY = {
 	color: "text.primary",
 	fontSize: "0.68rem",
 	lineHeight: 1.6,
+};
+
+const ENTRY_NOTE = {
+	mt: 0.5,
+	opacity: 0.8,
 };
 
 const ENTRY_BAR = {
