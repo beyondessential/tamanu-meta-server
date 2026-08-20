@@ -293,7 +293,7 @@ test.describe("upgrades dashboard", () => {
 		const dialog = page.getByTestId("edit-plan");
 		await dialog.getByLabel("Planned for").fill("");
 		// The hour was an hour of that day, so it goes with it.
-		await expect(dialog.getByLabel("Time", { exact: true })).toHaveValue("");
+		await expect(dialog.getByLabel("Starts")).toHaveValue("");
 		await dialog.getByRole("button", { name: "Save" }).click();
 
 		// No date means nothing to be late against.
@@ -404,12 +404,10 @@ test.describe("upgrades dashboard", () => {
 
 		await page.getByRole("button", { name: "Edit kamaka's plan" }).click();
 		const dialog = page.getByTestId("edit-plan");
-		await expect(dialog.getByLabel("Time", { exact: true })).toHaveValue(
-			"00:00",
-		);
+		await expect(dialog.getByLabel("Starts")).toHaveValue("00:00");
 		await expect(dialog.getByLabel("Timezone")).toHaveValue("Pacific/Fiji");
 
-		await dialog.getByLabel("Time", { exact: true }).fill("19:30");
+		await dialog.getByLabel("Starts").fill("19:30");
 		await dialog.getByLabel("Timezone").fill("Pacific/Nauru");
 		await page.getByRole("option", { name: "Pacific/Nauru" }).click();
 		await dialog.getByRole("button", { name: "Save" }).click();
@@ -439,7 +437,10 @@ test.describe("upgrades dashboard", () => {
 		await form.getByLabel("Going to").click();
 		await page.getByRole("option", { name: "2.61.0" }).click();
 		await form.getByLabel("Planned for").fill("2030-04-05");
-		await form.getByLabel("Time", { exact: true }).fill("23:00");
+		await form.getByLabel("Starts").fill("23:00");
+		// An hour on its own says nothing about how long the site is down, so
+		// the form offers the hour the calendar feed would have assumed.
+		await expect(form.getByLabel("Ends")).toHaveValue("00:00");
 		// Fiji is where most of the fleet is, so it stands unless changed.
 		await expect(form.getByLabel("Timezone")).toHaveValue("Pacific/Fiji");
 		await form.getByRole("button", { name: "Record" }).click();
@@ -447,12 +448,13 @@ test.describe("upgrades dashboard", () => {
 		const row = page
 			.getByTestId("planned-upgrade-row")
 			.filter({ hasText: "kamaka" });
-		await expect(row).toContainText("11pm FJT");
+		await expect(row).toContainText("11pm-12am FJT");
 
 		// An hour that is no longer settled comes off without losing the day.
 		await page.getByRole("button", { name: "Edit kamaka's plan" }).click();
 		const dialog = page.getByTestId("edit-plan");
-		await dialog.getByLabel("Time", { exact: true }).fill("");
+		await dialog.getByLabel("Starts").fill("");
+		await expect(dialog.getByLabel("Ends")).toHaveValue("");
 		await dialog.getByRole("button", { name: "Save" }).click();
 
 		await expect(row).toContainText("2030-04-05");
@@ -588,3 +590,123 @@ test.describe("upgrade calendar editing", () => {
 		).toHaveAttribute("data-date", `${month}-17`);
 	});
 });
+
+test.describe("upgrade windows", () => {
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("a window recorded by hand reads as a range", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await sql.query(
+			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
+			[group.id],
+		);
+		await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+
+		await page.goto("/upgrades");
+		const form = page.getByTestId("record-plan");
+		await form.getByLabel("Deployment").click();
+		await page.getByRole("option", { name: "kamaka" }).click();
+		await form.getByLabel("Going to").click();
+		await page.getByRole("option", { name: "2.61.0" }).click();
+		await form.getByLabel("Planned for").fill("2030-04-05");
+		await form.getByLabel("Starts").fill("22:00");
+		await form.getByLabel("Ends").fill("02:00");
+		await form.getByRole("button", { name: "Record" }).click();
+
+		// A window closing before it opened is the next morning, not a plan
+		// that runs backwards.
+		await expect(
+			page.getByTestId("planned-upgrade-row").filter({ hasText: "kamaka" }),
+		).toContainText("10pm-2am FJT");
+	});
+
+	test("the week view draws the window, and carries it past midnight", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await sql.query(
+			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
+			[group.id],
+		);
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+
+		// The Monday of the week on screen, so the morning the window runs into
+		// is a column of the same week whatever day the suite runs on.
+		const now = new Date();
+		const monday = new Date(
+			now.getFullYear(),
+			now.getMonth(),
+			now.getDate() - ((now.getDay() + 6) % 7),
+		);
+		const tuesday = new Date(monday);
+		tuesday.setDate(monday.getDate() + 1);
+
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+			plannedFor: localIso(monday),
+			plannedTime: "22:00",
+			plannedEndTime: "02:00",
+			plannedZone: "Pacific/Fiji",
+		});
+
+		await page.goto("/upgrades");
+		await page.getByRole("button", { name: "week", exact: true }).click();
+
+		await expect(page.getByTestId("calendar-day")).toHaveCount(7);
+		await expect(
+			page.locator(
+				`[data-testid="calendar-day"][data-date="${localIso(monday)}"] [data-testid="calendar-entry"]`,
+			),
+		).toContainText("10pm-2am");
+
+		await expect(
+			page.locator(
+				`[data-testid="calendar-day"][data-date="${localIso(tuesday)}"] [data-continues]`,
+			),
+		).toContainText("until 2am");
+	});
+
+	test("a day number opens that day on its own", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await sql.query(
+			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
+			[group.id],
+		);
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+
+		const now = new Date();
+		const fifteenth = new Date(now.getFullYear(), now.getMonth(), 15);
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+			plannedFor: localIso(fifteenth),
+			plannedTime: "09:00",
+			plannedEndTime: "11:30",
+			plannedZone: "Pacific/Fiji",
+		});
+
+		await page.goto("/upgrades");
+		await page.getByRole("button", { name: "15", exact: true }).click();
+
+		const calendar = page.getByTestId("upgrade-calendar");
+		const only = calendar.getByTestId("calendar-day");
+		await expect(only).toHaveCount(1);
+		await expect(only).toHaveAttribute("data-date", localIso(fifteenth));
+		await expect(calendar.getByTestId("calendar-entry")).toContainText(
+			"9am-11:30am",
+		);
+	});
+});
+
+/** The local calendar day, as the API and the grid both write it. */
+function localIso(at: Date): string {
+	return [
+		at.getFullYear(),
+		String(at.getMonth() + 1).padStart(2, "0"),
+		String(at.getDate()).padStart(2, "0"),
+	].join("-");
+}

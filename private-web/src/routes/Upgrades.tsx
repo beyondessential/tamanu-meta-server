@@ -29,11 +29,13 @@ import {
 	TableHead,
 	TableRow,
 	TextField,
+	ToggleButton,
+	ToggleButtonGroup,
 	Tooltip,
 	Typography,
 } from "@mui/material";
 import { alpha, type Theme } from "@mui/material/styles";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import TimeAgo from "../components/TimeAgo";
@@ -105,7 +107,7 @@ export default function Upgrades() {
 								<TableCell>Going to</TableCell>
 								<TableCell>Data survives it</TableCell>
 								<TableCell>Planned for</TableCell>
-								<TableCell>Time</TableCell>
+								<TableCell>Window</TableCell>
 								<TableCell>Note</TableCell>
 								{isAdmin && <TableCell />}
 							</TableRow>
@@ -145,6 +147,7 @@ export default function Upgrades() {
 										<TableCell>
 											<PlannedTime
 												time={row.plan?.planned_time ?? null}
+												end={row.plan?.planned_end_time ?? null}
 												zone={row.plan?.planned_zone ?? null}
 											/>
 										</TableCell>
@@ -162,6 +165,7 @@ export default function Upgrades() {
 													targetVersion={row.target_version ?? ""}
 													plannedFor={row.plan?.planned_for ?? null}
 													plannedTime={row.plan?.planned_time ?? null}
+													plannedEnd={row.plan?.planned_end_time ?? null}
 													plannedZone={row.plan?.planned_zone ?? null}
 													note={row.plan?.note ?? null}
 													onAmended={() => setTick((t) => t + 1)}
@@ -229,7 +233,21 @@ export default function Upgrades() {
 
 type FleetRow = ApiResponse<"upgrade_plans", "fleet">[number];
 
-type Day = { date: string; entries: Entry[] };
+type View = "month" | "week" | "day";
+
+const VIEWS: View[] = ["month", "week", "day"];
+
+/// Part of a window as one column draws it. A plan running past midnight is two
+/// of these: the rest of its night, and the following morning.
+type Segment = {
+	entry: Entry;
+	date: string;
+	from: number;
+	to: number;
+	tail: boolean;
+};
+
+type Block = Segment & { lane: number; lanes: number };
 
 /// How an entry reads at a glance: still ahead, already met, or past the day it
 /// named.
@@ -242,6 +260,7 @@ type Entry = {
 	group: string;
 	version: string;
 	time: string | null;
+	end: string | null;
 	zone: string | null;
 	note: string | null;
 	tone: Tone;
@@ -266,9 +285,9 @@ function toneColour(theme: Theme, tone: Tone): string {
 /// sit behind a count that names them.
 const ENTRIES_PER_DAY = 3;
 
-/// The month a deployment moves, read the way anyone reads a month. The table
-/// below answers what each plan says; this answers which week is busy and which
-/// two deployments land on the same night.
+/// Which month, week, or day a deployment moves in. The table below answers
+/// what each plan says; this answers which week is busy, which two deployments
+/// land on the same night, and how long each one is expected to take.
 // spec: UPG#the-dashboard
 function PlanCalendar({
 	fleet,
@@ -281,7 +300,8 @@ function PlanCalendar({
 	isAdmin: boolean;
 	onAmended: () => void;
 }) {
-	const [monthsAhead, setMonthsAhead] = useState(0);
+	const [view, setView] = useState<View>("month");
+	const [cursor, setCursor] = useState(startOfToday);
 	const [editing, setEditing] = useState<Entry | null>(null);
 	const today = localDate(new Date());
 
@@ -296,6 +316,7 @@ function PlanCalendar({
 				group: row.group_name,
 				version: row.target_version ?? "",
 				time: row.plan.planned_time,
+				end: row.plan.planned_end_time,
 				zone: row.plan.planned_zone,
 				note: row.plan.note,
 				tone: row.late ? "late" : "open",
@@ -312,6 +333,7 @@ function PlanCalendar({
 				group: row.group_name,
 				version: row.target_version,
 				time: row.plan.planned_time,
+				end: row.plan.planned_end_time,
 				zone: row.plan.planned_zone,
 				note: row.plan.note,
 				tone: "done",
@@ -324,29 +346,32 @@ function PlanCalendar({
 		);
 	}, [fleet, past]);
 
-	const start = new Date();
-	start.setDate(1);
-	start.setMonth(start.getMonth() + monthsAhead);
-	const month = localDate(start).slice(0, 7);
-	const weeks = monthWeeks(start, entries);
-	const shown = entries.filter((entry) => entry.date.startsWith(month)).length;
+	const days = useMemo(() => visibleDays(cursor, view), [cursor, view]);
+	const month = localDate(cursor).slice(0, 7);
+	const shown = entries.filter((entry) =>
+		view === "month" ? entry.date.startsWith(month) : days.includes(entry.date),
+	).length;
+
+	// A met plan is history and no longer amendable, so it keeps the link out
+	// to the deployment instead.
+	const editor = (entry: Entry) =>
+		isAdmin && entry.tone !== "done" ? () => setEditing(entry) : null;
 
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }} data-testid="upgrade-calendar">
 			<Stack direction="row" spacing={1} sx={{ alignItems: "center", mb: 1.5 }}>
 				<Box sx={{ flexGrow: 1, minWidth: 0 }}>
 					<Typography variant="h6" component="h2" sx={{ lineHeight: 1.25 }}>
-						{start.toLocaleDateString(undefined, { month: "long" })}{" "}
-						<Box component="span" sx={{ color: "text.secondary", fontWeight: 400 }}>
-							{start.getFullYear()}
+						{periodName(cursor, view)}{" "}
+						<Box
+							component="span"
+							sx={{ color: "text.secondary", fontWeight: 400 }}
+						>
+							{periodYear(cursor, view)}
 						</Box>
 					</Typography>
 					<Typography variant="caption" color="text.secondary">
-						{shown === 0
-							? "nothing planned this month"
-							: shown === 1
-								? "1 upgrade this month"
-								: `${shown} upgrades this month`}
+						{countLabel(shown, view)}
 					</Typography>
 				</Box>
 				<Button
@@ -357,88 +382,56 @@ function PlanCalendar({
 				>
 					Subscribe
 				</Button>
+				<ToggleButtonGroup
+					size="small"
+					exclusive
+					value={view}
+					onChange={(_, next: View | null) => next && setView(next)}
+					sx={{ flexShrink: 0 }}
+				>
+					{VIEWS.map((option) => (
+						<ToggleButton key={option} value={option} sx={VIEW_BUTTON}>
+							{option}
+						</ToggleButton>
+					))}
+				</ToggleButtonGroup>
 				<ButtonGroup size="small" variant="outlined" sx={{ flexShrink: 0 }}>
 					<Button
-						aria-label="previous month"
-						onClick={() => setMonthsAhead((m) => m - 1)}
+						aria-label={`previous ${view}`}
+						onClick={() => setCursor((at) => stepped(at, view, -1))}
 					>
 						<ChevronLeftIcon fontSize="small" />
 					</Button>
-					<Button onClick={() => setMonthsAhead(0)}>Today</Button>
+					<Button onClick={() => setCursor(startOfToday())}>Today</Button>
 					<Button
-						aria-label="next month"
-						onClick={() => setMonthsAhead((m) => m + 1)}
+						aria-label={`next ${view}`}
+						onClick={() => setCursor((at) => stepped(at, view, 1))}
 					>
 						<ChevronRightIcon fontSize="small" />
 					</Button>
 				</ButtonGroup>
 			</Stack>
 
-			<Box sx={CALENDAR_GRID}>
-				{WEEKDAYS.map((day) => (
-					<Typography key={day} variant="caption" sx={WEEKDAY_CELL}>
-						{day}
-					</Typography>
-				))}
-				{weeks.flat().map((day) => {
-					const inMonth = day.date.startsWith(month);
-					const overflow = day.entries.slice(ENTRIES_PER_DAY);
-					return (
-						<Box
-							key={day.date}
-							data-testid="calendar-day"
-							data-date={day.date}
-							sx={(theme) => ({
-								...CALENDAR_CELL,
-								// Opaque: the 1px gridlines are the container's own
-								// background showing through the gaps, so a tinted cell
-								// would let them flood it.
-								bgcolor: inMonth
-									? "background.paper"
-									: theme.palette.mode === "dark"
-										? theme.palette.grey[900]
-										: theme.palette.grey[50],
-							})}
-						>
-							<Box sx={{ display: "flex", justifyContent: "flex-end" }}>
-								<Box
-									sx={{
-										...DAY_NUMBER,
-										color: inMonth ? "text.secondary" : "text.disabled",
-										...(day.date === today ? TODAY_NUMBER : null),
-									}}
-								>
-									{Number(day.date.slice(8))}
-								</Box>
-							</Box>
-							{day.entries.slice(0, ENTRIES_PER_DAY).map((entry) => (
-								<CalendarEntry
-									key={entry.planId}
-									entry={entry}
-									// A met plan is history and no longer amendable, so it
-									// keeps the link out to the deployment instead.
-									onEdit={
-										isAdmin && entry.tone !== "done"
-											? () => setEditing(entry)
-											: null
-									}
-								/>
-							))}
-							{overflow.length > 0 && (
-								<Tooltip
-									title={overflow
-										.map((entry) => `${entry.group} ${entry.version}`)
-										.join(", ")}
-								>
-									<Typography variant="caption" sx={OVERFLOW_COUNT}>
-										+{overflow.length} more
-									</Typography>
-								</Tooltip>
-							)}
-						</Box>
-					);
-				})}
-			</Box>
+			{view === "month" ? (
+				<MonthGrid
+					days={days}
+					month={month}
+					today={today}
+					entries={entries}
+					editor={editor}
+					onOpenDay={(date) => {
+						setCursor(dateOf(date));
+						setView("day");
+					}}
+				/>
+			) : (
+				<TimeGrid
+					days={days}
+					today={today}
+					entries={entries}
+					editor={editor}
+				/>
+			)}
 
 			{editing && (
 				<EditPlanDialog
@@ -447,6 +440,7 @@ function PlanCalendar({
 					targetVersion={editing.version}
 					plannedFor={editing.date}
 					plannedTime={editing.time}
+					plannedEnd={editing.end}
 					plannedZone={editing.zone}
 					note={editing.note}
 					onClose={() => setEditing(null)}
@@ -460,6 +454,200 @@ function PlanCalendar({
 	);
 }
 
+/// The month as anyone reads a month: whole weeks, with the neighbouring
+/// months' edges drawn faded rather than left blank, so a plan on the 1st or
+/// the 31st is never off the edge of the view.
+function MonthGrid({
+	days,
+	month,
+	today,
+	entries,
+	editor,
+	onOpenDay,
+}: {
+	days: string[];
+	month: string;
+	today: string;
+	entries: Entry[];
+	editor: (entry: Entry) => (() => void) | null;
+	onOpenDay: (date: string) => void;
+}) {
+	return (
+		<Box sx={CALENDAR_GRID}>
+			{WEEKDAYS.map((day) => (
+				<Typography key={day} variant="caption" sx={WEEKDAY_CELL}>
+					{day}
+				</Typography>
+			))}
+			{days.map((date) => {
+				const inMonth = date.startsWith(month);
+				const onDay = entries.filter((entry) => entry.date === date);
+				const overflow = onDay.slice(ENTRIES_PER_DAY);
+				return (
+					<Box
+						key={date}
+						data-testid="calendar-day"
+						data-date={date}
+						sx={(theme) => ({
+							...CALENDAR_CELL,
+							// Opaque: the 1px gridlines are the container's own
+							// background showing through the gaps, so a tinted cell
+							// would let them flood it.
+							bgcolor: inMonth
+								? "background.paper"
+								: theme.palette.mode === "dark"
+									? theme.palette.grey[900]
+									: theme.palette.grey[50],
+						})}
+					>
+						<Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+							<Box
+								component="button"
+								type="button"
+								onClick={() => onOpenDay(date)}
+								sx={[
+									{
+										...DAY_NUMBER,
+										...DAY_BUTTON,
+										color: inMonth ? "text.secondary" : "text.disabled",
+									},
+									date === today && TODAY_NUMBER,
+								]}
+							>
+								{Number(date.slice(8))}
+							</Box>
+						</Box>
+						{onDay.slice(0, ENTRIES_PER_DAY).map((entry) => (
+							<CalendarEntry
+								key={entry.planId}
+								entry={entry}
+								onEdit={editor(entry)}
+							/>
+						))}
+						{overflow.length > 0 && (
+							<Tooltip
+								title={overflow
+									.map((entry) => `${entry.group} ${entry.version}`)
+									.join(", ")}
+							>
+								<Typography variant="caption" sx={OVERFLOW_COUNT}>
+									+{overflow.length} more
+								</Typography>
+							</Tooltip>
+						)}
+					</Box>
+				);
+			})}
+		</Box>
+	);
+}
+
+/// The hours of a day, or of a week. The length of a block is how long the
+/// deployment expects to be down, and a window running past midnight is drawn
+/// again on the following morning.
+function TimeGrid({
+	days,
+	today,
+	entries,
+	editor,
+}: {
+	days: string[];
+	today: string;
+	entries: Entry[];
+	editor: (entry: Entry) => (() => void) | null;
+}) {
+	const hours = useRef<HTMLDivElement>(null);
+	const blocks = useMemo(() => laidOut(days, entries), [days, entries]);
+	const resting = restingHour(blocks);
+
+	// Upgrades run at night, which is off the bottom of the scroller until
+	// something puts it in view.
+	useEffect(() => {
+		hours.current?.scrollTo({ top: resting * HOUR_HEIGHT });
+	}, [resting]);
+
+	const columns = `${GUTTER}px repeat(${days.length}, minmax(0, 1fr))`;
+
+	return (
+		<Box sx={TIME_FRAME}>
+			<Box sx={{ display: "grid", gridTemplateColumns: columns }}>
+				<Box />
+				{days.map((date) => (
+					<Box key={date} sx={COLUMN_HEAD}>
+						<Box component="span" sx={COLUMN_WEEKDAY}>
+							{weekdayOf(date)}
+						</Box>
+						<Box
+							component="span"
+							sx={[DAY_NUMBER, date === today && TODAY_NUMBER]}
+						>
+							{Number(date.slice(8))}
+						</Box>
+					</Box>
+				))}
+			</Box>
+
+			<Box sx={{ display: "grid", gridTemplateColumns: columns, ...ALLDAY_ROW }}>
+				<Box sx={GUTTER_LABEL}>all day</Box>
+				{days.map((date) => (
+					<Box
+						key={date}
+						data-testid="calendar-allday"
+						data-date={date}
+						sx={ALLDAY_CELL}
+					>
+						{entries
+							.filter((entry) => entry.date === date && !entry.time)
+							.map((entry) => (
+								<CalendarEntry
+									key={entry.planId}
+									entry={entry}
+									onEdit={editor(entry)}
+								/>
+							))}
+					</Box>
+				))}
+			</Box>
+
+			<Box ref={hours} sx={{ maxHeight: VISIBLE_HOURS * HOUR_HEIGHT, overflowY: "auto" }}>
+				<Box
+					sx={{
+						display: "grid",
+						gridTemplateColumns: columns,
+						height: 24 * HOUR_HEIGHT,
+					}}
+				>
+					<Box>
+						{HOURS.map((hour) => (
+							<Box key={hour} sx={HOUR_LABEL}>
+								{clockTime(`${String(hour).padStart(2, "0")}:00`)}
+							</Box>
+						))}
+					</Box>
+					{days.map((date) => (
+						<Box
+							key={date}
+							data-testid="calendar-day"
+							data-date={date}
+							sx={HOUR_COLUMN}
+						>
+							{blocks
+								.filter((block) => block.date === date)
+								.map((block) => (
+									<TimeBlock
+										key={`${block.entry.planId}${block.tail ? "-tail" : ""}`}
+										block={block}
+										onEdit={editor(block.entry)}
+									/>
+								))}
+						</Box>
+					))}
+				</Box>
+			</Box>
+		</Box>
+	);
+}
+
 function CalendarEntry({
 	entry,
 	onEdit,
@@ -467,25 +655,8 @@ function CalendarEntry({
 	entry: Entry;
 	onEdit: (() => void) | null;
 }) {
-	const headline =
-		entry.tone === "done"
-			? `${entry.group} reached ${entry.version}`
-			: `${entry.group} to ${entry.version}${entry.tone === "late" ? " (late)" : ""}`;
-
 	return (
-		<Tooltip
-			title={
-				<>
-					{headline}
-					{entry.time && entry.zone && (
-						<Box sx={ENTRY_NOTE}>
-							{clockTime(entry.time)} {zoneLabel(entry.zone)} ({entry.zone})
-						</Box>
-					)}
-					{entry.note && <Box sx={ENTRY_NOTE}>{entry.note}</Box>}
-				</>
-			}
-		>
+		<Tooltip title={<EntryTooltip entry={entry} />}>
 			<Box
 				{...(onEdit
 					? { component: "button" as const, type: "button", onClick: onEdit }
@@ -520,28 +691,227 @@ function CalendarEntry({
 	);
 }
 
-/// The weeks covering `month`, Monday first, each day carrying the plans that
-/// fall on it. Leading and trailing days belong to the neighbouring months and
-/// are drawn faded rather than left blank, so a plan on the 1st or the 31st is
-/// never off the edge of the view.
-function monthWeeks(month: Date, entries: Entry[]): Day[][] {
-	const first = new Date(month.getFullYear(), month.getMonth(), 1);
-	const cursor = new Date(first);
-	cursor.setDate(1 - ((first.getDay() + 6) % 7));
+/// One window on the hour grid, sized to how long it runs.
+function TimeBlock({
+	block,
+	onEdit,
+}: {
+	block: Block;
+	onEdit: (() => void) | null;
+}) {
+	const { entry } = block;
 
-	const weeks: Day[][] = [];
-	for (let week = 0; week < 6; week++) {
-		const days: Day[] = [];
-		for (let day = 0; day < 7; day++) {
-			const date = localDate(cursor);
-			days.push({ date, entries: entries.filter((e) => e.date === date) });
-			cursor.setDate(cursor.getDate() + 1);
+	return (
+		<Tooltip title={<EntryTooltip entry={entry} />}>
+			<Box
+				{...(onEdit
+					? { component: "button" as const, type: "button", onClick: onEdit }
+					: { component: RouterLink, to: `/groups/${entry.groupId}` })}
+				data-testid="calendar-entry"
+				{...(block.tail ? { "data-continues": "true" } : null)}
+				sx={[
+					(theme) => ({
+						...TIME_BLOCK,
+						top: `${(block.from / DAY_MINUTES) * 100}%`,
+						height: `${((block.to - block.from) / DAY_MINUTES) * 100}%`,
+						left: `${(block.lane / block.lanes) * 100}%`,
+						width: `${100 / block.lanes}%`,
+						bgcolor: alpha(toneColour(theme, entry.tone), 0.16),
+						borderColor: alpha(toneColour(theme, entry.tone), 0.45),
+						"&:hover": { bgcolor: alpha(toneColour(theme, entry.tone), 0.28) },
+					}),
+					!!onEdit && BLOCK_BUTTON,
+				]}
+			>
+				<Box sx={ENTRY_LABEL}>
+					<Box component="span" sx={{ fontWeight: 500 }}>
+						{entry.group}
+					</Box>{" "}
+					<Box component="span" sx={{ color: "text.secondary" }}>
+						{entry.version}
+					</Box>
+				</Box>
+				<Box sx={BLOCK_HOURS}>
+					{block.tail
+						? `until ${clockTime(wallClock(block.to))}`
+						: entry.time && clockRange(entry.time, entry.end)}
+				</Box>
+			</Box>
+		</Tooltip>
+	);
+}
+
+function EntryTooltip({ entry }: { entry: Entry }) {
+	return (
+		<>
+			{entry.tone === "done"
+				? `${entry.group} reached ${entry.version}`
+				: `${entry.group} to ${entry.version}${entry.tone === "late" ? " (late)" : ""}`}
+			{entry.time && entry.zone && (
+				<Box sx={ENTRY_NOTE}>
+					{clockRange(entry.time, entry.end)} {zoneLabel(entry.zone)} (
+					{entry.zone})
+				</Box>
+			)}
+			{entry.note && <Box sx={ENTRY_NOTE}>{entry.note}</Box>}
+		</>
+	);
+}
+
+/// A timed plan as the blocks an hour grid draws, laid out so that windows
+/// overlapping in the same column share its width rather than covering each
+/// other.
+function laidOut(days: string[], entries: Entry[]): Block[] {
+	const columns = new Map<string, Segment[]>();
+	for (const entry of entries) {
+		if (!entry.time) continue;
+		const from = minutesInto(entry.time);
+		const runs = windowMinutes(entry.time, entry.end);
+		const spans: Segment[] = [
+			{ entry, date: entry.date, from, to: Math.min(from + runs, DAY_MINUTES), tail: false },
+		];
+		if (from + runs > DAY_MINUTES) {
+			spans.push({
+				entry,
+				date: nextDay(entry.date),
+				from: 0,
+				to: from + runs - DAY_MINUTES,
+				tail: true,
+			});
 		}
-		weeks.push(days);
-		// A month spans six weeks only when it starts late enough to need one.
-		if (cursor.getMonth() !== month.getMonth() && week >= 4) break;
+		for (const span of spans.filter((span) => days.includes(span.date))) {
+			const column = columns.get(span.date);
+			if (column) column.push(span);
+			else columns.set(span.date, [span]);
+		}
 	}
-	return weeks;
+
+	const out: Block[] = [];
+	for (const column of columns.values()) {
+		const freeFrom: number[] = [];
+		const placed = column
+			.sort((a, b) => a.from - b.from || a.to - b.to)
+			.map((span) => {
+				const found = freeFrom.findIndex((at) => at <= span.from);
+				const lane = found < 0 ? freeFrom.length : found;
+				freeFrom[lane] = span.to;
+				return { ...span, lane };
+			});
+		out.push(...placed.map((span) => ({ ...span, lanes: freeFrom.length })));
+	}
+	return out;
+}
+
+/// Where the grid rests: the hour that brings the most windows into view.
+/// Upgrades cluster at night, so opening at the earliest of them would let one
+/// morning entry pin the view twelve hours away from the rest.
+function restingHour(blocks: Block[]): number {
+	const latest = 24 - VISIBLE_HOURS;
+	if (!blocks.length) return Math.min(MORNING / 60, latest);
+
+	const candidates = blocks
+		.map((block) =>
+			Math.min(Math.max(0, Math.floor(block.from / 60) - 1), latest),
+		)
+		.sort((a, b) => a - b);
+	let resting = candidates[0];
+	let most = -1;
+	for (const hour of candidates) {
+		const shown = blocks.filter(
+			(block) =>
+				block.from >= hour * 60 && block.to <= (hour + VISIBLE_HOURS) * 60,
+		).length;
+		if (shown > most) {
+			most = shown;
+			resting = hour;
+		}
+	}
+	return resting;
+}
+
+/// The days a view draws.
+function visibleDays(cursor: Date, view: View): string[] {
+	if (view === "day") return [localDate(cursor)];
+	const at = weekStart(view === "week" ? cursor : monthStart(cursor));
+	const wanted = view === "week" ? 7 : monthRows(cursor) * 7;
+	const days: string[] = [];
+	while (days.length < wanted) {
+		days.push(localDate(at));
+		at.setDate(at.getDate() + 1);
+	}
+	return days;
+}
+
+/// Six rows only for a month that starts late enough to need one.
+function monthRows(cursor: Date): number {
+	const first = monthStart(cursor);
+	const length = new Date(
+		cursor.getFullYear(),
+		cursor.getMonth() + 1,
+		0,
+	).getDate();
+	return Math.ceil((((first.getDay() + 6) % 7) + length) / 7);
+}
+
+function stepped(cursor: Date, view: View, delta: number): Date {
+	const at = new Date(cursor);
+	if (view === "month") {
+		at.setDate(1);
+		at.setMonth(at.getMonth() + delta);
+	} else {
+		at.setDate(at.getDate() + delta * (view === "week" ? 7 : 1));
+	}
+	return at;
+}
+
+function periodName(cursor: Date, view: View): string {
+	if (view === "month") {
+		return cursor.toLocaleDateString(undefined, { month: "long" });
+	}
+	if (view === "day") {
+		return cursor.toLocaleDateString(undefined, {
+			weekday: "long",
+			day: "numeric",
+			month: "long",
+		});
+	}
+	const monday = weekStart(cursor);
+	const sunday = new Date(monday);
+	sunday.setDate(monday.getDate() + 6);
+	const shortMonth = (at: Date) =>
+		at.toLocaleDateString(undefined, { month: "short" });
+	return monday.getMonth() === sunday.getMonth()
+		? `${monday.getDate()}-${sunday.getDate()} ${shortMonth(sunday)}`
+		: `${monday.getDate()} ${shortMonth(monday)}-${sunday.getDate()} ${shortMonth(sunday)}`;
+}
+
+function periodYear(cursor: Date, view: View): number {
+	return (view === "week" ? weekStart(cursor) : cursor).getFullYear();
+}
+
+function countLabel(count: number, view: View): string {
+	const span = view === "day" ? "on this day" : `this ${view}`;
+	if (count === 0) return `nothing planned ${span}`;
+	return `${count} upgrade${count === 1 ? "" : "s"} ${span}`;
+}
+
+function weekdayOf(date: string): string {
+	return dateOf(date).toLocaleDateString(undefined, { weekday: "short" });
+}
+
+function monthStart(cursor: Date): Date {
+	return new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+}
+
+function weekStart(at: Date): Date {
+	const monday = new Date(at);
+	monday.setDate(at.getDate() - ((at.getDay() + 6) % 7));
+	return monday;
+}
+
+function startOfToday(): Date {
+	const now = new Date();
+	return new Date(now.getFullYear(), now.getMonth(), now.getDate());
 }
 
 function localDate(at: Date): string {
@@ -550,6 +920,17 @@ function localDate(at: Date): string {
 		String(at.getMonth() + 1).padStart(2, "0"),
 		String(at.getDate()).padStart(2, "0"),
 	].join("-");
+}
+
+function dateOf(date: string): Date {
+	const [year, month, day] = date.split("-").map(Number);
+	return new Date(year, month - 1, day);
+}
+
+function nextDay(date: string): string {
+	const at = dateOf(date);
+	at.setDate(at.getDate() + 1);
+	return localDate(at);
 }
 
 const CALENDAR_GRID = {
@@ -633,6 +1014,127 @@ const ENTRY_LABEL = {
 	whiteSpace: "nowrap",
 };
 
+const HOUR_HEIGHT = 34;
+
+const VISIBLE_HOURS = 11;
+
+const GUTTER = 52;
+
+const HOURS = [...Array(24).keys()];
+
+const MORNING = 8 * 60;
+
+const VIEW_BUTTON = {
+	px: 1.25,
+	py: 0.25,
+	textTransform: "capitalize",
+	fontSize: "0.75rem",
+};
+
+const DAY_BUTTON = {
+	border: 0,
+	bgcolor: "transparent",
+	font: "inherit",
+	fontSize: "0.7rem",
+	cursor: "pointer",
+	p: 0,
+};
+
+const TIME_FRAME = {
+	border: 1,
+	borderColor: "divider",
+	borderRadius: 1,
+	overflow: "hidden",
+};
+
+const COLUMN_HEAD = {
+	display: "flex",
+	alignItems: "center",
+	justifyContent: "center",
+	gap: 0.5,
+	py: 0.5,
+	borderLeft: 1,
+	borderColor: "divider",
+};
+
+const COLUMN_WEEKDAY = {
+	color: "text.secondary",
+	textTransform: "uppercase",
+	letterSpacing: "0.08em",
+	fontSize: "0.65rem",
+};
+
+const ALLDAY_ROW = {
+	borderTop: 1,
+	borderBottom: 1,
+	borderColor: "divider",
+	minHeight: 28,
+};
+
+const ALLDAY_CELL = {
+	display: "flex",
+	flexDirection: "column",
+	gap: 0.25,
+	p: 0.5,
+	minWidth: 0,
+	borderLeft: 1,
+	borderColor: "divider",
+};
+
+const GUTTER_LABEL = {
+	display: "flex",
+	alignItems: "center",
+	justifyContent: "flex-end",
+	pr: 0.75,
+	color: "text.secondary",
+	fontSize: "0.62rem",
+};
+
+const HOUR_LABEL = {
+	height: HOUR_HEIGHT,
+	display: "flex",
+	justifyContent: "flex-end",
+	pr: 0.75,
+	color: "text.secondary",
+	fontSize: "0.62rem",
+	lineHeight: 1.2,
+};
+
+const HOUR_COLUMN = (theme: Theme) => ({
+	position: "relative",
+	borderLeft: 1,
+	borderColor: "divider",
+	minWidth: 0,
+	backgroundImage: `repeating-linear-gradient(to bottom, ${theme.palette.divider} 0 1px, transparent 1px ${HOUR_HEIGHT}px)`,
+});
+
+const TIME_BLOCK = {
+	position: "absolute",
+	minHeight: 20,
+	overflow: "hidden",
+	px: 0.75,
+	py: "1px",
+	border: 1,
+	borderRadius: 0.75,
+	textDecoration: "none",
+	color: "text.primary",
+	fontSize: "0.68rem",
+	lineHeight: 1.4,
+};
+
+const BLOCK_BUTTON = {
+	display: "block",
+	font: "inherit",
+	fontSize: "0.68rem",
+	textAlign: "left",
+	cursor: "pointer",
+};
+
+const BLOCK_HOURS = {
+	color: "text.secondary",
+	fontSize: "0.62rem",
+};
+
 const OVERFLOW_COUNT = {
 	color: "text.secondary",
 	fontSize: "0.65rem",
@@ -660,7 +1162,7 @@ function PastPlans({ plans }: { plans: PastPlan[] }) {
 						<TableCell>Deployment</TableCell>
 						<TableCell>Was going to</TableCell>
 						<TableCell>Planned for</TableCell>
-						<TableCell>Time</TableCell>
+						<TableCell>Window</TableCell>
 						<TableCell>Ended</TableCell>
 						<TableCell>Note</TableCell>
 					</TableRow>
@@ -678,6 +1180,7 @@ function PastPlans({ plans }: { plans: PastPlan[] }) {
 								<TableCell>
 									<PlannedTime
 										time={row.plan.planned_time ?? null}
+										end={row.plan.planned_end_time ?? null}
 										zone={row.plan.planned_zone ?? null}
 									/>
 								</TableCell>
@@ -884,14 +1387,16 @@ function PlanNote({ note, testId }: { note: string | null; testId: string }) {
 	);
 }
 
-/// The hour a deployment moves, as the wall clock it was recorded as. Canopy
-/// holds no timezone for a group, so the zone travels with the time or the
-/// reader cannot tell whose midnight it is.
+/// The window a deployment moves in, as the wall clocks it was recorded as.
+/// Canopy holds no timezone for a group, so the zone travels with the time or
+/// the reader cannot tell whose midnight it is.
 function PlannedTime({
 	time,
+	end,
 	zone,
 }: {
 	time: string | null;
+	end: string | null;
 	zone: string | null;
 }) {
 	if (!time || !zone) return null;
@@ -899,9 +1404,47 @@ function PlannedTime({
 	return (
 		<Tooltip title={offset ? `${zone} (${offset})` : zone}>
 			<span>
-				{clockTime(time)} {zoneLabel(zone)}
+				{clockRange(time, end)} {zoneLabel(zone)}
 			</span>
 		</Tooltip>
+	);
+}
+
+/// The window as a reader says it, or the hour alone where the plan names no
+/// close.
+function clockRange(time: string, end: string | null): string {
+	return end ? `${clockTime(time)}-${clockTime(end)}` : clockTime(time);
+}
+
+const DAY_MINUTES = 24 * 60;
+
+/// What the calendar feed allows a plan that names no close.
+const ASSUMED_MINUTES = 60;
+
+function minutesInto(time: string): number {
+	const [hours, minutes] = time.split(":").map(Number);
+	return hours * 60 + minutes;
+}
+
+function wallClock(minutes: number): string {
+	const of = ((minutes % DAY_MINUTES) + DAY_MINUTES) % DAY_MINUTES;
+	const hours = String(Math.floor(of / 60)).padStart(2, "0");
+	return `${hours}:${String(of % 60).padStart(2, "0")}`;
+}
+
+/// How long a window runs. A close earlier in the day than the open is the next
+/// morning.
+/// The close a form offers as soon as an hour is typed, so the common case is
+/// one field rather than two.
+function anHourLater(time: string): string {
+	return time ? wallClock(minutesInto(time) + ASSUMED_MINUTES) : "";
+}
+
+function windowMinutes(time: string, end: string | null): number {
+	if (!end) return ASSUMED_MINUTES;
+	return (
+		(minutesInto(end) - minutesInto(time) + DAY_MINUTES) % DAY_MINUTES ||
+		ASSUMED_MINUTES
 	);
 }
 
@@ -965,7 +1508,7 @@ function zonePart(
 const PLAN_FORM = {
 	display: "grid",
 	gridTemplateColumns:
-		"minmax(0, 1.15fr) minmax(0, 1.15fr) 155px 136px 150px minmax(0, 1.2fr) auto",
+		"minmax(0, 1fr) minmax(0, 1fr) 150px 112px 112px 140px minmax(0, 1fr) auto",
 	columnGap: 1.5,
 	rowGap: 1,
 	alignItems: "start",
@@ -973,7 +1516,7 @@ const PLAN_FORM = {
 
 const WHEN_FIELDS = {
 	display: "grid",
-	gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+	gridTemplateColumns: "minmax(0, 1.1fr) 100px 100px minmax(0, 1.4fr)",
 	columnGap: 1.5,
 };
 
@@ -1063,6 +1606,8 @@ function RecordPlan({
 	const [versionId, setVersionId] = useState("");
 	const [plannedFor, setPlannedFor] = useState("");
 	const [plannedTime, setPlannedTime] = useState("");
+	const [endTime, setEndTime] = useState("");
+	const [endTyped, setEndTyped] = useState(false);
 	const [zone, setZone] = useState(DEFAULT_ZONE);
 	const [note, setNote] = useState("");
 	const record = useApiAction("upgrade_plans", "record");
@@ -1083,12 +1628,15 @@ function RecordPlan({
 			target_version_id: versionId,
 			planned_for: plannedFor || null,
 			planned_time: plannedTime || null,
+			planned_end_time: plannedTime ? endTime || null : null,
 			planned_zone: plannedTime ? zone : null,
 			note: note || null,
 		});
 		setVersionId("");
 		setPlannedFor("");
 		setPlannedTime("");
+		setEndTime("");
+		setEndTyped(false);
 		setNote("");
 		onRecorded();
 	};
@@ -1161,17 +1709,41 @@ function RecordPlan({
 						value={plannedFor}
 						onChange={(e) => {
 							setPlannedFor(e.target.value);
-							if (!e.target.value) setPlannedTime("");
+							if (!e.target.value) {
+								setPlannedTime("");
+								setEndTime("");
+								setEndTyped(false);
+							}
 						}}
 						slotProps={{ inputLabel: { shrink: true } }}
 					/>
 					<TextField
 						size="small"
 						type="time"
-						label="Time"
+						label="Starts"
 						value={plannedTime}
 						disabled={!plannedFor}
-						onChange={(e) => setPlannedTime(e.target.value)}
+						onChange={(e) => {
+							setPlannedTime(e.target.value);
+							if (!e.target.value) {
+								setEndTime("");
+								setEndTyped(false);
+							} else if (!endTyped) {
+								setEndTime(anHourLater(e.target.value));
+							}
+						}}
+						slotProps={{ inputLabel: { shrink: true } }}
+					/>
+					<TextField
+						size="small"
+						type="time"
+						label="Ends"
+						value={endTime}
+						disabled={!plannedTime}
+						onChange={(e) => {
+							setEndTime(e.target.value);
+							setEndTyped(true);
+						}}
 						slotProps={{ inputLabel: { shrink: true } }}
 					/>
 					<ZoneField value={zone} onChange={setZone} disabled={!plannedTime} />
@@ -1209,6 +1781,7 @@ function EditPlan({
 	targetVersion,
 	plannedFor,
 	plannedTime,
+	plannedEnd,
 	plannedZone,
 	note,
 	onAmended,
@@ -1232,6 +1805,7 @@ function EditPlan({
 					targetVersion={targetVersion}
 					plannedFor={plannedFor}
 					plannedTime={plannedTime}
+					plannedEnd={plannedEnd}
 					plannedZone={plannedZone}
 					note={note}
 					onClose={() => setOpen(false)}
@@ -1251,6 +1825,7 @@ type PlanFields = {
 	targetVersion: string;
 	plannedFor: string | null;
 	plannedTime: string | null;
+	plannedEnd: string | null;
 	plannedZone: string | null;
 	note: string | null;
 };
@@ -1264,6 +1839,7 @@ function EditPlanDialog({
 	targetVersion,
 	plannedFor,
 	plannedTime,
+	plannedEnd,
 	plannedZone,
 	note,
 	onClose,
@@ -1271,6 +1847,10 @@ function EditPlanDialog({
 }: PlanFields & { onClose: () => void; onAmended: () => void }) {
 	const [date, setDate] = useState(plannedFor ?? "");
 	const [time, setTime] = useState(plannedTime?.slice(0, 5) ?? "");
+	const [end, setEnd] = useState(plannedEnd?.slice(0, 5) ?? "");
+	// A plan that already names an hour stands as recorded: filling an hour in
+	// for it would assert a window nobody typed.
+	const [endTyped, setEndTyped] = useState(plannedTime !== null);
 	const [zone, setZone] = useState(plannedZone ?? DEFAULT_ZONE);
 	const [text, setText] = useState(note ?? "");
 	const amend = useApiAction("upgrade_plans", "amend");
@@ -1280,6 +1860,7 @@ function EditPlanDialog({
 			id: planId,
 			planned_for: date || null,
 			planned_time: time || null,
+			planned_end_time: time ? end || null : null,
 			planned_zone: time ? zone : null,
 			note: text || null,
 		});
@@ -1301,17 +1882,40 @@ function EditPlanDialog({
 							value={date}
 							onChange={(e) => {
 								setDate(e.target.value);
-								if (!e.target.value) setTime("");
+								if (!e.target.value) {
+									setTime("");
+									setEnd("");
+								}
 							}}
 							slotProps={{ inputLabel: { shrink: true } }}
 						/>
 						<TextField
 							size="small"
 							type="time"
-							label="Time"
+							label="Starts"
 							value={time}
 							disabled={!date}
-							onChange={(e) => setTime(e.target.value)}
+							onChange={(e) => {
+								setTime(e.target.value);
+								if (!e.target.value) {
+									setEnd("");
+									setEndTyped(false);
+								} else if (!endTyped) {
+									setEnd(anHourLater(e.target.value));
+								}
+							}}
+							slotProps={{ inputLabel: { shrink: true } }}
+						/>
+						<TextField
+							size="small"
+							type="time"
+							label="Ends"
+							value={end}
+							disabled={!time}
+							onChange={(e) => {
+								setEnd(e.target.value);
+								setEndTyped(true);
+							}}
 							slotProps={{ inputLabel: { shrink: true } }}
 						/>
 						<ZoneField value={zone} onChange={setZone} disabled={!time} />
