@@ -1039,7 +1039,7 @@ const DAY_NUMBER = {
 	placeItems: "center",
 	fontSize: "0.85rem",
 	lineHeight: 1,
-	pt: "1px",
+	pt: "2px",
 };
 
 const TODAY_NUMBER = {
