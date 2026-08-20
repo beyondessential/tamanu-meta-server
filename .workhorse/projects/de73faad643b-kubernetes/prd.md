@@ -16,31 +16,27 @@ This project moves that burden into Canopy, so the fleet's deployment work is co
 
 ## Sequencing
 
-Two things gate everything else, and neither blocks the other, so both start now.
+**Migration testing is complete and in final QA.** It proved the managed-restore machinery that the reporting-schema pipeline reuses, so downstream replica work now builds on a known-good foundation. Its only remaining thread is migration testing in the RC cycle, which it unblocks.
 
-**Migration testing is the critical path.** It is the only component with code already in the ground, and proving it end to end also proves the managed-restore machinery that the reporting-schema pipeline reuses. Nothing downstream is worth building against an unproven replica.
+**Discovery now gates the reporting half on its own.** It needs the analytics team's time, which makes it calendar-bound rather than effort-bound. It starts immediately even though it delivers late; if it slips, the entire reporting half of the project slips with it.
 
-**Discovery is blocked on people, not code.** It needs the analytics team's time, which makes it calendar-bound rather than effort-bound. It starts immediately even though it delivers late; if it slips, the entire reporting half of the project slips with it.
+The rest falls out of that:
 
-The rest falls out of those two:
-
-- **Now, unblocked** — migration testing end to end; reporting-schema discovery; Canopy holding desired versions and inventory state; the release-process audit, which is a paper exercise with no dependencies; quick wins
-- **Once migration testing is proven** — migration testing in the RC cycle
+- **Now, unblocked** — reporting-schema discovery; migration testing in the RC cycle; Canopy holding desired versions and inventory state; the release-process audit, which is a paper exercise with no dependencies; quick wins
 - **Once Canopy holds inventory state** — the Ansible plugin that makes Canopy the inventory source, then the refusal policies that ride on it
 - **Once discovery lands** — deployment artefacts, whose shape depends on what the pipeline produces and who produces it, then the reporting-schema pipeline itself
 - **Last** — applying artefacts, which needs artefacts to exist and the bestool-or-Seedling question answered
 
 ## Migration testing
 
-Half-built in Canopy today: candidate versions, dispatch, and report shapes exist ([RST](../../specs/public-server/restore-replicas.md) *Pre-upgrade migration testing*, `crates/database/src/migration_tests.rs`, `crates/private-server/src/fns/migration_tests.rs`).
-Finish it and prove it end to end.
+Complete and in final QA ([RST](../../specs/public-server/restore-replicas.md) *Pre-upgrade migration testing*, `crates/database/src/migration_tests.rs`, `crates/private-server/src/fns/migration_tests.rs`). The full loop runs for real:
 
-- The full loop, exercised for real: take a backup → restore it through the Canopy managed-restore process → apply the target version's Tamanu migrations against that data → report the outcome back to Canopy
-- Close whatever gaps remain between the spec and the code — audit spec against implementation before shaping cards
-- Prove it against a real deployment's data, not a synthetic database. The whole point of the feature is that a migration's behaviour is a property of *that deployment's* data
+- Take a backup → restore it through the Canopy managed-restore process → apply the target version's Tamanu migrations against that data → report the outcome back to Canopy
+- Runs against a real deployment's data, not a synthetic database. The whole point of the feature is that a migration's behaviour is a property of *that deployment's* data
 - Reporting: verdict, target version, which migration failed and its error, and how long the chain took — the duration matters as much as the pass/fail, because a migration that succeeds but overruns the upgrade window is still a blocker
 - Operator-facing surface: where a VitiOps person looks to see whether a version is safe for a deployment before scheduling its window
-- Detailed shape of the remaining gaps can be filled in during card shaping, once the spec/code audit is done
+
+The remaining thread is running it inside the RC cycle — see *Release and RC process* below.
 
 ## Desired versions and Ansible inventory
 
@@ -165,5 +161,4 @@ Answerable by someone who already knows, and worth asking before this project sh
 Needs real work to answer:
 
 - Which of "fully in Canopy" and "managed from Canopy" the reporting-schema pipeline takes — blocked on discovery with the analytics team
-- How much of migration testing is actually left, which the spec-against-code audit answers and nothing else will
 - How much of the Ansible inventory Canopy holds, and in what form: the desired version alone, or the full inventory state for Linux deployments
