@@ -78,7 +78,7 @@ export default function CalendarFeeds() {
 	return (
 		<Stack spacing={3} data-testid="calendar-feeds">
 			<Typography variant="body2" color="text.secondary">
-				A read-only calendar of planned upgrades, for subscribing to from
+				A read-only calendar of planned upgrades, to subscribe to from
 				Google Calendar, Outlook, or Apple Calendar. It is served from the
 				public API host, so a calendar service can fetch it without being on
 				the tailnet. Anyone holding the URL can read it: mint one per
