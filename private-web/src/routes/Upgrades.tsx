@@ -500,12 +500,6 @@ function CalendarEntry({
 					!!onEdit && ENTRY_BUTTON,
 				]}
 			>
-				<Box
-					sx={(theme) => ({
-						...ENTRY_BAR,
-						bgcolor: toneColour(theme, entry.tone),
-					})}
-				/>
 				<Box sx={ENTRY_LABEL}>
 					{entry.time && (
 						<>
@@ -605,9 +599,8 @@ const TODAY_NUMBER = {
 
 const CALENDAR_ENTRY = {
 	display: "flex",
-	alignItems: "stretch",
-	gap: 0.5,
-	px: 0.5,
+	alignItems: "center",
+	px: 0.75,
 	py: "2px",
 	borderRadius: 0.75,
 	minWidth: 0,
@@ -631,12 +624,6 @@ const ENTRY_BUTTON = {
 const ENTRY_NOTE = {
 	mt: 0.5,
 	opacity: 0.8,
-};
-
-const ENTRY_BAR = {
-	width: 3,
-	borderRadius: 3,
-	flexShrink: 0,
 };
 
 const ENTRY_LABEL = {
