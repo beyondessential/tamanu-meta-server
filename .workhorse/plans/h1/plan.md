@@ -5,13 +5,17 @@ Kubernetes clusters, feeding the cluster-registration settings page specified in
 `monitoring/kubernetes.md` (K8S). Companion to J1, which maps *what* Canopy reads inside
 a namespace; this document covers *how* Canopy is authorised to read it.
 
+Working direction, not yet settled. Open items are listed at the end.
+
 ## Sources
 
-Every infrastructure fact below is read from `beyondessential/ops` (`pulumi/`), not
-inferred: `k8s-essentials/tailscale.ts` (operator install),
+Every infrastructure fact below is read from `beyondessential/ops` (`pulumi/`) or the
+Canopy tree, not inferred: `k8s-essentials/tailscale.ts` (operator install),
 `k8s-essentials/roles/data-engineer.ts` (RBAC precedent),
 `tamanu/on-k8s/src/central/CentralServer.ts` (database exposure),
-`canopy/src/servers.ts` (Canopy's own tailnet posture).
+`canopy/src/canopy-sa.ts` and `canopy/src/servers.ts` (Canopy's own posture),
+`canopy/src/jobs.ts` (worker replica counts), `first-officer/src/index.ts` (per-cluster
+service precedent), and `crates/commons-servers/src/` (device auth, backup secrets).
 
 ## The problem splits in two
 
@@ -19,104 +23,152 @@ The card frames the choice as Kubernetes-layer delegation vs network layer vs Ca
 owning an OIDC/IAM flow. Those stop competing once Canopy's two distinct needs are
 separated, because they are answered at different layers:
 
-1. **Reading Kubernetes objects** — the six infra checks, the identity picker, and
-   reading the CNPG secret. This goes through the kube API server and needs
-   *authorisation*.
+1. **Reading Kubernetes objects** for the six infra checks, the identity picker, and the
+   CNPG secret. This goes through the kube API server and needs *authorisation*.
 2. **Opening a Postgres connection** to `<prefix>-db-rw` for the `alertd` harvest. This
-   needs L4 *reachability* to a service inside the cluster. Reading objects through the
-   API server does not provide it.
+   needs L4 *reachability* to a service inside the cluster, which reading objects through
+   the API server does not provide.
 
-## Decision: both halves ride the Tailscale operator
+Any design that only answers the first leaves the harvest needing a second mechanism.
 
-The Tailscale Kubernetes operator is deployed in all clusters, and is already configured
-for the object-read half.
+## Decision: an in-cluster relay that dials Canopy
 
-### Object reads: the operator's API server proxy
+A small Canopy-authored service runs in each cluster. It holds the Kubernetes read
+permissions, connects to each local Postgres, and opens an outbound long-lived connection
+to Canopy. Canopy asks it for what it needs; the relay never accepts inbound connections
+and Canopy never talks to the kube API of an external cluster directly.
 
-`k8s-essentials/tailscale.ts` sets `apiServerProxyConfig.mode: 'true'`, which is auth
-mode rather than `noauth`. The proxy authenticates the calling tailnet identity and
-impersonates it into the kube API using `Impersonate-User` / `Impersonate-Group` headers
-derived from tailnet ACL grants. Each cluster with `tailscaleEnabled` therefore already
-publishes its API server on the tailnet as `k8s-operator-<clusterFullName>`.
+### Why this over direct access
 
-Canopy dials that MagicDNS name as itself, and Kubernetes RBAC governs what it may read.
-No AWS IAM, no STS AssumeRole, no EKS access entries.
+**The capability surface is the relay's method set, not the RBAC surface.** This is the
+decisive argument. RBAC cannot express "you may read this Secret only in order to connect
+to that database". Under any direct-access design Canopy holds `secrets: get/list/watch`
+across every Tamanu namespace and is trusted to touch only `<prefix>-db-app`. Under the
+relay, Canopy holds a verb that returns check results, and the credential is never on the
+wire.
 
-Authorisation is gated twice, as it would have been under an IAM design: the tailnet ACL
-grant controls which identities may reach a cluster's proxy and which k8s group they are
-impersonated as, and the cluster's RBAC controls what that group may read.
+**Per-server database reachability comes free.** The relay reaches `<prefix>-db-rw` on a
+ClusterIP. Direct access would need either one tailnet-exposed Service per facility per
+deploy, or `create` on `pods/portforward`, which grants reach to any port on any pod and
+defeats read-only access for a service identity.
 
-### Consequence: there are no per-cluster credentials
+**Canopy needs no outbound path to clusters.** The relay dials Canopy, which already
+accepts inbound.
 
-This settles the card's credential-storage and rotation question. A registered cluster is
-a MagicDNS hostname and nothing else. There is no secret to encrypt at rest, and no
-rotation schedule to own: credentials reduce to Canopy's own tailnet node key, whose
-rotation Tailscale already manages.
+**Relay liveness is a direct connectivity signal.** A dropped connection is immediate,
+rather than inferred from a failed poll. This maps onto the per-cluster connectivity
+self-alert K8S already specifies.
 
-Testing a cluster's connection when it is added is a tailnet dial followed by a
-`SelfSubjectAccessReview`, which verifies reachability and permissions together.
+### The alertd harvest runs in the relay
 
-### RBAC: a `canopy-reader` ClusterRole, following the existing precedent
+B1's plan has `bestool-alertd` embedded as a library in a Canopy worker, dialling each
+instance's Postgres. It belongs in the relay instead: the relay runs the checks against
+local Postgres and reports results upward. Database credentials never leave the cluster
+and query traffic never crosses the network, only check results.
+
+This is a revision to the B1 plan, and N1 is scoped from it.
+
+### How the relay authenticates to Canopy
+
+Preferred: a Tailscale sidecar on the relay pod, making the pod itself a tailnet node, so
+no cluster-level egress plumbing is needed in the Tamanu cluster. One tailnet node per
+cluster, not per facility. It dials Canopy's existing tailnet name and Canopy authorises
+it by tag.
+
+The alternative is reusing Canopy's device authentication (`device_auth/mtls.rs`,
+`pop.rs`, `tailnet.rs`) with the enrollment-token and challenge flow in
+`server_enrollment_tokens.rs` / `server_enrollment_challenges.rs`. The machinery fits, but
+Canopy models a device as belonging to a server and a relay is not a server, so it would
+need a distinct principal type. The sidecar route avoids new PKI entirely.
+
+### RBAC the relay needs
+
+The read set does not disappear, it moves to the relay's ServiceAccount. What shrinks is
+the blast radius of a Canopy compromise, which becomes the relay's method list rather than
+the whole read set.
 
 `k8s-essentials/roles/data-engineer.ts` is the pattern to copy: a ClusterRole bound to a
-tailnet-derived group (`tailscale:data-engineer`). Canopy gets `canopy-reader`, bound to
-Group `tailscale:canopy-reader`, granting `get`/`list`/`watch` only over J1's read set:
-`pods`, `services`, `endpoints`, `namespaces`, `persistentvolumeclaims`, `secrets`,
-`configmaps`, `apps/deployments`, `batch/jobs`, `postgresql.cnpg.io/clusters`,
-`gateway.networking.k8s.io/gateways` and `httproutes`, `networking.k8s.io/ingresses`
-while the Envoy migration lasts, and pod metrics.
+subject, whose rules are already close to what J1 requires. The relay's role grants
+`get`/`list`/`watch` only over `pods`, `services`, `endpoints`, `namespaces`,
+`persistentvolumeclaims`, `secrets`, `configmaps`, `apps/deployments`, `batch/jobs`,
+`postgresql.cnpg.io/clusters`, `gateway.networking.k8s.io/gateways` and `httproutes`,
+`networking.k8s.io/ingresses` while the Envoy migration lasts, and pod metrics. It carries
+neither `pods/exec` nor `pods/portforward`, which `data-engineer` holds for humans.
 
-It carries neither `pods/exec` nor `pods/portforward`, which `data-engineer` holds for
-humans but a service should not.
+### What Canopy stores per cluster
 
-### The cluster Canopy runs in
+No cluster credentials. A registered cluster is a relay identity and nothing else, so
+there is no secret to encrypt at rest and no rotation schedule to own. Testing a cluster's
+connection at registration time is a check that its relay is connected and answering.
 
-Registered and read like any other cluster, through its own operator's API server proxy.
-This keeps one code path and one auth model, and means Canopy's own cluster needs no
-special-casing to satisfy the card's requirement for an in-cluster policy reaching beyond
-Canopy's namespace: the same `canopy-reader` ClusterRole covers it.
+### Canopy's own cluster
 
-The alternative, an in-cluster ServiceAccount with a ClusterRoleBinding read directly via
-`kube::Client::try_default()` (as `commons-servers/src/backup_secrets.rs` already does),
-is more robust for the local cluster because it does not depend on the tailnet. It is
-worth taking only if the uniform path proves awkward.
+Canopy already reads Kubernetes in its own namespace through its ServiceAccount
+(`commons-servers/src/backup_secrets.rs` via `kube::Client::try_default()`, backed by the
+namespaced `Role` in `canopy/src/canopy-sa.ts`). Reading co-resident Tamanu instances
+needs that widened beyond its own namespace, which is the card's in-cluster requirement.
 
-## Open: Canopy cannot currently dial out to the tailnet
+Two options: run a relay in Canopy's cluster like any other, keeping one code path and one
+model; or read the local cluster directly with a widened ClusterRole, which is more robust
+because it does not depend on the relay being up. Not settled.
 
-Canopy has tailnet *ingress* only, via an Ingress with `ingressClassName: 'tailscale'`
-(`canopy/src/servers.ts`). There is no sidecar, no Connector, and no `tailnet-fqdn`
-egress Service anywhere in the ops Pulumi.
+## Costs
 
-Both halves of this design need Canopy to be a first-class tailnet node with its own tag,
-so it presents an identity the API server proxy can impersonate and can reach exposed
-database nodes. This is one-time infrastructure work in `pulumi/canopy` and is a
-prerequisite for the implementation cards.
+**A second deployable.** Canopy grows a service with its own release cycle, deployed into
+every cluster. This brings version skew (relay vN against Canopy vM) and needs protocol
+versioning from the start. It is the one cost the direct-access designs did not carry, and
+it turns "Canopy connects to clusters" into "Canopy grows a distributed agent".
 
-An operator egress proxy (an `ExternalName` Service annotated `tailscale.com/tailnet-fqdn`
-per target) is the wrong shape here: it needs one Service per target, and targets grow
-with every facility.
+**Judged worth it** because the database harvest forces either per-facility tailnet nodes
+or `portforward` under any direct design, and the relay is the only option that solves it
+without widening the surface. Worth revisiting if the fleet stays at two clusters.
 
-## Open: facility databases are not exposed on the tailnet
+## Considered and rejected
 
-`on-k8s/src/central/CentralServer.ts` exposes central's CNPG primary as a
-`loadBalancerClass: 'tailscale'` Service named `central-db-tailscale`, hostname
-`k8s-pg-<normalizedStack>`, selecting on `cnpg.io/cluster: central-db` and
-`cnpg.io/instanceRole: primary`. `dbExpose` defaults to true, so central's database is
-already reachable for every deploy.
+**Canopy owning an IAM/OIDC flow.** Canopy already has IRSA: `canopy/src/canopy-sa.ts`
+annotates every ServiceAccount with `eks.amazonaws.com/role-arn`. So cross-account
+AssumeRole into a reader role, minting an EKS token per request, was viable with no new
+network plumbing, reaching the EKS public endpoint over the internet. Rejected because it
+answers only the object-read half, leaving the harvest to a second mechanism, and because
+it gives Canopy the full RBAC surface.
 
-Facilities have no equivalent, and the `alertd` harvest needs every facility's own
-Postgres (J1 §5). Two candidate resolutions:
+**The Tailscale operator's API server proxy.** `k8s-essentials/tailscale.ts` sets
+`apiServerProxyConfig.mode: 'true'`, which is auth mode rather than `noauth`: the proxy
+authenticates the calling tailnet identity and impersonates it into the kube API via
+`Impersonate-User` / `Impersonate-Group` headers derived from tailnet ACL grants. Every
+cluster with `tailscaleEnabled` already publishes its API server on the tailnet as
+`k8s-operator-<clusterFullName>`. This was the leading candidate and remains a sound
+fallback. Rejected for the same two reasons as the IAM route, plus it requires Canopy to
+gain tailnet egress, which it does not have today: there is no `tailnet-fqdn` ExternalName,
+no egress ProxyGroup and no `subnetRouter` anywhere in the ops Pulumi, and the one
+Connector is `exitNode: true`, which is the opposite direction.
 
-- **Mirror the pattern per facility** (`facility-<N>-db-tailscale`). Same shape, no new
-  RBAC, keeps the read-only story intact. Costs one tailnet node per facility per deploy.
-- **Use `pods/portforward` through the API server proxy.** Adds no tailnet nodes and
-  keeps one mechanism, but `create` on `pods/portforward` grants reach to any port on any
-  pod, which defeats least-privilege for a service identity.
+Note that Canopy's tailnet Ingress (`canopy/src/servers.ts`, `ingressClassName:
+'tailscale'`) is inbound only and says nothing about egress, and the existing Secret read
+is in-namespace against the in-cluster API server, so neither demonstrates outbound
+tailnet reachability.
 
 ## Failure domain
 
-Routing all cluster access over the tailnet does not introduce a new single point of
-failure. Canopy's admin authentication is already tailnet-gated
+Routing cluster access over the tailnet introduces no new single point of failure.
+Canopy's admin authentication is already tailnet-gated
 (`commons-servers/src/tailscale_auth.rs` trusts `Tailscale-User-Login`), so a tailnet
-outage already makes Canopy unreachable to operators. The per-cluster connectivity
-self-alert specified in K8S covers the case where one cluster's proxy is down.
+outage already makes Canopy unreachable to operators.
+
+Relay liveness becomes the per-cluster connectivity self-alert K8S specifies. Note the
+diagnosis shifts: "cluster unreachable" becomes "relay not connected", which can mean the
+relay is down while the cluster is healthy.
+
+## Open items
+
+- **Whether the extra deployable is warranted** at a fleet of two clusters, versus the API
+  server proxy fallback.
+- **Relay authentication to Canopy**: Tailscale sidecar and tag, or the existing device
+  enrollment and mTLS machinery with a new principal type.
+- **Canopy's own cluster**: relay like any other, or direct in-cluster reads with a
+  widened ClusterRole.
+- **The relay's method set**, which is the security boundary and so needs designing
+  deliberately rather than growing per check.
+- **Who deploys the relay** and how it is versioned against Canopy.
+- **K8S spec impact**: "Canopy reads each registered cluster with read-only access" and
+  the registration page both change shape if registration becomes relay enrollment.
