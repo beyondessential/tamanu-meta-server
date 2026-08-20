@@ -559,6 +559,7 @@ function TimeGrid({
 	editor: (entry: Entry) => (() => void) | null;
 }) {
 	const hours = useRef<HTMLDivElement>(null);
+	const now = useMinute();
 	const blocks = useMemo(() => laidOut(days, entries), [days, entries]);
 	const resting = restingHour(blocks);
 
@@ -569,13 +570,18 @@ function TimeGrid({
 	}, [resting]);
 
 	const columns = `${GUTTER}px repeat(${days.length}, minmax(0, 1fr))`;
+	const marked = (date: string) =>
+		days.length > 1 && date === today && TODAY_COLUMN;
 
 	return (
 		<Box sx={TIME_FRAME}>
 			<Box sx={{ display: "grid", gridTemplateColumns: columns }}>
 				<Box />
 				{days.map((date) => (
-					<Box key={date} sx={COLUMN_HEAD}>
+					<Box
+						key={date}
+						sx={[COLUMN_HEAD, marked(date)]}
+					>
 						<Box component="span" sx={COLUMN_WEEKDAY}>
 							{weekdayOf(date)}
 						</Box>
@@ -596,7 +602,7 @@ function TimeGrid({
 						key={date}
 						data-testid="calendar-allday"
 						data-date={date}
-						sx={ALLDAY_CELL}
+						sx={[ALLDAY_CELL, marked(date)]}
 					>
 						{entries
 							.filter((entry) => entry.date === date && !entry.time)
@@ -631,8 +637,16 @@ function TimeGrid({
 							key={date}
 							data-testid="calendar-day"
 							data-date={date}
-							sx={HOUR_COLUMN}
+							sx={[HOUR_COLUMN, marked(date)]}
 						>
+							{date === localDate(now) && (
+								<Box
+									sx={{
+										...NOW_LINE,
+										top: `${((now.getHours() * 60 + now.getMinutes()) / DAY_MINUTES) * 100}%`,
+									}}
+								/>
+							)}
 							{blocks
 								.filter((block) => block.date === date)
 								.map((block) => (
@@ -802,6 +816,19 @@ function laidOut(days: string[], entries: Entry[]): Block[] {
 		out.push(...placed.map((span) => ({ ...span, lanes: freeFrom.length })));
 	}
 	return out;
+}
+
+/// A clock that ticks once a minute, for the line marking now. Paused while the
+/// tab is hidden, since nobody is reading it.
+function useMinute(): Date {
+	const [now, setNow] = useState(() => new Date());
+	useEffect(() => {
+		const id = window.setInterval(() => {
+			if (!document.hidden) setNow(new Date());
+		}, 60_000);
+		return () => window.clearInterval(id);
+	}, []);
+	return now;
 }
 
 /// Where the grid rests: the hour that brings the most windows into view.
@@ -1132,7 +1159,30 @@ const BLOCK_BUTTON = {
 	cursor: "pointer",
 };
 
+const TODAY_COLUMN = { bgcolor: "action.hover" };
+
+const NOW_LINE = {
+	position: "absolute",
+	left: 0,
+	right: 0,
+	borderTop: 2,
+	borderColor: "text.primary",
+	pointerEvents: "none",
+	zIndex: 1,
+	"&::before": {
+		content: '""',
+		position: "absolute",
+		left: 0,
+		top: -4,
+		width: 6,
+		height: 6,
+		borderRadius: "50%",
+		bgcolor: "text.primary",
+	},
+};
+
 const BLOCK_HOURS = {
+	...ENTRY_LABEL,
 	color: "text.secondary",
 	fontSize: "0.62rem",
 };
