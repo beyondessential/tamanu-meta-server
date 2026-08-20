@@ -45,6 +45,9 @@ struct OpenPlan {
 	/// The hour it starts on the planned day, as a wall clock in
 	/// `planned_zone`.
 	planned_time: Option<Time>,
+	/// The hour the window closes. Earlier than the start means the next
+	/// morning.
+	planned_end_time: Option<Time>,
 	planned_zone: Option<String>,
 	/// The planned day has passed and the deployment has not moved.
 	late: bool,
@@ -69,6 +72,9 @@ struct HistoricPlan {
 	/// The hour it started on the planned day, as a wall clock in
 	/// `planned_zone`.
 	planned_time: Option<Time>,
+	/// The hour the window closed. Earlier than the start means the next
+	/// morning.
+	planned_end_time: Option<Time>,
 	planned_zone: Option<String>,
 	note: Option<String>,
 	recorded_by: Option<String>,
@@ -111,6 +117,7 @@ impl CanopyMcp {
 					late: database::upgrade_plans::is_late(&plan, today),
 					planned_for: plan.planned_for,
 					planned_time: plan.planned_time,
+					planned_end_time: plan.planned_end_time,
 					planned_zone: plan.planned_zone,
 					note: plan.note,
 					recorded_by: plan.created_by,
@@ -156,6 +163,7 @@ impl CanopyMcp {
 				ended_at: database::upgrade_plans::ended_at(&plan),
 				planned_for: plan.planned_for,
 				planned_time: plan.planned_time,
+				planned_end_time: plan.planned_end_time,
 				planned_zone: plan.planned_zone,
 				note: plan.note,
 				recorded_by: plan.created_by,

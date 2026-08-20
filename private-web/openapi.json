@@ -7834,6 +7834,13 @@
             ],
             "description": "Anything the next reader needs to know. Cleared when absent."
           },
+          "planned_end_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The hour the window closes, as `HH:MM`. Cleared when absent, and needs a\nstart. Earlier than the start means the following morning."
+          },
           "planned_for": {
             "type": [
               "string",
@@ -13024,6 +13031,13 @@
             ],
             "description": "Anything the next reader needs to know. Optional."
           },
+          "planned_end_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The hour the window closes, as `HH:MM`. Optional, and needs a start.\nEarlier than the start means the following morning."
+          },
           "planned_for": {
             "type": [
               "string",
@@ -16351,6 +16365,13 @@
               "null"
             ],
             "description": "Whatever the operator needs the next reader to know."
+          },
+          "planned_end_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The hour it ends on, where the window is known. Earlier than the start\nmeans the following morning."
           },
           "planned_for": {
             "type": [

@@ -26,7 +26,7 @@ use database::{
 	calendar_tokens::CalendarToken, server_groups::ServerGroup, upgrade_plans::UpgradePlan,
 	versions::Version,
 };
-use jiff::{SignedDuration, Timestamp, civil::Date, tz::TimeZone};
+use jiff::{SignedDuration, Timestamp, civil::Date, civil::Time, tz::TimeZone};
 use uuid::Uuid;
 
 use crate::state::AppState;
@@ -42,10 +42,10 @@ const RL_PER_IP: u32 = 30;
 /// calendar services poll on their own schedule regardless.
 const REFRESH: &str = "PT1H";
 
-/// How long an event runs when a plan names the hour it starts. A plan records
-/// no duration, so the event marks the start of the window rather than claiming
-/// to know when it ends.
-const EVENT_LENGTH: SignedDuration = SignedDuration::from_hours(1);
+/// How long an event runs for a plan that names the hour it starts but not the
+/// hour it ends: the entry marks the start of the window rather than claiming to
+/// know how long it takes.
+const DEFAULT_LENGTH: SignedDuration = SignedDuration::from_hours(1);
 
 /// The `/calendar` mount: the feed behind the URL-token gate.
 pub fn routes(state: AppState) -> Router<()> {
@@ -175,14 +175,24 @@ fn event(
 			// Resolved to an instant rather than emitted as a wall clock with a
 			// TZID: the feed carries no VTIMEZONE, and every client agrees on
 			// what an instant means.
-			let zoned = date
-				.to_datetime(time)
-				.to_zoned(TimeZone::get(zone).map_err(|e| AppError::custom(e.to_string()))?)
-				.map_err(|e| AppError::custom(e.to_string()))?;
-			let start = zoned.timestamp();
-			let end = start
-				.checked_add(EVENT_LENGTH)
-				.map_err(|e| AppError::custom(e.to_string()))?;
+			let tz = TimeZone::get(zone).map_err(|e| AppError::custom(e.to_string()))?;
+			let start = instant(date, time, &tz)?;
+			let end = match plan.planned_end_time {
+				// A window closing earlier in the day than it opened runs into
+				// the next morning.
+				Some(closes) => {
+					let ends_on = if closes < time {
+						date.tomorrow()
+							.map_err(|e| AppError::custom(e.to_string()))?
+					} else {
+						date
+					};
+					instant(ends_on, closes, &tz)?
+				}
+				None => start
+					.checked_add(DEFAULT_LENGTH)
+					.map_err(|e| AppError::custom(e.to_string()))?,
+			};
 			line(out, &format!("DTSTART:{}", utc(start)));
 			line(out, &format!("DTEND:{}", utc(end)));
 		}
@@ -228,6 +238,15 @@ fn event(
 	line(out, "TRANSP:TRANSPARENT");
 	line(out, "END:VEVENT");
 	Ok(())
+}
+
+/// The instant a wall clock on a day lands at in a zone.
+fn instant(date: Date, time: Time, tz: &TimeZone) -> Result<Timestamp> {
+	Ok(date
+		.to_datetime(time)
+		.to_zoned(tz.clone())
+		.map_err(|e| AppError::custom(e.to_string()))?
+		.timestamp())
 }
 
 fn utc(at: Timestamp) -> String {

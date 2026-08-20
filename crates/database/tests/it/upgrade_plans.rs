@@ -635,6 +635,7 @@ async fn a_plan_can_carry_the_hour_it_starts() {
 				date: Some(date(2026, 8, 20)),
 				time: Some(time(0, 0, 0, 0)),
 				zone: Some("Pacific/Fiji".into()),
+				..Default::default()
 			},
 			None,
 			"a@example.com",
@@ -667,6 +668,63 @@ async fn a_plan_can_carry_the_hour_it_starts() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn a_window_qualifies_the_hour_it_opens() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, _server) = group_running(&mut conn, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+
+		let plan = UpgradePlan::record(
+			&mut conn,
+			group,
+			target.id,
+			PlannedWhen {
+				date: Some(date(2026, 8, 20)),
+				time: Some(time(22, 0, 0, 0)),
+				end: Some(time(2, 0, 0, 0)),
+				zone: Some("Pacific/Fiji".into()),
+			},
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("plan");
+
+		assert_eq!(
+			plan.planned_end_time,
+			Some(time(2, 0, 0, 0)),
+			"a window closing earlier in the day than it opened is the next morning"
+		);
+
+		let mut refuses = async |when| {
+			UpgradePlan::record(&mut conn, group, target.id, when, None, "a@example.com").await
+		};
+
+		assert!(
+			refuses(PlannedWhen {
+				date: Some(date(2026, 8, 20)),
+				end: Some(time(2, 0, 0, 0)),
+				..Default::default()
+			})
+			.await
+			.is_err(),
+			"a close with no open bounds nothing"
+		);
+		assert!(
+			refuses(PlannedWhen {
+				date: Some(date(2026, 8, 20)),
+				time: Some(time(22, 0, 0, 0)),
+				end: Some(time(22, 0, 0, 0)),
+				zone: Some("Pacific/Fiji".into()),
+			})
+			.await
+			.is_err(),
+			"closing at the hour it opens reads as either no time at all or a whole day"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn an_hour_nobody_can_read_is_refused() {
 	TestDb::run(|mut conn, _url| async move {
 		let (group, _server) = group_running(&mut conn, "2.60.0").await;
@@ -681,6 +739,7 @@ async fn an_hour_nobody_can_read_is_refused() {
 				date: Some(date(2026, 8, 20)),
 				time: Some(time(19, 30, 0, 0)),
 				zone: None,
+				..Default::default()
 			})
 			.await
 			.is_err(),
@@ -691,6 +750,7 @@ async fn an_hour_nobody_can_read_is_refused() {
 				date: None,
 				time: Some(time(19, 30, 0, 0)),
 				zone: Some("Pacific/Nauru".into()),
+				..Default::default()
 			})
 			.await
 			.is_err(),
@@ -701,6 +761,7 @@ async fn an_hour_nobody_can_read_is_refused() {
 				date: Some(date(2026, 8, 20)),
 				time: Some(time(19, 30, 0, 0)),
 				zone: Some("Pacific/Atlantis".into()),
+				..Default::default()
 			})
 			.await
 			.is_err(),
@@ -739,6 +800,7 @@ async fn only_dated_plans_that_still_stand_reach_the_calendar() {
 				date: Some(date(2026, 9, 2)),
 				time: Some(time(22, 0, 0, 0)),
 				zone: Some("Pacific/Fiji".into()),
+				..Default::default()
 			},
 			None,
 			"a@example.com",

@@ -133,6 +133,7 @@ async fn an_hour_is_resolved_from_its_zone_to_an_instant() {
 				date: Some(date(2026, 8, 14)),
 				time: Some(time(22, 0, 0, 0)),
 				zone: Some("Pacific/Fiji".into()),
+				..Default::default()
 			},
 			None,
 			"someone@example.com",
@@ -152,6 +153,69 @@ async fn an_hour_is_resolved_from_its_zone_to_an_instant() {
 		// 22:00 in Fiji (UTC+12) is 10:00 UTC the same day.
 		assert!(body.contains("DTSTART:20260814T100000Z"), "{body}");
 		assert!(body.contains("DTEND:20260814T110000Z"), "{body}");
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_window_ends_where_the_plan_closes_it() {
+	commons_tests::server::run(async |mut conn, public, _private| {
+		let (group, target) = seed(&mut conn).await;
+		let plan = UpgradePlan::record(
+			&mut conn,
+			group,
+			target.id,
+			PlannedWhen {
+				date: Some(date(2026, 8, 14)),
+				time: Some(time(9, 0, 0, 0)),
+				end: Some(time(11, 30, 0, 0)),
+				zone: Some("Pacific/Fiji".into()),
+			},
+			None,
+			"someone@example.com",
+		)
+		.await
+		.expect("record");
+		let (_, url) = CalendarToken::mint(&mut conn, "ops", "admin@example.com")
+			.await
+			.expect("mint");
+
+		let body = unfold(
+			&public
+				.get(&format!("/calendar/{url}/upgrades.ics"))
+				.await
+				.text(),
+		);
+		// 09:00 to 11:30 in Fiji (UTC+12) is 21:00 to 23:30 UTC the day before.
+		assert!(body.contains("DTSTART:20260813T210000Z"), "{body}");
+		assert!(body.contains("DTEND:20260813T233000Z"), "{body}");
+
+		UpgradePlan::amend(
+			&mut conn,
+			plan.id,
+			PlannedWhen {
+				date: Some(date(2026, 8, 14)),
+				time: Some(time(22, 0, 0, 0)),
+				end: Some(time(2, 0, 0, 0)),
+				zone: Some("Pacific/Fiji".into()),
+			},
+			None,
+			"someone@example.com",
+		)
+		.await
+		.expect("amend");
+
+		let body = unfold(
+			&public
+				.get(&format!("/calendar/{url}/upgrades.ics"))
+				.await
+				.text(),
+		);
+		assert!(body.contains("DTSTART:20260814T100000Z"), "{body}");
+		assert!(
+			body.contains("DTEND:20260814T140000Z"),
+			"a window closing earlier in the day than it opened runs into the next morning: {body}"
+		);
 	})
 	.await
 }

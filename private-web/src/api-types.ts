@@ -3978,6 +3978,11 @@ export interface components {
             id: string;
             /** @description Anything the next reader needs to know. Cleared when absent. */
             note?: string | null;
+            /**
+             * @description The hour the window closes, as `HH:MM`. Cleared when absent, and needs a
+             *     start. Earlier than the start means the following morning.
+             */
+            planned_end_time?: string | null;
             /** @description The day it is expected to happen, as `YYYY-MM-DD`. Cleared when absent. */
             planned_for?: string | null;
             /**
@@ -7249,6 +7254,11 @@ export interface components {
             group_id: string;
             /** @description Anything the next reader needs to know. Optional. */
             note?: string | null;
+            /**
+             * @description The hour the window closes, as `HH:MM`. Optional, and needs a start.
+             *     Earlier than the start means the following morning.
+             */
+            planned_end_time?: string | null;
             /** @description The day it is expected to happen, as `YYYY-MM-DD`. Optional. */
             planned_for?: string | null;
             /**
@@ -9327,6 +9337,11 @@ export interface components {
             met_at?: string | null;
             /** @description Whatever the operator needs the next reader to know. */
             note?: string | null;
+            /**
+             * @description The hour it ends on, where the window is known. Earlier than the start
+             *     means the following morning.
+             */
+            planned_end_time?: string | null;
             /** @description The day the upgrade is expected, where one is known. */
             planned_for?: string | null;
             /** @description The hour it starts on that day, where one is known. */
