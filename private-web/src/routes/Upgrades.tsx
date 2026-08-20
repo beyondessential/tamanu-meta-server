@@ -505,7 +505,7 @@ function MonthGrid({
 							bgcolor: inMonth
 								? "background.paper"
 								: theme.palette.mode === "dark"
-									? theme.palette.grey[900]
+									? "#0d0d0d"
 									: theme.palette.grey[50],
 						})}
 					>
@@ -1038,7 +1038,6 @@ const DAY_NUMBER = {
 	display: "grid",
 	placeItems: "center",
 	fontSize: "0.85rem",
-	fontWeight: 600,
 	lineHeight: 1,
 	pt: "1px",
 };
