@@ -43,7 +43,7 @@ The auth question is settled (H1). Rather than Canopy reaching into each cluster
 
 - **Why the relay wins.** The capability surface becomes the relay's method set, not an RBAC surface — RBAC can't express "read this secret only to connect to that database", so any direct design hands Canopy `secrets: get/list/watch` fleet-wide. The relay also gives per-server Postgres reachability for free (dials `<prefix>-db-rw` on a ClusterIP), needs no outbound path from Canopy, and its dropped connection is a direct per-cluster connectivity signal — exactly the self-alert K8S already specifies.
 - **The `alertd` harvest runs in the relay** (not a Canopy worker — revises the earlier plan): the relay embeds `bestool-alertd` as a Rust library, runs the checks against local Postgres, and reports only results up.
-- **Transport:** QUIC (`quinn`) over Tailscale, TLS carrying throwaway certs (WireGuard already provides confidentiality/peer auth). Both ends need a **kernel-mode** Tailscale sidecar (`TS_USERSPACE=false`, `NET_ADMIN`, TUN) — userspace mode is TCP-only and QUIC won't pass. Canopy's sidecar goes on the singleton worker owning relay connections; the relay gets its own namespace.
+- **Transport:** QUIC (`quinn`) over Tailscale, TLS carrying throwaway certs (WireGuard already provides confidentiality/peer auth). Both ends need a **kernel-mode** Tailscale sidecar (`TS_USERSPACE=false`, `NET_ADMIN`, TUN) — userspace mode is TCP-only and QUIC won't pass. We already run QUIC over Tailscale elsewhere, so this is a known-good path, not a risk to retire. Canopy's sidecar goes on the singleton worker owning relay connections; the relay gets its own namespace.
 - **Identity:** a relay is a **device with a new `role`**, authenticated by its tailnet peer tag (as `device_auth/tailnet.rs` already does for HTTP), taking the address from the QUIC connection. Optional cheap hardening: pin the relay's SPKI fingerprint at enrollment. Fits the existing device/association model without a new principal type.
 - **Canopy stores no cluster credentials.** A registered cluster is a relay identity and nothing else — no secret at rest, no rotation to own.
 - **Canopy's own cluster** (co-resident Tamanu test/dev): still open — run a relay there like any other (one code path), or read the local cluster directly with a widened ClusterRole (more robust, doesn't depend on the relay being up).
@@ -88,14 +88,17 @@ Deliberately **not** specified, because it is not settled: whether Canopy's own 
 
 - ~~Cluster auth mechanism~~ — **resolved by H1: in-cluster relay dialling Canopy over QUIC/tailnet.** See Access to clusters.
 - ~~Exact Tamanu k8s namespace layout~~ — **resolved by J1.** See `plans/j1/plan.md`; findings carried into the cards above.
-- **The relay's method set** — check-shaped (`give me results for namespace X`, tightest surface, relay release per new check) vs resource-shaped (`list deployments in X`, Canopy keeps check logic but drifts toward an RBAC proxy). Candidate middle: resource-shaped for the `kubernetes` infra checks, check-shaped for the `alertd` harvest. H1 defers this to its own design card; it also settles the relay's implementation language.
-- **Canopy's own cluster** — relay like any other, or direct in-cluster reads with a widened ClusterRole.
+- **The relay's method set** — check-shaped (`give me results for namespace X`, tightest surface, relay release per new check) vs resource-shaped (`list deployments in X`, Canopy keeps check logic but drifts toward an RBAC proxy). Candidate middle: resource-shaped for the `kubernetes` infra checks, check-shaped for the `alertd` harvest. H1 defers this to its own design card.
 - When to bring backups into Canopy (AWS-level + CNPG Barman) — deliberately deferred.
 
-### Raised to spikes
+### Settled without a spike
 
-- **Does QUIC pass a kernel-mode Tailscale sidecar** against a real deployment? Gates the relay's transport; fallbacks are tsnet at the relay end or HTTP/2 over TCP at both.
-- **Is `bestool-alertd` consumable as a Rust library** against a caller-supplied Postgres connection? Assumed by this plan and H1, examined by neither. Gates the harvest and settles the relay's language.
+Two of H1's to-confirm items needed no investigation:
+
+- **QUIC over the tailnet works.** Established practice elsewhere in our infrastructure, so the kernel-mode sidecar path is known-good statically. H1's fallbacks (tsnet at the relay end, HTTP/2 over TCP) are not on the table; note the canopy workspace itself gains `quinn` as a new dependency.
+- **`bestool-alertd` is embeddable.** Published, and deliberately built as a library, so embedding it is the crate's expected use rather than an assumption to test.
+
+What remains open about the harvest is its **contract with Canopy's filing**, not the crate: parity of check name and detail fields with pushed servers (or one operator-configured check silently splits in two), which of the alertd suite is DB-only and therefore applies, driving it per-instance concurrently in one relay process, where thresholds come from, and version skew reintroducing the very check drift the reuse exists to prevent. Carried by the harvest-contract card in the breakdown.
 
 ### Decided
 
