@@ -124,6 +124,20 @@ The feature gate wins on the card's own reasoning, despite the bloat instinct po
 - **The relay's read set widens, and stops being per-namespace.** Container memory needs `metrics.k8s.io`, a different API group from the core objects J1 enumerated, and PVC usage needs kubelet stats or CSI metrics. `http_errors` needs to list pods in `envoy-gateway-system` and scrape a port on them, which is outside the Tamanu namespaces entirely: read-only and no `exec` or `portforward`, but it breaks the assumption that a relay reads only the namespaces of the servers it serves. That lands on H1's relay method-set card, and it argues for the check-shaped method surface there, since the alternative exports a metrics proxy to Canopy.
 - **State-file collisions retire on their own.** `http_errors` and `external_users` persist state to one fixed path (`dirs::cache_dir()/bestool/doctor-*.json`), so several instances in one process would read and write each other's state. Both fall in the skip group, so the hazard goes without needing per-instance state paths. This, not `perform_sweep` being self-contained, is the answer to the re-entrancy question. If a portable check later needs persistent state, the substrate has to carry the state location too.
 
+## What a push carries that a harvest supplies for itself
+
+A pushed status carries facts bestool reads off the box. The harvest has no box, and the answer is not to synthesise a plausible `TamanuConfig`: it is for the substrate to supply each fact from the namespace, and for config-shaped questions to become observations of what is actually deployed.
+
+- **Database URL and credentials** — the CNPG `<prefix>-db-app` secret, dialled at `<prefix>-db-rw`, database `app` (J1). Never leaves the cluster.
+- **Central or facility** — `detect_kind` already prefers the database's `local_system_facts` over config, so it works with no install at all.
+- **Timezone** — the `TZ` environment variable on the container, which `CONFIG_FROM_ENV` sets.
+- **Application version** — `perform_sweep` already falls back to Tamanu's own recorded `currentVersion` from the database when `has_install` is false, so a harvested server reports an application version through an existing path. That is the figure FIG needs, and the container image tag is a cross-check rather than the source.
+- **Facility identity** — not in the container environment at all, so it comes from the prefix-to-id binding L1's picker persists (J1's positional `facility-<N>` finding), which is Canopy's to supply.
+- **`metaServerId`** — not minted and not read. `perform_sweep` calls `get_or_create_server_id()`, which reads or writes a host file; the harvest must do neither, because a Kubernetes server's identity is the operator's selection from L1's picker.
+- **FHIR and worker toggles** — genuinely absent: `CONFIG_FROM_ENV` carries no FHIR keys, so there is no config to read. But whether a duty is meant to be running is observable from whether that duty's Deployment exists and what its `.spec.replicas` says, which is a better source of truth than a config file even on a VM, and is already `tamanu_service`'s territory. `fhir_config`, which compares two config toggles to each other and nothing else, has no observable counterpart and stays skipped on its existing `has_install` gate.
+
+So the general rule: a fact the substrate can answer, it answers; a config-only question with no observable counterpart skips with a stated reason. Nothing is invented to fill a gap, because a synthesised config value grades a real server against a fiction.
+
 ## Version skew and FIG
 
 `perform_sweep` takes `binary_version` and it lands in the server-wide detail, which is where FIG reads the bestool figure. In the harvest that argument is naturally the relay's embedded alertd version.
