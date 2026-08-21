@@ -21,6 +21,7 @@ The current conditions are:
 - A history has less than two weeks of future range left to write into, failing below one week (see [HST](../platform/history-storage.md), "Running short"); it clears once every history is provisioned ahead again.
 - One or more group domains fall outside the DNS zones Canopy is configured with, failing when Canopy can read no zones at all and warning when only some claims are uncovered (see [DOM](../servers/domains.md), "When the zone configuration changes"); it clears when every live group's domains sit within a configured zone again.
 - Canopy cannot read one or more registered Kubernetes clusters, their relays being disconnected or not answering (escalating); the affected clusters are named in its detail, with what Canopy last observed of each relay (see [K8S](../monitoring/kubernetes.md)). It clears when every registered cluster is answering again.
+- One or more relays harvest their servers' checks with a version of the check suite that is out of step with the version the rest of the fleet reports (see [K8S](../monitoring/kubernetes.md), "Checks harvested for the server"). Each registered cluster is an instance, its detail carrying the version its relay runs and the version it is measured against, so a relay left behind by a fleet upgrade is visible before the two grade the same condition differently. It clears when every relay is back in step.
 
 ## Notification
 

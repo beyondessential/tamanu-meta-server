@@ -6,8 +6,8 @@ Working notes for the contract between `bestool-alertd` running in the relay and
 
 Read against `bestool-alertd` 26.0.1 (`crates/alertd` in the bestool repo).
 
-- **Parity is by construction, if Canopy does not re-derive it.** `perform_sweep(...) -> SweepResult` builds `payload["health"]` through the same `Check::to_wire()` a pushed bestool uses. A check's name is a `&'static str` in the registry and its detail fields are the same map, so a harvested filing matches a pushed one in check name and in the fields scoped policy reaches as `check.<field>`, provided the relay produces the payload via `perform_sweep` and Canopy ingests `health[]` verbatim through the same path a device push takes. The parity risk is Canopy re-modelling the filing on its side, and the arity problem below.
-- **Thresholds are compile-time constants.** `WARN_PCT_USED`, `FAIL_DEPTH`, `FAIL_OLDEST_SECS` and friends live in each check's own Rust, read from no config, no env, no file. There is no per-server threshold surface for the harvest to supply: thresholds come from the crate version. Threshold configuration and version skew are therefore one question, not two.
+- **Parity is by construction, if Canopy does not re-derive it.** `perform_sweep(...) -> SweepResult` builds `payload["health"]` through the same `Check::to_wire()` a pushed bestool uses. A check's name is a `&'static str` in the registry and its detail fields are the same map, so a harvested filing matches a pushed one in check name and in the fields scoped policy reaches as `check.<field>`, provided the relay produces the payload via `perform_sweep` and Canopy ingests `health[]` verbatim through the same path a device push takes. The one parity risk is Canopy re-modelling the filing on its side.
+- **Thresholds are compile-time constants.** `WARN_PCT_USED`, `FAIL_DEPTH`, `FAIL_OLDEST_SECS` and friends live in each check's own Rust, read from no config, no env, no file. So there is no per-server threshold surface for the harvest to supply, and no way for the two substrates' thresholds to drift apart: they are the same constants in the same build. What remains is whether one constant is the right number for both substrates, per check, which is a tuning question for the implementation rather than a contract question.
 - **Selection is a library feature.** `perform_sweep` takes `selected_names` / `skip_names`, validates them against the registry, and runs the selected checks concurrently.
 - **`enable_heal` is a parameter.** The harvest passes it off, which suppresses the self-heal actions (`canopy_registration`, `fhir_jobs` restarting FHIR workers) that would otherwise fire against a host the relay does not own.
 - **`get_or_create_server_id()` needs handling regardless.** `perform_sweep` calls it, and it reads or writes a host file to mint a `metaServerId`. The harvest must neither create nor depend on one: a Kubernetes server's identity is the operator's selection from L1's picker.
@@ -101,7 +101,7 @@ Applying the subject test to K8S's current `kubernetes` list, most of it is serv
 
 What is left for the `kubernetes` source is genuinely substrate: the namespace being present at all, volumes failing to bind, pods that cannot be scheduled, node pool and Karpenter health, and the existing cluster connectivity self-alert.
 
-That is a larger change to K8S than trimming, and it rebalances the breakdown: M1 shrinks a long way and N1 grows to own most of what M1 was going to build. Both cards should wait on it.
+That is a larger change to K8S than trimming, and it rebalances the work: M1 shrinks a long way and N1 grows to own most of what M1 was going to build. Both cards have been rescoped accordingly, and the bestool-side substrate work is carried as its own card in the bestool workspace, since it is a change to a different repository and a prerequisite for N1.
 
 ### It also resolves J1's hibernation question
 
@@ -109,20 +109,22 @@ J1 left open how a TTL-hibernated deploy is treated, having flagged that a hiber
 
 So the substrate carries more than "read this number for this subject". It also answers "is this subject expected to be running right now", which is what makes the difference between a skip and a failure. `CheckContext`'s existing `has_install` and `is_tamanu` flags are ad-hoc early versions of the same idea, and the substrate should subsume them rather than sit beside them.
 
-## The dependency-direction fork
+## Decided
 
-Two ways to make a check substrate-aware, and they trade the same property this card exists to protect.
+- **The substrate lives in alertd, behind a feature.** The check and both its substrate implementations sit in one crate, so a new check ships with both behaviours or neither and version skew covers both at once. Cost is a `kube` dependency behind a feature and the discipline to keep it out of the default build. The alternative, a trait in alertd implemented by the relay, keeps the dependency out entirely but puts a check's two behaviours in different repos on different release cycles, where they can diverge, which is the exact failure the reuse exists to prevent.
+- **The harvest files skips normally.** Canopy already carries a large proportion of skips, around a third of the checks on some servers, and deals with the volume in the UI rather than by withholding data. So the harvest reports what it ran and what it skipped like any other source, and nothing is dropped at the relay.
+- **Cluster-grain checks are a pathway to keep open, not a set to build now.** The specific cluster-infrastructure checks (node pools, Karpenter, and the like) are out of scope, but nothing in these choices may foreclose reporting a condition that touches a whole cluster. The Canopy-wide target with each cluster an instance, which the connectivity self-alert already uses, is that pathway.
+- **`tamanu_http` is the server-live check.** Not an overlap to resolve: under the subject demarcation it is server-subject, so it belongs to `alertd` and the `kubernetes` source carries no duplicate.
 
-- **Feature-gated Kubernetes support inside alertd.** The check and both its substrate implementations sit together in one crate, so a new check ships with both behaviours or neither, and version skew covers both at once. Cost is a `kube` dependency behind a feature, and the discipline to keep it out of the default build so unrelated binaries do not carry it.
-- **A substrate trait in alertd, implemented by the relay.** Alertd gains no Kubernetes dependency at all and the client lives where it already is. But a check's Kubernetes behaviour and its VM behaviour then sit in different repos on different release cycles, so they can diverge, which is the exact failure the reuse exists to prevent.
+## Still open, for the implementation
 
-The feature gate wins on the card's own reasoning, despite the bloat instinct pointing the other way. The anti-divergence property is the whole reason we are embedding alertd rather than reimplementing its checks.
+- **Whether each threshold constant suits both substrates.** The numbers were tuned against a VM, so this wants a per-check pass during N1. Not a spec matter, since specs carry no thresholds.
+- **Which grain the substrate reports at, per check.** `http_errors` needs a cluster-scoped reading fanned out per server, where the others are per-workload, so the interface has to admit both.
 
 ## Consequences that follow from the substrate
 
-- **The threshold constants become substrate-sensitive.** 90 and 98 percent were tuned for a VM's total memory; a container against a 512Mi limit may want different numbers, and disk at 80 and 95 percent means something different for a PVC that autoscales. So "where do thresholds come from" gets a second half: not a per-server surface, but whether one constant is right for both substrates, per check.
 - **The relay's read set widens, and stops being per-namespace.** Container memory needs `metrics.k8s.io`, a different API group from the core objects J1 enumerated, and PVC usage needs kubelet stats or CSI metrics. `http_errors` needs to list pods in `envoy-gateway-system` and scrape a port on them, which is outside the Tamanu namespaces entirely: read-only and no `exec` or `portforward`, but it breaks the assumption that a relay reads only the namespaces of the servers it serves. That lands on H1's relay method-set card, and it argues for the check-shaped method surface there, since the alternative exports a metrics proxy to Canopy.
-- **State-file collisions retire on their own.** `http_errors` and `external_users` persist state to one fixed path (`dirs::cache_dir()/bestool/doctor-*.json`), so several instances in one process would read and write each other's state. Both fall in the skip group, so the hazard goes without needing per-instance state paths. This, not `perform_sweep` being self-contained, is the answer to the re-entrancy question. If a portable check later needs persistent state, the substrate has to carry the state location too.
+- **Per-check state is the real re-entrancy question**, not whether `perform_sweep` is self-contained. `http_errors` and `external_users` persist state to one fixed path (`dirs::cache_dir()/bestool/doctor-*.json`), so several instances driven in one process read and write each other's state. `external_users` is skipped as host-subject, so it retires on its own, but `http_errors` ports and genuinely needs its snapshot history. So the substrate has to carry a state location scoped to the subject, and the fallback when there is none is the check's existing in-run sample.
 
 ## What a push carries that a harvest supplies for itself
 

@@ -45,39 +45,65 @@ A registered cluster is its relay's identity: Canopy stores no connection creden
 Canopy supports several clusters at once.
 Canopy can also read Tamanu instances running in the cluster Canopy itself runs in.
 
-## Checks Canopy determines from the cluster
+## What each source reports
 
-Under the `kubernetes` source, Canopy determines a server's infrastructure checks from what it reads of the server's namespace through its cluster's relay.
-The `kubernetes` source is populated by Canopy pulling; it is not reported by any device and is reserved from the device API (see [CHK](checks.md), "Sources").
-Its checks register already reviewed, each with the policy its condition warrants.
+A Kubernetes server's checks come from two sources, divided by what each check asserts something about rather than by how Canopy comes to observe it.
 
-Per server:
+The `alertd` source's subject is one server: the thing that has a database, a version, an API, sync state, and a set of duties that ought to be running.
+That subject is a coherent assemblage of processes or containers however they happen to be run, so it is the same subject on a Kubernetes server as on a server running the Tamanu services directly, and a condition about it is the same check on both.
 
-- **Server live** — the server's ingress or Gateway resolves and its front-end API answers.
-- **Workloads ready** — the server's workloads have their expected replicas ready.
-- **Restarts** — none of the server's containers is crash-looping or restarting abnormally.
-- **Database up** — the server's own Postgres instance is up and accepting connections.
-- **Storage** — the server's volumes are bound and not near full.
-- **Resource pressure** — the server's containers are not being out-of-memory killed or evicted.
+The `kubernetes` source's subject is the substrate: what the cluster does with those workloads, at grains other than one server.
+Coarser than a server, such as a namespace or a cluster, or finer, such as a single pod that cannot be scheduled or a volume that will not bind.
 
-These carry the signal that a host-level service check carries on a server that reports its own services: Kubernetes' own liveness and health, surfaced as the checks above, is the authoritative account of whether a server's services are running.
+A check belongs to a source by its subject, not by whether it has a counterpart on other substrates.
+So a check that asserts something about one server and is only expressible in Kubernetes is a server check, reported under `alertd`, and a condition that touches a whole cluster is reported at that grain rather than against the servers that happen to run there.
 
-## Checks Canopy harvests from the database
+## Checks harvested for the server
 
-Canopy harvests the Tamanu checks a server derives from its own database — the sync system, FHIR processing, and the rest of the database-level conditions — by running the same check logic Tamanu servers use elsewhere against each instance's Postgres and filing the results itself.
-These are filed under the `alertd` source, the source a Tamanu server reports on other substrates, so a Kubernetes server and a server that pushes its own reports share one catalog entry and one policy per check and are graded identically (see [CHK](checks.md), "Policy").
-The harvest reuses the same alertd check implementation the servers use, so the two never diverge into subtly different checks.
+Under the `alertd` source, Canopy files a Kubernetes server's checks by running the same Tamanu check suite that Tamanu servers run elsewhere, against that server, and filing the results itself.
+The suite covers the conditions a server derives from its own database (the sync system, FHIR processing, migrations, and the rest), whether its duties are running and on the version they should be, whether its API answers, how much storage headroom it has, and its HTTP error rate.
+
+Because it is the same check implementation, a Kubernetes server and a server that pushes its own reports share one catalog entry and one policy per check, are graded identically, and cannot drift into subtly different checks (see [CHK](checks.md), "Policy").
+A check's thresholds come from that implementation on either substrate, so there is no per-server threshold configuration to hold and no way for one substrate's thresholds to drift from the other's; operators grade a check through its policy instead.
 
 The relay runs the harvest inside the cluster and reports the results it produces.
 It obtains each instance's database credentials from the cluster rather than from per-server configuration: the namespace holds the databases and the secret backing each, and the relay reads them there.
 So a database credential and the queries the checks run against it stay within the cluster, and what crosses to Canopy is check results.
+
+### Checks that cannot run there
+
+Each check determines for itself whether it can run against a Kubernetes server, and reports skipped with its reason where it cannot.
+A condition that does not exist on the substrate is skipped rather than failed, so it neither alerts nor ages into a check that is broken for want of ever running.
+
+A deployment scaled to zero with its database hibernated is deliberately asleep rather than in trouble, so the server's checks are skipped for as long as it stays that way.
+A hibernated namespace is still present, so the server is not gone (see "Reachability").
+
+### The harvest reports on the server, never on the harvester
+
+What the harvest files describes the server it names and nothing else.
+The server-wide detail it carries omits anything that describes the process which produced it: the harvester's host, operating system, uptime, network, and its own version are not the server's, and presenting one as the other would state something false about the server rather than leave a gap.
+
+So a figure a Kubernetes server has no source for is simply not reported, and the rules for a figure nothing reports apply as they do anywhere (see [FIG](../private-server/server-figures.md)).
+In particular a Kubernetes server presents no bestool version, having no such agent installed on it, and the version of the check suite the harvest runs is a property of the relay rather than of any server it serves (see [SELF](../private-server/self-alerts.md)).
+
+## Checks Canopy determines about the substrate
+
+Under the `kubernetes` source, Canopy determines checks about what the cluster does with a server's workloads, from what it reads of the cluster through its relay.
+The `kubernetes` source is populated by Canopy pulling; it is not reported by any device and is reserved from the device API (see [CHK](checks.md), "Sources").
+Its checks register already reviewed, each with the policy its condition warrants.
+
+Per server, Canopy determines that the server's workloads can be placed, no pod of the server being unschedulable, and that its volumes are bound.
+
+A check under this source can also be scoped past a single server, at either grain.
+A check about a namespace targets the server group, a namespace being a server group at a rank (see [CHK](checks.md), "Targets").
+A check about a cluster is Canopy-wide with each registered cluster an instance, as the cluster connectivity check is (see "When Canopy cannot read a cluster").
 
 ## Reachability
 
 A Kubernetes server's reachability is determined by Canopy directly rather than from reporting sources (see [CHK](checks.md), "Reachability").
 It passes by default: a server in a cloud Canopy shares a region with is reachable to Canopy under normal conditions, so reachability never alerts on the cadence of Canopy's own pulling.
 It fails only when the server's configured namespace no longer exists in its cluster — the server is gone.
-Whether a server is serving, as opposed to present, is the **Server live** check above, not reachability.
+Whether a server is serving, as opposed to present, is carried by the server's own harvested checks, not by reachability.
 
 ## When Canopy cannot read a cluster
 
