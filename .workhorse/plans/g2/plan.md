@@ -22,8 +22,7 @@ So eligibility becomes a three-way split rather than on or off.
 
 ### Portable once a substrate can answer
 
-- `memory` — container working set against the container's memory limit. The limit is a better denominator than a VM's total, which carries cache-accounting noise.
-- `disk_free` — the CNPG PVC's usage against `Cluster.spec.storage.size`, which J1 already identified for M1's storage check.
+- `disk_free` — the CNPG PVC's usage against `Cluster.spec.storage.size`, which J1 already identified for M1's storage check. A PVC has a real declared size, so the percentage means what it means on a VM.
 - `uptime` — pod start time and container restart count.
 - `version_drift` — running container image tags against the deployment's version, which in Kubernetes is a more direct reading than parsing systemd units.
 - `tamanu_service` — expected duties against running workloads.
@@ -37,7 +36,8 @@ These are the checks that skip today by accident of what the relay image contain
 
 ### A different check in Kubernetes
 
-- `load` — a node load average says nothing about a pod. The Kubernetes analogue is CPU throttling, which is a different measurement and arguably a different check.
+- `memory` — **no denominator exists.** The central and facility API containers declare `requests` only and set no memory `limits` (`central/specs.ts`, `facility/specs.ts`; only the web container sets them), so those pods are Burstable and can grow to node capacity. There is no per-container ceiling to take a percentage of, and the ceiling that does exist is the node's, shared with every other pod on it including other servers' and other namespaces'. The condition worth alerting on is the OOM kill or the eviction, which is an event rather than a gauge, and it is already the `kubernetes` source's **Resource pressure** check.
+- `load` — a node load average says nothing about a pod, and CPU is likewise requests-only here. Same answer as `memory`: throttling and eviction are events, not a gauge.
 - `inodes` — PVC inode usage needs kubelet stats rather than the metrics API.
 - `billing_tags`, `munin`, `ips` — marginal value, no clean analogue.
 
@@ -65,11 +65,16 @@ So this check forces two axes into the substrate interface beyond "where do I re
 
 It also adds a second skew axis. The check would depend on Envoy Gateway's stat naming, which is an implementation detail of a component with its own version (pinned in ops, and the upstream issue asking for friendlier labels suggests it may move). If the expected series are absent the check cannot run, so that is **broken**, not failed, which matches the existing precedent where a class 42 SQL error reports broken rather than blaming the deployment.
 
-## The arity problem, which is where parity actually bites
+## Arity turns out not to be a problem
 
-On a VM one host is one server, so `memory` is one `(used_bytes, total_bytes, percent_used)` triple. A Kubernetes server is several workloads (a central's tasks, sync and API replicas) each with its own limit, so the substrate's answer is naturally several triples. Same check name, so one catalog entry and one policy holds, but the detail fields diverge, and a scoped policy rule reading `check.percent_used` would mean different things on the two substrates. That is the card's parity worry, now with teeth, and it lands on detail rather than on naming.
+The worry was that a VM answers with one value where a Kubernetes server answers with one per workload, so the detail fields diverge and a policy rule reading `check.percent_used` means different things on the two substrates. Checked against the actual checks, that case barely arises.
 
-The resolution that keeps parity is to make the check **instance-shaped on every substrate** and treat the VM as the degenerate one-instance case. CHK already models this ("Checks with instances"): one state per check, each instance graded through policy against its own detail, the effective result the most urgent across non-skipped instances, and the detail carrying every instance that is not passing. So the substrate interface should return a set of subjects, of size one on a VM, and the check's grading loop is written once. `Stat` values are never posted to Canopy, so the metrics endpoint does not constrain this.
+- **The multi-valued checks are already multi-valued on a VM.** A VM Tamanu also runs several services, so `version_drift` already carries `.with_detail("instances", <array>)` and `tamanu_service` already carries `.with_detail("diagnostics", <array>)`. Kubernetes workloads slot into the same arrays with no shape change at all.
+- **The single-valued host-resource checks either have a real per-subject denominator or do not port.** `disk_free` has one (the PVC's declared size). `memory` and `load` do not (requests-only containers, no ceiling), so they do not port and their concern is covered as an event by **Resource pressure**.
+
+So no instance-shaping of the VM side, and no need for CHK's "checks with instances" machinery here. Reach for it only if per-workload policy grading turns out to be wanted, which can happen later without changing the check name or its primary fields.
+
+Where a check does aggregate several subjects into one number, **it must aggregate by worst and not by sum.** A sum hides the failure: one full PVC beside an empty one of the same size reads as half full, and the thing that is out of space is invisible. Taking the worst subject's value keeps the single-number detail shape, so parity holds exactly, and naming the worst subject in an extra detail field costs nothing, because a rule reading `check.percent_used` still means the same thing on both substrates and the VM simply has no such extra field.
 
 ## Where this collides with the K8S spec
 
