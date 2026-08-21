@@ -617,9 +617,9 @@ function TimeGrid({
 						height: 24 * HOUR_HEIGHT,
 					}}
 				>
-					<Box>
-						{HOURS.map((hour) => (
-							<Box key={hour} sx={HOUR_LABEL}>
+					<Box sx={{ position: "relative" }}>
+						{HOURS.slice(1).map((hour) => (
+							<Box key={hour} sx={{ ...HOUR_LABEL, top: hour * HOUR_HEIGHT }}>
 								{clockTime(`${String(hour).padStart(2, "0")}:00`)}
 							</Box>
 						))}
@@ -1119,10 +1119,9 @@ const COLUMN_HEAD = {
 };
 
 const HOUR_LABEL = {
-	height: HOUR_HEIGHT,
-	display: "flex",
-	alignItems: "center",
-	justifyContent: "flex-end",
+	position: "absolute",
+	right: 0,
+	transform: "translateY(-50%)",
 	pr: 0.75,
 	color: "text.secondary",
 	fontSize: "0.7rem",
