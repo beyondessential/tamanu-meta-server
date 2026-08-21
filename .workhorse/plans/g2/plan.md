@@ -138,8 +138,25 @@ A pushed status carries facts bestool reads off the box. The harvest has no box,
 
 So the general rule: a fact the substrate can answer, it answers; a config-only question with no observable counterpart skips with a stated reason. Nothing is invented to fill a gap, because a synthesised config value grades a real server against a fiction.
 
-## Version skew and FIG
+## Server figures: the harvest must not describe its own host
 
-`perform_sweep` takes `binary_version` and it lands in the server-wide detail, which is where FIG reads the bestool figure. In the harvest that argument is naturally the relay's embedded alertd version.
+A Kubernetes server presents **no bestool version**. The figure exists to answer whether the agent installed on a server needs upgrading, and a Kubernetes server has no bestool installed to upgrade. Filing the relay's embedded alertd version there would put an identical row in the fleet spread for every server that relay harvests, describing the harvester rather than any of those servers, and would have an operator chasing an upgrade on something that does not exist. The relay being behind would read as those servers being behind.
 
-Presenting it as the Kubernetes server's bestool version makes skew observable: an operator sees a harvested server on one alertd version beside pushed servers on another, in the fleet spread FIG already draws. The bound is then keeping the relay's `bestool-alertd` dependency tracking the fleet's shipped bestool, with a bump being a relay release on the cadence the relay's protocol versioning already needs. Under the feature-gate option this covers the substrate code too. Whether FIG needs a fold is open; on this reading it may not, since the figure keeps its definition and only its reporter changes.
+This is one instance of a general rule, and the rule matters more than the instance: **the harvest's server-wide detail may carry only facts about the server.** `ServerInfo` is host-shaped by default, and most of its fields describe the process that gathered them:
+
+- `bestool_version`, `hostname`, `uptime_secs`, `cpu_cores`, `total_memory_bytes`, `os_kind`, `os_name`, `os_version`, `kernel`, `arch`, `virtualised`, `virtualisation`, `filesystems`, `ipv4`, `ipv6`, `nat64`, `os_timezone`, `node_version` — all of these would report the relay pod or its node. Several are not `Option`, so they serialise whatever the relay happens to be unless the harvest is built to leave them out.
+- Legitimately about the server: `tamanu_version` (from the database's `currentVersion`), `tamanu_server_kind`, `canonical_url`, `current_sync_tick`, `timezone` (Tamanu's configured zone, not the host's), and `pg_version` (from the database).
+
+FIG's **platform** figure reads `os_kind` and friends, so this is not only about the bestool row: a harvest that emitted them would give every Kubernetes server the relay's operating system as its own, which is worse than a wrong value because it is plausible enough to pass inspection.
+
+The good news is that FIG's existing rules already handle a reporter that is not on the server, provided the harvest does not invent anything. A figure never reported is omitted rather than presented empty, so the bestool row is simply absent. And a server reporting no operating system falls back to the family its database engine gives away, which for a Kubernetes server resolves to non-Windows, which is both true and as fine-grained as it needs to be. So FIG likely needs no fold at all, and the work is on the harvest's side: omit, do not synthesise.
+
+This also means the substrate reaches further into alertd than the checks. `server_info::gather` needs the same treatment, since a fact about the server has to come from the substrate exactly as a check's reading does.
+
+## Version skew, which is not a server figure
+
+The relay's embedded alertd version is real and worth tracking; it is just not a property of any server. It is relay metadata, so it belongs where the relay is presented: the cluster registry, the relay's device record, or the detail of the cluster-connectivity self-alert, which SELF already says carries what Canopy last observed of the relay.
+
+Skew detection is then one comparison per cluster (the relay's embedded alertd against the bestool the fleet is running) rather than a per-server figure to eyeball. Under the demarcation above that is cluster-subject, so it is a Canopy-wide check with each cluster an instance, exactly parallel to the connectivity check it would sit beside.
+
+The bound remains keeping the relay's `bestool-alertd` dependency tracking the fleet's shipped bestool, with a bump being a relay release on the cadence the relay's protocol versioning already needs. Under the feature-gate option that covers the substrate implementations too.
