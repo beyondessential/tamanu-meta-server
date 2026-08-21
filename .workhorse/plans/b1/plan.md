@@ -76,6 +76,10 @@ This card is the tracking issue/PR; it holds the specs, and the implementation s
 - **Fold** into `private-server/device-trust.md` — `relay` added to the device roles, associated with no server.
 - **No fold needed** in `private-server/server-figures.md` (`FIG`), which G2 checked: its existing rules already handle a reporter that is not on the server, provided the harvest omits rather than synthesises. A k8s server presents no bestool version because that figure is never reported for it, and a server reporting no operating system already falls back to what its database engine gives away.
 
+### Interaction with planned upgrades (`UPG`, landed upstream)
+
+Noticed while rebasing onto main. UPG decides a plan is met once **the group's reported version** has reached its target, so for a Kubernetes group that judgement rests entirely on the harvest reporting the Tamanu application version — there is no agent on the server to report it. G2's choice already satisfies this (the version comes from the database's recorded `currentVersion`, which the check suite falls back to when there is no install, with the container image tag as a cross-check rather than the source), so nothing needs changing. Worth recording because the coupling is not obvious from either side: if the harvest were later trimmed to omit the application version along with the host-shaped fields it must omit, Kubernetes groups would silently never meet an upgrade plan.
+
 The spec was deliberately written behavioural-only, leaving auth mechanism and exact namespace resource names to the spikes. J1 changes nothing behavioural (all implementation detail — see `plans/j1/plan.md`).
 
 **H1's relay is now folded into the specs**, at the architectural level (the relay exists, it dials outward, Canopy holds no cluster credential, credentials and query traffic stay in the cluster) and without the transport and deployment mechanics (QUIC/quinn, tailnet sidecars, kernel-mode networking, SPKI pinning), which stay in `plans/h1/plan.md` as implementation. What landed:
