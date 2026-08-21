@@ -14,7 +14,7 @@ Determine how Canopy authenticates to and reads from external Kubernetes cluster
 
 Map what actually exists in a Tamanu Kubernetes namespace and where, from the perspective of what Canopy needs for its checks and setup. Canopy needs, per namespace (one server group at one rank): the list of central servers and facilities running there for the server-identity picker; each server's workloads by duty (central tasks, central sync, central API replicas, facility processes/tasks) for readiness, crashloop/restart, and resource-pressure checks; the ingress or Gateway resource and front-end API for the liveness check; the PVCs for the storage check; each instance's own Postgres and the CNPG-managed Kubernetes secret backing it for the DB-check harvest; and the facility name/ID/prefix used to locate a facility's databases and containers. The card describes that required-inputs list, then works out where each piece lives in the namespace and how it's labelled or named, so the implementation can query it reliably.
 
-## Harvest contract: alertd checks filed by Canopy
+## Harvest contract: alertd checks filed by Canopy · G2
 
 Design card; gates N1 and informs the relay method set. That `bestool-alertd` is embeddable is settled: it is published and was built as a library. What is not settled is the contract between what the library produces in the relay and what Canopy files under the `alertd` source, which is where this design can go quietly wrong. Work out:
 
