@@ -625,9 +625,9 @@ function TimeGrid({
 					}}
 				>
 					<Box sx={{ position: "relative" }}>
-						{HOURS.map((hour) => (
+						{[...HOURS, 24].map((hour) => (
 							<Box key={hour} sx={{ ...HOUR_LABEL, top: hour * HOUR_HEIGHT }}>
-								{clockTime(`${String(hour).padStart(2, "0")}:00`)}
+								{clockTime(`${String(hour % 24).padStart(2, "0")}:00`)}
 							</Box>
 						))}
 					</Box>
