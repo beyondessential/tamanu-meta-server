@@ -21,10 +21,10 @@ Canopy-wide checks are Canopy monitoring its own operation (see [SELF](../privat
 A source is a named reporter of checks, identified by a short string.
 Multiple sources may report on the same server, each concerned with part of the system, and each source's reports are independent: a report from one source says nothing about another source's checks.
 
-Three source names are reserved for Canopy itself: `canopy` for conditions Canopy determines on its own (reachability, backup health, key expiry, self-monitoring), `manual` for conditions raised by operators, and `kubernetes` for the infrastructure checks Canopy derives by reading a server's Kubernetes cluster (see [K8S](kubernetes.md)).
+Three source names are reserved for Canopy itself: `canopy` for conditions Canopy determines on its own (reachability, backup health, key expiry, self-monitoring), `manual` for conditions raised by operators, and `kubernetes` for the checks Canopy derives about the substrate a Kubernetes server runs on, at the grain of a server, a namespace, or a cluster (see [K8S](kubernetes.md)).
 Reports arriving over the device API cannot use the reserved names.
 
-A source is normally populated by a device pushing its reports, but Canopy also populates sources itself: the `kubernetes` source is filled entirely by Canopy pulling from a cluster, and the `alertd` source, which a server reports on other substrates, is also filled by Canopy harvesting a Kubernetes server's database checks and filing them under it (see [K8S](kubernetes.md)). A Canopy-populated source's checks carry the same state, policy, and controls as any other.
+A source is normally populated by a device pushing its reports, but Canopy also populates sources itself: the `kubernetes` source is filled entirely by Canopy pulling from a cluster, and the `alertd` source, which a server reports on other substrates, is also filled by Canopy harvesting a Kubernetes server's checks with the same check suite and filing them under it (see [K8S](kubernetes.md)). A Canopy-populated source's checks carry the same state, policy, and controls as any other.
 
 ### Source policy
 
