@@ -29,7 +29,7 @@ Tamanu deployments on Kubernetes run no bestool (`alertd`), so they push no stat
 Two families per k8s server:
 
 1. **Infra checks — pulled from the kube API.** Server live (ingress/Gateway + front-end API answers), workloads ready (expected replicas ready), crashlooping/restarts, Postgres instance healthy, storage/PVC, resource pressure (OOM/eviction). These also replace bestool's systemd service-level checks: k8s liveness/health is a better signal than "is this service up", and FHIR/sync are covered via the database anyway. Container-composition checks aren't needed — trust k8s' own tracking; crashloop/restart + workloads-ready cover the shape.
-2. **Tamanu database checks — harvested via embedded bestool.** The valuable part of bestool (sync system metrics/checks, FHIR processing, and the rest of the Tamanu DB-level checks). Approach: integrate the published `bestool-alertd` crate as a **Rust library** inside a Canopy worker, connect it to each instance's own Postgres, run the checks, and inject the results directly into Canopy — no device-API push, no bestool binary running in-cluster.
+2. **Tamanu database checks — harvested via embedded bestool.** The valuable part of bestool (sync system metrics/checks, FHIR processing, and the rest of the Tamanu DB-level checks). Approach: integrate the published `bestool-alertd` crate as a **Rust library**, run the checks against each instance's own Postgres, and inject the results directly into Canopy — no device-API push, no bestool binary running in-cluster. **The harvest runs inside the in-cluster relay (see Access to clusters), not a Canopy worker** — the relay connects to each instance's local `<prefix>-db-rw` (database `app`, credentials from the CNPG `<prefix>-db-app` secret, per J1) and reports only check results upward, so database credentials and query traffic never leave the cluster.
 
 ### Out of scope now
 
@@ -37,15 +37,25 @@ Two families per k8s server:
 - **bestool systemd service checks** — superseded by k8s liveness/health.
 - **Container-composition checks** — covered by crashloop/restart + workloads-ready.
 
-## Access to clusters
+## Access to clusters — resolved by H1: an in-cluster relay
 
-- **Canopy's own cluster** (in-cluster): supports Tamanu test/dev instances co-resident with Canopy. A worker gains an RBAC policy to reach beyond its own namespace (kubelet etc.). Supported on principle; secondary.
-- **External clusters** (the real target): design for **multiple**; one today, more later. All AWS EKS with OIDC identities. Auth layer undecided — could be k8s-layer delegation/tunnel, network layer, or Canopy owning OIDC/IAM to mint a per-cluster token and pull directly. **Open — needs research.**
+The auth question is settled (H1). Rather than Canopy reaching into each cluster directly, a **small Canopy-authored relay runs in each cluster**: it holds the read permissions, connects to each local Postgres, and opens an outbound long-lived connection to Canopy. Canopy asks the relay for what it needs; the relay never accepts inbound and Canopy never talks to an external cluster's kube API directly.
+
+- **Why the relay wins.** The capability surface becomes the relay's method set, not an RBAC surface — RBAC can't express "read this secret only to connect to that database", so any direct design hands Canopy `secrets: get/list/watch` fleet-wide. The relay also gives per-server Postgres reachability for free (dials `<prefix>-db-rw` on a ClusterIP), needs no outbound path from Canopy, and its dropped connection is a direct per-cluster connectivity signal — exactly the self-alert K8S already specifies.
+- **The `alertd` harvest runs in the relay** (not a Canopy worker — revises the earlier plan): the relay embeds `bestool-alertd` as a Rust library, runs the checks against local Postgres, and reports only results up.
+- **Transport:** QUIC (`quinn`) over Tailscale, TLS carrying throwaway certs (WireGuard already provides confidentiality/peer auth). Both ends need a **kernel-mode** Tailscale sidecar (`TS_USERSPACE=false`, `NET_ADMIN`, TUN) — userspace mode is TCP-only and QUIC won't pass. Canopy's sidecar goes on the singleton worker owning relay connections; the relay gets its own namespace.
+- **Identity:** a relay is a **device with a new `role`**, authenticated by its tailnet peer tag (as `device_auth/tailnet.rs` already does for HTTP), taking the address from the QUIC connection. Optional cheap hardening: pin the relay's SPKI fingerprint at enrollment. Fits the existing device/association model without a new principal type.
+- **Canopy stores no cluster credentials.** A registered cluster is a relay identity and nothing else — no secret at rest, no rotation to own.
+- **Canopy's own cluster** (co-resident Tamanu test/dev): still open — run a relay there like any other (one code path), or read the local cluster directly with a widened ClusterRole (more robust, doesn't depend on the relay being up).
+- **RBAC** moves to the relay's ServiceAccount (`get`/`list`/`watch` only over the read set J1 enumerates; no `pods/exec` or `pods/portforward`).
+- **Cost:** a second deployable with its own release cycle in every cluster, so version skew and protocol versioning from the start. Judged worth it because the DB harvest forces either per-facility tailnet nodes or `portforward` under any direct design; worth revisiting if the fleet stays at two clusters.
+
+Fallback if the relay proves unwarranted at this fleet size: the **Tailscale operator's API-server proxy** (auth mode, impersonates the tailnet identity) — sound, but answers only the object-read half, still needs a second harvest mechanism, and requires Canopy to gain tailnet egress it doesn't have today.
 
 ## Config surface
 
-- **Cluster registration** is a Canopy settings page, managed in-app rather than by environment variables. Wizard-style: the admin enters the cluster's details and Canopy tests the connection on add, so bad details are caught up front. The per-server k8s form's cluster picker draws from this registry.
-- **DB harvest credentials** come from the cluster, not per-server config. Tamanu's k8s setup uses CNPG, which stores each instance's Postgres credentials as a Kubernetes secret in the instance's namespace. Canopy discovers the databases available and the secret backing each, so registering the cluster is enough to harvest.
+- **Cluster registration is relay enrollment** (reshaped by H1). A Canopy settings page still owns it and it's managed in-app, but a registered cluster is a relay identity, not a set of connection details and credentials Canopy stores. "Test the connection on add" becomes "is the relay connected and answering". The per-server k8s form's cluster picker draws from this registry. (K8S spec impact — see below.)
+- **DB harvest credentials never reach Canopy.** Tamanu's k8s setup uses CNPG, which stores each instance's Postgres credentials as the `<prefix>-db-app` secret in the instance's namespace (J1). The **relay** reads that secret in-cluster and connects to `<prefix>-db-rw`; Canopy receives only check results.
 
 ## Specs written on this card
 
@@ -56,12 +66,28 @@ This card is the tracking issue/PR; it holds the specs, and the implementation s
 - **Fold** into `monitoring/checks.md` — `kubernetes` added to the reserved sources, the notion of Canopy-populated sources, and Canopy-determined reachability for pulled servers.
 - **Fold** into `public-server/statuses.md` — `alertd` has two origins (device push and Canopy harvest).
 
-Behavioural level only: auth mechanism and exact namespace resource names are left to the two spikes (H1, J1).
+The spec was deliberately written behavioural-only, leaving auth mechanism and exact namespace resource names to the spikes. J1 changes nothing behavioural (all implementation detail — see `plans/j1/plan.md`). **H1 does introduce a product-visible concept the spec doesn't yet name: the in-cluster relay.** Two K8S passages now read differently under the relay model:
+
+- Cluster registry: "Adding a cluster tests the connection before it is saved" → the test is that the cluster's relay is connected and answering; and "Canopy reads each registered cluster with read-only access" → Canopy reads *via the relay*, holding no cluster credentials.
+- "When Canopy cannot reach a cluster": the per-cluster connectivity self-alert becomes "relay not connected" — which can mean the relay is down while the cluster is healthy.
+
+Whether to fold the relay into K8S now, or hold the spec behavioural until the relay design card lands, is a decision for the user (H1 is a working direction with open items to confirm — see below). Flagged, not yet applied.
+
+## New findings from J1 to carry into the implementation cards
+
+- **Positional facility prefix.** A facility's resource prefix is `facility-<N>` where N is a positional index, **not** the facility id or name. The id lives only in the `app.kubernetes.io/instance` label on app workloads and in the Gateway listener hostname. L1's picker must join across resource kinds (CNPG cluster ↔ app workloads ↔ Gateway) and **persist the prefix↔id/host binding**, because neither is derivable from the other.
+- **Gateway API, not Ingress.** Query `Gateway`/`HTTPRoute`; tolerate an un-migrated namespace still on `Ingress` rather than reading the missing Gateway as "server gone".
+- **Zero-replica duties are valid.** Read expected counts from each Deployment's own `.spec.replicas`; never assume a fixed count and don't alarm on a duty deliberately scaled to zero.
+- **TTL hibernation — new behavioural question.** Deploys with a TTL are scaled to zero and their CNPG clusters hibernated after the window. A hibernated-but-present namespace is not a deleted one; M1/N1 should likely treat it as broken/unconfirmed rather than failing. Needs a decision on the source-worker cards (M1/N1/P1) and may warrant a spec line.
 
 ## Open questions
 
-- Cluster auth mechanism (EKS OIDC vs alternatives) — moved to a research spike (see the card breakdown).
-- Exact Tamanu k8s namespace layout and where each check input lives — moved to a research spike (see the card breakdown).
+- ~~Cluster auth mechanism~~ — **resolved by H1: in-cluster relay dialling Canopy over QUIC/tailnet.** See Access to clusters.
+- ~~Exact Tamanu k8s namespace layout~~ — **resolved by J1.** See `plans/j1/plan.md`; findings carried into the cards above.
+- **The relay's method set** — check-shaped (`give me results for namespace X`, tightest surface, relay release per new check) vs resource-shaped (`list deployments in X`, Canopy keeps check logic but drifts toward an RBAC proxy). Candidate middle: resource-shaped for the `kubernetes` infra checks, check-shaped for the `alertd` harvest. H1 defers this to its own design card; it also settles the relay's implementation language.
+- **Canopy's own cluster** — relay like any other, or direct in-cluster reads with a widened ClusterRole.
+- **Is the extra deployable warranted** at a fleet of two clusters, versus the API-server-proxy fallback? And confirm kernel-mode sidecar UDP passes against a real deployment before committing.
+- **How M1/N1 treat a hibernated deploy** (see J1 findings above).
 - When to bring backups into Canopy (AWS-level + CNPG Barman) — deliberately deferred.
 
 ## Resolved: identity stability
