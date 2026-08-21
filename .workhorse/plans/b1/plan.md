@@ -4,7 +4,7 @@ Working notes for shaping k8s monitoring in Canopy. Not a spec yet; brainstorm i
 
 ## Problem
 
-Tamanu deployments on Kubernetes run no bestool (`alertd`), so they push no statuses and are invisible to Canopy's monitoring. Instead of porting bestool into k8s, Canopy pulls from the cluster and determines its own suite of checks for the workloads running there.
+Tamanu deployments on Kubernetes run no bestool (`alertd`), so they push no statuses and are invisible to Canopy's monitoring. Instead of porting bestool into k8s as an agent per server, Canopy reaches into the cluster: it runs the same alertd check suite against each server from inside the cluster, and determines its own checks about the substrate those servers run on.
 
 ## Topology (as described)
 
@@ -19,23 +19,31 @@ Tamanu deployments on Kubernetes run no bestool (`alertd`), so they push no stat
 
 - **Each k8s Tamanu server stays a Canopy server record** (target = server). No new target type. The server carries k8s coordinates: it's a k8s server, which cluster, which namespace, and for facilities a facility name/ID/prefix used to locate its DB and containers.
 - **Identity is set manually, not auto-discovered** (for now). On server create/edit: "is this server in Kubernetes? → which cluster + namespace?" Canopy then queries that cluster/namespace, lists the central servers and facilities running there, and the operator picks which one this record is. Auto-discovery may come later.
-- **Checks come from a new `kubernetes` source** (Canopy-populated by pulling, not the reserved `canopy` source), so general cluster-health checks can grow under it. Distinct from device-pushed sources.
-- **Reachability for a k8s server is Canopy-determined, not source-driven.** It's always green by default — a same-region cloud server is always reachable to Canopy, so reachability never alerts on harvest cadence (it's a coarse legacy signal; the full check suite tells you whether a server is serving). The one genuine failure is when the server's configured namespace no longer exists in the cluster: the server is gone, reported as unreachable. "Is this server up?" in the serving sense is the dedicated k8s liveness check (ingress/Gateway + front-end API), not reachability.
-- **Harvested Tamanu DB checks are filed under `alertd`** (the source a VM Tamanu server uses), so a k8s server and a VM server share one catalog entry and one policy per check — sync/FHIR health means the same thing regardless of substrate. `alertd` is therefore a source with both pushed and Canopy-injected origins.
+- **Two sources, divided by subject** (revised by G2; this originally read "infra checks under `kubernetes`, database checks under `alertd`"). A check belongs to a source by **what it asserts something about**, not by how Canopy comes to observe it. `alertd`'s subject is one server: the thing with a database, a version, an API, sync state, and duties that ought to be running — the same subject on Kubernetes as on a VM, so the same check. `kubernetes`' subject is the substrate: what the cluster does with those workloads, at grains other than one server. The useful consequence is that **`alertd` can hold Kubernetes-only checks**: a check qualifies on its subject, not on whether it has a VM counterpart.
+- **Reachability for a k8s server is Canopy-determined, not source-driven.** It's always green by default — a same-region cloud server is always reachable to Canopy, so reachability never alerts on harvest cadence (it's a coarse legacy signal; the full check suite tells you whether a server is serving). The one genuine failure is when the server's configured namespace no longer exists in the cluster: the server is gone, reported as unreachable. "Is this server up?" in the serving sense is carried by the server's own harvested checks, not reachability.
+- **Harvested server checks are filed under `alertd`** (the source a VM Tamanu server uses), so a k8s server and a VM server share one catalog entry and one policy per check — a server condition means the same thing regardless of substrate. `alertd` is therefore a source with both pushed and Canopy-injected origins. Per G2 this covers the whole server-subject suite, not only the database checks.
 - **Harvest failure is a single Canopy-wide failure, not per-server noise.** A Canopy-wide check per cluster covers connection + permissions (modelled like the backup-storage-identity self-alert). When Canopy can't reach a cluster, that check is the actionable failure; the affected servers' pulled/harvested checks go **broken** (unconfirmed) but are graded so they don't fail, so the fleet isn't polluted.
 
 ## Check suite
 
-Two families per k8s server:
+Two families per k8s server, split by subject rather than by how Canopy observes them (rebalanced by G2 — the original split put the infra list under `kubernetes` and only the database checks under `alertd`).
 
-1. **Infra checks — pulled from the kube API.** Server live (ingress/Gateway + front-end API answers), workloads ready (expected replicas ready), crashlooping/restarts, Postgres instance healthy, storage/PVC, resource pressure (OOM/eviction). These also replace bestool's systemd service-level checks: k8s liveness/health is a better signal than "is this service up", and FHIR/sync are covered via the database anyway. Container-composition checks aren't needed — trust k8s' own tracking; crashloop/restart + workloads-ready cover the shape.
-2. **Tamanu database checks — harvested via embedded bestool.** The valuable part of bestool (sync system metrics/checks, FHIR processing, and the rest of the Tamanu DB-level checks). Approach: integrate the published `bestool-alertd` crate as a **Rust library**, run the checks against each instance's own Postgres, and inject the results directly into Canopy — no device-API push, no bestool binary running in-cluster. **The harvest runs inside the in-cluster relay (see Access to clusters), not a Canopy worker** — the relay connects to each instance's local `<prefix>-db-rw` (database `app`, credentials from the CNPG `<prefix>-db-app` secret, per J1) and reports only check results upward, so database credentials and query traffic never leave the cluster.
+1. **Server checks — harvested via embedded bestool, filed under `alertd`.** The whole server-subject suite: the database conditions (sync, FHIR, migrations and the rest), plus whether duties are running and on the expected version, whether the API answers, storage headroom, and HTTP error rate. Approach: run the published `bestool-alertd` crate as a **Rust library** once per instance and file the results directly — no device-API push, no bestool binary running in-cluster. **The harvest runs inside the in-cluster relay (see Access to clusters), not a Canopy worker** — the relay connects to each instance's local `<prefix>-db-rw` (database `app`, credentials from the CNPG `<prefix>-db-app` secret, per J1) and reports only check results upward, so database credentials and query traffic never leave the cluster.
+2. **Substrate checks — pulled from the kube API, filed under `kubernetes`.** What the cluster does with those workloads: a pod that cannot be scheduled, a volume that will not bind, and the coarser grains (a namespace, a cluster). Much smaller than originally planned, because server live, workloads ready, restarts, database up, storage and resource pressure are all server-subject and moved to the harvest.
+
+So **M1 shrinks a long way and N1 grows to own most of what M1 was going to build**; both cards are rescoped accordingly. The rebalance also means the substrate checks are Canopy's own logic over plain objects (resource-shaped methods) while the server checks are alertd running in the relay (check-shaped), which confirms H1's candidate middle for the relay method set on principle rather than as a pragmatic compromise.
+
+### The substrate abstraction, and why it is a bestool change
+
+A host-subject check does not skip in a relay: the relay is a Linux process with a filesystem, memory and load of its own, so the check runs and reports **the relay pod's facts as the server's**, identically for every instance that relay serves. That passes, which is worse than failing. The fix is to give the check a *substrate* to ask instead of the local machine, keeping its graded logic and changing only the acquisition. That is a change to `bestool-alertd` itself (its Kubernetes implementation behind a feature, so a check's two behaviours cannot drift apart on separate release cycles), carried as a card in the **bestool** workspace and a prerequisite for N1.
+
+The substrate answers more than a reading: also whether the subject is expected to be running at all (which separates a skip from a failure), the scope at which a reading is shared (per workload, per server, per cluster), and where a check's persistent state lives.
 
 ### Out of scope now
 
 - **Backups.** K8s backups run at two layers (AWS-level, and Postgres via the CNPG Barman plugin), covered externally and not integrated in Canopy. Bringing them into Canopy is a separate future effort.
-- **bestool systemd service checks** — superseded by k8s liveness/health.
-- **Container-composition checks** — covered by crashloop/restart + workloads-ready.
+- **Cluster-infrastructure checks** (node pools, Karpenter and the like). Out of scope to build, but nothing may foreclose reporting a condition that touches a whole cluster; the Canopy-wide target with each cluster an instance is that pathway.
+- **`memory` and `load` as gauges.** The Tamanu containers declare requests and no limits, so there is no per-container ceiling to take a percentage of. The condition worth alerting on is the OOM kill or eviction, an event rather than a gauge, covered by resource pressure.
 
 ## Access to clusters — resolved by H1: an in-cluster relay
 
@@ -47,7 +55,7 @@ The auth question is settled (H1). Rather than Canopy reaching into each cluster
 - **Identity:** a relay is a **device with a new `role`**, authenticated by its tailnet peer tag (as `device_auth/tailnet.rs` already does for HTTP), taking the address from the QUIC connection. Optional cheap hardening: pin the relay's SPKI fingerprint at enrollment. Fits the existing device/association model without a new principal type.
 - **Canopy stores no cluster credentials.** A registered cluster is a relay identity and nothing else — no secret at rest, no rotation to own.
 - **Canopy's own cluster** (co-resident Tamanu test/dev): still open — run a relay there like any other (one code path), or read the local cluster directly with a widened ClusterRole (more robust, doesn't depend on the relay being up).
-- **RBAC** moves to the relay's ServiceAccount (`get`/`list`/`watch` only over the read set J1 enumerates; no `pods/exec` or `pods/portforward`).
+- **RBAC** moves to the relay's ServiceAccount (`get`/`list`/`watch` only over the read set J1 enumerates; no `pods/exec` or `pods/portforward`). **G2 widens this beyond J1's list, and past per-namespace:** container memory needs `metrics.k8s.io`, PVC usage needs kubelet or CSI stats, and the HTTP error-rate check must list pods in `envoy-gateway-system` and scrape a port on them — outside the Tamanu namespaces entirely. Still read-only and still no `exec`/`portforward`, but it breaks the assumption that a relay reads only the namespaces of the servers it serves, and it argues for the check-shaped method surface, since the alternative exports a metrics proxy to Canopy.
 - **Cost, accepted:** a second deployable with its own release cycle in every cluster, so version skew and protocol versioning from the start. H1 left open whether that cost is warranted at a fleet of two clusters; **decided that it is**, so the relay goes ahead at the current fleet size rather than waiting for the fleet to grow to justify it. The DB harvest forces either per-facility tailnet nodes or `portforward` under any direct design, and neither is acceptable, so the relay is the design.
 
 The **Tailscale operator's API-server proxy** (auth mode, impersonating the tailnet identity) was the leading alternative and is now a rejected one, not a fallback held in reserve: it answers only the object-read half, still needs a second mechanism for the harvest, and requires Canopy to gain tailnet egress it does not have today. Revisit only if the relay's own foundations fail (see the transport spike), not on fleet-size grounds.
@@ -61,11 +69,12 @@ The **Tailscale operator's API-server proxy** (auth mode, impersonating the tail
 
 This card is the tracking issue/PR; it holds the specs, and the implementation sub-cards merge into it. Specs so far:
 
-- **New:** `monitoring/kubernetes.md` (id `K8S`) — the umbrella: deployment shape, Kubernetes servers and identity picker, the in-cluster relay, cluster registry, pulled infra checks (`kubernetes` source), harvested DB checks (`alertd` source), reachability for k8s servers, and cluster-read failure handling.
-- **Fold** into `private-server/self-alerts.md` — the per-cluster connectivity self-alert (escalating), now expressed as relays disconnected or not answering.
-- **Fold** into `monitoring/checks.md` — `kubernetes` added to the reserved sources, the notion of Canopy-populated sources, and Canopy-determined reachability for pulled servers.
+- **New:** `monitoring/kubernetes.md` (id `K8S`) — the umbrella: deployment shape, Kubernetes servers and identity picker, the in-cluster relay, cluster registry, the subject demarcation between the two sources, harvested server checks (`alertd`), substrate checks (`kubernetes`), reachability for k8s servers, and cluster-read failure handling.
+- **Fold** into `private-server/self-alerts.md` — the per-cluster connectivity self-alert (escalating), now expressed as relays disconnected or not answering; plus (G2) a second per-cluster alert for a relay harvesting with a check-suite version out of step with the fleet.
+- **Fold** into `monitoring/checks.md` — `kubernetes` added to the reserved sources, the notion of Canopy-populated sources, and Canopy-determined reachability for pulled servers. G2 restated the `kubernetes` source as substrate checks at server, namespace, or cluster grain.
 - **Fold** into `public-server/statuses.md` — `alertd` has two origins (device push and Canopy harvest).
 - **Fold** into `private-server/device-trust.md` — `relay` added to the device roles, associated with no server.
+- **No fold needed** in `private-server/server-figures.md` (`FIG`), which G2 checked: its existing rules already handle a reporter that is not on the server, provided the harvest omits rather than synthesises. A k8s server presents no bestool version because that figure is never reported for it, and a server reporting no operating system already falls back to what its database engine gives away.
 
 The spec was deliberately written behavioural-only, leaving auth mechanism and exact namespace resource names to the spikes. J1 changes nothing behavioural (all implementation detail — see `plans/j1/plan.md`).
 
@@ -82,14 +91,20 @@ Deliberately **not** specified, because it is not settled: whether Canopy's own 
 - **Positional facility prefix.** A facility's resource prefix is `facility-<N>` where N is a positional index, **not** the facility id or name. The id lives only in the `app.kubernetes.io/instance` label on app workloads and in the Gateway listener hostname. L1's picker must join across resource kinds (CNPG cluster ↔ app workloads ↔ Gateway) and **persist the prefix↔id/host binding**, because neither is derivable from the other.
 - **Gateway API, not Ingress.** Query `Gateway`/`HTTPRoute`; tolerate an un-migrated namespace still on `Ingress` rather than reading the missing Gateway as "server gone".
 - **Zero-replica duties are valid.** Read expected counts from each Deployment's own `.spec.replicas`; never assume a fixed count and don't alarm on a duty deliberately scaled to zero.
-- **TTL hibernation — new behavioural question.** Deploys with a TTL are scaled to zero and their CNPG clusters hibernated after the window. A hibernated-but-present namespace is not a deleted one; M1/N1 should likely treat it as broken/unconfirmed rather than failing. Needs a decision on the source-worker cards (M1/N1/P1) and may warrant a spec line.
+- ~~**TTL hibernation**~~ — **resolved by G2.** Deploys with a TTL are scaled to zero and their CNPG clusters hibernated after the window. Under the subject demarcation this is server-subject, so it belongs to the harvest, and it is not a check result at all but an **eligibility fact**: a hibernated server is deliberately asleep, so its checks report **skipped** rather than failed or broken. A hibernated namespace is still present, so the server is not gone. Specified in K8S.
 
 ## Open questions
 
 - ~~Cluster auth mechanism~~ — **resolved by H1: in-cluster relay dialling Canopy over QUIC/tailnet.** See Access to clusters.
 - ~~Exact Tamanu k8s namespace layout~~ — **resolved by J1.** See `plans/j1/plan.md`; findings carried into the cards above.
-- **The relay's method set** — check-shaped (`give me results for namespace X`, tightest surface, relay release per new check) vs resource-shaped (`list deployments in X`, Canopy keeps check logic but drifts toward an RBAC proxy). Candidate middle: resource-shaped for the `kubernetes` infra checks, check-shaped for the `alertd` harvest. H1 defers this to its own design card.
+- **The relay's method set** — check-shaped (`give me results for namespace X`, tightest surface, relay release per new check) vs resource-shaped (`list deployments in X`, Canopy keeps check logic but drifts toward an RBAC proxy). H1's candidate middle was resource-shaped for the substrate checks and check-shaped for the harvest; **G2 confirms that split on principle** (the two families divide on subject, and the substrate checks are Canopy's logic over plain objects while the server checks are alertd in the relay), and G2's widened read set argues further for check-shaped, since the alternative exports a metrics proxy. Still its own design card, now largely to settle the surface rather than the shape.
 - When to bring backups into Canopy (AWS-level + CNPG Barman) — deliberately deferred.
+
+### Left open by G2, for the implementation
+
+- **Whether each threshold constant suits both substrates.** They were tuned against a VM. A per-check pass during N1; not a spec matter, since specs carry no thresholds.
+- **Which grain the substrate reports at, per check.** The HTTP error-rate check needs a cluster-scoped reading fanned out per server where the others are per-workload, so the interface must admit both.
+- **Where a check's persistent state lives.** Two alertd checks persist to one fixed path, so several instances driven in one relay process would read and write each other's state. The substrate has to carry a state location scoped to the subject.
 
 ### Settled without a spike
 
@@ -98,11 +113,19 @@ Two of H1's to-confirm items needed no investigation:
 - **QUIC over the tailnet works.** Established practice elsewhere in our infrastructure, so the kernel-mode sidecar path is known-good statically. H1's fallbacks (tsnet at the relay end, HTTP/2 over TCP) are not on the table; note the canopy workspace itself gains `quinn` as a new dependency.
 - **`bestool-alertd` is embeddable.** Published, and deliberately built as a library, so embedding it is the crate's expected use rather than an assumption to test.
 
-What remains open about the harvest is its **contract with Canopy's filing**, not the crate: parity of check name and detail fields with pushed servers (or one operator-configured check silently splits in two), which of the alertd suite is DB-only and therefore applies, driving it per-instance concurrently in one relay process, where thresholds come from, and version skew reintroducing the very check drift the reuse exists to prevent. Carried by the harvest-contract card in the breakdown.
+What remained open was the harvest's **contract with Canopy's filing**, which G2 carried and has now landed (see `plans/g2/plan.md`). Its outcomes:
+
+- **Parity is by construction, unless Canopy re-derives it.** The crate already builds its payload through the same serialisation a pushed bestool uses, so check names and the detail fields policy reaches as `check.<field>` match provided the relay produces the payload the same way and Canopy ingests it through the same path a device push takes. The one real risk is Canopy re-modelling the filing on its side.
+- **Thresholds are compile-time constants** in each check, read from no config, so the two substrates cannot drift apart; what remains is whether a given number suits both.
+- **Eligibility, not a curated subset.** Each check decides for itself whether it can run and reports skipped with a reason. Skips file normally — Canopy already carries a large proportion of skips and handles the volume in the UI rather than by withholding data.
+- **The harvest reports on the server, never on the harvester.** The crate's server-wide detail is host-shaped by default and several fields are not optional, so they must be deliberately omitted rather than left to serialise the relay's hostname, OS, uptime, memory and networking as the server's. Synthesising a plausible value is worse than a gap, because it grades a real server against a fiction.
+- **Version skew is relay metadata, not a server figure.** The relay's embedded suite version describes the relay, so it belongs to the cluster registry and the relay's device record, and skew becomes one comparison per cluster — a Canopy-wide check with each cluster an instance, sitting beside the connectivity check. Filing it as a server figure would put an identical row on every server a relay harvests and have an operator chase an upgrade on something that does not exist.
+- **Aggregate by worst, never by sum,** where a check folds several subjects into one number. A sum hides the failure: one full volume beside an empty one of the same size reads as half full.
 
 ### Decided
 
 - **The extra deployable is warranted** at a fleet of two clusters. The relay proceeds now; the API-server-proxy alternative is rejected rather than held as a fleet-size fallback (see Access to clusters).
+- **The substrate lives in alertd behind a feature**, not as a trait the relay implements: a check's two behaviours belong in one crate so they cannot drift on separate release cycles, which is the property the reuse exists for. Cost is a `kube` dependency behind a feature and the discipline to keep it out of the default build.
 
 ### Decisions to make, not research
 
@@ -112,7 +135,7 @@ These are judgment calls with the tradeoffs already laid out; they need deciding
 - **Whether to pin the relay's SPKI fingerprint** at enrollment, or rely on the tailnet ACL and tag check alone.
 - **How a relay is enrolled**, which the DTR fold leaves unstated. Follows from the pinning decision and from who deploys the relay.
 - **Who deploys the relay and how it is versioned** against Canopy, with protocol versioning needed from the start.
-- **How M1/N1 treat a hibernated deploy** (see J1 findings above) — likely broken/unconfirmed rather than failing, but it wants a decision, and probably a spec line.
+Hibernation is no longer among these: G2 settled it as an eligibility fact (see the J1 findings above).
 
 ## Resolved: identity stability
 
