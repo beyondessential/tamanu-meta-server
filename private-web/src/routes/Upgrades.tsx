@@ -573,7 +573,7 @@ function TimeGrid({
 	// Upgrades run at night, which is off the bottom of the scroller until
 	// something puts it in view.
 	useEffect(() => {
-		hours.current?.scrollTo({ top: resting * HOUR_HEIGHT });
+		hours.current?.scrollTo({ top: GRID_SLACK + resting * HOUR_HEIGHT });
 	}, [resting]);
 
 	const columns = `${GUTTER}px repeat(${days.length}, minmax(0, 1fr))`;
@@ -609,7 +609,14 @@ function TimeGrid({
 				))}
 			</Box>
 
-			<Box ref={hours} sx={{ maxHeight: VISIBLE_HOURS * HOUR_HEIGHT, overflowY: "auto" }}>
+			<Box
+				ref={hours}
+				sx={{
+					maxHeight: VISIBLE_HOURS * HOUR_HEIGHT + 2 * GRID_SLACK,
+					overflowY: "auto",
+					py: `${GRID_SLACK}px`,
+				}}
+			>
 				<Box
 					sx={{
 						display: "grid",
@@ -618,7 +625,7 @@ function TimeGrid({
 					}}
 				>
 					<Box sx={{ position: "relative" }}>
-						{HOURS.slice(1).map((hour) => (
+						{HOURS.map((hour) => (
 							<Box key={hour} sx={{ ...HOUR_LABEL, top: hour * HOUR_HEIGHT }}>
 								{clockTime(`${String(hour).padStart(2, "0")}:00`)}
 							</Box>
@@ -1079,6 +1086,8 @@ const HOUR_HEIGHT = 40;
 
 const VISIBLE_HOURS = 11;
 
+const GRID_SLACK = HOUR_HEIGHT / 2;
+
 const GUTTER = 58;
 
 const HOURS = [...Array(24).keys()];
@@ -1131,11 +1140,10 @@ const HOUR_LABEL = {
 const HOUR_COLUMN = (theme: Theme) => ({
 	position: "relative",
 	borderLeft: 1,
+	borderBottom: 1,
 	borderColor: "divider",
 	minWidth: 0,
-	backgroundImage: `repeating-linear-gradient(to bottom, transparent 0 ${HOUR_HEIGHT - 1}px, ${theme.palette.divider} ${HOUR_HEIGHT - 1}px ${HOUR_HEIGHT}px)`,
-	backgroundRepeat: "no-repeat",
-	backgroundSize: `100% ${23 * HOUR_HEIGHT}px`,
+	backgroundImage: `repeating-linear-gradient(to bottom, ${theme.palette.divider} 0 1px, transparent 1px ${HOUR_HEIGHT}px)`,
 });
 
 const TIME_BLOCK = {
