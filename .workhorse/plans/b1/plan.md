@@ -48,9 +48,9 @@ The auth question is settled (H1). Rather than Canopy reaching into each cluster
 - **Canopy stores no cluster credentials.** A registered cluster is a relay identity and nothing else — no secret at rest, no rotation to own.
 - **Canopy's own cluster** (co-resident Tamanu test/dev): still open — run a relay there like any other (one code path), or read the local cluster directly with a widened ClusterRole (more robust, doesn't depend on the relay being up).
 - **RBAC** moves to the relay's ServiceAccount (`get`/`list`/`watch` only over the read set J1 enumerates; no `pods/exec` or `pods/portforward`).
-- **Cost:** a second deployable with its own release cycle in every cluster, so version skew and protocol versioning from the start. Judged worth it because the DB harvest forces either per-facility tailnet nodes or `portforward` under any direct design; worth revisiting if the fleet stays at two clusters.
+- **Cost, accepted:** a second deployable with its own release cycle in every cluster, so version skew and protocol versioning from the start. H1 left open whether that cost is warranted at a fleet of two clusters; **decided that it is**, so the relay goes ahead at the current fleet size rather than waiting for the fleet to grow to justify it. The DB harvest forces either per-facility tailnet nodes or `portforward` under any direct design, and neither is acceptable, so the relay is the design.
 
-Fallback if the relay proves unwarranted at this fleet size: the **Tailscale operator's API-server proxy** (auth mode, impersonates the tailnet identity) — sound, but answers only the object-read half, still needs a second harvest mechanism, and requires Canopy to gain tailnet egress it doesn't have today.
+The **Tailscale operator's API-server proxy** (auth mode, impersonating the tailnet identity) was the leading alternative and is now a rejected one, not a fallback held in reserve: it answers only the object-read half, still needs a second mechanism for the harvest, and requires Canopy to gain tailnet egress it does not have today. Revisit only if the relay's own foundations fail (see the transport spike), not on fleet-size grounds.
 
 ## Config surface
 
@@ -97,11 +97,14 @@ Deliberately **not** specified, because it is not settled: whether Canopy's own 
 - **Does QUIC pass a kernel-mode Tailscale sidecar** against a real deployment? Gates the relay's transport; fallbacks are tsnet at the relay end or HTTP/2 over TCP at both.
 - **Is `bestool-alertd` consumable as a Rust library** against a caller-supplied Postgres connection? Assumed by this plan and H1, examined by neither. Gates the harvest and settles the relay's language.
 
+### Decided
+
+- **The extra deployable is warranted** at a fleet of two clusters. The relay proceeds now; the API-server-proxy alternative is rejected rather than held as a fleet-size fallback (see Access to clusters).
+
 ### Decisions to make, not research
 
 These are judgment calls with the tradeoffs already laid out; they need deciding rather than investigating.
 
-- **Is the extra deployable warranted** at a fleet of two clusters, versus the API-server-proxy fallback? The largest of these, and the one that would unwind the relay design if it goes the other way.
 - **Canopy's own cluster** — relay like any other (one code path), or direct in-cluster reads with a widened ClusterRole (robust to the relay being down). K8S is deliberately silent on this.
 - **Whether to pin the relay's SPKI fingerprint** at enrollment, or rely on the tailnet ACL and tag check alone.
 - **How a relay is enrolled**, which the DTR fold leaves unstated. Follows from the pinning decision and from who deploys the relay.
