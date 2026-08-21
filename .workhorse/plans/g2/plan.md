@@ -39,8 +39,31 @@ These are the checks that skip today by accident of what the relay image contain
 
 - `load` — a node load average says nothing about a pod. The Kubernetes analogue is CPU throttling, which is a different measurement and arguably a different check.
 - `inodes` — PVC inode usage needs kubelet stats rather than the metrics API.
-- `http_errors` — parses Caddy logs today; the analogue needs a log source the relay does not have.
 - `billing_tags`, `munin`, `ips` — marginal value, no clean analogue.
+
+`http_errors` looked like it belonged here and does not: see below.
+
+## `http_errors` against Envoy Gateway
+
+The check reads Caddy's admin `/metrics` (Prometheus text) for `caddy_http_request_duration_seconds_count` by status code, snapshots the counters to disk each run, deltas against the oldest snapshot inside a 10 minute window, and grades the 5xx share at 5 and 20 percent. Only the acquisition is Caddy-specific, so Envoy is a direct substitute.
+
+What the deployment actually looks like (`pulumi/k8s-essentials/envoyGateway.ts`, Envoy Gateway v1.8.3):
+
+- **`mergeGateways: true`**, set on the `EnvoyProxy` the GatewayClass points at. So every Gateway in the cluster merges onto **one** Envoy fleet of 2 replicas in `envoy-gateway-system`, labelled `bes.gateway.role: proxy`. Not one proxy per server, and not even one per namespace.
+- `ingress()` is called once per server, so each central and each facility gets its own Gateway plus five HTTPRoutes named `<server>-frontend`, `<server>-api`, `<server>-api-legacy`, `<server>-api-import`, `<server>-api-import-legacy`, all in the deployment's namespace.
+- Proxy metrics are on port 19001 at `/stats/prometheus`, enabled by default, in the same Prometheus text format the check already parses.
+
+Attribution therefore comes from the stat labels, not from which pod is scraped: `envoy_cluster_upstream_rq_xx{envoy_response_code_class="5", envoy_cluster_name="httproute/<namespace>/<route>/rule/<n>"}`. Namespace plus route-name prefix identifies the server and the suffix identifies the duty, so the harvested check can report per-server and can separate frontend from API from import, which the Caddy version on a VM cannot. The 4xx and 5xx split comes from the class label rather than from parsing status codes. `routeStatName` would add per-route virtual-host stats but is disabled by default and we do not need it.
+
+Three complications, and they are the interesting part:
+
+- **One scrape serves every server in the cluster.** A per-instance sweep must not scrape 19001 itself, or a tick costs (instances x replicas) scrapes of identical data. The reading is cluster-scoped and partitioned by label, then fanned out per server.
+- **Counters are per pod, and the pods roll.** `counters_reset` rejects any baseline where a counter went down, which is correct for one local Caddy but wrong for a 2 replica fleet: when one pod rolls, the summed counter drops, every baseline in the window is rejected, and the check falls back to its 10 second in-run sample. The proxy pods tolerate spot (`CAN_RUN_ON_SPOT`, and prefer it), so that is frequent rather than rare. Snapshots need keying by (pod, cluster, class) with vanished pods dropped rather than read as a negative delta.
+- **The snapshot history has nowhere to live.** State goes to `dirs::cache_dir()`, which in a relay pod is ephemeral and shared across every instance the relay serves.
+
+So this check forces two axes into the substrate interface beyond "where do I read this number": **the scope at which a reading is shared** (per workload, per server, per cluster) and **where the check's own persistent state lives**. Better to design those in from the start than to discover them on the second check that needs them.
+
+It also adds a second skew axis. The check would depend on Envoy Gateway's stat naming, which is an implementation detail of a component with its own version (pinned in ops, and the upstream issue asking for friendlier labels suggests it may move). If the expected series are absent the check cannot run, so that is **broken**, not failed, which matches the existing precedent where a class 42 SQL error reports broken rather than blaming the deployment.
 
 ## The arity problem, which is where parity actually bites
 
@@ -68,7 +91,7 @@ The feature gate wins on the card's own reasoning, despite the bloat instinct po
 ## Consequences that follow from the substrate
 
 - **The threshold constants become substrate-sensitive.** 90 and 98 percent were tuned for a VM's total memory; a container against a 512Mi limit may want different numbers, and disk at 80 and 95 percent means something different for a PVC that autoscales. So "where do thresholds come from" gets a second half: not a per-server surface, but whether one constant is right for both substrates, per check.
-- **The relay's read set widens.** Container memory needs `metrics.k8s.io`, a different API group from the core objects J1 enumerated, and PVC usage needs kubelet stats or CSI metrics. That lands on H1's relay method-set card, and it argues for the check-shaped method surface there, since the alternative exports a metrics proxy to Canopy.
+- **The relay's read set widens, and stops being per-namespace.** Container memory needs `metrics.k8s.io`, a different API group from the core objects J1 enumerated, and PVC usage needs kubelet stats or CSI metrics. `http_errors` needs to list pods in `envoy-gateway-system` and scrape a port on them, which is outside the Tamanu namespaces entirely: read-only and no `exec` or `portforward`, but it breaks the assumption that a relay reads only the namespaces of the servers it serves. That lands on H1's relay method-set card, and it argues for the check-shaped method surface there, since the alternative exports a metrics proxy to Canopy.
 - **State-file collisions retire on their own.** `http_errors` and `external_users` persist state to one fixed path (`dirs::cache_dir()/bestool/doctor-*.json`), so several instances in one process would read and write each other's state. Both fall in the skip group, so the hazard goes without needing per-instance state paths. This, not `perform_sweep` being self-contained, is the answer to the re-entrancy question. If a portable check later needs persistent state, the substrate has to carry the state location too.
 
 ## Version skew and FIG
