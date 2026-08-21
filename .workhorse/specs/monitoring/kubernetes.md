@@ -4,7 +4,7 @@ id: K8S
 
 # Kubernetes monitoring
 
-Canopy monitors Tamanu deployments running on Kubernetes by connecting to their clusters and determining checks itself, rather than a device on each server pushing them (see [STA](../public-server/statuses.md)).
+Canopy monitors Tamanu deployments running on Kubernetes by reading their clusters and determining checks itself, rather than a device on each server pushing them (see [STA](../public-server/statuses.md)).
 A Kubernetes server is an ordinary server in the fleet — it carries the same check state, health, incidents, and operator controls as any other (see [CHK](checks.md)) — reached by pulling rather than by being pushed to.
 
 ## Deployment shape Canopy relies on
@@ -28,16 +28,26 @@ Canopy does not discover Kubernetes servers on its own; identity is set by an op
 
 The namespace is the server's stable identity. A namespace that changes means the server is gone rather than that its identity has drifted, so Canopy neither reconciles the mapping nor guards against an operator reassigning a record to a different deployment. A namespace that disappears and later returns under the same name is picked up again.
 
+## The relay in each cluster
+
+Canopy reads a cluster it does not run in through a relay Canopy runs inside that cluster, rather than by reaching the cluster's Kubernetes API itself.
+The relay holds the read-only permissions for its cluster, and it opens its connection to Canopy outward: Canopy accepts that connection and asks the relay for what it needs, so Canopy holds no credential to the cluster and the cluster accepts no connection from Canopy.
+Canopy's authority over a cluster is therefore the set of requests its relay answers, each scoped to what a check or the identity picker needs, rather than a set of permissions over the cluster's objects.
+
+A relay's connection is continuous, so Canopy observes the loss of a relay directly rather than inferring it from a request failing.
+A relay is enrolled as a device carrying the relay role and is associated with no server, so it is created, authenticated, tracked, and revoked as any other device is (see [DTR](../private-server/device-trust.md)).
+
 ## Cluster registry
 
 Clusters are registered in Canopy through a settings page and managed in-app, not through environment configuration.
-Adding a cluster tests the connection before it is saved, so wrong details are caught as the operator enters them.
-Canopy reads each registered cluster with read-only access and supports several external clusters at once.
+Registering a cluster enrols its relay, and Canopy confirms the relay is connected and answering before the cluster is saved, so a cluster Canopy cannot read is caught as the operator adds it.
+A registered cluster is its relay's identity: Canopy stores no connection credential for a cluster, so it holds no cluster secret to protect or rotate.
+Canopy supports several clusters at once.
 Canopy can also read Tamanu instances running in the cluster Canopy itself runs in.
 
 ## Checks Canopy determines from the cluster
 
-Under the `kubernetes` source, Canopy determines a server's infrastructure checks by reading its cluster and namespace.
+Under the `kubernetes` source, Canopy determines a server's infrastructure checks from what it reads of the server's namespace through its cluster's relay.
 The `kubernetes` source is populated by Canopy pulling; it is not reported by any device and is reserved from the device API (see [CHK](checks.md), "Sources").
 Its checks register already reviewed, each with the policy its condition warrants.
 
@@ -58,7 +68,9 @@ Canopy harvests the Tamanu checks a server derives from its own database — the
 These are filed under the `alertd` source, the source a Tamanu server reports on other substrates, so a Kubernetes server and a server that pushes its own reports share one catalog entry and one policy per check and are graded identically (see [CHK](checks.md), "Policy").
 The harvest reuses the same alertd check implementation the servers use, so the two never diverge into subtly different checks.
 
-Canopy obtains each instance's database credentials from the cluster rather than from per-server configuration: the namespace holds the databases and the secret backing each, and Canopy reads them there.
+The relay runs the harvest inside the cluster and reports the results it produces.
+It obtains each instance's database credentials from the cluster rather than from per-server configuration: the namespace holds the databases and the secret backing each, and the relay reads them there.
+So a database credential and the queries the checks run against it stay within the cluster, and what crosses to Canopy is check results.
 
 ## Reachability
 
@@ -67,10 +79,13 @@ It passes by default: a server in a cloud Canopy shares a region with is reachab
 It fails only when the server's configured namespace no longer exists in its cluster — the server is gone.
 Whether a server is serving, as opposed to present, is the **Server live** check above, not reachability.
 
-## When Canopy cannot reach a cluster
+## When Canopy cannot read a cluster
 
 Canopy keeps one Canopy-wide check for Kubernetes cluster connectivity, with each registered cluster an instance of it (see [CHK](checks.md), "Checks with instances"), reported as a self-alert (see [SELF](../private-server/self-alerts.md)).
-A cluster Canopy cannot reach, or lacks the permissions to read, is a failing instance; the check's detail names every such cluster, and it recovers when every registered cluster is reachable again.
-This one check, escalating so it notifies at once, is the actionable failure for a cluster going away.
+A cluster whose relay is not connected, or whose relay does not answer what Canopy asks of it, is a failing instance; the check's detail names every such cluster, and it recovers when every registered cluster is answering again.
+This one check, escalating so it notifies at once, is the actionable failure for a cluster becoming unreadable.
 
-While a cluster is unreachable, the pulled and harvested checks of the servers on it are broken — their conditions unconfirmed — and are not raised to failures, so an unreachable cluster surfaces through this one check rather than flooding every server on it.
+What the check reports is that Canopy cannot read the cluster, a state a relay of its own that has stopped produces as readily as a cluster in trouble.
+So its detail carries what Canopy last observed of the relay, enough for an operator to tell a relay that needs attention from a cluster that does.
+
+While a cluster is unreadable, the pulled and harvested checks of the servers on it are broken — their conditions unconfirmed — and are not raised to failures, so a cluster Canopy cannot read surfaces through this one check rather than flooding every server on it.

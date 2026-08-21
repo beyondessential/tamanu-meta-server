@@ -61,17 +61,21 @@ Fallback if the relay proves unwarranted at this fleet size: the **Tailscale ope
 
 This card is the tracking issue/PR; it holds the specs, and the implementation sub-cards merge into it. Specs so far:
 
-- **New:** `monitoring/kubernetes.md` (id `K8S`) — the umbrella: deployment shape, Kubernetes servers and identity picker, cluster registry, pulled infra checks (`kubernetes` source), harvested DB checks (`alertd` source), reachability for k8s servers, and cluster-connection failure handling.
-- **Fold** into `private-server/self-alerts.md` — the per-cluster connection/permissions self-alert (escalating).
+- **New:** `monitoring/kubernetes.md` (id `K8S`) — the umbrella: deployment shape, Kubernetes servers and identity picker, the in-cluster relay, cluster registry, pulled infra checks (`kubernetes` source), harvested DB checks (`alertd` source), reachability for k8s servers, and cluster-read failure handling.
+- **Fold** into `private-server/self-alerts.md` — the per-cluster connectivity self-alert (escalating), now expressed as relays disconnected or not answering.
 - **Fold** into `monitoring/checks.md` — `kubernetes` added to the reserved sources, the notion of Canopy-populated sources, and Canopy-determined reachability for pulled servers.
 - **Fold** into `public-server/statuses.md` — `alertd` has two origins (device push and Canopy harvest).
+- **Fold** into `private-server/device-trust.md` — `relay` added to the device roles, associated with no server.
 
-The spec was deliberately written behavioural-only, leaving auth mechanism and exact namespace resource names to the spikes. J1 changes nothing behavioural (all implementation detail — see `plans/j1/plan.md`). **H1 does introduce a product-visible concept the spec doesn't yet name: the in-cluster relay.** Two K8S passages now read differently under the relay model:
+The spec was deliberately written behavioural-only, leaving auth mechanism and exact namespace resource names to the spikes. J1 changes nothing behavioural (all implementation detail — see `plans/j1/plan.md`).
 
-- Cluster registry: "Adding a cluster tests the connection before it is saved" → the test is that the cluster's relay is connected and answering; and "Canopy reads each registered cluster with read-only access" → Canopy reads *via the relay*, holding no cluster credentials.
-- "When Canopy cannot reach a cluster": the per-cluster connectivity self-alert becomes "relay not connected" — which can mean the relay is down while the cluster is healthy.
+**H1's relay is now folded into the specs**, at the architectural level (the relay exists, it dials outward, Canopy holds no cluster credential, credentials and query traffic stay in the cluster) and without the transport and deployment mechanics (QUIC/quinn, tailnet sidecars, kernel-mode networking, SPKI pinning), which stay in `plans/h1/plan.md` as implementation. What landed:
 
-Whether to fold the relay into K8S now, or hold the spec behavioural until the relay design card lands, is a decision for the user (H1 is a working direction with open items to confirm — see below). Flagged, not yet applied.
+- K8S gained a **The relay in each cluster** section, reshaped the cluster registry around relay enrolment (no stored credential, connection test = relay answering), pointed the infra checks and the DB harvest at the relay, and renamed the failure section to **When Canopy cannot read a cluster** with the relay-versus-cluster diagnosis carried in the check's detail.
+- SELF's Kubernetes bullet now reads as relays disconnected or not answering.
+- DTR gained `relay` as a device role, associated with no server.
+
+Deliberately **not** specified, because it is not settled: whether Canopy's own cluster is read through a relay or directly (K8S stays silent on the mechanism there, saying only that Canopy can read instances in its own cluster), and how a relay is enrolled in the first place (DTR's "how a device comes to exist" list is untouched, so the relay's creation path is a spec gap once the mechanism is chosen).
 
 ## New findings from J1 to carry into the implementation cards
 
@@ -86,9 +90,23 @@ Whether to fold the relay into K8S now, or hold the spec behavioural until the r
 - ~~Exact Tamanu k8s namespace layout~~ — **resolved by J1.** See `plans/j1/plan.md`; findings carried into the cards above.
 - **The relay's method set** — check-shaped (`give me results for namespace X`, tightest surface, relay release per new check) vs resource-shaped (`list deployments in X`, Canopy keeps check logic but drifts toward an RBAC proxy). Candidate middle: resource-shaped for the `kubernetes` infra checks, check-shaped for the `alertd` harvest. H1 defers this to its own design card; it also settles the relay's implementation language.
 - **Canopy's own cluster** — relay like any other, or direct in-cluster reads with a widened ClusterRole.
-- **Is the extra deployable warranted** at a fleet of two clusters, versus the API-server-proxy fallback? And confirm kernel-mode sidecar UDP passes against a real deployment before committing.
-- **How M1/N1 treat a hibernated deploy** (see J1 findings above).
 - When to bring backups into Canopy (AWS-level + CNPG Barman) — deliberately deferred.
+
+### Raised to spikes
+
+- **Does QUIC pass a kernel-mode Tailscale sidecar** against a real deployment? Gates the relay's transport; fallbacks are tsnet at the relay end or HTTP/2 over TCP at both.
+- **Is `bestool-alertd` consumable as a Rust library** against a caller-supplied Postgres connection? Assumed by this plan and H1, examined by neither. Gates the harvest and settles the relay's language.
+
+### Decisions to make, not research
+
+These are judgment calls with the tradeoffs already laid out; they need deciding rather than investigating.
+
+- **Is the extra deployable warranted** at a fleet of two clusters, versus the API-server-proxy fallback? The largest of these, and the one that would unwind the relay design if it goes the other way.
+- **Canopy's own cluster** — relay like any other (one code path), or direct in-cluster reads with a widened ClusterRole (robust to the relay being down). K8S is deliberately silent on this.
+- **Whether to pin the relay's SPKI fingerprint** at enrollment, or rely on the tailnet ACL and tag check alone.
+- **How a relay is enrolled**, which the DTR fold leaves unstated. Follows from the pinning decision and from who deploys the relay.
+- **Who deploys the relay and how it is versioned** against Canopy, with protocol versioning needed from the start.
+- **How M1/N1 treat a hibernated deploy** (see J1 findings above) — likely broken/unconfirmed rather than failing, but it wants a decision, and probably a spec line.
 
 ## Resolved: identity stability
 
