@@ -76,13 +76,38 @@ So no instance-shaping of the VM side, and no need for CHK's "checks with instan
 
 Where a check does aggregate several subjects into one number, **it must aggregate by worst and not by sum.** A sum hides the failure: one full PVC beside an empty one of the same size reads as half full, and the thing that is out of space is invisible. Taking the worst subject's value keeps the single-number detail shape, so parity holds exactly, and naming the worst subject in an extra detail field costs nothing, because a rule reading `check.percent_used` still means the same thing on both substrates and the VM simply has no such extra field.
 
-## Where this collides with the K8S spec
+## The demarcation between the two sources
 
-K8S currently draws the line as infrastructure checks under `kubernetes` (Canopy reading the cluster) and database-derived checks under `alertd` (harvested). The substrate model moves that line: **workloads ready**, **restarts**, **storage** and **resource pressure** are the same conditions as a substrate-aware `tamanu_service`, `uptime`, `disk_free` and `memory`, and **server live** is the same condition as `tamanu_http`.
+K8S currently draws the line as infrastructure checks under `kubernetes` (Canopy reading the cluster) and database-derived checks under `alertd` (harvested). That line does not hold up: **workloads ready**, **restarts**, **storage** and **server live** are the same conditions as `tamanu_service`, `disk_free` and `tamanu_http`, so it would file one condition twice under two names, and FIG's fleet spread would show them as duplicate checks.
 
-So the line is no longer "infrastructure versus database" but "what an alertd check can express portably versus what is genuinely Kubernetes-only". Whichever way it settles, it needs deciding before M1 and N1 both build their half, and it is a spec change to K8S rather than only a bestool change. The options are to shrink the `kubernetes` source to what has no VM counterpart (namespace presence, Gateway wiring, pod scheduling and eviction), or to keep both and accept two sources reporting the same condition under different names, which the fleet spread in FIG would show as duplicate checks.
+The line is not "portable versus Kubernetes-only" either. It is **what the check asserts something about**:
 
-Shrinking looks right on this card's own logic: a condition an operator configures once should not exist twice because the server runs on a different substrate.
+- **alertd's subject is one server**, as Tamanu understands a server: the thing that has a database, a version, an API, sync state, and a set of duties that ought to be running. That subject is a coherent assemblage of processes or containers regardless of what runs them, which is as true of podman on Linux as of Kubernetes, so the substrate is a real abstraction rather than a Kubernetes special case.
+- **Canopy's `kubernetes` source's subject is the substrate**: the cluster's ability to run and place those workloads, at whatever grain that shows up. Coarser than a server (a namespace, a cluster, a node pool, Karpenter behaving abnormally) or finer (this pod is unschedulable, this volume will not bind).
+
+The useful consequence is that **alertd can hold Kubernetes-only checks.** A check qualifies on its subject, not on whether it has a VM counterpart. So a check asserting something about one server that is only expressible in Kubernetes belongs in alertd anyway.
+
+This maps onto CHK's existing three targets rather than needing a new one:
+
+- server-subject, target server, filed under `alertd`, whether pushed or harvested;
+- namespace-subject, target **server group**, since a namespace is a server group at a rank, which is what CHK already means by a group's control plane;
+- cluster-subject, target **Canopy-wide**, which is where K8S already puts the cluster connectivity self-alert with each cluster an instance.
+
+It also confirms H1's candidate middle for the relay method set, for a better reason than pragmatism: the substrate-subject checks are Canopy's own logic over plain objects, so resource-shaped, and the server-subject checks are alertd running in the relay, so check-shaped.
+
+### What this moves
+
+Applying the subject test to K8S's current `kubernetes` list, most of it is server-subject and moves to `alertd`: **server live** (`tamanu_http`), **workloads ready** and **restarts** (`tamanu_service`, the server's duties not staying up), **database up** (`db_connect`), **storage** (`disk_free`). **Resource pressure** stays server-subject as an event ("this server's containers are being killed") even though its cause is substrate, and it absorbs what `memory` and `load` assert on a VM.
+
+What is left for the `kubernetes` source is genuinely substrate: the namespace being present at all, volumes failing to bind, pods that cannot be scheduled, node pool and Karpenter health, and the existing cluster connectivity self-alert.
+
+That is a larger change to K8S than trimming, and it rebalances the breakdown: M1 shrinks a long way and N1 grows to own most of what M1 was going to build. Both cards should wait on it.
+
+### It also resolves J1's hibernation question
+
+J1 left open how a TTL-hibernated deploy is treated, having flagged that a hibernated CNPG cluster and a scaled-to-zero deployment are not a deleted namespace. Under this demarcation hibernation is server-subject, so it belongs to alertd, and it is not a check result at all: it is an **eligibility fact**. A hibernated server is deliberately asleep, so its database checks should report skipped rather than failed or broken.
+
+So the substrate carries more than "read this number for this subject". It also answers "is this subject expected to be running right now", which is what makes the difference between a skip and a failure. `CheckContext`'s existing `has_install` and `is_tamanu` flags are ad-hoc early versions of the same idea, and the substrate should subsume them rather than sit beside them.
 
 ## The dependency-direction fork
 
