@@ -1134,6 +1134,8 @@ const HOUR_COLUMN = (theme: Theme) => ({
 	borderColor: "divider",
 	minWidth: 0,
 	backgroundImage: `repeating-linear-gradient(to bottom, transparent 0 ${HOUR_HEIGHT - 1}px, ${theme.palette.divider} ${HOUR_HEIGHT - 1}px ${HOUR_HEIGHT}px)`,
+	backgroundRepeat: "no-repeat",
+	backgroundSize: `100% ${23 * HOUR_HEIGHT}px`,
 });
 
 const TIME_BLOCK = {
