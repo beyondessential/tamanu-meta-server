@@ -67,26 +67,49 @@ The two check families do not share a filing shape, and forcing them into one en
 
 Both carry `Scope` from the single `database::issues::Scope` enum; the relay never hand-rolls a server/group discriminator of its own.
 
-## Identity over QUIC
+## Identity over QUIC — the existing device key, not a pinned throwaway cert
 
-The adaptation is small. `commons_servers::device_auth::tailnet::resolve` currently takes `&mut Parts` and pulls the caller's address out of it with the `ClientIp` extractor; the QUIC path has `connection.remote_address()` instead. So `resolve` splits into an **IP-taking core** with the existing HTTP extractor as a thin wrapper over it — one directory lookup, one `devices.tailscale_node_id` key, two callers.
+**This revises H1 and the card description**, which had the relay carry a throwaway certificate and be authenticated by its tailnet peer tag, with SPKI pinning as optional hardening. Canopy already has the concept those were reaching for: a device with a **device key** (spec `DPK`, provisioned credentials). Adopting it for the QUIC connection answers identity, differentiation between relays, and enrollment in one move, and adds no new mechanism.
 
-### The role is Canopy's gate; the tailnet ACL is not Canopy's concern
+### How it works
 
-Canopy authenticates a relay connection by resolving its remote address to a tailnet node identity, keying that into the device row, and **checking the device carries the `relay` role**. That role check is what Canopy owns and enforces.
+The relay presents a **client certificate carrying its device key** in the QUIC TLS handshake. Canopy reads the peer certificate's `subject_pki.raw`, looks it up with `Device::from_key`, and checks the resulting device carries the `relay` role. That is the same SPKI lookup the HTTP mTLS path performs (`device_auth/mtls.rs`), against the same `device_keys.key_data` column, so the two paths authenticate the same way against one store.
 
-Who can reach the listener at all is a tailnet ACL question, organised in the tailnet and out of scope for Canopy and the relay. Canopy does not validate ACL structure or require a particular tag arrangement; treating the tailnet's configuration as something Canopy polices would put the same policy in two places and make Canopy wrong whenever the tailnet is reorganised. The existing optional `TAILSCALE_REQUIRED_TAG` behaviour on the HTTP path is orthogonal and stays as it is.
+`keygen::generate_device_key` already mints exactly this: a P-256 keypair whose SPKI is derived *by self-signing a throwaway certificate and reading `subject_pki.raw`* — the same operation the relay's TLS stack will perform. So the bytes stored at provisioning are guaranteed to match what the QUIC handshake presents, by construction rather than by care.
 
-### An unresolved node is a hard failure on this path
+### It is stronger here than on the HTTP path
 
-`resolve` deliberately returns `Ok(None)` for a tailnet node with no device row, so that the HTTP caller can fall through to the mTLS path. There is no second path behind QUIC, so on the relay listener `None` **rejects the connection** rather than falling through. The IP-taking core keeps returning `None`; it is the relay listener that treats it as terminal.
+Worth recording, because it inverts the usual expectation. The HTTP mTLS path carries a documented weakness (`mtls.rs`, on `ClientCertHeader`): TLS is terminated at an ingress proxy, so authentication rests on a header, there is **no proof of possession**, and a public key is not a secret — hence the whole single-trusted-header apparatus guarding against a caller pasting in an enrolled device's certificate.
+
+Over QUIC, Canopy terminates TLS itself. The handshake *is* proof of possession: the relay must sign with the private key. No proxy, no header, nothing to spoof. The QUIC path gets for free the property the HTTP path has to work to approximate.
+
+### Enrollment falls out of it
+
+The DTR gap closes with no new path. An admin uses the existing **create-device workflow** with `role = relay`, Canopy mints the keypair and hands back the private key once, and that key is installed into the cluster as a Secret for the relay's deployment to read. Nothing authenticates before an operator has acted, and the relay is created, tracked, and revoked exactly as any other device is — which is what `K8S` already says of it.
+
+Revocation is likewise the existing path: deactivate the key (`is_active`), and `Device::from_key` stops resolving it.
+
+### Consequences
+
+- **SPKI pinning as a separate question dissolves.** The device key *is* the pin, and it is a first-class record with a provisioning workflow behind it rather than a fingerprint captured at enrollment.
+- **Relays differentiate by device key.** Each cluster's relay holds its own, so the connection maps to a cluster through the device row — the lookup the connection registry needs, and never a claim the relay makes in a message.
+- **Tailnet identity is no longer load-bearing for authentication.** The tailnet still provides the network path, confidentiality, and reachability control, and its ACL remains organised in the tailnet and out of Canopy's concern. But Canopy no longer needs the tailnet directory lookup on this path at all, so no refactor of `tailnet::resolve` is required and the QUIC listener does not depend on the Tailscale control-plane API being up.
+
+### Implementation notes
+
+- Canopy's rustls server config must **request a client certificate and accept any** (there is no CA and no chain to validate), then Canopy inspects the presented certificate itself and does the SPKI lookup. That is a custom `ClientCertVerifier`; the verifier is deliberately not the gate, the device-key lookup is.
+- `Device::add_key` refuses a second active key on a device that already carries a different one, so relay key rotation is deactivate-then-add rather than overlap-then-cut. Fine at this fleet size; note it, because it means a rotation has a window where the relay cannot reconnect.
+- The relay's own verification of *Canopy's* server certificate is the remaining minor choice: skip it and rest on the tailnet for that direction, or pin. Skipping matches the original reasoning and is the default unless there is a reason to do otherwise.
 
 ## Open — to decide on this card
 
-1. **SPKI pinning** — whether to pin the relay's certificate fingerprint at enrollment.
-2. **Relay enrollment** — how the relay's device row comes to exist (DTR gap), which follows from pinning and from who deploys.
-3. **Deployment & versioning** — who deploys the relay and how it's versioned against Canopy.
-4. **Canopy's own cluster** — read through a relay like any other, or direct in-cluster reads with a widened ClusterRole.
+1. **Deployment & versioning** — who deploys the relay and how it's versioned against Canopy.
+2. **Canopy's own cluster** — read through a relay like any other, or direct in-cluster reads with a widened ClusterRole.
+
+## Spec impact to carry back
+
+- **`DTR`** (`private-server/device-trust.md`) — the relay's creation path is the existing provisioned-credential workflow at `role = relay`, which closes the gap B1 flagged as unspecified. Check whether DTR's "how a device comes to exist" list needs the relay naming explicitly or already covers it.
+- **`K8S`** stays accurate as written: it says a relay is enrolled as a device carrying the relay role and is created, authenticated, tracked, and revoked as any other device is. The device-key decision realises that sentence rather than changing it.
 
 ## Decisions
 
