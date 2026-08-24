@@ -5,13 +5,14 @@
 //! a deliberate act with a visible diff, rather than something that happens by
 //! a handler reaching for a Kubernetes client.
 //!
-//! The implementations belong to the check families and the cluster work: the
-//! roster comes from listing a namespace, sleep and wake from scaling
-//! workloads and hibernating a database, the version from patching this
-//! relay's own Deployment. This trait is what they implement, and
-//! [`Unattached`] is what stands in until they do — it answers every request
-//! as a failure, which is honest about a relay that is connected but cannot
-//! yet read its cluster.
+//! None of these is a check. Checks are `alertd`'s, both families, and reach
+//! canopy as filings; this is only what canopy asks for by name. The
+//! implementations are cluster work: the roster comes from listing a
+//! namespace, sleep and wake from scaling workloads and hibernating a
+//! database, the version from patching this relay's own Deployment.
+//! [`Unattached`] stands in until they land — it answers every request as a
+//! failure, which is honest about a relay that is connected but cannot yet
+//! read its cluster.
 
 use relay_protocol::{Hello, RosterEntry};
 

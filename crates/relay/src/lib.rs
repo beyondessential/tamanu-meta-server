@@ -12,9 +12,15 @@
 //! This crate is the relay's *frame*: its identity, its connection, the
 //! reconnect loop, and the dispatch that answers canopy's requests and files
 //! upward. The checks themselves — the harvest against each instance's
-//! database, and the substrate checks read from the Kubernetes API — are the
-//! two check families, and they arrive as their own work. Where a check would
-//! be determined, this carries the seam and not the check: see [`Duties`].
+//! database, and the substrate checks read from the Kubernetes API — arrive as
+//! their own work, and they do not live here: both families are `alertd`'s,
+//! the substrate half behind a `kube` feature, so a check's two behaviours stay
+//! in one crate and cannot drift on separate release cycles. The relay embeds
+//! that suite and sends what it produces up the filings channel.
+//!
+//! So the seam for a check is [`client::Filings`], not [`Duties`]. `Duties` is
+//! the separate, smaller thing: the cluster actions canopy *asks* for, none of
+//! which is a check.
 //!
 //! Keeping the frame separable is not tidiness. It means the transport, the
 //! authentication, and the protocol can be exercised without a cluster or a
