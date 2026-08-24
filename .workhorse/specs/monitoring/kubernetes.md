@@ -4,8 +4,8 @@ id: K8S
 
 # Kubernetes monitoring
 
-Canopy monitors Tamanu deployments running on Kubernetes by reading their clusters and determining checks itself, rather than a device on each server pushing them (see [STA](../public-server/statuses.md)).
-A Kubernetes server is an ordinary server in the fleet — it carries the same check state, health, incidents, and operator controls as any other (see [CHK](checks.md)) — reached by pulling rather than by being pushed to.
+Canopy monitors Tamanu deployments running on Kubernetes through one relay in each cluster, which determines those deployments' checks and files them, rather than through a device on each server reporting its own (see [STA](../public-server/statuses.md)).
+A Kubernetes server is an ordinary server in the fleet — it carries the same check state, health, incidents, and operator controls as any other (see [CHK](checks.md)) — monitored through its cluster rather than by an agent of its own.
 
 ## Deployment shape Canopy relies on
 
@@ -31,11 +31,34 @@ The namespace is the server's stable identity. A namespace that changes means th
 ## The relay in each cluster
 
 Canopy reads a cluster it does not run in through a relay Canopy runs inside that cluster, rather than by reaching the cluster's Kubernetes API itself.
-The relay holds the read-only permissions for its cluster, and it opens its connection to Canopy outward: Canopy accepts that connection and asks the relay for what it needs, so Canopy holds no credential to the cluster and the cluster accepts no connection from Canopy.
-Canopy's authority over a cluster is therefore the set of requests its relay answers, each scoped to what a check or the identity picker needs, rather than a set of permissions over the cluster's objects.
+The relay holds the permissions for its cluster, and it opens its connection to Canopy outward, so Canopy holds no credential to the cluster and the cluster accepts no connection from Canopy.
+Canopy's authority over a cluster is therefore the set of requests its relay answers, each scoped to what a check, the identity picker, or an operator action needs, rather than a set of permissions over the cluster's objects.
 
 A relay's connection is continuous, so Canopy observes the loss of a relay directly rather than inferring it from a request failing.
 A relay is enrolled as a device carrying the relay role and is associated with no server, so it is created, authenticated, tracked, and revoked as any other device is (see [DTR](../private-server/device-trust.md)).
+
+### What crosses the connection
+
+The relay determines a Kubernetes server's checks itself, under both sources, and files the results upward.
+Everything crossing the connection is a filed check, an answer to one named question, or an action on a deployment, so the cluster's objects stay in the cluster and what Canopy learns of a cluster is what its relay has already made a check of.
+
+The relay holds the current state of what it watches and files a check when that check's result changes, so a condition surfaces when it arises rather than on the next turn of a polling loop.
+It also refiles what it holds periodically, so a check's state is re-established after an observation the relay missed, a relay restart, or a reconnection, rather than resting on a change it may never see.
+
+Beyond filings, Canopy asks a relay only for what is not a check: the roster of servers in a namespace for the identity picker, whether the relay is connected and answering for cluster registration, and the version of the check suite it runs (see [SELF](../private-server/self-alerts.md)).
+Each is a named answer to one question rather than a means of reading the cluster.
+
+### Putting a deployment to sleep
+
+Canopy can put a deployment to sleep and wake it again.
+A deployment is a namespace and so a server group at a rank, so the action covers every server in that group together and there is no sleeping one server within a namespace.
+
+A deployment that has no scheduled expiry cannot be put to sleep, and its relay is what refuses the request, so the restriction holds where the expiry is known rather than resting on Canopy asking correctly.
+Canopy gates the action by what the deployment is, as it gates any action against production.
+Sleeping and waking are available to admins and are audited.
+
+Whether a deployment is asleep is a fact Canopy presents on the server group rather than a check, a deployment asleep on purpose being nothing to grade.
+Each of its servers already carries it as the reason that server's checks are skipped (see "Checks that cannot run there").
 
 ## Cluster registry
 
@@ -86,13 +109,13 @@ The server-wide detail it carries omits anything that describes the process whic
 So a figure a Kubernetes server has no source for is simply not reported, and the rules for a figure nothing reports apply as they do anywhere (see [FIG](../private-server/server-figures.md)).
 In particular a Kubernetes server presents no bestool version, having no such agent installed on it, and the version of the check suite the harvest runs is a property of the relay rather than of any server it serves (see [SELF](../private-server/self-alerts.md)).
 
-## Checks Canopy determines about the substrate
+## Checks determined about the substrate
 
-Under the `kubernetes` source, Canopy determines checks about what the cluster does with a server's workloads, from what it reads of the cluster through its relay.
-The `kubernetes` source is populated by Canopy pulling; it is not reported by any device and is reserved from the device API (see [CHK](checks.md), "Sources").
+Under the `kubernetes` source, the relay determines checks about what the cluster does with a server's workloads and files them.
+The `kubernetes` source is filed only by a relay; no ordinary device reports it and it is reserved from the device API (see [CHK](checks.md), "Sources").
 Its checks register already reviewed, each with the policy its condition warrants.
 
-Per server, Canopy determines that the server's workloads can be placed, no pod of the server being unschedulable, and that its volumes are bound.
+Per server, the relay determines that the server's workloads can be placed, no pod of the server being unschedulable, and that its volumes are bound.
 
 A check under this source can also be scoped past a single server, at either grain.
 A check about a namespace targets the server group, a namespace being a server group at a rank (see [CHK](checks.md), "Targets").
@@ -101,7 +124,7 @@ A check about a cluster is Canopy-wide with each registered cluster an instance,
 ## Reachability
 
 A Kubernetes server's reachability is determined by Canopy directly rather than from reporting sources (see [CHK](checks.md), "Reachability").
-It passes by default: a server in a cloud Canopy shares a region with is reachable to Canopy under normal conditions, so reachability never alerts on the cadence of Canopy's own pulling.
+It passes by default: a server in a cloud Canopy shares a region with is reachable to Canopy under normal conditions, so reachability never alerts on the cadence at which its relay files.
 It fails only when the server's configured namespace no longer exists in its cluster — the server is gone.
 Whether a server is serving, as opposed to present, is carried by the server's own harvested checks, not by reachability.
 
@@ -114,4 +137,4 @@ This one check, escalating so it notifies at once, is the actionable failure for
 What the check reports is that Canopy cannot read the cluster, a state a relay of its own that has stopped produces as readily as a cluster in trouble.
 So its detail carries what Canopy last observed of the relay, enough for an operator to tell a relay that needs attention from a cluster that does.
 
-While a cluster is unreadable, the pulled and harvested checks of the servers on it are broken — their conditions unconfirmed — and are not raised to failures, so a cluster Canopy cannot read surfaces through this one check rather than flooding every server on it.
+While a cluster is unreadable, the substrate and harvested checks of the servers on it are broken — their conditions unconfirmed — and are not raised to failures, so a cluster Canopy cannot read surfaces through this one check rather than flooding every server on it.

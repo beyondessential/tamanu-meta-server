@@ -21,10 +21,10 @@ Canopy-wide checks are Canopy monitoring its own operation (see [SELF](../privat
 A source is a named reporter of checks, identified by a short string.
 Multiple sources may report on the same server, each concerned with part of the system, and each source's reports are independent: a report from one source says nothing about another source's checks.
 
-Three source names are reserved for Canopy itself: `canopy` for conditions Canopy determines on its own (reachability, backup health, key expiry, self-monitoring), `manual` for conditions raised by operators, and `kubernetes` for the checks Canopy derives about the substrate a Kubernetes server runs on, at the grain of a server, a namespace, or a cluster (see [K8S](kubernetes.md)).
+Three source names are reserved for Canopy itself: `canopy` for conditions Canopy determines on its own (reachability, backup health, key expiry, self-monitoring), `manual` for conditions raised by operators, and `kubernetes` for the checks reported about the substrate a Kubernetes server runs on, at the grain of a server, a namespace, or a cluster (see [K8S](kubernetes.md)).
 Reports arriving over the device API cannot use the reserved names.
 
-A source is normally populated by a device pushing its reports, but Canopy also populates sources itself: the `kubernetes` source is filled entirely by Canopy pulling from a cluster, and the `alertd` source, which a server reports on other substrates, is also filled by Canopy harvesting a Kubernetes server's checks with the same check suite and filing them under it (see [K8S](kubernetes.md)). A Canopy-populated source's checks carry the same state, policy, and controls as any other.
+A source is normally populated by a device pushing its reports over the device API, but a source is also populated by a cluster's relay filing what it determines in that cluster: the `kubernetes` source is filled that way and no other, and the `alertd` source, which a server reports for itself on other substrates, is filled that way for a Kubernetes server by the relay running the same check suite against it (see [K8S](kubernetes.md)). A source filled by a relay carries the same state, policy, and controls as any other.
 
 ### Source policy
 
@@ -155,7 +155,7 @@ It keeps one `reachability` check per server, under the `canopy` source, reflect
 A stale source degrades the server rather than silently dropping its checks, so a reporter going quiet is never mistaken for health.
 There is no per-source staleness check; the one reachability check carries the full picture.
 
-A server Canopy monitors by pulling rather than by being reported to has its reachability determined by Canopy directly, not from expected sources going stale, since a Canopy-populated source's freshness reflects Canopy's own cadence rather than the server reporting in (see [K8S](kubernetes.md), "Reachability").
+A server monitored through a relay rather than by reporting for itself has its reachability determined by Canopy directly, not from expected sources going stale, since a relay-filled source's freshness reflects the relay's cadence rather than the server reporting in (see [K8S](kubernetes.md), "Reachability").
 
 Every server presents a reachability check as it currently stands, whether or not a reporter has ever gone quiet: a server with nothing stale presents it as passed, and a server whose reachability is silenced presents it as skipped.
 So the check — and the controls on it — are reachable before anything has gone wrong.

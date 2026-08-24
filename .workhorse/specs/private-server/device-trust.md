@@ -8,7 +8,7 @@ Every device Canopy records holds a role that grants access: administrator, serv
 There is no untrusted or pending state.
 A device exists only because a deliberate act created it, and that act records the device at its role from the outset.
 
-A relay is the role held by a relay Canopy runs in a Kubernetes cluster to read that cluster on its behalf (see [K8S](../monitoring/kubernetes.md)); it is associated with no server, and it reports the checks of the servers in its cluster rather than of a server of its own.
+A relay is the role held by a relay Canopy runs in a Kubernetes cluster to monitor that cluster on its behalf (see [K8S](../monitoring/kubernetes.md)); it is associated with no server, and it reports the checks of the servers in its cluster rather than of a server of its own.
 
 ## How a device comes to exist
 
