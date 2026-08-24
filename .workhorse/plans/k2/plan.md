@@ -116,7 +116,7 @@ Folded:
 Carried into the cards:
 
 - **M1** — rescoped again: its checks are determined in the relay rather than in Canopy, so Canopy's side is registering the source and ingesting what the relay files. B1's breakdown entry follows.
-- **J2** — its breakdown entry now has the relay holding the cluster's permissions rather than read permissions, gaining the verbs sleeping a deployment takes. The card itself still says read-only.
+- **J2** — the relay holds the cluster's permissions rather than read permissions, gaining the verbs sleeping a deployment takes and enforcing the expiry precondition itself. Its card also now carries what the connection is shaped to carry, since that is the protocol J2 defines.
 
 Not rewritten:
 
