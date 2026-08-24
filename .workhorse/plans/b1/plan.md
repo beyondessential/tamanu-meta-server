@@ -119,9 +119,9 @@ Deliberately **not** specified, because it is not settled: whether Canopy's own 
 - ~~**The relay's method set**~~ — **resolved by K2: both families check-shaped and pushed**, with three named queries and two commands alongside. This overturned H1's candidate middle, which G2 had confirmed, on release-cadence grounds. See Access to clusters and `plans/k2/plan.md`.
 - When to bring backups into Canopy (AWS-level + CNPG Barman) — deliberately deferred.
 
-### Spun out by K2, with no card yet
+### Spun out by K2, tracked elsewhere
 
-- **A general log of operator actions.** Wanted, and wider than hibernate/wake. Canopy has no such facility today: three specs say an action is audited (upgrade plans, restore-replica declarations and credential issuances, the backup recovery ceremony) and each is realised on its own terms, with no log covering operator actions across Canopy. K2 says only that sleeping and waking are audited and leaves the facility to a card of its own. That card does not exist, and the work is Canopy-wide rather than Kubernetes, so it does not belong in this breakdown.
+- **A general log of operator actions.** Wanted, and wider than hibernate/wake. Canopy has no such facility today: three specs say an action is audited (upgrade plans, restore-replica declarations and credential issuances, the backup recovery ceremony) and each is realised on its own terms, with no log covering operator actions across Canopy. K2 commits only to sleeping and waking being audited. Canopy-wide work rather than Kubernetes, so **it has its own card outside this project and is not tracked in this breakdown**. Nothing here waits on it: K8S says hibernation is audited, and the facility it eventually audits into is that card's to define.
 
 ### Left open by G2, for the implementation
 
