@@ -48,6 +48,14 @@ It also refiles what it holds periodically, so a check's state is re-established
 Beyond filings, Canopy asks a relay only for what is not a check: the roster of servers in a namespace for the identity picker, whether the relay is connected and answering for cluster registration, and the version of the check suite it runs (see [SELF](../private-server/self-alerts.md)).
 Each is a named answer to one question rather than a means of reading the cluster.
 
+### Keeping a relay current
+
+Canopy names the version of the check suite each relay should be running, and a relay updates itself to the version named for it.
+So the fleet of relays follows Canopy's account of where they should be rather than being rolled cluster by cluster, which is what keeps a change to a check reaching every cluster it applies to.
+
+What Canopy names is a version and never the code itself: a relay obtains its code from where its versions are published, so the most Canopy can ask of a relay is which published version to run.
+A relay refuses a version below the floor it carries, so it cannot be sent back to a release already known to be bad.
+
 ### Putting a deployment to sleep
 
 Canopy can put a deployment to sleep and wake it again.
