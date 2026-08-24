@@ -48,13 +48,31 @@ The protocol version is carried in the **QUIC ALPN token** (`canopy-relay/1` and
 
 Detail that is not protocol-breaking rides in a post-handshake control message instead: the embedded check-suite version for SELF's skew alert, and the relay's build info.
 
+## Filing handover — hoist the ingestion core, two filing shapes
+
+K2 requires filings to converge on the ingestion path a device push takes, so parity is not re-derived on Canopy's side. Today that path is `file_health_events`, a **private function in `crates/public-server/src/statuses.rs`** reachable only through the axum handler. The relay speaks QUIC, not HTTP, and `jobs` depending on `public-server` would invert the dependency direction.
+
+### Hoist the push ingestion into `commons-servers`
+
+Decided. Move `file_health_events`, `collect_check_results`, `split_health_from_extra`, and the `StatusPush`/`HealthCheck` types out of `public-server` into `commons-servers`, which already reaches `issues::file_check` from `tailnet_sweeps.rs`. The HTTP handler and the relay connection worker then become two thin callers of one ingestion core.
+
+The alternative — re-implementing the conversion in `jobs` — produces exactly the drift G2 identified as the one real risk to parity ("the crate already builds its payload through the same serialisation a pushed bestool uses; the one real risk is Canopy re-modelling the filing on its side"). The refactor touches shipped code on the status-push path, so it carries regression risk of its own and wants the existing status-push tests kept green across the move.
+
+### Two filing message types, split by family
+
+The two check families do not share a filing shape, and forcing them into one envelope would mean a lowest-common-denominator type that fits neither.
+
+- **Harvest filings (`alertd` source)** are per-server, and the relay already produces the payload a pushed bestool produces. So the filing message **is the status-push body** rather than a re-modelled filing type, fed straight into the hoisted ingestion. Parity becomes structural rather than something maintained.
+- **Substrate filings (`kubernetes` source)** scope to a server, to a server group (a namespace), or Canopy-wide with each cluster an instance, and the source is reserved from the device API — so there is no push analogue to converge on. These construct `CheckFiling` / `InstancedCheckFiling` and go through `issues::file_check` directly.
+
+Both carry `Scope` from the single `database::issues::Scope` enum; the relay never hand-rolls a server/group discriminator of its own.
+
 ## Open — to decide on this card
 
-1. **Filing handover** — how filings reach the same ingestion path a device push takes, without re-deriving parity on Canopy's side.
-2. **Identity over QUIC** — adapting the tailnet resolve to take the address from the connection; whether to pin the relay's SPKI fingerprint at enrollment.
-3. **Relay enrollment** — how the relay's device row comes to exist (DTR gap), which follows from pinning and from who deploys.
-4. **Deployment & versioning** — who deploys the relay and how it's versioned against Canopy.
-5. **Canopy's own cluster** — read through a relay like any other, or direct in-cluster reads with a widened ClusterRole.
+1. **Identity over QUIC** — adapting the tailnet resolve to take the address from the connection; whether to pin the relay's SPKI fingerprint at enrollment.
+2. **Relay enrollment** — how the relay's device row comes to exist (DTR gap), which follows from pinning and from who deploys.
+3. **Deployment & versioning** — who deploys the relay and how it's versioned against Canopy.
+4. **Canopy's own cluster** — read through a relay like any other, or direct in-cluster reads with a widened ClusterRole.
 
 ## Decisions
 
