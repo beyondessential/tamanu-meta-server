@@ -556,7 +556,6 @@ fn public_server_with_sts(url: &str, sts: aws_sdk_sts::Client) -> TestServer {
 		db_read: db,
 		tera: public_server::state::AppState::init_tera().unwrap(),
 		server_versions_secret: Some("test-secret".to_string()),
-		calendar_secret: Some("test-calendar-secret".to_string()),
 		tailnet_directory: None,
 		rate_limiter: Default::default(),
 		sts: Some(sts),

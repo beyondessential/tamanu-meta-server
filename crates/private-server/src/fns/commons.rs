@@ -112,7 +112,7 @@ pub async fn server_versions_url() -> Result<Json<Option<String>>> {
 ///
 /// Returns the feed's full URL, secret included, so it can be handed to a
 /// calendar application or shared as-is. Returns `null` if the public API base
-/// URL or the calendar secret is not configured.
+/// URL or the secret gating the public reads is not configured.
 // spec: UPG#the-calendar-feed
 #[utoipa::path(
 	post,
@@ -126,7 +126,7 @@ pub async fn server_versions_url() -> Result<Json<Option<String>>> {
 pub async fn calendar_url() -> Result<Json<Option<String>>> {
 	let url = (|| {
 		let public_url = std::env::var("PUBLIC_URL").ok()?;
-		let secret = std::env::var("CALENDAR_SECRET").ok()?;
+		let secret = std::env::var("SERVER_VERSIONS_SECRET").ok()?;
 		Some(format!("{public_url}/calendar/{secret}/upgrades.ics"))
 	})();
 	Ok(Json(url))

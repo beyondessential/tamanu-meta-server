@@ -7,7 +7,6 @@ export RO_DATABASE_URL := env('RO_DATABASE_URL', 'postgres://localhost/canopy')
 # ...for development
 
 export SERVER_VERSIONS_SECRET := "test"
-export CALENDAR_SECRET := "test"
 export PUBLIC_URL := "http://localhost:8080"
 
 # Skip the npm install + npm run build that private-server's build.rs runs by default.

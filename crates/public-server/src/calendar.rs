@@ -52,7 +52,7 @@ async fn feed(
 	State(state): State<AppState>,
 	Path(presented): Path<String>,
 ) -> Result<impl IntoResponse> {
-	let Some(expected) = &state.calendar_secret else {
+	let Some(expected) = &state.server_versions_secret else {
 		return Err(AppError::NotFound("no such calendar".into()));
 	};
 	if !bool::from(presented.as_bytes().ct_eq(expected.as_bytes())) {

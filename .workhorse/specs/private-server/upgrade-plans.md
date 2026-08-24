@@ -106,7 +106,8 @@ Access is carried by a secret in the URL: a calendar application has no way to b
 There is one feed at one URL, configured with the deployment rather than minted per subscriber.
 The audience is everyone who works on the fleet, and the link is posted once where they can all read it, so a URL each would be bookkeeping against a credential they already share.
 The dashboard offers the URL for copying, and rotating it is a configuration change every subscriber then resubscribes to.
-Where no secret is configured the feed serves nothing, since an ungated one is an open read of the fleet's plans.
+The secret is the one already gating the public server-versions page: the same fleet information, to the same audience, over the same open path.
+Where none is configured the feed serves nothing, since an ungated one is an open read of the fleet's plans.
 
 The calendar carries the plans that name a day, while a plan is where the deployment is going and after it has been met.
 A replaced or withdrawn plan leaves the calendar, since the deployment is no longer going there; a met one stays as the record of what landed.

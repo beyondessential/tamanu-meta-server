@@ -1004,7 +1004,7 @@ export interface paths {
          * Get the subscription URL of the planned-upgrades calendar feed.
          * @description Returns the feed's full URL, secret included, so it can be handed to a
          *     calendar application or shared as-is. Returns `null` if the public API base
-         *     URL or the calendar secret is not configured.
+         *     URL or the secret gating the public reads is not configured.
          */
         post: operations["calendar_url"];
         delete?: never;

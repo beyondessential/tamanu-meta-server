@@ -21,7 +21,7 @@ fn unfold(body: &str) -> String {
 }
 
 /// The secret the test harness configures the feed with.
-const SECRET: &str = "test-calendar-secret";
+const SECRET: &str = "test-secret";
 
 const GROUP: &str = "11111111-1111-1111-1111-111111111111";
 const SERVER: &str = "22222222-2222-2222-2222-222222222222";

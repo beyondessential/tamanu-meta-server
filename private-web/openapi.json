@@ -2000,7 +2000,7 @@
           "commons"
         ],
         "summary": "Get the subscription URL of the planned-upgrades calendar feed.",
-        "description": "Returns the feed's full URL, secret included, so it can be handed to a\ncalendar application or shared as-is. Returns `null` if the public API base\nURL or the calendar secret is not configured.",
+        "description": "Returns the feed's full URL, secret included, so it can be handed to a\ncalendar application or shared as-is. Returns `null` if the public API base\nURL or the secret gating the public reads is not configured.",
         "operationId": "calendar_url",
         "responses": {
           "200": {

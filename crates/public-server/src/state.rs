@@ -28,7 +28,9 @@ pub struct AppState {
 	pub client_cert_header: commons_servers::device_auth::mtls::ClientCertHeader,
 	#[cfg(feature = "ui")]
 	pub tera: Arc<Tera>,
-	#[cfg(feature = "ui")]
+	/// Gates the public reads that carry fleet information to an audience the
+	/// tailnet cannot reach: the server-versions page and the planned-upgrades
+	/// calendar feed. Unset ⇒ both 404 rather than serving ungated.
 	pub server_versions_secret: Option<String>,
 	/// Populated only when the public-server's router is nested into
 	/// the private-server's `/public/...` mount and the private-server
@@ -36,10 +38,6 @@ pub struct AppState {
 	/// binary's `init()` leaves this `None`, so the tailnet path of
 	/// the device-auth extractor can never fire on the open internet.
 	pub tailnet_directory: Option<TailnetDirectory>,
-	/// Secret in the path of the planned-upgrades calendar feed. Unset ⇒ the
-	/// feed 404s, since a calendar client cannot be asked for a credential and
-	/// an ungated feed would be an open read of the fleet's plans.
-	pub calendar_secret: Option<String>,
 	/// In-process rate limiter backing the unauthenticated enrollment
 	/// endpoints (per source IP and per target server).
 	pub rate_limiter: crate::ratelimit::RateLimiter,
@@ -139,9 +137,7 @@ impl AppState {
 			db_read,
 			#[cfg(feature = "ui")]
 			tera: Self::init_tera()?,
-			#[cfg(feature = "ui")]
 			server_versions_secret: std::env::var("SERVER_VERSIONS_SECRET").ok(),
-			calendar_secret: std::env::var("CALENDAR_SECRET").ok(),
 			tailnet_directory,
 			rate_limiter: crate::ratelimit::RateLimiter::default(),
 			sts: None,
