@@ -29,11 +29,11 @@ Design card; gates N1 and informs the relay method set. That `bestool-alertd` is
 
 Verifies spec: K8S.
 
-## In-cluster relay and transport
+## In-cluster relay and transport · J2
 
 New, from H1; foundation the registry and both check families build on. Build the small Canopy-authored relay that runs in each cluster: it holds the Kubernetes read permissions (a ServiceAccount with `get`/`list`/`watch` over the read set J1 enumerates, no `exec`/`portforward`), connects to each instance's local Postgres, and opens an outbound long-lived connection to Canopy — Canopy never dials the cluster. Transport is QUIC (`quinn`, on the workspace's `aws-lc-rs` rustls provider) over Tailscale, with a kernel-mode Tailscale sidecar at both ends (`NET_ADMIN`, TUN), which is established practice elsewhere in our infrastructure rather than new ground; the relay gets its own namespace. A relay is a device with a new `role`, authenticated by its tailnet peer tag from the QUIC connection, optionally pinning its SPKI fingerprint at enrollment. Includes protocol versioning from the start, since the relay is a second deployable with its own release cycle. Leaves the relay's method set to its own design card. Verifies spec: K8S.
 
-## Relay method set
+## Relay method set · K2
 
 New design card, from H1; gates M1 and N1. Design the relay's request/response surface, which is the security boundary the relay design exists to create — the relay's methods take the role RBAC plays under direct access, so this warrants one deliberate pass rather than a method accreting per check. Weigh check-shaped (Canopy receives filed results only, tightest surface, a relay release per new check) against resource-shaped (Canopy keeps the check logic and iterates without redeploying relays, but the surface drifts toward an RBAC proxy). Candidate middle to evaluate: resource-shaped for the `kubernetes` infra checks, whose inputs are plain objects, and check-shaped for the `alertd` harvest, where the point is that credentials and query traffic stay in the cluster. This also settles the relay's implementation language. Verifies spec: K8S.
 
@@ -53,7 +53,7 @@ Draft, waits on the relay method set. **Rescoped by G2 and much smaller than fir
 
 Draft, waits on the relay method set and on the bestool substrate work. **Rescoped and grown by G2:** no longer just the database checks but the whole server-subject suite, absorbing most of what M1 originally carried — the database conditions (sync, FHIR, migrations and the rest), plus duties running and on the expected version, the API answering, storage headroom, and HTTP error rate. Run `bestool-alertd` as a library inside the relay, once per instance, with credentials read in-cluster from the CNPG `<prefix>-db-app` secret and dialled at `<prefix>-db-rw`, database `app` (J1), never leaving the cluster. Parity holds by not re-deriving the filing on Canopy's side; the server-wide detail must omit the host-shaped fields rather than let them serialise the relay's; each check reports its own skip with a reason, hibernation included. See the card for the full contract, and `plans/g2/plan.md` for the reasoning. Verifies spec: K8S.
 
-## Substrate abstraction for alertd checks (bestool workspace)
+## Substrate abstraction for alertd checks (bestool workspace) · L2
 
 Not a card in this workspace: it lands in **bestool**, and it is a prerequisite for N1. A host-subject check does not skip in a relay — it reports the relay pod's facts as the server's, identically for every instance that relay serves, which passes and is therefore worse than failing. The fix is a substrate the check asks for its reading instead of the local machine, keeping the check's graded logic and changing only the acquisition, with the Kubernetes implementation in the same crate behind a feature so a check's two behaviours cannot drift apart on separate release cycles. The substrate also answers whether a subject is expected to be running at all (skip versus failure), the scope at which a reading is shared, and where a check's persistent state lives. Tracked as `Substrate abstraction for alertd checks` in the bestool workspace.
 
