@@ -56,11 +56,24 @@ There is no operator-triggered re-run: the relay owns its own cadence.
 ### Commands, invoked by Canopy
 
 The surface is not read-only.
-Canopy can ask the relay to **hibernate** a deployment and to **wake** one, alongside a reading of whether a deployment is currently asleep.
+Canopy can ask the relay to **hibernate** a deployment and to **wake** one.
 Not immediately used, but designed in now rather than bolted on, because a mutation is exactly the kind of method that should be deliberate rather than accreted.
 
 This is the one place the design departs from every prior document, all of which treat the relay's authority as read-only.
-Consequences are tracked under Open below.
+The relay's ServiceAccount gains the verbs hibernation takes, so its RBAC is no longer `get`/`list`/`watch` alone.
+Still no `exec` and no `portforward`.
+
+**A command targets a deployment, which is a namespace, which is a server group at a rank.**
+So hibernation acts on a whole group at once rather than on one server, and there is no hibernating a single facility within a namespace.
+That follows the substrate rather than being a limitation to work around: CNPG hibernation and scaling to zero are what the deploy does to itself when its TTL expires, and the deploy is the unit that has a TTL.
+
+**Guardrails start at has-a-TTL.**
+A deployment carrying no TTL cannot be hibernated, which keeps the command away from the ranks where it would be an outage.
+Expected to widen later, so the restriction is a policy on the command rather than a property of the deployment being asleep or not.
+
+Whether a deployment is asleep is a **fact, not a check** (G2 settled hibernation as an eligibility fact).
+Canopy presents it on the group, and each affected server's checks carry it as their skip reason.
+Registering a check for it would grade a deliberate act as a condition, and there is no result it could sensibly take.
 
 ## State and cadence
 
@@ -78,11 +91,8 @@ Two cadences in one relay, then: the substrate checks event-driven with a resync
 
 ## Open
 
-- **Authorisation for the commands.** Who in Canopy may hibernate a deployment, and whether the action is audited.
-- **The grain a command targets.** A namespace is a server group at a rank (K8S), so hibernating a deployment acts on a group rather than on one server.
-- **Whether hibernation is a check or a fact.** G2 settled hibernation as an eligibility fact driving skips, not a check result; a reading of "is this deployment asleep" has to sit somewhere without grading a deliberate act as a condition.
-- **Guardrails on hibernating a live deployment.** TTL hibernation applies to deploys with a window; nothing yet stops the command being aimed at a production rank.
-- **What the read-only wording becomes.** K8S's relay section, H1's RBAC list, and the breakdown's J2 entry all state read-only; the relay's ServiceAccount now needs the verbs hibernation takes.
+- **Where the has-a-TTL restriction is enforced.** Canopy gates by rank, the relay does not; but a TTL is a cluster-side fact Canopy may not hold, so the relay is the natural place to refuse a deployment that has none. Whether the relay enforces that precondition itself, or the whole gate is Canopy's, decides whether the method set stays the boundary the design rests on.
+- **Authorisation and audit for the commands.** Who in Canopy may hibernate a deployment, and whether the action is recorded.
 
 ## Spec impact
 
