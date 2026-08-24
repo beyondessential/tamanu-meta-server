@@ -1,10 +1,9 @@
 //! The planned-upgrades calendar feed: what a subscriber's calendar fetches,
-//! and what a URL without a usable token gets.
+//! and what a URL carrying the wrong secret gets.
 
 use commons_tests::diesel_async::SimpleAsyncConnection;
 use commons_types::version::{VersionStatus, VersionStr};
 use database::{
-	calendar_tokens::CalendarToken,
 	reported_detail::ReportedDetail,
 	server_groups::ServerGroup,
 	upgrade_plans::{PlannedWhen, UpgradePlan},
@@ -20,6 +19,9 @@ use uuid::Uuid;
 fn unfold(body: &str) -> String {
 	body.replace("\r\n ", "")
 }
+
+/// The secret the test harness configures the feed with.
+const SECRET: &str = "test-calendar-secret";
 
 const GROUP: &str = "11111111-1111-1111-1111-111111111111";
 const SERVER: &str = "22222222-2222-2222-2222-222222222222";
@@ -83,11 +85,9 @@ async fn a_dated_plan_is_an_all_day_entry() {
 		)
 		.await
 		.expect("record");
-		let (_, url) = CalendarToken::mint(&mut conn, "ops", "admin@example.com")
-			.await
-			.expect("mint");
-
-		let resp = public.get(&format!("/calendar/{url}/upgrades.ics")).await;
+		let resp = public
+			.get(&format!("/calendar/{SECRET}/upgrades.ics"))
+			.await;
 		assert_eq!(resp.status_code().as_u16(), 200);
 		assert_eq!(
 			resp.header("content-type"),
@@ -140,13 +140,9 @@ async fn an_hour_is_resolved_from_its_zone_to_an_instant() {
 		)
 		.await
 		.expect("record");
-		let (_, url) = CalendarToken::mint(&mut conn, "ops", "admin@example.com")
-			.await
-			.expect("mint");
-
 		let body = unfold(
 			&public
-				.get(&format!("/calendar/{url}/upgrades.ics"))
+				.get(&format!("/calendar/{SECRET}/upgrades.ics"))
 				.await
 				.text(),
 		);
@@ -176,13 +172,9 @@ async fn a_window_ends_where_the_plan_closes_it() {
 		)
 		.await
 		.expect("record");
-		let (_, url) = CalendarToken::mint(&mut conn, "ops", "admin@example.com")
-			.await
-			.expect("mint");
-
 		let body = unfold(
 			&public
-				.get(&format!("/calendar/{url}/upgrades.ics"))
+				.get(&format!("/calendar/{SECRET}/upgrades.ics"))
 				.await
 				.text(),
 		);
@@ -207,7 +199,7 @@ async fn a_window_ends_where_the_plan_closes_it() {
 
 		let body = unfold(
 			&public
-				.get(&format!("/calendar/{url}/upgrades.ics"))
+				.get(&format!("/calendar/{SECRET}/upgrades.ics"))
 				.await
 				.text(),
 		);
@@ -221,15 +213,11 @@ async fn a_window_ends_where_the_plan_closes_it() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_url_without_a_usable_token_has_nothing_at_it() {
-	commons_tests::server::run(async |mut conn, public, _private| {
-		let (token, url) = CalendarToken::mint(&mut conn, "ops", "admin@example.com")
-			.await
-			.expect("mint");
-
+async fn a_url_with_the_wrong_secret_has_nothing_at_it() {
+	commons_tests::server::run(async |_conn, public, _private| {
 		assert_eq!(
 			public
-				.get("/calendar/canopy_cal_not-a-real-token/upgrades.ics")
+				.get("/calendar/not-the-secret/upgrades.ics")
 				.await
 				.status_code()
 				.as_u16(),
@@ -238,24 +226,11 @@ async fn a_url_without_a_usable_token_has_nothing_at_it() {
 
 		assert_eq!(
 			public
-				.get(&format!("/calendar/{url}/upgrades.ics"))
+				.get(&format!("/calendar/{SECRET}/upgrades.ics"))
 				.await
 				.status_code()
 				.as_u16(),
 			200
-		);
-
-		CalendarToken::revoke(&mut conn, token.id)
-			.await
-			.expect("revoke");
-		assert_eq!(
-			public
-				.get(&format!("/calendar/{url}/upgrades.ics"))
-				.await
-				.status_code()
-				.as_u16(),
-			404,
-			"a revoked feed stops serving"
 		);
 	})
 	.await

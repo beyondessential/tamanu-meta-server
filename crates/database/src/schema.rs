@@ -217,18 +217,6 @@ diesel::table! {
 }
 
 diesel::table! {
-	calendar_tokens (id) {
-		id -> Uuid,
-		name -> Text,
-		token_hash -> Bytea,
-		created_by -> Text,
-		created_at -> Timestamptz,
-		revoked_at -> Nullable<Timestamptz>,
-		last_used_at -> Nullable<Timestamptz>,
-	}
-}
-
-diesel::table! {
 	check_policies (source, check_name) {
 		source -> Text,
 		check_name -> Text,
@@ -870,7 +858,6 @@ diesel::allow_tables_to_appear_in_same_query!(
 	backup_runs,
 	backup_type_defaults,
 	bestool_snippets,
-	calendar_tokens,
 	check_policies,
 	check_stability,
 	check_stability_backfill,

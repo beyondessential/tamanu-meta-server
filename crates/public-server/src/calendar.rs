@@ -1,5 +1,5 @@
-//! The internet-facing calendar feed of planned upgrades, gated by a token in
-//! the URL ([`database::calendar_tokens::CalendarToken`]).
+//! The internet-facing calendar feed of planned upgrades, gated by a secret in
+//! the URL.
 //!
 //! Spec: `.workhorse/specs/private-server/upgrade-plans.md` (id `UPG`), "The
 //! calendar feed".
@@ -11,7 +11,6 @@
 //! test harness compose it in alongside the device routes.
 
 use std::collections::HashMap;
-use std::time::Duration;
 
 use axum::{
 	Router,
@@ -20,23 +19,13 @@ use axum::{
 	response::IntoResponse,
 	routing::get,
 };
-use axum_client_ip::ClientIp;
 use commons_errors::{AppError, Result};
-use database::{
-	calendar_tokens::CalendarToken, server_groups::ServerGroup, upgrade_plans::UpgradePlan,
-	versions::Version,
-};
+use database::{server_groups::ServerGroup, upgrade_plans::UpgradePlan, versions::Version};
 use jiff::{SignedDuration, Timestamp, civil::Date, civil::Time, tz::TimeZone};
+use subtle::ConstantTimeEq as _;
 use uuid::Uuid;
 
 use crate::state::AppState;
-
-/// Failed-lookup budget within a 1-minute window, per source IP. Only failures
-/// spend it, so a subscribed client never approaches it; a URL-guesser is
-/// blunted. Guessing is hopeless anyway (tokens are 256-bit CSPRNG), this just
-/// bounds the DB lookups it can burn.
-const RL_WINDOW: Duration = Duration::from_secs(60);
-const RL_PER_IP: u32 = 30;
 
 /// How long a client is told to wait before re-fetching. Advisory: the big
 /// calendar services poll on their own schedule regardless.
@@ -47,41 +36,30 @@ const REFRESH: &str = "PT1H";
 /// know how long it takes.
 const DEFAULT_LENGTH: SignedDuration = SignedDuration::from_hours(1);
 
-/// The `/calendar` mount: the feed behind the URL-token gate.
+/// The `/calendar` mount: the feed behind the URL secret.
 pub fn routes(state: AppState) -> Router<()> {
 	Router::new()
-		.route("/calendar/{token}/upgrades.ics", get(feed))
+		.route("/calendar/{secret}/upgrades.ics", get(feed))
 		.with_state(state)
 }
 
-/// Serve the planned-upgrades calendar for a token.
+/// Serve the planned-upgrades calendar.
 ///
-/// Unknown and revoked tokens are both a plain 404: there is nothing at that
-/// URL, and a guesser learns nothing from the answer.
+/// A wrong secret and an unconfigured one are both a plain 404: there is
+/// nothing at that URL, and a guesser learns nothing from the answer.
 // spec: UPG#the-calendar-feed
 async fn feed(
 	State(state): State<AppState>,
-	ClientIp(ip): ClientIp,
 	Path(presented): Path<String>,
 ) -> Result<impl IntoResponse> {
-	let key = format!("calendar:{ip}");
-	if state.rate_limiter.exceeded(&key, RL_PER_IP, RL_WINDOW) {
-		tracing::warn!(target: "calendar_auth", %ip, "calendar auth rate limit exceeded");
-		return Err(AppError::RateLimited);
+	let Some(expected) = &state.calendar_secret else {
+		return Err(AppError::NotFound("no such calendar".into()));
+	};
+	if !bool::from(presented.as_bytes().ct_eq(expected.as_bytes())) {
+		return Err(AppError::NotFound("no such calendar".into()));
 	}
 
 	let mut conn = state.db.get().await?;
-	let Some(token) = CalendarToken::find_active(&mut conn, &presented).await? else {
-		tracing::warn!(target: "calendar_auth", %ip, "calendar request with unusable token");
-		if !state.rate_limiter.check(&key, RL_PER_IP, RL_WINDOW) {
-			return Err(AppError::RateLimited);
-		}
-		return Err(AppError::NotFound("no such calendar".into()));
-	};
-
-	tracing::info!(token = %token.name, %ip, "calendar request");
-	CalendarToken::touch_last_used(&mut conn, token.id).await?;
-
 	let body = render(&mut conn).await?;
 	Ok((
 		[

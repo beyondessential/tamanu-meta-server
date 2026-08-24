@@ -20,7 +20,6 @@ import BackupDefaults from "./routes/BackupDefaults";
 import RecoveryVault from "./routes/RecoveryVault";
 import BackupPanel from "./routes/BackupPanel";
 import CertificateAuthority from "./routes/CertificateAuthority";
-import CalendarFeeds from "./routes/CalendarFeeds";
 import McpTokens from "./routes/McpTokens";
 import RestoreConsumers from "./routes/RestoreConsumers";
 import SelfAlerts from "./routes/SelfAlerts";
@@ -241,7 +240,6 @@ export default function App() {
 						/>
 						<Route path="restore-consumers" element={<RestoreConsumers />} />
 						<Route path="mcp-tokens" element={<McpTokens />} />
-						<Route path="calendar-feeds" element={<CalendarFeeds />} />
 						<Route
 							path="certificate-authority"
 							element={<CertificateAuthority />}

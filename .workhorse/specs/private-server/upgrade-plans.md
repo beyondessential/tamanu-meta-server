@@ -101,13 +101,12 @@ A withdrawn plan is otherwise unreadable anywhere, since a deployment that stopp
 Canopy publishes planned upgrades as an iCalendar feed a calendar application subscribes to, so the fleet's intent appears where people already look to see what a day holds.
 
 The feed is served by the internet-facing interface rather than the operator one, because the calendar services people use fetch a subscription unattended from their own infrastructure and cannot reach the operator network.
-Access is carried by a token in the URL: a calendar application has no way to be asked for a credential, so holding the URL is what grants the read.
+Access is carried by a secret in the URL: a calendar application has no way to be asked for a credential, so holding the URL is what grants the read.
 
-An operator mints a feed against a label saying whose calendar it is for, and the URL is shown once at minting and never again.
-A feed does not expire.
-A subscription that lapses stops updating without telling its subscriber, so a feed ends by being revoked, after which the URL serves nothing.
-Canopy records when each feed was last fetched, so one nobody subscribed to reads differently from one that is live.
-A feed nothing has fetched for two months raises an alert naming it, and the alert clears once every such feed is read again or revoked: an unexpiring URL that grants a read of the fleet's plans is worth keeping account of, and one nobody reads is outstanding for nothing.
+There is one feed at one URL, configured with the deployment rather than minted per subscriber.
+The audience is everyone who works on the fleet, and the link is posted once where they can all read it, so a URL each would be bookkeeping against a credential they already share.
+The dashboard offers the URL for copying, and rotating it is a configuration change every subscriber then resubscribes to.
+Where no secret is configured the feed serves nothing, since an ungated one is an open read of the fleet's plans.
 
 The calendar carries the plans that name a day, while a plan is where the deployment is going and after it has been met.
 A replaced or withdrawn plan leaves the calendar, since the deployment is no longer going there; a met one stays as the record of what landed.
@@ -125,3 +124,4 @@ An entry keeps its identity for the life of the plan, so amending a date moves t
 - Performing, scheduling, or triggering an upgrade.
 - Approving a plan, or gating who may record one beyond the existing operator permissions.
 - Planning anything other than a version move, such as an infrastructure migration.
+- Per-subscriber access to the calendar feed, or withdrawing one subscriber's.

@@ -23,11 +23,6 @@ const TABS: Array<{ value: string; label: string; to: string }> = [
 	},
 	{ value: "mcp-tokens", label: "MCP access", to: "/settings/mcp-tokens" },
 	{
-		value: "calendar-feeds",
-		label: "Calendar feeds",
-		to: "/settings/calendar-feeds",
-	},
-	{
 		value: "certificate-authority",
 		label: "Certificate authority",
 		to: "/settings/certificate-authority",
@@ -41,7 +36,6 @@ function valueFromPath(pathname: string): string {
 	if (pathname.startsWith("/settings/restore-consumers"))
 		return "restore-consumers";
 	if (pathname.startsWith("/settings/mcp-tokens")) return "mcp-tokens";
-	if (pathname.startsWith("/settings/calendar-feeds")) return "calendar-feeds";
 	if (pathname.startsWith("/settings/certificate-authority"))
 		return "certificate-authority";
 	if (pathname.startsWith("/settings/admins")) return "admins";

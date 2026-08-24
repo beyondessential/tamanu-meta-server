@@ -312,6 +312,9 @@ function PlanCalendar({
 	const [view, setView] = useState<View>("month");
 	const [cursor, setCursor] = useState(startOfToday);
 	const [editing, setEditing] = useState<Entry | null>(null);
+	const [copied, setCopied] = useState(false);
+	const feed = useApi("commons", "calendar_url");
+	const feedUrl = feed.status === "ok" ? feed.data : null;
 	const today = localDate(new Date());
 
 	const entries = useMemo(() => {
@@ -383,14 +386,22 @@ function PlanCalendar({
 						{countLabel(shown, view)}
 					</Typography>
 				</Box>
-				<Button
-					size="small"
-					component={RouterLink}
-					to="/settings/calendar-feeds"
-					startIcon={<CalendarMonthIcon />}
-				>
-					Subscribe
-				</Button>
+				{feedUrl && (
+					<Tooltip title="Copy the feed URL to subscribe a calendar">
+						<Button
+							size="small"
+							sx={{ flexShrink: 0 }}
+							startIcon={<CalendarMonthIcon />}
+							onClick={async () => {
+								await navigator.clipboard.writeText(feedUrl);
+								setCopied(true);
+								setTimeout(() => setCopied(false), 2000);
+							}}
+						>
+							{copied ? "Copied" : "Subscribe"}
+						</Button>
+					</Tooltip>
+				)}
 				<ToggleButtonGroup
 					size="small"
 					exclusive

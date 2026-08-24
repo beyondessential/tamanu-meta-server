@@ -1690,183 +1690,6 @@
         ]
       }
     },
-    "/api/calendar_tokens/list": {
-      "post": {
-        "tags": [
-          "calendar_tokens"
-        ],
-        "summary": "List calendar feeds.",
-        "description": "Returns every feed that has ever been minted, newest first, including ones\nthat have since been revoked. Feed URLs are never included, only metadata.",
-        "operationId": "calendar_tokens_list",
-        "responses": {
-          "200": {
-            "description": "All calendar feeds, newest first, revoked included.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/CalendarTokenView"
-                  }
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/calendar_tokens/mint": {
-      "post": {
-        "tags": [
-          "calendar_tokens"
-        ],
-        "summary": "Mint a calendar feed.",
-        "description": "Returns a subscription URL that reads planned upgrades, for pasting into a\ncalendar application. The URL appears only in this response and cannot be\nretrieved again, so it must be copied out immediately. Anyone holding it can\nread the feed, which is what lets a calendar service fetch it unattended.\nReturns 400 if the supplied name is empty or only whitespace.",
-        "operationId": "calendar_tokens_mint",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MintCalendarArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Freshly minted feed; the URL in this response is shown once.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MintedCalendar"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/calendar_tokens/revoke": {
-      "post": {
-        "tags": [
-          "calendar_tokens"
-        ],
-        "summary": "Revoke a calendar feed.",
-        "description": "Immediately stops the URL serving. Subscribers keep whatever their calendar\nlast fetched until they remove the subscription. Revoking an already-revoked\nfeed succeeds without doing anything further. Returns 404 if no feed with\nthat id exists.",
-        "operationId": "calendar_tokens_revoke",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RevokeCalendarArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Feed revoked (idempotent)."
-          },
-          "401": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
     "/api/certificates/authority": {
       "post": {
         "tags": [
@@ -2169,6 +1992,41 @@
             "tailscale-admin": []
           }
         ]
+      }
+    },
+    "/api/commons/calendar_url": {
+      "post": {
+        "tags": [
+          "commons"
+        ],
+        "summary": "Get the subscription URL of the planned-upgrades calendar feed.",
+        "description": "Returns the feed's full URL, secret included, so it can be handed to a\ncalendar application or shared as-is. Returns `null` if the public API base\nURL or the calendar secret is not configured.",
+        "operationId": "calendar_url",
+        "responses": {
+          "200": {
+            "description": "Calendar feed URL with its embedded secret, if configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/commons/is_current_user_admin": {
@@ -8488,52 +8346,6 @@
           }
         }
       },
-      "CalendarTokenView": {
-        "type": "object",
-        "description": "Metadata about a calendar feed. Never includes the token in its URL — that\nis only ever returned once, at minting time.",
-        "required": [
-          "id",
-          "name",
-          "created_by",
-          "created_at"
-        ],
-        "properties": {
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "description": "When it was minted."
-          },
-          "created_by": {
-            "type": "string",
-            "description": "The login of the admin who minted it."
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Unique identifier of the feed."
-          },
-          "last_used_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "When a calendar client last fetched it, or `null` if none ever has. May\nlag the true last fetch by up to a minute."
-          },
-          "name": {
-            "type": "string",
-            "description": "Operator-chosen label for who or what subscribes to it."
-          },
-          "revoked_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "When it was revoked, or `null` if it has not been."
-          }
-        }
-      },
       "Caps": {
         "type": "object",
         "description": "What canopy does for a product's servers.\n\nReachability, health checks and backups are deliberately absent: checks\nare graded by the source that reports them, and backup types are\nadvertised per-server by the agent, so both already work for any product.",
@@ -11823,44 +11635,6 @@
           }
         }
       },
-      "MintCalendarArgs": {
-        "type": "object",
-        "description": "Request body for minting a new calendar feed. Named apart from the MCP\none because utoipa keys component schemas by short name.",
-        "required": [
-          "name"
-        ],
-        "properties": {
-          "name": {
-            "type": "string",
-            "description": "Operator-chosen label, e.g. whose calendar this is for. Cannot be empty\nor only whitespace."
-          }
-        }
-      },
-      "MintedCalendar": {
-        "type": "object",
-        "description": "The result of minting a calendar feed: its metadata plus the one-time URL.\nThis is the only response that will ever include the URL.",
-        "required": [
-          "token",
-          "path"
-        ],
-        "properties": {
-          "path": {
-            "type": "string",
-            "description": "The feed's path on the public API host, for building the URL by hand."
-          },
-          "token": {
-            "$ref": "#/components/schemas/CalendarTokenView",
-            "description": "Metadata about the newly minted feed."
-          },
-          "url": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The subscription URL. Shown once; never retrievable again. `null` when\nthe public API base URL is not configured, in which case `path` is all\nthere is to go on."
-          }
-        }
-      },
       "MintedToken": {
         "type": "object",
         "description": "The result of minting a new MCP access token: its metadata plus the\none-time secret value. This is the only response that will ever include\nthe secret.",
@@ -13957,20 +13731,6 @@
             "type": "string",
             "format": "uuid",
             "description": "The id of the token to revoke."
-          }
-        }
-      },
-      "RevokeCalendarArgs": {
-        "type": "object",
-        "description": "Request body for revoking a calendar feed.",
-        "required": [
-          "id"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "The id of the feed to revoke."
           }
         }
       },
@@ -16695,10 +16455,6 @@
     {
       "name": "bestool",
       "description": "Bestool SQL snippet library."
-    },
-    {
-      "name": "calendar_tokens",
-      "description": "Subscription feeds of planned upgrades, for calendar applications."
     },
     {
       "name": "certificates",
