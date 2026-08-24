@@ -7,10 +7,10 @@ This plan is the working record for the technical approach. Architecture inherit
 ## Settled coming in (from B1/H1/G2/K2)
 
 - **One relay per cluster**, Canopy-authored, holding the cluster's RBAC on its own ServiceAccount. It dials outward to Canopy; Canopy never dials the cluster and holds no cluster credential. A registered cluster *is* a relay identity.
-- **Transport is QUIC (`quinn`) over Tailscale**, TLS carrying throwaway certificates (WireGuard already provides confidentiality and peer auth). `quinn` is configured onto the workspace's `aws-lc-rs` rustls provider, not the default `ring`.
+- **Transport is QUIC (`quinn`) over Tailscale**, `quinn` configured onto the workspace's `aws-lc-rs` rustls provider rather than the default `ring`. (H1 had the TLS carry throwaway certificates on the reasoning that WireGuard already provides confidentiality and peer auth — **superseded**, see "Identity over QUIC": the certificate carries the relay's device key and is load-bearing.)
 - **Kernel-mode Tailscale sidecar at both ends** (`TS_USERSPACE=false`, `NET_ADMIN`, TUN) — userspace mode is a TCP-only proxy that QUIC can't pass. Established practice in our infra.
-- **Identity** is a device with a `relay` role, associated with no server, authenticated by its tailnet peer tag resolved from the QUIC connection's remote address — the same check the HTTP path already does (`device_auth/tailnet.rs`), taking the address from the connection rather than an extractor. With cert verification skipped, the tailnet ACL + tag are the whole gate.
-- **What crosses the connection** (settled by K2): filings (both check families, computed relay-side), three named queries (namespace roster for L1's picker, connected-and-answering handshake for K1, embedded check-suite version for SELF's skew alert), and two commands (sleep/wake). No method returns a Kubernetes object. Filings converge on the same ingestion path a device push takes.
+- **Identity** is a device with a `relay` role, associated with no server. (H1 authenticated it by tailnet peer tag with SPKI pinning as optional hardening — **superseded**, see "Identity over QUIC": authentication is the device key presented in the TLS handshake, and the tailnet ACL is not Canopy's concern.)
+- **What crosses the connection** (settled by K2): filings (both check families, computed relay-side), three named queries (namespace roster for L1's picker, connected-and-answering handshake for K1, embedded check-suite version for SELF's skew alert), and two commands (sleep/wake). No method returns a Kubernetes object. Filings converge on the same ingestion path a device push takes. (A sixth exchange is added here by the deployment decision — Canopy naming the version the relay should run.)
 - **The relay embeds `bestool-alertd` as a library** to run the harvest against each instance's local Postgres; only results cross to Canopy.
 - **Protocol versioning from the start** — the relay is a second deployable (`vN`) running against Canopy (`vM`).
 
@@ -27,7 +27,7 @@ Decided. The relay is a canopy-workspace deployable, built and released from thi
 There is one relay per registered cluster, so the Canopy-side worker is not a client dialling out but a **QUIC listener holding N concurrent inbound connections**, one per cluster. Consequences to carry through the rest of the design:
 
 - The worker keeps a **connection registry keyed by cluster**, which is what K1's connected-and-answering query and SELF's per-cluster connectivity check both read.
-- Which cluster a connection belongs to is **derived from the authenticated relay identity**, never claimed by the relay in a message. The device row for the relay is the cluster's registration, so the mapping is a lookup, not a assertion to trust.
+- Which cluster a connection belongs to is **derived from the authenticated relay identity**, never claimed by the relay in a message. The device row for the relay is the cluster's registration, so the mapping is a lookup, not an assertion to trust.
 - The worker being a singleton means its loss makes every cluster unreadable at once. That surfaces correctly through the existing per-cluster connectivity check (every instance fails), but it is worth naming as a single point of failure the design accepts.
 
 ## Protocol — a stream per exchange
@@ -35,7 +35,7 @@ There is one relay per registered cluster, so the Canopy-side worker is not a cl
 Decided. QUIC streams are cheap and independently delivered, so **the stream is the correlation**: no request-ID bookkeeping, no multiplexing layer, and a cancelled request is just a reset stream. A slow namespace-roster query cannot stall a queue of filings behind it, which a single multiplexed stream would allow.
 
 - **Filings go up as unidirectional streams**, opened by the relay: open, write, close. No response body.
-- **Queries and commands are bidirectional streams**, opened by Canopy: the five exchanges K2 settled (namespace roster, connected-and-answering, embedded suite version; sleep, wake).
+- **Queries and commands are bidirectional streams**, opened by Canopy: the five exchanges K2 settled (namespace roster, connected-and-answering, embedded suite version; sleep, wake), plus the version-naming command the deployment decision adds.
 - Messages are length-delimited, with the message enum living in `relay-protocol`.
 
 ### Filings are unacknowledged
@@ -149,14 +149,25 @@ B's operational case is the right one and C satisfies it; where they differ, C i
 - **A version floor.** The lowest image tag a relay will accept being told to run, baked into the relay rather than supplied by Canopy. This is the answer to the downgrade attack C leaves open; without it a compromised Canopy could order a relay back to a known-bad release.
 - **SELF's skew check changes character but stays.** It stops being "did a human roll the fleet" and becomes "did the version Canopy named actually take" — a relay stuck on an old version now means a rollout that failed or a relay that will not accept it, both of which want an operator.
 
-## Open — to decide on this card
+## Canopy's own cluster — a relay like any other
 
-1. **Canopy's own cluster** — read through a relay like any other, or direct in-cluster reads with a widened ClusterRole.
+Decided. The cluster Canopy runs in, which also hosts Tamanu test and dev instances, is read through a relay exactly as a remote cluster is: its own device and key, its own QUIC connection, its own version-naming flow. One code path, no special case, and `K8S` needs no change (it says only that Canopy can read instances in its own cluster).
+
+The alternative — direct in-cluster reads under a widened ClusterRole on Canopy's own ServiceAccount — was rejected because it reintroduces both things this card exists to eliminate. It is a second implementation of every check, which is the drift risk that shaped the harvest design, and it hands Canopy the cluster read surface (including `secrets`, for the CNPG credentials) that the relay design exists to keep it from ever holding. Its one advantage, robustness to the relay being down, is worth little when a relay being down is already a first-class alerting condition, and the local relay is the easiest one to fix.
+
+Cost is one extra pod in Canopy's own cluster and a loopback out to the tailnet and back for a connection that could have been local. Cosmetic, and the price of the single code path.
+
+## Still open, deliberately
+
+- **The relay's verification of Canopy's server certificate.** Skip it and rest on the tailnet for that direction, matching the original reasoning, unless a reason to pin emerges.
+- **Relay key rotation has a window.** `Device::add_key` refuses a second active key on a device, so rotation is deactivate-then-add and the relay cannot reconnect in between. Acceptable at this fleet size; revisit if it bites.
 
 ## Spec impact to carry back
 
 - **`DTR`** (`private-server/device-trust.md`) — the relay's creation path is the existing provisioned-credential workflow at `role = relay`, which closes the gap B1 flagged as unspecified. Check whether DTR's "how a device comes to exist" list needs the relay naming explicitly or already covers it.
-- **`K8S`** stays accurate as written: it says a relay is enrolled as a device carrying the relay role and is created, authenticated, tracked, and revoked as any other device is. The device-key decision realises that sentence rather than changing it.
+- **`K8S`** stays accurate as written on identity: it says a relay is enrolled as a device carrying the relay role and is created, authenticated, tracked, and revoked as any other device is. The device-key decision realises that sentence rather than changing it.
+- **`K8S` may want a sentence on the relay keeping itself current**, since Canopy naming the version a relay should run is product behaviour rather than pure mechanism, and it changes what SELF's skew alert means. Worth deciding whether that rises to the spec or stays here as implementation. Everything else on this card — crate layout, stream shape, ALPN, the ingestion hoist — is implementation and stays in the plan.
+- **`SELF`** (`private-server/self-alerts.md`) — the skew alert's meaning shifts from "a relay is running an out-of-step suite" to "the version Canopy named did not take". The condition and the alert are the same; the reason an operator is being told is different, which may warrant a wording pass.
 
 ## Decisions
 
