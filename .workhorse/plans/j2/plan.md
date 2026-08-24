@@ -67,9 +67,23 @@ The two check families do not share a filing shape, and forcing them into one en
 
 Both carry `Scope` from the single `database::issues::Scope` enum; the relay never hand-rolls a server/group discriminator of its own.
 
+## Identity over QUIC
+
+The adaptation is small. `commons_servers::device_auth::tailnet::resolve` currently takes `&mut Parts` and pulls the caller's address out of it with the `ClientIp` extractor; the QUIC path has `connection.remote_address()` instead. So `resolve` splits into an **IP-taking core** with the existing HTTP extractor as a thin wrapper over it — one directory lookup, one `devices.tailscale_node_id` key, two callers.
+
+### The role is Canopy's gate; the tailnet ACL is not Canopy's concern
+
+Canopy authenticates a relay connection by resolving its remote address to a tailnet node identity, keying that into the device row, and **checking the device carries the `relay` role**. That role check is what Canopy owns and enforces.
+
+Who can reach the listener at all is a tailnet ACL question, organised in the tailnet and out of scope for Canopy and the relay. Canopy does not validate ACL structure or require a particular tag arrangement; treating the tailnet's configuration as something Canopy polices would put the same policy in two places and make Canopy wrong whenever the tailnet is reorganised. The existing optional `TAILSCALE_REQUIRED_TAG` behaviour on the HTTP path is orthogonal and stays as it is.
+
+### An unresolved node is a hard failure on this path
+
+`resolve` deliberately returns `Ok(None)` for a tailnet node with no device row, so that the HTTP caller can fall through to the mTLS path. There is no second path behind QUIC, so on the relay listener `None` **rejects the connection** rather than falling through. The IP-taking core keeps returning `None`; it is the relay listener that treats it as terminal.
+
 ## Open — to decide on this card
 
-1. **Identity over QUIC** — adapting the tailnet resolve to take the address from the connection; whether to pin the relay's SPKI fingerprint at enrollment.
+1. **SPKI pinning** — whether to pin the relay's certificate fingerprint at enrollment.
 2. **Relay enrollment** — how the relay's device row comes to exist (DTR gap), which follows from pinning and from who deploys.
 3. **Deployment & versioning** — who deploys the relay and how it's versioned against Canopy.
 4. **Canopy's own cluster** — read through a relay like any other, or direct in-cluster reads with a widened ClusterRole.
