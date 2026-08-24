@@ -193,4 +193,69 @@ The alternative — direct in-cluster reads under a widened ClusterRole on Canop
 
 ## Decisions
 
-_(captured as they land)_
+### A filing is addressed in cluster coordinates, not in Canopy's identifiers
+
+Settled while building the protocol. A filing has to say what it is about, and the obvious reading — the relay names Canopy's server UUID — would mean Canopy first pushing each relay a roster of the servers it serves, and then keeping that roster in step. That is a seventh exchange and a synchronisation problem, neither of which the card called for.
+
+So a filing names **what the relay actually holds**: a namespace, and an instance within it (the central server, or a facility by its identity). Canopy resolves that to the server or group from the Kubernetes coordinates an operator already set on the server record, which `K8S` makes the identity anyway ("identity is set by an operator"). The relay never holds a Canopy identifier, there is no roster to push or reconcile, and an unrecognised coordinate is one filing Canopy cannot place rather than a relay out of step.
+
+Note for review: the wire's `FilingTarget` is a *cluster coordinate*, not a second check-state scope. Canopy maps it onto the single `database::issues::Scope` on arrival — instance to the server, namespace to the group, cluster to Canopy-wide. The rule against a parallel scope enum is intact because there is still one scope vocabulary; this is the address the relay speaks, upstream of it.
+
+### The relay announces its build on connect, and Canopy can also ask
+
+Both, as the plan called for above, and they are not redundant. The `Hello` frame the relay opens with is what the connection registry records, so the skew alert grades from what Canopy already holds rather than a round trip per evaluation. The `Build` request re-reads it live, which is what a cluster-registration confirmation and an operator looking at a relay want.
+
+### The push payload types stay with the HTTP endpoint
+
+The hoist moved less than planned, for a reason worth recording. `StatusPayload` and `HealthCheck` turned out to be **documentation types only**: the handler takes `Json<serde_json::Value>` and the ingestion parses the value directly, so those structs exist to describe the endpoint in OpenAPI and nothing reads them. Moving them would have pulled `utoipa` into `commons-servers` and changed the generated spec for no gain, so they stayed where the endpoint they document lives. The push *contract* is still single-sourced: one parser, in the core, for both callers.
+
+What moved is the ingestion itself — `parse_push` (validation, the legacy-heartbeat transform, version resolution), `ingest_push` (the ingest-mode gate and the recording transaction), and the filing beneath them. Two additions the plan had not anticipated:
+
+- **`effective_tags_for_server` moved too**, from `public-server`'s tags module into `commons_servers::server_tags`. Grading reads the effective tags, so a relay filing has to compute them the same way a push does or the two substrates grade differently — which is the exact drift the shared-implementation design exists to prevent.
+- **`kubernetes` is now a reserved source** on the push path, alongside `canopy` and `manual`. `K8S` requires it ("reserved from the device API"), the constant lives with the rest of the source vocabulary in `commons-types`, and `relay-protocol` re-exports it rather than declaring a second copy.
+
+### Two latent manifest bugs fixed in passing
+
+`commons-errors` used `diesel_async::pooled_connection` and `commons-types` used `diesel::pg::Pg` without either declaring the feature that provides it — they built only because another workspace member turned those features on, so `cargo check -p commons-types` failed on `main`. Both now declare what they use. Not part of this card's work, but building a new leaf crate off `commons-types` is what surfaced it.
+
+## Build checklist
+
+The check families themselves are M1 and N1; this card lays the transport, the protocol, the identity, and the ingestion path they file through. So where a check would be determined, the relay carries the seam and not the check.
+
+### The relay role
+
+- [x] Add `relay` to `DeviceRole` (variant, `FromStr`, `Display`), so a device can be enrolled at the role `DTR` already names.
+- [x] Add the `RelayDevice` role extractor alongside the others, for the HTTP paths a relay may touch.
+
+### `crates/relay-protocol` — the wire contract
+
+- [x] New workspace member carrying no `kube` and no `bestool-alertd`: message types, framing, and the ALPN tokens.
+- [x] ALPN version negotiation (`canopy-relay/1`): Canopy offers the range it supports, the relay picks, an incompatible pair fails at the handshake.
+- [x] Length-delimited framing over a QUIC stream, with a frame ceiling so a malformed length cannot make Canopy allocate unboundedly.
+- [x] The filing messages: the harvest filing (the status-push body verbatim) and the substrate filing (scope, check, observed, detail).
+- [x] The three queries (namespace roster, handshake, embedded suite version), the two deployment commands (sleep, wake), and the version-naming command.
+
+### Ingestion hoist
+
+- [x] Move `file_health_events`, `collect_check_results`, `split_health_from_extra`, and the push payload types out of `public-server` into `commons-servers`.
+- [x] Leave the axum handler a thin caller, with the existing status-push tests green across the move.
+
+### Canopy side — the listener
+
+- [ ] QUIC listener in `crates/jobs`, its own bin, holding N inbound connections.
+- [ ] Client-certificate verifier that accepts any certificate, with the device-key SPKI lookup as the gate: `Device::from_key`, then the `relay` role.
+- [ ] Connection registry keyed by the authenticated relay device, never by anything the relay claims in a message.
+- [ ] Accept filings on unidirectional streams and route each family to its ingestion path.
+- [ ] Open the queries and commands as bidirectional streams against a registered connection.
+
+### Relay side — the client
+
+- [ ] `crates/relay` binary: configuration (its device key, Canopy's pinned public key, the endpoint), and the reconnect loop.
+- [ ] Pinned verification of Canopy's certificate, on every transport.
+- [ ] Serve the queries and commands, and file upward, with the check determination left as the seam M1/N1 fill.
+- [ ] The version floor: the lowest image tag the relay will accept being told to run.
+
+### Verification
+
+- [x] Protocol round-trip tests: framing, the frame ceiling, ALPN mismatch.
+- [ ] An end-to-end test over a real QUIC connection: an enrolled relay device connects, files, and is refused when its key is unknown, deactivated, or carries another role.

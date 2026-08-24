@@ -10,6 +10,7 @@ members = [
 	"crates/jobs",
 	"crates/private-server",
 	"crates/public-server",
+	"crates/relay-protocol",
 	"vendor/canopy-utoipa-axum",
 ]
 

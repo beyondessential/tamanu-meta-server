@@ -21,6 +21,8 @@ pub mod dns_provider;
 pub mod headers;
 pub mod health;
 pub mod recovery_vault;
+pub mod server_tags;
+pub mod status_ingest;
 pub mod tailnet_directory;
 pub mod tailnet_guard;
 pub mod tailnet_sweeps;
