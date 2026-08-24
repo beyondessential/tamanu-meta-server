@@ -612,7 +612,7 @@ function TimeGrid({
 						</Box>
 						<Box
 							component="span"
-							sx={[DAY_NUMBER, date === today && TODAY_NUMBER]}
+							sx={[DAY_NUMBER, HEAD_NUMBER, date === today && TODAY_NUMBER]}
 						>
 							{Number(date.slice(8))}
 						</Box>
@@ -1047,6 +1047,11 @@ const DAY_NUMBER = {
 	lineHeight: 1,
 	fontVariantNumeric: "proportional-nums",
 	pt: "2px",
+};
+
+const HEAD_NUMBER = {
+	width: "auto",
+	minWidth: 0,
 };
 
 const TODAY_NUMBER = {
