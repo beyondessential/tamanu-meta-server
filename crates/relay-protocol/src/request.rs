@@ -117,7 +117,9 @@ pub enum RefusalKind {
 	UnknownNamespace,
 }
 
-/// What a relay says once, on connect, before anything else.
+/// What a relay is running: the answer to [`Request::Build`], which canopy
+/// asks as soon as it has authenticated a connection and then holds for as
+/// long as that connection lasts.
 ///
 /// Detail that is not protocol-breaking rides here rather than in the ALPN
 /// token: the check-suite version and the build are things canopy records and

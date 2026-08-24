@@ -214,6 +214,20 @@ What moved is the ingestion itself — `parse_push` (validation, the legacy-hear
 - **`effective_tags_for_server` moved too**, from `public-server`'s tags module into `commons_servers::server_tags`. Grading reads the effective tags, so a relay filing has to compute them the same way a push does or the two substrates grade differently — which is the exact drift the shared-implementation design exists to prevent.
 - **`kubernetes` is now a reserved source** on the push path, alongside `canopy` and `manual`. `K8S` requires it ("reserved from the device API"), the constant lives with the rest of the source vocabulary in `commons-types`, and `relay-protocol` re-exports it rather than declaring a second copy.
 
+### One exchange for the build, not an announcement plus a query
+
+The plan had the relay announce its build in a post-handshake control message *and* canopy be able to query it. Built as one: canopy issues `Build` as the first thing after authenticating a connection, and holds the answer in the registry entry for as long as the connection lasts.
+
+That keeps both properties the plan wanted — the registry populated without a round trip per skew evaluation, and a live read available — while removing a message shape and, with it, an ambiguity. Stream direction alone now says what is on a stream: relay-opened unidirectional is a filing, canopy-opened bidirectional is a request. Nothing to mark and nothing to disambiguate.
+
+### Placing a filing waits on the identity columns
+
+A filing names cluster coordinates and canopy resolves them against the server record's Kubernetes coordinates — but no server record carries those columns yet. They arrive with the cluster registry and the identity picker, along with the `clusters` table a coordinate would reference, so adding them here would mean building those cards inside this one.
+
+So `jobs::relay::ingest::resolve` is the single function they fill in: it returns "cannot place" today, the listener logs each unplaceable filing with the coordinates it named, and the connection carries on. Everything downstream of resolution — both filing paths, provenance, scope mapping — is built and reachable. There is a test holding the line that an unplaceable filing costs a warning and not the connection.
+
+Worth being plain about the consequence: **no harvest filing lands in canopy until that function is implemented.** The transport, the protocol, the identity, and the ingestion convergence are done; the last hop from a coordinate to a server row is not, and cannot be until the columns exist.
+
 ### Two latent manifest bugs fixed in passing
 
 `commons-errors` used `diesel_async::pooled_connection` and `commons-types` used `diesel::pg::Pg` without either declaring the feature that provides it — they built only because another workspace member turned those features on, so `cargo check -p commons-types` failed on `main`. Both now declare what they use. Not part of this card's work, but building a new leaf crate off `commons-types` is what surfaced it.
@@ -242,11 +256,11 @@ The check families themselves are M1 and N1; this card lays the transport, the p
 
 ### Canopy side — the listener
 
-- [ ] QUIC listener in `crates/jobs`, its own bin, holding N inbound connections.
-- [ ] Client-certificate verifier that accepts any certificate, with the device-key SPKI lookup as the gate: `Device::from_key`, then the `relay` role.
-- [ ] Connection registry keyed by the authenticated relay device, never by anything the relay claims in a message.
-- [ ] Accept filings on unidirectional streams and route each family to its ingestion path.
-- [ ] Open the queries and commands as bidirectional streams against a registered connection.
+- [x] QUIC listener in `crates/jobs`, its own bin, holding N inbound connections.
+- [x] Client-certificate verifier that accepts any certificate, with the device-key SPKI lookup as the gate: `Device::from_key`, then the `relay` role.
+- [x] Connection registry keyed by the authenticated relay device, never by anything the relay claims in a message.
+- [x] Accept filings on unidirectional streams and route each family to its ingestion path.
+- [x] Open the queries and commands as bidirectional streams against a registered connection.
 
 ### Relay side — the client
 
@@ -258,4 +272,4 @@ The check families themselves are M1 and N1; this card lays the transport, the p
 ### Verification
 
 - [x] Protocol round-trip tests: framing, the frame ceiling, ALPN mismatch.
-- [ ] An end-to-end test over a real QUIC connection: an enrolled relay device connects, files, and is refused when its key is unknown, deactivated, or carries another role.
+- [x] An end-to-end test over a real QUIC connection: an enrolled relay device connects, files, and is refused when its key is unknown, deactivated, or carries another role.

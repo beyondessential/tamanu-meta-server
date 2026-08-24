@@ -22,8 +22,12 @@
 //!   frame. There is no response, and none is wanted (see [`filing`]).
 //! - Canopy opens a **bidirectional** stream per [`Request`], writes one frame,
 //!   and reads one [`Response`] frame back.
-//! - The relay opens one bidirectional stream on connect and writes [`Hello`],
-//!   which is what canopy records of a relay's identity and build.
+//!
+//! So the direction of a stream says what is on it, with no marker to read and
+//! no ambiguity to resolve. What canopy records of a relay's build ([`Hello`])
+//! is the answer to [`Request::Build`], which canopy asks as soon as it has
+//! authenticated the connection — one exchange rather than a connect-time
+//! announcement *and* a query that reads the same thing.
 //!
 //! ## Direction of authority
 //!
