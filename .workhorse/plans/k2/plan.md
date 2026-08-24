@@ -67,9 +67,13 @@ Still no `exec` and no `portforward`.
 So hibernation acts on a whole group at once rather than on one server, and there is no hibernating a single facility within a namespace.
 That follows the substrate rather than being a limitation to work around: CNPG hibernation and scaling to zero are what the deploy does to itself when its TTL expires, and the deploy is the unit that has a TTL.
 
-**Guardrails start at has-a-TTL.**
-A deployment carrying no TTL cannot be hibernated, which keeps the command away from the ranks where it would be an outage.
-Expected to widen later, so the restriction is a policy on the command rather than a property of the deployment being asleep or not.
+**Guardrails start at has-a-TTL, enforced at the relay.**
+A deployment carrying no TTL cannot be hibernated, and the relay is what refuses it.
+That keeps the precondition where the fact lives — a TTL is cluster-side and Canopy may not hold it — and it keeps the method set the boundary, rather than leaving the whole gate to Canopy asking correctly.
+Expected to widen later, so it is a policy on the command rather than a property of the deployment.
+
+Canopy gates production actions on top of that, as a standing principle rather than something this command introduces.
+No production deployment runs on Kubernetes today, though some are planned, so the relay-side precondition is what carries the weight in the meantime.
 
 Whether a deployment is asleep is a **fact, not a check** (G2 settled hibernation as an eligibility fact).
 Canopy presents it on the group, and each affected server's checks carry it as their skip reason.
@@ -89,15 +93,28 @@ This is the informer pattern, and its payoff is latency: a pod that cannot be sc
 The `alertd` harvest cannot be event-driven, its readings being database queries, so it stays on a sweep cadence.
 Two cadences in one relay, then: the substrate checks event-driven with a resync, the harvest on its loop.
 
+Sleeping and waking are **admin actions and are audited**, using the same vocabulary upgrade plans and restore-replica declarations already use.
+
+## A general log of operator actions
+
+Wanted, and wider than these two commands.
+Canopy has no such facility today: three specs say an action is audited (upgrade plans, restore-replica declarations and credential issuances, the backup recovery ceremony) and each is realised on its own terms, with no log covering operator actions across Canopy.
+
+That is its own piece of work rather than something to fold into the relay's method set, so K2 says only that hibernation is audited and leaves the facility to a card of its own.
+
 ## Open
 
-- **Where the has-a-TTL restriction is enforced.** Canopy gates by rank, the relay does not; but a TTL is a cluster-side fact Canopy may not hold, so the relay is the natural place to refuse a deployment that has none. Whether the relay enforces that precondition itself, or the whole gate is Canopy's, decides whether the method set stays the boundary the design rests on.
-- **Authorisation and audit for the commands.** Who in Canopy may hibernate a deployment, and whether the action is recorded.
+- Nothing outstanding on the method set itself.
 
 ## Spec impact
 
-To fold once the open items above settle:
+Folded:
 
-- **K8S** — the relay section says Canopy asks the relay for what it needs and the relay holds read-only permissions; the substrate section says Canopy determines those checks from what it reads of the cluster through its relay. Both describe the resource-shaped half that no longer exists.
-- **CHK** — "the `kubernetes` source is filled entirely by Canopy pulling from a cluster" becomes the relay filing, and the reservation restates as writable only by a device carrying the relay role rather than by Canopy alone.
-- **B1's breakdown** — M1's entry says resource-shaped relay methods suit the substrate source.
+- **K8S** — the relay section drops read-only, admits operator actions into the authority sentence, and gains **What crosses the connection** (the relay determines and files both families, no request returns an object, current state plus periodic refile, the three queries) and **Putting a deployment to sleep**. The substrate section now has the relay determining those checks rather than Canopy deriving them from what it reads.
+- **CHK** — the `kubernetes` source is filed by a relay rather than filled by Canopy pulling, and the reserved-name wording follows.
+
+Still to carry, outside the specs:
+
+- **B1's breakdown** — M1's entry says resource-shaped relay methods suit the substrate source, which is no longer the design. The entry is already a card, so the correction belongs on M1 rather than in the breakdown.
+- **J2** — the relay card describes a ServiceAccount with `get`/`list`/`watch` only. It gains the verbs hibernation takes; still no `exec` and no `portforward`.
+- **H1's plan** — its RBAC section and its deferred method-set framing are superseded by this document. Left as the spike's record rather than rewritten.
