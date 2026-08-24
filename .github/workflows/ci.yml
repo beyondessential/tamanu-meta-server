@@ -94,6 +94,14 @@ jobs:
     # binary plus a Vite dev server itself, so this job builds the rust
     # binaries the fixture expects, installs the frontend deps + chromium,
     # and runs `npm run test:e2e`.
+    #
+    # Sharded across 4 parallel jobs via Playwright's --shard; each shard
+    # runs a quarter of the tests. Artifacts are suffixed with the shard
+    # index so uploads don't collide.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - name: Free up space
         run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
@@ -137,13 +145,13 @@ jobs:
         # The wrapper spins up a throwaway tmpfs Postgres and exports
         # CANOPY_E2E_ADMIN_DATABASE_URL pointing at it; the fixture creates its
         # per-worker databases on that cluster. Same DB harness as `just test`.
-        run: ../scripts/ramdisk-pg.sh npm run test:e2e
+        run: ../scripts/ramdisk-pg.sh npm run test:e2e -- --shard=${{ matrix.shard }}/4
         working-directory: private-web
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: |
             private-web/playwright-report
             private-web/test-results
@@ -156,7 +164,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-screenshots
+          name: playwright-screenshots-${{ matrix.shard }}
           path: private-web/test-results/**/*.png
           retention-days: 5
           if-no-files-found: ignore
