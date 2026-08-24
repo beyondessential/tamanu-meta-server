@@ -101,9 +101,46 @@ Revocation is likewise the existing path: deactivate the key (`is_active`), and 
 - `Device::add_key` refuses a second active key on a device that already carries a different one, so relay key rotation is deactivate-then-add rather than overlap-then-cut. Fine at this fleet size; note it, because it means a rotation has a window where the relay cannot reconnect.
 - The relay's own verification of *Canopy's* server certificate is the remaining minor choice: skip it and rest on the tailnet for that direction, or pin. Skipping matches the original reasoning and is the default unless there is a reason to do otherwise.
 
+## Deployment & versioning — under discussion
+
+The relay embeds `bestool-alertd`, and K2's tradeoff (a substrate check change ships as a relay release) is only acceptable because the relay redeploys on the fleet's cadence. So the deployment mechanism has to actually deliver that cadence, or K2's reasoning does not hold.
+
+Orthogonal and worth doing under any option: **tighten Dependabot's cadence for `bestool-alertd`** specifically. The default weekly/seven-day delay is calibrated for dependencies we do not control; this one we publish and trust, so it should come in fast. A merged Dependabot PR is what triggers a release under every option below.
+
+### Option A — two images, ops deploys
+
+Canopy CI builds and publishes both images; `beyondessential/ops` (Pulumi, where the Tamanu k8s layout already lives) deploys the relay per cluster, pinning a tag so clusters roll independently. Optionally, only rebuild the image that actually changed.
+
+The problem is the deploy path. Either ops rolls each cluster by hand, which will not keep the fleet on cadence, or Canopy CI gains credentials to deploy into N clusters. The latter means **CI holds a deploy path into every cluster**, the cluster inventory lives in a public repo's CI configuration (so their number and identity are exposed), and standing up a new cluster is a CI change rather than a deployment.
+
+### Option B — harness plus pushed binary
+
+A thin harness is deployed once per cluster and rarely changes. It holds the device key, opens the QUIC connection, receives the relay binary from Canopy, and runs it. Canopy's image carries both binaries. Versioning largely disappears: if the connected relay is not on the version Canopy holds, Canopy pushes it.
+
+Strong on operations — no CI-to-cluster credentials, no cluster inventory in CI, adding a cluster is "deploy the harness, create the device". But it has two costs that are easy to underrate.
+
+**It is a bespoke code-distribution and execution system.** Binary transfer, integrity verification, atomic replace, supervision, restart, crash-loop rollback, version reporting — all built here, all needing to be very reliable, because a harness that breaks has no remote path to fix it. Kubernetes already is the deployment system; the harness re-implements a Deployment and an image tag from inside a pod, and gives up image provenance, signing, `kubectl rollout undo`, and the rollout safety a real image change gets for free. It also needs payload signature verification against a key baked into the harness, or connection compromise becomes code execution — which recreates by hand the provenance an image tag supplies.
+
+**It dissolves the boundary this card exists to build.** The compromise argument is mostly right: landing malicious code in the repo defeats A and B equally, and Canopy already holds credentials to do real damage. But the two differ in the *non-repo* case, compromise of the running Canopy process. The relay's authority is deliberately a narrow method set — no `exec`, no `portforward`, and **no method returns a Kubernetes object or a database row**. That is why a compromised Canopy in A can obtain check results but not clinical data, even though the relay itself reads every Tamanu database in the cluster. In B, a compromised Canopy ships code that the harness runs under the relay's ServiceAccount with the relay's access to every instance's Postgres. RBAC still bounds it, but RBAC was never what kept Canopy out of the databases — the method set was, and B replaces the thing that enforces it. The widening is from "check results" to "patient data in every cluster", which is a different order of thing from "Canopy can already do damage".
+
+### Option C — Canopy names the version, Kubernetes does the rollout
+
+Canopy tells the relay which version it should be on; the relay patches its own Deployment's image tag; Kubernetes pulls the signed image from the registry and performs the rollout. One image, one Deployment, no harness.
+
+This keeps what B is actually after — no CI-to-cluster credentials, no cluster inventory in CI, Canopy-driven cadence, adding a cluster needs no CI change — while giving up neither provenance nor the boundary:
+
+- **Less code than B, not more.** Patching a Deployment's image tag is a small piece of `kube` work. There is no transfer, no supervision, no rollback machinery to write.
+- **Provenance survives.** Code arrives from the registry as a signed, versioned image. Canopy supplies a *version string*, never a binary.
+- **Rollout safety is Kubernetes'.** A bad version that fails readiness does not complete its rollout; with `maxUnavailable: 0` the old pod keeps serving and stays connected, so Canopy can still name an earlier version. B would have to build that.
+- **Compromise is bounded to published images.** A compromised Canopy can order any published relay image, including an old one with a known bug — a downgrade attack, answered with a version floor. It cannot run arbitrary code, so the method set stays the boundary.
+
+Cost: the cluster needs registry pull access (it already has it, for its own image), and the relay needs RBAC to patch its own Deployment. That is a small widening, and the same *kind* of verb K2 already added for sleep and wake.
+
+**Recommendation: C.** B's operational case is the right one and C satisfies it; where they differ, C is both less to build and the one that preserves the property this card is for.
+
 ## Open — to decide on this card
 
-1. **Deployment & versioning** — who deploys the relay and how it's versioned against Canopy.
+1. **Deployment & versioning** — A, B, or C above.
 2. **Canopy's own cluster** — read through a relay like any other, or direct in-cluster reads with a widened ClusterRole.
 
 ## Spec impact to carry back
