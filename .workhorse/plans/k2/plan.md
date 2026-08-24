@@ -113,8 +113,11 @@ Folded:
 - **K8S** — the relay section drops read-only, admits operator actions into the authority sentence, and gains **What crosses the connection** (the relay determines and files both families, no request returns an object, current state plus periodic refile, the three queries) and **Putting a deployment to sleep**. The substrate section now has the relay determining those checks rather than Canopy deriving them from what it reads.
 - **CHK** — the `kubernetes` source is filed by a relay rather than filled by Canopy pulling, and the reserved-name wording follows.
 
-Still to carry, outside the specs:
+Carried into the cards:
 
-- **B1's breakdown** — M1's entry says resource-shaped relay methods suit the substrate source, which is no longer the design. The entry is already a card, so the correction belongs on M1 rather than in the breakdown.
-- **J2** — the relay card describes a ServiceAccount with `get`/`list`/`watch` only. It gains the verbs hibernation takes; still no `exec` and no `portforward`.
-- **H1's plan** — its RBAC section and its deferred method-set framing are superseded by this document. Left as the spike's record rather than rewritten.
+- **M1** — rescoped again: its checks are determined in the relay rather than in Canopy, so Canopy's side is registering the source and ingesting what the relay files. B1's breakdown entry follows.
+- **J2** — its breakdown entry now has the relay holding the cluster's permissions rather than read permissions, gaining the verbs sleeping a deployment takes. The card itself still says read-only.
+
+Not rewritten:
+
+- **H1's plan** — its RBAC section and its deferred method-set framing are superseded by this document, and it stays as the spike's record.
