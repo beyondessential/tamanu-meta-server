@@ -30,14 +30,31 @@ There is one relay per registered cluster, so the Canopy-side worker is not a cl
 - Which cluster a connection belongs to is **derived from the authenticated relay identity**, never claimed by the relay in a message. The device row for the relay is the cluster's registration, so the mapping is a lookup, not a assertion to trust.
 - The worker being a singleton means its loss makes every cluster unreadable at once. That surfaces correctly through the existing per-cluster connectivity check (every instance fails), but it is worth naming as a single point of failure the design accepts.
 
+## Protocol — a stream per exchange
+
+Decided. QUIC streams are cheap and independently delivered, so **the stream is the correlation**: no request-ID bookkeeping, no multiplexing layer, and a cancelled request is just a reset stream. A slow namespace-roster query cannot stall a queue of filings behind it, which a single multiplexed stream would allow.
+
+- **Filings go up as unidirectional streams**, opened by the relay: open, write, close. No response body.
+- **Queries and commands are bidirectional streams**, opened by Canopy: the five exchanges K2 settled (namespace roster, connected-and-answering, embedded suite version; sleep, wake).
+- Messages are length-delimited, with the message enum living in `relay-protocol`.
+
+### Filings are unacknowledged
+
+Accepted deliberately. The relay gets QUIC's delivery guarantee but no application-level acknowledgement that a filing was *ingested*, so a filing Canopy accepts on the wire and then fails to ingest is lost until the next refile. **The periodic refile is the reconciliation mechanism** — it already exists to survive a missed event, a restart, or a reconnection (K2's cadence), so per-filing acks would be redundant machinery covering a window the refile already closes. Worth revisiting only if the refile interval ever grows long enough that a lost filing matters in the gap.
+
+### Version negotiation rides on ALPN
+
+The protocol version is carried in the **QUIC ALPN token** (`canopy-relay/1` and successors). Canopy offers the range it supports and the relay picks, so an incompatible pair fails at the TLS handshake with a clear "no application protocol" rather than connecting and then failing to parse a message. Protocol versioning is present from the first release, since the relay is a second deployable running vN against Canopy vM.
+
+Detail that is not protocol-breaking rides in a post-handshake control message instead: the embedded check-suite version for SELF's skew alert, and the relay's build info.
+
 ## Open — to decide on this card
 
-1. **Protocol design** — stream/message framing over QUIC, request/response for queries and commands, and the version-negotiation scheme.
-2. **Filing handover** — how filings reach the same ingestion path a device push takes, without re-deriving parity on Canopy's side.
-3. **Identity over QUIC** — adapting the tailnet resolve to take the address from the connection; whether to pin the relay's SPKI fingerprint at enrollment.
-4. **Relay enrollment** — how the relay's device row comes to exist (DTR gap), which follows from pinning and from who deploys.
-5. **Deployment & versioning** — who deploys the relay and how it's versioned against Canopy.
-6. **Canopy's own cluster** — read through a relay like any other, or direct in-cluster reads with a widened ClusterRole.
+1. **Filing handover** — how filings reach the same ingestion path a device push takes, without re-deriving parity on Canopy's side.
+2. **Identity over QUIC** — adapting the tailnet resolve to take the address from the connection; whether to pin the relay's SPKI fingerprint at enrollment.
+3. **Relay enrollment** — how the relay's device row comes to exist (DTR gap), which follows from pinning and from who deploys.
+4. **Deployment & versioning** — who deploys the relay and how it's versioned against Canopy.
+5. **Canopy's own cluster** — read through a relay like any other, or direct in-cluster reads with a widened ClusterRole.
 
 ## Decisions
 
