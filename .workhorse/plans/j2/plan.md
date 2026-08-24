@@ -101,7 +101,9 @@ Revocation is likewise the existing path: deactivate the key (`is_active`), and 
 - `Device::add_key` refuses a second active key on a device that already carries a different one, so relay key rotation is deactivate-then-add rather than overlap-then-cut. Fine at this fleet size; note it, because it means a rotation has a window where the relay cannot reconnect.
 - The relay's own verification of *Canopy's* server certificate is the remaining minor choice: skip it and rest on the tailnet for that direction, or pin. Skipping matches the original reasoning and is the default unless there is a reason to do otherwise.
 
-## Deployment & versioning — under discussion
+## Deployment & versioning — Canopy names the version, Kubernetes rolls it
+
+**Decided: option C below.** The relay is deployed once per cluster from `beyondessential/ops`, and thereafter Canopy keeps it current by naming the version it should be on. Canopy CI never holds credentials to a cluster.
 
 The relay embeds `bestool-alertd`, and K2's tradeoff (a substrate check change ships as a relay release) is only acceptable because the relay redeploys on the fleet's cadence. So the deployment mechanism has to actually deliver that cadence, or K2's reasoning does not hold.
 
@@ -136,12 +138,20 @@ This keeps what B is actually after — no CI-to-cluster credentials, no cluster
 
 Cost: the cluster needs registry pull access (it already has it, for its own image), and the relay needs RBAC to patch its own Deployment. That is a small widening, and the same *kind* of verb K2 already added for sleep and wake.
 
-**Recommendation: C.** B's operational case is the right one and C satisfies it; where they differ, C is both less to build and the one that preserves the property this card is for.
+B's operational case is the right one and C satisfies it; where they differ, C is both less to build and the one that preserves the property this card is for.
+
+### What C means for this card's build
+
+- **A sixth protocol exchange.** Alongside K2's three queries and two commands, Canopy needs a way to tell a relay the version it should be on. It fits the command shape (Canopy-opened bidirectional stream), and it is the one command that is not about a Tamanu deployment.
+- **Bootstrap deployment stays with ops.** `beyondessential/ops` deploys the relay per cluster once — namespace, ServiceAccount and RBAC, the Tailscale sidecar, the device-key Secret, and an initial image tag. Standing up a new cluster is that plus creating the relay device in Canopy. No CI change, and no cluster inventory in this repo.
+- **RBAC gains the verbs to patch its own Deployment.** Narrow: the relay's own Deployment in its own namespace, nothing else. Same kind of verb K2 already introduced for sleep and wake, and still never `exec` or `portforward`.
+- **`maxUnavailable: 0` is load-bearing, not a default to inherit.** It is what keeps the old pod serving and connected when a bad version fails readiness, which is what lets Canopy name an earlier version to recover. Set it deliberately and note why.
+- **A version floor.** The lowest image tag a relay will accept being told to run, baked into the relay rather than supplied by Canopy. This is the answer to the downgrade attack C leaves open; without it a compromised Canopy could order a relay back to a known-bad release.
+- **SELF's skew check changes character but stays.** It stops being "did a human roll the fleet" and becomes "did the version Canopy named actually take" — a relay stuck on an old version now means a rollout that failed or a relay that will not accept it, both of which want an operator.
 
 ## Open — to decide on this card
 
-1. **Deployment & versioning** — A, B, or C above.
-2. **Canopy's own cluster** — read through a relay like any other, or direct in-cluster reads with a widened ClusterRole.
+1. **Canopy's own cluster** — read through a relay like any other, or direct in-cluster reads with a widened ClusterRole.
 
 ## Spec impact to carry back
 
