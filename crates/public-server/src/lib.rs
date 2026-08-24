@@ -7,6 +7,7 @@ use crate::state::AppState;
 pub mod artifacts;
 pub mod backup;
 pub mod bestool;
+pub mod calendar;
 pub mod mcp;
 pub mod names;
 pub mod openapi;

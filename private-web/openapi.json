@@ -1994,6 +1994,41 @@
         ]
       }
     },
+    "/api/commons/calendar_url": {
+      "post": {
+        "tags": [
+          "commons"
+        ],
+        "summary": "Get the subscription URL of the planned-upgrades calendar feed.",
+        "description": "Returns the feed's full URL, secret included, so it can be handed to a\ncalendar application or shared as-is. Returns `null` if the public API base\nURL or the secret gating the public reads is not configured.",
+        "operationId": "calendar_url",
+        "responses": {
+          "200": {
+            "description": "Calendar feed URL with its embedded secret, if configured.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/commons/is_current_user_admin": {
       "post": {
         "tags": [
@@ -7657,6 +7692,13 @@
             ],
             "description": "Anything the next reader needs to know. Cleared when absent."
           },
+          "planned_end_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The hour the window closes, as `HH:MM`. Cleared when absent, and needs a\nstart. Earlier than the start means the following morning."
+          },
           "planned_for": {
             "type": [
               "string",
@@ -12763,6 +12805,13 @@
             ],
             "description": "Anything the next reader needs to know. Optional."
           },
+          "planned_end_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The hour the window closes, as `HH:MM`. Optional, and needs a start.\nEarlier than the start means the following morning."
+          },
           "planned_for": {
             "type": [
               "string",
@@ -16076,6 +16125,13 @@
               "null"
             ],
             "description": "Whatever the operator needs the next reader to know."
+          },
+          "planned_end_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The hour it ends on, where the window is known. Earlier than the start\nmeans the following morning."
           },
           "planned_for": {
             "type": [

@@ -34,6 +34,11 @@ pub struct UpgradePlan {
 	#[diesel(deserialize_as = jiff_diesel::NullableTime, serialize_as = jiff_diesel::NullableTime)]
 	#[schema(value_type = Option<String>)]
 	pub planned_time: Option<Time>,
+	/// The hour it ends on, where the window is known. Earlier than the start
+	/// means the following morning.
+	#[diesel(deserialize_as = jiff_diesel::NullableTime, serialize_as = jiff_diesel::NullableTime)]
+	#[schema(value_type = Option<String>)]
+	pub planned_end_time: Option<Time>,
 	/// The IANA zone the planned time is a wall clock in.
 	pub planned_zone: Option<String>,
 	/// Whatever the operator needs the next reader to know.
@@ -66,13 +71,14 @@ pub struct UpgradePlan {
 	pub withdrawn_by: Option<String>,
 }
 
-/// When an upgrade is expected: the day, and the hour on it where that is
-/// settled. The zone travels with the time because Canopy holds none for a
-/// group.
+/// When an upgrade is expected: the day, the hour on it where that is settled,
+/// and the hour it ends. The zone travels with the time because Canopy holds
+/// none for a group.
 #[derive(Debug, Clone, Default)]
 pub struct PlannedWhen {
 	pub date: Option<Date>,
 	pub time: Option<Time>,
+	pub end: Option<Time>,
 	pub zone: Option<String>,
 }
 
@@ -86,6 +92,16 @@ impl PlannedWhen {
 		if self.time.is_some() && self.date.is_none() {
 			return Err(AppError::BadRequest(
 				"a planned time needs the day it is on".into(),
+			));
+		}
+		if self.end.is_some() && self.time.is_none() {
+			return Err(AppError::BadRequest(
+				"an end time needs the hour the upgrade starts".into(),
+			));
+		}
+		if self.end.is_some() && self.end == self.time {
+			return Err(AppError::BadRequest(
+				"an upgrade cannot end at the hour it starts".into(),
 			));
 		}
 		if let Some(zone) = &self.zone
@@ -148,6 +164,7 @@ impl UpgradePlan {
 				dsl::target_version_id.eq(target_version_id),
 				dsl::planned_for.eq(when.date.map(jiff_diesel::Date::from)),
 				dsl::planned_time.eq(when.time.map(jiff_diesel::Time::from)),
+				dsl::planned_end_time.eq(when.end.map(jiff_diesel::Time::from)),
 				dsl::planned_zone.eq(when.zone),
 				dsl::note.eq(note),
 				dsl::created_by.eq(created_by),
@@ -241,6 +258,26 @@ impl UpgradePlan {
 			.map_err(AppError::from)
 	}
 
+	/// Plans that belong on a calendar: those with a day, still open or since
+	/// met.
+	///
+	/// A replaced or withdrawn plan is not where the deployment is going, so it
+	/// leaves the calendar; a met one stays as the record of what landed.
+	// spec: UPG#the-calendar-feed
+	pub async fn dated(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		use crate::schema::upgrade_plans::dsl;
+
+		dsl::upgrade_plans
+			.select(Self::as_select())
+			.filter(dsl::planned_for.is_not_null())
+			.filter(dsl::superseded_at.is_null())
+			.filter(dsl::withdrawn_at.is_null())
+			.order(dsl::planned_for.asc())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Amend an open plan's date and note.
 	///
 	/// The same plan better described, so it is not superseded and does not
@@ -265,6 +302,7 @@ impl UpgradePlan {
 			.set((
 				dsl::planned_for.eq(when.date.map(jiff_diesel::Date::from)),
 				dsl::planned_time.eq(when.time.map(jiff_diesel::Time::from)),
+				dsl::planned_end_time.eq(when.end.map(jiff_diesel::Time::from)),
 				dsl::planned_zone.eq(when.zone),
 				dsl::note.eq(note),
 				dsl::amended_by.eq(amended_by),

@@ -48,6 +48,7 @@ async fn main() -> miette::Result<()> {
 			.split_for_parts();
 	let app: Router<()> = api_router
 		.with_state(state.clone())
+		.merge(public_server::calendar::routes(state.clone()))
 		.merge(public_server::mcp::routes(state))
 		.merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", api_spec));
 

@@ -15,6 +15,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(public_url))
 		.routes(routes!(server_versions_url))
+		.routes(routes!(calendar_url))
 		.routes(routes!(is_current_user_admin))
 		.routes(routes!(products))
 }
@@ -103,6 +104,30 @@ pub async fn server_versions_url() -> Result<Json<Option<String>>> {
 		let public_url = std::env::var("PUBLIC_URL").ok()?;
 		let secret = std::env::var("SERVER_VERSIONS_SECRET").ok()?;
 		Some(format!("{public_url}/server-versions?s={secret}"))
+	})();
+	Ok(Json(url))
+}
+
+/// Get the subscription URL of the planned-upgrades calendar feed.
+///
+/// Returns the feed's full URL, secret included, so it can be handed to a
+/// calendar application or shared as-is. Returns `null` if the public API base
+/// URL or the secret gating the public reads is not configured.
+// spec: UPG#the-calendar-feed
+#[utoipa::path(
+	post,
+	path = "/calendar_url",
+	tag = "commons",
+	responses(
+		(status = 200, description = "Calendar feed URL with its embedded secret, if configured.", body = Option<String>),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn calendar_url() -> Result<Json<Option<String>>> {
+	let url = (|| {
+		let public_url = std::env::var("PUBLIC_URL").ok()?;
+		let secret = std::env::var("SERVER_VERSIONS_SECRET").ok()?;
+		Some(format!("{public_url}/calendar/{secret}/upgrades.ics"))
 	})();
 	Ok(Json(url))
 }

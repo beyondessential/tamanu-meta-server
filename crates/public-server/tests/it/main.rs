@@ -6,6 +6,7 @@
 mod auth_requirements;
 mod backup;
 mod backup_secrets;
+mod calendar;
 mod check_severities;
 mod device_key_auth;
 mod error_scenarios;

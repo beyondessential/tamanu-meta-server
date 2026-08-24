@@ -991,6 +991,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/commons/calendar_url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get the subscription URL of the planned-upgrades calendar feed.
+         * @description Returns the feed's full URL, secret included, so it can be handed to a
+         *     calendar application or shared as-is. Returns `null` if the public API base
+         *     URL or the secret gating the public reads is not configured.
+         */
+        post: operations["calendar_url"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/commons/is_current_user_admin": {
         parameters: {
             query?: never;
@@ -3910,6 +3932,11 @@ export interface components {
             id: string;
             /** @description Anything the next reader needs to know. Cleared when absent. */
             note?: string | null;
+            /**
+             * @description The hour the window closes, as `HH:MM`. Cleared when absent, and needs a
+             *     start. Earlier than the start means the following morning.
+             */
+            planned_end_time?: string | null;
             /** @description The day it is expected to happen, as `YYYY-MM-DD`. Cleared when absent. */
             planned_for?: string | null;
             /**
@@ -7123,6 +7150,11 @@ export interface components {
             group_id: string;
             /** @description Anything the next reader needs to know. Optional. */
             note?: string | null;
+            /**
+             * @description The hour the window closes, as `HH:MM`. Optional, and needs a start.
+             *     Earlier than the start means the following morning.
+             */
+            planned_end_time?: string | null;
             /** @description The day it is expected to happen, as `YYYY-MM-DD`. Optional. */
             planned_for?: string | null;
             /**
@@ -9193,6 +9225,11 @@ export interface components {
             met_at?: string | null;
             /** @description Whatever the operator needs the next reader to know. */
             note?: string | null;
+            /**
+             * @description The hour it ends on, where the window is known. Earlier than the start
+             *     means the following morning.
+             */
+            planned_end_time?: string | null;
             /** @description The day the upgrade is expected, where one is known. */
             planned_for?: string | null;
             /** @description The hour it starts on that day, where one is known. */
@@ -10747,6 +10784,34 @@ export interface operations {
             };
             /** @description The authority does not offer that profile. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    calendar_url: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Calendar feed URL with its embedded secret, if configured. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string | null;
+                };
+            };
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

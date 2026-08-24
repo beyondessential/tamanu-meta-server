@@ -359,6 +359,10 @@ pub struct RecordArgs {
 	/// and a zone.
 	#[schema(value_type = Option<String>)]
 	pub planned_time: Option<Time>,
+	/// The hour the window closes, as `HH:MM`. Optional, and needs a start.
+	/// Earlier than the start means the following morning.
+	#[schema(value_type = Option<String>)]
+	pub planned_end_time: Option<Time>,
 	/// The IANA zone the planned time is a wall clock in, such as
 	/// `Pacific/Fiji`. Required alongside a time.
 	pub planned_zone: Option<String>,
@@ -403,6 +407,7 @@ pub async fn record(
 		PlannedWhen {
 			date: args.planned_for,
 			time: args.planned_time,
+			end: args.planned_end_time,
 			zone: args.planned_zone,
 		},
 		note,
@@ -424,6 +429,10 @@ pub struct AmendArgs {
 	/// needs a day and a zone.
 	#[schema(value_type = Option<String>)]
 	pub planned_time: Option<Time>,
+	/// The hour the window closes, as `HH:MM`. Cleared when absent, and needs a
+	/// start. Earlier than the start means the following morning.
+	#[schema(value_type = Option<String>)]
+	pub planned_end_time: Option<Time>,
 	/// The IANA zone the planned time is a wall clock in, such as
 	/// `Pacific/Fiji`. Required alongside a time.
 	pub planned_zone: Option<String>,
@@ -468,6 +477,7 @@ pub async fn amend(
 		PlannedWhen {
 			date: args.planned_for,
 			time: args.planned_time,
+			end: args.planned_end_time,
 			zone: args.planned_zone,
 		},
 		note,

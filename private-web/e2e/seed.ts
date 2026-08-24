@@ -1278,6 +1278,7 @@ export async function seedUpgradePlan(
 		targetVersionId: string;
 		plannedFor?: string | null;
 		plannedTime?: string | null;
+		plannedEndTime?: string | null;
 		plannedZone?: string | null;
 		note?: string | null;
 		createdBy?: string;
@@ -1297,13 +1298,15 @@ export async function seedUpgradePlan(
 	}
 	await sql.query(
 		`INSERT INTO upgrade_plans
-		   (group_id, target_version_id, planned_for, planned_time, planned_zone, note, created_by)
-		 VALUES ($1, $2, $3::date, $4::time, $5, $6, $7)`,
+		   (group_id, target_version_id, planned_for, planned_time, planned_end_time,
+		    planned_zone, note, created_by)
+		 VALUES ($1, $2, $3::date, $4::time, $5::time, $6, $7, $8)`,
 		[
 			opts.groupId,
 			opts.targetVersionId,
 			opts.plannedFor ?? null,
 			opts.plannedTime ?? null,
+			opts.plannedEndTime ?? null,
 			opts.plannedZone ?? null,
 			opts.note ?? null,
 			opts.createdBy ?? "e2e@example.com",
