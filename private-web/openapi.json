@@ -9401,7 +9401,8 @@
           "admin",
           "releaser",
           "server",
-          "backup-restore"
+          "backup-restore",
+          "relay"
         ]
       },
       "DeviceSearchArgs": {

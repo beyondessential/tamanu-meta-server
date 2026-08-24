@@ -220,6 +220,14 @@ The plan had the relay announce its build in a post-handshake control message *a
 
 That keeps both properties the plan wanted — the registry populated without a round trip per skew evaluation, and a live read available — while removing a message shape and, with it, an ambiguity. Stream direction alone now says what is on a stream: relay-opened unidirectional is a filing, canopy-opened bidirectional is a request. Nothing to mark and nothing to disambiguate.
 
+### The relay's cluster work is one trait
+
+`relay::duties::Duties` is every method canopy's requests reach: the namespace roster, the build, sleep, wake, and the version patch. Putting them behind one trait makes the list of Canopy's authority over a cluster readable in one place, and widening it a visible diff rather than something that happens when a handler reaches for a `kube` client. Note what the trait cannot express: no method returns a Kubernetes object, and there is no general read. That is the boundary the card exists to build, stated as a type.
+
+`Unattached` implements it by answering every request with a failure while still reporting its build. So a relay that has no cluster access yet still connects, authenticates, and answers — which is what makes the transport and the enrollment testable against a real Canopy before there is a check to run, and what makes a misconfigured deployment read as "this relay cannot do anything" rather than as a silence that looks like a network fault.
+
+The two check families fill this in. Nothing else about the relay changes when they do.
+
 ### Placing a filing waits on the identity columns
 
 A filing names cluster coordinates and canopy resolves them against the server record's Kubernetes coordinates — but no server record carries those columns yet. They arrive with the cluster registry and the identity picker, along with the `clusters` table a coordinate would reference, so adding them here would mean building those cards inside this one.
@@ -264,10 +272,10 @@ The check families themselves are M1 and N1; this card lays the transport, the p
 
 ### Relay side — the client
 
-- [ ] `crates/relay` binary: configuration (its device key, Canopy's pinned public key, the endpoint), and the reconnect loop.
-- [ ] Pinned verification of Canopy's certificate, on every transport.
-- [ ] Serve the queries and commands, and file upward, with the check determination left as the seam M1/N1 fill.
-- [ ] The version floor: the lowest image tag the relay will accept being told to run.
+- [x] `crates/relay` binary: configuration (its device key, Canopy's pinned public key, the endpoint), and the reconnect loop.
+- [x] Pinned verification of Canopy's certificate, on every transport.
+- [x] Serve the queries and commands, and file upward, with the check determination left as the seam M1/N1 fill.
+- [x] The version floor: the lowest image tag the relay will accept being told to run.
 
 ### Verification
 

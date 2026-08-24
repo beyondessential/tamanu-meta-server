@@ -153,16 +153,18 @@ impl Response {
 	/// is caught where it arrives rather than misread by the caller. Every
 	/// request may be refused or fail.
 	pub fn answers(&self, request: &Request) -> bool {
-		match (request, self) {
-			(_, Self::Refused(_) | Self::Failed { .. }) => true,
-			(Request::NamespaceRoster { .. }, Self::NamespaceRoster { .. }) => true,
-			(Request::Ping, Self::Pong) => true,
-			(Request::Build, Self::Build(_)) => true,
-			(Request::Sleep { .. }, Self::Asleep) => true,
-			(Request::Wake { .. }, Self::Awake) => true,
-			(Request::RunVersion { .. }, Self::VersionAccepted) => true,
-			_ => false,
-		}
+		matches!(
+			(request, self),
+			(_, Self::Refused(_) | Self::Failed { .. })
+				| (
+					Request::NamespaceRoster { .. },
+					Self::NamespaceRoster { .. }
+				) | (Request::Ping, Self::Pong)
+				| (Request::Build, Self::Build(_))
+				| (Request::Sleep { .. }, Self::Asleep)
+				| (Request::Wake { .. }, Self::Awake)
+				| (Request::RunVersion { .. }, Self::VersionAccepted)
+		)
 	}
 }
 
