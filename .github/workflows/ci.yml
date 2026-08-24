@@ -180,7 +180,8 @@ jobs:
       - e2e
     runs-on: ubuntu-latest
     steps:
+      # No allowed-skips: every dependency must succeed. None of the jobs above
+      # carry an `if`, so none can skip — a skip or failure here fails the gate.
       - uses: re-actors/alls-green@release/v1
         with:
           jobs: ${{ toJSON(needs) }}
-          allowed-skips: ${{ needs.plan.outputs.allowed-skips }}
