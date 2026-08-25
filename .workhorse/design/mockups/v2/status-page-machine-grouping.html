@@ -542,7 +542,7 @@
 <div class="ramp" style="margin-top:16px">
 	<b style="color:var(--text-primary);font-weight:500">Proposed dot</b>
 	<span class="item"><span class="dot p-healthy"></span> healthy</span>
-	<span class="item"><span class="dot p-warning"></span> warning</span>
+	<span class="item"><span class="dot p-warning"></span> warning, overall OK</span>
 	<span class="item"><span class="dot p-unhealthy"></span> down</span>
 	<span class="item"><span class="dot p-gone"></span> nothing yet</span>
 	<span class="item"><span class="dot p-healthy unmonitored"></span> unmonitored</span>
@@ -572,9 +572,10 @@
 	check-broken state. Orange is left to the enclosure alone, so each hue means one
 	thing: light green degraded, orange a degraded machine, red down.
 	<br><br>
-	<b>One thing to settle.</b> The light green reads as warning next to the darker
-	green, but a lone warning dot in a row of otherwise-healthy ones has less contrast
-	than the ring gave it.
+	The light green is deliberately quiet. A warning means some check is failing while
+	the application is overall OK, which is "could be better" rather than "degraded",
+	so it should not compete with a red for attention. Being a near neighbour of the
+	healthy green is the point: it reads as a shade of fine, not a shade of trouble.
 	<br><br>
 	The old away and blip states were reachability sub-states, so they belong on the
 	pill if they survive the split. The fleet cards below render a late-reporting box
@@ -782,7 +783,7 @@
 	<div class="legend-row">
 		<span class="machine"><span class="dot p-healthy"></span></span><span>healthy</span>
 		<span class="sep"></span>
-		<span class="machine"><span class="dot p-warning"></span></span><span>degraded</span>
+		<span class="machine"><span class="dot p-warning"></span></span><span>warning, overall OK</span>
 		<span class="sep"></span>
 		<span class="machine"><span class="dot p-unhealthy"></span></span><span>down</span>
 		<span class="sep"></span>

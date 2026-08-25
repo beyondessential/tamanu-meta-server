@@ -145,8 +145,11 @@ That indicator was doing two jobs because a server was two things; once the mach
 
 Severity reads from the colour and subject from the shape.
 Red means down on either grain: a red application on a plain machine is one application failing on a healthy box, while a machine that goes red takes every application on it red with it.
-A degraded machine is distinct from a degraded application, so the two never compete for the same hue.
+A machine that is merely degraded is distinct from an application that is, so the two never compete for the same hue.
 Yellow is not part of this palette at all, being spoken for by the striped presentation of a check that could not run.
+
+A warning stays a near neighbour of healthy rather than a step towards down.
+It means a check is failing while the application is overall fine, so it reads as a shade of fine and does not compete with a failure for attention.
 
 The same holds for controls that follow a grain.
 The unreachability silence lives mechanically on whatever carries reachability, which is the machine, but ergonomically it sits wherever the thing it silences is reported.
@@ -359,7 +362,6 @@ Three mockups put the open presentation and wire questions side by side as optio
 
 - [ ] Should a group carry a product in its billing attribution at all? Product is not a group-level fact, and dropping it would remove the "only when members agree" rule rather than working around it. In scope for this card, or its own?
 - [ ] Do `away` and `blip` survive the split? They were reachability sub-states, so they belong on the machine if they survive at all. The mockup renders a late-reporting box as a degraded machine with its last-known-healthy application, which is what the model implies but is not decided.
-- [ ] Is the degraded application colour distinct enough on its own? It reads as degraded beside a healthy one, but a lone degraded application in a row of healthy ones has less contrast than the ring gave it.
 
 ## Transition
 
