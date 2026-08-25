@@ -276,28 +276,6 @@ impl Server {
 			.map(|n: i64| n.try_into().unwrap_or_default())
 	}
 
-	pub async fn own(db: &mut AsyncPgConnection) -> Result<Self> {
-		use crate::schema::servers::dsl::*;
-		servers
-			.select(Self::as_select())
-			.filter(id.eq(Uuid::nil()))
-			.first(db)
-			.await
-			.map_err(AppError::from)
-	}
-
-	pub async fn all_pingable(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
-		use crate::schema::servers::dsl::*;
-		servers
-			.select(Self::as_select())
-			.filter(device_id.is_null().and(id.ne(Uuid::nil())))
-			.filter(deleted_at.is_null())
-			.filter(host.is_not_null())
-			.load(db)
-			.await
-			.map_err(AppError::from)
-	}
-
 	pub async fn get_by_id(db: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {
 		crate::schema::servers::table
 			.select(Self::as_select())

@@ -2122,7 +2122,6 @@ dependencies = [
  "miette",
  "node-semver",
  "rcgen",
- "reqwest",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -3175,17 +3174,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hostname"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "617aaa3557aef3810a6369d0a99fac8a080891b68bd9f9812a1eeda0c0730cbd"
-dependencies = [
- "cfg-if",
- "libc",
- "windows-link",
-]
-
-[[package]]
 name = "hpke"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3899,7 +3887,6 @@ dependencies = [
  "diesel",
  "diesel-async",
  "futures",
- "hostname",
  "jiff",
  "k8s-openapi",
  "kube",
@@ -6657,19 +6644,14 @@ version = "0.6.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4cfcf7e2740e6fc6d4d688b4ef00650406bb94adf4731e43c096c3a19fe40840"
 dependencies = [
- "async-compression",
  "base64 0.22.1",
  "bitflags 2.13.0",
  "bytes",
- "futures-core",
  "futures-util",
  "http 1.5.0",
  "http-body 1.0.1",
- "http-body-util",
  "mime",
  "pin-project-lite",
- "tokio",
- "tokio-util",
  "tower",
  "tower-layer",
  "tower-service",

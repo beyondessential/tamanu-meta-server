@@ -8,8 +8,6 @@
 //!   its down threshold and file (or close) the `(source=canopy,
 //!   ref=reachability)` check when nothing at all is reporting, plus a
 //!   `stale/<source>` check per reporting source that has gone quiet.
-//!   Independent of pingtask: most servers push their own status, so the sweep
-//!   operates on the resulting rows regardless of which path produced them.
 //! - **backup staleness + reconcile** — `database::backup::sweep`: stale
 //!   reported runs / maintenance, and report-vs-inventory reconciliation.
 //! - **tailnet key-expiry** — when the Tailscale directory is configured.
