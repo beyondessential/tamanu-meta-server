@@ -118,9 +118,15 @@ Inputs accept the old name as an alias for compatibility, so a fielded agent enr
 
 ### Monitoring and reachability
 
-Working position: reachability is a machine-level concept only, and applications have nothing called reachability.
+Reachability is a machine-level concept, and a cluster-level one on Kubernetes.
 Applications carry a monitoring on/off toggle; machines carry one too.
-See the reachability findings below — pingtask and the legacy `tamanu` heartbeat complicate this and it is not settled.
+
+Every application on an unreachable machine is itself unreachable.
+That is a derivation and not a second filing: one `reachability` check exists, on the machine, and it fails once.
+So a dead host is one check, one issue, and one incident, with every application on it presenting as unreachable — the "one fact with N consequences" the split is for.
+
+An application presenting as unreachable is how an operator reads its checks correctly.
+The check states keep their last observed results, which would otherwise read as current, and the unreachable presentation is what says they are not.
 
 ## Reachability as it stands today
 
@@ -184,7 +190,8 @@ An operator crosses a machine figure against an application figure the same way 
 ## Open questions
 
 - [ ] Does `Scope` gain one variant or two — `Machine(id)` alone, or `Machine(id)` and `Cluster(id)` — given reachability files at both?
-- [ ] How does an application present while its machine or cluster is unreachable? It has no reachability of its own to fail, so something has to say why nothing is arriving.
+- [ ] Does an application's health rollup change while it is unreachable, or does it keep presenting the health its last reports gave, with unreachability alongside rather than inside it?
+- [ ] The "Alert when this server is unreachable" switch is the server-scoped silence on `canopy`/`reachability` (`ServerEdit.tsx`), so it becomes a machine-scoped silence on the machine's form. Does anything equivalent stay on the application's form?
 - [ ] `alert_when_down_for` moves to the machine, so what does the migration do with a machine whose applications disagreed on the threshold? (Moot at migration, where every machine has one application, but not for a machine that later gains a second.)
 - [ ] Is "a machine has at least one application" enforced, or is a temporary zero allowed for the delete-then-recreate case?
 - [ ] Does `/servers/self` become a machine-self route returning the machine plus the applications on it?
