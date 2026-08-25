@@ -275,8 +275,6 @@
 	}
 
 	.dot.down { background: var(--error); }
-	.dot.away { background: var(--warning); }
-	.dot.blip { background: var(--secondary); }
 	.dot.gone { background: var(--text-disabled); }
 
 	.dot.h-warning {
@@ -577,10 +575,17 @@
 	so it should not compete with a red for attention. Being a near neighbour of the
 	healthy green is the point: it reads as a shade of fine, not a shade of trouble.
 	<br><br>
-	The old away and blip states were reachability sub-states, so they belong on the
-	pill if they survive the split. The fleet cards below render a late-reporting box
-	as a degraded machine with its last-known-healthy application, which is what the
-	model implies, but it is not settled.
+	<b>The away and blip states are removed.</b> They graded how long a server had been
+	quiet on hardcoded thresholds of two, ten and thirty minutes
+	(<code>short_status</code>, <code>crates/database/src/statuses.rs:646</code>),
+	which is a second definition of reachability that never agreed with the per-server
+	<code>alert_when_down_for</code> the reachability check uses. Two clocks, two
+	answers, one of them unconfigurable.
+	<br><br>
+	A machine is reachable or it is not, on its own threshold, and grey covers a
+	machine that has never reported at all. The orange pill keeps its meaning as a
+	machine whose own checks are warning, which is a real state rather than a stopwatch
+	reading.
 </p>
 
 <h2>Rank watermark</h2>

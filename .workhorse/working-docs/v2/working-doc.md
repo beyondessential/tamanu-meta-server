@@ -151,6 +151,11 @@ Yellow is not part of this palette at all, being spoken for by the striped prese
 A warning stays a near neighbour of healthy rather than a step towards down.
 It means a check is failing while the application is overall fine, so it reads as a shade of fine and does not compete with a failure for attention.
 
+A machine is reachable or it is not, with a further state for one that has never reported at all.
+There are no intermediate degrees of quiet: the graded "recently quiet" and "quiet a while" states are removed.
+They ran on fixed thresholds of two, ten and thirty minutes (`short_status`, `crates/database/src/statuses.rs:646`), which is a second definition of reachability alongside the per-machine threshold the reachability check uses, and the two never agreed.
+Only the configurable one survives, so the fleet presents reachability on the same terms it alerts on.
+
 The same holds for controls that follow a grain.
 The unreachability silence lives mechanically on whatever carries reachability, which is the machine, but ergonomically it sits wherever the thing it silences is reported.
 So an operator quiets a host that is expected to be down without first working out which record owns the switch.
@@ -361,7 +366,6 @@ Three mockups put the open presentation and wire questions side by side as optio
 - [ ] Which check names and which server-wide fields does Canopy's unified split rule treat as machine-subject? Needs to be written down and to match bestool.
 
 - [ ] Should a group carry a product in its billing attribution at all? Product is not a group-level fact, and dropping it would remove the "only when members agree" rule rather than working around it. In scope for this card, or its own?
-- [ ] Do `away` and `blip` survive the split? They were reachability sub-states, so they belong on the machine if they survive at all. The mockup renders a late-reporting box as a degraded machine with its last-known-healthy application, which is what the model implies but is not decided.
 
 ## Transition
 
