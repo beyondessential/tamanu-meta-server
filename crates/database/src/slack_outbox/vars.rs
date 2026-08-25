@@ -85,7 +85,9 @@ pub fn maintenance_declared(
 		"target": target,
 		"by": by.unwrap_or("an operator"),
 		"until": until,
-		"note": truncate(note.unwrap_or(""), MAX_MESSAGE_LEN),
+		// The workflow lays the note out as a field, so an absent one reads
+		// as a value rather than leaving the label dangling.
+		"note": truncate(note.unwrap_or("not stated"), MAX_MESSAGE_LEN),
 	})
 }
 
