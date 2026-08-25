@@ -127,6 +127,24 @@ Both of the gaps left deliberately unspecified are now closed by J2, and neither
 - ~~**The relay's method set**~~ — **resolved by K2: both families check-shaped and pushed**, with three named queries and two commands alongside. This overturned H1's candidate middle, which G2 had confirmed, on release-cadence grounds. See Access to clusters and `plans/k2/plan.md`.
 - When to bring backups into Canopy (AWS-level + CNPG Barman) — deliberately deferred.
 
+### Spun out: the machine / application-server split (card V2, General project)
+
+The bestool substrate exploration surfaced a foundational modelling question that this project cannot answer on its own, so it is **card V2 outside this project**.
+
+Canopy's `server` conflates a machine with an application server, and `device` conflates an identity with the machine it runs on. That holds only while one machine runs one workload, which is already false on some Linux hosts (bestool ignores the second) and meaningless on Kubernetes, where application servers are scheduled across a cluster and there is no machine in Canopy's sense.
+
+**The point that makes it tractable: this is G2's subject demarcation, generalised.** G2 split checks by what they assert something about, server-subject to `alertd` and substrate-subject to `kubernetes`. On Kubernetes the substrate is the cluster and namespace; **on a VM the substrate is the machine**. So `disk_free`, `memory`, `load` and the rest are not server checks that happen to run on a host, they are substrate checks filed against a server because a server is the only target Canopy has. bestool found the same axis from its side, in registry categories that encode what inputs a check needs rather than whose host it speaks for.
+
+**Why it blocks rather than merely relates:** if bestool gains the axis and Canopy does not, the abstraction stops at the wire — a machine-subject result from a two-workload host still has to be attributed to one of its servers arbitrarily.
+
+Direction agreed, for V2 to explore: the current server becomes the application server; `device` retires into an identity and a machine; a machine becomes a fourth check target alongside server, group, and Canopy-wide, with its variant in the one `Scope` enum; an application server usually has one machine, sometimes shares one, and on Kubernetes has none or a cluster-class one.
+
+Effect on this project:
+
+- **Unaffected:** J2's relay and transport, merged and verified. The transport is agnostic to what a filing is about.
+- **Contingent on V2:** L2 (bestool substrate) and N1 (harvested server checks), both of which turn on this axis.
+- **Interacts:** K1 wants a Kubernetes cluster table distinct from the relay's device row, which is the same separation from the Kubernetes end; M1's filing grains may shift.
+
 ### Spun out by K2, tracked elsewhere
 
 - **A general log of operator actions.** Wanted, and wider than hibernate/wake. Canopy has no such facility today: three specs say an action is audited (upgrade plans, restore-replica declarations and credential issuances, the backup recovery ceremony) and each is realised on its own terms, with no log covering operator actions across Canopy. K2 commits only to sleeping and waking being audited. Canopy-wide work rather than Kubernetes, so **it has its own card outside this project and is not tracked in this breakdown**. Nothing here waits on it: K8S says hibernation is audited, and the facility it eventually audits into is that card's to define.
