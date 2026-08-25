@@ -365,8 +365,6 @@ Three mockups put the open presentation and wire questions side by side as optio
 - [ ] The edit form is machine-first, so is the *detail* view too, or does an application keep a page of its own with its machine's facts presented on it?
 - [ ] Is there a machine list, or is the fleet still listed as applications?
 - [ ] Confirm the discriminator: the presence of a `machine` key means split, `health` without it means unified, neither means the legacy Tamanu push. Proposed in the wire mockup; needs agreeing with bestool.
-- [ ] Do metrics carry one sample per push, or batches of timestamped samples? Batching decouples resolution from push cadence but brings a unit vocabulary and reporter clocks that are known to drift, which is why `time_sync` is a check.
-- [ ] Where do metrics live and for how long? They cannot ride the status history, and a retention policy is a decision this card should make or explicitly hand off.
 - [ ] Which check names and which server-wide fields does Canopy's unified split rule treat as machine-subject? Needs to be written down and to match bestool.
 
 - [ ] Should a group carry a product in its billing attribution at all? Product is not a group-level fact, and dropping it would remove the "only when members agree" rule rather than working around it. In scope for this card, or its own?
@@ -403,26 +401,9 @@ Today they are spread across the top level and across each health entry, so a re
 `detail` is the name because it is already Canopy's word for this, in the status contract, the check-state model and the figures.
 Policy rules and the fleet spread reach a check's fields as `check.<field>`, which is exactly `health[].detail.<field>`, so the wire and the vocabulary need no translation between them.
 
-### Metrics
-
-A reporter can optionally send metrics, and they attach to an application as readily as to a machine.
-
-Per-application metrics are load-bearing rather than a convenience.
-On a shared box, which workload is consuming the memory cannot be answered from a machine total, and on Kubernetes container metrics are per-namespace to begin with, so they arrive application-grained whether or not Canopy asks for them that way.
-
-Optional means optional: a reporter sending no metrics is not reporting zero, and a machine whose reporter never sends them presents no metrics rather than empty ones, the way an unreported figure is omitted rather than shown blank.
-
-Metrics are stored differently from detail, and this is the part that needs designing rather than deciding.
-Detail is latest-value-wins, one current report per source per target.
-Metrics accumulate, so they need a retention policy of their own rather than riding the status history, which is bounded and holds whole pushes rather than series (see [HST](../../specs/platform/history-storage.md)).
-
-bestool moves from unified to split over whatever period it takes, one release at a time, and the unified machinery is retired once nothing sends it.
-
-The split rule for unified pushes is knowledge Canopy has to hold — which check names are machine-subject, and which server-wide fields belong to the machine.
-It duplicates what bestool will know once it sends split format, which is the price of the transition rather than a design choice, and it goes away with the unified path.
-
-During the transition a check name can file against a machine from one reporter and an application from another, depending on which format that host is sending.
-The catalog is keyed by (source, check) fleet-wide while scope is per-filing (see [CHK](../../specs/monitoring/checks.md)), so this costs nothing as long as Canopy's split rule agrees with bestool's.
+Nesting also makes the envelope extensible, which is why this card does not need to answer everything a reporter might one day send.
+Because the envelope's keys are a closed set rather than whatever a reporter did not happen to send, a new sibling of `health` and `detail` can be added later without ambiguity and without a format break.
+Reported metrics are the case in point: they raise questions about sampling, units, reporter clocks and retention that this card deliberately leaves alone, and the shape can take them when those are answered.
 
 ### Migration
 

@@ -244,6 +244,11 @@
 			A container removes the reserved words entirely: anything inside
 			<code>detail</code> is data, and everything outside it is structure.
 			<br><br>
+			It also makes the envelope extensible. A new sibling of <code>health</code>
+			and <code>detail</code> can be added later without ambiguity, because the
+			envelope's keys are a closed set rather than whatever a reporter did not
+			happen to send.
+			<br><br>
 			<code>detail</code> is Canopy's own word for this already, in the status
 			contract, the check-state model and the figures. Policy rules and the fleet
 			spread reach a check's fields as <code>check.&lt;field&gt;</code>, which is
@@ -253,96 +258,6 @@
 	</div>
 
 </div>
-
-<h2>Metrics</h2>
-<p class="note">
-	A reporter can optionally send metrics alongside its checks, on the machine and on
-	each application rather than on the machine alone. Per-application metrics are not
-	a nicety: on a shared box, "which workload is eating the memory" cannot be answered
-	from a machine total, and on Kubernetes container metrics are per-namespace to
-	begin with, so they arrive application-grained whether or not Canopy asks.
-</p>
-
-<div class="compare">
-
-	<div class="option">
-		<h3>A · One sample per push</h3>
-		<div class="paper">
-<pre>  <span class="mark-machine k">"machine"</span>: {
-    <span class="k">"health"</span>: [ … ],
-    <span class="k">"detail"</span>: { … },
-    <span class="k">"metrics"</span>: {
-      <span class="k">"cpu_percent"</span>: <span class="n">37.2</span>,
-      <span class="k">"memory_used_bytes"</span>: <span class="n">5033164800</span>,
-      <span class="k">"load_1m"</span>: <span class="n">0.84</span>
-    }
-  },
-  <span class="mark-app k">"applications"</span>: [
-    {
-      <span class="k">"id"</span>: <span class="s">"9f1c…"</span>,
-      <span class="k">"health"</span>: [ … ],
-      <span class="k">"detail"</span>: { … },
-      <span class="k">"metrics"</span>: {
-        <span class="k">"memory_used_bytes"</span>: <span class="n">2147483648</span>,
-        <span class="k">"sync_queue_depth"</span>: <span class="n">1204</span>
-      }
-    }
-  ]</pre>
-		</div>
-		<p class="verdict">
-			<b>Same shape as <code>detail</code>, different meaning.</b> A flat map of
-			name to number, sampled when the push was built.
-			<br><br>
-			Resolution is capped at the push cadence, so a minute-by-minute reporter
-			gives minute-by-minute metrics and a spike between pushes is invisible.
-			Cheapest to send, to store, and to reason about.
-		</p>
-	</div>
-
-	<div class="option">
-		<h3>B · Batched samples</h3>
-		<div class="paper">
-<pre>  <span class="mark-machine k">"machine"</span>: {
-    <span class="k">"health"</span>: [ … ],
-    <span class="k">"detail"</span>: { … },
-    <span class="k">"metrics"</span>: {
-      <span class="k">"cpu_percent"</span>: {
-        <span class="k">"unit"</span>: <span class="s">"percent"</span>,
-        <span class="k">"samples"</span>: [
-          [<span class="s">"2026-08-25T04:00:00Z"</span>, <span class="n">37.2</span>],
-          [<span class="s">"2026-08-25T04:00:15Z"</span>, <span class="n">41.8</span>],
-          [<span class="s">"2026-08-25T04:00:30Z"</span>, <span class="n">92.4</span>],
-          [<span class="s">"2026-08-25T04:00:45Z"</span>, <span class="n">38.0</span>]
-        ]
-      }
-    }
-  }</pre>
-		</div>
-		<p class="verdict">
-			<b>Resolution stops depending on cadence.</b> A reporter samples as often as
-			it likes and ships a batch on its own schedule, so the spike at 04:00:30
-			survives a once-a-minute push.
-			<br><br>
-			Costs a heavier payload, a unit vocabulary, and clock handling: samples carry
-			the reporter's timestamps, which will disagree with Canopy's, and a
-			<code>time_sync</code> check exists precisely because those clocks drift.
-		</p>
-	</div>
-
-</div>
-
-<p class="verdict" style="max-width:68ch">
-	<b>Metrics are a different animal from detail, whichever shape wins.</b> Detail is
-	latest-value-wins: a push replaces what that source last reported, and one row per
-	source per target holds it. Metrics accumulate, so they need a retention policy of
-	their own rather than riding the status history, which is bounded at thirty days
-	and stores whole pushes rather than series.
-	<br><br>
-	Optional means optional. A reporter sending no <code>metrics</code> key is not
-	saying its metrics are zero, and a machine whose reporter never sends them presents
-	no metrics rather than empty ones, the way an unreported figure is omitted rather
-	than shown blank.
-</p>
 
 <h2>Telling them apart</h2>
 <p class="note">
@@ -393,7 +308,7 @@
 			<tr>
 				<th style="width:16%">Subject</th>
 				<th style="width:42%">Checks</th>
-				<th>Detail and metrics</th>
+				<th>Detail fields</th>
 			</tr>
 		</thead>
 		<tbody>
