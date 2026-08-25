@@ -37,6 +37,18 @@ Machines are created through creating applications, which keeps the invariant th
   By default it creates a new machine for that application.
   Unticking that offers a search dropdown to select an existing machine instead.
 
+### Identities and the machine link
+
+An identity does gain a machine association, but only routes that need it reach for it.
+
+Extraction is per-route, following the role-gated extractor pattern already in `crates/commons-servers/src/device_auth/mod.rs` (`ServerDevice`, `AdminDevice`, `ReleaserDevice`, `BackupRestoreDevice`).
+A route gated to machines resolves the machine from the authenticated identity.
+A route gated to something else — an admin, a releaser — resolves no machine, so the association stays invisible to everything that has no business with it.
+
+This drops an existing awkwardness.
+`/servers/self` (see [DID](../../specs/public-server/device-identity.md)) refuses when the resolved device is attached to more than one server, and `Server::live_by_device_id` returns a `Vec` for the same reason.
+An identity resolves to exactly one machine, and applications hang off the machine, so the ambiguity has nowhere left to arise.
+
 ### Monitoring and reachability
 
 Working position: reachability is a machine-level concept only, and applications have nothing called reachability.
@@ -95,7 +107,7 @@ Probably acceptable, and the source detail names the quiet source anyway.
 - [ ] How does an application present while its machine or cluster is unreachable? It has no reachability of its own to fail, so something has to say why nothing is arriving.
 - [ ] Does the per-target down threshold (`alert_when_down_for`, today a `servers` column) move to the machine, and what happens to a machine whose applications disagreed about it before the migration?
 - [ ] Is "a machine has at least one application" enforced, or is a temporary zero allowed for the delete-then-recreate case?
-- [ ] Does an identity gain a machine association, or is the machine link a property of what reports rather than of who authenticates?
+- [ ] Does the `server` identity role become a `machine` role, and does `/servers/self` become a machine-self route returning the machine plus its applications?
 - [ ] Where do `host`, `cloud`, and `geolocation` land, and what does that do to DNS, TLS, and backups, which reach for them today?
 - [ ] What does the status page present once applications and machines are separate?
 
