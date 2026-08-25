@@ -224,13 +224,21 @@ Also the machine facts bestool does not report yet — uptime, CPU, memory, file
 Application figures: the application version and its release-train grading, the database engine version, and the runtime version.
 Postgres and Node are per-application even though they sit on the machine, because each application has its own.
 
-The fleet view stays one view.
-An operator crosses a machine figure against an application figure the same way they cross two of either, so "which platforms is this Tamanu version running on" is one crossing and not a join the operator has to do in their head.
+The fleet view stays one view, but each figure spreads over the population it belongs to: machine figures over machines, application figures over applications.
+Two denominators in one view, because the alternative — everything counted over applications — reports one two-application box as two Ubuntu machines, and a spread whose numbers are wrong is worse than one that needs reading carefully.
+
+An operator crosses a machine figure against an application figure the same way they cross two of either, so "which platforms is this Tamanu version running on" is one crossing and not a join done in the operator's head.
+
+The unit of a crossing follows from cardinality rather than being chosen: an application has at most one machine, so every application has a well-defined value for any machine figure, while a machine has many applications and no single value for an application figure.
+So a crossing involving any application figure counts applications, and a crossing of two machine figures counts machines.
+
+A machine-less application has no value for a machine figure and is absent from such a crossing rather than counted as unreported, following the precedent [APP](../../specs/servers/products.md) already sets for a server excluded from the application-version spread.
+It is absent from a machine-figure spread automatically, being no part of that population.
 
 ## Open questions
 
 - [ ] Does `Scope` gain one variant or two — `Machine(id)` alone, or `Machine(id)` and `Cluster(id)` — given reachability files at both?
-- [ ] Does the fleet spread count applications or machines for a machine figure? A machine's checks and figures presenting on each of its applications means a two-application machine is counted twice in a platform spread, which is a wrong number rather than harmless repetition.
+- [ ] Confirm the crossing unit: a crossing involving any application figure counts applications, a crossing of two machine figures counts machines. Derived from cardinality rather than chosen, so it should hold, but the view has to label which it is showing.
 - [ ] The edit form is machine-first, so is the *detail* view too, or does an application keep a page of its own with its machine's facts presented on it?
 - [ ] Is there a machine list, or is the fleet still listed as applications?
 - [ ] How does Canopy tell a unified push from a split one — a marker field, or the presence of the new machine section?
