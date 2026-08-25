@@ -1,9 +1,9 @@
 use axum::{Json, extract::State};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::{backup_jobs::BillingLabels, device_auth::ServerDevice};
+use commons_servers::{device_auth::ServerDevice, server_tags::effective_tags_for_server};
 use commons_types::server::TagMap;
-use database::{Db, diesel_async::AsyncPgConnection, server_groups::ServerGroup, servers::Server};
+use database::{Db, servers::Server};
 
 use crate::state::AppState;
 
@@ -67,40 +67,4 @@ pub async fn get_self(device: ServerDevice, State(db): State<Db>) -> Result<Json
 	}
 	let server = servers.pop().ok_or(AppError::DeviceHasNoServer)?;
 	Ok(Json(effective_tags_for_server(&mut conn, &server).await?))
-}
-
-/// The device-facing effective tag set for a server: its own tags overlaid
-/// on its group's, plus the synthetic read-only `canopy:` tags and the
-/// effective `billing.*` labels. Shared between the standalone `GET /tags`
-/// endpoint and the status-push response, so the two always agree.
-pub async fn effective_tags_for_server(
-	conn: &mut AsyncPgConnection,
-	server: &Server,
-) -> Result<TagMap> {
-	let mut merged = server.tags_for_device(conn).await?;
-
-	// Fill in the effective billing labels where the server doesn't already
-	// carry one, matching what canopy attributes to the group's cloud
-	// resources. `merged` already holds server tags overlaid on group tags, so a
-	// stored `billing.*` tag (server's own first, then the group's) is honoured
-	// and only the missing labels fall back to computed values.
-	//
-	// Every computed label describes *this* server, not its group: the stage
-	// comes from the server's own rank, so a rank=clone server reports
-	// `billing.stage=clone` and never the group's `prod`; and the product comes
-	// from the server's own product, so a SENAITE server in a Tamanu group
-	// reports `billing.product=senaite`. Attribution needs a deployment to
-	// attribute to, so an ungrouped server carries none.
-	// spec: APP#billing-attribution
-	if let Some(group_id) = server.group_id {
-		let group = ServerGroup::get_by_id(conn, group_id).await?;
-		for (key, value) in
-			BillingLabels::for_server(&group.tags, &group.name, server.product, server.rank)
-				.into_tags()
-		{
-			merged.0.entry(key).or_insert(value);
-		}
-	}
-
-	Ok(merged)
 }

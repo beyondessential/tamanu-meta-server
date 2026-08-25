@@ -991,9 +991,17 @@ pub async fn file_check_instances(
 	use crate::check_policies::{CheckPolicy, EvaluationContext, ScopedCheckPolicy};
 
 	let source = filing.source;
+	// Filing past a single server is for the sources no device reports: canopy's
+	// own determinations, and a relay's substrate checks, which are about what a
+	// cluster does with a server's workloads and are graded at a namespace or a
+	// whole cluster (spec `K8S`, "Checks determined about the substrate"). Both
+	// are reserved from the device API, which is the property that matters here
+	// — a device-reported source has no business claiming a group's state.
 	debug_assert!(
-		matches!(filing.scope, Scope::Server(_)) || source == crate::statuses::CANOPY_SOURCE,
-		"group- and canopy-wide filings are canopy's own",
+		matches!(filing.scope, Scope::Server(_))
+			|| source == crate::statuses::CANOPY_SOURCE
+			|| source == commons_types::source::SUBSTRATE_SOURCE,
+		"group- and canopy-wide filings are canopy's own or a relay's",
 	);
 	debug_assert!(
 		!filing.instances.is_empty(),

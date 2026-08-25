@@ -185,12 +185,99 @@ The alternative — direct in-cluster reads under a widened ClusterRole on Canop
 
 ## Spec impact to carry back
 
-- **`DTR`** (`private-server/device-trust.md`) — the relay's creation path is the existing provisioned-credential workflow at `role = relay`, which closes the gap B1 flagged as unspecified. Check whether DTR's "how a device comes to exist" list needs the relay naming explicitly or already covers it.
+- **`DTR`** — **done**, and already on this branch: the role list names `relay` and a paragraph says what it is. The creation path is the existing provisioned-credential workflow at `role = relay`, which the implementation uses unchanged, so DTR's "how a device comes to exist" list needed nothing added.
 - **`K8S`** stays accurate as written on identity: it says a relay is enrolled as a device carrying the relay role and is created, authenticated, tracked, and revoked as any other device is. The device-key decision realises that sentence rather than changing it.
-- **`K8S` may want a sentence on the relay keeping itself current**, since Canopy naming the version a relay should run is product behaviour rather than pure mechanism, and it changes what SELF's skew alert means. Worth deciding whether that rises to the spec or stays here as implementation. Everything else on this card — crate layout, stream shape, ALPN, the ingestion hoist — is implementation and stays in the plan.
+- **`K8S` on the relay keeping itself current** — **decided: it rises to the spec**, and is written as "Keeping a relay current". Canopy naming the version is product behaviour, not mechanism: it decides which checks a cluster's servers get, and an operator reads the skew alert differently because of it. What went in is the behaviour plus the three properties a reimplementation must be held to — a version is named and never code sent, the cluster performs the change so a bad version leaves the previous relay serving, and the floor is the relay's own. Everything else on this card — crate layout, stream shape, ALPN, the ingestion hoist — is implementation and stays in the plan.
 - **No spec change from demoting Tailscale.** `K8S` was written behavioural-only, with transport left to the plans, so it names no overlay. What it does assert still holds exactly: the relay opens its connection outward, Canopy never dials the cluster, and Canopy holds no cluster credential.
-- **`SELF`** (`private-server/self-alerts.md`) — the skew alert's meaning shifts from "a relay is running an out-of-step suite" to "the version Canopy named did not take". The condition and the alert are the same; the reason an operator is being told is different, which may warrant a wording pass.
+- **`SELF`** — **done**. The condition and the alert are unchanged; the wording no longer says "left behind by a fleet upgrade", because nothing upgrades a relay by hand any more. It now says what a named relay means: the version Canopy named did not take, so it wants an operator rather than another attempt at naming it.
 
 ## Decisions
 
-_(captured as they land)_
+### A filing is addressed in cluster coordinates, not in Canopy's identifiers
+
+Settled while building the protocol. A filing has to say what it is about, and the obvious reading — the relay names Canopy's server UUID — would mean Canopy first pushing each relay a roster of the servers it serves, and then keeping that roster in step. That is a seventh exchange and a synchronisation problem, neither of which the card called for.
+
+So a filing names **what the relay actually holds**: a namespace, and an instance within it (the central server, or a facility by its identity). Canopy resolves that to the server or group from the Kubernetes coordinates an operator already set on the server record, which `K8S` makes the identity anyway ("identity is set by an operator"). The relay never holds a Canopy identifier, there is no roster to push or reconcile, and an unrecognised coordinate is one filing Canopy cannot place rather than a relay out of step.
+
+Note for review: the wire's `FilingTarget` is a *cluster coordinate*, not a second check-state scope. Canopy maps it onto the single `database::issues::Scope` on arrival — instance to the server, namespace to the group, cluster to Canopy-wide. The rule against a parallel scope enum is intact because there is still one scope vocabulary; this is the address the relay speaks, upstream of it.
+
+### The relay announces its build on connect, and Canopy can also ask
+
+Both, as the plan called for above, and they are not redundant. The `Hello` frame the relay opens with is what the connection registry records, so the skew alert grades from what Canopy already holds rather than a round trip per evaluation. The `Build` request re-reads it live, which is what a cluster-registration confirmation and an operator looking at a relay want.
+
+### The push payload types stay with the HTTP endpoint
+
+The hoist moved less than planned, for a reason worth recording. `StatusPayload` and `HealthCheck` turned out to be **documentation types only**: the handler takes `Json<serde_json::Value>` and the ingestion parses the value directly, so those structs exist to describe the endpoint in OpenAPI and nothing reads them. Moving them would have pulled `utoipa` into `commons-servers` and changed the generated spec for no gain, so they stayed where the endpoint they document lives. The push *contract* is still single-sourced: one parser, in the core, for both callers.
+
+What moved is the ingestion itself — `parse_push` (validation, the legacy-heartbeat transform, version resolution), `ingest_push` (the ingest-mode gate and the recording transaction), and the filing beneath them. Two additions the plan had not anticipated:
+
+- **`effective_tags_for_server` moved too**, from `public-server`'s tags module into `commons_servers::server_tags`. Grading reads the effective tags, so a relay filing has to compute them the same way a push does or the two substrates grade differently — which is the exact drift the shared-implementation design exists to prevent.
+- **`kubernetes` is now a reserved source** on the push path, alongside `canopy` and `manual`. `K8S` requires it ("reserved from the device API"), the constant lives with the rest of the source vocabulary in `commons-types`, and `relay-protocol` re-exports it rather than declaring a second copy.
+
+### One exchange for the build, not an announcement plus a query
+
+The plan had the relay announce its build in a post-handshake control message *and* canopy be able to query it. Built as one: canopy issues `Build` as the first thing after authenticating a connection, and holds the answer in the registry entry for as long as the connection lasts.
+
+That keeps both properties the plan wanted — the registry populated without a round trip per skew evaluation, and a live read available — while removing a message shape and, with it, an ambiguity. Stream direction alone now says what is on a stream: relay-opened unidirectional is a filing, canopy-opened bidirectional is a request. Nothing to mark and nothing to disambiguate.
+
+### The relay's cluster work is one trait
+
+`relay::duties::Duties` is every method canopy's requests reach: the namespace roster, the build, sleep, wake, and the version patch. Putting them behind one trait makes the list of Canopy's authority over a cluster readable in one place, and widening it a visible diff rather than something that happens when a handler reaches for a `kube` client. Note what the trait cannot express: no method returns a Kubernetes object, and there is no general read. That is the boundary the card exists to build, stated as a type.
+
+`Unattached` implements it by answering every request with a failure while still reporting its build. So a relay that has no cluster access yet still connects, authenticates, and answers — which is what makes the transport and the enrollment testable against a real Canopy before there is a check to run, and what makes a misconfigured deployment read as "this relay cannot do anything" rather than as a silence that looks like a network fault.
+
+The two check families fill this in. Nothing else about the relay changes when they do.
+
+### Placing a filing waits on the identity columns
+
+A filing names cluster coordinates and canopy resolves them against the server record's Kubernetes coordinates — but no server record carries those columns yet. They arrive with the cluster registry and the identity picker, along with the `clusters` table a coordinate would reference, so adding them here would mean building those cards inside this one.
+
+So `jobs::relay::ingest::resolve` is the single function they fill in: it returns "cannot place" today, the listener logs each unplaceable filing with the coordinates it named, and the connection carries on. Everything downstream of resolution — both filing paths, provenance, scope mapping — is built and reachable. There is a test holding the line that an unplaceable filing costs a warning and not the connection.
+
+Worth being plain about the consequence: **no harvest filing lands in canopy until that function is implemented.** The transport, the protocol, the identity, and the ingestion convergence are done; the last hop from a coordinate to a server row is not, and cannot be until the columns exist.
+
+### Two latent manifest bugs fixed in passing
+
+`commons-errors` used `diesel_async::pooled_connection` and `commons-types` used `diesel::pg::Pg` without either declaring the feature that provides it — they built only because another workspace member turned those features on, so `cargo check -p commons-types` failed on `main`. Both now declare what they use. Not part of this card's work, but building a new leaf crate off `commons-types` is what surfaced it.
+
+## Build checklist
+
+The check families themselves are M1 and N1; this card lays the transport, the protocol, the identity, and the ingestion path they file through. So where a check would be determined, the relay carries the seam and not the check.
+
+### The relay role
+
+- [x] Add `relay` to `DeviceRole` (variant, `FromStr`, `Display`), so a device can be enrolled at the role `DTR` already names.
+- [x] Add the `RelayDevice` role extractor alongside the others, for the HTTP paths a relay may touch.
+
+### `crates/relay-protocol` — the wire contract
+
+- [x] New workspace member carrying no `kube` and no `bestool-alertd`: message types, framing, and the ALPN tokens.
+- [x] ALPN version negotiation (`canopy-relay/1`): Canopy offers the range it supports, the relay picks, an incompatible pair fails at the handshake.
+- [x] Length-delimited framing over a QUIC stream, with a frame ceiling so a malformed length cannot make Canopy allocate unboundedly.
+- [x] The filing messages: the harvest filing (the status-push body verbatim) and the substrate filing (scope, check, observed, detail).
+- [x] The three queries (namespace roster, handshake, embedded suite version), the two deployment commands (sleep, wake), and the version-naming command.
+
+### Ingestion hoist
+
+- [x] Move `file_health_events`, `collect_check_results`, `split_health_from_extra`, and the push payload types out of `public-server` into `commons-servers`.
+- [x] Leave the axum handler a thin caller, with the existing status-push tests green across the move.
+
+### Canopy side — the listener
+
+- [x] QUIC listener in `crates/jobs`, its own bin, holding N inbound connections.
+- [x] Client-certificate verifier that accepts any certificate, with the device-key SPKI lookup as the gate: `Device::from_key`, then the `relay` role.
+- [x] Connection registry keyed by the authenticated relay device, never by anything the relay claims in a message.
+- [x] Accept filings on unidirectional streams and route each family to its ingestion path.
+- [x] Open the queries and commands as bidirectional streams against a registered connection.
+
+### Relay side — the client
+
+- [x] `crates/relay` binary: configuration (its device key, Canopy's pinned public key, the endpoint), and the reconnect loop.
+- [x] Pinned verification of Canopy's certificate, on every transport.
+- [x] Serve the queries and commands, and file upward, with the check determination left as the seam M1/N1 fill.
+- [x] The version floor: the lowest image tag the relay will accept being told to run.
+
+### Verification
+
+- [x] Protocol round-trip tests: framing, the frame ceiling, ALPN mismatch.
+- [x] An end-to-end test over a real QUIC connection: an enrolled relay device connects, files, and is refused when its key is unknown, deactivated, or carries another role.

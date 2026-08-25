@@ -14,7 +14,10 @@ authors = [
 [dependencies]
 base64 = "0.23.0"
 commons-errors = { path = "../commons-errors" }
-diesel.workspace = true
+# `postgres` for the `ToSql`/`FromSql` impls these types carry against
+# `diesel::pg::Pg`. Declared here rather than inherited from whichever other
+# workspace member happens to turn it on, so this crate builds on its own.
+diesel = { workspace = true, features = ["postgres"] }
 jiff.workspace = true
 node-semver.workspace = true
 serde = { workspace = true, features = ["derive"] }

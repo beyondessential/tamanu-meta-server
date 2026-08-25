@@ -13,7 +13,10 @@ authors = [
 [dependencies]
 axum = { workspace = true, features = ["json", "macros"] }
 diesel.workspace = true
-diesel-async.workspace = true
+# `pool` for `pooled_connection::PoolError`, which `AppError` wraps. Declared
+# here rather than inherited from whichever other workspace member happens to
+# turn it on, so this crate builds on its own.
+diesel-async = { workspace = true, features = ["pool"] }
 http.workspace = true
 miette.workspace = true
 mobc.workspace = true

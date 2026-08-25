@@ -4,3 +4,5 @@
 // Nextest still runs every #[tokio::test] in parallel as usual.
 
 mod domains;
+mod relay;
+mod relay_end_to_end;

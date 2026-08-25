@@ -54,7 +54,9 @@ Canopy names the version of the check suite each relay should be running, and a 
 So the fleet of relays follows Canopy's account of where they should be rather than being rolled cluster by cluster, which is what keeps a change to a check reaching every cluster it applies to.
 
 What Canopy names is a version and never the code itself: a relay obtains its code from where its versions are published, so the most Canopy can ask of a relay is which published version to run.
+The cluster carries out the update, so a version that will not start leaves the relay already serving in place and Canopy can name an earlier one to recover from a bad release.
 A relay refuses a version below the floor it carries, so it cannot be sent back to a release already known to be bad.
+The floor is the relay's own rather than something Canopy supplies, because a floor Canopy could set is a floor Canopy could lower.
 
 ### Putting a deployment to sleep
 

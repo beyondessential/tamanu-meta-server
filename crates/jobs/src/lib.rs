@@ -6,3 +6,4 @@
 
 pub mod backup;
 pub mod domains;
+pub mod relay;
