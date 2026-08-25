@@ -302,11 +302,14 @@ Backup staleness anchors "never backed up" on `max(min_first_seen, config_create
 It is what stops a newly-onboarded server alerting immediately against a backup config that predates it: taking the later of the two starts the grace from when the server actually showed up.
 
 Dropping the table degrades the anchor to `config_created_at` alone, which the code already handles but which reintroduces exactly that false alert.
-`registered_at` on the application is the natural replacement and is arguably a truer anchor than the association ever was, being when the thing completed enrolment rather than when a row happened to be first written.
+So the anchor moves to the application's `registered_at`.
+
+This is a correction rather than a substitution.
+Anchoring a backup deadline on when a device was first associated with a server is a confusing thing for the system to do, and reads as an accident of what happened to be available rather than a decision — the question "has this been backed up in time" has nothing to do with certificates or associations.
+`registered_at` says when the thing started existing as far as Canopy is concerned, which is what the anchor was always reaching for.
 
 ## Open questions
 
-- [ ] Confirm `registered_at` as the backup-staleness anchor replacing `min_first_seen`. It changes when "never backed up" first fires for a server, so it is a behaviour change rather than a refactor.
 - [ ] Is the machine's group column maintained by a trigger or in application code? A trigger cannot see the "refuse to move group off a shared machine" rule, which lives above it.
 - [ ] Confirm the crossing unit: a crossing involving any application figure counts applications, a crossing of two machine figures counts machines. Derived from cardinality rather than chosen, so it should hold, but the view has to label which it is showing.
 - [ ] The edit form is machine-first, so is the *detail* view too, or does an application keep a page of its own with its machine's facts presented on it?
