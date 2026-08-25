@@ -122,6 +122,11 @@ The edit form is **machine-first**: one form per machine, holding a machine sect
 So a shared machine is edited in the one place that shows everything sharing it, and a change to the machine's fields is visibly a change to all of them.
 A one-application machine reads as a single form with two sections, which is close to the server form as it stands.
 
+The status page presents applications grouped by machine.
+That keeps the application as the unit an operator reads while making a shared box visible as one thing, so a machine going down reads as one failure with its applications under it rather than as several unrelated ones.
+
+How the grouping expresses itself in the current iconography is not settled and is a question for mockups rather than for prose.
+
 The same holds for controls that follow a grain.
 The unreachability silence lives mechanically on whatever carries reachability, which is the machine, but ergonomically it sits wherever the thing it silences is reported.
 So an operator quiets a host that is expected to be down without first working out which record owns the switch.
@@ -246,7 +251,7 @@ It is absent from a machine-figure spread automatically, being no part of that p
 - [ ] Is "a machine has at least one application" enforced, or is a temporary zero allowed for the delete-then-recreate case?
 - [ ] Does `/servers/self` become a machine-self route returning the machine plus the applications on it?
 - [ ] Should a group carry a product in its billing attribution at all? Product is not a group-level fact, and dropping it would remove the "only when members agree" rule rather than working around it. In scope for this card, or its own?
-- [ ] What does the status page present once applications and machines are separate?
+- [ ] How does the status page express machine grouping in the current iconography? Deferred to mockups.
 
 ## Transition
 
