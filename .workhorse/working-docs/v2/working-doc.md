@@ -365,7 +365,8 @@ Three mockups put the open presentation and wire questions side by side as optio
 - [ ] The edit form is machine-first, so is the *detail* view too, or does an application keep a page of its own with its machine's facts presented on it?
 - [ ] Is there a machine list, or is the fleet still listed as applications?
 - [ ] Confirm the discriminator: the presence of a `machine` key means split, `health` without it means unified, neither means the legacy Tamanu push. Proposed in the wire mockup; needs agreeing with bestool.
-- [ ] Which check names and which server-wide fields does Canopy's unified split rule treat as machine-subject? Needs to be written down and to match bestool.
+- [ ] Which top-level fields does the unified split rule treat as machine-subject? The check names are settled from bestool's registry; the detail fields are not.
+- [ ] Operator presence becomes a machine fact, since `external_users` is machine-subject. Does the group card's operator mark count operators per machine, and does anything still attribute a person to an application?
 
 - [ ] Should a group carry a product in its billing attribution at all? Product is not a group-level fact, and dropping it would remove the "only when members agree" rule rather than working around it. In scope for this card, or its own?
 
@@ -404,6 +405,32 @@ Policy rules and the fleet spread reach a check's fields as `check.<field>`, whi
 Nesting also makes the envelope extensible, which is why this card does not need to answer everything a reporter might one day send.
 Because the envelope's keys are a closed set rather than whatever a reporter did not happen to send, a new sibling of `health` and `detail` can be added later without ambiguity and without a format break.
 Reported metrics are the case in point: they raise questions about sampling, units, reporter clocks and retention that this card deliberately leaves alone, and the shape can take them when those are answered.
+
+### The unified split rule
+
+Splitting a unified push is knowledge Canopy has to hold: which check names are machine-subject, and which top-level fields belong to the machine.
+It duplicates what bestool knows once it sends split format, which is the price of the transition rather than a design choice, and it goes away with the unified path.
+
+bestool's registry splits 45 checks into 18 machine-subject and 27 application-subject.
+Application is the default, so Canopy holds only the machine list: an 18-name allowlist rather than a 45-name mapping, and a check absent from it files against the application, as an unknown check always did.
+
+The machine-subject checks are `disk_free`, `inodes`, `btrfs`, `held_captures`, `memory`, `load`, `uptime`, `time_sync`, `external_users`, `ips`, `munin`, `billing_tags`, `tailscale`, `tailscale_config`, `canopy_registration`, `caddy_version`, `caddy_resolvers` and `caddyfile_version`.
+
+The rule matches whole names rather than patterns, and that is load-bearing rather than incidental.
+Caddy straddles the split: its version, resolvers and Caddyfile describe the install on the box, while its certificates are what it serves for one application.
+`ips` and `ips_errors` share a prefix and nothing else, one being the machine's addresses and the other a Tamanu error stream.
+A prefix rule would file both wrongly and silently.
+
+Two entries bear on decisions made elsewhere in this card.
+
+`external_users` is machine-subject, which moves operator presence onto the machine.
+The status page reads that check to show who is logged in and currently attributes them to a server.
+People are on a box rather than in an application, so the machine is the truer home, but what the operator marks count changes with it.
+
+`billing_tags` is machine-subject, which agrees from bestool's side with both grains carrying billing tags: on a VM the cost is incurred by the box.
+
+During the transition a check name can file against a machine from one reporter and an application from another, depending on which format that host is sending.
+The catalog is keyed by (source, check) fleet-wide while scope is per-filing (see [CHK](../../specs/monitoring/checks.md)), so this costs nothing as long as Canopy's split rule agrees with bestool's.
 
 ### Migration
 

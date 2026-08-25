@@ -115,6 +115,20 @@
 
 	.verdict b { color: var(--text-primary); font-weight: 500; }
 
+	.names {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+	}
+
+	.names code {
+		font-family: "SF Mono", Menlo, Consolas, monospace;
+		font-size: 0.8125rem;
+		background: rgba(50, 102, 154, 0.10);
+		border-radius: 3px;
+		padding: 3px 7px;
+	}
+
 	.key {
 		display: flex;
 		gap: 24px;
@@ -167,9 +181,9 @@
 <pre>{
   <span class="k">"source"</span>: <span class="s">"alertd"</span>,
   <span class="k">"health"</span>: [
-    { <span class="k">"check"</span>: <span class="mark-app s">"tamanu_api"</span>,   <span class="k">"result"</span>: <span class="s">"passed"</span> },
-    { <span class="k">"check"</span>: <span class="mark-app s">"sync_lag"</span>,     <span class="k">"result"</span>: <span class="s">"warning"</span>,
-      <span class="k">"lag_seconds"</span>: <span class="n">412</span> },
+    { <span class="k">"check"</span>: <span class="mark-app s">"tamanu_http"</span>,   <span class="k">"result"</span>: <span class="s">"passed"</span> },
+    { <span class="k">"check"</span>: <span class="mark-app s">"sync_facility_stale"</span>,     <span class="k">"result"</span>: <span class="s">"warning"</span>,
+      <span class="k">"stale_facilities"</span>: <span class="n">3</span> },
     { <span class="k">"check"</span>: <span class="mark-machine s">"disk_free"</span>,    <span class="k">"result"</span>: <span class="s">"passed"</span>,
       <span class="k">"percent"</span>: <span class="n">37</span> },
     { <span class="k">"check"</span>: <span class="mark-machine s">"time_sync"</span>,    <span class="k">"result"</span>: <span class="s">"passed"</span> }
@@ -216,9 +230,9 @@
     {
       <span class="k">"id"</span>: <span class="s">"9f1c…"</span>,
       <span class="k">"health"</span>: [
-        { <span class="k">"check"</span>: <span class="s">"tamanu_api"</span>, <span class="k">"result"</span>: <span class="s">"passed"</span> },
-        { <span class="k">"check"</span>: <span class="s">"sync_lag"</span>, <span class="k">"result"</span>: <span class="s">"warning"</span>,
-          <span class="k">"detail"</span>: { <span class="k">"lag_seconds"</span>: <span class="n">412</span> } }
+        { <span class="k">"check"</span>: <span class="s">"tamanu_http"</span>, <span class="k">"result"</span>: <span class="s">"passed"</span> },
+        { <span class="k">"check"</span>: <span class="s">"sync_facility_stale"</span>, <span class="k">"result"</span>: <span class="s">"warning"</span>,
+          <span class="k">"detail"</span>: { <span class="k">"stale_facilities"</span>: <span class="n">3</span> } }
       ],
       <span class="k">"detail"</span>: {
         <span class="k">"tamanuVersion"</span>: <span class="s">"2.33.0"</span>,
@@ -297,39 +311,43 @@
 
 <h2>The unified split rule</h2>
 <p class="note">
-	Canopy holds this list only while unified pushes exist, and it has to agree with
-	what bestool decides in card L2. A unified push from a two-application machine
-	still lands on one application, since the format cannot say which.
+	From bestool's registry: 45 checks, 18 machine-subject and 27 application-subject.
+	Canopy only has to hold the machine list, because application is the default, so
+	the rule is an 18-name allowlist rather than a 45-name mapping. It exists only
+	while unified pushes do.
 </p>
 
 <div class="paper" style="max-width:1300px">
-	<table>
-		<thead>
-			<tr>
-				<th style="width:16%">Subject</th>
-				<th style="width:42%">Checks</th>
-				<th>Detail fields</th>
-			</tr>
-		</thead>
-		<tbody>
-			<tr>
-				<td><span class="swatch mark-machine"></span>machine</td>
-				<td><code>disk_free</code>, <code>memory</code>, <code>load</code>, <code>time_sync</code>, <code>tailscale</code></td>
-				<td><code>os</code>, <code>hostname</code>, <code>timezone</code>, <code>bestoolVersion</code>, <code>uptime</code></td>
-			</tr>
-			<tr>
-				<td><span class="swatch mark-app"></span>application</td>
-				<td>everything else</td>
-				<td><code>tamanuVersion</code>, <code>pgVersion</code>, <code>nodeVersion</code>, everything else</td>
-			</tr>
-		</tbody>
-	</table>
-	<p class="verdict" style="margin-top:16px">
-		<b>Application is the default, machine is the named exception.</b> An unknown
-		check from a new reporter lands on the application, which is where an unknown
-		check belonged before the split, so nothing changes meaning by being unlisted.
+	<p style="margin:0 0 10px;font-size:0.8125rem;color:var(--text-secondary)">
+		<b style="color:var(--text-primary)">Machine-subject checks.</b> Everything not
+		on this list is application-subject.
 	</p>
+	<div class="names"><code>disk_free</code><code>inodes</code><code>btrfs</code><code>held_captures</code><code>memory</code><code>load</code><code>uptime</code><code>time_sync</code><code>external_users</code><code>ips</code><code>munin</code><code>billing_tags</code><code>tailscale</code><code>tailscale_config</code><code>canopy_registration</code><code>caddy_version</code><code>caddy_resolvers</code><code>caddyfile_version</code></div>
 </div>
+
+<p class="verdict" style="max-width:68ch">
+	<b>The list is per name, not per prefix, and it has to be.</b> Caddy splits across
+	both grains: <code>caddy_version</code>, <code>caddy_resolvers</code> and
+	<code>caddyfile_version</code> are the install on the box, while
+	<code>caddy_certs</code> is what it serves for one application. A prefix rule would
+	file the certs against the machine and lose which application they belong to.
+	<br><br>
+	<code>ips</code> and <code>ips_errors</code> are not the same subject either, or
+	even the same word: one is the machine's addresses, the other is a Tamanu error
+	stream. Two checks sharing a prefix and sharing nothing else is exactly the case a
+	pattern would get wrong silently.
+	<br><br>
+	<b><code>external_users</code> being machine-subject moves operator presence.</b>
+	The status page reads it to show who is logged in
+	(<code>operators_from_health</code>, <code>aggregateOperators</code>), and it
+	currently attributes them to a server. People are on a box rather than in an
+	application, so the machine is the truer home, but the operator marks on the group
+	card change what they are counting.
+	<br><br>
+	<b><code>billing_tags</code> being machine-subject agrees with the model
+	independently.</b> On a VM the cost is incurred by the box, which is why both
+	grains carry billing tags; bestool reached the same answer from the other side.
+</p>
 
 </body>
 </html>
