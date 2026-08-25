@@ -256,7 +256,8 @@ Adding a machine grain follows the group migration (`migrations/2026-06-15-06443
 - `machine_id UUID REFERENCES machines (id) ON DELETE CASCADE ON UPDATE CASCADE` on `issues` and `scoped_check_policies`.
 - Widen `issues_scope_at_most_one` to cover three columns.
 - `CREATE UNIQUE INDEX issues_machine_source_ref ON issues (machine_id, source, ref) WHERE machine_id IS NOT NULL`.
-- `Scope` gains `Machine(Uuid)`, and `from_columns`/`to_columns` take and return the third column.
+- `Scope` ends as `{ Application(Uuid), Machine(Uuid), Group(Uuid), Global }` — `Server` renamed to `Application` by the rename step, `Machine` genuinely new, the other two untouched.
+  `from_columns`/`to_columns` take and return the third column.
 
 **Trap to avoid.** The global-scope partial unique index is `WHERE server_id IS NULL AND server_group_id IS NULL` (`migrations/2026-07-08-085731-0000_issues_global_scope`).
 A machine-scoped row has both of those null, so it would fall inside the global index and collide with a genuine canopy-wide issue on the same `(source, ref)`.
