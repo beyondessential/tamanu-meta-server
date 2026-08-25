@@ -2278,6 +2278,96 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/maintenance/declare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Declare that a server or a group is being worked on.
+         * @description Every check on the target grades to skipped while the window holds and
+         *     for a settle period after it ends, so nothing on it opens or joins an
+         *     incident. Issues already in an open incident leave it, closing the
+         *     incident where nothing else holds it open. A target that already has an
+         *     open window has that window amended rather than a second opened.
+         *     Requires admin access.
+         */
+        post: operations["declare"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/maintenance/for_target": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A target's maintenance windows.
+         * @description Open and ended, most recently declared first, so what was being done the
+         *     last time the target went quiet is readable against it.
+         */
+        post: operations["for_target"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/maintenance/lift": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Lift a window before its expected end.
+         * @description Suspension runs on for the settle period, after which the target is
+         *     watched again. Lifting a window that has already ended changes nothing.
+         *     Requires admin access.
+         */
+        post: operations["lift"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/maintenance/list_open": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Every maintenance window currently holding, across the fleet.
+         * @description Most recently declared first. A window that has ended is history and
+         *     belongs to its target, so it is not listed here even while its settle
+         *     period runs.
+         */
+        post: operations["list_open"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/mcp_tokens/list": {
         parameters: {
             query?: never;
@@ -4920,6 +5010,26 @@ export interface components {
              */
             server_group_id: string;
         };
+        /** @description Declare a window over a target, or amend the one it already has. */
+        DeclareArgs: {
+            /**
+             * Format: date-time
+             * @description When the work is expected to finish. The window ends itself then.
+             */
+            expected_end: string;
+            /** @description What is being done. */
+            note?: string | null;
+            /**
+             * Format: uuid
+             * @description The group, for a window over a whole group.
+             */
+            server_group_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The server, for a window over one server.
+             */
+            server_id?: string | null;
+        };
         /** @description Request body for decommissioning a check. */
         DecommissionArgs: {
             /**
@@ -6193,6 +6303,14 @@ export interface components {
             /** @description Whether the migrations applied. */
             verdict: components["schemas"]["Verdict"];
         };
+        /** @description The window to lift. */
+        LiftArgs: {
+            /**
+             * Format: uuid
+             * @description The window, as returned when it was declared or listed.
+             */
+            id: string;
+        };
         /** @description Filters for listing open incidents. */
         ListActiveArgs: {
             /**
@@ -6356,6 +6474,73 @@ export interface components {
          * @enum {string}
          */
         MaintenanceKind: "quick" | "full";
+        /** @description A declaration that a server or a group is being worked on. */
+        MaintenanceWindow: {
+            /**
+             * Format: date-time
+             * @description When the window was last amended.
+             */
+            amended_at?: string | null;
+            /** @description The operator who last amended the window, where one has. */
+            amended_by?: string | null;
+            /**
+             * Format: date-time
+             * @description When this record was created.
+             */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description When the window was declared.
+             */
+            declared_at: string;
+            /** @description The operator who declared the window. `None` if not recorded. */
+            declared_by?: string | null;
+            /**
+             * Format: date-time
+             * @description When the window stopped holding. `None` while it holds.
+             */
+            ended_at?: string | null;
+            /**
+             * @description The operator who lifted the window. `None` where its expected end
+             *     passed instead.
+             */
+            ended_by?: string | null;
+            /**
+             * Format: date-time
+             * @description When the operator expects the work to finish. A window reaching it
+             *     ends itself.
+             */
+            expected_end: string;
+            /**
+             * Format: uuid
+             * @description Unique identifier of this window.
+             */
+            id: string;
+            /** @description What is being done, where the operator said. */
+            note?: string | null;
+            /**
+             * Format: uuid
+             * @description Set for a window over a group, covering the group's own checks and
+             *     those of every server in it.
+             */
+            server_group_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Set for a window over one server.
+             */
+            server_id?: string | null;
+            /**
+             * Format: date-time
+             * @description Stamped once the settle period has elapsed and the target's issues
+             *     have been re-evaluated.
+             */
+            settled_at?: string | null;
+            /**
+             * Format: date-time
+             * @description When this record was last modified.
+             */
+            updated_at: string;
+        };
         /**
          * @description A DNS zone Canopy can write records in.
          *
@@ -6526,6 +6711,16 @@ export interface components {
             zone?: string | null;
         };
         /**
+         * @description An open window with the target it covers, named so a fleet-wide view
+         *     reads without a lookup per row.
+         */
+        OpenWindow: {
+            /** @description The target as it reads to an operator. */
+            target: string;
+            /** @description The window itself. */
+            window: components["schemas"]["MaintenanceWindow"];
+        };
+        /**
          * @description One person currently connected to a server, identified by their
          *     Tailscale login.
          *
@@ -6643,6 +6838,12 @@ export interface components {
                 is_monitored: boolean;
                 /** @description The server's role within its product's topology. */
                 kind: components["schemas"]["ServerKind"];
+                /**
+                 * @description Whether a maintenance window suspends this server, its own or its
+                 *     group's. Set alongside `up` and `health` by the endpoints that
+                 *     decorate listings; `None` where they aren't.
+                 */
+                maintained?: boolean | null;
                 /**
                  * @description Whether the server may manage its own DNS records for names under its
                  *     group's domains.
@@ -8148,6 +8349,11 @@ export interface components {
             health: components["schemas"]["HealthState"];
             last_status?: null | components["schemas"]["ServerLastStatusData"];
             /**
+             * @description Whether a maintenance window suspends this server, its own or its
+             *     group's: its checks are recorded and shown, and raise nothing.
+             */
+            maintained: boolean;
+            /**
              * @description Whether the server is known to run Munin, from the most recent source
              *     to report the flag. The UI offers a Munin link only when this is true.
              */
@@ -8390,6 +8596,12 @@ export interface components {
             is_monitored: boolean;
             /** @description The server's role within its product's topology. */
             kind: components["schemas"]["ServerKind"];
+            /**
+             * @description Whether a maintenance window suspends this server, its own or its
+             *     group's. Set alongside `up` and `health` by the endpoints that
+             *     decorate listings; `None` where they aren't.
+             */
+            maintained?: boolean | null;
             /**
              * @description Whether the server may manage its own DNS records for names under its
              *     group's domains.
@@ -9073,6 +9285,19 @@ export interface components {
             tags: string[];
             /** @description The tailnet (Tailscale network) this node belongs to. */
             tailnet: string;
+        };
+        /** @description The target a window covers: exactly one of the two is set. */
+        TargetArgs: {
+            /**
+             * Format: uuid
+             * @description The group, for a window over a whole group.
+             */
+            server_group_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The server, for a window over one server.
+             */
+            server_id?: string | null;
         };
         /**
          * @description One healthy↔degraded transition: the state became (or was first
@@ -12463,6 +12688,122 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IssueData"];
+                };
+            };
+        };
+    };
+    declare: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeclareArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceWindow"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    for_target: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TargetArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceWindow"][];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    lift: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LiftArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceWindow"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    list_open: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenWindow"][];
                 };
             };
         };

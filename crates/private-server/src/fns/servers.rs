@@ -45,6 +45,10 @@ pub struct ServerDetailData {
 	pub up: ShortStatus,
 	/// Current self-reported health, derived from the most recent status report.
 	pub health: HealthState,
+	/// Whether a maintenance window suspends this server, its own or its
+	/// group's: its checks are recorded and shown, and raise nothing.
+	// spec: MNT#presentation
+	pub maintained: bool,
 	/// The server's current checks across every source, graded and
 	/// classified — the live consolidated checks view.
 	pub checks: commons_types::status::ConsolidatedChecks,
@@ -140,6 +144,11 @@ pub struct ServerInfo {
 	/// Whether the server may obtain TLS certificates for names under its
 	/// group's domains.
 	pub may_manage_tls: bool,
+	/// Whether a maintenance window suspends this server, its own or its
+	/// group's. Set alongside `up` and `health` by the endpoints that
+	/// decorate listings; `None` where they aren't.
+	// spec: MNT#presentation
+	pub maintained: Option<bool>,
 }
 
 /// The server's most recently reported status push: version/host info plus
@@ -307,6 +316,7 @@ pub(super) fn server_to_info(s: Server) -> ServerInfo {
 		archived: s.deleted_at.is_some(),
 		up: None,
 		health: None,
+		maintained: None,
 		may_manage_dns: s.may_manage_dns,
 		may_manage_tls: s.may_manage_tls,
 	}
@@ -332,10 +342,18 @@ pub(super) async fn decorate_with_status(
 	let server_groups: Vec<(Uuid, Option<Uuid>)> =
 		infos.iter().map(|i| (i.id, i.group_id)).collect();
 	let health = database::issues::health_from_check_state(conn, &server_groups).await?;
+	let (maintained_servers, maintained_groups) =
+		database::maintenance_windows::MaintenanceWindow::suspended_targets(conn).await?;
 	for info in infos.iter_mut() {
 		let st = by_server.get(&info.id).copied();
 		info.up = Some(st.map(|s| s.short_status()).unwrap_or_default());
 		info.health = Some(health.get(&info.id).copied().unwrap_or_default());
+		info.maintained = Some(
+			maintained_servers.contains(&info.id)
+				|| info
+					.group_id
+					.is_some_and(|gid| maintained_groups.contains(&gid)),
+		);
 	}
 	Ok(())
 }
@@ -755,12 +773,20 @@ pub async fn get_detail(
 	// spec: SVC#munin-link
 	let munin = figures.munin().unwrap_or(false);
 
+	let maintained = database::maintenance_windows::MaintenanceWindow::suspends(
+		&mut conn,
+		Some(args.server_id),
+		server.group_id,
+	)
+	.await?;
+
 	Ok(Json(ServerDetailData {
 		server: server_details,
 		device_info,
 		last_status,
 		up,
 		health,
+		maintained,
 		checks,
 		group,
 		siblings,
