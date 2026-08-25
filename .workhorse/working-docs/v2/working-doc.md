@@ -243,6 +243,32 @@ So a crossing involving any application figure counts applications, and a crossi
 A machine-less application has no value for a machine figure and is absent from such a crossing rather than counted as unreported, following the precedent [APP](../../specs/servers/products.md) already sets for a server excluded from the application-version spread.
 It is absent from a machine-figure spread automatically, being no part of that population.
 
+## Implementation notes
+
+### Extending scope is a well-worn path
+
+The storage pattern is already set up to take another grain, and has taken two.
+Each scope is a nullable FK column, with a CHECK that at most one is set and a partial unique index keying find-or-create for that grain.
+`issues` (which is the check-state table) and `scoped_check_policies` both carry `server_id` and `server_group_id`; `incidents` carries `server_group_id` as its target.
+
+Adding a machine grain follows the group migration (`migrations/2026-06-15-064431-0000_backup_group_scoped_issues`) almost line for line:
+
+- `machine_id UUID REFERENCES machines (id) ON DELETE CASCADE ON UPDATE CASCADE` on `issues` and `scoped_check_policies`.
+- Widen `issues_scope_at_most_one` to cover three columns.
+- `CREATE UNIQUE INDEX issues_machine_source_ref ON issues (machine_id, source, ref) WHERE machine_id IS NOT NULL`.
+- `Scope` gains `Machine(Uuid)`, and `from_columns`/`to_columns` take and return the third column.
+
+**Trap to avoid.** The global-scope partial unique index is `WHERE server_id IS NULL AND server_group_id IS NULL` (`migrations/2026-07-08-085731-0000_issues_global_scope`).
+A machine-scoped row has both of those null, so it would fall inside the global index and collide with a genuine canopy-wide issue on the same `(source, ref)`.
+The migration has to add `AND machine_id IS NULL` to that index, and to its counterpart on `scoped_check_policies`, or machine checks will silently clash with self-alerts.
+
+### Blast radius of the rename
+
+19 of 55 tables carry a `server_id`, and 103 Rust files reference `Server`.
+The API surface is generated on top of that: `private-web/openapi.json` and `src/api-types.ts` both regenerate from the handler annotations, and `src/types.ts` re-exports them by hand.
+
+So the rename is mechanical but wide, and it is a different kind of work from adding the grain.
+
 ## Open questions
 
 - [ ] Does `Scope` gain one variant or two — `Machine(id)` alone, or `Machine(id)` and `Cluster(id)` — given reachability files at both?
