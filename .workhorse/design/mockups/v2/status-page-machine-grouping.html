@@ -167,6 +167,60 @@
 		border-radius: 999px;
 	}
 
+	/* The enclosure is the machine, so it carries the machine's own state
+	   while the dots inside carry each application's. */
+	.machine.m-warning {
+		border-color: var(--warning);
+		background: rgba(237, 108, 2, 0.10);
+	}
+
+	.machine.m-down {
+		border-color: var(--error);
+		background: rgba(211, 47, 47, 0.12);
+	}
+
+	/* Rank labelling, three ways. */
+	.lbl-watermark .rank-row { position: relative; }
+
+	.lbl-watermark .rank-row::after {
+		content: attr(data-rank);
+		position: absolute;
+		right: 8px;
+		top: 50%;
+		transform: translateY(-50%);
+		font-size: 0.9375rem;
+		font-weight: 500;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: rgba(0, 0, 0, 0.09);
+		pointer-events: none;
+		z-index: 0;
+	}
+
+	.lbl-watermark .machine { position: relative; z-index: 1; }
+
+	.lbl-initial-right .rank-row { position: relative; padding-right: 22px; }
+
+	.lbl-initial-right .rank-row::after {
+		content: attr(data-initial);
+		position: absolute;
+		right: 8px;
+		top: 50%;
+		transform: translateY(-50%);
+		font-size: 0.75rem;
+		font-weight: 500;
+		color: var(--text-disabled);
+	}
+
+	.lbl-initial-left .rank-row::before {
+		content: attr(data-initial);
+		font-size: 0.75rem;
+		font-weight: 500;
+		color: var(--text-disabled);
+		flex: none;
+		width: 0.8em;
+	}
+
 	.dot {
 		display: inline-block;
 		width: 0.85em;
@@ -293,7 +347,7 @@
 			</div>
 			<div class="band-detail">
 				<div class="rank-row">
-					<span class="machine">
+					<span class="machine m-down">
 						<span class="dot down"></span>
 						<span class="dot down"></span>
 					</span>
@@ -407,6 +461,157 @@
 	<span class="dot"></span>
 </div>
 
+<h2>Machine state on the enclosure</h2>
+<p class="note">
+	The pill is the machine, so it can carry the machine's own state while the dots
+	carry each application's. That separates two cases which read identically today.
+</p>
+
+<div class="variants">
+	<div class="variant">
+		<div class="card">
+			<div class="band-head"><h3 class="card-name">Machine fine</h3></div>
+			<div class="band-detail">
+				<div class="rank-row">
+					<span class="machine"><span class="dot"></span><span class="dot"></span></span>
+				</div>
+			</div>
+		</div>
+		<p>Box healthy, both applications healthy.</p>
+	</div>
+
+	<div class="variant">
+		<div class="card">
+			<div class="band-head"><h3 class="card-name">App sick</h3></div>
+			<div class="band-detail">
+				<div class="rank-row">
+					<span class="machine"><span class="dot"></span><span class="dot h-unhealthy"></span></span>
+				</div>
+			</div>
+		</div>
+		<p>Box healthy, one application failing. The pill stays neutral.</p>
+	</div>
+
+	<div class="variant">
+		<div class="card">
+			<div class="band-head"><h3 class="card-name">Machine degraded</h3></div>
+			<div class="band-detail">
+				<div class="rank-row">
+					<span class="machine m-warning"><span class="dot h-warning"></span><span class="dot h-warning"></span></span>
+				</div>
+			</div>
+		</div>
+		<p>Disk filling up. Both applications warn because the machine's checks count on each, and the pill says why.</p>
+	</div>
+
+	<div class="variant">
+		<div class="card">
+			<div class="band-head"><h3 class="card-name">Machine down</h3></div>
+			<div class="band-detail">
+				<div class="rank-row">
+					<span class="machine m-down"><span class="dot down"></span><span class="dot down"></span></span>
+				</div>
+			</div>
+		</div>
+		<p>Box gone, so everything on it is unreachable.</p>
+	</div>
+</div>
+
+<p class="verdict">
+	<b>It answers "is it the box or the app".</b> Two red dots in a neutral pill means
+	two applications happened to fail; two red dots in a red pill means one box took
+	them both. Today those are the same picture.
+	<br><br>
+	The machine-degraded case shows the reinforcement rather than redundancy: every
+	dot warns because a machine check counts toward every application on it, and the
+	pill is what says the cause is shared rather than coincidental.
+</p>
+
+<h2>Rank labelling</h2>
+<p class="note">
+	Same group, three ways. Production, demo, and dev, chosen because demo and dev
+	collide on a single initial.
+</p>
+
+<div class="variants">
+
+	<div class="variant">
+		<div class="card lbl-watermark">
+			<div class="band-head">
+				<h3 class="card-name">Vanuatu</h3>
+				<span class="version">2.34.1</span>
+			</div>
+			<div class="band-detail">
+				<div class="rank-row" data-rank="production">
+					<span class="machine"><span class="dot"></span></span>
+					<span class="machine"><span class="dot"></span></span>
+				</div>
+				<div class="rank-row" data-rank="demo">
+					<span class="machine"><span class="dot"></span></span>
+				</div>
+				<div class="rank-row" data-rank="dev">
+					<span class="machine"><span class="dot unmonitored"></span></span>
+				</div>
+			</div>
+		</div>
+		<p><b>Watermark, right-aligned.</b> Unambiguous, and free when a row is short. A full row of dots runs over it.</p>
+	</div>
+
+	<div class="variant">
+		<div class="card lbl-initial-right">
+			<div class="band-head">
+				<h3 class="card-name">Vanuatu</h3>
+				<span class="version">2.34.1</span>
+			</div>
+			<div class="band-detail">
+				<div class="rank-row" data-initial="P">
+					<span class="machine"><span class="dot"></span></span>
+					<span class="machine"><span class="dot"></span></span>
+				</div>
+				<div class="rank-row" data-initial="D">
+					<span class="machine"><span class="dot"></span></span>
+				</div>
+				<div class="rank-row" data-initial="D">
+					<span class="machine"><span class="dot unmonitored"></span></span>
+				</div>
+			</div>
+		</div>
+		<p><b>Initial, right-aligned.</b> Reserves a fixed gutter so dots never collide with it. Demo and dev are both D.</p>
+	</div>
+
+	<div class="variant">
+		<div class="card lbl-initial-left">
+			<div class="band-head">
+				<h3 class="card-name">Vanuatu</h3>
+				<span class="version">2.34.1</span>
+			</div>
+			<div class="band-detail">
+				<div class="rank-row" data-initial="P">
+					<span class="machine"><span class="dot"></span></span>
+					<span class="machine"><span class="dot"></span></span>
+				</div>
+				<div class="rank-row" data-initial="D">
+					<span class="machine"><span class="dot"></span></span>
+				</div>
+				<div class="rank-row" data-initial="D">
+					<span class="machine"><span class="dot unmonitored"></span></span>
+				</div>
+			</div>
+		</div>
+		<p><b>Initial, left prefix.</b> Reads as a row label and aligns down the left edge, but pushes every dot right by a character.</p>
+	</div>
+
+</div>
+
+<p class="verdict">
+	<b>The initials collide.</b> Production, clone, demo, test, dev gives P, C, D, T, D.
+	Two letters (Pr, Cl, De, Te, Dv) fixes it but stops reading as an initial, and the
+	watermark sidesteps it by spelling the rank out.
+	<br><br>
+	Worth weighing against doing nothing: rows are already ordered highest rank first,
+	which is exactly what the triangle conveyed, and dot tooltips already name the rank.
+</p>
+
 <h2>At fleet scale</h2>
 <p class="note">
 	Production groups as the page would show them. Most machines carry one
@@ -440,7 +645,7 @@
 		</div>
 		<div class="band-detail">
 			<div class="rank-row">
-				<span class="machine">
+				<span class="machine m-down">
 					<span class="dot down"></span>
 					<span class="dot down"></span>
 				</span>
