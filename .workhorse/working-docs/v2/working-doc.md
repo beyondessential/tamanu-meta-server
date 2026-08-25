@@ -89,6 +89,9 @@ It is a denormalisation for query performance, with the application's column the
 This holds because a shared machine is always shared within one deployment, so every application on a machine is in the same group and the derived value is never ambiguous.
 That is a real constraint, not just an observation: it makes the machine dropdown in the application creation form a choice among the machines already in that application's group.
 
+Moving an application to a different group while it shares a machine with applications staying behind is refused.
+It has no meaning in the model, and forbidding it stops it happening by accident rather than leaving a machine with two groups to derive from.
+
 ### Billing attribution for a machine
 
 A machine's billing attribution is assembled from the applications on it, since `product` and `rank` stay there.
@@ -195,7 +198,6 @@ An operator crosses a machine figure against an application figure the same way 
 - [ ] `alert_when_down_for` moves to the machine, so what does the migration do with a machine whose applications disagreed on the threshold? (Moot at migration, where every machine has one application, but not for a machine that later gains a second.)
 - [ ] Is "a machine has at least one application" enforced, or is a temporary zero allowed for the delete-then-recreate case?
 - [ ] Does `/servers/self` become a machine-self route returning the machine plus the applications on it?
-- [ ] Does an application change group after creation, and if so what happens to a machine it shares with applications staying behind?
 - [ ] Should a group carry a product in its billing attribution at all? Product is not a group-level fact, and dropping it would remove the "only when members agree" rule rather than working around it. In scope for this card, or its own?
 - [ ] What does the status page present once applications and machines are separate?
 
