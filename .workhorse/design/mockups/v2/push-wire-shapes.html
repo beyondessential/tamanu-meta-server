@@ -325,6 +325,14 @@
 	<div class="names"><code>disk_free</code><code>inodes</code><code>btrfs</code><code>held_captures</code><code>memory</code><code>load</code><code>uptime</code><code>time_sync</code><code>external_users</code><code>ips</code><code>munin</code><code>billing_tags</code><code>tailscale</code><code>tailscale_config</code><code>canopy_registration</code><code>caddy_version</code><code>caddy_resolvers</code><code>caddyfile_version</code></div>
 </div>
 
+<div class="paper" style="max-width:1300px;margin-top:16px">
+	<p style="margin:0 0 10px;font-size:0.8125rem;color:var(--text-secondary)">
+		<b style="color:var(--text-primary)">Machine-subject detail fields.</b> 22 of
+		30; the rest are application-subject.
+	</p>
+	<div class="names"><code>hostname</code><code>osKind</code><code>osName</code><code>osVersion</code><code>kernel</code><code>arch</code><code>osTimezone</code><code>cpuCores</code><code>totalMemoryBytes</code><code>filesystems</code><code>uptimeSecs</code><code>virtualised</code><code>virtualisation</code><code>ipv4</code><code>ipv6</code><code>nat64</code><code>lanIps</code><code>wanIpv4</code><code>wanIpv6</code><code>bestoolVersion</code><code>instanceTags</code><code>munin</code></div>
+</div>
+
 <p class="verdict" style="max-width:68ch">
 	<b>The list is per name, not per prefix, and it has to be.</b> Caddy splits across
 	both grains: <code>caddy_version</code>, <code>caddy_resolvers</code> and
@@ -347,6 +355,69 @@
 	<b><code>billing_tags</code> being machine-subject agrees with the model
 	independently.</b> On a VM the cost is incurred by the box, which is why both
 	grains carry billing tags; bestool reached the same answer from the other side.
+</p>
+
+<h2>Two timezones</h2>
+<p class="note">
+	The detail split puts <code>osTimezone</code> on the machine and
+	<code>timezone</code> on the application, so a fact that was one figure becomes two
+	that can disagree.
+</p>
+
+<div class="paper" style="max-width:780px">
+<pre>  <span class="mark-machine k">"machine"</span>: {
+    <span class="k">"detail"</span>: { <span class="k">"osTimezone"</span>: <span class="s">"UTC"</span> }
+  },
+  <span class="mark-app k">"applications"</span>: [
+    { <span class="k">"detail"</span>: { <span class="k">"timezone"</span>: <span class="s">"Pacific/Nauru"</span> } }
+  ]</pre>
+</div>
+
+<p class="verdict" style="max-width:68ch">
+	<b>A Tamanu configured for one timezone on a box set to another is a real
+	configuration, not a contradiction.</b> The figures today present one timezone,
+	described as the server's own configured timezone so an operator can read its local
+	time. Which one that means now has to be answered: the box's clock, the
+	application's setting, or both side by side with the disagreement visible.
+	<br><br>
+	Worth noting that a disagreement is often the thing an operator wants to see, since
+	a timestamp read in the wrong zone is a class of bug that survives a long time.
+</p>
+
+<h2>Fallbacks that now cross grains</h2>
+<p class="note">
+	Two figure rules reach for a value that has moved to the other grain.
+</p>
+
+<div class="paper" style="max-width:1300px">
+	<table>
+		<thead>
+			<tr>
+				<th style="width:26%">Figure</th>
+				<th style="width:37%">Current fallback</th>
+				<th>After the split</th>
+			</tr>
+		</thead>
+		<tbody>
+			<tr>
+				<td>Platform</td>
+				<td>A server reporting no operating system falls back to the family its database engine gives away.</td>
+				<td>The OS is machine-subject and the database engine is application-subject, so a machine with no reported OS has to read its applications' <code>pgVersion</code> to guess.</td>
+			</tr>
+			<tr>
+				<td>Runtime version</td>
+				<td>When no source reports it, falls back to the runtime named by the reporting device's connection metadata.</td>
+				<td>The runtime is application-subject and the identity is reached through the machine, so the fallback reads across the link.</td>
+			</tr>
+		</tbody>
+	</table>
+</div>
+
+<p class="verdict" style="max-width:68ch">
+	<b>Neither is broken, both are now explicit.</b> They read across the machine link
+	rather than within one record, which is fine while an application has at most one
+	machine. Both are worth stating rather than inheriting, because a reader of the
+	figures spec will otherwise assume a figure is sourced from its own grain.
 </p>
 
 </body>
