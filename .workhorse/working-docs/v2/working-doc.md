@@ -147,17 +147,26 @@ An unreachable application is also **unhealthy**, not merely marked.
 If the machine is down, so is everything on it, and a rollup reading healthy off stale checks would be a lie.
 
 That does pull towards applications having a liveness signal of their own, since unreachability now behaves per-application for health while being filed once.
-The split holds for now: one filing, one issue, one incident, and health derived onto each application.
+The split holds for now: one filing, one issue, one incident.
 Worth revisiting if a second application-subject reporter ever appears.
 
-Two ways to land the health part, and the choice is not settled:
+### A machine's checks present on its applications
 
-- **Extra clause in the rollup.** Health is derived from the checks contributing, *plus* the reachability of the application's machine.
-  Changes the rollup rule in [CHK](../../specs/monitoring/checks.md).
-- **Inherited check.** The machine's reachability check presents in each application's check list, so the existing rollup rule reaches it without changing.
-  Costs one check appearing against several targets, which nothing in the model does today.
+Reachability is the case that raised this, but the rule is general: **every machine check appears on every application on that machine**, marked as a machine check.
 
-Either way there is one filing, so incidents are unaffected: still one, from the machine's scope.
+Take a server presenting checks A, B and C today, where the split makes A and B application checks and C a machine check.
+It still presents A, B and C.
+The MCP interface still returns A, B and C.
+The only difference is that C is marked as belonging to the machine.
+
+So the machine is absorbed into the application as a shared part, from an operator's point of view.
+The health rollup rule in [CHK](../../specs/monitoring/checks.md) does not change: an application's health still derives from the checks contributing to it, and its machine's checks are among them.
+
+There is still one filing per machine check, so incidents are unaffected — one incident from the machine's scope, however many applications present the check.
+A silence on a machine check is machine-scoped and quiets it everywhere it appears, which is right: it is one check, seen from several places.
+
+This is the strongest continuity property the split has.
+Nothing an operator or an MCP consumer currently sees disappears or moves, so the refactor lands without a relearning cost.
 
 ## Reachability as it stands today
 
@@ -221,7 +230,7 @@ An operator crosses a machine figure against an application figure the same way 
 ## Open questions
 
 - [ ] Does `Scope` gain one variant or two — `Machine(id)` alone, or `Machine(id)` and `Cluster(id)` — given reachability files at both?
-- [ ] Which way does unreachability reach an application's health — an extra clause in the rollup rule, or the machine's reachability check inherited into the application's check list?
+- [ ] Does the fleet spread count applications or machines for a machine figure? A machine's checks and figures presenting on each of its applications means a two-application machine is counted twice in a platform spread, which is a wrong number rather than harmless repetition.
 - [ ] The edit form is machine-first, so is the *detail* view too, or does an application keep a page of its own with its machine's facts presented on it?
 - [ ] Is there a machine list, or is the fleet still listed as applications?
 - [ ] How does Canopy tell a unified push from a split one — a marker field, or the presence of the new machine section?
