@@ -145,13 +145,17 @@ impl Config {
 		}
 	}
 
-	/// The `link` variable for a row: its incident page, or the self-alerts
-	/// view for rows that have no incident.
+	/// The `link` variable for a row: the fleet's open maintenance windows
+	/// for a maintenance row, its incident page for one carrying an
+	/// incident, or the self-alerts view otherwise.
 	fn link_for(&self, row: &SlackOutbox) -> Option<String> {
 		let base = self.private_url.as_deref()?.trim_end_matches('/');
-		Some(match row.incident_id {
-			Some(incident_id) => format!("{base}/incidents/{incident_id}"),
-			None => format!("{base}/alerts"),
+		Some(match (row.kind.as_str(), row.incident_id) {
+			(KIND_MAINTENANCE_DECLARED | KIND_MAINTENANCE_ENDED, _) => {
+				format!("{base}/maintenance")
+			}
+			(_, Some(incident_id)) => format!("{base}/incidents/{incident_id}"),
+			(_, None) => format!("{base}/alerts"),
 		})
 	}
 }
