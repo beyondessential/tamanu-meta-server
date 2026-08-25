@@ -365,7 +365,8 @@ Three mockups put the open presentation and wire questions side by side as optio
 - [ ] The edit form is machine-first, so is the *detail* view too, or does an application keep a page of its own with its machine's facts presented on it?
 - [ ] Is there a machine list, or is the fleet still listed as applications?
 - [ ] Confirm the discriminator: the presence of a `machine` key means split, `health` without it means unified, neither means the legacy Tamanu push. Proposed in the wire mockup; needs agreeing with bestool.
-- [ ] Which top-level fields does the unified split rule treat as machine-subject? The check names are settled from bestool's registry; the detail fields are not.
+- [ ] Which timezone do the figures present, the machine's or the application's, and is a disagreement between them worth surfacing?
+- [ ] `tamanuServerKind` is reported while a kind is operator-set (see [APP](../../specs/servers/products.md)). Is the reported value ignored, or used to flag an application whose operator-set kind disagrees with what it says it is?
 - [ ] Operator presence becomes a machine fact, since `external_users` is machine-subject. Does the group card's operator mark count operators per machine, and does anything still attribute a person to an application?
 
 - [ ] Should a group carry a product in its billing attribution at all? Product is not a group-level fact, and dropping it would remove the "only when members agree" rule rather than working around it. In scope for this card, or its own?
@@ -428,6 +429,30 @@ The status page reads that check to show who is logged in and currently attribut
 People are on a box rather than in an application, so the machine is the truer home, but what the operator marks count changes with it.
 
 `billing_tags` is machine-subject, which agrees from bestool's side with both grains carrying billing tags: on a VM the cost is incurred by the box.
+
+The detail fields split 30 ways: 22 machine-subject and 8 application-subject.
+Machine takes identity and OS (`hostname`, `osKind`, `osName`, `osVersion`, `kernel`, `arch`, `osTimezone`), hardware and capacity (`cpuCores`, `totalMemoryBytes`, `filesystems`, `uptimeSecs`), virtualisation (`virtualised`, `virtualisation`), addressing (`ipv4`, `ipv6`, `nat64`, `lanIps`, `wanIpv4`, `wanIpv6`), and the agent and platform (`bestoolVersion`, `instanceTags`, `munin`).
+The application takes `tamanuVersion`, `tamanuRoot`, `tamanuServerKind`, `nodeVersion`, `canonicalUrl`, `currentSyncTick`, `timezone`, `pgVersion`, and the service inventory.
+
+Two of these agree with decisions this card reached from the other direction.
+`instanceTags` is machine-subject, matching the machine carrying billing tags, and `canonicalUrl` is application-subject, matching `host` becoming the application's `url`.
+
+### Two timezones
+
+The detail split turns one figure into two that can disagree.
+`osTimezone` is the machine's clock and `timezone` is the application's own setting, and a Tamanu configured for one zone on a box set to another is a real configuration rather than a contradiction.
+
+The figures present a single timezone today, described as the server's own configured timezone so an operator can read its local time.
+Which one that now means has to be decided: the box's, the application's, or both with the disagreement visible.
+A disagreement is often the thing worth seeing, since a timestamp read in the wrong zone is a class of bug that survives a long time.
+
+### Figure fallbacks now cross grains
+
+Two figure rules reach for a value that has moved to the other grain, and both still work while an application has at most one machine.
+Neither is broken; both are worth stating rather than inheriting, because a reader will otherwise assume a figure is sourced from its own grain.
+
+The platform falls back to the family the database engine gives away when no operating system is reported, so a machine with no OS reads its applications' `pgVersion` to guess.
+The runtime version falls back to the runtime named by the reporting identity's connection metadata, which the application reaches through its machine.
 
 During the transition a check name can file against a machine from one reporter and an application from another, depending on which format that host is sending.
 The catalog is keyed by (source, check) fleet-wide while scope is per-filing (see [CHK](../../specs/monitoring/checks.md)), so this costs nothing as long as Canopy's split rule agrees with bestool's.
