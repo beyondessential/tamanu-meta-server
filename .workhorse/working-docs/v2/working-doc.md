@@ -394,6 +394,13 @@ Canopy accepts both, and tells them apart on arrival.
 - A **split** push is the new format, carrying machine-subject and application-subject material already separated.
   Canopy takes it verbatim and splits nothing.
 
+The split format also stops flattening free-form fields into the envelope.
+A reporter's own fields sit under a `detail` object, on the machine, on each application, and on each health entry.
+Today they are spread across the top level and across each health entry, so a reporter cannot send a field named `source`, `health`, `check` or `result` without colliding with the envelope; a container removes the reserved words entirely, leaving everything inside `detail` as data and everything outside it as structure.
+
+`detail` is the name because it is already Canopy's word for this, in the status contract, the check-state model and the figures.
+Policy rules and the fleet spread reach a check's fields as `check.<field>`, which is exactly `health[].detail.<field>`, so the wire and the vocabulary need no translation between them.
+
 bestool moves from unified to split over whatever period it takes, one release at a time, and the unified machinery is retired once nothing sends it.
 
 The split rule for unified pushes is knowledge Canopy has to hold — which check names are machine-subject, and which server-wide fields belong to the machine.

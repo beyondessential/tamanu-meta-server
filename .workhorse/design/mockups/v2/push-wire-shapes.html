@@ -202,13 +202,15 @@
   <span class="mark-machine k">"machine"</span>: {
     <span class="k">"health"</span>: [
       { <span class="k">"check"</span>: <span class="s">"disk_free"</span>, <span class="k">"result"</span>: <span class="s">"passed"</span>,
-        <span class="k">"percent"</span>: <span class="n">37</span> },
+        <span class="k">"detail"</span>: { <span class="k">"percent"</span>: <span class="n">37</span> } },
       { <span class="k">"check"</span>: <span class="s">"time_sync"</span>, <span class="k">"result"</span>: <span class="s">"passed"</span> }
     ],
-    <span class="k">"os"</span>: <span class="s">"Ubuntu 22.04"</span>,
-    <span class="k">"hostname"</span>: <span class="s">"nauru-prod-01"</span>,
-    <span class="k">"timezone"</span>: <span class="s">"Pacific/Nauru"</span>,
-    <span class="k">"bestoolVersion"</span>: <span class="s">"0.41.2"</span>
+    <span class="k">"detail"</span>: {
+      <span class="k">"os"</span>: <span class="s">"Ubuntu 22.04"</span>,
+      <span class="k">"hostname"</span>: <span class="s">"nauru-prod-01"</span>,
+      <span class="k">"timezone"</span>: <span class="s">"Pacific/Nauru"</span>,
+      <span class="k">"bestoolVersion"</span>: <span class="s">"0.41.2"</span>
+    }
   },
   <span class="mark-app k">"applications"</span>: [
     {
@@ -216,11 +218,13 @@
       <span class="k">"health"</span>: [
         { <span class="k">"check"</span>: <span class="s">"tamanu_api"</span>, <span class="k">"result"</span>: <span class="s">"passed"</span> },
         { <span class="k">"check"</span>: <span class="s">"sync_lag"</span>, <span class="k">"result"</span>: <span class="s">"warning"</span>,
-          <span class="k">"lag_seconds"</span>: <span class="n">412</span> }
+          <span class="k">"detail"</span>: { <span class="k">"lag_seconds"</span>: <span class="n">412</span> } }
       ],
-      <span class="k">"tamanuVersion"</span>: <span class="s">"2.33.0"</span>,
-      <span class="k">"pgVersion"</span>: <span class="s">"16.4"</span>,
-      <span class="k">"nodeVersion"</span>: <span class="s">"22.11.0"</span>
+      <span class="k">"detail"</span>: {
+        <span class="k">"tamanuVersion"</span>: <span class="s">"2.33.0"</span>,
+        <span class="k">"pgVersion"</span>: <span class="s">"16.4"</span>,
+        <span class="k">"nodeVersion"</span>: <span class="s">"22.11.0"</span>
+      }
     }
   ]
 }</pre>
@@ -232,6 +236,19 @@
 			<br><br>
 			<code>applications</code> is a list because a machine can carry several;
 			<code>machine</code> is an object because an application has at most one.
+			<br><br>
+			<b>Free-form fields nest under <code>detail</code> instead of flattening.</b>
+			Today they are spread at the top level and inside each health entry, so a
+			reporter cannot send a field called <code>source</code>, <code>health</code>,
+			<code>check</code> or <code>result</code> without colliding with the envelope.
+			A container removes the reserved words entirely: anything inside
+			<code>detail</code> is data, and everything outside it is structure.
+			<br><br>
+			<code>detail</code> is Canopy's own word for this already, in the status
+			contract, the check-state model and the figures. Policy rules and the fleet
+			spread reach a check's fields as <code>check.&lt;field&gt;</code>, which is
+			exactly <code>health[].detail.&lt;field&gt;</code>, so the wire and the
+			vocabulary line up rather than needing translation.
 		</p>
 	</div>
 
@@ -286,7 +303,7 @@
 			<tr>
 				<th style="width:16%">Subject</th>
 				<th style="width:42%">Checks</th>
-				<th>Top-level fields</th>
+				<th>Detail fields</th>
 			</tr>
 		</thead>
 		<tbody>
