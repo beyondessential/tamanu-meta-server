@@ -63,26 +63,37 @@ Both are "did a reporter reach us recently".
 The reporter is bestool, and bestool runs on the machine, so both are machine facts.
 That supports machine-primary.
 
-Two things still pull against machine-only.
+The **legacy `tamanu` source** (see [STA](../../specs/public-server/statuses.md), "Legacy pushes"; `crates/public-server/src/statuses.rs:128`) was the other application-subject reporter, but it is going: one server still sends it, and that stops within about a month of this card.
+So every remaining reporter is an agent installed on something.
 
-The **legacy `tamanu` source** (see [STA](../../specs/public-server/statuses.md), "Legacy pushes"; `crates/public-server/src/statuses.rs:128`) is a Tamanu server pushing its own heartbeat directly, with no bestool involved.
-That is an application reporter, so its silence is an application fact, and today that silence is exactly what moves the server's reachability check.
-If the legacy path is being retired too, this stops mattering.
+### Reachability attaches to whatever hosts the reporter
 
-**Machine-less applications** do not.
-On Kubernetes an application has no machine, so machine-only reachability leaves it with no liveness signal at all — nothing says its reporter went quiet.
-Either the Kubernetes substrate plays the machine's part for reachability, or applications keep a reachability signal of their own.
+That is the rule the split needs, and it holds in both contexts.
 
-So the real discriminator may not be the target but **what a source reports about** — the same subject axis L2 is giving bestool.
-On that reading reachability is "did the reporters that file against this target go quiet", and which target that is follows from the source's subject.
+On a VM the reporter is bestool, installed on the machine, so bestool going quiet is a machine fact — one fact, with every application on that machine as its consequence.
+
+On Kubernetes the reporter is the relay, and there is one relay per cluster holding one outbound connection (see card J2).
+The relay going quiet is a cluster fact, with every application on the cluster as its consequence.
+Liveness is not per-application on Kubernetes, because the namespace is a *filing grain* for checks and never a reporter.
+
+So reachability is carried by machines and by clusters, and by neither applications nor namespaces.
+This keeps "machine" an honest name: it does not have to stretch to cover clusters, because a cluster is its own entity carrying its own reachability.
+
+An application never goes quiet in its own right.
+A dead application on a live machine is not silence — bestool keeps reporting and grades the application's own checks as failed or broken.
+Silence only ever means the agent stopped, and the agent belongs to the machine or the cluster.
 
 Health is already documented as independent of reachability (`status.rs:406`), so the two axes are established; this adds a grain to one of them.
 
+Residual edge: a machine hosting two applications reported by two different agents, where one agent goes quiet.
+Machine reachability counts sources, so the quiet one raises the machine's reachability warning without saying which application lost its reporter.
+Probably acceptable, and the source detail names the quiet source anyway.
+
 ## Open questions
 
-- [ ] Is the legacy `tamanu` direct-push path being retired? If it stays, an application-subject reporter outlives pingtask and machine-only reachability has a hole.
-- [ ] What carries liveness for a machine-less (Kubernetes) application — the cluster or namespace substrate standing in for the machine, or an application-level reachability signal?
-- [ ] If applications do keep a reachability signal, is it suppressed while the machine is unreachable, so a dead host is one fact rather than N?
+- [ ] Does `Scope` gain one variant or two — `Machine(id)` alone, or `Machine(id)` and `Cluster(id)` — given reachability files at both?
+- [ ] How does an application present while its machine or cluster is unreachable? It has no reachability of its own to fail, so something has to say why nothing is arriving.
+- [ ] Does the per-target down threshold (`alert_when_down_for`, today a `servers` column) move to the machine, and what happens to a machine whose applications disagreed about it before the migration?
 - [ ] Is "a machine has at least one application" enforced, or is a temporary zero allowed for the delete-then-recreate case?
 - [ ] Does an identity gain a machine association, or is the machine link a property of what reports rather than of who authenticates?
 - [ ] Where do `host`, `cloud`, and `geolocation` land, and what does that do to DNS, TLS, and backups, which reach for them today?
