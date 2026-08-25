@@ -262,9 +262,13 @@ Adding a machine grain follows the group migration (`migrations/2026-06-15-06443
 A machine-scoped row has both of those null, so it would fall inside the global index and collide with a genuine canopy-wide issue on the same `(source, ref)`.
 The migration has to add `AND machine_id IS NULL` to that index, and to its counterpart on `scoped_check_policies`, or machine checks will silently clash with self-alerts.
 
-Only `Machine(Uuid)` is added here.
-The cluster grain belongs to K1, which will widen the same CHECK and add the same kind of partial index again.
-The migration and `Scope` should carry a note saying so, since the global-index trap above is exactly the sort of thing a second pass repeats.
+Only `Machine(Uuid)` is added here, and nothing anticipates a cluster.
+
+Clusters are K1's to model, and this card should not presuppose that a cluster will be a scope at all.
+Adding a `Cluster` variant now, or even leaving a note that one is coming, railroads K1 into the shape this card happens to find convenient.
+K1 may want a scope variant, or something else entirely; it should reach that on its own evidence.
+
+The one thing worth carrying forward is not a design but a hazard: whoever adds the next grain has to remember that the global partial index matches on *all* other scope columns being null.
 
 ### Sequencing: rename first, then split
 
