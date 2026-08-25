@@ -1,0 +1,513 @@
+<!-- spec: monitoring/checks.md -->
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<title>Status page: machine grouping options</title>
+<style>
+	:root {
+		--paper: #fff;
+		--divider: rgba(0, 0, 0, 0.12);
+		--text-primary: rgba(0, 0, 0, 0.87);
+		--text-secondary: rgba(0, 0, 0, 0.6);
+		--text-disabled: rgba(0, 0, 0, 0.38);
+		--action-hover: rgba(0, 0, 0, 0.04);
+		--success: #2e7d32;
+		--error: #d32f2f;
+		--warning: #ed6c02;
+		--info: #0288d1;
+		--secondary: #32669a;
+		--health-warning: rgb(132, 223, 91);
+	}
+
+	body {
+		font-family: Roboto, Helvetica, Arial, sans-serif;
+		margin: 0;
+		padding: 32px;
+		background: #fafafa;
+		color: var(--text-primary);
+		font-size: 16px;
+		line-height: 1.5;
+	}
+
+	h1 {
+		font-size: 1.5rem;
+		font-weight: 400;
+		margin: 0 0 4px;
+	}
+
+	h2 {
+		font-size: 1.25rem;
+		font-weight: 400;
+		margin: 40px 0 4px;
+	}
+
+	.lede {
+		color: var(--text-secondary);
+		font-size: 0.875rem;
+		max-width: 62ch;
+		margin: 0 0 24px;
+	}
+
+	.note {
+		color: var(--text-secondary);
+		font-size: 0.875rem;
+		max-width: 68ch;
+		margin: 8px 0 16px;
+	}
+
+	.grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(18em, 1fr));
+		gap: 12px;
+		max-width: 1100px;
+	}
+
+	.card {
+		background: var(--paper);
+		border: 1px solid var(--divider);
+		border-radius: 4px;
+		padding: 12px;
+	}
+
+	.card.incident {
+		border: 2px solid var(--error);
+		padding: 11px;
+	}
+
+	.card-head {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 8px;
+		margin-bottom: 8px;
+	}
+
+	.card-name {
+		font-size: 1rem;
+		font-weight: 400;
+		margin: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.version {
+		flex-shrink: 0;
+		font-size: 0.8125rem;
+		color: var(--text-secondary);
+		font-variant-numeric: tabular-nums;
+	}
+
+	.card-foot {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+
+	.chip {
+		display: inline-flex;
+		align-items: center;
+		height: 24px;
+		padding: 0 8px;
+		border-radius: 12px;
+		font-size: 0.75rem;
+		border: 1px solid var(--divider);
+		color: var(--text-secondary);
+		white-space: nowrap;
+	}
+
+	.chip.error {
+		background: var(--error);
+		border-color: var(--error);
+		color: #fff;
+	}
+
+	/* Dot strip, matching RankedDotStrip: identical 1em cells, gap 0.5em. */
+	.strip {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.5em;
+	}
+
+	.cell {
+		display: inline-flex;
+		width: 1em;
+		height: 1em;
+		align-items: center;
+		justify-content: center;
+		flex: none;
+	}
+
+	.dot {
+		display: inline-block;
+		width: 1em;
+		height: 1em;
+		border-radius: 50%;
+		background: var(--success);
+	}
+
+	.dot.down { background: var(--error); }
+	.dot.away { background: var(--warning); }
+	.dot.blip { background: var(--secondary); }
+	.dot.gone { background: var(--text-disabled); }
+
+	.dot.h-warning {
+		outline: 0.2em solid var(--health-warning);
+		outline-offset: -0.2em;
+	}
+
+	.dot.h-unhealthy {
+		background: var(--error);
+		outline: 0.2em solid var(--success);
+		outline-offset: -0.2em;
+	}
+
+	.dot.unmonitored {
+		-webkit-mask-image: linear-gradient(135deg, #000 0 42%, transparent 42% 58%, #000 58% 100%);
+		mask-image: linear-gradient(135deg, #000 0 42%, transparent 42% 58%, #000 58% 100%);
+	}
+
+	.sep {
+		color: var(--text-primary);
+		display: inline-flex;
+	}
+
+	/* Option A: flush clustering. Applications on one machine sit with no
+	   gap; the container gap separates machines. */
+	.machine-flush {
+		display: inline-flex;
+		align-items: center;
+		gap: 0;
+	}
+
+	/* Option B: underline bar beneath a shared machine's dots. */
+	.machine-bar {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5em;
+		padding-bottom: 3px;
+		border-bottom: 2px solid var(--text-disabled);
+	}
+
+	/* Option C: enclosure around a shared machine's dots. */
+	.machine-box {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5em;
+		padding: 2px 4px;
+		margin: -2px 0;
+		border: 1px solid var(--text-disabled);
+		border-radius: 999px;
+	}
+
+	.compare {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+		gap: 24px;
+		max-width: 1100px;
+		margin-top: 16px;
+	}
+
+	.option h3 {
+		font-size: 0.75rem;
+		font-weight: 500;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--text-secondary);
+		margin: 0 0 8px;
+	}
+
+	.verdict {
+		font-size: 0.8125rem;
+		color: var(--text-secondary);
+		margin: 12px 0 0;
+	}
+
+	.verdict b { color: var(--text-primary); font-weight: 500; }
+
+	.legend {
+		background: var(--paper);
+		border: 1px solid var(--divider);
+		border-radius: 4px;
+		padding: 16px;
+		max-width: 1100px;
+		margin-top: 8px;
+		font-size: 0.8125rem;
+		color: var(--text-secondary);
+	}
+
+	.legend-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 6px;
+	}
+
+	.legend-row:last-child { margin-bottom: 0; }
+
+	.tag {
+		display: inline-block;
+		font-size: 0.6875rem;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--text-secondary);
+		background: var(--action-hover);
+		border-radius: 3px;
+		padding: 1px 6px;
+		margin-left: 6px;
+		vertical-align: middle;
+	}
+</style>
+</head>
+<body>
+
+<h1>Status page: machine grouping</h1>
+<p class="lede">
+	The status page presents applications grouped by machine. Group cards, the dot
+	strip, and the rank separator are unchanged; the only question is how a shared
+	machine reads. Almost every machine hosts one application, so the grouping has
+	to disappear entirely when nothing is shared.
+</p>
+
+<h2>Today</h2>
+<p class="note">
+	One dot per server, sorted by rank then kind, with a hollow triangle between
+	ranks. The Nauru card below has two workloads on one box; nothing says so.
+</p>
+
+<div class="grid">
+	<div class="card">
+		<div class="card-head">
+			<h3 class="card-name">Fiji</h3>
+			<span class="version">2.34.1</span>
+		</div>
+		<div class="card-foot">
+			<div class="strip">
+				<span class="cell"><span class="dot"></span></span>
+				<span class="cell sep">
+					<svg width="1em" height="1em" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M4.5 3.2 12.8 8 4.5 12.8Z"/></svg>
+				</span>
+				<span class="cell"><span class="dot"></span></span>
+				<span class="cell"><span class="dot h-warning"></span></span>
+			</div>
+		</div>
+	</div>
+
+	<div class="card">
+		<div class="card-head">
+			<h3 class="card-name">Nauru</h3>
+			<span class="version">2.33.0</span>
+		</div>
+		<div class="card-foot">
+			<div class="strip">
+				<span class="cell"><span class="dot"></span></span>
+				<span class="cell"><span class="dot"></span></span>
+				<span class="cell sep">
+					<svg width="1em" height="1em" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M4.5 3.2 12.8 8 4.5 12.8Z"/></svg>
+				</span>
+				<span class="cell"><span class="dot"></span></span>
+			</div>
+		</div>
+	</div>
+</div>
+
+<h2>Options</h2>
+<p class="note">
+	Each shows the same Nauru group: a production central and a production facility
+	sharing one machine, then a test facility on its own machine. The machine is
+	down in the second row of each option, which is the case the grouping exists for.
+</p>
+
+<div class="compare">
+
+	<div class="option">
+		<h3>A · Flush clustering</h3>
+		<div class="card">
+			<div class="card-head">
+				<h3 class="card-name">Nauru</h3>
+				<span class="version">2.33.0</span>
+			</div>
+			<div class="card-foot">
+				<div class="strip">
+					<span class="machine-flush">
+						<span class="cell"><span class="dot"></span></span>
+						<span class="cell"><span class="dot"></span></span>
+					</span>
+					<span class="cell sep">
+						<svg width="1em" height="1em" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M4.5 3.2 12.8 8 4.5 12.8Z"/></svg>
+					</span>
+					<span class="cell"><span class="dot"></span></span>
+				</div>
+			</div>
+		</div>
+		<div class="card incident" style="margin-top:12px">
+			<div class="card-head">
+				<h3 class="card-name">Nauru</h3>
+				<span class="version">2.33.0</span>
+			</div>
+			<div class="card-foot">
+				<div class="strip">
+					<span class="machine-flush">
+						<span class="cell"><span class="dot down"></span></span>
+						<span class="cell"><span class="dot down"></span></span>
+					</span>
+					<span class="cell sep">
+						<svg width="1em" height="1em" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M4.5 3.2 12.8 8 4.5 12.8Z"/></svg>
+					</span>
+					<span class="cell"><span class="dot"></span></span>
+				</div>
+			</div>
+			<div class="card-foot" style="margin-top:8px">
+				<span></span><span class="chip error">incident</span>
+			</div>
+		</div>
+		<p class="verdict">
+			<b>Costs nothing when nothing is shared.</b> A one-application machine is
+			a plain dot, so the whole fleet reads as it does today. Adds no new mark,
+			only spacing, which the strip already uses to mean adjacency.
+			<br><br>
+			Two touching red dots read as one wide failure, which is what happened.
+			Risk: at small sizes flush dots can merge into a blob, and the difference
+			between 0 and 0.5em of gap is subtle on a busy card.
+		</p>
+	</div>
+
+	<div class="option">
+		<h3>B · Underline</h3>
+		<div class="card">
+			<div class="card-head">
+				<h3 class="card-name">Nauru</h3>
+				<span class="version">2.33.0</span>
+			</div>
+			<div class="card-foot">
+				<div class="strip">
+					<span class="machine-bar">
+						<span class="cell"><span class="dot"></span></span>
+						<span class="cell"><span class="dot"></span></span>
+					</span>
+					<span class="cell sep">
+						<svg width="1em" height="1em" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M4.5 3.2 12.8 8 4.5 12.8Z"/></svg>
+					</span>
+					<span class="cell"><span class="dot"></span></span>
+				</div>
+			</div>
+		</div>
+		<div class="card incident" style="margin-top:12px">
+			<div class="card-head">
+				<h3 class="card-name">Nauru</h3>
+				<span class="version">2.33.0</span>
+			</div>
+			<div class="card-foot">
+				<div class="strip">
+					<span class="machine-bar">
+						<span class="cell"><span class="dot down"></span></span>
+						<span class="cell"><span class="dot down"></span></span>
+					</span>
+					<span class="cell sep">
+						<svg width="1em" height="1em" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M4.5 3.2 12.8 8 4.5 12.8Z"/></svg>
+					</span>
+					<span class="cell"><span class="dot"></span></span>
+				</div>
+			</div>
+			<div class="card-foot" style="margin-top:8px">
+				<span></span><span class="chip error">incident</span>
+			</div>
+		</div>
+		<p class="verdict">
+			<b>Explicit, and still absent for a lone application.</b> The bar is drawn
+			only where a machine is shared, so the fleet is as quiet as today and the
+			exceptions are marked.
+			<br><br>
+			Reads as "these belong together" without changing dot spacing, so the
+			column grid survives wrapping. Risk: a second horizontal mark competes
+			with the rank triangle, and the strip starts carrying two separate
+			grouping languages at once.
+		</p>
+	</div>
+
+	<div class="option">
+		<h3>C · Enclosure</h3>
+		<div class="card">
+			<div class="card-head">
+				<h3 class="card-name">Nauru</h3>
+				<span class="version">2.33.0</span>
+			</div>
+			<div class="card-foot">
+				<div class="strip">
+					<span class="machine-box">
+						<span class="cell"><span class="dot"></span></span>
+						<span class="cell"><span class="dot"></span></span>
+					</span>
+					<span class="cell sep">
+						<svg width="1em" height="1em" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M4.5 3.2 12.8 8 4.5 12.8Z"/></svg>
+					</span>
+					<span class="cell"><span class="dot"></span></span>
+				</div>
+			</div>
+		</div>
+		<div class="card incident" style="margin-top:12px">
+			<div class="card-head">
+				<h3 class="card-name">Nauru</h3>
+				<span class="version">2.33.0</span>
+			</div>
+			<div class="card-foot">
+				<div class="strip">
+					<span class="machine-box">
+						<span class="cell"><span class="dot down"></span></span>
+						<span class="cell"><span class="dot down"></span></span>
+					</span>
+					<span class="cell sep">
+						<svg width="1em" height="1em" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M4.5 3.2 12.8 8 4.5 12.8Z"/></svg>
+					</span>
+					<span class="cell"><span class="dot"></span></span>
+				</div>
+			</div>
+			<div class="card-foot" style="margin-top:8px">
+				<span></span><span class="chip error">incident</span>
+			</div>
+		</div>
+		<p class="verdict">
+			<b>Hardest to miss, heaviest on the card.</b> The pill says "one box" more
+			plainly than a bar does, and survives wrapping better because it encloses
+			rather than underlines.
+			<br><br>
+			Risk: it breaks the fixed-cell grid the strip is built on, adding width
+			that the column alignment does not expect, and on a card with several
+			shared machines it starts to look like a diagram rather than a glance.
+		</p>
+	</div>
+
+</div>
+
+<div class="legend">
+	<div class="legend-row">
+		<span class="cell"><span class="dot"></span></span>
+		<span>up</span>
+		<span class="cell" style="margin-left:16px"><span class="dot away"></span></span>
+		<span>away</span>
+		<span class="cell" style="margin-left:16px"><span class="dot down"></span></span>
+		<span>down</span>
+		<span class="cell" style="margin-left:16px"><span class="dot gone"></span></span>
+		<span>never reported</span>
+	</div>
+	<div class="legend-row">
+		<span class="cell"><span class="dot h-warning"></span></span>
+		<span>degraded</span>
+		<span class="cell" style="margin-left:16px"><span class="dot h-unhealthy"></span></span>
+		<span>unhealthy</span>
+		<span class="cell" style="margin-left:16px"><span class="dot unmonitored"></span></span>
+		<span>unmonitored</span>
+	</div>
+	<div class="legend-row">
+		<span class="cell sep">
+			<svg width="1em" height="1em" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M4.5 3.2 12.8 8 4.5 12.8Z"/></svg>
+		</span>
+		<span>rank boundary, unchanged<span class="tag">existing</span></span>
+	</div>
+</div>
+
+</body>
+</html>

@@ -37,6 +37,7 @@ Machines are created through creating applications, which keeps the invariant th
   Unticking that offers a search dropdown to select an existing machine instead, among the machines in that application's group.
 
 A machine ends with its last application, which is what keeps "at least one application" true rather than merely encouraged.
+It is archived rather than deleted, as an application is, so it leaves the live fleet without the record going away.
 Removing the last application off a machine warns first, saying that the machine goes with it, and that if the box is still alive the new applications should be put on before the old one is removed.
 So the delete-then-recreate case is answered by doing it in the other order, rather than by admitting an empty machine to the model.
 
@@ -317,16 +318,25 @@ This is a correction rather than a substitution.
 Anchoring a backup deadline on when a device was first associated with a server is a confusing thing for the system to do, and reads as an accident of what happened to be available rather than a decision — the question "has this been backed up in time" has nothing to do with certificates or associations.
 `registered_at` says when the thing started existing as far as Canopy is concerned, which is what the anchor was always reaching for.
 
+### Mockups
+
+Three mockups put the open presentation and wire questions side by side as options, under `.workhorse/design/mockups/v2/`.
+
+- **Status page: machine grouping** — flush clustering, an underline, or an enclosure in the dot strip.
+  The governing constraint is that almost every machine hosts one application, so the affordance has to vanish entirely in the 1:1 case; flush clustering is the only option that does so without drawing anything.
+- **Machine navigation** — application page with a machine section against a machine page with applications nested, the group listing flat against shared machines enclosing, and a machine list.
+  The detail and list questions answer each other, so they are shown together.
+- **Status push wire shapes** — unified against split, the discriminator, and the unified split rule as a table.
+
 ## Open questions
 
 - [ ] Confirm the trigger also *enforces* rather than only recomputing — raising when a write would leave a machine's applications in disagreeing groups, with the application-code refusal in front of it as the readable error.
 - [ ] Confirm the crossing unit: a crossing involving any application figure counts applications, a crossing of two machine figures counts machines. Derived from cardinality rather than chosen, so it should hold, but the view has to label which it is showing.
 - [ ] The edit form is machine-first, so is the *detail* view too, or does an application keep a page of its own with its machine's facts presented on it?
 - [ ] Is there a machine list, or is the fleet still listed as applications?
-- [ ] How does Canopy tell a unified push from a split one — a marker field, or the presence of the new machine section?
+- [ ] Confirm the discriminator: the presence of a `machine` key means split, `health` without it means unified, neither means the legacy Tamanu push. Proposed in the wire mockup; needs agreeing with bestool.
 - [ ] Which check names and which server-wide fields does Canopy's unified split rule treat as machine-subject? Needs to be written down and to match bestool.
-- [ ] Servers are archived rather than deleted (`deleted_at`, and [FIG](../../specs/private-server/server-figures.md) counts only live ones). Does a machine archive alongside its last application, or is machine removal a real delete?
-- [ ] Does `/servers/self` become a machine-self route returning the machine plus the applications on it?
+
 - [ ] Should a group carry a product in its billing attribution at all? Product is not a group-level fact, and dropping it would remove the "only when members agree" rule rather than working around it. In scope for this card, or its own?
 - [ ] How does the status page express machine grouping in the current iconography? Deferred to mockups.
 
@@ -338,6 +348,13 @@ bestool's existing server ID is really the machine ID.
 
 - bestool keeps calling it the server ID for now, and Canopy keeps accepting it as such.
 - Canopy introduces a machine ID; bestool moves across to it later.
+
+### Routes are deprecated, never removed
+
+No route is deleted, because fielded clients call the names that exist today and would break.
+A renamed route keeps its old path, marked deprecated, and routes internally to the new name, so there is one implementation and two ways in.
+
+`/servers/self` becomes a machine-self route under that rule: it answers with the machine and the applications on it (see [DID](../../specs/public-server/device-identity.md)), reached at both the old path and the new one.
 
 ### Two push formats
 
