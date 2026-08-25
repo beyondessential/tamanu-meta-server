@@ -74,6 +74,32 @@ pub fn incident_resolve(server_label: &str, by: Option<&str>) -> Value {
 	})
 }
 
+/// `maintenance_declared`: variables `target`, `by`, `until`, `note`.
+pub fn maintenance_declared(
+	target: &str,
+	by: Option<&str>,
+	until: &str,
+	note: Option<&str>,
+) -> Value {
+	json!({
+		"target": target,
+		"by": by.unwrap_or("an operator"),
+		"until": until,
+		"note": truncate(note.unwrap_or(""), MAX_MESSAGE_LEN),
+	})
+}
+
+/// `maintenance_ended`: variables `target`, `by`, `watching_from`. `by` is
+/// the operator who lifted the window, or the event where its expected end
+/// passed instead.
+pub fn maintenance_ended(target: &str, by: Option<&str>, watching_from: &str) -> Value {
+	json!({
+		"target": target,
+		"by": by.unwrap_or("its expected end passing"),
+		"watching_from": watching_from,
+	})
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;

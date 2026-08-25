@@ -17,6 +17,7 @@
 //! endpoints.
 
 use crate::issues::Scope;
+use crate::maintenance_windows::MaintenanceWindow;
 use commons_errors::{AppError, Result};
 use commons_types::status::CheckResult;
 use diesel::dsl::{AsSelect, SqlTypeOf};
@@ -876,6 +877,9 @@ impl ScopedCheckPolicy {
 			.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name)));
 		let mut rows: Vec<Self> = query.load(db).await.map_err(AppError::from)?;
 		Self::order_chain(&mut rows);
+		if MaintenanceWindow::suspends(db, server_id, group_id).await? {
+			rows.push(Self::maintenance(server_id, group_id));
+		}
 		Ok(rows)
 	}
 
@@ -901,6 +905,11 @@ impl ScopedCheckPolicy {
 		}
 		for chain in chains.values_mut() {
 			Self::order_chain(chain);
+		}
+		if MaintenanceWindow::suspends(db, server_id, group_id).await? {
+			for chain in chains.values_mut() {
+				chain.push(Self::maintenance(server_id, group_id));
+			}
 		}
 		Ok(chains)
 	}
@@ -932,6 +941,32 @@ impl ScopedCheckPolicy {
 						.is_not_distinct_from(group)
 						.and(dsl::server_group_id.is_not_null())),
 			),
+		}
+	}
+
+	/// The transform a maintenance window contributes: a skipped ceiling
+	/// over every check on the target, for as long as the window suspends
+	/// it (see [`crate::maintenance_windows`]). It rides the chain rather
+	/// than gating each grading call site, so a path that grades a check
+	/// cannot forget to honour a window.
+	///
+	/// Not a stored row: windows cover a target, while
+	/// `scoped_check_policies` holds operator-owned transforms on one
+	/// (source, check). A ceiling only narrows, so where it sits in the
+	/// chain makes no difference.
+	fn maintenance(server_id: Option<Uuid>, group_id: Option<Uuid>) -> Self {
+		let now = Timestamp::now();
+		Self {
+			id: Uuid::nil(),
+			created_at: now,
+			updated_at: now,
+			source: String::new(),
+			check_name: String::new(),
+			server_id,
+			server_group_id: group_id,
+			ceiling: Some(CheckResult::Skipped.to_string()),
+			rules: None,
+			created_by: None,
 		}
 	}
 

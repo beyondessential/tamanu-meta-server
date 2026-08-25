@@ -1656,13 +1656,15 @@ pub async fn get_global_issue(conn: &mut AsyncPgConnection, r#ref: &str) -> Resu
 /// Compute whether the issue *should* currently be contributing to an
 /// open incident, and apply join/leave accordingly. The rules:
 ///
-/// - **Leave**: `!active || resolved || snoozed || silenced || !monitored`.
+/// - **Leave**: `!active || resolved || snoozed || silenced || maintained ||
+///   !monitored`.
 ///   A result downgrade alone does *not* remove an issue — once
 ///   contributing, it stays until it's actually gone or explicitly
 ///   suppressed. Flipping the server to unmonitored *does* remove it: the
 ///   operator has said they're not watching this server, so its issues
 ///   stop counting. The same applies if the check is silenced at server
-///   or group scope — see [`crate::silenced_refs`].
+///   or group scope — see [`crate::silenced_refs`] — or if a maintenance
+///   window suspends the target, see [`crate::maintenance_windows`].
 /// - **Join**: not leaving, AND one of:
 ///   - the state opens incidents on its own — an effective failure (see
 ///     [`Issue::opens_incident`]); or
@@ -1678,8 +1680,8 @@ pub async fn get_global_issue(conn: &mut AsyncPgConnection, r#ref: &str) -> Resu
 ///   The linger sweep ([`sweep_lingering_incidents`]) closes it once the
 ///   window elapses, backdating the close to when the failure left. Only a
 ///   leave caused by the check actually recovering lingers: resolution,
-///   snooze, silence, and monitoring-off are explicit operator actions,
-///   not flaps, and close immediately — as does a zero linger window.
+///   snooze, silence, maintenance, and monitoring-off are explicit operator
+///   actions, not flaps, and close immediately — as does a zero linger window.
 ///   Lesser contributors that joined because
 ///   the target had an open incident stay attached (so the audit trail and
 ///   Slack thread retain them) but **do not** hold the incident open (or
@@ -1721,6 +1723,14 @@ async fn re_evaluate_incident_membership(
 		&issue.r#ref,
 	)
 	.await?;
+	// A maintenance window over the target suspends everything on it, so its
+	// issues leave exactly as a silenced one does.
+	let maintained = crate::maintenance_windows::MaintenanceWindow::suspends(
+		conn,
+		issue.server_id,
+		target.group_id(),
+	)
+	.await?;
 	// Lock the target before reading whether it has an open incident: for a
 	// sub-Error issue, that read is the entire justification for joining, and
 	// a concurrent close landing between here and `find_or_open_incident`
@@ -1729,10 +1739,15 @@ async fn re_evaluate_incident_membership(
 	lock_target(conn, target).await?;
 	let target_open = target_has_open_incident(conn, target).await?;
 
-	let should_leave =
-		!issue.active || issue.resolved_at.is_some() || snoozed || silenced || !monitored;
+	let should_leave = !issue.active
+		|| issue.resolved_at.is_some()
+		|| snoozed
+		|| silenced
+		|| maintained
+		|| !monitored;
 	let should_join = monitored
 		&& !silenced
+		&& !maintained
 		&& issue.active
 		&& issue.resolved_at.is_none()
 		&& !snoozed
@@ -2232,6 +2247,76 @@ pub async fn reevaluate_open_issues_for_group_ref(
 			None,
 		)
 		.await?;
+	}
+	Ok(())
+}
+
+/// Re-evaluate every currently-open issue on a scope against incident
+/// membership: one server's, or a whole group's plus the group's own. Used
+/// when something about the target changes what counts, rather than
+/// something about one check — currently a maintenance window being
+/// declared over it (see [`crate::maintenance_windows`]).
+///
+/// `by` attributes an incident that closes as a result, so the notice says
+/// what happened instead of reading as the trouble having passed.
+pub async fn reevaluate_open_issues_for_scope(
+	db: &mut AsyncPgConnection,
+	scope: Scope,
+	by: Option<&str>,
+) -> Result<()> {
+	use crate::schema::{issues, servers};
+
+	let (gid, server_ids, include_group_scoped) = match scope {
+		Scope::Server(sid) => {
+			let server = Server::get_by_id(db, sid).await?;
+			let Some(gid) = server.group_id else {
+				return Ok(());
+			};
+			(gid, vec![sid], false)
+		}
+		Scope::Group(gid) => {
+			let ids: Vec<Uuid> = servers::table
+				.select(servers::id)
+				.filter(servers::group_id.eq(gid))
+				.load(db)
+				.await?;
+			(gid, ids, true)
+		}
+		Scope::Global => return Ok(()),
+	};
+
+	let mut query = issues::table
+		.select(Issue::as_select())
+		.filter(issues::active.eq(true))
+		.filter(issues::resolved_at.is_null())
+		.into_boxed();
+	query = if include_group_scoped {
+		query.filter(
+			issues::server_id
+				.eq_any(server_ids.clone())
+				.or(issues::server_group_id.eq(gid)),
+		)
+	} else {
+		query.filter(issues::server_id.eq_any(server_ids.clone()))
+	};
+	let open_issues: Vec<Issue> = query.load(db).await?;
+
+	let mut monitored_by_server: std::collections::HashMap<Uuid, bool> =
+		std::collections::HashMap::new();
+	for sid in &server_ids {
+		let server = Server::get_by_id(db, *sid).await?;
+		monitored_by_server.insert(*sid, server.is_monitored);
+	}
+
+	let now = Timestamp::now();
+	for issue in open_issues {
+		// A group-scoped issue answers to no server's monitoring gate.
+		let monitored = match issue.server_id {
+			Some(sid) => monitored_by_server.get(&sid).copied().unwrap_or(true),
+			None => true,
+		};
+		re_evaluate_incident_membership(db, &issue, IncidentTarget::Group(gid), monitored, now, by)
+			.await?;
 	}
 	Ok(())
 }
@@ -2781,7 +2866,7 @@ async fn enqueue_slack_resolve_inner(
 	Ok(())
 }
 
-fn format_group_label(group: &ServerGroup, server: Option<&Server>) -> String {
+pub(crate) fn format_group_label(group: &ServerGroup, server: Option<&Server>) -> String {
 	if let Some(server) = server {
 		let host = server.host.as_ref().map(|h| h.0.to_string());
 		let server_part = match (&server.name, host) {
