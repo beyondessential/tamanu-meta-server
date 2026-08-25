@@ -54,31 +54,35 @@ Nothing alerts off it.
 **2. The `canopy`/`reachability` check** (`Status::sweep_staleness`, `crates/database/src/statuses.rs:275`) — one check per server, computed from per-source freshness against that server's own `alert_when_down_for` interval, each source graded by its reachability mode (`on`/`quiet`/`off`).
 This is the one that alerts, is silenceable (the "Alert when this server is unreachable" switch in `ServerEdit.tsx` *is* the server-scoped silence on it), and feeds incidents and the health rollup.
 
-**3. Pingtask** (`Status::ping_server`, `crates/database/src/statuses.rs:175`) — an active HTTP GET of the server's `host` + `/api/public/ping`, run only for servers with **no device** (`all_pingable` filters on `device_id IS NULL`).
-It writes a synthetic status row under the `canopy` source, so it feeds 1 and 2 rather than standing on its own.
+Pingtask, the third, is being removed as this card is written, so an active HTTP probe of the application is no longer part of the picture.
+The backstop it justified in the sweep — "servers with no counted source fall back to the latest status row, any source" — goes with it.
 
 ### What that implies for the split
 
-1 and 2 are both "did a reporter reach us recently".
+Both are "did a reporter reach us recently".
 The reporter is bestool, and bestool runs on the machine, so both are machine facts.
 That supports machine-primary.
 
-3 is not.
-An HTTP GET against the application's own endpoint asks whether the *application* is serving, which a machine grain cannot answer: a live box running a dead Tamanu keeps bestool reporting while the ping fails.
-It only looks like a machine fact today because it is laundered through a synthetic status push.
+Two things still pull against machine-only.
 
-The legacy `tamanu` source (see [STA](../../specs/public-server/statuses.md), "Legacy pushes") is the same shape.
-A Tamanu server pushing its own heartbeat is an application reporter, so its silence is an application fact, and today that silence is exactly what moves the server's reachability check.
+The **legacy `tamanu` source** (see [STA](../../specs/public-server/statuses.md), "Legacy pushes"; `crates/public-server/src/statuses.rs:128`) is a Tamanu server pushing its own heartbeat directly, with no bestool involved.
+That is an application reporter, so its silence is an application fact, and today that silence is exactly what moves the server's reachability check.
+If the legacy path is being retired too, this stops mattering.
 
-So the real discriminator is not the target but **what a source reports about** — the same subject axis L2 is giving bestool.
-Reachability is "did the reporters that file against this target go quiet", and which target that is follows from the source's subject.
+**Machine-less applications** do not.
+On Kubernetes an application has no machine, so machine-only reachability leaves it with no liveness signal at all — nothing says its reporter went quiet.
+Either the Kubernetes substrate plays the machine's part for reachability, or applications keep a reachability signal of their own.
+
+So the real discriminator may not be the target but **what a source reports about** — the same subject axis L2 is giving bestool.
+On that reading reachability is "did the reporters that file against this target go quiet", and which target that is follows from the source's subject.
 
 Health is already documented as independent of reachability (`status.rs:406`), so the two axes are established; this adds a grain to one of them.
 
 ## Open questions
 
-- [ ] Does an application keep a reachability signal of its own for application-subject reporters (pingtask, the legacy `tamanu` heartbeat), or does application liveness stop being called reachability and become an ordinary check?
-- [ ] If applications do keep one, is it suppressed while the machine is unreachable, so a dead host is one fact rather than N?
+- [ ] Is the legacy `tamanu` direct-push path being retired? If it stays, an application-subject reporter outlives pingtask and machine-only reachability has a hole.
+- [ ] What carries liveness for a machine-less (Kubernetes) application — the cluster or namespace substrate standing in for the machine, or an application-level reachability signal?
+- [ ] If applications do keep a reachability signal, is it suppressed while the machine is unreachable, so a dead host is one fact rather than N?
 - [ ] Is "a machine has at least one application" enforced, or is a temporary zero allowed for the delete-then-recreate case?
 - [ ] Does an identity gain a machine association, or is the machine link a property of what reports rather than of who authenticates?
 - [ ] Where do `host`, `cloud`, and `geolocation` land, and what does that do to DNS, TLS, and backups, which reach for them today?
