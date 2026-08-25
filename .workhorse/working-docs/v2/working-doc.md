@@ -22,8 +22,7 @@ A machine usually has an identity, and one or more applications on it.
 ### Cardinality
 
 - An application has zero or one machine, never two.
-- A machine has one or more applications.
-  Whether "one or more" is enforced is an open question (see below) — the delete-then-recreate case wants a temporary zero.
+- A machine has one or more applications, always. A machine with none does not exist.
 - On Kubernetes an application has no machine at all; machine-less is a first-class case, not a degenerate one.
 - A Kubernetes cluster is a separate entity beside machines, not a machine of a special class.
 
@@ -35,7 +34,11 @@ Machines are created through creating applications, which keeps the invariant th
 - The migration creates one machine per existing server, 1:1.
 - The application creation form gains a machine section.
   By default it creates a new machine for that application.
-  Unticking that offers a search dropdown to select an existing machine instead.
+  Unticking that offers a search dropdown to select an existing machine instead, among the machines in that application's group.
+
+A machine ends with its last application, which is what keeps "at least one application" true rather than merely encouraged.
+Removing the last application off a machine warns first, saying that the machine goes with it, and that if the box is still alive the new applications should be put on before the old one is removed.
+So the delete-then-recreate case is answered by doing it in the other order, rather than by admitting an empty machine to the model.
 
 ### Identities and the machine link
 
@@ -248,7 +251,7 @@ It is absent from a machine-figure spread automatically, being no part of that p
 - [ ] Is there a machine list, or is the fleet still listed as applications?
 - [ ] How does Canopy tell a unified push from a split one — a marker field, or the presence of the new machine section?
 - [ ] Which check names and which server-wide fields does Canopy's unified split rule treat as machine-subject? Needs to be written down and to match bestool.
-- [ ] Is "a machine has at least one application" enforced, or is a temporary zero allowed for the delete-then-recreate case?
+- [ ] Servers are archived rather than deleted (`deleted_at`, and [FIG](../../specs/private-server/server-figures.md) counts only live ones). Does a machine archive alongside its last application, or is machine removal a real delete?
 - [ ] Does `/servers/self` become a machine-self route returning the machine plus the applications on it?
 - [ ] Should a group carry a product in its billing attribution at all? Product is not a group-level fact, and dropping it would remove the "only when members agree" rule rather than working around it. In scope for this card, or its own?
 - [ ] How does the status page express machine grouping in the current iconography? Deferred to mockups.
