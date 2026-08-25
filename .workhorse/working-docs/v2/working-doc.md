@@ -131,6 +131,22 @@ So a dead host is one check, one issue, and one incident, with every application
 An application presenting as unreachable is how an operator reads its checks correctly.
 The check states keep their last observed results, which would otherwise read as current, and the unreachable presentation is what says they are not.
 
+An unreachable application is also **unhealthy**, not merely marked.
+If the machine is down, so is everything on it, and a rollup reading healthy off stale checks would be a lie.
+
+That does pull towards applications having a liveness signal of their own, since unreachability now behaves per-application for health while being filed once.
+The split holds for now: one filing, one issue, one incident, and health derived onto each application.
+Worth revisiting if a second application-subject reporter ever appears.
+
+Two ways to land the health part, and the choice is not settled:
+
+- **Extra clause in the rollup.** Health is derived from the checks contributing, *plus* the reachability of the application's machine.
+  Changes the rollup rule in [CHK](../../specs/monitoring/checks.md).
+- **Inherited check.** The machine's reachability check presents in each application's check list, so the existing rollup rule reaches it without changing.
+  Costs one check appearing against several targets, which nothing in the model does today.
+
+Either way there is one filing, so incidents are unaffected: still one, from the machine's scope.
+
 ## Reachability as it stands today
 
 Three distinct things wear the name, and they do not split the same way.
@@ -193,7 +209,7 @@ An operator crosses a machine figure against an application figure the same way 
 ## Open questions
 
 - [ ] Does `Scope` gain one variant or two — `Machine(id)` alone, or `Machine(id)` and `Cluster(id)` — given reachability files at both?
-- [ ] Does an application's health rollup change while it is unreachable, or does it keep presenting the health its last reports gave, with unreachability alongside rather than inside it?
+- [ ] Which way does unreachability reach an application's health — an extra clause in the rollup rule, or the machine's reachability check inherited into the application's check list?
 - [ ] The "Alert when this server is unreachable" switch is the server-scoped silence on `canopy`/`reachability` (`ServerEdit.tsx`), so it becomes a machine-scoped silence on the machine's form. Does anything equivalent stay on the application's form?
 - [ ] `alert_when_down_for` moves to the machine, so what does the migration do with a machine whose applications disagreed on the threshold? (Moot at migration, where every machine has one application, but not for a machine that later gains a second.)
 - [ ] Is "a machine has at least one application" enforced, or is a temporary zero allowed for the delete-then-recreate case?
