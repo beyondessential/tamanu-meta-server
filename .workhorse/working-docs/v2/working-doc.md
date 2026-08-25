@@ -94,8 +94,13 @@ A machine's billing attribution is assembled from the applications on it, since 
 - **Stage** is the highest rank across its applications, on the existing ordering (`ServerRank` derives `Ord` production-first, `crates/commons-types/src/server/rank.rs:30`), so a box shared by a production and a test workload bills as production.
 - **Deployment** is the group, which is unambiguous given the rule above.
 
-This differs from the group rule, which attributes no product at all when its members span products (see [APP](../../specs/servers/products.md)).
-A group spanning products is a mixed deployment where naming one would charge the wrong place; a machine spanning products is one box genuinely running both, and the cost is genuinely shared, so listing both is the truthful answer rather than a guess.
+A group's attribution is not the precedent here.
+[APP](../../specs/servers/products.md) has a group attribute no product when its live members span products, justified as avoiding charging the shared cost to the wrong place.
+That justification does not hold up: product is not a group-level fact at all, so there is nothing to get right or wrong.
+Arguably a group should carry no product in its attribution in the first place, and the "only when they agree" rule is working around a field that should not be there.
+
+A machine is different in kind, not a special case of the same rule.
+A machine spanning products is one box genuinely running both, so the cost really is shared and listing both products is the truthful answer.
 
 Reported rather than stored as a column:
 
@@ -181,6 +186,7 @@ An operator crosses a machine figure against an application figure the same way 
 - [ ] Is "a machine has at least one application" enforced, or is a temporary zero allowed for the delete-then-recreate case?
 - [ ] Does `/servers/self` become a machine-self route returning the machine plus the applications on it?
 - [ ] Machine and application groups cannot disagree, so all applications on one machine share a group. Does that forbid a real case — one box hosting two applications that belong to different deployments?
+- [ ] Should a group carry a product in its billing attribution at all? Product is not a group-level fact, and dropping it would remove the "only when members agree" rule rather than working around it. In scope for this card, or its own?
 - [ ] What does the status page present once applications and machines are separate?
 
 ## Transition
