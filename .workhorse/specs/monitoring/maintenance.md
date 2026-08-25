@@ -40,6 +40,8 @@ Canopy never opens a window by itself.
 A group with an open upgrade plan is offered the declaration from that plan, prefilled with the plan's window and note, so declaring is one action at the moment the work starts.
 The plan supplies the prefill and triggers nothing: an hour someone typed in advance is not evidence that work began.
 
+An open incident offers the declaration over its target as well, so an operator who recognises an alert as the work they are already doing declares from where they are reading it, and the incident closes as its issues leave.
+
 ## What a window suspends
 
 While a window holds over a target, every check on that target has an effective result of skipped, whatever it was observed as (see [CHK](checks.md), "Policy").
