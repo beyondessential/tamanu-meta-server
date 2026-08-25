@@ -278,13 +278,36 @@ The `servers` → `applications` rename lands before the machine grain, so the i
 Blast radius: 19 of 55 tables carry a `server_id`, and 103 Rust files reference `Server`.
 The API surface regenerates on top of that — `private-web/openapi.json` and `src/api-types.ts` come from the handler annotations via `just gen-openapi`, and `src/types.ts` re-exports them by hand.
 
+**How deep it goes.** `server_backup_capabilities`, `server_reported_detail` and `server_enrollment_tokens` are about the application and become `application_*`.
+
+`server_groups` stays as it is.
+Renaming it to `deployments` would be wrong — "deployment" is already contested language, meaning a group in one place and a single rank within a group in another, which is exactly what card W1 exists to settle.
+Picking a name here would pre-empt that, so the group tables keep their names and W1 decides.
+
+`device_server_associations` is dropped rather than renamed; see below.
+
 **Trap in the rename.** The wire's `server_id` and the database's `servers.id` stop meaning the same thing.
 bestool's `server_id` is the *machine* ID and keeps that meaning through the transition, while `servers.id` becomes `applications.id`.
 So a mechanical rename of `server_id` to `application_id` is wrong at exactly the places where it touches the device API, and each of those has to be read rather than swept.
 
+### The identity link, and dropping the association table
+
+The identity ↔ machine link is a single column on the machine.
+`device_server_associations` goes: it is a many-to-many that the new model has no use for, and it has not been consulted in months.
+
+Three things read it today, and two of them fall away with it — the lookup in `crates/database/src/servers.rs:621` (fed by a trigger on `statuses`, which goes too) and the merge fix-up in `crates/database/src/devices.rs:395`.
+
+The third has to be rehomed.
+Backup staleness anchors "never backed up" on `max(min_first_seen, config_created_at)`, where `min_first_seen` is the earliest association for the server (`crates/database/src/backup/staleness.rs:80`).
+It is what stops a newly-onboarded server alerting immediately against a backup config that predates it: taking the later of the two starts the grace from when the server actually showed up.
+
+Dropping the table degrades the anchor to `config_created_at` alone, which the code already handles but which reintroduces exactly that false alert.
+`registered_at` on the application is the natural replacement and is arguably a truer anchor than the association ever was, being when the thing completed enrolment rather than when a row happened to be first written.
+
 ## Open questions
 
-- [ ] How deep does the rename go in compound names — `server_groups`, `server_backup_capabilities`, `server_reported_detail`, `server_enrollment_tokens`, `server_group_domains`, `device_server_associations`?
+- [ ] Confirm `registered_at` as the backup-staleness anchor replacing `min_first_seen`. It changes when "never backed up" first fires for a server, so it is a behaviour change rather than a refactor.
+- [ ] Is the machine's group column maintained by a trigger or in application code? A trigger cannot see the "refuse to move group off a shared machine" rule, which lives above it.
 - [ ] Confirm the crossing unit: a crossing involving any application figure counts applications, a crossing of two machine figures counts machines. Derived from cardinality rather than chosen, so it should hold, but the view has to label which it is showing.
 - [ ] The edit form is machine-first, so is the *detail* view too, or does an application keep a page of its own with its machine's facts presented on it?
 - [ ] Is there a machine list, or is the fleet still listed as applications?
