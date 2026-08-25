@@ -262,16 +262,24 @@ Adding a machine grain follows the group migration (`migrations/2026-06-15-06443
 A machine-scoped row has both of those null, so it would fall inside the global index and collide with a genuine canopy-wide issue on the same `(source, ref)`.
 The migration has to add `AND machine_id IS NULL` to that index, and to its counterpart on `scoped_check_policies`, or machine checks will silently clash with self-alerts.
 
-### Blast radius of the rename
+Only `Machine(Uuid)` is added here.
+The cluster grain belongs to K1, which will widen the same CHECK and add the same kind of partial index again.
+The migration and `Scope` should carry a note saying so, since the global-index trap above is exactly the sort of thing a second pass repeats.
 
-19 of 55 tables carry a `server_id`, and 103 Rust files reference `Server`.
-The API surface is generated on top of that: `private-web/openapi.json` and `src/api-types.ts` both regenerate from the handler annotations, and `src/types.ts` re-exports them by hand.
+### Sequencing: rename first, then split
 
-So the rename is mechanical but wide, and it is a different kind of work from adding the grain.
+The `servers` → `applications` rename lands before the machine grain, so the interesting work is written against names that already read correctly and the 19 affected tables are touched once rather than twice.
+
+Blast radius: 19 of 55 tables carry a `server_id`, and 103 Rust files reference `Server`.
+The API surface regenerates on top of that — `private-web/openapi.json` and `src/api-types.ts` come from the handler annotations via `just gen-openapi`, and `src/types.ts` re-exports them by hand.
+
+**Trap in the rename.** The wire's `server_id` and the database's `servers.id` stop meaning the same thing.
+bestool's `server_id` is the *machine* ID and keeps that meaning through the transition, while `servers.id` becomes `applications.id`.
+So a mechanical rename of `server_id` to `application_id` is wrong at exactly the places where it touches the device API, and each of those has to be read rather than swept.
 
 ## Open questions
 
-- [ ] Does `Scope` gain one variant or two — `Machine(id)` alone, or `Machine(id)` and `Cluster(id)` — given reachability files at both?
+- [ ] How deep does the rename go in compound names — `server_groups`, `server_backup_capabilities`, `server_reported_detail`, `server_enrollment_tokens`, `server_group_domains`, `device_server_associations`?
 - [ ] Confirm the crossing unit: a crossing involving any application figure counts applications, a crossing of two machine figures counts machines. Derived from cardinality rather than chosen, so it should hold, but the view has to label which it is showing.
 - [ ] The edit form is machine-first, so is the *detail* view too, or does an application keep a page of its own with its machine's facts presented on it?
 - [ ] Is there a machine list, or is the fleet still listed as applications?
