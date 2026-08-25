@@ -354,6 +354,8 @@ Three mockups put the open presentation and wire questions side by side as optio
   That last part is what makes it work: the enclosure carries no meaning on its own, only its contents, so an operator never has to notice whether a pill is there, only how many dots are inside.
 - **Machine navigation** — application page with a machine section against a machine page with applications nested, the group listing flat against shared machines enclosing, and a machine list.
   The detail and list questions answer each other, so they are shown together.
+  Indicators follow the status page: a dot is an application's health, an enclosure is a machine, and an enclosure appears only where a machine is the subject.
+  This exposes a weakness in the flat listing that was not visible before: it has nowhere to show machine state, so a dead box reads as a coincidence of failing applications.
 - **Status push wire shapes** — unified against split, the discriminator, and the unified split rule as a table.
 
 ## Open questions
