@@ -68,7 +68,6 @@ Moves to the machine:
 
 Carried by both, rather than moving:
 
-- **A group.** A machine belongs to a group as an application does, so a machine-targeted check has an incident target to resolve through (`Scope::resolve_incident_target`, `crates/database/src/issues.rs:834`).
 - **Tags, and resolved billing tags.** A machine-subject check is graded by policy rules against its target's tags, so a machine without tags could not be graded the way an application is.
   Both grains carry both, and a check decides which it reads.
   `product` and `kind` stay reserved read-only tags on applications only, since neither is a property of a box.
@@ -76,6 +75,27 @@ Carried by both, rather than moving:
 Billing is why both need billing tags rather than one.
 On a VM the cost is incurred by the machine, so its billing tags belong there.
 On Kubernetes there is no machine and the cost attaches to the application server, so the reverse holds.
+
+### Groups
+
+The group lives on the application and only on the application, because a machine-less application still has to belong to one.
+A machine's group is never independently set and can never disagree with its applications'.
+
+A machine still needs a group in hand: `Scope::resolve_incident_target` (`crates/database/src/issues.rs:834`) resolves through it, so a machine-targeted check with no group has no incident path, and `disk_free` and `memory` are exactly the checks that should page.
+
+Taking the call left open: the machine carries a **derived** group column, maintained from its applications rather than edited.
+It is a denormalisation for query performance, with the application's column the source of truth, so the two cannot drift by construction.
+
+### Billing attribution for a machine
+
+A machine's billing attribution is assembled from the applications on it, since `product` and `rank` stay there.
+
+- **Product** is the list of its applications' products, rather than one picked among them.
+- **Stage** is the highest rank across its applications, on the existing ordering (`ServerRank` derives `Ord` production-first, `crates/commons-types/src/server/rank.rs:30`), so a box shared by a production and a test workload bills as production.
+- **Deployment** is the group, which is unambiguous given the rule above.
+
+This differs from the group rule, which attributes no product at all when its members span products (see [APP](../../specs/servers/products.md)).
+A group spanning products is a mixed deployment where naming one would charge the wrong place; a machine spanning products is one box genuinely running both, and the cost is genuinely shared, so listing both is the truthful answer rather than a guess.
 
 Reported rather than stored as a column:
 
@@ -160,8 +180,7 @@ An operator crosses a machine figure against an application figure the same way 
 - [ ] `alert_when_down_for` moves to the machine, so what does the migration do with a machine whose applications disagreed on the threshold? (Moot at migration, where every machine has one application, but not for a machine that later gains a second.)
 - [ ] Is "a machine has at least one application" enforced, or is a temporary zero allowed for the delete-then-recreate case?
 - [ ] Does `/servers/self` become a machine-self route returning the machine plus the applications on it?
-- [ ] Can a machine's group disagree with its applications' groups, and if so which wins where? A machine in one group hosting an application in another is representable once both carry a group.
-- [ ] What does a VM's billing attribution name as its product and stage, given `product` and `rank` stay on applications and a two-workload machine has two of each? The group rule (span products, attribute none — see [APP](../../specs/servers/products.md)) is the nearest precedent.
+- [ ] Machine and application groups cannot disagree, so all applications on one machine share a group. Does that forbid a real case — one box hosting two applications that belong to different deployments?
 - [ ] What does the status page present once applications and machines are separate?
 
 ## Transition
