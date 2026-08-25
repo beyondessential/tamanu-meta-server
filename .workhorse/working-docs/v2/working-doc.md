@@ -132,6 +132,8 @@ That keeps the application as the unit an operator reads while making a shared b
 The group card restructures to carry this.
 It becomes narrower and taller, in three bands: the group's name and version, then its applications, then its incident and operator marks.
 Each rank is a row within the applications band rather than a run within one wrapping strip, separated by a rule, which retires the hollow triangle that marked a rank break before.
+A row carries its rank spelled out, right-aligned behind its applications, so the rank is readable without hovering anything.
+Initials were considered and rejected: production, clone, demo, test and dev collide on their first letters, and a two-letter abbreviation stops being an initial without becoming the word.
 A machine is drawn as an enclosure around the applications on it, and every machine is enclosed whether it carries one application or several.
 
 Enclosing every machine is what keeps the common case quiet.
@@ -347,7 +349,7 @@ Three mockups put the open presentation and wire questions side by side as optio
 - [ ] Which check names and which server-wide fields does Canopy's unified split rule treat as machine-subject? Needs to be written down and to match bestool.
 
 - [ ] Should a group carry a product in its billing attribution at all? Product is not a group-level fact, and dropping it would remove the "only when members agree" rule rather than working around it. In scope for this card, or its own?
-- [ ] Do the rank rows carry a label, or is highest-rank-first ordering enough as the triangle's ordering was? Unlabelled in the mockup, matching what the triangle conveyed.
+- [ ] Does the dot drop its two-level encoding for one colourway, with the machine's enclosure carrying reachability? Proposed in the mockup; leaves orange doing double duty, and leaves `away` and `blip` without a home.
 
 ## Transition
 
