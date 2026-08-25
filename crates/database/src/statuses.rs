@@ -1,8 +1,3 @@
-use std::{
-	str::FromStr as _,
-	time::{Duration, Instant},
-};
-
 use commons_errors::{AppError, Result};
 use commons_types::{
 	status::{CheckResult, ShortStatus},
@@ -10,11 +5,9 @@ use commons_types::{
 };
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use futures::stream::{FuturesOrdered, StreamExt};
 use jiff::{SignedDuration, Timestamp};
 use node_semver::Version;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::issues::Issue;
@@ -108,8 +101,8 @@ pub struct Status {
 	pub created_at: Timestamp,
 	/// The server this status was reported for.
 	pub server_id: Uuid,
-	/// The device that submitted this status, or `null` for statuses
-	/// generated internally (e.g. by the reachability sweep).
+	/// The device that submitted this status, or `null` for a status not
+	/// attributable to one.
 	pub device_id: Option<Uuid>,
 	/// The software version the server reported, if it reported one.
 	pub version: Option<VersionStr>,
@@ -124,7 +117,8 @@ pub struct Status {
 	/// through verbatim.
 	pub health: serde_json::Value,
 	/// The source that pushed this status: the named reporter (e.g.
-	/// `alertd`), or `canopy` for statuses generated internally.
+	/// `alertd`). Rows retained from before canopy stopped generating
+	/// status rows of its own also carry `canopy`.
 	pub source: String,
 }
 
@@ -142,20 +136,6 @@ pub struct NewStatus {
 	pub source: String,
 }
 
-impl Default for NewStatus {
-	fn default() -> Self {
-		Self {
-			server_id: Default::default(),
-			device_id: Default::default(),
-			version: Default::default(),
-			extra: serde_json::Value::Object(Default::default()),
-			healthy: true,
-			health: serde_json::Value::Array(Default::default()),
-			source: CANOPY_SOURCE.into(),
-		}
-	}
-}
-
 impl NewStatus {
 	pub async fn save(self, db: &mut AsyncPgConnection) -> Result<Status> {
 		diesel::insert_into(crate::schema::statuses::table)
@@ -170,87 +150,6 @@ impl NewStatus {
 impl Status {
 	pub fn extra(&self, key: &str) -> Option<&serde_json::Value> {
 		self.extra.as_object().and_then(|obj| obj.get(key))
-	}
-
-	pub async fn ping_server(client: &reqwest::Client, server: &Server) -> Option<Self> {
-		// A server with no URL can't be reached externally — nothing to ping.
-		let host = &server.host.as_ref()?.0;
-		let start = Instant::now();
-		let url = host.join("/api/public/ping").unwrap();
-		debug!(%url, "pinging");
-		match client.get(url).send().await.map(|res| {
-			res.headers()
-				.get("X-Version")
-				.and_then(|value| value.to_str().ok())
-				.and_then(|value| VersionStr::from_str(value).ok())
-		}) {
-			Ok(version) => {
-				let latency = start.elapsed().as_millis().try_into().unwrap_or(i32::MAX);
-				info!(server=%server.id, host=%host, %latency, "ping success");
-				Some(Self {
-					id: Uuid::new_v4(),
-					server_id: server.id,
-					device_id: None,
-					created_at: Timestamp::now(),
-					version,
-					extra: Default::default(),
-					// Pingtask doesn't know the server's self-reported health;
-					// it only knows the server is reachable. Default to healthy
-					// to avoid false-positive unhealthy events from this path.
-					healthy: true,
-					health: serde_json::Value::Array(Default::default()),
-					source: CANOPY_SOURCE.into(),
-				})
-			}
-			Err(err) => {
-				warn!(server=%server.id, host=%host, "ping failure: {err}");
-				None
-			}
-		}
-	}
-
-	pub async fn ping_servers(db: &mut AsyncPgConnection) -> Result<Vec<(Self, Server)>> {
-		let client = reqwest::ClientBuilder::new()
-			.timeout(Duration::from_secs(10))
-			.build()
-			.map_err(|err| AppError::custom(format!("failed to build HTTP client: {err}")))?;
-		let statuses =
-			FuturesOrdered::from_iter(Server::all_pingable(db).await?.into_iter().map({
-				let client = client.clone();
-				move |server| {
-					let client = client.clone();
-					async move {
-						Self::ping_server(&client, &server)
-							.await
-							.map(|ping| (ping, server))
-					}
-				}
-			}));
-
-		Ok(statuses
-			.collect::<Vec<Option<_>>>()
-			.await
-			.into_iter()
-			.flatten()
-			.collect())
-	}
-
-	pub async fn ping_servers_and_save(db: &mut AsyncPgConnection) -> Result<()> {
-		use crate::schema::statuses::dsl::*;
-
-		let servers = Self::ping_servers(db).await?;
-		diesel::insert_into(statuses)
-			.values(
-				servers
-					.iter()
-					.map(|(status, _)| status.clone())
-					.collect::<Vec<_>>(),
-			)
-			.execute(db)
-			.await
-			.map_err(AppError::from)?;
-
-		Ok(())
 	}
 
 	/// File (or update) each server's single `reachability` check
@@ -295,7 +194,7 @@ impl Status {
 		}
 
 		// Backstop for servers with no counted source (never reported, or
-		// only reached by pingtask): the latest status row, any source.
+		// every source excluded): the latest status row, any source.
 		let statuses = Self::latest_for_servers(db, &server_ids).await?;
 		let status_map: HashMap<Uuid, Status> =
 			statuses.into_iter().map(|s| (s.server_id, s)).collect();

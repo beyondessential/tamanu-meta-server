@@ -25,7 +25,6 @@ commons-types = { path = "../commons-types" }
 database = { path = "../database" }
 diesel-async = { workspace = true, features = ["mobc", "postgres"] }
 futures = { workspace = true }
-hostname = "0.4.2"
 jiff = { workspace = true }
 k8s-openapi.workspace = true
 kube.workspace = true
