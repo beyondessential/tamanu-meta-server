@@ -224,7 +224,8 @@ An operator crosses a machine figure against an application figure the same way 
 - [ ] Which way does unreachability reach an application's health — an extra clause in the rollup rule, or the machine's reachability check inherited into the application's check list?
 - [ ] How does the combined form present machine fields that are shared? Editing them from one application's form changes what another application on that machine sees, and the form has to make that visible before the edit rather than after.
 - [ ] Is there a machine-first view at all — a list of machines, a machine detail page — or are machines only ever reached through the applications on them?
-- [ ] `alert_when_down_for` moves to the machine, so what does the migration do with a machine whose applications disagreed on the threshold? (Moot at migration, where every machine has one application, but not for a machine that later gains a second.)
+- [ ] How does Canopy tell a unified push from a split one — a marker field, or the presence of the new machine section?
+- [ ] Which check names and which server-wide fields does Canopy's unified split rule treat as machine-subject? Needs to be written down and to match bestool.
 - [ ] Is "a machine has at least one application" enforced, or is a temporary zero allowed for the delete-then-recreate case?
 - [ ] Does `/servers/self` become a machine-self route returning the machine plus the applications on it?
 - [ ] Should a group carry a product in its billing attribution at all? Product is not a group-level fact, and dropping it would remove the "only when members agree" rule rather than working around it. In scope for this card, or its own?
@@ -232,9 +233,31 @@ An operator crosses a machine figure against an application figure the same way 
 
 ## Transition
 
+### The identifier
+
 bestool's existing server ID is really the machine ID.
 
 - bestool keeps calling it the server ID for now, and Canopy keeps accepting it as such.
 - Canopy introduces a machine ID; bestool moves across to it later.
-- bestool will grow separate application-subject and machine-subject reporting.
-- Canopy needs to recognise a bestool that is not yet sending split data, and split the current coalesced push across the two grains itself.
+
+### Two push formats
+
+Canopy accepts both, and tells them apart on arrival.
+
+- A **unified** push is the format bestool sends today: machine facts and application facts mixed in one `health` set and one server-wide detail.
+  Canopy splits it across the machine and the application itself.
+- A **split** push is the new format, carrying machine-subject and application-subject material already separated.
+  Canopy takes it verbatim and splits nothing.
+
+bestool moves from unified to split over whatever period it takes, one release at a time, and the unified machinery is retired once nothing sends it.
+
+The split rule for unified pushes is knowledge Canopy has to hold — which check names are machine-subject, and which server-wide fields belong to the machine.
+It duplicates what bestool will know once it sends split format, which is the price of the transition rather than a design choice, and it goes away with the unified path.
+
+During the transition a check name can file against a machine from one reporter and an application from another, depending on which format that host is sending.
+The catalog is keyed by (source, check) fleet-wide while scope is per-filing (see [CHK](../../specs/monitoring/checks.md)), so this costs nothing as long as Canopy's split rule agrees with bestool's.
+
+### Migration
+
+Every existing server becomes one application and one machine, 1:1, so the backfill is mechanical.
+`alert_when_down_for` moves to the machine, and with one application per machine at migration time there is nothing to reconcile.
