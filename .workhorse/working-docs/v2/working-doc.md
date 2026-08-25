@@ -66,6 +66,17 @@ Moves to the machine:
 - `cloud` and `geolocation`, both operator-set today (`detect_cloud` only seeds `cloud` from an enrollment hint).
 - `alert_when_down_for`, since reachability is a machine fact.
 
+Carried by both, rather than moving:
+
+- **A group.** A machine belongs to a group as an application does, so a machine-targeted check has an incident target to resolve through (`Scope::resolve_incident_target`, `crates/database/src/issues.rs:834`).
+- **Tags, and resolved billing tags.** A machine-subject check is graded by policy rules against its target's tags, so a machine without tags could not be graded the way an application is.
+  Both grains carry both, and a check decides which it reads.
+  `product` and `kind` stay reserved read-only tags on applications only, since neither is a property of a box.
+
+Billing is why both need billing tags rather than one.
+On a VM the cost is incurred by the machine, so its billing tags belong there.
+On Kubernetes there is no machine and the cost attaches to the application server, so the reverse holds.
+
 Reported rather than stored as a column:
 
 - The machine's hostname.
@@ -129,6 +140,19 @@ Residual edge: a machine hosting two applications reported by two different agen
 Machine reachability counts sources, so the quiet one raises the machine's reachability warning without saying which application lost its reporter.
 Probably acceptable, and the source detail names the quiet source anyway.
 
+### Figures
+
+Figures split by which grain the fact belongs to, but present in one view rather than two.
+
+Machine figures: the platform and operating system version, the timezone, the hostname, and the bestool version.
+Also the machine facts bestool does not report yet — uptime, CPU, memory, filesystems, addresses.
+
+Application figures: the application version and its release-train grading, the database engine version, and the runtime version.
+Postgres and Node are per-application even though they sit on the machine, because each application has its own.
+
+The fleet view stays one view.
+An operator crosses a machine figure against an application figure the same way they cross two of either, so "which platforms is this Tamanu version running on" is one crossing and not a join the operator has to do in their head.
+
 ## Open questions
 
 - [ ] Does `Scope` gain one variant or two — `Machine(id)` alone, or `Machine(id)` and `Cluster(id)` — given reachability files at both?
@@ -136,9 +160,8 @@ Probably acceptable, and the source detail names the quiet source anyway.
 - [ ] `alert_when_down_for` moves to the machine, so what does the migration do with a machine whose applications disagreed on the threshold? (Moot at migration, where every machine has one application, but not for a machine that later gains a second.)
 - [ ] Is "a machine has at least one application" enforced, or is a temporary zero allowed for the delete-then-recreate case?
 - [ ] Does `/servers/self` become a machine-self route returning the machine plus the applications on it?
-- [ ] Does a machine carry tags of its own? Policy rules grade against a target's effective tags, so machine-subject checks need machine tags to be gradeable the way application checks are.
-- [ ] Does a machine belong to a group? Incidents resolve their target through the scope's group (`Scope::resolve_incident_target`), so a machine-targeted check needs an answer, and a machine hosting applications from two groups has no obvious one.
-- [ ] How do figures split between machine and application, and does the fleet spread present two sets or one?
+- [ ] Can a machine's group disagree with its applications' groups, and if so which wins where? A machine in one group hosting an application in another is representable once both carry a group.
+- [ ] What does a VM's billing attribution name as its product and stage, given `product` and `rank` stay on applications and a two-workload machine has two of each? The group rule (span products, attribute none — see [APP](../../specs/servers/products.md)) is the nearest precedent.
 - [ ] What does the status page present once applications and machines are separate?
 
 ## Transition
