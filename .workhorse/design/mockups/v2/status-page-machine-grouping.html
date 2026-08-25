@@ -179,6 +179,72 @@
 		background: rgba(211, 47, 47, 0.12);
 	}
 
+	/* Proposed dot colourway: one flat fill for the application's health, no
+	   ring, because reachability has moved to the machine and the dot no
+	   longer has two things to say. */
+	.dot.p-healthy { background: var(--success); }
+	.dot.p-warning { background: var(--health-warning); }
+	.dot.p-unhealthy { background: var(--warning); }
+	.dot.p-gone { background: var(--text-disabled); }
+
+	.matrix {
+		display: grid;
+		grid-template-columns: 15em 1fr 1fr;
+		gap: 0;
+		max-width: 780px;
+		background: var(--paper);
+		border: 1px solid var(--divider);
+		border-radius: 4px;
+		overflow: hidden;
+	}
+
+	.matrix > div {
+		padding: 10px 14px;
+		border-bottom: 1px solid var(--divider);
+		display: flex;
+		align-items: center;
+	}
+
+	.matrix > div:nth-child(3n + 2) { border-left: 1px solid var(--divider); }
+	.matrix > div:nth-child(3n) { border-left: 1px solid var(--divider); }
+	.matrix > div:nth-last-child(-n + 3) { border-bottom: none; }
+
+	.matrix .mh {
+		font-size: 0.75rem;
+		font-weight: 500;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--text-secondary);
+		background: var(--action-hover);
+	}
+
+	.matrix .situation {
+		font-size: 0.8125rem;
+		display: block;
+	}
+
+	.matrix .situation small {
+		display: block;
+		color: var(--text-secondary);
+		font-size: 0.75rem;
+	}
+
+	.ramp {
+		display: flex;
+		gap: 20px;
+		flex-wrap: wrap;
+		align-items: center;
+		background: var(--paper);
+		border: 1px solid var(--divider);
+		border-radius: 4px;
+		padding: 16px;
+		max-width: 780px;
+		font-size: 0.8125rem;
+		color: var(--text-secondary);
+	}
+
+	.ramp span.item { display: inline-flex; align-items: center; gap: 6px; }
+
 	/* Rank labelling, three ways. */
 	.lbl-watermark .rank-row { position: relative; }
 
@@ -470,68 +536,73 @@
 
 <h2>Machine state on the enclosure</h2>
 <p class="note">
-	The pill is the machine, so it can carry the machine's own state while the dots
-	carry each application's. That separates two cases which read identically today.
+	The pill is the machine, so it carries the machine's state while the dots carry
+	each application's. The question is what a dot has left to say once reachability
+	has moved off it, and whether it still needs two levels to say it.
 </p>
 
-<div class="variants">
-	<div class="variant">
-		<div class="card">
-			<div class="band-head"><h3 class="card-name">Machine fine</h3></div>
-			<div class="band-detail">
-				<div class="rank-row">
-					<span class="machine"><span class="dot"></span><span class="dot"></span></span>
-				</div>
-			</div>
-		</div>
-		<p>Box healthy, both applications healthy.</p>
-	</div>
+<div class="matrix">
+	<div class="mh">Situation</div>
+	<div class="mh">Current: fill plus ring</div>
+	<div class="mh">Proposed: one colourway</div>
+	<div><span class="situation">Everything fine<small>Box healthy, both applications healthy</small></span></div>
+	<div><span class="machine"><span class="dot "></span><span class="dot "></span></span></div>
+	<div><span class="machine"><span class="dot p-healthy"></span><span class="dot p-healthy"></span></span></div>
+	<div><span class="situation">One application warning<small>A sync lag, say. The box is fine</small></span></div>
+	<div><span class="machine"><span class="dot "></span><span class="dot h-warning"></span></span></div>
+	<div><span class="machine"><span class="dot p-healthy"></span><span class="dot p-warning"></span></span></div>
+	<div><span class="situation">One application down<small>That application has failed; the other is fine</small></span></div>
+	<div><span class="machine"><span class="dot "></span><span class="dot h-unhealthy"></span></span></div>
+	<div><span class="machine"><span class="dot p-healthy"></span><span class="dot p-unhealthy"></span></span></div>
+	<div><span class="situation">Machine degraded<small>Disk filling. Machine checks count toward every application on it</small></span></div>
+	<div><span class="machine m-warning"><span class="dot h-warning"></span><span class="dot h-warning"></span></span></div>
+	<div><span class="machine m-warning"><span class="dot p-warning"></span><span class="dot p-warning"></span></span></div>
+	<div><span class="situation">Machine down<small>Box gone, so everything on it is unreachable</small></span></div>
+	<div><span class="machine m-down"><span class="dot down"></span><span class="dot down"></span></span></div>
+	<div><span class="machine m-down"><span class="dot p-unhealthy"></span><span class="dot p-unhealthy"></span></span></div>
+	<div><span class="situation">Never reported<small>Enrolled, nothing has arrived yet</small></span></div>
+	<div><span class="machine"><span class="dot gone"></span></span></div>
+	<div><span class="machine"><span class="dot p-gone"></span></span></div>
+	<div><span class="situation">Unmonitored<small>Determined and shown, alerts nobody</small></span></div>
+	<div><span class="machine"><span class="dot unmonitored"></span></span></div>
+	<div><span class="machine"><span class="dot p-healthy unmonitored"></span></span></div>
+</div>
 
-	<div class="variant">
-		<div class="card">
-			<div class="band-head"><h3 class="card-name">App sick</h3></div>
-			<div class="band-detail">
-				<div class="rank-row">
-					<span class="machine"><span class="dot"></span><span class="dot h-unhealthy"></span></span>
-				</div>
-			</div>
-		</div>
-		<p>Box healthy, one application failing. The pill stays neutral.</p>
-	</div>
+<div class="ramp" style="margin-top:16px">
+	<b style="color:var(--text-primary);font-weight:500">Proposed dot</b>
+	<span class="item"><span class="dot p-healthy"></span> healthy</span>
+	<span class="item"><span class="dot p-warning"></span> warning</span>
+	<span class="item"><span class="dot p-unhealthy"></span> down</span>
+	<span class="item"><span class="dot p-gone"></span> nothing yet</span>
+	<span class="item"><span class="dot p-healthy unmonitored"></span> unmonitored</span>
+</div>
 
-	<div class="variant">
-		<div class="card">
-			<div class="band-head"><h3 class="card-name">Machine degraded</h3></div>
-			<div class="band-detail">
-				<div class="rank-row">
-					<span class="machine m-warning"><span class="dot h-warning"></span><span class="dot h-warning"></span></span>
-				</div>
-			</div>
-		</div>
-		<p>Disk filling up. Both applications warn because the machine's checks count on each, and the pill says why.</p>
-	</div>
-
-	<div class="variant">
-		<div class="card">
-			<div class="band-head"><h3 class="card-name">Machine down</h3></div>
-			<div class="band-detail">
-				<div class="rank-row">
-					<span class="machine m-down"><span class="dot down"></span><span class="dot down"></span></span>
-				</div>
-			</div>
-		</div>
-		<p>Box gone, so everything on it is unreachable.</p>
-	</div>
+<div class="ramp" style="margin-top:8px">
+	<b style="color:var(--text-primary);font-weight:500">Enclosure</b>
+	<span class="item"><span class="machine"><span class="dot p-healthy"></span></span> machine fine</span>
+	<span class="item"><span class="machine m-warning"><span class="dot p-warning"></span></span> machine degraded</span>
+	<span class="item"><span class="machine m-down"><span class="dot p-unhealthy"></span></span> machine down</span>
 </div>
 
 <p class="verdict">
-	<b>It answers "is it the box or the app".</b> Two red dots in a neutral pill means
-	two applications happened to fail; two red dots in a red pill means one box took
-	them both. Today those are the same picture.
+	<b>The ring existed because the dot had two things to say.</b> Fill carried
+	reachability and the ring carried health, because a server was both. Now the
+	machine owns reachability, so the dot has one subject and can spend its whole
+	colourway on it. The unhealthy case stops being a fill-and-ring inversion and
+	becomes a colour.
 	<br><br>
-	The machine-degraded case shows the reinforcement rather than redundancy: every
-	dot warns because a machine check counts toward every application on it, and the
-	pill is what says the cause is shared rather than coincidental.
+	Hue also splits the two grains: a dot is never red and a pill is never green, so
+	orange means an application and red means a box, at a glance and without
+	decoding a ring.
+	<br><br>
+	<b>Two things to settle.</b> Orange now does double duty, as an application being
+	down and as a machine being degraded; they never sit on the same element, but it
+	is one hue for two meanings. And the light green reads as warning only next to
+	the darker green, so a lone warning dot in a row of nothing else has less contrast
+	than the ring gave it.
+	<br><br>
+	The old away and blip states have no home in the proposal. They were reachability
+	sub-states, so they belong on the pill if they survive the split at all.
 </p>
 
 <h2>Rank labelling</h2>
