@@ -49,6 +49,34 @@ This drops an existing awkwardness.
 `/servers/self` (see [DID](../../specs/public-server/device-identity.md)) refuses when the resolved device is attached to more than one server, and `Server::live_by_device_id` returns a `Vec` for the same reason.
 An identity resolves to exactly one machine, and applications hang off the machine, so the ambiguity has nowhere left to arise.
 
+### What sits on which
+
+The dividing principle is not "machine-ish sounding".
+Most of what a machine is gets *reported*, so it arrives as sourced detail and presents as a figure; only a few things are operator-set columns.
+
+Stays with the application, and `host` is renamed **`url`** while we are here, since it is a URL and calling it a host was part of the confusion:
+
+- `url` (today `host`), and the name-management fields that work from it: `may_manage_dns`, `may_manage_tls`, `certificate_profile`, the name-management pause fields.
+- `product`, `kind`, `rank`, `name`, `public_name`, `group_id`, `notes`, `tags`.
+- `registered_at`, `deleted_at`, the restore-window fields.
+
+Moves to the machine:
+
+- The identity link (today `device_id`).
+- `cloud` and `geolocation`, both operator-set today (`detect_cloud` only seeds `cloud` from an enrollment hint).
+- `alert_when_down_for`, since reachability is a machine fact.
+
+Reported rather than stored as a column:
+
+- The machine's hostname.
+  bestool will report it, and it attaches to the machine as sourced data — a figure like any other, not a dedicated field.
+  This matters because it is the machine's own name, which is a different thing from an application's `url`, and two applications on one machine have one hostname between them and a `url` each.
+
+### Identity roles
+
+The `server` identity role becomes `machine`, so a role names what the identity is installed on.
+Inputs accept the old name as an alias for compatibility, so a fielded agent enrolling as `server` keeps working.
+
 ### Monitoring and reachability
 
 Working position: reachability is a machine-level concept only, and applications have nothing called reachability.
@@ -105,10 +133,12 @@ Probably acceptable, and the source detail names the quiet source anyway.
 
 - [ ] Does `Scope` gain one variant or two — `Machine(id)` alone, or `Machine(id)` and `Cluster(id)` — given reachability files at both?
 - [ ] How does an application present while its machine or cluster is unreachable? It has no reachability of its own to fail, so something has to say why nothing is arriving.
-- [ ] Does the per-target down threshold (`alert_when_down_for`, today a `servers` column) move to the machine, and what happens to a machine whose applications disagreed about it before the migration?
+- [ ] `alert_when_down_for` moves to the machine, so what does the migration do with a machine whose applications disagreed on the threshold? (Moot at migration, where every machine has one application, but not for a machine that later gains a second.)
 - [ ] Is "a machine has at least one application" enforced, or is a temporary zero allowed for the delete-then-recreate case?
-- [ ] Does the `server` identity role become a `machine` role, and does `/servers/self` become a machine-self route returning the machine plus its applications?
-- [ ] Where do `host`, `cloud`, and `geolocation` land, and what does that do to DNS, TLS, and backups, which reach for them today?
+- [ ] Does `/servers/self` become a machine-self route returning the machine plus the applications on it?
+- [ ] Does a machine carry tags of its own? Policy rules grade against a target's effective tags, so machine-subject checks need machine tags to be gradeable the way application checks are.
+- [ ] Does a machine belong to a group? Incidents resolve their target through the scope's group (`Scope::resolve_incident_target`), so a machine-targeted check needs an answer, and a machine hosting applications from two groups has no obvious one.
+- [ ] How do figures split between machine and application, and does the fleet spread present two sets or one?
 - [ ] What does the status page present once applications and machines are separate?
 
 ## Transition
