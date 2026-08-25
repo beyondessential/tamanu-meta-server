@@ -57,6 +57,7 @@ import IncidentsLink from "../components/IncidentsLink";
 import OperatorAvatars from "../components/OperatorAvatars";
 import ManualEventButton from "../components/ManualEventButton";
 import ServerCertificatesSection from "../components/ServerCertificatesSection";
+import MaintenanceSection from "../components/MaintenanceSection";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import StatusDot from "../components/StatusDot";
 import TailnetIdentitySection from "../components/TailnetIdentitySection";
@@ -195,6 +196,7 @@ export default function ServerDetail() {
 				checks={data.checks}
 				onSilenced={bumpRefresh}
 				up={data.up}
+				maintained={data.maintained}
 				refreshTick={refreshTick}
 			/>
 			{data.group && (
@@ -228,6 +230,12 @@ export default function ServerDetail() {
 					onEventSubmitted={bumpRefresh}
 				/>
 			)}
+			<MaintenanceSection
+				scope="server"
+				id={data.server.id}
+				targetLabel={data.server.name ?? data.server.display_host}
+				onChanged={() => detail.reload()}
+			/>
 			<SilencedRefsSection
 				scope="server"
 				id={data.server.id}
@@ -765,6 +773,7 @@ function InfoSection({
 	checks,
 	onSilenced,
 	up,
+	maintained,
 	refreshTick,
 }: {
 	server: ServerInfo;
@@ -773,6 +782,7 @@ function InfoSection({
 	checks: ConsolidatedChecks;
 	onSilenced: () => void;
 	up: ShortStatus;
+	maintained: boolean;
 	refreshTick: number;
 }) {
 	return (
@@ -782,6 +792,7 @@ function InfoSection({
 					health={health}
 					up={up}
 					monitored={server.is_monitored !== false}
+					maintained={maintained}
 					operators={status.operators}
 				/>
 			)}
@@ -869,11 +880,13 @@ function HealthIndicator({
 	health,
 	up,
 	monitored,
+	maintained,
 	operators,
 }: {
 	health: HealthState;
 	up: ShortStatus;
 	monitored: boolean;
+	maintained: boolean;
 	operators: OperatorPresence[];
 }) {
 	const reporting = up === "up" || up === "blip";
@@ -884,7 +897,12 @@ function HealthIndicator({
 			useFlexGap
 			sx={{ mb: 1.5, alignItems: "center", flexWrap: "wrap" }}
 		>
-			<HealthChip health={health} stale={!reporting} monitored={monitored} />
+			<HealthChip
+				health={health}
+				stale={!reporting}
+				monitored={monitored}
+				maintained={maintained}
+			/>
 			{reporting && operators.length > 0 && (
 				<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 					<OperatorAvatars operators={operators} size={24} />
@@ -1615,6 +1633,7 @@ function SiblingServers({
 										up={sib.up ?? "gone"}
 										health={sib.health ?? undefined}
 										monitored={sib.is_monitored !== false}
+										maintained={sib.maintained === true}
 									/>
 									<MuiLink
 										component={RouterLink}
@@ -2119,6 +2138,7 @@ function SiblingDotStrip({
 							up={(m.entry.up as ShortStatus | undefined) ?? "gone"}
 							health={(m.entry.health as HealthState | undefined) ?? undefined}
 							monitored={m.entry.is_monitored !== false}
+							maintained={m.entry.maintained === true}
 							title={m.entry.name ?? ""}
 							dim={!m.focused}
 							size="0.8em"

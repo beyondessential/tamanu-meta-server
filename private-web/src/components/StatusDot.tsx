@@ -27,6 +27,11 @@ const REACHABLE: ReadonlySet<ShortStatus> = new Set(["up", "blip"]);
 const UNMONITORED_MASK =
 	"linear-gradient(135deg, #000 0 42%, transparent 42% 58%, #000 58% 100%)";
 
+// A window's cut runs the other way, so a target being worked on is not read
+// as one nobody is watching at all.
+const MAINTAINED_MASK =
+	"linear-gradient(45deg, #000 0 42%, transparent 42% 58%, #000 58% 100%)";
+
 interface StatusDotProps {
 	up: ShortStatus;
 	/** Server's self-reported health from its most recent status push.
@@ -43,6 +48,11 @@ interface StatusDotProps {
 	 * normal but raise nothing. Defaults to monitored. */
 	// spec: CHK#monitoring-gate
 	monitored?: boolean;
+	/** Whether a maintenance window suspends this server. Cut the other way
+	 * from unmonitored: the work is deliberate and temporary, and its checks
+	 * are still recorded and shown. Defaults to not under maintenance. */
+	// spec: MNT#presentation
+	maintained?: boolean;
 }
 
 export default function StatusDot({
@@ -52,7 +62,13 @@ export default function StatusDot({
 	dim,
 	size = "1em",
 	monitored = true,
+	maintained = false,
 }: StatusDotProps) {
+	const mask = maintained
+		? MAINTAINED_MASK
+		: monitored
+			? undefined
+			: UNMONITORED_MASK;
 	const outlineColor =
 		health && REACHABLE.has(up) ? HEALTH_OUTLINE[health] : null;
 	// Errors swap the dot's fill and outline colours instead of stacking a
@@ -79,14 +95,18 @@ export default function StatusDot({
 				outline: outlineColor ? "0.2em solid" : "none",
 				outlineColor,
 				outlineOffset: outlineColor ? "-0.2em" : 0,
-				maskImage: monitored ? undefined : UNMONITORED_MASK,
-				WebkitMaskImage: monitored ? undefined : UNMONITORED_MASK,
+				maskImage: mask,
+				WebkitMaskImage: mask,
 			}}
 		/>
 	);
-	const tooltip = monitored
-		? title
-		: [title, "unmonitored"].filter(Boolean).join(" · ");
+	const tooltip = [
+		title,
+		maintained ? "under maintenance" : null,
+		monitored ? null : "unmonitored",
+	]
+		.filter(Boolean)
+		.join(" · ");
 	if (tooltip) {
 		return <Tooltip title={tooltip}>{dot}</Tooltip>;
 	}

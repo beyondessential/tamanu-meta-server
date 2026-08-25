@@ -22,6 +22,8 @@ import { useState } from "react";
 import { Link as RouterLink, useParams } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import IssueRow from "../components/IssueRow";
+import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
+import DeclareMaintenanceDialog from "../components/DeclareMaintenanceDialog";
 import { AddNoteButton } from "../components/NotesList";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { useIsNotificationHeld } from "../hooks/useIsNotificationHeld";
@@ -145,6 +147,7 @@ function Header({
 	const unresolve = useApiAction("incidents", "unresolve");
 
 	const [resolveOpen, setResolveOpen] = useState(false);
+	const [maintenanceOpen, setMaintenanceOpen] = useState(false);
 	const [reason, setReason] = useState<ResolvedReason>("fixed");
 
 	const wrap = async (fn: () => Promise<unknown>) => {
@@ -338,6 +341,29 @@ function Header({
 							parentId={incident.id}
 							onAdded={onChanged}
 							variant="outlined"
+						/>
+					</>
+				)}
+				{/* An operator who recognises this as work they are already
+				    doing declares the window from where they are reading it. */}
+				{/* spec: MNT#declaring */}
+				{isAdmin && incident.server_group_id != null && (
+					<>
+						<Button
+							size="small"
+							variant="outlined"
+							startIcon={<BuildOutlinedIcon />}
+							onClick={() => setMaintenanceOpen(true)}
+						>
+							This is maintenance…
+						</Button>
+						<DeclareMaintenanceDialog
+							open={maintenanceOpen}
+							onClose={() => setMaintenanceOpen(false)}
+							scope="group"
+							id={incident.server_group_id}
+							targetLabel={incident.server_group_name ?? undefined}
+							onDone={onChanged}
 						/>
 					</>
 				)}

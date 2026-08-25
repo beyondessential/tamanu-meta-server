@@ -19,6 +19,7 @@ import GroupDomainsSection from "../components/GroupDomainsSection";
 import MigrationTestsSection from "../components/MigrationTestsSection";
 import { OperatorAvatar, connectedFor } from "../components/OperatorAvatars";
 import ServerShorty from "../components/ServerShorty";
+import MaintenanceSection from "../components/MaintenanceSection";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import TimeAgo from "../components/TimeAgo";
 import { useApi, useApiAction } from "../api";
@@ -243,6 +244,11 @@ export default function GroupDetail() {
 
 			<GroupDomainsSection groupId={group.id} />
 
+			<MaintenanceSection
+				scope="group"
+				id={group.id}
+				targetLabel={group.name}
+			/>
 			<SilencedRefsSection scope="group" id={group.id} />
 		</Stack>
 	);

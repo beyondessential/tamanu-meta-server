@@ -1,4 +1,5 @@
 import AddIcon from "@mui/icons-material/Add";
+import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
@@ -46,6 +47,7 @@ import {
 } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
+import DeclareMaintenanceDialog from "../components/DeclareMaintenanceDialog";
 import TimeAgo from "../components/TimeAgo";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -184,6 +186,14 @@ export default function Upgrades() {
 													groupName={row.group_name}
 													targetVersion={row.target_version ?? ""}
 													onWithdrawn={() => setTick((t) => t + 1)}
+												/>
+												<DeclareFromPlan
+													groupId={row.group_id}
+													groupName={row.group_name}
+													plannedTime={row.plan?.planned_time ?? null}
+													plannedEnd={row.plan?.planned_end_time ?? null}
+													note={row.plan?.note ?? null}
+													onDeclared={() => setTick((t) => t + 1)}
 												/>
 											</TableCell>
 										)}
@@ -2101,5 +2111,69 @@ function WithdrawPlan({
 		>
 			<DeleteIcon fontSize="small" />
 		</IconButton>
+	);
+}
+
+/** How long the plan says the deployment is down, from its window's two
+ * wall clocks. A close earlier in the day than the open is the following
+ * morning, as the plan reads it. Two hours where the plan names no window,
+ * which is what a declaration otherwise starts from. */
+function plannedHours(time: string | null, end: string | null): number {
+	if (!time || !end) return 2;
+	const minutes = (clock: string) => {
+		const [h, m] = clock.split(":");
+		return Number(h) * 60 + Number(m ?? 0);
+	};
+	const span = minutes(end) - minutes(time);
+	return (span > 0 ? span : span + 24 * 60) / 60;
+}
+
+/** Declare maintenance for a group from its open plan, carrying the plan's
+ * window length and note. The plan supplies the prefill and triggers
+ * nothing: this is an operator saying the work is starting now. */
+// spec: MNT#declaring
+function DeclareFromPlan({
+	groupId,
+	groupName,
+	plannedTime,
+	plannedEnd,
+	note,
+	onDeclared,
+}: {
+	groupId: string;
+	groupName: string;
+	plannedTime: string | null;
+	plannedEnd: string | null;
+	note: string | null;
+	onDeclared: () => void;
+}) {
+	const [open, setOpen] = useState(false);
+	const hours = plannedHours(plannedTime, plannedEnd);
+	return (
+		<>
+			<Tooltip title="Declare maintenance: suspend this group's alerting while the upgrade runs">
+				<IconButton
+					size="small"
+					aria-label={`Declare maintenance for ${groupName}`}
+					onClick={() => setOpen(true)}
+				>
+					<BuildOutlinedIcon fontSize="small" />
+				</IconButton>
+			</Tooltip>
+			<DeclareMaintenanceDialog
+				open={open}
+				onClose={() => setOpen(false)}
+				scope="group"
+				id={groupId}
+				targetLabel={groupName}
+				prefill={{
+					expectedEnd: new Date(
+						Date.now() + hours * 3600_000,
+					).toISOString(),
+					note: note ?? undefined,
+				}}
+				onDone={onDeclared}
+			/>
+		</>
 	);
 }

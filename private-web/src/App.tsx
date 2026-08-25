@@ -40,6 +40,7 @@ import Healthchecks from "./routes/Healthchecks";
 import SourcesSettings from "./routes/SourcesSettings";
 import IncidentDetail from "./routes/IncidentDetail";
 import Incidents from "./routes/Incidents";
+import Maintenance from "./routes/Maintenance";
 import Status from "./routes/Status";
 import ServerCreate from "./routes/ServerCreate";
 import ServerDetail from "./routes/ServerDetail";
@@ -65,6 +66,7 @@ const BASE_NAV: NavItem[] = [
 	{ label: "Fleet", to: "/servers" },
 	{ label: "Versions", to: "/versions" },
 	{ label: "Upgrades", to: "/upgrades" },
+	{ label: "Maintenance", to: "/maintenance" },
 	{ label: "Devices", to: "/devices" },
 	{ label: "Bestool", to: "/bestool" },
 	{ label: "Settings", to: "/settings" },
@@ -196,6 +198,7 @@ export default function App() {
 					<Route path="/incidents/:id" element={<IncidentDetail />} />
 					<Route path="/healthchecks/:source/:check" element={<CheckDetail />} />
 					<Route path="/upgrades" element={<Upgrades />} />
+					<Route path="/maintenance" element={<Maintenance />} />
 					<Route path="/versions" element={<Versions />} />
 					<Route path="/versions/:version" element={<VersionDetail />} />
 					<Route path="/servers" element={<Servers />}>

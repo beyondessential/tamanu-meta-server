@@ -58,6 +58,9 @@ test.describe("reachability alerting switch on the server form", () => {
 
 		await page.goto(`/groups/${group.id}/servers/new`);
 		await page.getByLabel(/^Name(\s*\*)?$/i).fill("expected-to-stay");
+		// The switch settling is what says the form is live; clicking before
+		// that lands on markup with no handler attached yet.
+		await expect(page.getByLabel(SWITCH)).toBeChecked();
 		await page.getByRole("button", { name: "Create server" }).click();
 
 		await expect(page).toHaveURL(/\/servers\/[0-9a-f-]{36}$/);
