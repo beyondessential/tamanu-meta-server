@@ -114,6 +114,18 @@ Reported rather than stored as a column:
   bestool will report it, and it attaches to the machine as sourced data — a figure like any other, not a dedicated field.
   This matters because it is the machine's own name, which is a different thing from an application's `url`, and two applications on one machine have one hostname between them and a `url` each.
 
+### The model splits; the UI mostly does not
+
+The separation is a modelling one, and an operator should not have to navigate it.
+There is one form, carrying the machine's fields and the application's fields together.
+
+The same holds for controls that follow a grain.
+The unreachability silence lives mechanically on whatever carries reachability, which is the machine, but ergonomically it sits wherever the thing it silences is reported.
+So an operator quiets a host that is expected to be down without first working out which record owns the switch.
+
+Open in this: a shared machine means editing the machine fields from one application's form changes what another application sees.
+The form has to say so.
+
 ### Identity roles
 
 The `server` identity role becomes `machine`, so a role names what the identity is installed on.
@@ -210,7 +222,8 @@ An operator crosses a machine figure against an application figure the same way 
 
 - [ ] Does `Scope` gain one variant or two — `Machine(id)` alone, or `Machine(id)` and `Cluster(id)` — given reachability files at both?
 - [ ] Which way does unreachability reach an application's health — an extra clause in the rollup rule, or the machine's reachability check inherited into the application's check list?
-- [ ] The "Alert when this server is unreachable" switch is the server-scoped silence on `canopy`/`reachability` (`ServerEdit.tsx`), so it becomes a machine-scoped silence on the machine's form. Does anything equivalent stay on the application's form?
+- [ ] How does the combined form present machine fields that are shared? Editing them from one application's form changes what another application on that machine sees, and the form has to make that visible before the edit rather than after.
+- [ ] Is there a machine-first view at all — a list of machines, a machine detail page — or are machines only ever reached through the applications on them?
 - [ ] `alert_when_down_for` moves to the machine, so what does the migration do with a machine whose applications disagreed on the threshold? (Moot at migration, where every machine has one application, but not for a machine that later gains a second.)
 - [ ] Is "a machine has at least one application" enforced, or is a temporary zero allowed for the delete-then-recreate case?
 - [ ] Does `/servers/self` become a machine-self route returning the machine plus the applications on it?
