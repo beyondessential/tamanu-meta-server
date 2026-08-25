@@ -184,7 +184,7 @@
 	   longer has two things to say. */
 	.dot.p-healthy { background: var(--success); }
 	.dot.p-warning { background: var(--health-warning); }
-	.dot.p-unhealthy { background: var(--warning); }
+	.dot.p-unhealthy { background: var(--error); }
 	.dot.p-gone { background: var(--text-disabled); }
 
 	.matrix {
@@ -562,18 +562,24 @@
 	colourway on it. The unhealthy case stops being a fill-and-ring inversion and
 	becomes a colour.
 	<br><br>
-	Hue also splits the two grains: a dot is never red and a pill is never green, so
-	orange means an application and red means a box, at a glance and without
-	decoding a ring.
+	Red on both grains is deliberate rather than a collision: red means down, and
+	which element carries it says what went down. A red dot in a neutral pill is one
+	application failing on a healthy box; a red pill is the box, and every dot in it
+	goes red with it. So an operator reads the severity from the colour and the
+	subject from the shape, instead of decoding a ring.
 	<br><br>
-	<b>Two things to settle.</b> Orange now does double duty, as an application being
-	down and as a machine being degraded; they never sit on the same element, but it
-	is one hue for two meanings. And the light green reads as warning only next to
-	the darker green, so a lone warning dot in a row of nothing else has less contrast
+	Yellow stays out of the ramp entirely, being spoken for by the striped
+	check-broken state. Orange is left to the enclosure alone, so each hue means one
+	thing: light green degraded, orange a degraded machine, red down.
+	<br><br>
+	<b>One thing to settle.</b> The light green reads as warning next to the darker
+	green, but a lone warning dot in a row of otherwise-healthy ones has less contrast
 	than the ring gave it.
 	<br><br>
-	The old away and blip states have no home in the proposal. They were reachability
-	sub-states, so they belong on the pill if they survive the split at all.
+	The old away and blip states were reachability sub-states, so they belong on the
+	pill if they survive the split. The fleet cards below render a late-reporting box
+	as a degraded machine with its last-known-healthy application, which is what the
+	model implies, but it is not settled.
 </p>
 
 <h2>Rank watermark</h2>
@@ -656,12 +662,12 @@
 		</div>
 		<div class="band-detail">
 			<div class="rank-row" data-rank="production">
-				<span class="machine"><span class="dot"></span></span>
-				<span class="machine"><span class="dot"></span></span>
-				<span class="machine"><span class="dot h-warning"></span></span>
+				<span class="machine"><span class="dot p-healthy"></span></span>
+				<span class="machine"><span class="dot p-healthy"></span></span>
+				<span class="machine"><span class="dot p-warning"></span></span>
 			</div>
 			<div class="rank-row" data-rank="test">
-				<span class="machine"><span class="dot"></span></span>
+				<span class="machine"><span class="dot p-healthy"></span></span>
 			</div>
 		</div>
 	</div>
@@ -674,13 +680,13 @@
 		<div class="band-detail">
 			<div class="rank-row" data-rank="production">
 				<span class="machine m-down">
-					<span class="dot down"></span>
-					<span class="dot down"></span>
+					<span class="dot p-unhealthy"></span>
+					<span class="dot p-unhealthy"></span>
 				</span>
-				<span class="machine"><span class="dot"></span></span>
+				<span class="machine"><span class="dot p-healthy"></span></span>
 			</div>
 			<div class="rank-row" data-rank="test">
-				<span class="machine"><span class="dot"></span></span>
+				<span class="machine"><span class="dot p-healthy"></span></span>
 			</div>
 		</div>
 		<div class="band-status">
@@ -695,8 +701,8 @@
 		</div>
 		<div class="band-detail">
 			<div class="rank-row" data-rank="production">
-				<span class="machine"><span class="dot"></span></span>
-				<span class="machine"><span class="dot"></span></span>
+				<span class="machine"><span class="dot p-healthy"></span></span>
+				<span class="machine"><span class="dot p-healthy"></span></span>
 			</div>
 		</div>
 		<div class="band-status">
@@ -715,14 +721,14 @@
 		</div>
 		<div class="band-detail">
 			<div class="rank-row" data-rank="production">
-				<span class="machine"><span class="dot"></span></span>
-				<span class="machine"><span class="dot h-unhealthy"></span></span>
-				<span class="machine"><span class="dot"></span></span>
-				<span class="machine"><span class="dot"></span></span>
+				<span class="machine"><span class="dot p-healthy"></span></span>
+				<span class="machine"><span class="dot p-unhealthy"></span></span>
+				<span class="machine"><span class="dot p-healthy"></span></span>
+				<span class="machine"><span class="dot p-healthy"></span></span>
 			</div>
 			<div class="rank-row" data-rank="test">
-				<span class="machine"><span class="dot away"></span></span>
-				<span class="machine"><span class="dot unmonitored"></span></span>
+				<span class="machine m-warning"><span class="dot p-healthy"></span></span>
+				<span class="machine"><span class="dot p-healthy unmonitored"></span></span>
 			</div>
 		</div>
 		<div class="band-status">
@@ -738,9 +744,9 @@
 		<div class="band-detail">
 			<div class="rank-row" data-rank="production">
 				<span class="machine">
-					<span class="dot"></span>
-					<span class="dot"></span>
-					<span class="dot"></span>
+					<span class="dot p-healthy"></span>
+					<span class="dot p-healthy"></span>
+					<span class="dot p-healthy"></span>
 				</span>
 			</div>
 		</div>
@@ -756,14 +762,14 @@
 		</div>
 		<div class="band-detail">
 			<div class="rank-row" data-rank="production">
-				<span class="machine"><span class="dot"></span></span>
+				<span class="machine"><span class="dot p-healthy"></span></span>
 			</div>
 			<div class="rank-row" data-rank="test">
-				<span class="machine"><span class="dot"></span></span>
-				<span class="machine"><span class="dot gone"></span></span>
+				<span class="machine"><span class="dot p-healthy"></span></span>
+				<span class="machine"><span class="dot p-gone"></span></span>
 			</div>
 			<div class="rank-row" data-rank="dev">
-				<span class="machine"><span class="dot unmonitored"></span></span>
+				<span class="machine"><span class="dot p-healthy unmonitored"></span></span>
 			</div>
 		</div>
 	</div>
@@ -774,23 +780,23 @@
 
 <div class="legend">
 	<div class="legend-row">
-		<span class="machine"><span class="dot"></span></span><span>up</span>
+		<span class="machine"><span class="dot p-healthy"></span></span><span>healthy</span>
 		<span class="sep"></span>
-		<span class="machine"><span class="dot away"></span></span><span>away</span>
+		<span class="machine"><span class="dot p-warning"></span></span><span>degraded</span>
 		<span class="sep"></span>
-		<span class="machine"><span class="dot down"></span></span><span>down</span>
+		<span class="machine"><span class="dot p-unhealthy"></span></span><span>down</span>
 		<span class="sep"></span>
-		<span class="machine"><span class="dot gone"></span></span><span>never reported</span>
+		<span class="machine"><span class="dot p-gone"></span></span><span>nothing reported yet</span>
+		<span class="sep"></span>
+		<span class="machine"><span class="dot p-healthy unmonitored"></span></span><span>unmonitored</span>
 	</div>
 	<div class="legend-row">
-		<span class="machine"><span class="dot h-warning"></span></span><span>degraded</span>
+		<span class="machine m-warning"><span class="dot p-healthy"></span></span><span>machine degraded</span>
 		<span class="sep"></span>
-		<span class="machine"><span class="dot h-unhealthy"></span></span><span>unhealthy</span>
-		<span class="sep"></span>
-		<span class="machine"><span class="dot unmonitored"></span></span><span>unmonitored</span>
+		<span class="machine m-down"><span class="dot p-unhealthy"></span><span class="dot p-unhealthy"></span></span><span>machine down, taking both its applications</span>
 	</div>
 	<div class="legend-row">
-		<span class="machine"><span class="dot"></span><span class="dot"></span></span>
+		<span class="machine"><span class="dot p-healthy"></span><span class="dot p-healthy"></span></span>
 		<span>two applications on one machine</span>
 	</div>
 </div>

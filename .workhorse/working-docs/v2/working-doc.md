@@ -139,6 +139,15 @@ A machine is drawn as an enclosure around the applications on it, and every mach
 Enclosing every machine is what keeps the common case quiet.
 An enclosure means nothing by being present, only by what it holds, so an operator reads how many applications are on a box without first checking whether the box is shared.
 
+The enclosure also carries the machine's own state, and the application indicator inside it carries only the application's.
+This retires the two-level indicator the status page uses today, where a fill carries reachability and a ring carries health.
+That indicator was doing two jobs because a server was two things; once the machine owns reachability, the application indicator has one subject and spends its whole colourway on it.
+
+Severity reads from the colour and subject from the shape.
+Red means down on either grain: a red application on a plain machine is one application failing on a healthy box, while a machine that goes red takes every application on it red with it.
+A degraded machine is distinct from a degraded application, so the two never compete for the same hue.
+Yellow is not part of this palette at all, being spoken for by the striped presentation of a check that could not run.
+
 The same holds for controls that follow a grain.
 The unreachability silence lives mechanically on whatever carries reachability, which is the machine, but ergonomically it sits wherever the thing it silences is reported.
 So an operator quiets a host that is expected to be down without first working out which record owns the switch.
@@ -349,7 +358,8 @@ Three mockups put the open presentation and wire questions side by side as optio
 - [ ] Which check names and which server-wide fields does Canopy's unified split rule treat as machine-subject? Needs to be written down and to match bestool.
 
 - [ ] Should a group carry a product in its billing attribution at all? Product is not a group-level fact, and dropping it would remove the "only when members agree" rule rather than working around it. In scope for this card, or its own?
-- [ ] Does the dot drop its two-level encoding for one colourway, with the machine's enclosure carrying reachability? Proposed in the mockup; leaves orange doing double duty, and leaves `away` and `blip` without a home.
+- [ ] Do `away` and `blip` survive the split? They were reachability sub-states, so they belong on the machine if they survive at all. The mockup renders a late-reporting box as a degraded machine with its last-known-healthy application, which is what the model implies but is not decided.
+- [ ] Is the degraded application colour distinct enough on its own? It reads as degraded beside a healthy one, but a lone degraded application in a row of healthy ones has less contrast than the ring gave it.
 
 ## Transition
 
