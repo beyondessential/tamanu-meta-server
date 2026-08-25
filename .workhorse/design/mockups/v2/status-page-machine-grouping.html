@@ -199,27 +199,34 @@
 
 	.lbl-watermark .machine { position: relative; z-index: 1; }
 
-	.lbl-initial-right .rank-row { position: relative; padding-right: 22px; }
+	/* Hover label: small, top-right of each rank row, revealed when the card
+	   is hovered. Sits on the hover-composited background so it stays legible
+	   over a full row. */
+	.lbl-hover .rank-row { position: relative; }
 
-	.lbl-initial-right .rank-row::after {
-		content: attr(data-initial);
+	.lbl-hover .rank-row::after {
+		content: attr(data-rank);
 		position: absolute;
-		right: 8px;
-		top: 50%;
-		transform: translateY(-50%);
-		font-size: 0.75rem;
-		font-weight: 500;
-		color: var(--text-disabled);
+		top: 1px;
+		right: 4px;
+		font-size: 0.625rem;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--text-secondary);
+		background: #f5f5f5;
+		border-radius: 2px;
+		padding: 0 3px;
+		opacity: 0;
+		transition: opacity 120ms;
+		pointer-events: none;
+		z-index: 2;
 	}
 
-	.lbl-initial-left .rank-row::before {
-		content: attr(data-initial);
-		font-size: 0.75rem;
-		font-weight: 500;
-		color: var(--text-disabled);
-		flex: none;
-		width: 0.8em;
-	}
+	.lbl-hover:hover .rank-row::after,
+	.lbl-hover.show-label .rank-row::after { opacity: 1; }
+
+	/* Forced-visible copy renders the hovered card in a static page. */
+	.lbl-hover.show-label { background: var(--action-hover); }
 
 	.dot {
 		display: inline-block;
@@ -529,8 +536,10 @@
 
 <h2>Rank labelling</h2>
 <p class="note">
-	Same group, three ways. Production, demo, and dev, chosen because demo and dev
-	collide on a single initial.
+	The initials are dropped: production, clone, demo, test, dev gives P, C, D, T, D,
+	and demo against dev has no fix that still reads as an initial. Two remain, both
+	spelling the rank out. Rows are filled here so the overlap is visible: the
+	production row holds six machines and wraps.
 </p>
 
 <div class="variants">
@@ -543,10 +552,15 @@
 			</div>
 			<div class="band-detail">
 				<div class="rank-row" data-rank="production">
+					<span class="machine"><span class="dot"></span><span class="dot"></span></span>
+					<span class="machine"><span class="dot"></span></span>
+					<span class="machine"><span class="dot h-warning"></span></span>
+					<span class="machine"><span class="dot"></span></span>
 					<span class="machine"><span class="dot"></span></span>
 					<span class="machine"><span class="dot"></span></span>
 				</div>
 				<div class="rank-row" data-rank="demo">
+					<span class="machine"><span class="dot"></span></span>
 					<span class="machine"><span class="dot"></span></span>
 				</div>
 				<div class="rank-row" data-rank="dev">
@@ -554,62 +568,81 @@
 				</div>
 			</div>
 		</div>
-		<p><b>Watermark, right-aligned.</b> Unambiguous, and free when a row is short. A full row of dots runs over it.</p>
+		<p><b>Watermark, always on.</b> Vertically centred at the right, behind the dots. A wrapped row puts dots across it on both lines.</p>
 	</div>
 
 	<div class="variant">
-		<div class="card lbl-initial-right">
+		<div class="card lbl-hover">
 			<div class="band-head">
 				<h3 class="card-name">Vanuatu</h3>
 				<span class="version">2.34.1</span>
 			</div>
 			<div class="band-detail">
-				<div class="rank-row" data-initial="P">
+				<div class="rank-row" data-rank="production">
+					<span class="machine"><span class="dot"></span><span class="dot"></span></span>
+					<span class="machine"><span class="dot"></span></span>
+					<span class="machine"><span class="dot h-warning"></span></span>
+					<span class="machine"><span class="dot"></span></span>
 					<span class="machine"><span class="dot"></span></span>
 					<span class="machine"><span class="dot"></span></span>
 				</div>
-				<div class="rank-row" data-initial="D">
+				<div class="rank-row" data-rank="demo">
+					<span class="machine"><span class="dot"></span></span>
 					<span class="machine"><span class="dot"></span></span>
 				</div>
-				<div class="rank-row" data-initial="D">
+				<div class="rank-row" data-rank="dev">
 					<span class="machine"><span class="dot unmonitored"></span></span>
 				</div>
 			</div>
 		</div>
-		<p><b>Initial, right-aligned.</b> Reserves a fixed gutter so dots never collide with it. Demo and dev are both D.</p>
+		<p><b>Hover label, at rest.</b> Nothing drawn, so the card is as quiet as an unlabelled one. Hover it to reveal.</p>
 	</div>
 
 	<div class="variant">
-		<div class="card lbl-initial-left">
+		<div class="card lbl-hover show-label">
 			<div class="band-head">
 				<h3 class="card-name">Vanuatu</h3>
 				<span class="version">2.34.1</span>
 			</div>
 			<div class="band-detail">
-				<div class="rank-row" data-initial="P">
+				<div class="rank-row" data-rank="production">
+					<span class="machine"><span class="dot"></span><span class="dot"></span></span>
+					<span class="machine"><span class="dot"></span></span>
+					<span class="machine"><span class="dot h-warning"></span></span>
+					<span class="machine"><span class="dot"></span></span>
 					<span class="machine"><span class="dot"></span></span>
 					<span class="machine"><span class="dot"></span></span>
 				</div>
-				<div class="rank-row" data-initial="D">
+				<div class="rank-row" data-rank="demo">
+					<span class="machine"><span class="dot"></span></span>
 					<span class="machine"><span class="dot"></span></span>
 				</div>
-				<div class="rank-row" data-initial="D">
+				<div class="rank-row" data-rank="dev">
 					<span class="machine"><span class="dot unmonitored"></span></span>
 				</div>
 			</div>
 		</div>
-		<p><b>Initial, left prefix.</b> Reads as a row label and aligns down the left edge, but pushes every dot right by a character.</p>
+		<p><b>Hover label, revealed.</b> Top right of each row, on an opaque chip so it stays legible over a full row. Overlaps the rightmost machine of the first line.</p>
 	</div>
 
 </div>
 
 <p class="verdict">
-	<b>The initials collide.</b> Production, clone, demo, test, dev gives P, C, D, T, D.
-	Two letters (Pr, Cl, De, Te, Dv) fixes it but stops reading as an initial, and the
-	watermark sidesteps it by spelling the rank out.
+	<b>The hover label costs nothing until asked for.</b> A fleet of quiet cards stays
+	quiet, and the label appears only where an operator is already looking. The
+	watermark is readable without interaction but is permanent noise on every card,
+	on a page whose job is to be scanned rather than read.
 	<br><br>
-	Worth weighing against doing nothing: rows are already ordered highest rank first,
-	which is exactly what the triangle conveyed, and dot tooltips already name the rank.
+	Both overlap dots on a full row, which is unavoidable at this card width. The
+	difference is that the watermark overlaps constantly and sits behind, while the
+	hover label overlaps only while hovered and sits on top, so it is legible when it
+	matters and absent when it does not.
+	<br><br>
+	Hovering the card reveals every row's label at once rather than one per row, so a
+	single hover gives the whole breakdown. Say if it should be per-row instead.
+	<br><br>
+	Still worth weighing against doing nothing: rows are already ordered highest rank
+	first, which is all the triangle conveyed, and dot tooltips already name the rank.
 </p>
 
 <h2>At fleet scale</h2>
