@@ -290,6 +290,15 @@ Picking a name here would pre-empt that, so the group tables keep their names an
 bestool's `server_id` is the *machine* ID and keeps that meaning through the transition, while `servers.id` becomes `applications.id`.
 So a mechanical rename of `server_id` to `application_id` is wrong at exactly the places where it touches the device API, and each of those has to be read rather than swept.
 
+### The machine's group column is trigger-maintained
+
+A trigger recomputes the machine's group from its applications, so the denormalisation cannot drift however the applications are written.
+Triggers-for-denormalisation is established here already — the table being dropped below was itself trigger-maintained off `statuses`.
+
+This puts the invariant and its guard in the right order rather than in two places.
+The trigger is where "a machine's group is its applications' group" is *true*, and it raises if a write would leave a machine's applications disagreeing.
+The application-code refusal to move an application's group off a shared machine then sits in front of that as an operator-facing error, explaining the problem in the operator's terms instead of surfacing a constraint violation — but it is not the only thing standing between the model and an inconsistent row.
+
 ### The identity link, and dropping the association table
 
 The identity ↔ machine link is a single column on the machine.
@@ -310,7 +319,7 @@ Anchoring a backup deadline on when a device was first associated with a server 
 
 ## Open questions
 
-- [ ] Is the machine's group column maintained by a trigger or in application code? A trigger cannot see the "refuse to move group off a shared machine" rule, which lives above it.
+- [ ] Confirm the trigger also *enforces* rather than only recomputing — raising when a write would leave a machine's applications in disagreeing groups, with the application-code refusal in front of it as the readable error.
 - [ ] Confirm the crossing unit: a crossing involving any application figure counts applications, a crossing of two machine figures counts machines. Derived from cardinality rather than chosen, so it should hold, but the view has to label which it is showing.
 - [ ] The edit form is machine-first, so is the *detail* view too, or does an application keep a page of its own with its machine's facts presented on it?
 - [ ] Is there a machine list, or is the fleet still listed as applications?
