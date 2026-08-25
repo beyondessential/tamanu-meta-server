@@ -129,7 +129,13 @@ A one-application machine reads as a single form with two sections, which is clo
 The status page presents applications grouped by machine.
 That keeps the application as the unit an operator reads while making a shared box visible as one thing, so a machine going down reads as one failure with its applications under it rather than as several unrelated ones.
 
-How the grouping expresses itself in the current iconography is not settled and is a question for mockups rather than for prose.
+The group card restructures to carry this.
+It becomes narrower and taller, in three bands: the group's name and version, then its applications, then its incident and operator marks.
+Each rank is a row within the applications band rather than a run within one wrapping strip, separated by a rule, which retires the hollow triangle that marked a rank break before.
+A machine is drawn as an enclosure around the applications on it, and every machine is enclosed whether it carries one application or several.
+
+Enclosing every machine is what keeps the common case quiet.
+An enclosure means nothing by being present, only by what it holds, so an operator reads how many applications are on a box without first checking whether the box is shared.
 
 The same holds for controls that follow a grain.
 The unreachability silence lives mechanically on whatever carries reachability, which is the machine, but ergonomically it sits wherever the thing it silences is reported.
@@ -322,8 +328,11 @@ Anchoring a backup deadline on when a device was first associated with a server 
 
 Three mockups put the open presentation and wire questions side by side as options, under `.workhorse/design/mockups/v2/`.
 
-- **Status page: machine grouping** — flush clustering, an underline, or an enclosure in the dot strip.
-  The governing constraint is that almost every machine hosts one application, so the affordance has to vanish entirely in the 1:1 case; flush clustering is the only option that does so without drawing anything.
+- **Status page: banded group cards** — the settled direction, not options.
+  Cards become narrower and taller, split into three bands: name and version, the dots, then incident and operator marks, with the status band omitted when there is nothing in it.
+  Ranks become rows separated by a rule lighter than the band borders, replacing the hollow triangle.
+  Every machine is a pill enclosure, one application or several, so a one-application machine is a single dot in a pill.
+  That last part is what makes it work: the enclosure carries no meaning on its own, only its contents, so an operator never has to notice whether a pill is there, only how many dots are inside.
 - **Machine navigation** — application page with a machine section against a machine page with applications nested, the group listing flat against shared machines enclosing, and a machine list.
   The detail and list questions answer each other, so they are shown together.
 - **Status push wire shapes** — unified against split, the discriminator, and the unified split rule as a table.
@@ -338,7 +347,7 @@ Three mockups put the open presentation and wire questions side by side as optio
 - [ ] Which check names and which server-wide fields does Canopy's unified split rule treat as machine-subject? Needs to be written down and to match bestool.
 
 - [ ] Should a group carry a product in its billing attribution at all? Product is not a group-level fact, and dropping it would remove the "only when members agree" rule rather than working around it. In scope for this card, or its own?
-- [ ] How does the status page express machine grouping in the current iconography? Deferred to mockups.
+- [ ] Do the rank rows carry a label, or is highest-rank-first ordering enough as the triangle's ordering was? Unlabelled in the mockup, matching what the triangle conveyed.
 
 ## Transition
 
