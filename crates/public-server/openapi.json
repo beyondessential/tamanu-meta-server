@@ -1974,7 +1974,6 @@
         "type": "object",
         "description": "How the target version's migrations went against the restored replica.",
         "required": [
-          "target_version_id",
           "total_elapsed_seconds",
           "data_bytes_before",
           "data_bytes_after",
@@ -1998,10 +1997,20 @@
             ],
             "description": "The migration that failed, when one did."
           },
+          "target_version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The version whose migrations were applied, as semver, taken from the\nworklist entry's `target_version`. This is the version the consumer\nactually migrated to; send it in preference to echoing the identifier."
+          },
           "target_version_id": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "uuid",
-            "description": "The version whose migrations were applied, taken from the worklist\nentry's `target_version_id`."
+            "description": "The version whose migrations were applied, as the identifier a consumer\nechoes from the worklist entry's `target_version_id`. Accepted only for\nolder consumers that report the identifier; omit it when `target_version`\nis sent."
           },
           "timings": {
             "type": "array",

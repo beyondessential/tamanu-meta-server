@@ -1178,7 +1178,8 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 			assert_eq!(dispatched.len(), 1, "got {dispatched:?}");
 			let entry = &dispatched[0];
 
-			// Report it back the way a consumer would, echoing the entry.
+			// Report it back the way a consumer would: naming the version by its
+			// semver, not echoing the identifier.
 			public
 				.post("/restore-verification")
 				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
@@ -1194,7 +1195,7 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 					"postgres_version": "18",
 					"observed_at": "2026-07-30T00:00:00Z",
 					"migration": {
-						"target_version_id": entry["target_version_id"],
+						"target_version": entry["target_version"],
 						"total_elapsed_seconds": 900,
 						"data_bytes_before": 200_000_000_000i64,
 						"data_bytes_after": 260_000_000_000i64,
@@ -1222,6 +1223,169 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 				.await
 				.json();
 			assert!(after.is_empty(), "got {after:?}");
+		},
+	)
+	.await;
+}
+
+/// An older consumer that echoes the version's identifier instead of its semver
+/// is still recorded: the endpoint resolves the version from whichever the
+/// report carries.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_migration_report_by_version_id_still_lands() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let server = make_server(&mut conn, group).await;
+			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
+			report_version(&mut conn, server, "2.62.0").await;
+			let planned = publish_version(&mut conn, 63, 2).await;
+			plan_upgrade(&mut conn, group, planned).await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
+			register_migrate_intent(&public, &cert).await;
+
+			let dispatched: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.await
+				.json();
+			let entry = &dispatched[0];
+
+			public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"replica_id": entry["replica_id"],
+					"group": group,
+					"server_id": server,
+					"type": "tamanu-postgres",
+					"intent": "verify",
+					"snapshot_id": entry["snapshot_id"],
+					"outcome": "success",
+					"replica_healthy": true,
+					"observed_at": "2026-07-30T00:00:00Z",
+					"migration": {
+						"target_version_id": entry["target_version_id"],
+						"total_elapsed_seconds": 900,
+						"data_bytes_before": 10,
+						"data_bytes_after": 10,
+						"timings": [],
+					},
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			assert_eq!(
+				database::migration_tests::verdict(&mut conn, server, planned)
+					.await
+					.expect("verdict"),
+				database::migration_tests::Verdict::Passed
+			);
+		},
+	)
+	.await;
+}
+
+/// A migration report that names its version neither way cannot be attributed
+/// to one, and is refused.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_migration_report_naming_no_version_is_refused() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let server = make_server(&mut conn, group).await;
+			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
+			report_version(&mut conn, server, "2.62.0").await;
+			let planned = publish_version(&mut conn, 63, 2).await;
+			plan_upgrade(&mut conn, group, planned).await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
+			register_migrate_intent(&public, &cert).await;
+
+			let dispatched: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.await
+				.json();
+			let entry = &dispatched[0];
+
+			public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"replica_id": entry["replica_id"],
+					"group": group,
+					"server_id": server,
+					"type": "tamanu-postgres",
+					"intent": "verify",
+					"snapshot_id": entry["snapshot_id"],
+					"outcome": "success",
+					"replica_healthy": true,
+					"observed_at": "2026-07-30T00:00:00Z",
+					"migration": {
+						"total_elapsed_seconds": 900,
+						"data_bytes_before": 10,
+						"data_bytes_after": 10,
+						"timings": [],
+					},
+				}))
+				.await
+				.assert_status(http::StatusCode::BAD_REQUEST);
+		},
+	)
+	.await;
+}
+
+/// A semver that matches no known version cannot be resolved, and the report is
+/// refused rather than stored against nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_migration_report_with_an_unknown_version_is_refused() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let server = make_server(&mut conn, group).await;
+			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
+			report_version(&mut conn, server, "2.62.0").await;
+			let planned = publish_version(&mut conn, 63, 2).await;
+			plan_upgrade(&mut conn, group, planned).await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
+			register_migrate_intent(&public, &cert).await;
+
+			let dispatched: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.await
+				.json();
+			let entry = &dispatched[0];
+
+			public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"replica_id": entry["replica_id"],
+					"group": group,
+					"server_id": server,
+					"type": "tamanu-postgres",
+					"intent": "verify",
+					"snapshot_id": entry["snapshot_id"],
+					"outcome": "success",
+					"replica_healthy": true,
+					"observed_at": "2026-07-30T00:00:00Z",
+					"migration": {
+						"target_version": "9.9.9",
+						"total_elapsed_seconds": 900,
+						"data_bytes_before": 10,
+						"data_bytes_after": 10,
+						"timings": [],
+					},
+				}))
+				.await
+				.assert_status(http::StatusCode::NOT_FOUND);
 		},
 	)
 	.await;
