@@ -153,7 +153,7 @@ A box shared by a production and a test workload files under production with its
 An incident that named a server names an application.
 
 The status dot goes from the top of both pages.
-The health badge already says how the thing is, at a size the dot was never trying to compete with, and the group's own listing says how everything around it is.
+The health chip beside it already says how the thing is, in words, and the group's tree at the foot of the page says how everything around it is.
 
 ### Operator presence
 
