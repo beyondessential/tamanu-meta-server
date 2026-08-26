@@ -187,39 +187,84 @@
 		margin: 0 0 12px;
 	}
 
-	/* Checks table */
-	table { border-collapse: collapse; width: 100%; font-size: 0.875rem; }
-	th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--divider); }
-	th {
-		font-weight: 500;
-		color: var(--text-secondary);
+	/* Checks: a stack of bordered rows, as ChecksTableBody renders them. */
+	.checks-title {
+		display: block;
 		font-size: 0.75rem;
+		letter-spacing: 0.08em;
 		text-transform: uppercase;
-		letter-spacing: 0.04em;
+		color: var(--text-secondary);
+		margin: 16px 0 4px;
 	}
-	tbody tr:last-child td { border-bottom: none; }
-	td.name { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 0.8125rem; }
-	td.msg { color: var(--text-secondary); }
 
-	.res {
-		display: inline-flex;
+	.check {
+		display: flex;
+		gap: 12px;
+		padding: 8px;
+		border: 1px solid var(--divider);
+		border-radius: 4px;
+		align-items: flex-start;
+	}
+
+	.check + .check { margin-top: 8px; }
+
+	/* Anything not passing or silenced is tinted, so the eye lands on it. */
+	.check.loud { background: var(--action-hover); }
+
+	.check-icon { flex: none; width: 20px; height: 20px; margin-top: 1px; }
+	.check-icon.passed { fill: var(--success); }
+	.check-icon.warning { fill: var(--warning); }
+	.check-icon.failed { fill: var(--error); }
+	.check-icon.muted { fill: var(--text-disabled); }
+
+	.check-body { flex: 1; min-width: 0; }
+
+	.check-head {
+		display: flex;
 		align-items: center;
-		gap: 6px;
-		font-size: 0.8125rem;
-		white-space: nowrap;
+		flex-wrap: wrap;
+		gap: 8px;
 	}
 
-	.res::before {
-		content: "";
-		width: 0.7em;
-		height: 0.7em;
-		border-radius: 50%;
-		background: var(--success);
+	.check-name {
+		font-family: "SF Mono", Menlo, Consolas, monospace;
+		font-size: 0.875rem;
+		color: var(--secondary);
+		text-decoration: none;
+	}
+
+	.check-name:hover { text-decoration: underline; }
+
+	.check-source { font-size: 0.75rem; color: var(--text-secondary); }
+
+	.check-extras {
+		display: grid;
+		grid-template-columns: max-content 1fr;
+		column-gap: 12px;
+		row-gap: 2px;
+		font-size: 0.8em;
+		margin: 4px 0 0;
+	}
+
+	.check-extras dt { color: var(--text-secondary); margin: 0; }
+	.check-extras dd { margin: 0; font-family: "SF Mono", Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+
+	.icon-btn {
 		flex: none;
+		width: 22px;
+		height: 22px;
+		fill: var(--text-disabled);
 	}
 
-	.res.warning::before { background: var(--health-warning); }
-	.res.failed::before { background: var(--error); }
+	.show-more {
+		display: inline-block;
+		margin-top: 4px;
+		padding: 4px 5px;
+		font-size: 0.8125rem;
+		text-transform: uppercase;
+		letter-spacing: 0.02857em;
+		color: var(--secondary);
+	}
 
 	.subject {
 		font-size: 0.6875rem;
@@ -374,49 +419,68 @@
 					<div><span class="field-label">Mobile list</span><span class="field-value">nauru</span></div>
 				</div>
 
-				<table>
-					<thead>
-						<tr><th>Check</th><th>Source</th><th></th><th>Result</th></tr>
-					</thead>
-					<tbody>
-						<tr>
-							<td class="name">tamanu_http</td>
-							<td>alertd</td>
-							<td></td>
-							<td><span class="res">passed</span></td>
-						</tr>
-						<tr>
-							<td class="name">sync_facility_stale</td>
-							<td>alertd</td>
-							<td></td>
-							<td><span class="res warning">warning</span></td>
-						</tr>
-						<tr>
-							<td class="name">db_connect</td>
-							<td>alertd</td>
-							<td></td>
-							<td><span class="res">passed</span></td>
-						</tr>
-						<tr>
-							<td class="name">disk_free</td>
-							<td>alertd</td>
-							<td><span class="subject">machine</span></td>
-							<td><span class="res">passed</span></td>
-						</tr>
-						<tr>
-							<td class="name">memory</td>
-							<td>alertd</td>
-							<td><span class="subject">machine</span></td>
-							<td><span class="res">passed</span></td>
-						</tr>
-						<tr>
-							<td class="name">reachability</td>
-							<td>canopy</td>
-							<td><span class="subject">machine</span></td>
-							<td><span class="res">passed</span></td>
-						</tr>
-					</tbody>
-				</table>
+					<span class="checks-title">Checks (6)</span>
+						<div class="check loud">
+							<svg class="check-icon warning" viewBox="0 0 24 24"><path d="M12 5.99 19.53 19H4.47L12 5.99M12 2 1 21h22L12 2zm1 14h-2v2h2v-2zm0-6h-2v4h2v-4z"/></svg>
+							<div class="check-body">
+								<div class="check-head">
+									<a class="check-name" href="#">sync_facility_stale</a>
+									<span class="check-source">alertd</span>
+									
+								</div>
+								<dl class="check-extras"><dt>stale_facilities</dt><dd>3</dd><dt>oldest</dt><dd>4h12m</dd></dl>
+							</div>
+							<svg class="icon-btn" viewBox="0 0 24 24"><path d="M20 18.69 7.84 6.14 5.27 3.49 4 4.76l2.8 2.8v.01c-.52.99-.8 2.16-.8 3.42v5l-2 2v1h13.73l2 2L21 19.72l-1-1.03zM12 22c1.11 0 2-.89 2-2h-4c0 1.11.89 2 2 2zm6-7.32V11c0-3.08-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.15.03-.29.08-.42.12-.1.03-.2.07-.29.11h-.01c-.01 0-.01 0-.02.01-.23.09-.46.2-.68.31 0 0-.01 0-.01.01L18 14.68z"/></svg>
+						</div>
+						<div class="check">
+							<svg class="check-icon passed" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+							<div class="check-body">
+								<div class="check-head">
+									<a class="check-name" href="#">tamanu_http</a>
+									<span class="check-source">alertd</span>
+									
+								</div>
+								
+							</div>
+							<svg class="icon-btn" viewBox="0 0 24 24"><path d="M20 18.69 7.84 6.14 5.27 3.49 4 4.76l2.8 2.8v.01c-.52.99-.8 2.16-.8 3.42v5l-2 2v1h13.73l2 2L21 19.72l-1-1.03zM12 22c1.11 0 2-.89 2-2h-4c0 1.11.89 2 2 2zm6-7.32V11c0-3.08-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.15.03-.29.08-.42.12-.1.03-.2.07-.29.11h-.01c-.01 0-.01 0-.02.01-.23.09-.46.2-.68.31 0 0-.01 0-.01.01L18 14.68z"/></svg>
+						</div>
+						<div class="check">
+							<svg class="check-icon passed" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+							<div class="check-body">
+								<div class="check-head">
+									<a class="check-name" href="#">db_connect</a>
+									<span class="check-source">alertd</span>
+									
+								</div>
+								
+							</div>
+							<svg class="icon-btn" viewBox="0 0 24 24"><path d="M20 18.69 7.84 6.14 5.27 3.49 4 4.76l2.8 2.8v.01c-.52.99-.8 2.16-.8 3.42v5l-2 2v1h13.73l2 2L21 19.72l-1-1.03zM12 22c1.11 0 2-.89 2-2h-4c0 1.11.89 2 2 2zm6-7.32V11c0-3.08-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.15.03-.29.08-.42.12-.1.03-.2.07-.29.11h-.01c-.01 0-.01 0-.02.01-.23.09-.46.2-.68.31 0 0-.01 0-.01.01L18 14.68z"/></svg>
+						</div>
+						<div class="check">
+							<svg class="check-icon passed" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+							<div class="check-body">
+								<div class="check-head">
+									<a class="check-name" href="#">disk_free</a>
+									<span class="check-source">alertd</span>
+									<span class="subject">machine</span>
+								</div>
+								<dl class="check-extras"><dt>percent</dt><dd>37</dd></dl>
+							</div>
+							<svg class="icon-btn" viewBox="0 0 24 24"><path d="M20 18.69 7.84 6.14 5.27 3.49 4 4.76l2.8 2.8v.01c-.52.99-.8 2.16-.8 3.42v5l-2 2v1h13.73l2 2L21 19.72l-1-1.03zM12 22c1.11 0 2-.89 2-2h-4c0 1.11.89 2 2 2zm6-7.32V11c0-3.08-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.15.03-.29.08-.42.12-.1.03-.2.07-.29.11h-.01c-.01 0-.01 0-.02.01-.23.09-.46.2-.68.31 0 0-.01 0-.01.01L18 14.68z"/></svg>
+						</div>
+						<div class="check">
+							<svg class="check-icon passed" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+							<div class="check-body">
+								<div class="check-head">
+									<a class="check-name" href="#">memory</a>
+									<span class="check-source">alertd</span>
+									<span class="subject">machine</span>
+								</div>
+								
+							</div>
+							<svg class="icon-btn" viewBox="0 0 24 24"><path d="M20 18.69 7.84 6.14 5.27 3.49 4 4.76l2.8 2.8v.01c-.52.99-.8 2.16-.8 3.42v5l-2 2v1h13.73l2 2L21 19.72l-1-1.03zM12 22c1.11 0 2-.89 2-2h-4c0 1.11.89 2 2 2zm6-7.32V11c0-3.08-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.15.03-.29.08-.42.12-.1.03-.2.07-.29.11h-.01c-.01 0-.01 0-.02.01-.23.09-.46.2-.68.31 0 0-.01 0-.01.01L18 14.68z"/></svg>
+						</div>
+					<a class="show-more" href="#">Show 1 more</a>
 			</div>
 
 			<div class="paper">
@@ -501,20 +565,68 @@
 					<div><span class="field-label">Location</span><span class="field-value">Cloud · ap-southeast-2</span></div>
 				</div>
 
-				<table>
-					<thead>
-						<tr><th>Check</th><th>Source</th><th>Result</th></tr>
-					</thead>
-					<tbody>
-						<tr><td class="name">disk_free</td><td>alertd</td><td><span class="res">passed</span></td></tr>
-						<tr><td class="name">memory</td><td>alertd</td><td><span class="res">passed</span></td></tr>
-						<tr><td class="name">load</td><td>alertd</td><td><span class="res">passed</span></td></tr>
-						<tr><td class="name">time_sync</td><td>alertd</td><td><span class="res">passed</span></td></tr>
-						<tr><td class="name">tailscale</td><td>alertd</td><td><span class="res">passed</span></td></tr>
-						<tr><td class="name">external_users</td><td>alertd</td><td><span class="res">passed</span></td></tr>
-						<tr><td class="name">reachability</td><td>canopy</td><td><span class="res">passed</span></td></tr>
-					</tbody>
-				</table>
+					<span class="checks-title">Checks (7)</span>
+						<div class="check">
+							<svg class="check-icon passed" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+							<div class="check-body">
+								<div class="check-head">
+									<a class="check-name" href="#">external_users</a>
+									<span class="check-source">alertd</span>
+									
+								</div>
+								<div style="font-size:0.8em;margin-top:4px"><div>fsaparelli · pts/0 · 2h</div><div>agnes · pts/1 · 20m</div></div>
+							</div>
+							<svg class="icon-btn" viewBox="0 0 24 24"><path d="M20 18.69 7.84 6.14 5.27 3.49 4 4.76l2.8 2.8v.01c-.52.99-.8 2.16-.8 3.42v5l-2 2v1h13.73l2 2L21 19.72l-1-1.03zM12 22c1.11 0 2-.89 2-2h-4c0 1.11.89 2 2 2zm6-7.32V11c0-3.08-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.15.03-.29.08-.42.12-.1.03-.2.07-.29.11h-.01c-.01 0-.01 0-.02.01-.23.09-.46.2-.68.31 0 0-.01 0-.01.01L18 14.68z"/></svg>
+						</div>
+						<div class="check">
+							<svg class="check-icon passed" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+							<div class="check-body">
+								<div class="check-head">
+									<a class="check-name" href="#">disk_free</a>
+									<span class="check-source">alertd</span>
+									
+								</div>
+								<dl class="check-extras"><dt>percent</dt><dd>37</dd></dl>
+							</div>
+							<svg class="icon-btn" viewBox="0 0 24 24"><path d="M20 18.69 7.84 6.14 5.27 3.49 4 4.76l2.8 2.8v.01c-.52.99-.8 2.16-.8 3.42v5l-2 2v1h13.73l2 2L21 19.72l-1-1.03zM12 22c1.11 0 2-.89 2-2h-4c0 1.11.89 2 2 2zm6-7.32V11c0-3.08-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.15.03-.29.08-.42.12-.1.03-.2.07-.29.11h-.01c-.01 0-.01 0-.02.01-.23.09-.46.2-.68.31 0 0-.01 0-.01.01L18 14.68z"/></svg>
+						</div>
+						<div class="check">
+							<svg class="check-icon passed" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+							<div class="check-body">
+								<div class="check-head">
+									<a class="check-name" href="#">memory</a>
+									<span class="check-source">alertd</span>
+									
+								</div>
+								
+							</div>
+							<svg class="icon-btn" viewBox="0 0 24 24"><path d="M20 18.69 7.84 6.14 5.27 3.49 4 4.76l2.8 2.8v.01c-.52.99-.8 2.16-.8 3.42v5l-2 2v1h13.73l2 2L21 19.72l-1-1.03zM12 22c1.11 0 2-.89 2-2h-4c0 1.11.89 2 2 2zm6-7.32V11c0-3.08-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.15.03-.29.08-.42.12-.1.03-.2.07-.29.11h-.01c-.01 0-.01 0-.02.01-.23.09-.46.2-.68.31 0 0-.01 0-.01.01L18 14.68z"/></svg>
+						</div>
+						<div class="check">
+							<svg class="check-icon passed" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+							<div class="check-body">
+								<div class="check-head">
+									<a class="check-name" href="#">load</a>
+									<span class="check-source">alertd</span>
+									
+								</div>
+								<dl class="check-extras"><dt>load_1m</dt><dd>0.84</dd></dl>
+							</div>
+							<svg class="icon-btn" viewBox="0 0 24 24"><path d="M20 18.69 7.84 6.14 5.27 3.49 4 4.76l2.8 2.8v.01c-.52.99-.8 2.16-.8 3.42v5l-2 2v1h13.73l2 2L21 19.72l-1-1.03zM12 22c1.11 0 2-.89 2-2h-4c0 1.11.89 2 2 2zm6-7.32V11c0-3.08-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.15.03-.29.08-.42.12-.1.03-.2.07-.29.11h-.01c-.01 0-.01 0-.02.01-.23.09-.46.2-.68.31 0 0-.01 0-.01.01L18 14.68z"/></svg>
+						</div>
+						<div class="check">
+							<svg class="check-icon passed" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+							<div class="check-body">
+								<div class="check-head">
+									<a class="check-name" href="#">time_sync</a>
+									<span class="check-source">alertd</span>
+									
+								</div>
+								
+							</div>
+							<svg class="icon-btn" viewBox="0 0 24 24"><path d="M20 18.69 7.84 6.14 5.27 3.49 4 4.76l2.8 2.8v.01c-.52.99-.8 2.16-.8 3.42v5l-2 2v1h13.73l2 2L21 19.72l-1-1.03zM12 22c1.11 0 2-.89 2-2h-4c0 1.11.89 2 2 2zm6-7.32V11c0-3.08-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68c-.15.03-.29.08-.42.12-.1.03-.2.07-.29.11h-.01c-.01 0-.01 0-.02.01-.23.09-.46.2-.68.31 0 0-.01 0-.01.01L18 14.68z"/></svg>
+						</div>
+					<a class="show-more" href="#">Show 2 more</a>
 			</div>
 
 			<div>
