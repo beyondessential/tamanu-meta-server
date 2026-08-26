@@ -74,13 +74,16 @@ Moving a machine to another group moves the applications on it, and there is no 
 
 A **machine** carries the name its operator gave it, its identity, its group, where it is (whether it is cloud-hosted and its geolocation), and how long it may be silent before it is considered unreachable.
 
-An **application** carries its type, its rank, its optional name, its public name, the URL it serves at and the name-management permissions and pause state that work from that URL, its notes and tags, and how long it may be silent before it is considered unreachable.
+An **application** carries its type, its rank, its optional name, its public name, the URL it is reached at, the DNS names it serves at and the name-management permissions and pause state that work from those names, its notes and tags, and how long it may be silent before it is considered unreachable.
+
+A DNS name an application serves at is held by that application alone across the fleet, which is what lets a request about a name resolve to one application on a machine hosting several (see [CRT](../public-server/certificates.md), "Declared names").
+Its URL is where an operator reaches it, which is a presentation concern rather than an authorisation one (see [SVC](../private-server/service-links.md)).
 
 Both carry tags and effective billing labels, so a check filed against either can be graded by policy rules against the tags of its own target.
 An application's type is among the reserved read-only tags on applications, and appears on no machine, not being a property of a box.
 
 A machine's own name as the operating system reports it is a reported figure rather than a field an operator sets (see [FIG](../private-server/figures.md)).
-It is distinct from an application's URL: two applications on one machine share one hostname and have a URL each.
+It is distinct from the DNS names an application serves at: two applications on one machine share one hostname and serve at names of their own.
 
 ## Identities
 

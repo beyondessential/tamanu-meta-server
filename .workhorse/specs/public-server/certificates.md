@@ -18,33 +18,50 @@ Proving control through DNS means writing to the zone, and Canopy already holds 
 
 Centralising issuance also puts the authority's rate limits, the record of every certificate's expiry, and the alerting when renewal stops working in one place — the same place that already watches the fleet.
 
+## Declared names
+
+An operator declares the names an application serves.
+A declared name is what ties a name to the software that answers on it, and it is what an address registration or a certificate request is resolved against.
+
+A name is declared by at most one application across the whole fleet.
+Declaring a name another application already holds is refused, and the refusal names the application holding it, so an operator can see what to release first.
+Exclusivity is what makes a name resolve to one application without Canopy having to guess which of a machine's workloads a request is about.
+
+An application may declare several names, each held exclusively.
+Releasing a name ends the application's hold on it and leaves the records and certificates already in place, as revoking a grant does.
+
 ## Identity and authorisation
 
-A certificate or address request authenticates as the device enrolled against the application it concerns, by either transport Canopy already accepts for devices (see [DID](machine-identity.md)).
+A certificate or address request authenticates as the machine the requesting application runs on, by either transport Canopy already accepts for devices (see [DID](machine-identity.md)).
+An identity belongs to a machine rather than to the software on it (see [FLT](../servers/overview.md), "Identities"), so which application a request concerns is resolved from the name it asks about rather than from the credential it presents.
+Because a name is held by one application, that resolution is unambiguous however many applications the machine hosts.
 
 Every request is checked in the same order, and each check is reported distinctly so a misconfiguration is diagnosable from the refusal alone:
 
-1. The caller authenticates as a device attached to a live application.
-2. That application has the grant the request needs — DNS management for addresses, certificate issuance for certificates.
-3. The requested name lies at or beneath a domain the application's *own group* controls.
-4. A managed zone covers that domain, so Canopy can act on the name at all.
+1. The caller authenticates as an identity belonging to a live machine.
+2. An application on that machine declares the requested name.
+3. That application has the grant the request needs — DNS management for addresses, certificate issuance for certificates.
+4. The requested name lies at or beneath a domain the application's *own group* controls.
+5. A managed zone covers that domain, so Canopy can act on the name at all.
+
+A machine asking about a name none of its applications declares is refused the same way whether the name is held by an application elsewhere or by nobody, so the endpoint is not a directory of what other machines serve.
 
 A name within another group's domain is refused as if unclaimed: the refusal says the application's group does not control the name, and never that another group does, so the endpoint is not a directory of other deployments' names.
 
-A certificate for a name is available to any application of the group that controls it, provided that application holds the certificate grant.
-Certificate issuance is deliberately not tied to which application registered the name's addresses: a standby that serves the same name on failover needs the same certificate, and Canopy holds no view of which member is live.
-
 ## What an application may act on
 
-An application can ask Canopy what names it is entitled to, rather than discovering the boundary by being refused.
-The answer carries the domains its group controls, which of the two grants it holds, and the names it already has addresses registered or certificates issued for, each with when the certificate expires.
+An agent can ask Canopy what names the applications on its machine are entitled to, rather than discovering the boundary by being refused.
+The answer is given per application, since the grants and the declared names are each an application's own: for every application on the machine, the domains its group controls, the names it declares, which of the two grants it holds, and the names it already has addresses registered or certificates issued for, each with when the certificate expires.
+
+Answering for every application on the machine is what lets one agent serve a box running several: it learns what each of its workloads may do without knowing in advance which of them Canopy holds a grant for.
 
 That is enough for an agent to work ahead of demand: knowing the domains it may use and what it already holds, it can request a certificate before anything asks for one, and renew before expiry, instead of discovering at handshake time that it has nothing to serve.
 
 The answer is available both on its own and on the response to a status push, so an agent that already reports status learns of a new domain or a newly granted permission without asking separately (see [STA](statuses.md)).
 Both carry the same content, the standalone form being for an agent that wants it without pushing.
 
-An application with no grants, or whose group controls no domain, is told so plainly: the answer is empty rather than an error, since asking what one may do is not itself a privileged act.
+An application with no grants, or whose group controls no domain, is told so plainly: its entry is empty rather than an error, since asking what one may do is not itself a privileged act.
+A machine with no applications is answered the same way, with nothing in it.
 
 ## Pausing an application
 
@@ -79,8 +96,7 @@ Canopy publishes what it is told: it does not verify that an address is really t
 Canopy changes only records it created itself.
 Because zones are shared, a name may be served by records Canopy knows nothing about, and Canopy neither rewrites nor removes those; it records what it has published so it can tell its own records from everyone else's.
 
-A name's addresses are registered by one application at a time.
-While a registration stands, another application registering the same name is refused, so two members of a group cannot fight over where one name points.
+A name's addresses are the addresses of the one application that declares it, so two applications cannot fight over where one name points.
 
 ## Certificates
 
@@ -131,7 +147,7 @@ Failing that, Canopy renews after a fixed fraction of the certificate's own life
 Neither is a fixed interval, because a fixed interval cannot serve both lifetimes: a window measured in weeks would leave a certificate that lives days permanently overdue, and one measured in hours would renew a long-lived certificate hundreds of times over.
 Where the authority accounts for a renewal as replacing a particular certificate, Canopy tells it which, so a renewal is not mistaken for an additional certificate.
 
-Renewal stops when the certificate is no longer wanted: a name whose group has released the domain it sits under is not renewed, nor is a certificate for an application whose grant has been revoked or that has been archived.
+Renewal stops when the certificate is no longer wanted: a name whose group has released the domain it sits under is not renewed, nor is a certificate for a name its application no longer declares, or for an application whose grant has been revoked or that has been archived.
 A grant revoked does not withdraw the certificate already issued — it cannot be recalled once it exists — but it does end the renewals that would extend it.
 
 ### Revocation
@@ -164,7 +180,7 @@ A certificate that has expired outright fails regardless.
 A paused application raises none of this either, for the same reason: Canopy has been told to stop acting on its behalf, so a certificate running down is the expected consequence rather than a failure. What is reported instead is the pause, and eventually the pause having been forgotten.
 
 Except that a certificate for a name the application is no longer entitled to raises nothing at all, however far past expiry it is.
-Its group may have released the domain it sat under, the application's grant may have been revoked, or the application may have been archived — and in each case Canopy deliberately stopped renewing it, so its running out is the intended outcome rather than a failure to report.
+Its group may have released the domain it sat under, its application may have released the name, the application's grant may have been revoked, or the application may have been archived — and in each case Canopy deliberately stopped renewing it, so its running out is the intended outcome rather than a failure to report.
 Alerting on it would mean every deliberate withdrawal left an alert behind that no action could clear, which teaches an operator to ignore the alert that matters.
 Whether the name is still entitled is asked when the alert is evaluated rather than remembered from when renewal stopped, so a domain reclaimed by its group brings its certificates back into scope.
 
@@ -176,7 +192,8 @@ Reporting the two apart matters because they call for different people — an ap
 
 ## Presentation
 
-An application presents the names it has registered — with the addresses published for each, and whether the zone has caught up with what it asked for — and the certificates Canopy holds for it, each with the name it covers, the profile it was issued under, and when it expires, given both as an instant and as how long is left.
+An application presents the names it declares — with the addresses published for each, and whether the zone has caught up with what it asked for — and the certificates Canopy holds for it, each with the name it covers, the profile it was issued under, and when it expires, given both as an instant and as how long is left.
+An operator declares and releases an application's names from the same place.
 A request that has not yet produced a certificate presents as pending, or as failed with the reason.
 An operator sets the application's profile where its other permissions are set, and pauses or unpauses it from the same place, a pause showing who set it, when, and why.
 

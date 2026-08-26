@@ -30,7 +30,7 @@ A machine that reports no operating system falls back to the family the database
 The operating system timezone is the machine's own configured timezone, presented so an operator can read the machine's local time.
 It is named for what it is, an application's own configured timezone being a separate figure.
 
-The hostname is the machine's own name as it reports it, which is a different thing from the URL an application serves at.
+The hostname is the machine's own name as it reports it, which is a different thing from the DNS names an application serves at.
 
 The bestool version is the version of bestool, the first-party agent that reports on the machine, as it reports it.
 A machine reported on only by sources other than bestool presents no bestool version.
