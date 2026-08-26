@@ -8,6 +8,7 @@
 	:root {
 		--paper: #fff;
 		--divider: rgba(0, 0, 0, 0.12);
+		--divider-light: rgba(0, 0, 0, 0.06);
 		--enclosure: rgba(0, 0, 0, 0.18);
 		--text-primary: rgba(0, 0, 0, 0.87);
 		--text-secondary: rgba(0, 0, 0, 0.6);
@@ -313,6 +314,48 @@
 		flex: none;
 	}
 
+	/* The group's tree: rank, then machine, then the applications on it. */
+	.tree-machine {
+		border: 1px solid var(--divider);
+		border-radius: 4px;
+		overflow: hidden;
+	}
+
+	.tree-machine + .tree-machine { margin-top: 8px; }
+
+	.tree-head {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 10px 12px;
+	}
+
+	.tree-apps { border-top: 1px solid var(--divider); }
+
+	.tree-app {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 8px 12px 8px 30px;
+	}
+
+	.tree-app + .tree-app { border-top: 1px solid var(--divider-light); }
+
+	.tree-app.current, .tree-head.current { background: var(--action-hover); }
+
+	.tree-name { font-weight: 500; text-decoration: none; color: var(--text-primary); }
+	.tree-name:hover { text-decoration: underline; }
+	.tree-name.plain { color: var(--text-secondary); }
+
+	.tree-meta { margin-left: auto; font-size: 0.8125rem; color: var(--text-secondary); }
+
+	.here {
+		font-size: 0.6875rem;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--text-secondary);
+	}
+
 	.overline {
 		font-size: 0.75rem;
 		letter-spacing: 0.08em;
@@ -503,31 +546,45 @@
 			</div>
 
 			<div>
-				<h5 class="section-title">Elsewhere in Nauru</h5>
-				<span class="overline">applications</span>
-				<div class="shorty">
-					<span class="dot warning"></span>
-					<a class="shorty-name" href="#">Nauru Facility</a>
-					<span class="chip">facility</span>
-					<span class="shorty-host">nauru-fac.example</span>
-				</div>
-				<div class="shorty">
-					<span class="dot"></span>
-					<a class="shorty-name" href="#">Nauru Test</a>
-					<span class="chip">facility</span>
-					<span class="shorty-host">nauru-test.example</span>
-				</div>
-				<span class="overline">machines</span>
-				<div class="shorty">
-					<span class="machine"><span class="dot"></span><span class="dot warning"></span></span>
-					<a class="shorty-name" href="#">nauru-prod-01</a>
-					<span class="shorty-host">Ubuntu 22.04</span>
-				</div>
-				<div class="shorty">
-					<span class="machine"><span class="dot"></span></span>
-					<a class="shorty-name" href="#">nauru-test-01</a>
-					<span class="shorty-host">Ubuntu 22.04</span>
-				</div>
+				<h5 class="section-title">Nauru</h5>
+				<span class="overline" style="margin-top:0">production</span>
+					<div class="tree-machine">
+						<div class="tree-head">
+							<span class="machine"><span class="dot "></span><span class="dot warning"></span></span>
+							<a class="tree-name" href="#">nauru-prod-01</a>
+							<span class="tree-meta">Ubuntu 22.04</span>
+						</div>
+						<div class="tree-apps">
+							<div class="tree-app current">
+								<span class="dot "></span>
+								<span class="tree-name plain">Nauru Central</span><span class="here">you are here</span>
+								<span class="chip">central</span>
+								<span class="tree-meta">nauru.example</span>
+							</div>
+							<div class="tree-app">
+								<span class="dot warning"></span>
+								<a class="tree-name" href="#">Nauru Facility</a>
+								<span class="chip">facility</span>
+								<span class="tree-meta">nauru-fac.example</span>
+							</div>
+						</div>
+					</div>
+				<span class="overline">test</span>
+					<div class="tree-machine">
+						<div class="tree-head">
+							<span class="machine"><span class="dot "></span></span>
+							<a class="tree-name" href="#">nauru-test-01</a>
+							<span class="tree-meta">Ubuntu 22.04</span>
+						</div>
+						<div class="tree-apps">
+							<div class="tree-app">
+								<span class="dot "></span>
+								<a class="tree-name" href="#">Nauru Test</a>
+								<span class="chip">facility</span>
+								<span class="tree-meta">nauru-test.example</span>
+							</div>
+						</div>
+					</div>
 			</div>
 		</div>
 	</div>
@@ -671,20 +728,45 @@
 			</div>
 
 			<div>
-				<h5 class="section-title">Elsewhere in Nauru</h5>
-				<span class="overline">machines</span>
-				<div class="shorty">
-					<span class="machine"><span class="dot"></span></span>
-					<a class="shorty-name" href="#">nauru-test-01</a>
-					<span class="shorty-host">Ubuntu 22.04</span>
-				</div>
-				<span class="overline">applications</span>
-				<div class="shorty">
-					<span class="dot"></span>
-					<a class="shorty-name" href="#">Nauru Test</a>
-					<span class="chip">facility</span>
-					<span class="shorty-host">nauru-test.example</span>
-				</div>
+				<h5 class="section-title">Nauru</h5>
+				<span class="overline" style="margin-top:0">production</span>
+					<div class="tree-machine">
+						<div class="tree-head current">
+							<span class="machine"><span class="dot "></span><span class="dot warning"></span></span>
+							<span class="tree-name plain">nauru-prod-01</span><span class="here">you are here</span>
+							<span class="tree-meta">Ubuntu 22.04</span>
+						</div>
+						<div class="tree-apps">
+							<div class="tree-app">
+								<span class="dot "></span>
+								<a class="tree-name" href="#">Nauru Central</a>
+								<span class="chip">central</span>
+								<span class="tree-meta">nauru.example</span>
+							</div>
+							<div class="tree-app">
+								<span class="dot warning"></span>
+								<a class="tree-name" href="#">Nauru Facility</a>
+								<span class="chip">facility</span>
+								<span class="tree-meta">nauru-fac.example</span>
+							</div>
+						</div>
+					</div>
+				<span class="overline">test</span>
+					<div class="tree-machine">
+						<div class="tree-head">
+							<span class="machine"><span class="dot "></span></span>
+							<a class="tree-name" href="#">nauru-test-01</a>
+							<span class="tree-meta">Ubuntu 22.04</span>
+						</div>
+						<div class="tree-apps">
+							<div class="tree-app">
+								<span class="dot "></span>
+								<a class="tree-name" href="#">Nauru Test</a>
+								<span class="chip">facility</span>
+								<span class="tree-meta">nauru-test.example</span>
+							</div>
+						</div>
+					</div>
 			</div>
 		</div>
 	</div>
@@ -704,9 +786,20 @@
 	<b>Reachability appears on both</b>, as one filing seen from two places. Silencing
 	it from either is the same machine-scoped silence.
 	<br><br>
-	<b>Every page ends with the group's other pages</b>, applications and machines
-	both, so moving sideways never goes back through the group. The application page
-	adds one link upward to its machine, which is the only hop the hierarchy needs.
+	<b>Every page ends with the group's whole tree</b>: rank, then machine, then the
+	applications on it. It is the same shape the group page shows, so an operator
+	learns one arrangement and reads it everywhere, and moving sideways never goes back
+	through the group. The current page is marked in place rather than omitted, so the
+	tree reads as a map rather than a list of everything else.
+	<br><br>
+	The application page adds one link upward to its machine, which is the only hop the
+	hierarchy needs.
+	<br><br>
+	<b>A machine sits under the rank of its highest-ranked application</b>, on the same
+	rule its billing stage uses. A box shared by a production and a test workload files
+	under production with its test application nested inside it, which is worth seeing
+	rather than hiding: the box is production-grade because something production is on
+	it.
 </p>
 
 </body>

@@ -142,7 +142,12 @@ It carries no backups and no identity, both of which belong to the box.
 The **machine** page presents the checks that are about the box and not those of the applications on it, the identity, the machine's own notes and tags, and its backups.
 It carries no `url`, that being an application's.
 
-Each page lists the group's other pages at the bottom, so any application or machine in the group is one hop away, and the application page links up to its machine at the top.
+Each page ends with the group's whole tree: rank, then machine, then the applications on that machine.
+It is the same arrangement the group's own page uses, so an operator learns one shape and reads it everywhere, and the page they are on is marked in place rather than left out.
+Any application or machine in the group is one hop away, and the application page links up to its machine at the top.
+
+A machine sits under the rank of its highest-ranked application, the same rule its billing stage follows.
+A box shared by a production and a test workload files under production with its test application nested inside it, which is the useful reading: the box is production-grade because something production is on it.
 
 `/servers/{id}` redirects to the application, so every deep link that exists today keeps working and lands on the page that replaced what it pointed at.
 An incident that named a server names an application.
