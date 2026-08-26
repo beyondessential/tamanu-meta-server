@@ -19,8 +19,7 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 - [ ] An application takes its machine's group (verifies spec: FLT)
 - [ ] Moving a machine to another group moves every application on it (verifies spec: FLT)
 - [ ] An application on a machine cannot be moved to a different group on its own (verifies spec: FLT)
-- [ ] A machine-less application carries a group of its own (verifies spec: FLT)
-- [ ] A machine-targeted check on a grouped machine resolves an incident target through that group (verifies spec: CHK)
+- [ ] A machine-targeted check on a grouped machine resolves an incident target through that group (verifies spec: CHK, INC)
 
 ## Application types
 
@@ -48,7 +47,8 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 ## Checks
 
 - [ ] Every machine check presents on every application on that machine, marked as the machine's (verifies spec: CHK)
-- [ ] A degraded machine check opens one incident from the machine's scope, not one per application (verifies spec: CHK)
+- [ ] A degraded machine check contributes one issue at machine scope, not one per application (verifies spec: CHK)
+- [ ] A machine-scoped and an application-scoped issue in one group join the same incident (verifies spec: INC)
 - [ ] A silence on a machine check quiets it on every application presenting it (verifies spec: CHK)
 - [ ] An application's health rollup counts its machine's checks (verifies spec: CHK)
 - [ ] An application check is catalogued as `<type>.<check>`; two types reporting one name are two entries (verifies spec: CHK)
@@ -75,8 +75,8 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 - [ ] Application version spreads over applications (verifies spec: FIG)
 - [ ] A crossing counts machines whatever is on its axes, and names the unit it counts (verifies spec: FIG)
 - [ ] A machine whose applications disagree on an application figure appears in each matching cell (verifies spec: FIG)
-- [ ] A machine-less application is absent from crossings (verifies spec: FIG)
 - [ ] The OS timezone and an application's configured timezone present as separate figures and may differ (verifies spec: FIG)
+- [ ] The Munin flag is a machine figure, and the Munin link is offered on the machine (verifies spec: SVC, FIG)
 - [ ] A machine reporting no OS falls back to the family its applications' database engine gives away (verifies spec: FIG)
 - [ ] Runtime version falls back to the reporting identity's connection metadata (verifies spec: FIG)
 
@@ -95,10 +95,32 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 - [ ] A group's labels carry no type (verifies spec: APP)
 - [ ] A group's backup storage still attributes to Canopy's backup product (verifies spec: APP)
 
-## Backups
+## Backups and restores
 
-- [ ] An application onboarded into an existing backup configuration is not stale on arrival (verifies spec: BKJ)
-- [ ] Backup capability and configuration follow the machine (verifies spec: APP)
+- [ ] A machine onboarded into an existing backup configuration is not stale on arrival (verifies spec: BKJ)
+- [ ] Adding a second application to a machine does not restart that machine's backup staleness anchor (verifies spec: BKJ)
+- [ ] Backup capability and participation follow the machine, and a two-application box is one participant (verifies spec: BAK, BKO)
+- [ ] A device request resolves identity to machine to group, without reaching the applications on it (verifies spec: BAK)
+- [ ] A restore-replica declaration names a machine, and a whole-group declaration expands over machines (verifies spec: RST)
+- [ ] `restore-verification` and `redaction` file at machine scope; `migration-test` files at application scope (verifies spec: RST)
+- [ ] A migrate worklist entry names the machine's snapshot and the application whose candidate it carries (verifies spec: RST)
+
+## Names and certificates
+
+- [ ] Declaring a name another application already holds is refused, and the refusal names the holder (verifies spec: CRT)
+- [ ] A certificate request from a two-application machine resolves to the application declaring the requested name (verifies spec: CRT)
+- [ ] A request for a name none of the machine's applications declares is refused identically whether another application holds it or nobody does (verifies spec: CRT)
+- [ ] The entitlement answer carries one entry per application on the machine (verifies spec: CRT)
+- [ ] The entitlement answer on a status-push response matches the standalone one (verifies spec: CRT, STA)
+- [ ] Releasing a name stops renewal and leaves existing records and certificates in place (verifies spec: CRT)
+
+## Fleet query interface
+
+- [ ] `Get machine` returns platform and hardware figures; `Get application` returns version and database engine (verifies spec: MCP)
+- [ ] `Find machines` returns machines with their application counts (verifies spec: MCP)
+- [ ] `Find issues` filtered by application returns the machine's issues among the application's own (verifies spec: MCP)
+- [ ] `Get incident` reports each issue's scope (verifies spec: MCP)
+- [ ] MCP health classifications match what the operator UI presents for the same machine or application (verifies spec: MCP)
 
 ## Migration
 
