@@ -82,6 +82,31 @@ test.describe("maintenance windows", () => {
 		expect(await openWindows(sql)).toBe(0);
 	});
 
+	test("a server under its group's window says so and points at the group", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "whole-region" });
+		const server = await seedServer(sql, {
+			name: "one-of-many",
+			groupId: group.id,
+		});
+		await seedStatus(sql, { serverId: server.id, healthy: true });
+		await seedMaintenanceWindow(sql, {
+			serverGroupId: group.id,
+			note: "Cutting over the database",
+		});
+
+		await page.goto(`/servers/${server.id}`);
+		const covering = page.getByTestId("covering-group-window");
+		await expect(covering).toContainText("Under maintenance until");
+		await expect(covering).toContainText("Cutting over the database");
+		await expect(
+			covering.getByRole("link", { name: "whole-region" }),
+		).toHaveAttribute("href", `/groups/${group.id}`);
+		await expect(page.getByTestId("maintenance-marker")).toBeVisible();
+	});
+
 	test("the maintenance page lists what the fleet is not watching", async ({
 		page,
 		sql,

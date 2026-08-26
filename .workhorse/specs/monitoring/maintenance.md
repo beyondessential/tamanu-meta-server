@@ -75,6 +75,7 @@ Canopy presents every open window across the fleet in one view: what each covers
 The view answers "what are we not watching right now" without reading each group.
 
 A target's own surface presents its open window with the actions to amend or lift it, and its ended windows as history.
+A server covered by its group's window presents that window too, naming the group and leading there, since a server under maintenance without a window of its own would otherwise read as one nobody had declared.
 A check skipped because a window holds says so where its result is presented.
 
 ## Out of scope

@@ -3,12 +3,14 @@ import {
 	Box,
 	Button,
 	LinearProgress,
+	Link as MuiLink,
 	Paper,
 	Stack,
 	Typography,
 } from "@mui/material";
 import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import { useState } from "react";
+import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import type { MaintenanceWindow } from "../types";
@@ -25,11 +27,18 @@ export default function MaintenanceSection({
 	scope,
 	id,
 	targetLabel,
+	groupId,
+	groupName,
 	onChanged,
 }: {
 	scope: "server" | "group";
 	id: string;
 	targetLabel?: string;
+	/** For a server, its group: a group's window covers every server in it,
+	 * so the server is under maintenance without having a window of its own.
+	 * Its own surface has to say so. */
+	groupId?: string | null;
+	groupName?: string | null;
 	/** Called after declaring or lifting, so the page can refresh the
 	 * health and checks that the window changes. */
 	onChanged?: () => void;
@@ -44,6 +53,13 @@ export default function MaintenanceSection({
 		"for_target",
 		scope === "server" ? { server_id: id } : { server_group_id: id },
 		[id, tick],
+	);
+	const covering = useApi(
+		"maintenance",
+		"for_target",
+		{ server_group_id: groupId ?? "" },
+		[groupId, tick],
+		{ skip: !groupId },
 	);
 
 	const reload = () => {
@@ -70,13 +86,39 @@ export default function MaintenanceSection({
 
 	const windows: MaintenanceWindow[] = result.data;
 	const open = windows.find((w) => w.ended_at === null) ?? null;
+	const fromGroup =
+		covering.status === "ok"
+			? ((covering.data as MaintenanceWindow[]).find((w) => w.ended_at === null) ?? null)
+			: null;
 	const history = windows.filter((w) => w.ended_at !== null).slice(0, HISTORY_SHOWN);
 
-	if (!open && history.length === 0 && !isAdmin) return null;
+	if (!open && !fromGroup && history.length === 0 && !isAdmin) return null;
 
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }} data-testid="maintenance-section">
 			<Heading />
+			{fromGroup && (
+				<Alert
+					severity="info"
+					icon={<BuildOutlinedIcon fontSize="inherit" />}
+					sx={{ mb: 2 }}
+					data-testid="covering-group-window"
+				>
+					<Typography variant="body2">
+						Under maintenance until{" "}
+						<TimeAgo timestamp={fromGroup.expected_end} /> as part of{" "}
+						<MuiLink component={RouterLink} to={`/groups/${groupId}`}>
+							{groupName ?? "its group"}
+						</MuiLink>
+						. Amend or lift it there.
+					</Typography>
+					{fromGroup.note && (
+						<Typography variant="body2" sx={{ mt: 0.5, fontStyle: "italic" }}>
+							{fromGroup.note}
+						</Typography>
+					)}
+				</Alert>
+			)}
 			{open ? (
 				<Alert
 					severity="info"

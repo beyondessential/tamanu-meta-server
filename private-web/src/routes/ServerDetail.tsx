@@ -234,6 +234,8 @@ export default function ServerDetail() {
 				scope="server"
 				id={data.server.id}
 				targetLabel={data.server.name ?? data.server.display_host}
+				groupId={data.group?.id ?? null}
+				groupName={data.group?.name ?? null}
 				onChanged={() => detail.reload()}
 			/>
 			<SilencedRefsSection
