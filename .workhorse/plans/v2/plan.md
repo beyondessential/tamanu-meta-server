@@ -73,6 +73,18 @@ Adding the machine grain follows `migrations/2026-06-15-064431-0000_backup_group
 
 Only `Machine` is added. Clusters are K1's to model, and nothing here should presuppose that a cluster will be a scope at all — including a note saying one is coming, which would railroad K1 into a shape convenient to this card. The hazard worth carrying forward is not a design: whoever adds the next grain must remember the global partial index matches on *all* other scope columns being null.
 
+### Done
+
+Migration `2026-08-26-232015-0000_machine_scoped_issues`. `machine_id` on `issues` and `scoped_check_policies`, both scope CHECKs widened to at-most-one-of-three, machine find-or-create indexes, and **both** global partial indexes recreated with `AND machine_id IS NULL`. The trap has a test that files a canopy-wide and a machine-scoped issue on the same `(source, ref)` and asserts two rows.
+
+`Scope` is now `{ Application, Machine, Group, Global }`, with `to_columns`/`from_columns` on the triple. `Scope::Machine` resolves through the machine's group carrying the *machine's* own `is_monitored`, so excusing a box from monitoring does not quiet the applications on it. `raise_machine_event_with_state` is the machine-grain filing path, mirroring the group one; the startup incident sweep batches machines alongside applications.
+
+Policy chains take the machine dimension: `scoped_to`, `chain_for`, `chains_for_scope` and `apply_scoped` all carry it, and `order_chain` treats machine and application scope as equally specific — a filing is at one grain or the other, so the two never share a chain.
+
+**Nothing files at machine scope yet.** The two call sites that grade a push pass `None` for the machine, because separating machine-subject checks out of a unified push is the ingest step's job. The plumbing is in place and unused, which is deliberate: it lands before the thing that needs it rather than alongside it.
+
+**`IssueData` does not carry the machine.** The private API's issue DTO still exposes only `application_id`, so a machine-scoped issue would present with a null application and no indication of which box it belongs to. Nothing files one yet, and the field goes in with the step that presents machine checks (MCP and the detail pages).
+
 ## Group denormalisation
 
 A trigger propagates a machine's group onto its applications, so the denormalisation cannot drift however either is written. Triggers-for-denormalisation is established here — the table being dropped below was itself trigger-maintained off `statuses`.

@@ -858,8 +858,11 @@ async fn consolidated_checks_at(
 	// dozens of checks, and re-querying the catalog and the scoped chain for
 	// each one turned this reconstruction into a few hundred round-trips.
 	let grading = CheckPolicy::grading_table(conn).await?;
+	// Reconstructs an application's own checks from its status history, so
+	// only the application and group chains bear on it. Amalgamating its
+	// machine's checks into this view is the detail-page step's job.
 	let chains =
-		ScopedCheckPolicy::chains_for_scope(conn, Some(server.id), server.group_id).await?;
+		ScopedCheckPolicy::chains_for_scope(conn, Some(server.id), None, server.group_id).await?;
 
 	let mut checks: Vec<ConsolidatedCheck> = Vec::new();
 	for status in &statuses {

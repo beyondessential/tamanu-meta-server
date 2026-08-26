@@ -203,6 +203,20 @@ impl Machine {
 			.map_err(AppError::from)
 	}
 
+	/// This machine's tags over its group's, so a check filed against a
+	/// machine is graded by policy against the tags of its own target rather
+	/// than against some application that happens to run on it.
+	///
+	/// An application's type is not among them: it is not a property of a box.
+	// spec: FLT#what-each-carries
+	pub async fn tags_merged_with_group(&self, db: &mut AsyncPgConnection) -> Result<TagMap> {
+		let Some(gid) = self.group_id else {
+			return Ok(self.tags.clone());
+		};
+		let group = crate::server_groups::ServerGroup::get_by_id(db, gid).await?;
+		Ok(self.tags.merged_with(&group.tags))
+	}
+
 	/// Archive a machine and, with it, the applications on it — a box going
 	/// away takes its workloads with it. Archival is not deletion: the records
 	/// and their history remain.

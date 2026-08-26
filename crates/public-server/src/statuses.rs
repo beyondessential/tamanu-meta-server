@@ -521,6 +521,10 @@ async fn file_health_events(
 			*result,
 			&ctx,
 			Some(server_id),
+			// A push still describes one application. Separating the
+			// machine-subject checks out of it is the ingest step's job; until
+			// then nothing here files at machine scope.
+			None,
 			group_id,
 		)
 		.await?;

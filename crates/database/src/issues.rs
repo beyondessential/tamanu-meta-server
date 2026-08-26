@@ -31,14 +31,19 @@ pub struct Issue {
 	/// When this issue was last modified.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub updated_at: Timestamp,
-	/// The server this issue is attached to. `None` for a group-scoped issue
-	/// (see `server_group_id`) — exactly one of the two is always set.
+	/// The application this issue is attached to. `None` unless this is an
+	/// application-scoped issue; at most one of the three scope columns is set,
+	/// and all three null is canopy-wide.
 	pub application_id: Option<Uuid>,
+	/// The machine this issue is attached to, for a check that asserts
+	/// something about the box rather than about a workload on it — disk,
+	/// memory, clock, the tailnet. One degraded machine check is one issue at
+	/// machine scope, not one per application on the host.
+	pub machine_id: Option<Uuid>,
 	/// The server group this issue is attached to, for a control-plane issue
 	/// (e.g. backup corruption, a failed preflight check) that isn't tied to
-	/// any single server. `None` for an ordinary server-scoped issue.
-	/// Group-scoped issues are always considered even if an individual
-	/// server in the group has monitoring turned off.
+	/// any single application or machine. Group-scoped issues are always
+	/// considered even if an individual member has monitoring turned off.
 	pub server_group_id: Option<Uuid>,
 	/// The device that reported this issue, if it was raised by a device
 	/// push. `None` for issues raised by an operator or by the platform
@@ -666,6 +671,133 @@ pub async fn raise_group_event_with_state(
 	.await
 }
 
+/// Open (or recover) a **machine-scoped** issue: one keyed
+/// `(machine_id, source = canopy, ref)` under the machine partial unique
+/// index.
+///
+/// A degraded machine check is one issue at machine scope, not one per
+/// application on the box. The applications present it — it is theirs to
+/// show, not theirs to own — so a two-workload host raises a single disk
+/// failure rather than two.
+///
+/// Mirrors [`raise_group_event_with_state`]'s find-or-create. Incident
+/// evaluation resolves through the machine's group and carries the machine's
+/// own `is_monitored`, so excusing a box from monitoring does not quiet the
+/// applications on it.
+// spec: CHK
+pub async fn raise_machine_event_with_state(
+	conn: &mut AsyncPgConnection,
+	machine_id: Uuid,
+	r#ref: &str,
+	description: Option<&str>,
+	message: &str,
+	active: bool,
+	state: Option<&CheckStateStamp>,
+) -> Result<Issue> {
+	use crate::schema::issues;
+
+	if let Some(d) = description
+		&& d.contains('\n')
+	{
+		return Err(AppError::BadRequest(
+			"description must be a single line (no newlines); use `message` for body text".into(),
+		));
+	}
+
+	let source = crate::statuses::CANOPY_SOURCE;
+	let now = Timestamp::now();
+
+	conn.transaction::<_, AppError, _>(async |conn| {
+		let existing: Option<Issue> = issues::table
+			.select(Issue::as_select())
+			.filter(
+				issues::machine_id
+					.eq(machine_id)
+					.and(issues::source.eq(source))
+					.and(issues::ref_.eq(r#ref)),
+			)
+			.for_update()
+			.first(conn)
+			.await
+			.optional()?;
+
+		let prior_state = existing
+			.as_ref()
+			.map(|e| (e.degraded_since, e.last_degraded_at));
+		let issue: Issue = if let Some(existing) = existing {
+			let new_last_seen = if now > existing.last_seen {
+				now
+			} else {
+				existing.last_seen
+			};
+			let clear_resolved = active && existing.resolved_at.is_some();
+			diesel::update(issues::table.filter(issues::id.eq(existing.id)))
+				.set((
+					issues::description.eq(description),
+					issues::message.eq(message),
+					issues::active.eq(active),
+					issues::last_seen.eq(jiff_diesel::Timestamp::from(new_last_seen)),
+					issues::resolved_at.eq(diesel::dsl::sql::<
+						diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>,
+					>(if clear_resolved {
+						"NULL"
+					} else {
+						"issues.resolved_at"
+					})),
+					issues::resolved_by.eq(diesel::dsl::sql::<
+						diesel::sql_types::Nullable<diesel::sql_types::Text>,
+					>(if clear_resolved {
+						"NULL"
+					} else {
+						"issues.resolved_by"
+					})),
+					issues::resolved_reason.eq(diesel::dsl::sql::<
+						diesel::sql_types::Nullable<diesel::sql_types::Text>,
+					>(if clear_resolved {
+						"NULL"
+					} else {
+						"issues.resolved_reason"
+					})),
+				))
+				.returning(Issue::as_select())
+				.get_result(conn)
+				.await?
+		} else {
+			diesel::insert_into(issues::table)
+				.values((
+					issues::machine_id.eq(machine_id),
+					issues::source.eq(source),
+					issues::ref_.eq(r#ref),
+					issues::description.eq(description),
+					issues::message.eq(message),
+					issues::active.eq(active),
+					issues::first_seen.eq(jiff_diesel::Timestamp::from(now)),
+					issues::last_seen.eq(jiff_diesel::Timestamp::from(now)),
+				))
+				.returning(Issue::as_select())
+				.get_result(conn)
+				.await?
+		};
+
+		let issue = match state {
+			Some(stamp) => stamp_check_state(conn, issue.id, prior_state, stamp, now).await?,
+			None => issue,
+		};
+
+		// An ungrouped machine has no incident target, exactly as an ungrouped
+		// application has none.
+		if let Some((target, monitored)) = Scope::Machine(machine_id)
+			.resolve_incident_target(conn)
+			.await?
+		{
+			re_evaluate_incident_membership(conn, &issue, target, monitored, now, None).await?;
+		}
+
+		Ok(issue)
+	})
+	.await
+}
+
 /// Open (or recover) a **canopy-wide** issue: one scoped to neither a
 /// server nor a group, keyed `(source = canopy, ref)` under the global
 /// partial unique index. This is the state store for canopy monitoring
@@ -793,44 +925,62 @@ pub async fn raise_global_event_with_state(
 }
 
 /// The scope a check-state, issue, or scoped policy attaches to: one
-/// server, a server group, or canopy as a whole. This is the single scope
-/// vocabulary for check state — do not reintroduce a parallel scope enum or
-/// an ad-hoc `match (application_id, server_group_id)`; map through the methods
-/// here. Provenance (which device reported a filing) is a separate concern
-/// (see `CheckFiling::device_id`), not part of scope.
+/// application, one machine, a server group, or canopy as a whole. This is the
+/// single scope vocabulary for check state — do not reintroduce a parallel
+/// scope enum or an ad-hoc `match (application_id, machine_id,
+/// server_group_id)`; map through the methods here. Provenance (which device
+/// reported a filing) is a separate concern (see `CheckFiling::device_id`), not
+/// part of scope.
+///
+/// A machine is a target in its own right because a host's disk, memory and
+/// clock assert something about the box, not about any one workload on it.
+// spec: CHK
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scope {
 	Application(Uuid),
+	Machine(Uuid),
 	Group(Uuid),
 	Global,
 }
 
 impl Scope {
-	/// The `(application_id, server_group_id)` storage columns for this scope.
-	pub fn to_columns(self) -> (Option<Uuid>, Option<Uuid>) {
+	/// The `(application_id, machine_id, server_group_id)` storage columns for
+	/// this scope.
+	pub fn to_columns(self) -> (Option<Uuid>, Option<Uuid>, Option<Uuid>) {
 		match self {
-			Scope::Application(id) => (Some(id), None),
-			Scope::Group(id) => (None, Some(id)),
-			Scope::Global => (None, None),
+			Scope::Application(id) => (Some(id), None, None),
+			Scope::Machine(id) => (None, Some(id), None),
+			Scope::Group(id) => (None, None, Some(id)),
+			Scope::Global => (None, None, None),
 		}
 	}
 
-	/// The scope encoded by a `(application_id, server_group_id)` pair. A set
-	/// group wins (the storage CHECK allows at most one set; both null is
-	/// canopy-wide).
-	pub fn from_columns(application_id: Option<Uuid>, server_group_id: Option<Uuid>) -> Self {
-		match (application_id, server_group_id) {
-			(_, Some(gid)) => Scope::Group(gid),
-			(Some(sid), None) => Scope::Application(sid),
-			(None, None) => Scope::Global,
+	/// The scope encoded by an `(application_id, machine_id, server_group_id)`
+	/// triple. The storage CHECK allows at most one to be set, so the arms are
+	/// mutually exclusive in practice; the order below only decides what a row
+	/// that violated the CHECK would read as, and all-null is canopy-wide.
+	pub fn from_columns(
+		application_id: Option<Uuid>,
+		machine_id: Option<Uuid>,
+		server_group_id: Option<Uuid>,
+	) -> Self {
+		match (application_id, machine_id, server_group_id) {
+			(_, _, Some(gid)) => Scope::Group(gid),
+			(_, Some(mid), None) => Scope::Machine(mid),
+			(Some(sid), None, None) => Scope::Application(sid),
+			(None, None, None) => Scope::Global,
 		}
 	}
 
 	/// Resolve this scope to the incident target it contributes to and
-	/// whether that contribution is monitored. A server maps to its group,
-	/// carrying the server's `is_monitored`; a group targets itself and a
-	/// canopy-wide scope the global target, both always monitored. An
-	/// ungrouped server has no target and no incident path.
+	/// whether that contribution is monitored. An application or a machine
+	/// maps to its group, carrying that target's own `is_monitored`; a group
+	/// targets itself and a canopy-wide scope the global target, both always
+	/// monitored. An ungrouped application or machine has no target and no
+	/// incident path.
+	///
+	/// A machine carries its own monitoring switch, so excusing a box from
+	/// monitoring does not quiet the applications on it, and vice versa.
 	pub async fn resolve_incident_target(
 		self,
 		conn: &mut AsyncPgConnection,
@@ -842,6 +992,12 @@ impl Scope {
 				Ok(server
 					.group_id
 					.map(|gid| (IncidentTarget::Group(gid), server.is_monitored)))
+			}
+			Scope::Machine(mid) => {
+				let machine = crate::machines::Machine::get_by_id(conn, mid).await?;
+				Ok(machine
+					.group_id
+					.map(|gid| (IncidentTarget::Group(gid), machine.is_monitored)))
 			}
 			Scope::Global => Ok(Some((IncidentTarget::Global, true))),
 		}
@@ -1010,8 +1166,9 @@ pub async fn file_check_instances(
 	.await?;
 
 	let status_extra = serde_json::Map::new();
-	let (tags, scope_server, scope_group): (
+	let (tags, scope_server, scope_machine, scope_group): (
 		std::collections::HashMap<String, serde_json::Value>,
+		Option<Uuid>,
 		Option<Uuid>,
 		Option<Uuid>,
 	) = match filing.scope {
@@ -1025,18 +1182,39 @@ pub async fn file_check_instances(
 				.into_iter()
 				.map(|(k, v)| (k, serde_json::Value::String(v)))
 				.collect();
-			(tags, Some(application_id), group_id)
+			(tags, Some(application_id), None, group_id)
 		}
-		Scope::Group(group_id) => (Default::default(), None, Some(group_id)),
-		Scope::Global => (Default::default(), None, None),
+		// Graded against the machine's own tags, not against any application
+		// that happens to run on it.
+		Scope::Machine(machine_id) => {
+			let machine = crate::machines::Machine::get_by_id(conn, machine_id).await?;
+			let group_id = machine.group_id;
+			let tags = machine
+				.tags_merged_with_group(conn)
+				.await?
+				.0
+				.into_iter()
+				.map(|(k, v)| (k, serde_json::Value::String(v)))
+				.collect();
+			(tags, None, Some(machine_id), group_id)
+		}
+		Scope::Group(group_id) => (Default::default(), None, None, Some(group_id)),
+		Scope::Global => (Default::default(), None, None, None),
 	};
 
 	// The catalog entry and the scoped chain are properties of the check, not
 	// of any one instance: read them once and grade purely from there, so a
 	// server with a dozen backup types still costs two queries.
 	let fleet = CheckPolicy::fleet_grading(conn, source, filing.check).await?;
-	let chain =
-		ScopedCheckPolicy::chain_for(conn, source, filing.check, scope_server, scope_group).await?;
+	let chain = ScopedCheckPolicy::chain_for(
+		conn,
+		source,
+		filing.check,
+		scope_server,
+		scope_machine,
+		scope_group,
+	)
+	.await?;
 
 	let mut graded_instances: Vec<GradedInstance> = Vec::with_capacity(filing.instances.len());
 	let mut escalates = false;
@@ -1144,6 +1322,18 @@ pub async fn file_check_instances(
 				occurred_at: None,
 			}
 			.save_with_state(conn, application_id, filing.device_id, Some(&stamp), false)
+			.await
+		}
+		Scope::Machine(machine_id) => {
+			raise_machine_event_with_state(
+				conn,
+				machine_id,
+				filing.check,
+				description,
+				filing.message,
+				active,
+				Some(&stamp),
+			)
 			.await
 		}
 		Scope::Group(gid) => {
@@ -1970,9 +2160,13 @@ async fn issue_target_and_monitored(
 	conn: &mut AsyncPgConnection,
 	issue: &Issue,
 ) -> Result<Option<(IncidentTarget, bool)>> {
-	Scope::from_columns(issue.application_id, issue.server_group_id)
-		.resolve_incident_target(conn)
-		.await
+	Scope::from_columns(
+		issue.application_id,
+		issue.machine_id,
+		issue.server_group_id,
+	)
+	.resolve_incident_target(conn)
+	.await
 }
 
 /// Re-evaluate every currently-open issue on `application_id` against incident
@@ -2370,6 +2564,18 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 		let by_id: std::collections::HashMap<Uuid, Application> =
 			applications.into_iter().map(|s| (s.id, s)).collect();
 
+		let machine_ids: Vec<Uuid> = {
+			let mut s: std::collections::HashSet<Uuid> =
+				open_issues.iter().filter_map(|i| i.machine_id).collect();
+			s.drain().collect()
+		};
+		let machines_by_id: std::collections::HashMap<Uuid, crate::machines::Machine> =
+			crate::machines::Machine::get_by_ids(conn, &machine_ids)
+				.await?
+				.into_iter()
+				.map(|m| (m.id, m))
+				.collect();
+
 		let now = Timestamp::now();
 		let mut evaluated = 0usize;
 		for issue in open_issues {
@@ -2377,7 +2583,11 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 			// server case from the batched `by_id` map (rather than
 			// `Scope::resolve_incident_target`, which queries per issue) to
 			// keep this startup sweep to a single server fetch.
-			match Scope::from_columns(issue.application_id, issue.server_group_id) {
+			match Scope::from_columns(
+				issue.application_id,
+				issue.machine_id,
+				issue.server_group_id,
+			) {
 				// Group-scoped issue: resolve its group directly, bypass the
 				// per-server is_monitored gate (monitored = true).
 				Scope::Group(gid) => {
@@ -2406,6 +2616,27 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 						&issue,
 						IncidentTarget::Group(gid),
 						server.is_monitored,
+						now,
+						None,
+					)
+					.await?;
+					evaluated += 1;
+				}
+				// Machine-scoped issue: look up the machine and its group,
+				// carrying the machine's own monitoring switch.
+				Scope::Machine(mid) => {
+					let Some(machine) = machines_by_id.get(&mid) else {
+						continue;
+					};
+					let Some(gid) = machine.group_id else {
+						// Ungrouped machines can't have incidents either.
+						continue;
+					};
+					re_evaluate_incident_membership(
+						conn,
+						&issue,
+						IncidentTarget::Group(gid),
+						machine.is_monitored,
 						now,
 						None,
 					)

@@ -534,11 +534,19 @@ impl CheckPolicy {
 		observed: CheckResult,
 		ctx: &EvaluationContext<'_>,
 		application_id: Option<Uuid>,
+		machine_id: Option<Uuid>,
 		group_id: Option<Uuid>,
 	) -> Result<GradedResult> {
 		let fleet = Self::apply(db, source, check_name, observed, ctx).await?;
-		let scoped =
-			ScopedCheckPolicy::chain_for(db, source, check_name, application_id, group_id).await?;
+		let scoped = ScopedCheckPolicy::chain_for(
+			db,
+			source,
+			check_name,
+			application_id,
+			machine_id,
+			group_id,
+		)
+		.await?;
 		Ok(Self::chain_scoped(fleet, &scoped, ctx))
 	}
 
@@ -723,10 +731,13 @@ pub struct ScopedCheckPolicy {
 	pub source: String,
 	/// The check this transform applies to.
 	pub check_name: String,
-	/// Set for a server-scoped transform.
+	/// Set for an application-scoped transform.
 	pub application_id: Option<Uuid>,
-	/// Set for a group-scoped transform. Both `application_id` and
-	/// `server_group_id` unset means canopy-wide scope.
+	/// Set for a machine-scoped transform. Silencing a machine's check quiets
+	/// it wherever it presents, including on the applications that show it.
+	pub machine_id: Option<Uuid>,
+	/// Set for a group-scoped transform. All of `application_id`,
+	/// `machine_id` and `server_group_id` unset means canopy-wide scope.
 	pub server_group_id: Option<Uuid>,
 	/// Scoped ceiling: caps the effective result arriving from the
 	/// previous transform in the chain. `skipped` is the silence.
@@ -747,7 +758,7 @@ impl ScopedCheckPolicy {
 		check_name: &str,
 	) -> Result<Option<Self>> {
 		use crate::schema::scoped_check_policies::dsl;
-		let (server, group) = scope.to_columns();
+		let (server, machine, group) = scope.to_columns();
 		dsl::scoped_check_policies
 			.select(Self::as_select())
 			.filter(
@@ -755,6 +766,7 @@ impl ScopedCheckPolicy {
 					.eq(source)
 					.and(dsl::check_name.eq(check_name))
 					.and(dsl::application_id.is_not_distinct_from(server))
+					.and(dsl::machine_id.is_not_distinct_from(machine))
 					.and(dsl::server_group_id.is_not_distinct_from(group)),
 			)
 			.first(db)
@@ -774,7 +786,7 @@ impl ScopedCheckPolicy {
 		created_by: Option<&str>,
 	) -> Result<Self> {
 		use crate::schema::scoped_check_policies::dsl;
-		let (server, group) = scope.to_columns();
+		let (server, machine, group) = scope.to_columns();
 		if let Some(existing) = Self::get(db, scope, source, check_name).await? {
 			return diesel::update(dsl::scoped_check_policies.filter(dsl::id.eq(existing.id)))
 				.set((
@@ -791,6 +803,7 @@ impl ScopedCheckPolicy {
 				dsl::source.eq(source),
 				dsl::check_name.eq(check_name),
 				dsl::application_id.eq(server),
+				dsl::machine_id.eq(machine),
 				dsl::server_group_id.eq(group),
 				dsl::ceiling.eq(CheckResult::Skipped.to_string()),
 				dsl::created_by.eq(created_by),
@@ -842,12 +855,13 @@ impl ScopedCheckPolicy {
 	/// dead config that shouldn't clutter the operator's list.
 	pub async fn list_silences(db: &mut AsyncPgConnection, scope: Scope) -> Result<Vec<Self>> {
 		use crate::schema::scoped_check_policies::dsl;
-		let (server, group) = scope.to_columns();
+		let (server, machine, group) = scope.to_columns();
 		let rows: Vec<Self> = dsl::scoped_check_policies
 			.select(Self::as_select())
 			.filter(
 				dsl::application_id
 					.is_not_distinct_from(server)
+					.and(dsl::machine_id.is_not_distinct_from(machine))
 					.and(dsl::server_group_id.is_not_distinct_from(group))
 					.and(dsl::ceiling.eq(CheckResult::Skipped.to_string())),
 			)
@@ -870,10 +884,11 @@ impl ScopedCheckPolicy {
 		source: &str,
 		check_name: &str,
 		application_id: Option<Uuid>,
+		machine_id: Option<Uuid>,
 		group_id: Option<Uuid>,
 	) -> Result<Vec<Self>> {
 		use crate::schema::scoped_check_policies::dsl;
-		let query = Self::scoped_to(application_id, group_id)
+		let query = Self::scoped_to(application_id, machine_id, group_id)
 			.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name)));
 		let mut rows: Vec<Self> = query.load(db).await.map_err(AppError::from)?;
 		Self::order_chain(&mut rows);
@@ -890,9 +905,10 @@ impl ScopedCheckPolicy {
 	pub async fn chains_for_scope(
 		db: &mut AsyncPgConnection,
 		application_id: Option<Uuid>,
+		machine_id: Option<Uuid>,
 		group_id: Option<Uuid>,
 	) -> Result<HashMap<(String, String), Vec<Self>>> {
-		let rows: Vec<Self> = Self::scoped_to(application_id, group_id)
+		let rows: Vec<Self> = Self::scoped_to(application_id, machine_id, group_id)
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
@@ -915,10 +931,15 @@ impl ScopedCheckPolicy {
 	}
 
 	/// The scope half of the chain predicate: the rows whose scope covers a
-	/// filing against `(application_id, group_id)`. Shared so the single-check and
-	/// batch paths can never disagree about what a scope covers.
+	/// filing against `(application_id, machine_id, group_id)`. Shared so the
+	/// single-check and batch paths can never disagree about what a scope
+	/// covers.
+	///
+	/// A filing is at exactly one of the application or machine grains, so at
+	/// most one of those two ever matches; the group arm is what both share.
 	fn scoped_to(
 		application_id: Option<Uuid>,
+		machine_id: Option<Uuid>,
 		group_id: Option<Uuid>,
 	) -> crate::schema::scoped_check_policies::BoxedQuery<
 		'static,
@@ -929,16 +950,20 @@ impl ScopedCheckPolicy {
 		let query = dsl::scoped_check_policies
 			.select(Self::as_select())
 			.into_boxed();
-		match (application_id, group_id) {
-			(None, None) => query.filter(
+		match (application_id, machine_id, group_id) {
+			(None, None, None) => query.filter(
 				dsl::application_id
 					.is_null()
+					.and(dsl::machine_id.is_null())
 					.and(dsl::server_group_id.is_null()),
 			),
-			(server, group) => query.filter(
+			(server, machine, group) => query.filter(
 				dsl::application_id
 					.is_not_distinct_from(server)
 					.and(dsl::application_id.is_not_null())
+					.or(dsl::machine_id
+						.is_not_distinct_from(machine)
+						.and(dsl::machine_id.is_not_null()))
 					.or(dsl::server_group_id
 						.is_not_distinct_from(group)
 						.and(dsl::server_group_id.is_not_null())),
@@ -956,7 +981,7 @@ impl ScopedCheckPolicy {
 	/// `scoped_check_policies` holds operator-owned transforms on one
 	/// (source, check). A ceiling only narrows, so where it sits in the
 	/// chain makes no difference.
-	fn maintenance(server_id: Option<Uuid>, group_id: Option<Uuid>) -> Self {
+	fn maintenance(application_id: Option<Uuid>, group_id: Option<Uuid>) -> Self {
 		let now = Timestamp::now();
 		Self {
 			id: Uuid::nil(),
@@ -964,7 +989,8 @@ impl ScopedCheckPolicy {
 			updated_at: now,
 			source: String::new(),
 			check_name: String::new(),
-			server_id,
+			application_id,
+			machine_id: None,
 			server_group_id: group_id,
 			ceiling: Some(CheckResult::Skipped.to_string()),
 			rules: None,
@@ -972,10 +998,11 @@ impl ScopedCheckPolicy {
 		}
 	}
 
-	/// Group scope applies before server scope: the most specific transform
-	/// has the last word.
+	/// Group scope applies before the target's own scope: the most specific
+	/// transform has the last word. An application-scoped and a
+	/// machine-scoped row never appear in one chain, so they sort alike.
 	fn order_chain(rows: &mut [Self]) {
-		rows.sort_by_key(|r| r.application_id.is_some());
+		rows.sort_by_key(|r| r.application_id.is_some() || r.machine_id.is_some());
 	}
 
 	/// Apply this transform to the effective result arriving from the

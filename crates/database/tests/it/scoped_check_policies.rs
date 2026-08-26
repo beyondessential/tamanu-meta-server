@@ -177,6 +177,7 @@ async fn server_scoped_rule_can_upgrade_past_the_fleet_ceiling() {
 			&ctx,
 			Some(server_id),
 			None,
+			None,
 		)
 		.await
 		.expect("apply");
@@ -195,6 +196,7 @@ async fn server_scoped_rule_can_upgrade_past_the_fleet_ceiling() {
 			CheckResult::Failed,
 			&ctx,
 			Some(other),
+			None,
 			None,
 		)
 		.await

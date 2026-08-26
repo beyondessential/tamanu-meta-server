@@ -19,7 +19,7 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 - [ ] An application takes its machine's group (verifies spec: FLT)
 - [ ] Moving a machine to another group moves every application on it (verifies spec: FLT)
 - [ ] An application on a machine cannot be moved to a different group on its own (verifies spec: FLT)
-- [ ] A machine-targeted check on a grouped machine resolves an incident target through that group (verifies spec: CHK, INC)
+- [x] A machine-targeted check on a grouped machine resolves an incident target through that group (verifies spec: CHK, INC)
 
 ## Application types
 
@@ -47,14 +47,14 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 ## Checks
 
 - [ ] Every machine check presents on every application on that machine, marked as the machine's (verifies spec: CHK)
-- [ ] A degraded machine check contributes one issue at machine scope, not one per application (verifies spec: CHK)
+- [x] A degraded machine check contributes one issue at machine scope, not one per application (verifies spec: CHK)
 - [ ] A machine-scoped and an application-scoped issue in one group join the same incident (verifies spec: INC)
 - [ ] A silence on a machine check quiets it on every application presenting it (verifies spec: CHK)
 - [ ] An application's health rollup counts its machine's checks (verifies spec: CHK)
 - [ ] An application check is catalogued as `<type>.<check>`; two types reporting one name are two entries (verifies spec: CHK)
 - [ ] A machine check is catalogued under its bare name (verifies spec: CHK)
 - [ ] A machine's monitoring switch does not silence the applications on it (verifies spec: CHK)
-- [ ] A machine-scoped issue does not collide with a canopy-wide issue on the same `(source, ref)` (verifies spec: CHK)
+- [x] A machine-scoped issue does not collide with a canopy-wide issue on the same `(source, ref)` (verifies spec: CHK)
 
 ## Status pushes
 

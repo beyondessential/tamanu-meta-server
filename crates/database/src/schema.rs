@@ -469,6 +469,7 @@ diesel::table! {
 		degraded_since -> Nullable<Timestamptz>,
 		last_degraded_at -> Nullable<Timestamptz>,
 		escalates -> Bool,
+		machine_id -> Nullable<Uuid>,
 	}
 }
 
@@ -590,6 +591,7 @@ diesel::table! {
 		ceiling -> Nullable<Text>,
 		rules -> Nullable<Jsonb>,
 		created_by -> Nullable<Text>,
+		machine_id -> Nullable<Uuid>,
 	}
 }
 
@@ -852,6 +854,7 @@ diesel::joinable!(incidents -> server_groups (server_group_id));
 diesel::joinable!(issue_notes -> issues (issue_id));
 diesel::joinable!(issues -> applications (application_id));
 diesel::joinable!(issues -> devices (device_id));
+diesel::joinable!(issues -> machines (machine_id));
 diesel::joinable!(issues -> server_groups (server_group_id));
 diesel::joinable!(machines -> devices (device_id));
 diesel::joinable!(machines -> server_groups (group_id));
@@ -863,6 +866,7 @@ diesel::joinable!(restore_replicas -> applications (server_id));
 diesel::joinable!(restore_replicas -> devices (consumer_device_id));
 diesel::joinable!(restore_replicas -> server_groups (group_id));
 diesel::joinable!(scoped_check_policies -> applications (application_id));
+diesel::joinable!(scoped_check_policies -> machines (machine_id));
 diesel::joinable!(maintenance_windows -> server_groups (server_group_id));
 diesel::joinable!(maintenance_windows -> applications (server_id));
 diesel::joinable!(scoped_check_policies -> server_groups (server_group_id));
