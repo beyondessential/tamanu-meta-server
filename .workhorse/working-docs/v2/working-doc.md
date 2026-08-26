@@ -309,11 +309,15 @@ Two denominators in one view, because the alternative — everything counted ove
 
 An operator crosses a machine figure against an application figure the same way they cross two of either, so "which platforms is this Tamanu version running on" is one crossing and not a join done in the operator's head.
 
-The unit of a crossing follows from cardinality rather than being chosen: an application has at most one machine, so every application has a well-defined value for any machine figure, while a machine has many applications and no single value for an application figure.
-So a crossing involving any application figure counts applications, and a crossing of two machine figures counts machines.
+A crossing counts machines, whichever figures are on its axes.
+One unit for every crossing is simpler to build and simpler to read than a unit that changes with what an operator picked, and the alternative — applications when both axes are application figures, machines otherwise — is more machinery than the question deserves.
 
-A machine-less application has no value for a machine figure and is absent from such a crossing rather than counted as unreported, following the precedent [APP](../../specs/servers/products.md) already sets for a server excluded from the application-version spread.
-It is absent from a machine-figure spread automatically, being no part of that population.
+Two things follow, and both are acceptable at the price.
+A machine whose applications disagree on an application figure has a value in more than one cell and appears in each, so a crossing's cells can sum to more than the fleet.
+A machine-less application has no machine and is absent from crossings entirely, which on Kubernetes means those applications do not appear.
+
+Neither is worth complicating the view for.
+An operator who needs a count the crossing cannot express has SQL, and that is a better place for an occasional precise question than a general-purpose view that is harder to read for everyone.
 
 ## Implementation notes
 
@@ -405,7 +409,7 @@ Three mockups put the open presentation and wire questions side by side as optio
 
 ## Open questions
 
-- [ ] Confirm the crossing unit: a crossing involving any application figure counts applications, a crossing of two machine figures counts machines. Derived from cardinality rather than chosen, so it should hold, but the view has to label which it is showing.
+None. Every question this doc raised has been answered.
 
 ## Transition
 
