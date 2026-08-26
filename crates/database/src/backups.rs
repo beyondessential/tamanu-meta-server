@@ -133,9 +133,6 @@ pub struct ServerGroupBackupConfig {
 	/// ARN of the IAM role devices assume to upload their own backups
 	/// (write-only; no delete permission).
 	pub target_role_arn: String,
-	/// ARN of the IAM role used to run repository maintenance, inspection,
-	/// and metrics collection (full read/write/delete permission).
-	pub maintenance_role_arn: String,
 	/// AWS region the bucket lives in, if known.
 	pub region: Option<String>,
 	/// Reference to where the repository's encryption passphrase is stored.
@@ -156,6 +153,16 @@ pub struct ServerGroupBackupConfig {
 	/// Error message from the most recent failed provisioning attempt, if
 	/// any.
 	pub last_init_error: Option<String>,
+	/// ARN of the IAM role used to run repository maintenance, inspection,
+	/// and metrics collection (full read/write/delete permission).
+	///
+	/// Sits here, rather than beside `target_role_arn` where it reads more
+	/// naturally, because `Queryable` maps positionally against the column
+	/// list `schema.rs` declares, and that file is generated in the table's
+	/// physical column order. This column was added late. Grouping it with
+	/// the other ARN means hand-patching `schema.rs` after every
+	/// regeneration.
+	pub maintenance_role_arn: String,
 	/// Where the backup bucket lives and who provisioned it: an externally
 	/// provisioned account the deployment brought itself, or an
 	/// automatically provisioned bucket in a shared account.
