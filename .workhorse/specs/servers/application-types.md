@@ -60,7 +60,7 @@ An application whose type has no version presents no version at all.
 An application whose type has a tracked release train but which has not reported a version presents its version as unknown, because there is a version to learn and Canopy has not learnt it.
 An application whose type has no version presents nothing rather than an unknown, because there is nothing to learn.
 
-A group's headline version is the version of the `tamanu-central` application running on the group's highest-ranked machine.
+A group's headline version is the version of the `tamanu-central` application running on the group's highest-ranked machine bearing that application.
 A deployment's version is its central's version.
 A group with no such application has no headline version.
 
