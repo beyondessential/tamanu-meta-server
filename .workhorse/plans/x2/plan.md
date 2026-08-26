@@ -79,6 +79,24 @@ by then.
 - Regenerate the public-server OpenAPI (`just gen-openapi`) after the
   `MigrationArgs` change.
 
+## Status
+
+- [x] `MigrationArgs`: added `target_version` (semver), made `target_version_id`
+      optional.
+- [x] Report handler resolves the version — prefer semver via
+      `Version::get_by_version`, fall back to the id, reject when neither is
+      given (`BadRequest`/400) or the semver is unknown (diesel NotFound/404).
+- [x] Replaced `From<MigrationArgs>` with `into_new(target_version_id)`.
+- [x] Worklist entry left unchanged (still carries `target_version_id`
+      transitionally).
+- [x] Tests: happy path now reports by semver; added by-id back-compat,
+      no-version-refused, and unknown-version-refused cases.
+- [x] Hand-updated `crates/public-server/openapi.json` to match.
+- [ ] **Needs a machine with the toolchain** (I can't run cargo/just here):
+      `just gen-openapi` to regenerate the public-server spec authoritatively
+      (my hand-edit is a best-effort approximation), `just test-package
+      public-server`, `just check`, and `cargo fmt`.
+
 ## Spec
 
 No spec change. `Pre-upgrade migration testing` in

@@ -16,6 +16,7 @@
 use aws_sdk_sts::operation::RequestId as _;
 use axum::{Json, extract::State, http::StatusCode};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
+use diesel_async::AsyncPgConnection;
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::device_auth::BackupRestoreDevice;
 use commons_types::backup::{
@@ -657,9 +658,15 @@ pub struct RedactionArgs {
 /// How the target version's migrations went against the restored replica.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct MigrationArgs {
-	/// The version whose migrations were applied, taken from the worklist
-	/// entry's `target_version_id`.
-	pub target_version_id: Uuid,
+	/// The version whose migrations were applied, as semver, taken from the
+	/// worklist entry's `target_version`. This is the version the consumer
+	/// actually migrated to; send it in preference to echoing the identifier.
+	pub target_version: Option<String>,
+	/// The version whose migrations were applied, as the identifier a consumer
+	/// echoes from the worklist entry's `target_version_id`. Accepted only for
+	/// older consumers that report the identifier; omit it when `target_version`
+	/// is sent.
+	pub target_version_id: Option<Uuid>,
 	/// Whole seconds the whole migration run took.
 	pub total_elapsed_seconds: i64,
 	/// The migration that failed, when one did.
@@ -772,7 +779,8 @@ async fn verification(
 
 	match args.migration {
 		Some(migration) => {
-			MigrationTest::record(&mut conn, report, migration.into()).await?;
+			let target_version_id = resolve_migration_target(&mut conn, &migration).await?;
+			MigrationTest::record(&mut conn, report, migration.into_new(target_version_id)).await?;
 		}
 		None => {
 			BackupRestoreCheck::record_report(&mut conn, report).await?;
@@ -782,15 +790,36 @@ async fn verification(
 	Ok(StatusCode::NO_CONTENT)
 }
 
-impl From<MigrationArgs> for NewMigrationTest {
-	fn from(args: MigrationArgs) -> Self {
-		Self {
-			target_version_id: args.target_version_id,
-			total_elapsed: PgDuration(SignedDuration::from_secs(args.total_elapsed_seconds)),
-			failed_migration: args.failed_migration,
-			data_bytes_before: args.data_bytes_before,
-			data_bytes_after: args.data_bytes_after,
-			timings: args
+/// Resolve the version a migration report is about.
+///
+/// A report may name it as a semver — the going-forward form, what the consumer
+/// actually migrated to — or as the `target_version_id` an older consumer
+/// echoes from its worklist entry. The semver wins when both are present. A
+/// report naming neither, or a semver matching no known version, cannot be
+/// attributed to a version and is refused.
+async fn resolve_migration_target(
+	conn: &mut AsyncPgConnection,
+	migration: &MigrationArgs,
+) -> Result<Uuid> {
+	if let Some(semver) = &migration.target_version {
+		return Ok(database::versions::Version::get_by_version(conn, semver.parse()?)
+			.await?
+			.id);
+	}
+	migration
+		.target_version_id
+		.ok_or_else(|| AppError::BadRequest("migration report names no target version".into()))
+}
+
+impl MigrationArgs {
+	fn into_new(self, target_version_id: Uuid) -> NewMigrationTest {
+		NewMigrationTest {
+			target_version_id,
+			total_elapsed: PgDuration(SignedDuration::from_secs(self.total_elapsed_seconds)),
+			failed_migration: self.failed_migration,
+			data_bytes_before: self.data_bytes_before,
+			data_bytes_after: self.data_bytes_after,
+			timings: self
 				.timings
 				.into_iter()
 				.map(|timing| {
