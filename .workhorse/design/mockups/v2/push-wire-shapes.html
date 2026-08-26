@@ -229,9 +229,9 @@
       <span class="k">"bestoolVersion"</span>: <span class="s">"0.41.2"</span>
     }
   },
-  <span class="mark-app k">"applications"</span>: [
-    {
-      <span class="k">"id"</span>: <span class="s">"9f1c…"</span>,
+  <span class="mark-app k">"applications"</span>: {
+    <span class="k">"a1f4c2"</span>: {
+      <span class="k">"type"</span>: <span class="s">"tamanu"</span>,
       <span class="k">"health"</span>: [
         { <span class="k">"check"</span>: <span class="s">"tamanu_http"</span>, <span class="k">"result"</span>: <span class="s">"passed"</span> },
         { <span class="k">"check"</span>: <span class="s">"sync_facility_stale"</span>, <span class="k">"result"</span>: <span class="s">"warning"</span>,
@@ -246,7 +246,7 @@
         <span class="k">"nodeVersion"</span>: <span class="s">"22.11.0"</span>
       }
     }
-  ]
+  }
 }</pre>
 		</div>
 		<p class="verdict">
@@ -254,8 +254,21 @@
 			given. A second workload adds an entry to <code>applications</code> rather
 			than duplicating the machine, which is the case the split exists for.
 			<br><br>
-			<code>applications</code> is a list because a machine can carry several;
 			<code>machine</code> is an object because an application has at most one.
+			<code>applications</code> is an object too, keyed by an identifier the
+			reporter chooses for each application it found.
+			<br><br>
+			<b>The key is the reporter's, and Canopy's identifier stays Canopy's.</b> A
+			reporter cannot know what Canopy calls an application, and on a machine's
+			first report there may be nothing to know. So it sends a key of its own,
+			unique on that machine and stable across its pushes, and Canopy correlates on
+			the machine and that key. What the key is derived from is the reporter's
+			business.
+			<br><br>
+			Keying the object rather than listing entries makes that uniqueness a
+			property of the format: a payload with two applications sharing a key cannot
+			be written. <code>type</code> then says what each one is, since the key only
+			says which.
 			<br><br>
 			<b>Free-form fields nest under <code>detail</code> instead of flattening.</b>
 			Today they are spread at the top level and inside each health entry, so a
@@ -374,9 +387,9 @@
 <pre>  <span class="mark-machine k">"machine"</span>: {
     <span class="k">"detail"</span>: { <span class="k">"osTimezone"</span>: <span class="s">"UTC"</span> }
   },
-  <span class="mark-app k">"applications"</span>: [
-    { <span class="k">"detail"</span>: { <span class="k">"timezone"</span>: <span class="s">"Pacific/Nauru"</span> } }
-  ]</pre>
+  <span class="mark-app k">"applications"</span>: {
+    <span class="k">"a1f4c2"</span>: { <span class="k">"detail"</span>: { <span class="k">"timezone"</span>: <span class="s">"Pacific/Nauru"</span> } }
+  }</pre>
 </div>
 
 <p class="verdict" style="max-width:68ch">
