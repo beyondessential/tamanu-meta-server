@@ -405,7 +405,6 @@ Three mockups put the open presentation and wire questions side by side as optio
 
 ## Open questions
 
-- [ ] What breaks a tie for a group's canonical member now that kind is gone? Ordering application types directly is the obvious replacement, but it means the type list carries a precedence rather than being a flat set.
 - [ ] Confirm the crossing unit: a crossing involving any application figure counts applications, a crossing of two machine figures counts machines. Derived from cardinality rather than chosen, so it should hold, but the view has to label which it is showing.
 
 ## Transition
@@ -562,8 +561,15 @@ A group with several applications of one type shows that name repeated, distingu
 The tree does that for free by nesting them; a flat listing would not, and is a reason to name them.
 
 Removing kind reaches one rule that leaned on it.
-A group's headline version comes from its canonical member, chosen as the highest-ranked live member with kind breaking a tie in the order central, then facility, then standalone (see [APP](../../specs/servers/products.md)).
-With no kind, that tie-break needs another basis, and application type is the obvious one since it now carries what kind carried.
+A group's headline version came from its canonical member, chosen as the highest-ranked live member with kind breaking a tie in the order central, then facility, then standalone (see [APP](../../specs/servers/products.md)).
+
+The replacement names the thing directly rather than ranking types against each other: a group's version is the application version of the `tamanu-central` on its highest-ranked machine.
+A deployment's version is its central's version, and saying so is clearer than a precedence order that happens to put centrals first.
+It also leaves application types a flat set, with no ordering to maintain as new ones appear.
+
+This is more load-bearing than the status card it is most visible on.
+The same value is `effective_version` on the group, which upgrade plans read as the deployment's current version (`crates/database/src/upgrade_plans.rs:143`), and which the MCP interface returns.
+So the rule decides where an upgrade is measured from, not only what a card displays.
 
 ### Two timezones
 
