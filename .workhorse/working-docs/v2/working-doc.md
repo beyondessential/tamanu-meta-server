@@ -68,7 +68,7 @@ Moves to the machine:
 - The identity link (today `device_id`), and `registered_at`, since enrolment is now a machine's.
 - The group, which an operator sets on the machine and its applications take.
 - `cloud` and `geolocation`, both operator-set today (`detect_cloud` only seeds `cloud` from an enrollment hint).
-- `alert_when_down_for`, since reachability is a machine fact.
+- `alert_when_down_for`. An application needs a threshold of its own too, since it now has its own reachability.
 
 Carried by both, rather than moving:
 
@@ -201,26 +201,28 @@ Inputs accept the old name as an alias for compatibility, so a fielded agent enr
 
 ### Monitoring and reachability
 
-Reachability is a machine-level concept, and a cluster-level one on Kubernetes.
-Applications carry a monitoring on/off toggle; machines carry one too.
+Both grains have reachability, computed the same way at each: a target is reachable while something is currently reporting about it, and unreachable while nothing is.
+A machine is reported on by its agent; an application is reported on by whatever machine or cluster carries it.
 
-Every application on an unreachable machine is itself unreachable.
-That is a derivation and not a second filing: one `reachability` check exists, on the machine, and it fails once.
-So a dead host is one check, one issue, and one incident, with every application on it presenting as unreachable — the "one fact with N consequences" the split is for.
+So an application's reachability is a check of its own, filed at application scope, and it alerts and silences like any other.
+
+Nothing derives one grain's reachability from the other's, and nothing needs to.
+A machine that goes quiet stops reporting about the applications on it by the same act, so each of them goes unreachable on its own account, by the same rule, without any propagation.
+They recover the same way when it comes back.
+One mechanism, applied at two grains, produces the right answer in every case, which is why it is worth resisting the temptation to special-case the machine-down path.
+
+An application also goes unreachable while its machine is perfectly healthy, if that machine stops mentioning it.
+That is the case a derived rule could not have expressed at all, and it falls out of this one for free.
 
 An application presenting as unreachable is how an operator reads its checks correctly.
 The check states keep their last observed results, which would otherwise read as current, and the unreachable presentation is what says they are not.
 
-An unreachable application is also **unhealthy**, not merely marked.
-If the machine is down, so is everything on it, and a rollup reading healthy off stale checks would be a lie.
-
-That does pull towards applications having a liveness signal of their own, since unreachability now behaves per-application for health while being filed once.
-The split holds for now: one filing, one issue, one incident.
-Worth revisiting if a second application-subject reporter ever appears.
+Applications and machines each carry a monitoring on/off toggle.
 
 ### A machine's checks present on its applications
 
-Reachability is the case that raised this, but the rule is general: **every machine check appears on every application on that machine**, marked as a machine check.
+**Every machine check appears on every application on that machine**, marked as a machine check.
+Reachability is not among them, each grain having its own; this is about `disk_free`, `memory`, `time_sync` and the rest, which describe a box that an application depends on.
 
 Take a server presenting checks A, B and C today, where the split makes A and B application checks and C a machine check.
 It still presents A, B and C.
@@ -403,8 +405,6 @@ Three mockups put the open presentation and wire questions side by side as optio
 
 ## Open questions
 
-- [ ] Does an application dropping out of a live machine's reports file a check of its own, so it can alert and be silenced, or is it presentation-only? Its machine is reachable, so the machine's reachability check cannot carry it.
-- [ ] Does Canopy adopt a reported type silently, or surface the change for an operator to see? Adoption is settled; whether it is announced is not.
 - [ ] What breaks a tie for a group's canonical member now that kind is gone? Ordering application types directly is the obvious replacement, but it means the type list carries a precedence rather than being a flat set.
 - [ ] Confirm the crossing unit: a crossing involving any application figure counts applications, a crossing of two machine figures counts machines. Derived from cardinality rather than chosen, so it should hold, but the view has to label which it is showing.
 
@@ -515,8 +515,11 @@ It is not what the fleet does today, but the model allows it and the wire has to
 So every reported application carries a **key**, chosen by the reporter, unique within the machine and stable across its pushes.
 What that key is derived from is the reporter's business and not Canopy's: Canopy requires only that it exists, that it identifies the same application each time, and that no two applications on one machine share one.
 
-Canopy correlates on the machine and that key, and keeps its own identifier to itself for its links, incidents and silences.
+Canopy correlates on the machine, the key **and the type together**, and keeps its own identifier to itself for its links, incidents and silences.
 The reporter never learns it.
+
+Including the type in the correlation is what makes a type change behave sensibly rather than needing a rule of its own.
+An application does not change type: a reporter that starts sending a different type under the same key has, as far as Canopy can tell, stopped reporting one application and started reporting another.
 
 `applications` is therefore an **object keyed by that key**, rather than an array of entries carrying one.
 Uniqueness is then a property of the format rather than a rule stated beside it, and a payload that breaks it cannot be expressed.
@@ -527,6 +530,18 @@ Each entry carries the application's **type** alongside its `health` and `detail
 
 An application knows its own type, because it follows from the software it is running.
 An operator never sets it: an application exists only because a report created it.
+
+Canopy adopts what it is told, silently.
+An application it has not seen before is created without ceremony, because that is simply how applications come to exist.
+
+A reporter that starts sending a different type under a key it was already using is the same event seen twice.
+The old one stops being reported and goes unreachable; the new one has never been seen and is created.
+An operator gets an alert from the first and finds the second waiting beside it, which is the whole notification the situation needs.
+
+From there it is theirs to resolve, and both readings are available.
+If the reporter is wrong, they fix it and archive the application that should not have appeared.
+If the change was real, they archive the one that is genuinely gone.
+Neither needs a mechanism of its own: the reachability check raised it, and archival is the operator action that already exists.
 
 **Kind goes entirely.** A Tamanu central and a Tamanu facility are not one type in two configurations; they are two types.
 The evidence was already there in the check registry, where a large set of checks exists only on centrals and another only on facilities, which is not what two instances of one thing look like.

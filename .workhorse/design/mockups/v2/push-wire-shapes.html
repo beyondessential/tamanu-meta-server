@@ -262,9 +262,15 @@
 			<b>The key is the reporter's, and Canopy's identifier stays Canopy's.</b> A
 			reporter cannot know what Canopy calls an application, and on a machine's
 			first report there may be nothing to know. So it sends a key of its own,
-			unique on that machine and stable across its pushes, and Canopy correlates on
-			the machine and that key. What the key is derived from is the reporter's
-			business.
+			unique on that machine and stable across its pushes, and Canopy correlates on the
+			machine, that key and the <code>type</code> together. What the key is derived
+			from is the reporter's business.
+			<br><br>
+			Correlating on the type as well means a reporter that changes an
+			application's type under an unchanged key reads as one application going away
+			and another arriving, which is what it is. The one that went away goes
+			unreachable and alerts; the one that arrived is adopted silently. An operator
+			resolves it by archiving whichever of the two is wrong.
 			<br><br>
 			Keying the object rather than listing entries makes that uniqueness a
 			property of the format: a payload with two applications sharing a key cannot
