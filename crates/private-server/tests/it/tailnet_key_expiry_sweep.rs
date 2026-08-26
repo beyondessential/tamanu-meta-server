@@ -1,7 +1,7 @@
 //! Integration tests for the `sweep_key_expiry` Tailscale sweep.
 //!
 //! Lives under private-server because it's the only crate that already
-//! depends on both `commons-servers` (the sweep + directory live there)
+//! depends on both `commons-applications` (the sweep + directory live there)
 //! and `commons-tests` (`TestDb`).
 
 use commons_servers::{
@@ -45,7 +45,7 @@ async fn insert_tailnet_device(conn: &mut AsyncPgConnection) -> Uuid {
 async fn insert_server_for(conn: &mut AsyncPgConnection, device_id: Uuid, host: &str) -> Uuid {
 	let id = Uuid::new_v4();
 	conn.batch_execute(&format!(
-		"INSERT INTO servers (id, host, kind, device_id) \
+		"INSERT INTO applications (id, host, kind, device_id) \
 		 VALUES ('{id}', '{host}', 'central', '{device_id}');"
 	))
 	.await

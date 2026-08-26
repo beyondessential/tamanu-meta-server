@@ -168,7 +168,7 @@ impl CheckPolicy {
 		let refresh = format!(
 			"UPDATE check_policies cp SET last_seen = f.max_seen FROM (\
 			 SELECT source, check_name, max(last_seen) AS max_seen FROM issues \
-			 WHERE server_id IS NOT NULL AND check_name IS NOT NULL \
+			 WHERE application_id IS NOT NULL AND check_name IS NOT NULL \
 			 AND source NOT IN ('{canopy}', '{manual}') \
 			 GROUP BY source, check_name) f \
 			 WHERE cp.source = f.source AND cp.check_name = f.check_name \
@@ -266,7 +266,7 @@ impl CheckPolicy {
 			.select(iss::id)
 			.filter(iss::source.eq(source))
 			.filter(iss::check_name.eq(check_name))
-			.filter(iss::server_id.is_not_null())
+			.filter(iss::application_id.is_not_null())
 			.filter(iss::resolved_at.is_null())
 			.load(db)
 			.await?;
@@ -533,12 +533,12 @@ impl CheckPolicy {
 		check_name: &str,
 		observed: CheckResult,
 		ctx: &EvaluationContext<'_>,
-		server_id: Option<Uuid>,
+		application_id: Option<Uuid>,
 		group_id: Option<Uuid>,
 	) -> Result<GradedResult> {
 		let fleet = Self::apply(db, source, check_name, observed, ctx).await?;
 		let scoped =
-			ScopedCheckPolicy::chain_for(db, source, check_name, server_id, group_id).await?;
+			ScopedCheckPolicy::chain_for(db, source, check_name, application_id, group_id).await?;
 		Ok(Self::chain_scoped(fleet, &scoped, ctx))
 	}
 
@@ -724,8 +724,8 @@ pub struct ScopedCheckPolicy {
 	/// The check this transform applies to.
 	pub check_name: String,
 	/// Set for a server-scoped transform.
-	pub server_id: Option<Uuid>,
-	/// Set for a group-scoped transform. Both `server_id` and
+	pub application_id: Option<Uuid>,
+	/// Set for a group-scoped transform. Both `application_id` and
 	/// `server_group_id` unset means canopy-wide scope.
 	pub server_group_id: Option<Uuid>,
 	/// Scoped ceiling: caps the effective result arriving from the
@@ -754,7 +754,7 @@ impl ScopedCheckPolicy {
 				dsl::source
 					.eq(source)
 					.and(dsl::check_name.eq(check_name))
-					.and(dsl::server_id.is_not_distinct_from(server))
+					.and(dsl::application_id.is_not_distinct_from(server))
 					.and(dsl::server_group_id.is_not_distinct_from(group)),
 			)
 			.first(db)
@@ -790,7 +790,7 @@ impl ScopedCheckPolicy {
 			.values((
 				dsl::source.eq(source),
 				dsl::check_name.eq(check_name),
-				dsl::server_id.eq(server),
+				dsl::application_id.eq(server),
 				dsl::server_group_id.eq(group),
 				dsl::ceiling.eq(CheckResult::Skipped.to_string()),
 				dsl::created_by.eq(created_by),
@@ -846,7 +846,7 @@ impl ScopedCheckPolicy {
 		let rows: Vec<Self> = dsl::scoped_check_policies
 			.select(Self::as_select())
 			.filter(
-				dsl::server_id
+				dsl::application_id
 					.is_not_distinct_from(server)
 					.and(dsl::server_group_id.is_not_distinct_from(group))
 					.and(dsl::ceiling.eq(CheckResult::Skipped.to_string())),
@@ -869,11 +869,11 @@ impl ScopedCheckPolicy {
 		db: &mut AsyncPgConnection,
 		source: &str,
 		check_name: &str,
-		server_id: Option<Uuid>,
+		application_id: Option<Uuid>,
 		group_id: Option<Uuid>,
 	) -> Result<Vec<Self>> {
 		use crate::schema::scoped_check_policies::dsl;
-		let query = Self::scoped_to(server_id, group_id)
+		let query = Self::scoped_to(application_id, group_id)
 			.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name)));
 		let mut rows: Vec<Self> = query.load(db).await.map_err(AppError::from)?;
 		Self::order_chain(&mut rows);
@@ -883,16 +883,16 @@ impl ScopedCheckPolicy {
 		Ok(rows)
 	}
 
-	/// Every scoped transform covering `(server_id, group_id)`, grouped by
+	/// Every scoped transform covering `(application_id, group_id)`, grouped by
 	/// `(source, check_name)` and in application order within each group —
 	/// the batch form of [`Self::chain_for`], for callers walking a whole
 	/// report's checks. One query for the lot instead of one per check.
 	pub async fn chains_for_scope(
 		db: &mut AsyncPgConnection,
-		server_id: Option<Uuid>,
+		application_id: Option<Uuid>,
 		group_id: Option<Uuid>,
 	) -> Result<HashMap<(String, String), Vec<Self>>> {
-		let rows: Vec<Self> = Self::scoped_to(server_id, group_id)
+		let rows: Vec<Self> = Self::scoped_to(application_id, group_id)
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
@@ -915,10 +915,10 @@ impl ScopedCheckPolicy {
 	}
 
 	/// The scope half of the chain predicate: the rows whose scope covers a
-	/// filing against `(server_id, group_id)`. Shared so the single-check and
+	/// filing against `(application_id, group_id)`. Shared so the single-check and
 	/// batch paths can never disagree about what a scope covers.
 	fn scoped_to(
-		server_id: Option<Uuid>,
+		application_id: Option<Uuid>,
 		group_id: Option<Uuid>,
 	) -> crate::schema::scoped_check_policies::BoxedQuery<
 		'static,
@@ -929,14 +929,16 @@ impl ScopedCheckPolicy {
 		let query = dsl::scoped_check_policies
 			.select(Self::as_select())
 			.into_boxed();
-		match (server_id, group_id) {
-			(None, None) => {
-				query.filter(dsl::server_id.is_null().and(dsl::server_group_id.is_null()))
-			}
+		match (application_id, group_id) {
+			(None, None) => query.filter(
+				dsl::application_id
+					.is_null()
+					.and(dsl::server_group_id.is_null()),
+			),
 			(server, group) => query.filter(
-				dsl::server_id
+				dsl::application_id
 					.is_not_distinct_from(server)
-					.and(dsl::server_id.is_not_null())
+					.and(dsl::application_id.is_not_null())
 					.or(dsl::server_group_id
 						.is_not_distinct_from(group)
 						.and(dsl::server_group_id.is_not_null())),
@@ -973,7 +975,7 @@ impl ScopedCheckPolicy {
 	/// Group scope applies before server scope: the most specific transform
 	/// has the last word.
 	fn order_chain(rows: &mut [Self]) {
-		rows.sort_by_key(|r| r.server_id.is_some());
+		rows.sort_by_key(|r| r.application_id.is_some());
 	}
 
 	/// Apply this transform to the effective result arriving from the
@@ -1061,7 +1063,7 @@ pub struct EvaluationContext<'a> {
 	/// The check's own fields (the `health[i]` object minus `check` and
 	/// `healthy`).
 	pub check_extra: &'a serde_json::Map<String, JsonValue>,
-	/// Server's resolved tag map (merged server + group). Each value is
+	/// Application's resolved tag map (merged server + group). Each value is
 	/// already wrapped as `JsonValue::String` for uniform comparison.
 	pub tags: &'a HashMap<String, JsonValue>,
 }

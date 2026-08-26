@@ -21,9 +21,11 @@ use commons_servers::csr::validate_csr;
 use commons_servers::device_auth::ServerDevice;
 use commons_types::Uuid;
 use commons_types::dns::{ManagedZone, is_within, match_zone, normalize_domain};
+use database::application_certificates::OrderState;
 use database::diesel_async::AsyncPgConnection;
-use database::server_certificates::OrderState;
-use database::{ServerCertificate, ServerGroupDomain, ServerName, servers::Server};
+use database::{
+	ApplicationCertificate, ApplicationName, ServerGroupDomain, applications::Application,
+};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -50,7 +52,7 @@ enum Grant {
 }
 
 impl Grant {
-	fn held_by(self, server: &Server) -> bool {
+	fn held_by(self, server: &Application) -> bool {
 		match self {
 			Self::Dns => server.may_manage_dns,
 			Self::Tls => server.may_manage_tls,
@@ -67,7 +69,7 @@ impl Grant {
 
 /// The server a request is for, having passed every check in CRT's fixed order.
 struct Authorised {
-	server: Server,
+	server: Application,
 	name: String,
 }
 
@@ -87,7 +89,7 @@ async fn authorise(
 	let name = normalize_domain(name)?;
 
 	// 1. A device attached to a live server.
-	let server = Server::live_by_device_id(conn, device_id)
+	let server = Application::live_by_device_id(conn, device_id)
 		.await?
 		.into_iter()
 		.next()
@@ -194,7 +196,7 @@ pub struct HeldCertificate {
 	pub key_must_be_replaced: bool,
 }
 
-fn held(cert: &ServerCertificate) -> HeldCertificate {
+fn held(cert: &ApplicationCertificate) -> HeldCertificate {
 	HeldCertificate {
 		name: cert.name.clone(),
 		key_fingerprint: cert.key_fingerprint.clone(),
@@ -232,7 +234,7 @@ pub async fn entitlements(
 	ServerDevice(auth): ServerDevice,
 ) -> Result<Json<Entitlements>> {
 	let mut conn = state.db.get().await?;
-	let server = Server::live_by_device_id(&mut conn, auth.0.id)
+	let server = Application::live_by_device_id(&mut conn, auth.0.id)
 		.await?
 		.into_iter()
 		.next()
@@ -248,7 +250,7 @@ pub async fn entitlements(
 // spec: CRT#what-a-server-may-act-on
 pub async fn entitlements_for(
 	conn: &mut AsyncPgConnection,
-	server: &Server,
+	server: &Application,
 	zones: &[ManagedZone],
 ) -> Result<Entitlements> {
 	// Only domains Canopy can actually act in are offered: naming one whose zone
@@ -263,13 +265,13 @@ pub async fn entitlements_for(
 			.collect(),
 	};
 
-	let registered_names = ServerName::for_server(conn, server.id)
+	let registered_names = ApplicationName::for_server(conn, server.id)
 		.await?
 		.into_iter()
 		.map(|row| row.name)
 		.collect();
 
-	let certificates = ServerCertificate::for_server(conn, server.id)
+	let certificates = ApplicationCertificate::for_server(conn, server.id)
 		.await?
 		.iter()
 		.map(held)
@@ -355,7 +357,7 @@ pub async fn register_name(
 	)
 	.await?;
 
-	let row = ServerName::register(
+	let row = ApplicationName::register(
 		&mut conn,
 		authorised.server.id,
 		&authorised.name,
@@ -413,7 +415,7 @@ pub struct CertificateResponse {
 	pub last_error: Option<String>,
 }
 
-fn certificate_response(cert: &ServerCertificate) -> CertificateResponse {
+fn certificate_response(cert: &ApplicationCertificate) -> CertificateResponse {
 	CertificateResponse {
 		name: cert.name.clone(),
 		state: cert.state.clone(),
@@ -478,7 +480,7 @@ pub async fn request_certificate(
 	// for, so a normalisation difference can't slip a different name through.
 	let csr = validate_csr(&der, &authorised.name)?;
 
-	let cert = ServerCertificate::request(
+	let cert = ApplicationCertificate::request(
 		&mut conn,
 		authorised.server.id,
 		&csr.name,

@@ -141,7 +141,7 @@ export default function BackupPanel() {
 	}
 
 	const members =
-		group.status === "ok" ? group.data.servers : [];
+		group.status === "ok" ? group.data.applications : [];
 	const status = data.status as BackupConfigStatus;
 
 	return (

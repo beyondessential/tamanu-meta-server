@@ -55,7 +55,7 @@ fn check_to_ref(source: &str, check: &str) -> String {
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ServerSilencedRef {
 	/// The server this silence applies to.
-	pub server_id: Uuid,
+	pub application_id: Uuid,
 	/// The issue source this silence matches.
 	pub source: String,
 	/// The issue reference this silence matches.
@@ -92,7 +92,7 @@ pub struct ServerGroupSilencedRef {
 /// scope).
 pub async fn is_silenced(
 	db: &mut AsyncPgConnection,
-	server_id: Uuid,
+	application_id: Uuid,
 	group_id: Option<Uuid>,
 	source: &str,
 	r#ref: &str,
@@ -100,7 +100,9 @@ pub async fn is_silenced(
 	let check = ref_to_check(r#ref);
 	let is_silence =
 		|p: Option<ScopedCheckPolicy>| p.is_some_and(|p| p.ceiling.as_deref() == Some("skipped"));
-	if is_silence(ScopedCheckPolicy::get(db, Scope::Server(server_id), source, check).await?) {
+	if is_silence(
+		ScopedCheckPolicy::get(db, Scope::Application(application_id), source, check).await?,
+	) {
 		return Ok(true);
 	}
 	let Some(gid) = group_id else {
@@ -123,7 +125,7 @@ pub async fn is_silenced(
 /// rollup.
 pub async fn silenced_health_checks_for_server(
 	db: &mut AsyncPgConnection,
-	server_id: Uuid,
+	application_id: Uuid,
 	group_id: Option<Uuid>,
 	source: &str,
 ) -> Result<BTreeSet<String>> {
@@ -134,9 +136,11 @@ pub async fn silenced_health_checks_for_server(
 		.filter(dsl::ceiling.eq("skipped"))
 		.filter(dsl::source.eq(source))
 		.filter(
-			dsl::server_id.eq(server_id).or(dsl::server_group_id
-				.is_not_distinct_from(group_id)
-				.and(dsl::server_group_id.is_not_null())),
+			dsl::application_id
+				.eq(application_id)
+				.or(dsl::server_group_id
+					.is_not_distinct_from(group_id)
+					.and(dsl::server_group_id.is_not_null())),
 		)
 		.load(db)
 		.await?;
@@ -146,7 +150,7 @@ pub async fn silenced_health_checks_for_server(
 impl ServerSilencedRef {
 	fn from_policy(p: ScopedCheckPolicy) -> Option<Self> {
 		Some(Self {
-			server_id: p.server_id?,
+			application_id: p.application_id?,
 			r#ref: check_to_ref(&p.source, &p.check_name),
 			source: p.source,
 			created_at: p.created_at,
@@ -158,40 +162,48 @@ impl ServerSilencedRef {
 	/// matching issues so they leave their incident. Idempotent.
 	pub async fn add(
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		application_id: Uuid,
 		source: &str,
 		r#ref: &str,
 		created_by: Option<&str>,
 	) -> Result<Self> {
 		let policy = ScopedCheckPolicy::silence(
 			db,
-			Scope::Server(server_id),
+			Scope::Application(application_id),
 			source,
 			ref_to_check(r#ref),
 			created_by,
 		)
 		.await?;
-		reevaluate_open_issues_for_server_ref(db, server_id, source, r#ref).await?;
-		Ok(Self::from_policy(policy).expect("server-scoped silence has a server_id"))
+		reevaluate_open_issues_for_server_ref(db, application_id, source, r#ref).await?;
+		Ok(Self::from_policy(policy).expect("server-scoped silence has a application_id"))
 	}
 
 	/// Remove a server-scoped silence and re-evaluate any currently-open
 	/// matching issues so they (re)join an incident if eligible.
 	pub async fn remove(
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		application_id: Uuid,
 		source: &str,
 		r#ref: &str,
 	) -> Result<()> {
-		ScopedCheckPolicy::unsilence(db, Scope::Server(server_id), source, ref_to_check(r#ref))
-			.await?;
-		reevaluate_open_issues_for_server_ref(db, server_id, source, r#ref).await?;
+		ScopedCheckPolicy::unsilence(
+			db,
+			Scope::Application(application_id),
+			source,
+			ref_to_check(r#ref),
+		)
+		.await?;
+		reevaluate_open_issues_for_server_ref(db, application_id, source, r#ref).await?;
 		Ok(())
 	}
 
-	pub async fn list_for_server(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Vec<Self>> {
+	pub async fn list_for_server(
+		db: &mut AsyncPgConnection,
+		application_id: Uuid,
+	) -> Result<Vec<Self>> {
 		Ok(
-			ScopedCheckPolicy::list_silences(db, Scope::Server(server_id))
+			ScopedCheckPolicy::list_silences(db, Scope::Application(application_id))
 				.await?
 				.into_iter()
 				.filter_map(Self::from_policy)

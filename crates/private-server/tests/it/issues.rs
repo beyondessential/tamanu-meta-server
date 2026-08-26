@@ -10,9 +10,9 @@ async fn list_issues_for_device_and_server() {
 			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'server');
 			 INSERT INTO device_keys (device_id, key_data, name, is_active) VALUES \
 				('{device_id}', '\\x6b6579'::bytea, 'k', true);
-			 INSERT INTO servers (id, host, kind, device_id) VALUES \
+			 INSERT INTO applications (id, host, kind, device_id) VALUES \
 				('{server_id}', 'https://example.com', 'central', '{device_id}');
-			 INSERT INTO issues (server_id, device_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, last_degraded_at) VALUES \
+			 INSERT INTO issues (application_id, device_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, last_degraded_at) VALUES \
 				('{server_id}', '{device_id}', 'src', 'a', 'a', 'failed',  'failed',  'newest', true,  '2026-05-03T10:00:00Z', '2026-05-03T10:00:00Z', '2026-05-03T10:00:00Z'),
 				('{server_id}', '{device_id}', 'src', 'b', 'b', 'warning', 'warning', 'older',  true,  '2026-05-01T10:00:00Z', '2026-05-01T10:00:00Z', '2026-05-01T10:00:00Z'),
 				('{server_id}', '{device_id}', 'src', 'c', 'c', 'passed',  'passed',  'gone',   false, '2026-05-02T10:00:00Z', '2026-05-02T10:00:00Z', '2026-05-02T10:00:00Z');"
@@ -48,7 +48,7 @@ async fn manual_event_submit_creates_issue_without_device() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind) VALUES \
+			"INSERT INTO applications (id, host, kind) VALUES \
 				('{server_id}', 'https://example.com', 'central');"
 		))
 		.await
@@ -81,7 +81,7 @@ async fn manual_event_submit_creates_issue_without_device() {
 #[tokio::test(flavor = "multi_thread")]
 async fn incident_groups_at_server_group() {
 	commons_tests::server::run(async |mut conn, _public, private| {
-		// One group containing two equal-level servers.
+		// One group containing two equal-level applications.
 		let device_id = Uuid::new_v4();
 		let group_id = Uuid::new_v4();
 		let server_a_id = Uuid::new_v4();
@@ -91,9 +91,9 @@ async fn incident_groups_at_server_group() {
 			 INSERT INTO devices (id, role) VALUES ('{device_id}', 'server');
 			 INSERT INTO device_keys (device_id, key_data, name, is_active) VALUES \
 				('{device_id}', '\\x6b6579'::bytea, 'k', true);
-			 INSERT INTO servers (id, host, kind, group_id) VALUES \
+			 INSERT INTO applications (id, host, kind, group_id) VALUES \
 				('{server_a_id}', 'https://a.example.com', 'central', '{group_id}');
-			 INSERT INTO servers (id, host, kind, device_id, group_id) VALUES \
+			 INSERT INTO applications (id, host, kind, device_id, group_id) VALUES \
 				('{server_b_id}', 'https://b.example.com', 'facility', '{device_id}', '{group_id}');"
 		))
 		.await
@@ -156,7 +156,7 @@ async fn ungrouped_server_event_skips_incident() {
 		// incident is opened — incidents are group-keyed.
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind) VALUES \
+			"INSERT INTO applications (id, host, kind) VALUES \
 				('{server_id}', 'https://orphan.example.com', 'central');"
 		))
 		.await
@@ -179,7 +179,10 @@ async fn ungrouped_server_event_skips_incident() {
 			.await;
 		resp.assert_status_ok();
 		let items: Vec<serde_json::Value> = resp.json();
-		assert!(items.is_empty(), "ungrouped servers can't have incidents");
+		assert!(
+			items.is_empty(),
+			"ungrouped applications can't have incidents"
+		);
 	})
 	.await;
 }
@@ -194,7 +197,7 @@ async fn assigning_group_opens_pending_incident() {
 		let server_id = Uuid::new_v4();
 		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind) VALUES \
+			"INSERT INTO applications (id, host, kind) VALUES \
 				('{server_id}', 'https://late.example.com', 'central');
 			 INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'late group');"
 		))
@@ -253,7 +256,7 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
-			 INSERT INTO servers (id, host, kind, group_id) VALUES \
+			 INSERT INTO applications (id, host, kind, group_id) VALUES \
 				('{server_id}', 'https://example.com', 'central', '{group_id}');"
 		))
 		.await
@@ -358,7 +361,7 @@ async fn low_severity_issue_joins_existing_open_incident() {
 		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
-			 INSERT INTO servers (id, host, kind, group_id) VALUES \
+			 INSERT INTO applications (id, host, kind, group_id) VALUES \
 				('{server_id}', 'https://example.com', 'central', '{group_id}');"
 		))
 		.await
@@ -414,7 +417,7 @@ async fn low_severity_alone_does_not_open_incident() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind) VALUES \
+			"INSERT INTO applications (id, host, kind) VALUES \
 				('{server_id}', 'https://example.com', 'central');"
 		))
 		.await
@@ -452,7 +455,7 @@ async fn severity_downgrade_keeps_issue_in_incident() {
 		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
-			 INSERT INTO servers (id, host, kind, group_id) VALUES \
+			 INSERT INTO applications (id, host, kind, group_id) VALUES \
 				('{server_id}', 'https://example.com', 'central', '{group_id}');"
 		))
 		.await
@@ -504,7 +507,7 @@ async fn open_issue(
 	let group_id = Uuid::new_v4();
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g') ON CONFLICT DO NOTHING; \
-		 INSERT INTO servers (id, host, kind, group_id) VALUES \
+		 INSERT INTO applications (id, host, kind, group_id) VALUES \
 			('{server_id}', 'https://example.com', 'central', '{group_id}') ON CONFLICT DO NOTHING;"
 	))
 	.await
@@ -606,7 +609,7 @@ async fn reopen_via_device_clears_resolved_fields() {
 		async |mut conn, cert, device_id, public, private| {
 			let server_id = Uuid::new_v4();
 			conn.batch_execute(&format!(
-				"INSERT INTO servers (id, host, kind, device_id) VALUES \
+				"INSERT INTO applications (id, host, kind, device_id) VALUES \
 					('{server_id}', 'https://example.com', 'central', '{device_id}');"
 			))
 			.await
@@ -756,7 +759,7 @@ async fn unmonitored_server_event_does_not_open_incident() {
 		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
-			 INSERT INTO servers (id, host, kind, group_id, is_monitored) VALUES \
+			 INSERT INTO applications (id, host, kind, group_id, is_monitored) VALUES \
 				('{server_id}', 'https://muted.example.com', 'central', '{group_id}', FALSE);"
 		))
 		.await
@@ -782,7 +785,10 @@ async fn unmonitored_server_event_does_not_open_incident() {
 			.await;
 		resp.assert_status_ok();
 		let items: Vec<serde_json::Value> = resp.json();
-		assert!(items.is_empty(), "unmonitored servers don't open incidents");
+		assert!(
+			items.is_empty(),
+			"unmonitored applications don't open incidents"
+		);
 
 		// The issue itself is still there for the record.
 		let resp = private
@@ -806,7 +812,7 @@ async fn enabling_monitoring_opens_pending_incident() {
 		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
-			 INSERT INTO servers (id, host, kind, group_id, is_monitored) VALUES \
+			 INSERT INTO applications (id, host, kind, group_id, is_monitored) VALUES \
 				('{server_id}', 'https://later.example.com', 'central', '{group_id}', FALSE);"
 		))
 		.await
@@ -1009,7 +1015,7 @@ async fn group_silence_blocks_events_from_all_members() {
 		let server_b = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
-			 INSERT INTO servers (id, host, kind, group_id) VALUES \
+			 INSERT INTO applications (id, host, kind, group_id) VALUES \
 				('{server_a}', 'https://a.example.com', 'central', '{group_id}'),
 				('{server_b}', 'https://b.example.com', 'central', '{group_id}');"
 		))
@@ -1078,7 +1084,7 @@ async fn list_silenced_refs_for_server_and_group() {
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
-			 INSERT INTO servers (id, host, kind, group_id) VALUES \
+			 INSERT INTO applications (id, host, kind, group_id) VALUES \
 				('{server_id}', 'https://l.example.com', 'central', '{group_id}');
 			 INSERT INTO check_policies (source, check_name) VALUES \
 				('manual', 'srv-ref'), ('canopy', 'grp-ref');"
@@ -1175,9 +1181,9 @@ async fn empty_validation_input_is_a_400_not_a_500() {
 		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
-			 INSERT INTO servers (id, host, kind, group_id) VALUES \
+			 INSERT INTO applications (id, host, kind, group_id) VALUES \
 				('{server_id}', 'https://validate.example.com', 'central', '{group_id}');
-			 INSERT INTO issues (id, server_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, last_degraded_at) VALUES \
+			 INSERT INTO issues (id, application_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, last_degraded_at) VALUES \
 				('11111111-2222-3333-4444-555555555555', '{server_id}', 'src', 'r', 'r', 'failed', 'failed', 'm', true, NOW(), NOW(), NOW());"
 		))
 		.await

@@ -18,7 +18,7 @@ async fn group_card_version_is_from_highest_rank_kind_member() {
 				VALUES (2, 10, 0, 'x', 'published');
 			INSERT INTO server_groups (id, name)
 				VALUES ('aaaaaaaa-0000-0000-0000-000000000001', 'Group');
-			INSERT INTO servers (id, name, host, kind, rank, group_id) VALUES
+			INSERT INTO applications (id, name, host, kind, rank, group_id) VALUES
 				('aaaaaaaa-0000-0000-0000-0000000000c0', 'prod-central',
 				 'https://prod.example.com', 'central', 'production',
 				 'aaaaaaaa-0000-0000-0000-000000000001'),
@@ -72,7 +72,7 @@ async fn group_card_is_served_when_no_version_is_published() {
 				VALUES (2, 10, 0, 'unreleased', 'draft');
 			INSERT INTO server_groups (id, name)
 				VALUES ('bbbbbbbb-0000-0000-0000-000000000001', 'Fresh');
-			INSERT INTO servers (id, name, host, kind, rank, group_id) VALUES
+			INSERT INTO applications (id, name, host, kind, rank, group_id) VALUES
 				('bbbbbbbb-0000-0000-0000-0000000000c0', 'central',
 				 'https://fresh.example.com', 'central', 'production',
 				 'bbbbbbbb-0000-0000-0000-000000000001');",

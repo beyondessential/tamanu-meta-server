@@ -1,4 +1,4 @@
-//! Which versions Canopy asks to be migration-tested against which servers,
+//! Which versions Canopy asks to be migration-tested against which applications,
 //! and what came back.
 //!
 //! Candidacy here is the version axis only. Whether a server has a snapshot to
@@ -18,9 +18,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-	backup::refs, pg_duration::PgDuration, restore::BackupRestoreCheck,
-	restore::NewBackupRestoreCheck, servers::Server, version_known_issues::VersionKnownIssue,
-	versions::Version,
+	applications::Application, backup::refs, pg_duration::PgDuration, restore::BackupRestoreCheck,
+	restore::NewBackupRestoreCheck, version_known_issues::VersionKnownIssue, versions::Version,
 };
 
 /// A version a server could upgrade to, so one to test against that server's
@@ -37,10 +36,13 @@ pub struct Candidate {
 /// with no plan has no candidate: a restore costs hours, and it is only worth
 /// spending on a version a deployment has said it intends to apply.
 ///
-/// Tamanu servers only: the migrations under test are Tamanu's, so no other
+/// Tamanu applications only: the migrations under test are Tamanu's, so no other
 /// product's server has an upgrade path through them.
 // spec: RST#candidate-versions
-pub async fn candidate_for(db: &mut AsyncPgConnection, server: &Server) -> Result<Option<Version>> {
+pub async fn candidate_for(
+	db: &mut AsyncPgConnection,
+	server: &Application,
+) -> Result<Option<Version>> {
 	if server.product != Product::Tamanu {
 		return Ok(None);
 	}
@@ -57,7 +59,7 @@ pub async fn candidate_for(db: &mut AsyncPgConnection, server: &Server) -> Resul
 pub async fn candidates(db: &mut AsyncPgConnection) -> Result<Vec<Candidate>> {
 	let mut candidates = Vec::new();
 
-	for server in Server::get_all(db, 0, None).await? {
+	for server in Application::get_all(db, 0, None).await? {
 		if let Some(version) = candidate_for(db, &server).await? {
 			candidates.push(Candidate {
 				server_id: server.id,
@@ -139,7 +141,7 @@ pub struct LatestTest {
 	pub data_bytes_after: i64,
 }
 
-/// Where one of a group's servers stands against the version it would take
+/// Where one of a group's applications stands against the version it would take
 /// next.
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct GroupVerdict {
@@ -489,7 +491,7 @@ pub async fn verdicts_for_group(
 ) -> Result<Vec<GroupVerdict>> {
 	let mut out = Vec::new();
 
-	for server in Server::list_live_in_group(db, group_id).await? {
+	for server in Application::list_live_in_group(db, group_id).await? {
 		let Some(version) = candidate_for(db, &server).await? else {
 			continue;
 		};

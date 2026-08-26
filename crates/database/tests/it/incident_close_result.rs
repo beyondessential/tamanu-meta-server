@@ -23,12 +23,13 @@ async fn insert_grouped_server(conn: &mut diesel_async::AsyncPgConnection, host:
 			.get_result(conn)
 			.await
 			.expect("group");
-	let row: RowId = sql_query("INSERT INTO servers (host, group_id) VALUES ($1, $2) RETURNING id")
-		.bind::<sql_types::Text, _>(host)
-		.bind::<sql_types::Uuid, _>(group.id)
-		.get_result(conn)
-		.await
-		.expect("server");
+	let row: RowId =
+		sql_query("INSERT INTO applications (host, group_id) VALUES ($1, $2) RETURNING id")
+			.bind::<sql_types::Text, _>(host)
+			.bind::<sql_types::Uuid, _>(group.id)
+			.get_result(conn)
+			.await
+			.expect("server");
 	row.id
 }
 

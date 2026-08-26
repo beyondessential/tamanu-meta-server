@@ -588,7 +588,7 @@ function useGroupScopeData(groupId: string) {
 	const typeDefaults = useApi("backups", "type_defaults");
 	const servers =
 		detail.status === "ok"
-			? detail.data.servers.filter((s) => !s.archived)
+			? detail.data.applications.filter((s) => !s.archived)
 			: [];
 	const typeOptions =
 		typeDefaults.status === "ok" && typeDefaults.data.length > 0

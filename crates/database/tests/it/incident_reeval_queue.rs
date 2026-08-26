@@ -30,7 +30,7 @@ async fn insert_grouped_server(conn: &mut diesel_async::AsyncPgConnection) -> Uu
 	.await
 	.expect("group");
 	let server: RowId = sql_query(
-		"INSERT INTO servers (host, group_id) VALUES ('http://reeval.invalid/', $1) RETURNING id",
+		"INSERT INTO applications (host, group_id) VALUES ('http://reeval.invalid/', $1) RETURNING id",
 	)
 	.bind::<sql_types::Uuid, _>(group.id)
 	.get_result(conn)
@@ -86,7 +86,7 @@ async fn latest_incident(
 ) -> Option<IncFlags> {
 	sql_query(
 		"SELECT (i.closed_at IS NULL) AS is_open, (i.closing_at IS NOT NULL) AS is_lingering \
-		 FROM incidents i JOIN servers s ON i.server_group_id = s.group_id \
+		 FROM incidents i JOIN applications s ON i.server_group_id = s.group_id \
 		 WHERE s.id = $1 ORDER BY i.opened_at DESC LIMIT 1",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)

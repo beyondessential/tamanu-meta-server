@@ -10,8 +10,8 @@ use commons_types::{
 	version::VersionStr,
 };
 use database::{
-	backups::BackupRun, backups::ServerBackupCapability, reported_detail::ReportedDetail,
-	server_groups::ServerGroup, servers::Server, statuses::Status,
+	applications::Application, backups::BackupRun, backups::ServerBackupCapability,
+	reported_detail::ReportedDetail, server_groups::ServerGroup, statuses::Status,
 };
 use jiff::Timestamp;
 use rmcp::{
@@ -42,7 +42,7 @@ pub struct FindServersArgs {
 	pub product: Option<String>,
 	/// Filter to one group's id.
 	pub group_id: Option<String>,
-	/// Include archived (soft-deleted) servers. Defaults to false.
+	/// Include archived (soft-deleted) applications. Defaults to false.
 	pub include_archived: Option<bool>,
 	/// Max results to return (default 200).
 	pub limit: Option<u64>,
@@ -82,7 +82,7 @@ struct FindServersResult {
 	total_matched: usize,
 	returned: usize,
 	truncated: bool,
-	servers: Vec<ServerSummary>,
+	applications: Vec<ServerSummary>,
 }
 
 #[derive(Serialize)]
@@ -143,10 +143,10 @@ struct ServerDetail {
 	backups: Vec<BackupCapabilityOut>,
 }
 
-#[tool_router(router = servers_router, vis = "pub(crate)")]
+#[tool_router(router = applications_router, vis = "pub(crate)")]
 impl CanopyMcp {
 	#[tool(
-		description = "Find servers by name/host/id substring, optionally filtered by product, \
+		description = "Find applications by name/host/id substring, optionally filtered by product, \
 		               kind, rank, or group. Returns compact records with last-seen, version, and \
 		               health. A server whose product has no application version carries none."
 	)]
@@ -161,13 +161,19 @@ impl CanopyMcp {
 		let group = parse_opt_uuid(&args.group_id, "group_id")?;
 		let limit = args.limit.unwrap_or(DEFAULT_SERVER_LIMIT) as usize;
 
-		let mut servers = Server::get_all(&mut conn, 0, None).await.map_err(mcp_err)?;
+		let mut applications = Application::get_all(&mut conn, 0, None)
+			.await
+			.map_err(mcp_err)?;
 		if args.include_archived.unwrap_or(false) {
-			servers.extend(Server::list_archived(&mut conn).await.map_err(mcp_err)?);
+			applications.extend(
+				Application::list_archived(&mut conn)
+					.await
+					.map_err(mcp_err)?,
+			);
 		}
 
 		let q = args.query.as_deref().map(str::to_lowercase);
-		servers.retain(|s| {
+		applications.retain(|s| {
 			product.as_ref().is_none_or(|p| &s.product == p)
 				&& kind.as_ref().is_none_or(|k| &s.kind == k)
 				&& rank.as_ref().is_none_or(|r| s.rank.as_ref() == Some(r))
@@ -177,14 +183,14 @@ impl CanopyMcp {
 				&& q.as_deref().is_none_or(|q| server_matches(s, q))
 		});
 
-		let total_matched = servers.len();
+		let total_matched = applications.len();
 		let truncated = total_matched > limit;
-		servers.truncate(limit);
+		applications.truncate(limit);
 		if truncated {
 			tracing::info!(total_matched, limit, "find_servers result truncated");
 		}
 
-		let ids: Vec<Uuid> = servers.iter().map(|s| s.id).collect();
+		let ids: Vec<Uuid> = applications.iter().map(|s| s.id).collect();
 		let statuses = Status::latest_for_servers(&mut conn, &ids)
 			.await
 			.map_err(mcp_err)?;
@@ -195,7 +201,7 @@ impl CanopyMcp {
 		// Sourcing it from the status window alone made `find_servers`
 		// disagree: a server quiet for more than a week reported no version at
 		// all, so a fleet version survey run through this tool undercounted
-		// exactly the servers most worth noticing. Only the servers the window
+		// exactly the applications most worth noticing. Only the applications the window
 		// missed are looked up again, and only against the projection table —
 		// status history stays windowed.
 		let missed: Vec<Uuid> = ids
@@ -207,16 +213,16 @@ impl CanopyMcp {
 			.await
 			.map_err(mcp_err)?;
 
-		let group_names = Server::group_names_by_server_ids(&mut conn, &ids)
+		let group_names = Application::group_names_by_server_ids(&mut conn, &ids)
 			.await
 			.map_err(mcp_err)?;
 		let server_groups: Vec<(Uuid, Option<Uuid>)> =
-			servers.iter().map(|s| (s.id, s.group_id)).collect();
+			applications.iter().map(|s| (s.id, s.group_id)).collect();
 		let health = database::issues::health_from_check_state(&mut conn, &server_groups)
 			.await
 			.map_err(mcp_err)?;
 
-		let summaries: Vec<ServerSummary> = servers
+		let summaries: Vec<ServerSummary> = applications
 			.iter()
 			.map(|s| {
 				summarize(
@@ -235,7 +241,7 @@ impl CanopyMcp {
 			total_matched,
 			returned: summaries.len(),
 			truncated,
-			servers: summaries,
+			applications: summaries,
 		})
 	}
 
@@ -250,7 +256,7 @@ impl CanopyMcp {
 		let mut conn = self.conn().await?;
 		let id = parse_uuid(&args.server_id, "server_id")?;
 
-		let Ok(server) = Server::get_by_id(&mut conn, id).await else {
+		let Ok(server) = Application::get_by_id(&mut conn, id).await else {
 			return Ok(not_found(format!("no server with id {id}")));
 		};
 
@@ -372,7 +378,7 @@ pub(crate) struct Retained {
 }
 
 pub(crate) fn summarize(
-	s: &Server,
+	s: &Application,
 	st: Option<&Status>,
 	retained: Retained,
 	group_name: Option<String>,
@@ -402,7 +408,7 @@ pub(crate) fn summarize(
 	}
 }
 
-fn server_matches(s: &Server, q: &str) -> bool {
+fn server_matches(s: &Application, q: &str) -> bool {
 	s.name
 		.as_deref()
 		.is_some_and(|n| n.to_lowercase().contains(q))

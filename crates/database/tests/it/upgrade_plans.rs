@@ -4,10 +4,10 @@
 use commons_tests::db::TestDb;
 use commons_types::version::{VersionStatus, VersionStr};
 use database::{
+	applications::Application,
 	migration_tests::candidate_for,
 	reported_detail::ReportedDetail,
 	server_groups::ServerGroup,
-	servers::Server,
 	upgrade_plans::{PlannedWhen, UpgradePlan, close_met_plans, is_late, planned_target},
 	versions::{NewVersion, Version},
 };
@@ -40,13 +40,13 @@ async fn publish(conn: &mut AsyncPgConnection, minor: i32, patch: i32) -> Versio
 
 /// A group with one server reporting `running`, and the group's cached
 /// effective version recomputed through the real path.
-async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Server) {
+async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Application) {
 	let group: RowId = sql_query("INSERT INTO server_groups (name) VALUES ('kamaka') RETURNING id")
 		.get_result(conn)
 		.await
 		.expect("group");
 	let server: RowId = sql_query(
-		"INSERT INTO servers (host, kind, group_id) VALUES ($1, 'central', $2) RETURNING id",
+		"INSERT INTO applications (host, kind, group_id) VALUES ($1, 'central', $2) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>("https://central.kamaka.example")
 	.bind::<sql_types::Uuid, _>(group.id)
@@ -76,7 +76,7 @@ async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Se
 		.await
 		.expect("recompute");
 
-	let server = Server::get_by_id(conn, server.id)
+	let server = Application::get_by_id(conn, server.id)
 		.await
 		.expect("get server");
 	(group.id, server)

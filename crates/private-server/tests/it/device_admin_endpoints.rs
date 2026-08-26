@@ -353,7 +353,7 @@ async fn resolve_tailnet_identifier_returns_null_for_unknown() {
 
 /// Both attach handlers document 404 for "identifier does not resolve to a
 /// known tailnet node". `devices::attach_tailscale` answered 500 (via
-/// `AppError::custom`) and `servers::attach_tailscale` answered 400 — so
+/// `AppError::custom`) and `applications::attach_tailscale` answered 400 — so
 /// they disagreed with the spec and with each other.
 #[tokio::test(flavor = "multi_thread")]
 async fn attach_tailscale_is_404_for_an_unresolvable_identifier() {
@@ -383,7 +383,7 @@ async fn server_attach_tailscale_is_404_for_an_unresolvable_identifier() {
 
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind) \
+			"INSERT INTO applications (id, host, kind) \
 			 VALUES ('{server_id}', 'https://attach.example.com', 'central');"
 		))
 		.await

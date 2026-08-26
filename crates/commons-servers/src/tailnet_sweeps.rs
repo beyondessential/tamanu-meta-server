@@ -39,7 +39,7 @@ Re-authenticate the node (`tailscale up`) or disable key expiry for it in the Ta
 ///
 /// Tailnet-attached devices with no server are intentionally skipped:
 /// the tailnet hosts plenty of nodes that aren't canopy-managed
-/// servers (operator laptops, other infra, …) and we have nothing to
+/// applications (operator laptops, other infra, …) and we have nothing to
 /// say about those — the sweep is scoped to the headless devices
 /// canopy actually runs.
 ///
@@ -61,7 +61,7 @@ pub async fn sweep_key_expiry(
 	// server-scoped (`server_id` is `Some`); drop any defensively.
 	let issue_map: std::collections::HashMap<Uuid, &Issue> = existing
 		.iter()
-		.filter_map(|i| i.server_id.map(|sid| (sid, i)))
+		.filter_map(|i| i.application_id.map(|sid| (sid, i)))
 		.collect();
 
 	let mut filed = 0usize;
@@ -105,7 +105,7 @@ pub async fn sweep_key_expiry(
 			db,
 			CheckFiling {
 				source: TAILSCALE_SOURCE,
-				scope: Scope::Server(*server_id),
+				scope: Scope::Application(*server_id),
 				device_id: Some(device.id),
 				check: KEY_EXPIRY_REF,
 				observed,

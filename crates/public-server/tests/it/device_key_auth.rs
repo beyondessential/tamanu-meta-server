@@ -110,7 +110,7 @@ async fn multiple_keys_per_device() {
 				&mut conn,
 				device_id,
 				additional_key_data.to_vec(),
-				Some("Additional Server Key".to_string()),
+				Some("Additional Application Key".to_string()),
 			)
 			.await
 			.unwrap();
@@ -288,7 +288,7 @@ async fn key_deactivation_works() {
 			let server_id = uuid::Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
 			sql_query(
 				r#"
-				INSERT INTO servers (id, host, kind, device_id)
+				INSERT INTO applications (id, host, kind, device_id)
 				VALUES ($1, 'https://test.example.com', 'facility', $2)
 			"#,
 			)
@@ -397,7 +397,7 @@ async fn key_rotation_scenario() {
 			let server_id = uuid::Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
 			sql_query(
 				r#"
-				INSERT INTO servers (id, host, kind, device_id)
+				INSERT INTO applications (id, host, kind, device_id)
 				VALUES ($1, 'https://rotation-test.com', 'facility', $2)
 			"#,
 			)

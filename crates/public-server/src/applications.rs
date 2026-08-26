@@ -12,10 +12,10 @@ use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_types::server::{kind::ServerKind, rank::ServerRank};
 use database::{
 	Db,
+	applications::Application,
 	devices::{Device, DeviceKey},
 	server_enrollment_challenges::ServerEnrollmentChallenge,
 	server_enrollment_tokens::ServerEnrollmentToken,
-	servers::Server,
 	url_field::UrlField,
 };
 use diesel_async::AsyncConnection;
@@ -66,7 +66,7 @@ fn rank_order(rank: &Option<ServerRank>) -> u32 {
 	}
 }
 
-/// List publicly-listed central servers.
+/// List publicly-listed central applications.
 ///
 /// Returns every central server that has both a public display name and a
 /// reachable host configured, ordered by environment tier (production
@@ -76,19 +76,19 @@ fn rank_order(rank: &Option<ServerRank>) -> u32 {
 	get,
 	path = "/",
 	operation_id = "list_servers",
-	tag = "servers",
+	tag = "applications",
 	responses(
-		(status = 200, description = "Publicly-listed central servers, ordered by rank then name.", body = Vec<PublicServer>),
+		(status = 200, description = "Publicly-listed central applications, ordered by rank then name.", body = Vec<PublicServer>),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
 pub async fn list(State(db): State<Db>) -> Result<Json<Vec<PublicServer>>> {
 	let mut db = db.get().await?;
-	let mut servers = Server::list_by_kind(&mut db, ServerKind::Central, 0, None)
+	let mut applications = Application::list_by_kind(&mut db, ServerKind::Central, 0, None)
 		.await?
 		.into_iter()
 		.filter_map(|s| {
-			// Only list servers that have both a public name and a URL — the
+			// Only list applications that have both a public name and a URL — the
 			// mobile app needs a reachable host.
 			match (s.public_name, s.host) {
 				(Some(name), Some(host)) => Some(PublicServer {
@@ -101,13 +101,13 @@ pub async fn list(State(db): State<Db>) -> Result<Json<Vec<PublicServer>>> {
 		})
 		.collect::<Vec<_>>();
 
-	servers.sort_by(|a, b| {
+	applications.sort_by(|a, b| {
 		rank_order(&a.rank)
 			.cmp(&rank_order(&b.rank))
 			.then_with(|| a.name.cmp(&b.name))
 	});
 
-	Ok(Json(servers))
+	Ok(Json(applications))
 }
 
 /// The calling device's own identity, as assigned at enrollment.
@@ -138,7 +138,7 @@ pub struct SelfResponse {
 	get,
 	path = "/self",
 	operation_id = "server_self",
-	tag = "servers",
+	tag = "applications",
 	security(("server-device" = [])),
 	responses(
 		(status = 200, body = SelfResponse),
@@ -153,14 +153,14 @@ pub async fn self_identity(
 ) -> Result<Json<SelfResponse>> {
 	let mut conn = db.get().await?;
 	let device_id = device.0.0.id;
-	let mut servers = Server::get_by_device_id(&mut conn, device_id).await?;
-	if servers.len() > 1 {
+	let mut applications = Application::get_by_device_id(&mut conn, device_id).await?;
+	if applications.len() > 1 {
 		return Err(AppError::Conflict(format!(
-			"device {device_id} is attached to {} servers; expected at most one",
-			servers.len(),
+			"device {device_id} is attached to {} applications; expected at most one",
+			applications.len(),
 		)));
 	}
-	let server = servers.pop().ok_or(AppError::DeviceHasNoServer)?;
+	let server = applications.pop().ok_or(AppError::DeviceHasNoServer)?;
 	Ok(Json(SelfResponse {
 		server_id: server.id,
 		device_id,
@@ -269,7 +269,7 @@ fn enforce_rate_limit(rl: &RateLimiter, ip: std::net::IpAddr, server_id: uuid::U
 #[utoipa::path(
 	post,
 	path = "/register/begin",
-	tag = "servers",
+	tag = "applications",
 	request_body = BeginArgs,
 	responses(
 		(status = 200, body = BeginResponse),
@@ -292,8 +292,8 @@ pub async fn register_begin(
 	let tailnet = directory.is_some();
 	let spki = resolve_spki(&headers, args.spki.as_deref(), tailnet, cert_header)?;
 
-	// Server must exist and be live.
-	let server = Server::get_by_id(&mut db, args.server_id)
+	// Application must exist and be live.
+	let server = Application::get_by_id(&mut db, args.server_id)
 		.await
 		.map_err(|_| AppError::EnrollmentFailed)?;
 	if server.deleted_at.is_some() {
@@ -373,7 +373,7 @@ pub struct CompleteResponse {
 #[utoipa::path(
 	post,
 	path = "/register/complete",
-	tag = "servers",
+	tag = "applications",
 	request_body = CompleteArgs,
 	responses(
 		(status = 200, body = CompleteResponse),
@@ -437,7 +437,7 @@ pub async fn register_complete(
 		.transaction::<_, AppError, _>(async |conn| {
 			// Lock the server row so a concurrent archival can't slip in between
 			// this check and the bind/burn below (it also locks FOR UPDATE).
-			let server = Server::get_by_id_for_update(conn, args.server_id).await?;
+			let server = Application::get_by_id_for_update(conn, args.server_id).await?;
 			if server.deleted_at.is_some() {
 				return Err(AppError::EnrollmentFailed);
 			}
@@ -445,7 +445,7 @@ pub async fn register_complete(
 			// Refuse to graft this key onto an identity already serving a
 			// different live server.
 			if let Some(existing) = Device::from_key(conn, &spki).await? {
-				if Server::live_by_device_id(conn, existing.id)
+				if Application::live_by_device_id(conn, existing.id)
 					.await?
 					.iter()
 					.any(|s| s.id != args.server_id)
@@ -475,7 +475,7 @@ pub async fn register_complete(
 					}
 					None => Device::create(conn, spki.to_vec()).await?.id,
 				};
-				Server::bind_device(conn, server_id, device_id).await?;
+				Application::bind_device(conn, server_id, device_id).await?;
 				Ok(device_id)
 			}
 
@@ -501,9 +501,14 @@ pub async fn register_complete(
 				None => bind_fresh_device(conn, args.server_id, &spki).await?,
 			};
 
-			Device::trust(conn, device_id, commons_types::device::DeviceRole::Server).await?;
+			Device::trust(
+				conn,
+				device_id,
+				commons_types::device::DeviceRole::Server,
+			)
+			.await?;
 			ServerEnrollmentToken::consume(conn, args.server_id, &challenge.token_hash).await?;
-			Server::mark_registered(conn, args.server_id).await?;
+			Application::mark_registered(conn, args.server_id).await?;
 			Ok(device_id)
 		})
 		.await?;

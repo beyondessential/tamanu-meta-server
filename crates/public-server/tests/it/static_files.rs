@@ -61,11 +61,11 @@ async fn password_method_not_allowed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn servers_nested_routes() {
 	commons_tests::server::run(async |_conn, public, _| {
-		// Test that servers endpoint exists (returns empty list)
+		// Test that applications endpoint exists (returns empty list)
 		let response = public.get("/servers").await;
 		response.assert_status_ok();
 
-		// Test nested routes under servers don't exist by default
+		// Test nested routes under applications don't exist by default
 		let response = public.get("/servers/nonexistent").await;
 		response.assert_status(StatusCode::NOT_FOUND);
 	})

@@ -40,7 +40,7 @@ async fn insert_server(
 	}
 	let host = format!("http://test.invalid/{}", Uuid::new_v4());
 	let row: RowId = sql_query(
-		"INSERT INTO servers (host, kind, group_id) VALUES ($1, 'central', $2) RETURNING id",
+		"INSERT INTO applications (host, kind, group_id) VALUES ($1, 'central', $2) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>(host)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group_id)
@@ -72,7 +72,7 @@ async fn combines_server_and_group_scopes() {
 			.await
 			.unwrap();
 
-		// Server scope and group scope combine for the grouped server.
+		// Application scope and group scope combine for the grouped server.
 		assert_eq!(
 			silenced_health_checks_for_server(&mut conn, grouped, Some(group), "alertd")
 				.await

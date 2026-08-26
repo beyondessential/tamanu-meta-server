@@ -134,8 +134,8 @@ async fn status_json_basic_server() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Test cluster');
-			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Test Server', 'https://test.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')",
+			INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Test Application', 'https://test.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')",
 		)
 		.await
 		.unwrap();
@@ -159,7 +159,7 @@ async fn status_json_basic_server() {
 
 		assert_eq!(details.name, "Test cluster");
 		assert_eq!(details.members.len(), 1);
-		assert_eq!(details.members[0].name, "Test Server");
+		assert_eq!(details.members[0].name, "Test Application");
 		assert_eq!(details.members[0].up, "gone");
 	})
 	.await
@@ -179,8 +179,8 @@ async fn status_json_server_with_recent_status() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Active cluster');
-			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Active Server', 'https://active.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+			INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Active Application', 'https://active.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 
 			INSERT INTO statuses (server_id, version, extra, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '1.2.3', '{\"uptime\": 3600}'::jsonb, NOW());
@@ -222,7 +222,7 @@ async fn status_json_server_with_recent_status() {
 
 		assert_eq!(details.name, "Active cluster");
 		assert_eq!(details.members.len(), 1);
-		assert_eq!(details.members[0].name, "Active Server");
+		assert_eq!(details.members[0].name, "Active Application");
 		assert_eq!(details.members[0].up, "up"); // Recent status means "up"
 		assert_eq!(details.version, Some("1.2.3".to_string()));
 	})
@@ -244,9 +244,9 @@ async fn status_json_server_status_ages() {
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Down cluster'),
 			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Away cluster');
-			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Down Server', 'https://down.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
-			('22222222-2222-2222-2222-222222222222', 'Away Server', 'https://away.example.com', 'production', 'central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+			INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Down Application', 'https://down.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('22222222-2222-2222-2222-222222222222', 'Away Application', 'https://away.example.com', 'production', 'central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
 
 			INSERT INTO statuses (server_id, version, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '1.0.0', NOW() - INTERVAL '45 minutes'),
@@ -276,8 +276,8 @@ async fn status_json_server_status_ages() {
 			assert_eq!(details.members.len(), 1);
 
 			match details.members[0].name.as_str() {
-				"Down Server" => down_status = Some(details.members[0].up.clone()),
-				"Away Server" => away_status = Some(details.members[0].up.clone()),
+				"Down Application" => down_status = Some(details.members[0].up.clone()),
+				"Away Application" => away_status = Some(details.members[0].up.clone()),
 				_ => {}
 			}
 		}
@@ -304,10 +304,10 @@ async fn status_json_platform_detection() {
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Windows cluster'),
 			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Linux cluster'),
 			('cccccccc-cccc-cccc-cccc-cccccccccccc', 'Windows cluster 2');
-			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Windows Server', 'https://win.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
-			('22222222-2222-2222-2222-222222222222', 'Linux Server', 'https://linux.example.com', 'production', 'central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'),
-			('33333333-3333-3333-3333-333333333333', 'Windows Server 2', 'https://win2.example.com', 'production', 'central', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
+			INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Windows Application', 'https://win.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('22222222-2222-2222-2222-222222222222', 'Linux Application', 'https://linux.example.com', 'production', 'central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'),
+			('33333333-3333-3333-3333-333333333333', 'Windows Application 2', 'https://win2.example.com', 'production', 'central', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
 
 			INSERT INTO statuses (server_id, version, extra, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '1.0.0', '{\"pgVersion\": \"PostgreSQL 13.7 on x86_64-pc-windows-msvc, compiled by Visual C++ build 1914\"}'::jsonb, NOW()),
@@ -337,9 +337,9 @@ async fn status_json_platform_detection() {
 			let details: ServerGroupCardResponse = details_response.json();
 
 			match details.members.first().map(|m| m.name.as_str()) {
-				Some("Windows Server") => win_status = Some(details),
-				Some("Linux Server") => linux_status = Some(details),
-				Some("Windows Server 2") => win2_status = Some(details),
+				Some("Windows Application") => win_status = Some(details),
+				Some("Linux Application") => linux_status = Some(details),
+				Some("Windows Application 2") => win2_status = Some(details),
 				_ => {}
 			}
 		}
@@ -369,7 +369,7 @@ async fn status_json_mixed_server_ranks() {
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Production'),
 			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Dev'),
 			('cccccccc-cccc-cccc-cccc-cccccccccccc', 'Clone');
-			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
+			INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Production', 'https://prod.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
 			('22222222-2222-2222-2222-222222222222', 'Dev', 'https://dev.example.com', 'dev', 'central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'),
 			('33333333-3333-3333-3333-333333333333', 'Clone', 'https://clone.example.com', 'clone', 'central', 'cccccccc-cccc-cccc-cccc-cccccccccccc')",
@@ -419,8 +419,8 @@ async fn status_json_unnamed_servers_excluded() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Mixed cluster');
-			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Named Server', 'https://named.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Named Application', 'https://named.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
 			('22222222-2222-2222-2222-222222222222', NULL, 'https://unnamed.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')",
 		)
 		.await
@@ -458,8 +458,8 @@ async fn status_json_blip_status() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Blip cluster');
-			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Blip Server', 'https://blip.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+			INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Blip Application', 'https://blip.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 			INSERT INTO statuses (server_id, version, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '1.0.0', NOW() - INTERVAL '4 minutes')",
 		)
@@ -484,7 +484,7 @@ async fn status_json_blip_status() {
 		let details: ServerGroupCardResponse = details_response.json();
 
 		assert_eq!(details.members.len(), 1);
-		assert_eq!(details.members[0].name, "Blip Server");
+		assert_eq!(details.members[0].name, "Blip Application");
 		assert_eq!(details.members[0].up, "blip"); // 4 minutes ago should be "blip"
 	})
 	.await
@@ -506,8 +506,8 @@ async fn status_json_gone_server() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Gone cluster');
-			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Gone Server', 'https://gone.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')",
+			INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Gone Application', 'https://gone.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')",
 		)
 		.await
 		.unwrap();
@@ -545,8 +545,8 @@ async fn get_detail_basic() {
 		.unwrap();
 
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Test Server', 'https://test.example.com', 'production', 'central')"
+			"INSERT INTO applications (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Test Application', 'https://test.example.com', 'production', 'central')"
 		)
 		.await
 		.unwrap();
@@ -558,7 +558,7 @@ async fn get_detail_basic() {
 		response.assert_status_ok();
 		let detail: ServerDetailResponse = response.json();
 
-		assert_eq!(detail.server.name, "Test Server");
+		assert_eq!(detail.server.name, "Test Application");
 		assert_eq!(detail.server.host, "https://test.example.com/");
 		assert_eq!(detail.server.rank, "production");
 		assert!(detail.device_info.is_none());
@@ -574,9 +574,9 @@ async fn get_detail_basic() {
 async fn get_detail_munin_flag() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Munin Server', 'https://munin.example.com', 'production', 'central'),
-			('22222222-2222-2222-2222-222222222222', 'Plain Server', 'https://plain.example.com', 'production', 'central');
+			"INSERT INTO applications (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Munin Application', 'https://munin.example.com', 'production', 'central'),
+			('22222222-2222-2222-2222-222222222222', 'Plain Application', 'https://plain.example.com', 'production', 'central');
 
 			INSERT INTO statuses (server_id, extra, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '{\"munin\": true}'::jsonb, NOW()),
@@ -621,8 +621,8 @@ async fn get_detail_with_status() {
 		.unwrap();
 
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Status Server', 'https://status.example.com', 'test', 'central');
+			"INSERT INTO applications (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Status Application', 'https://status.example.com', 'test', 'central');
 
 			INSERT INTO statuses (server_id, version, extra, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '2.5.1', '{\"timezone\": \"Pacific/Auckland\", \"pgVersion\": \"PostgreSQL 17.2, (x86_64-pc-linux-gnu, compiled by gcc)\"}'::jsonb, NOW());
@@ -640,7 +640,7 @@ async fn get_detail_with_status() {
 		response.assert_status_ok();
 		let detail: ServerDetailResponse = response.json();
 
-		assert_eq!(detail.server.name, "Status Server");
+		assert_eq!(detail.server.name, "Status Application");
 		assert!(detail.last_status.is_some());
 
 		let status = detail.last_status.unwrap();
@@ -661,8 +661,8 @@ async fn get_detail_with_status() {
 async fn get_detail_figures_resolve_across_sources() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Bestool Server', 'https://bestool.example.com', 'test', 'central'),
+			"INSERT INTO applications (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Bestool Application', 'https://bestool.example.com', 'test', 'central'),
 			('22222222-2222-2222-2222-222222222222', 'Tamanu Only', 'https://tamanuonly.example.com', 'test', 'central');
 
 			INSERT INTO statuses (server_id, source, extra, created_at) VALUES
@@ -726,8 +726,8 @@ async fn get_detail_with_device() {
 			"INSERT INTO devices (id, role) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'server');
 
-			INSERT INTO servers (id, name, host, rank, kind, device_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Device Server', 'https://device.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+			INSERT INTO applications (id, name, host, rank, kind, device_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Device Application', 'https://device.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 
 			INSERT INTO device_connections (device_id, ip, user_agent) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '192.168.1.100', 'Tamanu/1.0.0 Node.js/18.20.5')"
@@ -742,7 +742,7 @@ async fn get_detail_with_device() {
 		response.assert_status_ok();
 		let detail: ServerDetailResponse = response.json();
 
-		assert_eq!(detail.server.name, "Device Server");
+		assert_eq!(detail.server.name, "Device Application");
 		assert!(detail.device_info.is_some());
 		assert!(detail.siblings.is_empty());
 
@@ -827,7 +827,7 @@ async fn server_grouped_ids_with_data() {
 		.await
 		.unwrap();
 
-		// Three groups, each with one or more servers — Production group has
+		// Three groups, each with one or more applications — Production group has
 		// multiple members to make sure the bucket gets exactly one entry per
 		// group rather than per server.
 		conn.batch_execute(
@@ -835,7 +835,7 @@ async fn server_grouped_ids_with_data() {
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Production cluster'),
 			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Clone cluster'),
 			('cccccccc-cccc-cccc-cccc-cccccccccccc', 'Demo cluster');
-			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
+			INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Prod Central', 'https://prod.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
 			('44444444-4444-4444-4444-444444444444', 'Prod Facility A', 'https://facility-a.example.com', 'production', 'facility', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
 			('55555555-5555-5555-5555-555555555555', 'Prod Facility B', 'https://facility-b.example.com', 'production', 'facility', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
@@ -896,7 +896,7 @@ async fn server_grouped_ids_excludes_ungrouped() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Production cluster');
-			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
+			INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Grouped Central', 'https://grouped.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
 			('22222222-2222-2222-2222-222222222222', 'Standalone', 'https://standalone.example.com', 'production', 'central', NULL)",
 		)
@@ -942,7 +942,7 @@ struct SnapshotData {
 async fn snapshot_returns_latest_when_at_omitted() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO servers (id, host, kind) VALUES
+			"INSERT INTO applications (id, host, kind) VALUES
 			('20000000-0000-0000-0000-000000000001', 'https://snap.example.com', 'central')",
 		)
 		.await
@@ -983,7 +983,7 @@ async fn snapshot_returns_latest_when_at_omitted() {
 async fn snapshot_figures_survive_a_later_push_from_another_source() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO servers (id, host, kind) VALUES
+			"INSERT INTO applications (id, host, kind) VALUES
 			('20000000-0000-0000-0000-000000000030', 'https://figures.example.com', 'central');
 
 			INSERT INTO statuses (server_id, source, created_at, healthy, health, extra) VALUES
@@ -1021,7 +1021,7 @@ async fn snapshot_figures_survive_a_later_push_from_another_source() {
 async fn snapshot_has_no_bestool_version_when_unreported() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO servers (id, host, kind) VALUES
+			"INSERT INTO applications (id, host, kind) VALUES
 			('20000000-0000-0000-0000-000000000031', 'https://nobestool.example.com', 'central');
 
 			INSERT INTO statuses (server_id, source, created_at, healthy, health, extra) VALUES
@@ -1056,18 +1056,18 @@ struct FleetRow {
 }
 
 /// The fleet view lists every live server with its currently reported detail,
-/// resolved across sources — including servers that have never reported, and
+/// resolved across sources — including applications that have never reported, and
 /// excluding archived ones.
 // spec: FIG#fleet-spread
 #[tokio::test(flavor = "multi_thread")]
 async fn fleet_detail_covers_live_servers() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, kind) VALUES
+			"INSERT INTO applications (id, name, host, kind) VALUES
 			('30000000-0000-0000-0000-000000000001', 'reports', 'https://reports.example.com', 'central'),
 			('30000000-0000-0000-0000-000000000002', 'silent', 'https://silent.example.com', 'central');
 
-			INSERT INTO servers (id, name, host, kind, deleted_at) VALUES
+			INSERT INTO applications (id, name, host, kind, deleted_at) VALUES
 			('30000000-0000-0000-0000-000000000003', 'archived', 'https://archived.example.com', 'central', NOW());
 
 			INSERT INTO server_reported_detail (server_id, source, extra, reported_at) VALUES
@@ -1125,14 +1125,14 @@ async fn fleet_detail_covers_live_servers() {
 async fn fleet_detail_carries_healthcheck_fields() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, kind) VALUES
+			"INSERT INTO applications (id, name, host, kind) VALUES
 			('50000000-0000-0000-0000-000000000001', 'checked', 'https://checked.example.com', 'central'),
 			('50000000-0000-0000-0000-000000000002', 'unchecked', 'https://unchecked.example.com', 'central');
 
 			INSERT INTO check_policies (source, check_name) VALUES
 			('alertd', 'diskspace');
 
-			INSERT INTO issues (server_id, source, ref, check_name, observed_result, effective_result, detail, message, active) VALUES
+			INSERT INTO issues (application_id, source, ref, check_name, observed_result, effective_result, detail, message, active) VALUES
 			('50000000-0000-0000-0000-000000000001', 'alertd', 'health/diskspace', 'diskspace',
 			 'warning', 'warning',
 			 '{\"check\": \"diskspace\", \"result\": \"warning\", \"percent\": 91}'::jsonb,
@@ -1185,7 +1185,7 @@ async fn snapshot_prefers_payload_node_version_over_user_agent() {
 			"INSERT INTO devices (id, role) VALUES
 			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'server');
 
-			INSERT INTO servers (id, host, kind, device_id) VALUES
+			INSERT INTO applications (id, host, kind, device_id) VALUES
 			('20000000-0000-0000-0000-000000000010', 'https://node.example.com', 'central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
 
 			INSERT INTO device_connections (device_id, ip, user_agent) VALUES
@@ -1224,7 +1224,7 @@ async fn snapshot_node_version_falls_back_to_user_agent() {
 			"INSERT INTO devices (id, role) VALUES
 			('cccccccc-cccc-cccc-cccc-cccccccccccc', 'server');
 
-			INSERT INTO servers (id, host, kind, device_id) VALUES
+			INSERT INTO applications (id, host, kind, device_id) VALUES
 			('20000000-0000-0000-0000-000000000011', 'https://node2.example.com', 'central', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
 
 			INSERT INTO device_connections (device_id, ip, user_agent) VALUES
@@ -1258,7 +1258,7 @@ async fn snapshot_node_version_falls_back_to_user_agent() {
 async fn snapshot_at_time_returns_prior_row() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO servers (id, host, kind) VALUES
+			"INSERT INTO applications (id, host, kind) VALUES
 			('20000000-0000-0000-0000-000000000002', 'https://snap2.example.com', 'central');
 			INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'old'), ('alertd', 'mid'), ('alertd', 'new')",
 		)
@@ -1302,7 +1302,7 @@ async fn snapshot_at_time_returns_prior_row() {
 async fn snapshot_before_any_row_returns_null() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO servers (id, host, kind) VALUES
+			"INSERT INTO applications (id, host, kind) VALUES
 			('20000000-0000-0000-0000-000000000003', 'https://snap3.example.com', 'central')",
 		)
 		.await
@@ -1333,7 +1333,7 @@ async fn snapshot_before_any_row_returns_null() {
 async fn snapshot_server_without_statuses_returns_null() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO servers (id, host, kind) VALUES
+			"INSERT INTO applications (id, host, kind) VALUES
 			('20000000-0000-0000-0000-000000000004', 'https://snap4.example.com', 'central')",
 		)
 		.await
@@ -1353,7 +1353,7 @@ async fn snapshot_server_without_statuses_returns_null() {
 }
 
 // -----------------------------------------------------------------
-// check_detail endpoint: servers currently flagging one named check
+// check_detail endpoint: applications currently flagging one named check
 // -----------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
@@ -1371,7 +1371,7 @@ struct CheckDetailServer {
 struct CheckDetailResponse {
 	check: String,
 	ceiling: Option<String>,
-	servers: Vec<CheckDetailServer>,
+	applications: Vec<CheckDetailServer>,
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1385,7 +1385,7 @@ async fn check_detail_empty_database() {
 		let data: CheckDetailResponse = r.json();
 		assert_eq!(data.check, "postgres");
 		assert_eq!(data.ceiling, None);
-		assert!(data.servers.is_empty());
+		assert!(data.applications.is_empty());
 	})
 	.await
 }
@@ -1396,13 +1396,13 @@ async fn check_detail_lists_servers_reporting_that_check_ordered_failed_first() 
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Attention cluster');
-			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Warning Server', 'https://warning.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
-			('22222222-2222-2222-2222-222222222222', 'Failing Server', 'https://failing.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
-			('33333333-3333-3333-3333-333333333333', 'Healthy Server', 'https://healthy.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
-			('44444444-4444-4444-4444-444444444444', 'Other Check Server', 'https://other.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+			INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Warning Application', 'https://warning.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('22222222-2222-2222-2222-222222222222', 'Failing Application', 'https://failing.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('33333333-3333-3333-3333-333333333333', 'Healthy Application', 'https://healthy.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('44444444-4444-4444-4444-444444444444', 'Other Check Application', 'https://other.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 
-			INSERT INTO issues (server_id, source, \"ref\", check_name, observed_result, effective_result, detail, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
+			INSERT INTO issues (application_id, source, \"ref\", check_name, observed_result, effective_result, detail, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/postgres', 'postgres', 'warning', 'warning',
 				'{\"check\":\"postgres\",\"result\":\"warning\"}'::jsonb, 'warned', true, NOW(), NOW(), NOW(), NOW()),
 			('22222222-2222-2222-2222-222222222222', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed',
@@ -1425,7 +1425,7 @@ async fn check_detail_lists_servers_reporting_that_check_ordered_failed_first() 
 		assert_eq!(data.check, "postgres");
 		assert_eq!(data.ceiling, None, "no catalog row was ever created");
 		assert_eq!(
-			data.servers.len(),
+			data.applications.len(),
 			3,
 			"every server reporting postgres appears (healthy included); other checks don't"
 		);
@@ -1433,36 +1433,36 @@ async fn check_detail_lists_servers_reporting_that_check_ordered_failed_first() 
 		// Failed sorts before warning, regardless of insertion order; the
 		// healthy server sorts last so the client's default (unhealthy-only)
 		// view is a prefix.
-		assert_eq!(data.servers[0].server_name, "Failing Server");
-		assert_eq!(data.servers[0].result, "failed");
+		assert_eq!(data.applications[0].server_name, "Failing Application");
+		assert_eq!(data.applications[0].result, "failed");
 		assert_eq!(
-			data.servers[0].group_id,
+			data.applications[0].group_id,
 			Some("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string())
 		);
 		assert_eq!(
-			data.servers[0].group_name,
+			data.applications[0].group_name,
 			Some("Attention cluster".to_string())
 		);
 		assert_eq!(
-			data.servers[0].server_id,
+			data.applications[0].server_id,
 			"22222222-2222-2222-2222-222222222222"
 		);
 		// The check's detail rides along for the expandable row.
 		assert_eq!(
-			data.servers[0].data,
+			data.applications[0].data,
 			serde_json::json!({"check": "postgres", "result": "failed", "free_pct": 2}),
 		);
 		assert!(
-			data.servers[0].failing_since.is_some(),
+			data.applications[0].failing_since.is_some(),
 			"a degraded state row carries its streak start"
 		);
 
-		assert_eq!(data.servers[1].server_name, "Warning Server");
-		assert_eq!(data.servers[1].result, "warning");
+		assert_eq!(data.applications[1].server_name, "Warning Application");
+		assert_eq!(data.applications[1].result, "warning");
 
-		assert_eq!(data.servers[2].server_name, "Healthy Server");
-		assert_eq!(data.servers[2].result, "passed");
-		assert_eq!(data.servers[2].failing_since, None);
+		assert_eq!(data.applications[2].server_name, "Healthy Application");
+		assert_eq!(data.applications[2].result, "passed");
+		assert_eq!(data.applications[2].failing_since, None);
 	})
 	.await
 }
@@ -1471,12 +1471,12 @@ async fn check_detail_lists_servers_reporting_that_check_ordered_failed_first() 
 async fn check_detail_failing_since_comes_from_the_active_issue() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Failing Server', 'https://failing.example.com', 'production', 'central'),
-			('22222222-2222-2222-2222-222222222222', 'Recovered Issue Server', 'https://recovered.example.com', 'production', 'central');
+			"INSERT INTO applications (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Failing Application', 'https://failing.example.com', 'production', 'central'),
+			('22222222-2222-2222-2222-222222222222', 'Recovered Issue Application', 'https://recovered.example.com', 'production', 'central');
 
 		-- Active state: its degraded_since is the failing-since timestamp.
-			INSERT INTO issues (server_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
+			INSERT INTO issues (application_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed',
 				'postgres check failing', true, NOW() - INTERVAL '3 hours', NOW(), NOW() - INTERVAL '3 hours', NOW()),
 			-- Recovered state (inactive): shows the last observed result but
@@ -1493,12 +1493,12 @@ async fn check_detail_failing_since_comes_from_the_active_issue() {
 			.await;
 		r.assert_status_ok();
 		let data: CheckDetailResponse = r.json();
-		assert_eq!(data.servers.len(), 2);
+		assert_eq!(data.applications.len(), 2);
 
 		let failing = data
-			.servers
+			.applications
 			.iter()
-			.find(|s| s.server_name == "Failing Server")
+			.find(|s| s.server_name == "Failing Application")
 			.unwrap();
 		let since = failing
 			.failing_since
@@ -1512,9 +1512,9 @@ async fn check_detail_failing_since_comes_from_the_active_issue() {
 		);
 
 		let recovered = data
-			.servers
+			.applications
 			.iter()
-			.find(|s| s.server_name == "Recovered Issue Server")
+			.find(|s| s.server_name == "Recovered Issue Application")
 			.unwrap();
 		assert_eq!(
 			recovered.failing_since, None,
@@ -1528,13 +1528,13 @@ async fn check_detail_failing_since_comes_from_the_active_issue() {
 async fn check_detail_excludes_ungrouped_and_archived_servers() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
+			"INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Standalone Failing', 'https://standalone.example.com', 'production', 'central', NULL),
 			('22222222-2222-2222-2222-222222222222', 'Archived Failing', 'https://archived.example.com', 'production', 'central', NULL);
 
-			UPDATE servers SET deleted_at = NOW() WHERE id = '22222222-2222-2222-2222-222222222222';
+			UPDATE applications SET deleted_at = NOW() WHERE id = '22222222-2222-2222-2222-222222222222';
 
-			INSERT INTO issues (server_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
+			INSERT INTO issues (application_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed', 'failed', true, NOW(), NOW(), NOW(), NOW()),
 			('22222222-2222-2222-2222-222222222222', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed', 'failed', true, NOW(), NOW(), NOW(), NOW())",
 		)
@@ -1548,10 +1548,10 @@ async fn check_detail_excludes_ungrouped_and_archived_servers() {
 		r.assert_status_ok();
 		let data: CheckDetailResponse = r.json();
 
-		assert_eq!(data.servers.len(), 1, "the archived server is excluded");
-		assert_eq!(data.servers[0].server_name, "Standalone Failing");
-		assert_eq!(data.servers[0].group_id, None);
-		assert_eq!(data.servers[0].group_name, None);
+		assert_eq!(data.applications.len(), 1, "the archived server is excluded");
+		assert_eq!(data.applications[0].server_name, "Standalone Failing");
+		assert_eq!(data.applications[0].group_id, None);
+		assert_eq!(data.applications[0].group_name, None);
 	})
 	.await
 }
@@ -1561,9 +1561,9 @@ async fn check_detail_returns_catalog_policy_and_ignores_non_matching_check() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
 			"INSERT INTO check_policies (source, check_name, ceiling) VALUES ('alertd', 'postgres', 'failed');
-			INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Failing Server', 'https://failing.example.com', 'production', 'central');
-			INSERT INTO issues (server_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
+			INSERT INTO applications (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Failing Application', 'https://failing.example.com', 'production', 'central');
+			INSERT INTO issues (application_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed', 'failed', true, NOW(), NOW(), NOW(), NOW())",
 		)
 		.await
@@ -1577,9 +1577,9 @@ async fn check_detail_returns_catalog_policy_and_ignores_non_matching_check() {
 		r.assert_status_ok();
 		let data: CheckDetailResponse = r.json();
 		assert_eq!(data.ceiling, Some("failed".to_string()));
-		assert_eq!(data.servers.len(), 1);
+		assert_eq!(data.applications.len(), 1);
 
-		// A different, never-reported check name: no servers, but the
+		// A different, never-reported check name: no applications, but the
 		// catalog lookup still runs (and correctly finds nothing).
 		let r = private
 			.post("/api/statuses/check_detail")
@@ -1589,7 +1589,7 @@ async fn check_detail_returns_catalog_policy_and_ignores_non_matching_check() {
 		let data: CheckDetailResponse = r.json();
 		assert_eq!(data.check, "unrelated_check");
 		assert_eq!(data.ceiling, None);
-		assert!(data.servers.is_empty());
+		assert!(data.applications.is_empty());
 	})
 	.await
 }
@@ -1600,7 +1600,7 @@ async fn check_detail_returns_catalog_policy_and_ignores_non_matching_check() {
 async fn snapshot_merges_all_sources() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO servers (id, host, kind) VALUES \
+			"INSERT INTO applications (id, host, kind) VALUES \
 				('30000000-0000-0000-0000-00000000000a', 'https://multi.example.com', 'central'); \
 				 INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'db'), ('tamanu', 'tasks'); \
 			 INSERT INTO statuses (server_id, source, healthy, health, extra) VALUES \
@@ -1661,7 +1661,7 @@ async fn snapshot_surfaces_per_check_results() {
 		.unwrap();
 
 		conn.batch_execute(
-			"INSERT INTO servers (id, host, kind) VALUES \
+			"INSERT INTO applications (id, host, kind) VALUES \
 				('30000000-0000-0000-0000-000000000001', 'https://snap-sev.example.com', 'central'); \
 			 INSERT INTO statuses (server_id, healthy, health, extra) VALUES \
 				('30000000-0000-0000-0000-000000000001', false, \
@@ -1715,7 +1715,7 @@ async fn snapshot_check_results_cover_result_form() {
 		.unwrap();
 
 		conn.batch_execute(
-			"INSERT INTO servers (id, host, kind) VALUES \
+			"INSERT INTO applications (id, host, kind) VALUES \
 				('30000000-0000-0000-0000-000000000002', 'https://snap-res.example.com', 'central'); \
 			 INSERT INTO statuses (server_id, healthy, health, extra) VALUES \
 				('30000000-0000-0000-0000-000000000002', true, \
@@ -1770,8 +1770,8 @@ async fn get_detail_health_excludes_silenced_checks() {
 			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
 			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW());
 
-			INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Silence Server', 'https://silence.example.com', 'production', 'central');
+			INSERT INTO applications (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Silence Application', 'https://silence.example.com', 'production', 'central');
 
 			INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '1.0.0', true,
@@ -1779,7 +1779,7 @@ async fn get_detail_health_excludes_silenced_checks() {
 
 			INSERT INTO check_policies (source, check_name, ceiling) VALUES ('alertd', 'postgres', 'failed');
 
-			INSERT INTO issues (server_id, source, ref, check_name, observed_result, effective_result, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
+			INSERT INTO issues (application_id, source, ref, check_name, observed_result, effective_result, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed', 'postgres failed', true, NOW(), NOW(), NOW(), NOW())",
 		)
 		.await
@@ -1799,7 +1799,7 @@ async fn get_detail_health_excludes_silenced_checks() {
 		assert_eq!(body["health"], "unhealthy");
 
 		conn.batch_execute(
-			"INSERT INTO scoped_check_policies (server_id, source, check_name, ceiling) VALUES
+			"INSERT INTO scoped_check_policies (application_id, source, check_name, ceiling) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd', 'postgres', 'skipped')",
 		)
 		.await
@@ -1842,14 +1842,14 @@ async fn group_details_member_health_excludes_group_silenced_checks() {
 			INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Silenced cluster');
 
-			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Member Server', 'https://member.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+			INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Member Application', 'https://member.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 
 			INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '1.0.0', true,
 			 '[{\"check\": \"disk\", \"result\": \"failed\"}]'::jsonb, '{}'::jsonb, NOW());
 
-			INSERT INTO issues (server_id, source, ref, check_name, observed_result, effective_result, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
+			INSERT INTO issues (application_id, source, ref, check_name, observed_result, effective_result, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/disk', 'disk', 'failed', 'failed', 'disk failed', true, NOW(), NOW(), NOW(), NOW());
 
 			INSERT INTO scoped_check_policies (server_group_id, source, check_name, ceiling) VALUES
@@ -1875,8 +1875,8 @@ async fn group_details_member_health_excludes_group_silenced_checks() {
 async fn snapshot_reports_and_excludes_silenced_checks() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Snap Server', 'https://snap.example.com', 'production', 'central');
+			"INSERT INTO applications (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Snap Application', 'https://snap.example.com', 'production', 'central');
 
 			INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '1.0.0', true,
@@ -1884,7 +1884,7 @@ async fn snapshot_reports_and_excludes_silenced_checks() {
 
 			INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'postgres'), ('alertd', 'disk');
 
-			INSERT INTO scoped_check_policies (server_id, source, check_name, ceiling) VALUES
+			INSERT INTO scoped_check_policies (application_id, source, check_name, ceiling) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd', 'postgres', 'skipped')",
 		)
 		.await
@@ -1911,18 +1911,18 @@ async fn snapshot_reports_and_excludes_silenced_checks() {
 
 /// The release summary counts each still-reporting production server once, at
 /// the version the most recent source to report one gave — and ignores
-/// servers that have gone quiet, or that aren't production.
+/// applications that have gone quiet, or that aren't production.
 // spec: FIG#active-versions
 #[tokio::test(flavor = "multi_thread")]
 async fn summary_covers_actively_reporting_production_servers() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, kind, rank) VALUES
+			"INSERT INTO applications (id, name, host, kind, rank) VALUES
 			('40000000-0000-0000-0000-000000000001', 'live-a', 'https://a.example.com', 'central', 'production'),
 			('40000000-0000-0000-0000-000000000002', 'live-b', 'https://b.example.com', 'central', 'production'),
 			('40000000-0000-0000-0000-000000000003', 'quiet', 'https://q.example.com', 'central', 'production');
 
-			INSERT INTO servers (id, name, host, kind, rank) VALUES
+			INSERT INTO applications (id, name, host, kind, rank) VALUES
 			('40000000-0000-0000-0000-000000000004', 'testing', 'https://t.example.com', 'central', 'test');
 
 			INSERT INTO server_reported_detail (server_id, source, extra, version, reported_at) VALUES

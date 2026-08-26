@@ -57,7 +57,7 @@ async fn fetch_issue(
 		SELECT escalates, active, message, description, (resolved_at IS NOT NULL) AS is_resolved,
 			observed_result, effective_result
 		FROM issues
-		WHERE server_id = $1 AND source = $2 AND ref = $3
+		WHERE application_id = $1 AND source = $2 AND ref = $3
 "#,
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
@@ -78,7 +78,7 @@ async fn count_issues_for_server(
 	conn: &mut diesel_async::AsyncPgConnection,
 	server_id: Uuid,
 ) -> i64 {
-	let c: EventCount = sql_query("SELECT COUNT(*) AS count FROM issues WHERE server_id = $1")
+	let c: EventCount = sql_query("SELECT COUNT(*) AS count FROM issues WHERE application_id = $1")
 		.bind::<sql_types::Uuid, _>(server_id)
 		.get_result(conn)
 		.await
@@ -134,7 +134,7 @@ async fn fetch_open_incident(
 ) -> Option<IncidentRow> {
 	sql_query(
 		"SELECT i.id FROM incidents i \
-		 JOIN servers s ON i.server_group_id = s.group_id \
+		 JOIN applications s ON i.server_group_id = s.group_id \
 		 WHERE s.id = $1 AND i.closed_at IS NULL",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
@@ -223,7 +223,7 @@ async fn submit_status() {
 			let server_id = Uuid::new_v4();
 			sql_query(
 				r#"
-				INSERT INTO servers (id, host, kind, device_id)
+				INSERT INTO applications (id, host, kind, device_id)
 				VALUES ($1, 'https://test.example.com', 'facility', $2)
 			"#,
 			)
@@ -311,7 +311,7 @@ async fn submit_status_returns_effective_tags_matching_tags_endpoint() {
 			.await
 			.expect("insert group");
 			sql_query(
-				"INSERT INTO servers (id, host, kind, device_id, group_id, rank, tags) \
+				"INSERT INTO applications (id, host, kind, device_id, group_id, rank, tags) \
 				 VALUES ($1, 'https://tagged.example.com', 'central', $2, $3, 'production', \
 				 '{\"env\": \"server\"}'::jsonb)",
 			)
@@ -365,7 +365,7 @@ async fn submit_status_with_geolocation() {
 			let server_id = Uuid::new_v4();
 			sql_query(
 				r#"
-				INSERT INTO servers (id, host, kind, device_id, geolocation)
+				INSERT INTO applications (id, host, kind, device_id, geolocation)
 				VALUES ($1, 'https://test.example.com', 'facility', $2, ARRAY[-41.2865, 174.7762])
 			"#,
 			)
@@ -419,7 +419,7 @@ async fn submit_status_with_geolocation() {
 			let server_with_geo: GeoCheck = sql_query(
 				r#"
 				SELECT geolocation IS NOT NULL as has_geolocation
-				FROM servers
+				FROM applications
 				WHERE id = $1
 			"#,
 			)
@@ -430,7 +430,7 @@ async fn submit_status_with_geolocation() {
 
 			assert!(
 				server_with_geo.has_geolocation,
-				"Server should have geolocation"
+				"Application should have geolocation"
 			);
 		},
 	)
@@ -445,7 +445,7 @@ async fn submit_status_with_cloud() {
 			let server_id = Uuid::new_v4();
 			sql_query(
 				r#"
-				INSERT INTO servers (id, host, kind, device_id, cloud)
+				INSERT INTO applications (id, host, kind, device_id, cloud)
 				VALUES ($1, 'https://cloud.example.com', 'central', $2, true)
 			"#,
 			)
@@ -499,7 +499,7 @@ async fn submit_status_with_cloud() {
 			let server_with_cloud: CloudCheck = sql_query(
 				r#"
 				SELECT cloud
-				FROM servers
+				FROM applications
 				WHERE id = $1
 			"#,
 			)
@@ -511,7 +511,7 @@ async fn submit_status_with_cloud() {
 			assert_eq!(
 				server_with_cloud.cloud,
 				Some(true),
-				"Server should have cloud=true"
+				"Application should have cloud=true"
 			);
 		},
 	)
@@ -526,7 +526,7 @@ async fn submit_status_with_geolocation_and_cloud() {
 			let server_id = Uuid::new_v4();
 			sql_query(
 				r#"
-				INSERT INTO servers (id, host, kind, device_id, geolocation, cloud)
+				INSERT INTO applications (id, host, kind, device_id, geolocation, cloud)
 				VALUES ($1, 'https://full.example.com', 'central', $2, ARRAY[40.7128, -74.0060], false)
 			"#,
 			)
@@ -588,7 +588,7 @@ async fn submit_status_with_geolocation_and_cloud() {
 			let server_check: FullCheck = sql_query(
 				r#"
 				SELECT geolocation, cloud
-				FROM servers
+				FROM applications
 				WHERE id = $1
 			"#,
 			)
@@ -599,7 +599,7 @@ async fn submit_status_with_geolocation_and_cloud() {
 
 			assert!(
 				server_check.geolocation.is_some(),
-				"Server should have geolocation"
+				"Application should have geolocation"
 			);
 			if let Some(geo) = &server_check.geolocation {
 				assert_eq!(geo.len(), 2, "Geolocation should have 2 values");
@@ -616,7 +616,7 @@ async fn submit_status_with_geolocation_and_cloud() {
 			assert_eq!(
 				server_check.cloud,
 				Some(false),
-				"Server should have cloud=false"
+				"Application should have cloud=false"
 			);
 		},
 	)
@@ -629,7 +629,7 @@ async fn insert_health_test_server(
 	conn: &mut diesel_async::AsyncPgConnection,
 	device_id: Uuid,
 ) -> Uuid {
-	// Server gets a group so events promote to incidents normally.
+	// Application gets a group so events promote to incidents normally.
 	let group_id = Uuid::new_v4();
 	sql_query("INSERT INTO server_groups (id, name) VALUES ($1, 'health-group')")
 		.bind::<sql_types::Uuid, _>(group_id)
@@ -639,7 +639,7 @@ async fn insert_health_test_server(
 	let server_id = Uuid::new_v4();
 	sql_query(
 		r#"
-		INSERT INTO servers (id, host, kind, device_id, group_id)
+		INSERT INTO applications (id, host, kind, device_id, group_id)
 		VALUES ($1, 'https://health.example.com', 'central', $2, $3)
 	"#,
 	)
@@ -1234,7 +1234,7 @@ async fn submit_status_with_all_failing_checks_silenced_opens_no_incident() {
 			// Pre-silence both failing checks at server scope.
 			for check in ["database", "disk"] {
 				sql_query(
-					"INSERT INTO scoped_check_policies (server_id, source, check_name, ceiling) \
+					"INSERT INTO scoped_check_policies (application_id, source, check_name, ceiling) \
 					 VALUES ($1, 'alertd', $2, 'skipped')",
 				)
 				.bind::<sql_types::Uuid, _>(server_id)
@@ -1292,7 +1292,7 @@ async fn submit_status_with_partial_silence_opens_incident_for_unsilenced() {
 
 			// Silence only one of the two failing checks.
 			sql_query(
-				"INSERT INTO scoped_check_policies (server_id, source, check_name, ceiling) \
+				"INSERT INTO scoped_check_policies (application_id, source, check_name, ceiling) \
 				 VALUES ($1, 'alertd', 'database', 'skipped')",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -1563,7 +1563,7 @@ async fn submit_status_reachability_to_health_handoff() {
 			// leaves — see the severity-≥-error close rule.)
 			set_check_severity(&mut conn, "db", "error").await;
 
-			// Server pings in with a failing per-check; the per-check
+			// Application pings in with a failing per-check; the per-check
 			// issue (Error severity) joins the existing incident rather
 			// than opening a separate one.
 			post_status(
@@ -1590,7 +1590,7 @@ async fn submit_status_reachability_to_health_handoff() {
 				"same incident absorbs both contributors"
 			);
 
-			// Reachability sweep runs again. Server's latest status is fresh
+			// Reachability sweep runs again. Application's latest status is fresh
 			// so the sweep closes the reachability issue. The incident must
 			// stay open because the per-check issue is still contributing.
 			database::statuses::Status::sweep_staleness(&mut conn)
@@ -1819,7 +1819,7 @@ async fn set_server_tags(
 	server_id: Uuid,
 	tags: serde_json::Value,
 ) {
-	sql_query("UPDATE servers SET tags = $1::jsonb WHERE id = $2")
+	sql_query("UPDATE applications SET tags = $1::jsonb WHERE id = $2")
 		.bind::<sql_types::Text, _>(tags.to_string())
 		.bind::<sql_types::Uuid, _>(server_id)
 		.execute(conn)
@@ -2546,7 +2546,7 @@ async fn seed_server_in_group(
 		.expect("insert group");
 	let server_id = Uuid::new_v4();
 	sql_query(
-		"INSERT INTO servers (id, host, kind, device_id, group_id) \
+		"INSERT INTO applications (id, host, kind, device_id, group_id) \
 		 VALUES ($1, 'https://srv.example.com', 'central', $2, $3)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
@@ -3052,7 +3052,7 @@ async fn filings_stamp_check_state_columns() {
 			let fetch = async |conn: &mut diesel_async::AsyncPgConnection| -> StateRow {
 				sql_query(
 					"SELECT check_name, observed_result, effective_result, detail \
-					 FROM issues WHERE server_id = $1 AND ref = 'health/db'",
+					 FROM issues WHERE application_id = $1 AND ref = 'health/db'",
 				)
 				.bind::<sql_types::Uuid, _>(server_id)
 				.get_result(conn)
@@ -3104,7 +3104,7 @@ async fn push_records_the_source_s_current_detail() {
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = Uuid::new_v4();
 			sql_query(
-				"INSERT INTO servers (id, host, kind, device_id) \
+				"INSERT INTO applications (id, host, kind, device_id) \
 				 VALUES ($1, 'https://detail.example.com', 'central', $2)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)

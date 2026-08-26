@@ -51,7 +51,7 @@ const HEALTH: &str = r#"[{"check":"external_users","result":"passed","count":4,"
 #[tokio::test(flavor = "multi_thread")]
 async fn group_details_dedupes_enriches_and_gates_operators() {
 	commons_tests::server::run(async |mut conn, _, private| {
-		// Two servers in one group: Fresh reports now (operators must show,
+		// Two applications in one group: Fresh reports now (operators must show,
 		// alice enriched from the cache), Stale reported 45 minutes ago
 		// (its sessions can't claim active presence).
 		conn.batch_execute(&format!(
@@ -59,7 +59,7 @@ async fn group_details_dedupes_enriches_and_gates_operators() {
 			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW());
 			INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Cluster');
-			INSERT INTO servers (id, name, host, rank, kind, group_id) VALUES
+			INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Fresh', 'https://fresh.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
 			('22222222-2222-2222-2222-222222222222', 'Stale', 'https://stale.example.com', 'production', 'facility', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 			INSERT INTO tailscale_users (login, name, profile_pic) VALUES
@@ -113,8 +113,8 @@ async fn get_detail_last_status_carries_operators() {
 		conn.batch_execute(&format!(
 			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
 			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW());
-			INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Server', 'https://s.example.com', 'production', 'central');
+			INSERT INTO applications (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Application', 'https://s.example.com', 'production', 'central');
 			INSERT INTO statuses (server_id, created_at, health) VALUES
 			('11111111-1111-1111-1111-111111111111', NOW(), '{HEALTH}'::jsonb)",
 		))
@@ -138,8 +138,8 @@ async fn get_detail_last_status_carries_operators() {
 async fn snapshot_operators_are_not_freshness_gated() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Server', 'https://s.example.com', 'production', 'central');
+			"INSERT INTO applications (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Application', 'https://s.example.com', 'production', 'central');
 			INSERT INTO statuses (server_id, created_at, health) VALUES
 			('11111111-1111-1111-1111-111111111111', NOW() - INTERVAL '2 hours', '{HEALTH}'::jsonb)",
 		))

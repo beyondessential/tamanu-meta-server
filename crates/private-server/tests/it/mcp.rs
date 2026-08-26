@@ -57,7 +57,7 @@ macro_rules! call_tool {
 	}};
 }
 
-/// Seed a group, two servers (one grouped + monitored with a fresh healthy
+/// Seed a group, two applications (one grouped + monitored with a fresh healthy
 /// status, one ungrouped), and a status carrying a version + platform.
 const GROUP: &str = "11111111-1111-1111-1111-111111111111";
 const SRV_GROUPED: &str = "22222222-2222-2222-2222-222222222222";
@@ -66,9 +66,9 @@ const SRV_UNGROUPED: &str = "33333333-3333-3333-3333-333333333333";
 async fn seed(conn: &mut impl SimpleAsyncConnection) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{GROUP}', 'Prod Group'); \
-		 INSERT INTO servers (id, host, name, kind, rank, group_id, is_monitored) VALUES \
+		 INSERT INTO applications (id, host, name, kind, rank, group_id, is_monitored) VALUES \
 			('{SRV_GROUPED}', 'https://prod-central', 'Prod Central', 'central', 'production', '{GROUP}', true); \
-		 INSERT INTO servers (id, host, name, kind) VALUES \
+		 INSERT INTO applications (id, host, name, kind) VALUES \
 			('{SRV_UNGROUPED}', 'https://lonely', 'Lonely Facility', 'facility'); \
 		 INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES \
 			('{SRV_GROUPED}', '2.34.1', true, '[]'::jsonb, \
@@ -209,7 +209,7 @@ async fn find_servers_filters_and_decorates() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		seed(&mut conn).await;
 
-		// Unfiltered: both seeded servers.
+		// Unfiltered: both seeded applications.
 		let all = call_tool!(private, "find_servers", serde_json::json!({}));
 		assert!(all["total_matched"].as_u64().unwrap() >= 2);
 
@@ -219,10 +219,10 @@ async fn find_servers_filters_and_decorates() {
 			"find_servers",
 			serde_json::json!({ "kind": "facility" })
 		);
-		let servers = facility["servers"].as_array().unwrap();
-		assert_eq!(servers.len(), 1);
-		assert_eq!(servers[0]["id"], SRV_UNGROUPED);
-		assert_eq!(servers[0]["health"], "healthy");
+		let applications = facility["applications"].as_array().unwrap();
+		assert_eq!(applications.len(), 1);
+		assert_eq!(applications[0]["id"], SRV_UNGROUPED);
+		assert_eq!(applications[0]["health"], "healthy");
 
 		// Query matches by name.
 		let q = call_tool!(
@@ -230,7 +230,7 @@ async fn find_servers_filters_and_decorates() {
 			"find_servers",
 			serde_json::json!({ "query": "central" })
 		);
-		let names: Vec<&str> = q["servers"]
+		let names: Vec<&str> = q["applications"]
 			.as_array()
 			.unwrap()
 			.iter()
@@ -354,9 +354,9 @@ const INC_CLOSED: &str = "aaaaaaaa-0000-0000-0000-0000000000a2";
 async fn seed_incidents(conn: &mut impl SimpleAsyncConnection) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{IGROUP}', 'Inc Group'); \
-		 INSERT INTO servers (id, host, name, kind, group_id, is_monitored) VALUES \
-			('{ISRV}', 'https://inc', 'Inc Server', 'central', '{IGROUP}', true); \
-		 INSERT INTO issues (id, created_at, updated_at, server_id, source, ref, check_name, observed_result, effective_result, description, message, active, first_seen, last_seen, last_degraded_at) VALUES \
+		 INSERT INTO applications (id, host, name, kind, group_id, is_monitored) VALUES \
+			('{ISRV}', 'https://inc', 'Inc Application', 'central', '{IGROUP}', true); \
+		 INSERT INTO issues (id, created_at, updated_at, application_id, source, ref, check_name, observed_result, effective_result, description, message, active, first_seen, last_seen, last_degraded_at) VALUES \
 			('{ISSUE1}', NOW(), NOW(), '{ISRV}', 'test', 'r1', 'r1', 'failed', 'failed', 'Disk full', 'disk usage 98%', true, NOW() - interval '2 days', NOW() - interval '1 hour', NOW() - interval '1 hour'), \
 			('{ISSUE2}', NOW(), NOW(), '{ISRV}', 'test', 'r2', 'r2', 'warning', 'warning', NULL, 'slow query', false, NOW() - interval '10 days', NOW() - interval '9 days', NOW() - interval '9 days'); \
 		 INSERT INTO incidents (id, created_at, updated_at, server_group_id, opened_at, closed_at) VALUES \
@@ -446,7 +446,7 @@ async fn incidents_window_status_and_detail() {
 		assert_eq!(issues[0]["issue_id"], ISSUE1);
 		assert_eq!(issues[0]["effective_result"], "failed");
 		assert_eq!(issues[0]["ref"], "r1");
-		assert_eq!(issues[0]["server_name"], "Inc Server");
+		assert_eq!(issues[0]["server_name"], "Inc Application");
 	})
 	.await
 }
@@ -523,7 +523,7 @@ async fn backup_problems_finds_a_failure_behind_many_later_successes() {
 
 		let mut sql = format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group}', 'Chatty'); \
-			 INSERT INTO servers (id, host, name, kind, group_id) VALUES \
+			 INSERT INTO applications (id, host, name, kind, group_id) VALUES \
 				('{server}', 'https://chatty', 'Chatty', 'central', '{group}'); \
 			 INSERT INTO devices (id, role) VALUES ('{device}', 'server'); \
 			 INSERT INTO server_group_backup_config \
@@ -588,7 +588,7 @@ const REPLICA_GAP: &str = "bbbbbbbb-0000-0000-0000-0000000000b3";
 async fn seed_backup_runs(conn: &mut impl SimpleAsyncConnection) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{RGROUP}', 'Backup Group'); \
-		 INSERT INTO servers (id, host, name, kind, group_id) VALUES \
+		 INSERT INTO applications (id, host, name, kind, group_id) VALUES \
 			('{RSERVER}', 'https://backup-target', 'Backup Target', 'central', '{RGROUP}'); \
 		 INSERT INTO devices (id, role) VALUES ('{RDEVICE}', 'server'); \
 		 INSERT INTO backup_runs \
@@ -969,12 +969,12 @@ const SRV_OFFLINE: &str = "44444444-4444-4444-4444-444444444444";
 /// `find_servers` took it from the status row instead, which is read through
 /// a seven-day window — so a server quiet for longer reported no version at
 /// all, and a fleet version survey run through this tool undercounted
-/// exactly the servers most worth noticing.
+/// exactly the applications most worth noticing.
 #[tokio::test(flavor = "multi_thread")]
 async fn find_servers_retains_the_version_of_a_long_offline_server() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, name, kind, rank) VALUES \
+			"INSERT INTO applications (id, host, name, kind, rank) VALUES \
 				('{SRV_OFFLINE}', 'https://long-gone', 'Long Gone', 'central', 'production'); \
 			 INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES \
 				('{SRV_OFFLINE}', '2.30.0', true, '[]'::jsonb, '{{}}'::jsonb, \
@@ -990,9 +990,9 @@ async fn find_servers_retains_the_version_of_a_long_offline_server() {
 			"find_servers",
 			serde_json::json!({ "query": "Long Gone" })
 		);
-		let servers = found["servers"].as_array().unwrap();
-		assert_eq!(servers.len(), 1, "seeded server should match");
-		let s = &servers[0];
+		let applications = found["applications"].as_array().unwrap();
+		assert_eq!(applications.len(), 1, "seeded server should match");
+		let s = &applications[0];
 
 		assert_eq!(
 			s["version"], "2.30.0",

@@ -50,7 +50,7 @@ async fn insert_group(conn: &mut AsyncPgConnection, name: &str) -> Uuid {
 async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid, is_monitored: bool) -> Uuid {
 	let host = format!("http://test.invalid/{}", Uuid::new_v4());
 	sql_query(
-		"INSERT INTO servers (host, kind, group_id, is_monitored) \
+		"INSERT INTO applications (host, kind, group_id, is_monitored) \
 		 VALUES ($1, 'central', $2, $3) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>(host)
@@ -309,7 +309,7 @@ async fn server_issue(
 ) -> Option<IssueRow> {
 	sql_query(
 		"SELECT observed_result, effective_result, active, escalates FROM issues \
-		 WHERE server_id = $1 AND source = $2 AND \"ref\" = $3",
+		 WHERE application_id = $1 AND source = $2 AND \"ref\" = $3",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Text, _>(refs::CANOPY_SOURCE)
@@ -333,7 +333,7 @@ async fn issue_message(
 ) -> Option<String> {
 	sql_query(
 		"SELECT message FROM issues \
-		 WHERE server_id = $1 AND source = $2 AND \"ref\" = $3",
+		 WHERE application_id = $1 AND source = $2 AND \"ref\" = $3",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Text, _>(refs::CANOPY_SOURCE)
@@ -359,7 +359,7 @@ async fn issues_matching(
 ) -> Vec<String> {
 	sql_query(
 		"SELECT \"ref\" AS name FROM issues \
-		 WHERE server_id = $1 AND source = $2 AND \"ref\" LIKE $3 ORDER BY \"ref\"",
+		 WHERE application_id = $1 AND source = $2 AND \"ref\" LIKE $3 ORDER BY \"ref\"",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Text, _>(refs::CANOPY_SOURCE)
@@ -403,7 +403,7 @@ async fn issue_detail(
 ) -> Option<serde_json::Value> {
 	sql_query(
 		"SELECT detail FROM issues \
-		 WHERE server_id = $1 AND source = $2 AND \"ref\" = $3",
+		 WHERE application_id = $1 AND source = $2 AND \"ref\" = $3",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Text, _>(refs::CANOPY_SOURCE)
@@ -448,7 +448,7 @@ async fn server_issue_open_links(
 	sql_query(
 		"SELECT COUNT(*) AS n FROM incident_issues ii \
 		 JOIN issues i ON i.id = ii.issue_id \
-		 WHERE i.server_id = $1 AND i.\"ref\" = $2 AND ii.left_at IS NULL",
+		 WHERE i.application_id = $1 AND i.\"ref\" = $2 AND ii.left_at IS NULL",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Text, _>(r#ref)
@@ -1171,7 +1171,7 @@ async fn reconcile_records_the_recency_observation_without_alerting() {
 	.await;
 }
 
-/// Two servers in one group failing the same check hold two separate alerts.
+/// Two applications in one group failing the same check hold two separate alerts.
 /// While this was group-scoped they collided on one row, so whichever server
 /// the sweep reached last owned the message — and the healthy one's recovery
 /// filed a `Passed` that cleared the broken one's alert.
@@ -1241,7 +1241,7 @@ async fn reconcile_missing_names_the_server_rather_than_its_id() {
 		let server_id = insert_server(&mut conn, group_id, true).await;
 		let device_id = insert_device(&mut conn).await;
 
-		sql_query("UPDATE servers SET name = 'kotare-central' WHERE id = $1")
+		sql_query("UPDATE applications SET name = 'kotare-central' WHERE id = $1")
 			.bind::<sql_types::Uuid, _>(server_id)
 			.execute(&mut conn)
 			.await
@@ -1647,7 +1647,10 @@ async fn group_event_pages_even_when_all_members_unmonitored() {
 		.await
 		.expect("raise group event");
 
-		assert_eq!(issue.server_id, None, "group-scoped issue has no server_id");
+		assert_eq!(
+			issue.application_id, None,
+			"group-scoped issue has no server_id"
+		);
 		assert_eq!(issue.server_group_id, Some(group_id));
 		assert!(issue.active);
 

@@ -116,16 +116,16 @@ impl CheckStability {
 /// with its stability row (absent for states that predate stability
 /// recording), across all scopes: server, group, and canopy-wide.
 ///
-/// `server_id` narrows to that server's states; `group_id` narrows to the
-/// group's servers plus the group's own group-scoped states.
+/// `application_id` narrows to that server's states; `group_id` narrows to the
+/// group's applications plus the group's own group-scoped states.
 pub async fn states_for_checks(
 	conn: &mut AsyncPgConnection,
 	pairs: &[(String, String)],
-	server_id: Option<Uuid>,
+	application_id: Option<Uuid>,
 	group_id: Option<Uuid>,
 ) -> Result<Vec<(crate::issues::Issue, Option<CheckStability>)>> {
 	use crate::issues::Issue;
-	use crate::schema::{issues, servers};
+	use crate::schema::{applications, issues};
 	use diesel::pg::Pg;
 	use diesel::sql_types::{Bool, Nullable};
 
@@ -150,17 +150,17 @@ pub async fn states_for_checks(
 		.filter(matches_pair)
 		.filter(issues::observed_result.is_not_null())
 		.into_boxed();
-	if let Some(sid) = server_id {
-		q = q.filter(issues::server_id.eq(sid));
+	if let Some(sid) = application_id {
+		q = q.filter(issues::application_id.eq(sid));
 	}
 	if let Some(gid) = group_id {
-		let member_ids: Vec<Uuid> = servers::table
-			.select(servers::id)
-			.filter(servers::group_id.eq(gid))
+		let member_ids: Vec<Uuid> = applications::table
+			.select(applications::id)
+			.filter(applications::group_id.eq(gid))
 			.load(conn)
 			.await?;
 		q = q.filter(
-			issues::server_id
+			issues::application_id
 				.eq_any(member_ids)
 				.or(issues::server_group_id.eq(gid)),
 		);
@@ -204,7 +204,7 @@ WITH obs AS (
 		END AS degraded
 	FROM statuses s
 	CROSS JOIN LATERAL jsonb_array_elements(s.health) e
-	WHERE s.server_id = $1
+	WHERE s.application_id = $1
 		AND s.created_at > NOW() - INTERVAL '30 days'
 		AND e ->> 'check' IS NOT NULL
 ),
@@ -294,7 +294,7 @@ SELECT
 	d.duty_cycle
 FROM counts c
 JOIN issues i
-	ON i.server_id = $1
+	ON i.application_id = $1
 	AND i.source = c.source
 	AND i.ref = 'health/' || c.check_name
 JOIN last_state ls
@@ -315,7 +315,7 @@ const BACKFILL_LOCK: i64 = 818_723_002;
 /// fleet-wide INSERT..SELECT would hold FK row locks (FOR KEY SHARE) on
 /// most live issues rows until commit, blocking every concurrent filing's
 /// SELECT .. FOR UPDATE for the whole run — ingestion downtime. Per-server
-/// statements ride the (server_id, created_at) statuses index and hold
+/// statements ride the (application_id, created_at) statuses index and hold
 /// their handful of row locks for milliseconds.
 ///
 /// Gated by the `check_stability_backfill` marker (written only on
@@ -327,7 +327,7 @@ const BACKFILL_LOCK: i64 = 818_723_002;
 /// TODO(backfill-removal): transitional; delete once fully deployed —
 /// see [`BACKFILL_SERVER_SQL`].
 pub async fn backfill_from_statuses(conn: &mut AsyncPgConnection) -> Result<Option<usize>> {
-	use crate::schema::{check_stability_backfill, servers};
+	use crate::schema::{applications, check_stability_backfill};
 
 	let done: i64 = check_stability_backfill::table
 		.count()
@@ -362,11 +362,14 @@ pub async fn backfill_from_statuses(conn: &mut AsyncPgConnection) -> Result<Opti
 			return Ok(None);
 		}
 
-		let server_ids: Vec<Uuid> = servers::table.select(servers::id).load(conn).await?;
+		let server_ids: Vec<Uuid> = applications::table
+			.select(applications::id)
+			.load(conn)
+			.await?;
 		let mut backfilled = 0usize;
-		for server_id in server_ids {
+		for application_id in server_ids {
 			backfilled += diesel::sql_query(BACKFILL_SERVER_SQL)
-				.bind::<diesel::sql_types::Uuid, _>(server_id)
+				.bind::<diesel::sql_types::Uuid, _>(application_id)
 				.execute(conn)
 				.await?;
 		}

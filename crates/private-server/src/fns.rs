@@ -2,6 +2,7 @@ use canopy_utoipa_axum::router::OpenApiRouter;
 use serde::{Deserialize, Serialize};
 
 pub mod admins;
+pub mod applications;
 pub mod backups;
 pub mod bestool;
 pub mod certificates;
@@ -17,7 +18,6 @@ pub mod migration_tests;
 pub mod restore_replicas;
 pub mod self_alerts;
 pub mod server_groups;
-pub mod servers;
 pub mod silenced_refs;
 pub mod sql;
 pub mod statuses;
@@ -70,7 +70,7 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 			.nest("/restore_replicas", restore_replicas::routes())
 			.nest("/self_alerts", self_alerts::routes())
 			.nest("/server_groups", server_groups::routes())
-			.nest("/servers", servers::routes())
+			.nest("/servers", applications::routes())
 			.nest("/maintenance", maintenance::routes())
 			.nest("/silenced_refs", silenced_refs::routes())
 			.nest("/sql", sql::routes())

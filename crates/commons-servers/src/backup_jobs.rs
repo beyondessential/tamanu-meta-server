@@ -1,6 +1,6 @@
 //! Shared helpers for the backup-credentials scheduler binaries
 //! (`backup_preflight` here, plus maintenance/inspection in the sibling jobs
-//! component). Kept in `commons-servers` so all three schedulers agree on the
+//! component). Kept in `commons-applications` so all three schedulers agree on the
 //! jitter scheme.
 
 use std::time::Duration;

@@ -23,10 +23,10 @@ async fn stats_for_dedupes_repeat_join_rows() {
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'server'); \
 			 INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
-			 INSERT INTO servers (id, host, kind, device_id, group_id) VALUES \
+			 INSERT INTO applications (id, host, kind, device_id, group_id) VALUES \
 				('{server_id}', 'https://example.com', 'central', '{device_id}', '{group_id}'); \
 			 INSERT INTO issues \
-				(id, server_id, device_id, source, ref, check_name, observed_result, effective_result, message, active, first_seen, last_seen) \
+				(id, application_id, device_id, source, ref, check_name, observed_result, effective_result, message, active, first_seen, last_seen) \
 			   VALUES \
 				('{issue_id}', '{server_id}', '{device_id}', 'test', 'r', 'r', 'failed', 'failed', 'm', true, NOW(), NOW()); \
 			 INSERT INTO incidents (id, server_group_id, opened_at) \

@@ -160,7 +160,7 @@ export default function CheckDetail() {
 /// even when no single target stands out. Hidden until at least one
 /// target has a record.
 function FleetStability({ data }: { data: CheckDetailData }) {
-	const serverRecords = data.servers.flatMap((s) =>
+	const serverRecords = data.applications.flatMap((s) =>
 		s.stability ? [s.stability] : [],
 	);
 	const groupRecords = data.groups.flatMap((g) =>
@@ -226,8 +226,8 @@ function AttentionList({
 }) {
 	const healthy = (result: string) => HEALTHY_RESULTS.includes(result);
 	const servers = showHealthy
-		? data.servers
-		: data.servers.filter((s) => !healthy(s.result));
+		? data.applications
+		: data.applications.filter((s) => !healthy(s.result));
 	const groups = showHealthy
 		? data.groups
 		: data.groups.filter((g) => !healthy(g.result));
@@ -238,7 +238,7 @@ function AttentionList({
 
 	if (servers.length === 0 && groups.length === 0 && !canopy) {
 		const healthyCount =
-			data.servers.length + data.groups.length + (data.canopy ? 1 : 0);
+			data.applications.length + data.groups.length + (data.canopy ? 1 : 0);
 		return (
 			<Alert severity="success">
 				Nothing currently flags <code>{check}</code>.
@@ -287,7 +287,7 @@ function AttentionList({
 		}
 		return agg;
 	};
-	for (const s of data.servers) {
+	for (const s of data.applications) {
 		if (s.group_id && s.stability) {
 			const agg = aggFor(s.group_id);
 			agg.records.push(s.stability);

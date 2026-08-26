@@ -37,7 +37,7 @@ async fn deleting_device_nulls_status_device_id() {
 		// 2) Insert a server (minimal fields)
 		let server_row: RowId = sql_query(
 			r#"
-				INSERT INTO servers (host)
+				INSERT INTO applications (host)
 				VALUES ($1)
 				RETURNING id
 			"#,

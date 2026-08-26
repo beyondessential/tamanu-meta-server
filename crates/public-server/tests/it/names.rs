@@ -16,7 +16,7 @@ struct Count {
 }
 
 async fn count_certificates(conn: &mut AsyncPgConnection) -> i64 {
-	sql_query("SELECT count(*) AS count FROM server_certificates")
+	sql_query("SELECT count(*) AS count FROM application_certificates")
 		.get_result::<Count>(conn)
 		.await
 		.expect("count")
@@ -55,7 +55,7 @@ async fn entitled(
 
 	let server = Uuid::new_v4();
 	conn.batch_execute(&format!(
-		"INSERT INTO servers (id, name, host, kind, group_id, device_id, may_manage_dns, may_manage_tls) \
+		"INSERT INTO applications (id, name, host, kind, group_id, device_id, may_manage_dns, may_manage_tls) \
 		 VALUES ('{server}', 'crt', 'https://{server}.example.invalid', 'central', '{group}', \
 		 '{device_id}', {dns}, {tls})"
 	))
@@ -215,7 +215,7 @@ async fn each_refusal_is_distinguishable_by_problem_type() {
 			assert_eq!(problem_type(&resp.json()), "auth-insufficient-permissions");
 
 			conn.batch_execute(&format!(
-				"UPDATE servers SET may_manage_dns = true, may_manage_tls = true WHERE id = '{server}'"
+				"UPDATE applications SET may_manage_dns = true, may_manage_tls = true WHERE id = '{server}'"
 			))
 			.await
 			.unwrap();
@@ -231,7 +231,7 @@ async fn each_refusal_is_distinguishable_by_problem_type() {
 
 			// Paused.
 			conn.batch_execute(&format!(
-				"UPDATE servers SET name_management_paused_at = now(), \
+				"UPDATE applications SET name_management_paused_at = now(), \
 				 name_management_pause_reason = 'looking into it' WHERE id = '{server}'"
 			))
 			.await
@@ -347,7 +347,7 @@ async fn a_certificate_becomes_collectable_once_issued() {
 
 			// The worker would do this.
 			conn.batch_execute(
-				"UPDATE server_certificates SET state = 'issued', chain = '-----BEGIN CERT-----', \
+				"UPDATE application_certificates SET state = 'issued', chain = '-----BEGIN CERT-----', \
 				 issued_at = now(), not_after = now() + interval '80 days', profile = 'classic'",
 			)
 			.await
@@ -390,7 +390,7 @@ async fn a_revoked_compromised_key_is_refused_actionably() {
 			// Bar the key the way a key-compromise revocation does.
 			conn.batch_execute(
 				"INSERT INTO compromised_keys (key_fingerprint) \
-				 SELECT key_fingerprint FROM server_certificates",
+				 SELECT key_fingerprint FROM application_certificates",
 			)
 			.await
 			.unwrap();

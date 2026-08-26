@@ -127,7 +127,7 @@ async fn server_versions_page(
 ) -> Result<Response> {
 	let Some(secret) = &state.server_versions_secret else {
 		return Err(AppError::AuthFailed {
-			reason: "Server versions endpoint not configured".to_string(),
+			reason: "Application versions endpoint not configured".to_string(),
 		});
 	};
 
@@ -154,10 +154,10 @@ async fn server_versions_page(
 	let tera = &state.tera;
 	let mut conn = db.get().await?;
 
-	let servers = {
-		use database::schema::servers::dsl::*;
+	let applications = {
+		use database::schema::applications::dsl::*;
 
-		servers
+		applications
 			.select((id, name, host))
 			.filter(
 				rank.eq(ServerRank::Production)
@@ -174,7 +174,7 @@ async fn server_versions_page(
 		.ok()
 		.map(|v| v.as_semver());
 
-	let server_ids: Vec<Uuid> = servers.iter().map(|(id, _, _)| *id).collect();
+	let server_ids: Vec<Uuid> = applications.iter().map(|(id, _, _)| *id).collect();
 	let statuses = if !server_ids.is_empty() {
 		Status::latest_for_servers(&mut conn, &server_ids).await?
 	} else {
@@ -182,7 +182,7 @@ async fn server_versions_page(
 	};
 
 	let mut server_infos: Vec<ServerVersionInfo> = Vec::new();
-	for (id, name, host) in servers {
+	for (id, name, host) in applications {
 		let host = host.unwrap_or_default(); // filtered to non-null above
 		let status = statuses.iter().find(|s| s.server_id == id);
 
@@ -231,7 +231,7 @@ async fn server_versions_page(
 
 	let mut context = Context::new();
 	context.insert("latest_version", &latest_version);
-	context.insert("servers", &server_infos);
+	context.insert("applications", &server_infos);
 	context.insert("rc_environments", &rc_environments);
 
 	let html = tera.render("server_versions", &context)?;

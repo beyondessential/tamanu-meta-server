@@ -33,7 +33,7 @@ async fn insert_server_full(
 ) -> Uuid {
 	let row: RowId = sql_query(
 		r#"
-			INSERT INTO servers (host, alert_when_down_for, is_monitored)
+			INSERT INTO applications (host, alert_when_down_for, is_monitored)
 			VALUES ($1, ($2 || ' seconds')::INTERVAL, $3)
 			RETURNING id
 		"#,
@@ -48,7 +48,7 @@ async fn insert_server_full(
 }
 
 /// Insert a server in a group, so incident membership is actually on the
-/// table: the incident flow is skipped outright for ungrouped servers, and
+/// table: the incident flow is skipped outright for ungrouped applications, and
 /// a gate assertion against one would pass for the wrong reason.
 async fn insert_grouped_server(
 	conn: &mut diesel_async::AsyncPgConnection,
@@ -62,7 +62,7 @@ async fn insert_grouped_server(
 		.expect("insert group");
 	let row: RowId = sql_query(
 		r#"
-			INSERT INTO servers (host, alert_when_down_for, is_monitored, group_id)
+			INSERT INTO applications (host, alert_when_down_for, is_monitored, group_id)
 			VALUES ($1, ($2 || ' seconds')::INTERVAL, $3, $4)
 			RETURNING id
 		"#,
@@ -88,7 +88,7 @@ async fn open_incident_links(conn: &mut diesel_async::AsyncPgConnection, server_
 	sql_query(
 		"SELECT COUNT(*) AS n FROM incident_issues ii \
 		 JOIN issues i ON i.id = ii.issue_id \
-		 WHERE i.server_id = $1 AND i.\"ref\" = $2 AND ii.left_at IS NULL",
+		 WHERE i.application_id = $1 AND i.\"ref\" = $2 AND ii.left_at IS NULL",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Text, _>(REACHABILITY_REF)
@@ -148,7 +148,7 @@ async fn insert_check_state(
 	sql_query(
 		r#"
 			INSERT INTO issues
-			(server_id, source, ref, check_name, observed_result, effective_result,
+			(application_id, source, ref, check_name, observed_result, effective_result,
 			 message, active, first_seen, last_seen)
 			VALUES ($1, $2, 'health/' || $3, $3, 'passed', 'passed',
 			 'seeded', false,
@@ -287,11 +287,11 @@ struct RowSecs {
 	seconds: f64,
 }
 
-/// Freshly-inserted servers inherit the column default of 10 minutes.
+/// Freshly-inserted applications inherit the column default of 10 minutes.
 #[tokio::test(flavor = "multi_thread")]
 async fn new_servers_default_to_ten_minutes() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		sql_query("INSERT INTO servers (host) VALUES ('http://new.invalid/')")
+		sql_query("INSERT INTO applications (host) VALUES ('http://new.invalid/')")
 			.execute(&mut conn)
 			.await
 			.expect("insert default");
@@ -299,7 +299,7 @@ async fn new_servers_default_to_ten_minutes() {
 		let row: RowSecs = sql_query(
 			r#"
 				SELECT EXTRACT(EPOCH FROM alert_when_down_for)::float8 AS seconds
-				FROM servers
+				FROM applications
 				WHERE host = 'http://new.invalid/'
 			"#,
 		)
@@ -318,7 +318,7 @@ async fn check_constraint_forbids_non_positive_duration() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		for bad in ["INTERVAL '-1 second'", "INTERVAL '0'"] {
 			let res = sql_query(&format!(
-				"INSERT INTO servers (host, alert_when_down_for) \
+				"INSERT INTO applications (host, alert_when_down_for) \
 				 VALUES ('http://bad.invalid/', {bad})"
 			))
 			.execute(&mut conn)
@@ -473,7 +473,7 @@ async fn sweep_clears_reachability_when_source_reports_again() {
 		assert!(issue_for(&mut conn, id).await.unwrap().active);
 
 		// The source reports again: ingestion re-stamps its check state.
-		sql_query("UPDATE issues SET last_seen = NOW() WHERE server_id = $1 AND source = 'alertd'")
+		sql_query("UPDATE issues SET last_seen = NOW() WHERE application_id = $1 AND source = 'alertd'")
 			.bind::<sql_types::Uuid, _>(id)
 			.execute(&mut conn)
 			.await

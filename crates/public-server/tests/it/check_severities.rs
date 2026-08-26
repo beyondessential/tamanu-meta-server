@@ -25,7 +25,7 @@ async fn insert_server(
 ) -> Uuid {
 	let server_id = Uuid::new_v4();
 	sql_query(
-		"INSERT INTO servers (id, host, kind, device_id, group_id) \
+		"INSERT INTO applications (id, host, kind, device_id, group_id) \
 		 VALUES ($1, 'https://checks.example.com', 'facility', $2, $3)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
@@ -189,7 +189,7 @@ async fn endpoint_rejects_device_not_bound_to_server() {
 	commons_tests::server::run_with_device_auth(
 		"server",
 		async |mut conn, cert, _device_id, public, _| {
-			// Server bound to no device: the caller's device doesn't match.
+			// Application bound to no device: the caller's device doesn't match.
 			let server_id = insert_server(&mut conn, None, None).await;
 
 			let response = public

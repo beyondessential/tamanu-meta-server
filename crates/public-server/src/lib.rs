@@ -4,6 +4,7 @@ use canopy_utoipa_axum::router::OpenApiRouter;
 
 use crate::state::AppState;
 
+pub mod applications;
 pub mod artifacts;
 pub mod backup;
 pub mod bestool;
@@ -17,7 +18,6 @@ pub mod ratelimit;
 pub mod restore;
 #[cfg(feature = "ui")]
 pub mod server_versions;
-pub mod servers;
 pub mod state;
 pub mod statuses;
 pub mod tags;
@@ -34,7 +34,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.nest("/bestool", bestool::routes())
 		.nest("/certificates", names::certificate_routes())
 		.nest("/names", names::routes())
-		.nest("/servers", servers::routes())
+		.nest("/servers", applications::routes())
 		.nest("/status", statuses::routes())
 		.nest("/tags", tags::routes())
 		.nest("/versions", versions::routes());

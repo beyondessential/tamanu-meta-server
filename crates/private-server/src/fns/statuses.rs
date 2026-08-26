@@ -16,12 +16,12 @@ use commons_types::{
 	version::VersionStr,
 };
 use database::{
+	applications::Application,
 	check_policies::CheckPolicy,
 	devices::DeviceConnection,
 	issues::Issue,
 	reported_detail::ReportedDetail,
 	server_groups::ServerGroup,
-	servers::Server,
 	statuses::{MergedDetail, Status},
 	tailscale_users::TailscaleUser as CachedTailscaleUser,
 	versions::Version,
@@ -63,15 +63,15 @@ pub struct SummaryData {
 /// endpoint in this API.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ServerDetailsData {
-	/// Server id.
+	/// Application id.
 	pub id: String,
-	/// Server display name.
+	/// Application display name.
 	pub name: String,
-	/// Server kind (deployment type).
+	/// Application kind (deployment type).
 	pub kind: String,
-	/// Server rank (e.g. production, test, dev).
+	/// Application rank (e.g. production, test, dev).
 	pub rank: String,
-	/// Server hostname or address.
+	/// Application hostname or address.
 	pub host: String,
 }
 
@@ -147,7 +147,7 @@ pub async fn summary(State(state): State<AppState>) -> Result<Json<SummaryData>>
 /// List server group ids, bucketed by rank.
 ///
 /// Each group is bucketed under the highest rank held by any of its member
-/// servers (production outranks clone, which outranks demo, then test,
+/// applications (production outranks clone, which outranks demo, then test,
 /// then dev). Groups whose members are all unranked are omitted entirely.
 /// Within each rank bucket, groups are ordered alphabetically by name.
 #[utoipa::path(
@@ -155,7 +155,7 @@ pub async fn summary(State(state): State<AppState>) -> Result<Json<SummaryData>>
 	path = "/server_grouped_ids",
 	tag = "statuses",
 	responses(
-		(status = 200, description = "Server group IDs grouped by highest-ranked member's rank.", body = BTreeMap<ServerRank, Vec<Uuid>>),
+		(status = 200, description = "Application group IDs grouped by highest-ranked member's rank.", body = BTreeMap<ServerRank, Vec<Uuid>>),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
@@ -216,19 +216,19 @@ pub async fn group_details(
 ) -> Result<Json<ServerGroupCard>> {
 	let mut conn = state.db_read.get().await?;
 	let group = ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
-	let servers = group.list_servers(&mut conn).await?;
+	let applications = group.list_servers(&mut conn).await?;
 
 	// A group card shouldn't 404 just because no versions are published yet
 	// (e.g. a fresh deployment, or every version still draft); treat "no match"
 	// as "unknown latest" so `version_distance` falls back to None. Same as
-	// `servers::get_detail` and `statuses::snapshot`.
+	// `applications::get_detail` and `statuses::snapshot`.
 	let latest_version = match Version::get_latest_matching(&mut conn, "*".parse()?).await {
 		Ok(v) => Some(v.as_semver()),
 		Err(AppError::NoMatchingVersions) => None,
 		Err(e) => return Err(e),
 	};
 
-	let server_ids: Vec<Uuid> = servers.iter().map(|s| s.id).collect();
+	let server_ids: Vec<Uuid> = applications.iter().map(|s| s.id).collect();
 	let status_map: HashMap<Uuid, Status> = Status::latest_for_servers(&mut conn, &server_ids)
 		.await?
 		.into_iter()
@@ -237,7 +237,7 @@ pub async fn group_details(
 	// Member health rolls up current check state across every source
 	// (silenced checks already skipped in the rollup).
 	let member_groups: Vec<(Uuid, Option<Uuid>)> =
-		servers.iter().map(|s| (s.id, s.group_id)).collect();
+		applications.iter().map(|s| (s.id, s.group_id)).collect();
 	let member_health =
 		database::issues::health_from_check_state(&mut conn, &member_groups).await?;
 
@@ -251,7 +251,7 @@ pub async fn group_details(
 		.zip(latest_version.as_ref())
 		.map(|(current, latest)| database::statuses::version_distance(&current.0, latest));
 
-	let mut members: Vec<FacilityServerStatus> = servers
+	let mut members: Vec<FacilityServerStatus> = applications
 		.into_iter()
 		.map(|s| {
 			let st = status_map.get(&s.id);
@@ -298,7 +298,7 @@ pub async fn group_details(
 /// for [`check_detail`].
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CheckDetailServerData {
-	/// The server's id — the UI links to `/servers/{server_id}`.
+	/// The server's id — the UI links to `/applications/{server_id}`.
 	pub server_id: Uuid,
 	/// The server's display name; empty string when the server has none.
 	pub server_name: String,
@@ -312,14 +312,14 @@ pub struct CheckDetailServerData {
 	/// The server's kind, for the standard within-rank ordering.
 	pub kind: ServerKind,
 	/// The check's observed result on its latest report. The UI shows
-	/// warning/failed/broken servers by default and puts passed/skipped
+	/// warning/failed/broken applications by default and puts passed/skipped
 	/// ones behind a "show healthy" toggle.
 	pub result: CheckResult,
 	/// The check's own fields from its latest report, verbatim, so the
 	/// row can expand to the same per-check detail the server page shows.
 	pub data: serde_json::Value,
 	/// When the check's current degradation streak began. `None` for
-	/// servers currently reporting the check healthy.
+	/// applications currently reporting the check healthy.
 	pub failing_since: Option<Timestamp>,
 	/// When the check state last updated (the check's latest report).
 	pub status_created_at: Timestamp,
@@ -406,7 +406,7 @@ pub struct CheckDetailData {
 	/// warning, broken, passed, skipped (most urgent first), then by
 	/// group name then server name. The client filters out the
 	/// passed/skipped tail unless the "show healthy" toggle is on.
-	pub servers: Vec<CheckDetailServerData>,
+	pub applications: Vec<CheckDetailServerData>,
 	/// Group-scoped states of this check, ordered by group name. The
 	/// client files each under its group in the list.
 	pub groups: Vec<CheckDetailGroupData>,
@@ -428,7 +428,7 @@ fn check_result_rank(result: CheckResult) -> u8 {
 	}
 }
 
-/// List the servers whose check state reports one (source, check).
+/// List the applications whose check state reports one (source, check).
 ///
 /// Everything the per-healthcheck page needs: the catalog's configured
 /// policy for the (source, check) (if any) plus every live server's
@@ -436,7 +436,7 @@ fn check_result_rank(result: CheckResult) -> u8 {
 /// carrying `failing_since` (the start of its current degradation
 /// streak). This is the data behind the `/healthchecks/:source/:check`
 /// "who's affected" page, which doubles as an operator TODO list and as
-/// a way to correlate servers sharing the same issue during a
+/// a way to correlate applications sharing the same issue during a
 /// fleet-wide incident.
 #[utoipa::path(
 	post,
@@ -445,7 +445,7 @@ fn check_result_rank(result: CheckResult) -> u8 {
 	tag = "statuses",
 	request_body = CheckDetailArgs,
 	responses(
-		(status = 200, description = "The check's catalog policy and the servers currently reporting it.", body = CheckDetailData),
+		(status = 200, description = "The check's catalog policy and the applications currently reporting it.", body = CheckDetailData),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
@@ -456,23 +456,23 @@ pub async fn check_detail(
 	let mut conn = state.db_read.get().await?;
 	let states = Issue::check_state_for_check(&mut conn, &args.source, &args.check).await?;
 
-	// Live servers only: archived servers and canopy's own row never
+	// Live applications only: archived applications and canopy's own row never
 	// appear on the check detail page.
 	let server_ids: Vec<Uuid> = states
 		.iter()
-		.filter_map(|st| st.server_id)
+		.filter_map(|st| st.application_id)
 		.collect::<BTreeSet<_>>()
 		.into_iter()
 		.collect();
-	let live: HashMap<Uuid, database::servers::Server> =
-		database::servers::Server::get_by_ids(&mut conn, &server_ids)
+	let live: HashMap<Uuid, database::applications::Application> =
+		database::applications::Application::get_by_ids(&mut conn, &server_ids)
 			.await?
 			.into_iter()
 			.filter(|s| s.deleted_at.is_none() && s.id != Uuid::nil())
 			.map(|s| (s.id, s))
 			.collect();
 	// Group names (and, for group-scoped states, rank buckets) cover both
-	// the member servers' groups and the groups with their own state.
+	// the member applications' groups and the groups with their own state.
 	let group_ids: Vec<Uuid> = live
 		.values()
 		.filter_map(|s| s.group_id)
@@ -506,7 +506,7 @@ pub async fn check_detail(
 			.then_some(st.degraded_since.unwrap_or(st.first_seen))
 	};
 
-	let mut servers: Vec<CheckDetailServerData> = Vec::new();
+	let mut applications: Vec<CheckDetailServerData> = Vec::new();
 	let mut groups: Vec<CheckDetailGroupData> = Vec::new();
 	let mut canopy: Option<CheckDetailCanopyData> = None;
 	for st in states {
@@ -516,12 +516,12 @@ pub async fn check_detail(
 		let row_stability = stability
 			.get(&st.id)
 			.map(|row| database::stability::StabilityData::from_row(row, now));
-		match (st.server_id, st.server_group_id) {
+		match (st.application_id, st.server_group_id) {
 			(Some(sid), _) => {
 				let Some(server) = live.get(&sid) else {
 					continue;
 				};
-				servers.push(CheckDetailServerData {
+				applications.push(CheckDetailServerData {
 					server_id: server.id,
 					server_name: server.name.clone().unwrap_or_default(),
 					group_id: server.group_id,
@@ -558,7 +558,7 @@ pub async fn check_detail(
 			}
 		}
 	}
-	servers.sort_by(|a, b| {
+	applications.sort_by(|a, b| {
 		check_result_rank(a.result)
 			.cmp(&check_result_rank(b.result))
 			.then_with(|| a.group_name.cmp(&b.group_name))
@@ -574,7 +574,7 @@ pub async fn check_detail(
 		ceiling: policy.as_ref().map(|p| p.ceiling),
 		escalates: policy.as_ref().is_some_and(|p| p.escalates),
 		documentation: policy.and_then(|p| p.documentation),
-		servers,
+		applications,
 		groups,
 		canopy,
 	}))
@@ -679,7 +679,7 @@ pub async fn snapshot(
 	let Some(status) = status else {
 		return Ok(Json(None));
 	};
-	let server = Server::get_by_id(&mut conn, args.server_id).await?;
+	let server = Application::get_by_id(&mut conn, args.server_id).await?;
 
 	// Grading a version means measuring it against a release train canopy
 	// holds, so it applies only to a product that has one. A canopy instance
@@ -732,7 +732,7 @@ pub async fn snapshot(
 	// spec: APP#versions
 	let min_chrome_version = match &status.version {
 		Some(v) if server.product.tracks_versions() => {
-			super::servers::compute_min_chrome_version(&mut conn, v).await
+			super::applications::compute_min_chrome_version(&mut conn, v).await
 		}
 		_ => None,
 	};
@@ -815,7 +815,7 @@ struct SnapshotState {
 /// of the consolidated checks view.
 async fn consolidated_checks_at(
 	conn: &mut database::diesel_async::AsyncPgConnection,
-	server: &Server,
+	server: &Application,
 	at: Option<Timestamp>,
 ) -> commons_errors::Result<SnapshotState> {
 	use commons_types::status::{CheckResult, ConsolidatedCheck, ConsolidatedChecks, HealthState};
@@ -957,7 +957,7 @@ pub struct FleetServerDetailData {
 	/// Where the server sits in its deployment's promotion order, if set.
 	pub rank: Option<ServerRank>,
 	/// The application the server runs. The fleet view reads it to keep the
-	/// application-version spread to servers that have one to report.
+	/// application-version spread to applications that have one to report.
 	// spec: APP#versions
 	pub product: Product,
 	/// The server's role within its product's topology.
@@ -995,8 +995,8 @@ pub struct FleetServerDetailData {
 /// spread across the fleet, and can cross two fields against each other.
 ///
 /// Reads each source's current report rather than status history, so it
-/// covers servers that have been quiet for any length of time. Archived
-/// servers and canopy's own row are excluded; a live server that has never
+/// covers applications that have been quiet for any length of time. Archived
+/// applications and canopy's own row are excluded; a live server that has never
 /// reported appears with everything absent.
 // spec: FIG#fleet-spread
 #[utoipa::path(
@@ -1016,10 +1016,10 @@ pub async fn fleet_detail(
 ) -> Result<Json<Vec<FleetServerDetailData>>> {
 	let mut conn = state.db_read.get().await?;
 
-	// get_all already excludes archived servers and canopy's own row.
-	let servers = Server::get_all(&mut conn, 0, None).await?;
+	// get_all already excludes archived applications and canopy's own row.
+	let applications = Application::get_all(&mut conn, 0, None).await?;
 
-	let group_ids: Vec<Uuid> = servers
+	let group_ids: Vec<Uuid> = applications
 		.iter()
 		.filter_map(|s| s.group_id)
 		.collect::<BTreeSet<_>>()
@@ -1038,10 +1038,11 @@ pub async fn fleet_detail(
 
 	// Same again for check state, which is a row per (server, source, check)
 	// and carries the fields each check reports.
-	let scopes: Vec<(Uuid, Option<Uuid>)> = servers.iter().map(|s| (s.id, s.group_id)).collect();
+	let scopes: Vec<(Uuid, Option<Uuid>)> =
+		applications.iter().map(|s| (s.id, s.group_id)).collect();
 	let mut checks = database::issues::check_detail_by_server(&mut conn, &scopes).await?;
 
-	let rows = servers
+	let rows = applications
 		.into_iter()
 		.map(|server| {
 			let (figures, version) = merged.remove(&server.id).unwrap_or_default();

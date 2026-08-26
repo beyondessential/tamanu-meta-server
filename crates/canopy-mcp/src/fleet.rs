@@ -8,13 +8,13 @@ use commons_types::{
 	status::{HealthState, ShortStatus},
 };
 use database::{
+	applications::Application,
 	backup::staleness::{StalenessVerdict, scan_rows},
 	backups::{
 		BackupMaintenanceRun, BackupMaintenanceRunFilters, BackupRun, BackupRunFilters,
 		MaintenanceOutcomeFilter, ServerGroupBackupConfig,
 	},
 	server_groups::ServerGroup,
-	servers::Server,
 	statuses::Status,
 };
 use jiff::{SignedDuration, Timestamp};
@@ -111,14 +111,16 @@ impl CanopyMcp {
 		Parameters(_): Parameters<EmptyArgs>,
 	) -> Result<CallToolResult, McpError> {
 		let mut conn = self.conn().await?;
-		let servers = Server::get_all(&mut conn, 0, None).await.map_err(mcp_err)?;
-		let ids: Vec<Uuid> = servers.iter().map(|s| s.id).collect();
+		let applications = Application::get_all(&mut conn, 0, None)
+			.await
+			.map_err(mcp_err)?;
+		let ids: Vec<Uuid> = applications.iter().map(|s| s.id).collect();
 		let statuses = Status::latest_for_servers(&mut conn, &ids)
 			.await
 			.map_err(mcp_err)?;
 		let st_by: HashMap<Uuid, &Status> = statuses.iter().map(|s| (s.server_id, s)).collect();
 		let server_groups: Vec<(Uuid, Option<Uuid>)> =
-			servers.iter().map(|s| (s.id, s.group_id)).collect();
+			applications.iter().map(|s| (s.id, s.group_id)).collect();
 		let state_health = database::issues::health_from_check_state(&mut conn, &server_groups)
 			.await
 			.map_err(mcp_err)?;
@@ -126,7 +128,7 @@ impl CanopyMcp {
 		let mut counts = Counts::default();
 		let mut health = HealthRollup::default();
 		let mut version_distribution: HashMap<String, usize> = HashMap::new();
-		for s in &servers {
+		for s in &applications {
 			*counts.by_product.entry(s.product.to_string()).or_default() += 1;
 			*counts.by_kind.entry(s.kind.to_string()).or_default() += 1;
 			if let Some(r) = &s.rank {
@@ -168,7 +170,7 @@ impl CanopyMcp {
 		}
 
 		ok_json(&FleetSummary {
-			total_servers: servers.len(),
+			total_servers: applications.len(),
 			groups: groups.len(),
 			counts,
 			health,

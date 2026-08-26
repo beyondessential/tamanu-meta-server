@@ -42,9 +42,9 @@ async fn recompute_groups(
 #[derive(
 	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, utoipa::ToSchema,
 )]
-#[diesel(table_name = crate::schema::servers)]
+#[diesel(table_name = crate::schema::applications)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct Server {
+pub struct Application {
 	/// Unique identifier for this server.
 	pub id: Uuid,
 	/// The server's display name, scoped within its group. May not be
@@ -98,10 +98,10 @@ pub struct Server {
 	pub is_monitored: bool,
 	/// How long, in seconds, a server's status may go without an update
 	/// before it's considered unreachable and an issue is filed. Increase
-	/// it for servers with flaky connectivity; decrease it for critical
-	/// servers that should alert promptly. Only enforced while
+	/// it for applications with flaky connectivity; decrease it for critical
+	/// applications that should alert promptly. Only enforced while
 	/// `is_monitored` is `true`. Must be a positive number of seconds;
-	/// defaults to 600 (10 minutes) for newly-created servers.
+	/// defaults to 600 (10 minutes) for newly-created applications.
 	#[schema(value_type = i64)]
 	pub alert_when_down_for: PgDuration,
 	/// Free-form operator notes about this server.
@@ -190,14 +190,14 @@ pub struct Server {
 	pub name_management_pause_reason: Option<String>,
 }
 
-impl Server {
+impl Application {
 	pub async fn get_all(
 		db: &mut AsyncPgConnection,
 		offset: u64,
 		limit: Option<u64>,
 	) -> Result<Vec<Self>> {
-		use crate::schema::servers::dsl::*;
-		let q = servers
+		use crate::schema::applications::dsl::*;
+		let q = applications
 			.select(Self::as_select())
 			.filter(id.ne(Uuid::nil()))
 			.filter(deleted_at.is_null())
@@ -217,10 +217,10 @@ impl Server {
 		.map_err(AppError::from)
 	}
 
-	/// Archived (soft-deleted) servers, for the Archived view.
+	/// Archived (soft-deleted) applications, for the Archived view.
 	pub async fn list_archived(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
-		use crate::schema::servers::dsl::*;
-		servers
+		use crate::schema::applications::dsl::*;
+		applications
 			.select(Self::as_select())
 			.filter(id.ne(Uuid::nil()))
 			.filter(deleted_at.is_not_null())
@@ -236,8 +236,8 @@ impl Server {
 		offset: u64,
 		limit: Option<u64>,
 	) -> Result<Vec<Self>> {
-		use crate::schema::servers::dsl::*;
-		let q = servers
+		use crate::schema::applications::dsl::*;
+		let q = applications
 			.select(Self::as_select())
 			.filter(id.ne(Uuid::nil()).and(kind.eq(k)))
 			.filter(deleted_at.is_null())
@@ -253,8 +253,8 @@ impl Server {
 	}
 
 	pub async fn count_all(db: &mut AsyncPgConnection) -> Result<u64> {
-		use crate::schema::servers::dsl::*;
-		servers
+		use crate::schema::applications::dsl::*;
+		applications
 			.count()
 			.filter(id.ne(Uuid::nil()))
 			.filter(deleted_at.is_null())
@@ -265,8 +265,8 @@ impl Server {
 	}
 
 	pub async fn count_by_kind(db: &mut AsyncPgConnection, k: ServerKind) -> Result<u64> {
-		use crate::schema::servers::dsl::*;
-		servers
+		use crate::schema::applications::dsl::*;
+		applications
 			.count()
 			.filter(id.ne(Uuid::nil()).and(kind.eq(k)))
 			.filter(deleted_at.is_null())
@@ -276,23 +276,71 @@ impl Server {
 			.map(|n: i64| n.try_into().unwrap_or_default())
 	}
 
-	pub async fn get_by_id(db: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {
-		crate::schema::servers::table
+<<<<<<< HEAD:crates/database/src/servers.rs
+||||||| parent of a9e64f71 (Pre-PR commit):crates/database/src/servers.rs
+	pub async fn own(db: &mut AsyncPgConnection) -> Result<Self> {
+		use crate::schema::servers::dsl::*;
+		servers
 			.select(Self::as_select())
-			.filter(crate::schema::servers::id.eq(id))
+			.filter(id.eq(Uuid::nil()))
 			.first(db)
 			.await
 			.map_err(AppError::from)
 	}
 
-	/// Like [`Server::get_by_id`] but takes a `FOR UPDATE` row lock. A caller
+	pub async fn all_pingable(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		use crate::schema::servers::dsl::*;
+		servers
+			.select(Self::as_select())
+			.filter(device_id.is_null().and(id.ne(Uuid::nil())))
+			.filter(deleted_at.is_null())
+			.filter(host.is_not_null())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+=======
+	pub async fn own(db: &mut AsyncPgConnection) -> Result<Self> {
+		use crate::schema::applications::dsl::*;
+		applications
+			.select(Self::as_select())
+			.filter(id.eq(Uuid::nil()))
+			.first(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	pub async fn all_pingable(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		use crate::schema::applications::dsl::*;
+		applications
+			.select(Self::as_select())
+			.filter(device_id.is_null().and(id.ne(Uuid::nil())))
+			.filter(deleted_at.is_null())
+			.filter(host.is_not_null())
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+>>>>>>> a9e64f71 (Pre-PR commit):crates/database/src/applications.rs
+	pub async fn get_by_id(db: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {
+		crate::schema::applications::table
+			.select(Self::as_select())
+			.filter(crate::schema::applications::id.eq(id))
+			.first(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Like [`Application::get_by_id`] but takes a `FOR UPDATE` row lock. A caller
 	/// inside a transaction uses this to serialise against concurrent archival
 	/// (`soft_delete` locks the same row), closing the archive-vs-register
 	/// TOCTOU at enrollment completion.
 	pub async fn get_by_id_for_update(db: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {
-		crate::schema::servers::table
+		crate::schema::applications::table
 			.select(Self::as_select())
-			.filter(crate::schema::servers::id.eq(id))
+			.filter(crate::schema::applications::id.eq(id))
 			.for_update()
 			.first(db)
 			.await
@@ -300,9 +348,9 @@ impl Server {
 	}
 
 	pub async fn get_by_host(db: &mut AsyncPgConnection, host: String) -> Result<Self> {
-		crate::schema::servers::table
+		crate::schema::applications::table
 			.select(Self::as_select())
-			.filter(crate::schema::servers::host.eq(host))
+			.filter(crate::schema::applications::host.eq(host))
 			.first(db)
 			.await
 			.map_err(AppError::from)
@@ -311,12 +359,12 @@ impl Server {
 	/// Operator-driven insert. The caller pre-builds the row (id, defaults,
 	/// optional URL, optional pre-bound `device_id` for the Tailscale case).
 	/// URLs are no longer unique, so there is no collision check.
-	pub async fn create(db: &mut AsyncPgConnection, server: Server) -> Result<Self> {
-		use crate::schema::servers;
+	pub async fn create(db: &mut AsyncPgConnection, server: Application) -> Result<Self> {
+		use crate::schema::applications;
 
 		crate::tags::reject_reserved_keys(&server.tags)?;
 
-		let created = diesel::insert_into(servers::table)
+		let created = diesel::insert_into(applications::table)
 			.values(server)
 			.returning(Self::as_select())
 			.get_result(db)
@@ -332,11 +380,11 @@ impl Server {
 	/// revokes the device's credentials) so the box can only return through the
 	/// gated enrollment flow. Idempotent.
 	pub async fn soft_delete(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<()> {
-		use crate::schema::servers::dsl;
+		use crate::schema::applications::dsl;
 		use diesel_async::AsyncConnection;
 
 		db.transaction::<_, AppError, _>(async |conn| {
-			let server: Server = dsl::servers
+			let server: Application = dsl::applications
 				.select(Self::as_select())
 				.filter(dsl::id.eq(server_id))
 				.for_update()
@@ -352,7 +400,7 @@ impl Server {
 				crate::devices::Device::revoke(conn, device_id).await?;
 			}
 
-			diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+			diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
 				.set((
 					dsl::deleted_at
 						.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))),
@@ -373,9 +421,9 @@ impl Server {
 
 	/// Un-archive a server. Does not rebind a device — the box must re-enroll.
 	pub async fn restore(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Self> {
-		use crate::schema::servers::dsl;
+		use crate::schema::applications::dsl;
 
-		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+		diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
 			.set(dsl::deleted_at.eq(None::<jiff_diesel::Timestamp>))
 			.execute(db)
 			.await
@@ -409,10 +457,10 @@ impl Server {
 		)
 	}
 
-	/// Live (non-archived) servers currently bound to this device.
+	/// Live (non-archived) applications currently bound to this device.
 	pub async fn live_by_device_id(db: &mut AsyncPgConnection, dev_id: Uuid) -> Result<Vec<Self>> {
-		use crate::schema::servers::dsl::*;
-		servers
+		use crate::schema::applications::dsl::*;
+		applications
 			.select(Self::as_select())
 			.filter(device_id.eq(dev_id))
 			.filter(deleted_at.is_null())
@@ -427,8 +475,8 @@ impl Server {
 		server_id: Uuid,
 		device_id: Uuid,
 	) -> Result<()> {
-		use crate::schema::servers::dsl;
-		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+		use crate::schema::applications::dsl;
+		diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
 			.set(dsl::device_id.eq(Some(device_id)))
 			.execute(db)
 			.await
@@ -438,8 +486,8 @@ impl Server {
 
 	/// Mark a server enrolled (sets `registered_at = now()`).
 	pub async fn mark_registered(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<()> {
-		use crate::schema::servers::dsl;
-		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+		use crate::schema::applications::dsl;
+		diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
 			.set(
 				dsl::registered_at.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))),
 			)
@@ -472,8 +520,8 @@ impl Server {
 		paused_by: Option<&str>,
 		reason: &str,
 	) -> Result<()> {
-		use crate::schema::servers::dsl;
-		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+		use crate::schema::applications::dsl;
+		diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
 			.filter(dsl::name_management_paused_at.is_null())
 			.set((
 				dsl::name_management_paused_at
@@ -495,8 +543,8 @@ impl Server {
 	/// Canopy is not in a position to make.
 	// spec: CRT#pausing-a-server
 	pub async fn resume_name_management(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<()> {
-		use crate::schema::servers::dsl;
-		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+		use crate::schema::applications::dsl;
+		diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
 			.set((
 				dsl::name_management_paused_at.eq(jiff_diesel::NullableTimestamp::from(None)),
 				dsl::name_management_paused_by.eq::<Option<String>>(None),
@@ -520,8 +568,8 @@ impl Server {
 		server_id: Uuid,
 		profile: Option<&str>,
 	) -> Result<()> {
-		use crate::schema::servers::dsl;
-		let updated = diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+		use crate::schema::applications::dsl;
+		let updated = diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
 			.filter(dsl::deleted_at.is_null())
 			.set(dsl::certificate_profile.eq(profile))
 			.execute(db)
@@ -538,9 +586,9 @@ impl Server {
 		server_id: Uuid,
 		allowed_by: Option<&str>,
 	) -> Result<Timestamp> {
-		use crate::schema::servers::dsl;
+		use crate::schema::applications::dsl;
 		let until = Timestamp::now() + RESTORE_WINDOW;
-		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+		diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
 			.set((
 				dsl::restore_allowed_until.eq(jiff_diesel::NullableTimestamp::from(Some(until))),
 				dsl::restore_allowed_by.eq(allowed_by),
@@ -555,8 +603,8 @@ impl Server {
 	/// expiry and the recorded operator). Clearing an already-closed window is a
 	/// no-op.
 	pub async fn disallow_restore(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<()> {
-		use crate::schema::servers::dsl;
-		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+		use crate::schema::applications::dsl;
+		diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
 			.set((
 				dsl::restore_allowed_until.eq(jiff_diesel::NullableTimestamp::from(None)),
 				dsl::restore_allowed_by.eq::<Option<String>>(None),
@@ -575,8 +623,8 @@ impl Server {
 	}
 
 	pub async fn get_by_device_id(db: &mut AsyncPgConnection, dev_id: Uuid) -> Result<Vec<Self>> {
-		use crate::schema::servers::dsl::*;
-		servers
+		use crate::schema::applications::dsl::*;
+		applications
 			.select(Self::as_select())
 			.filter(device_id.eq(dev_id))
 			.load(db)
@@ -585,8 +633,8 @@ impl Server {
 	}
 
 	pub async fn get_by_ids(db: &mut AsyncPgConnection, ids: &[Uuid]) -> Result<Vec<Self>> {
-		use crate::schema::servers::dsl::*;
-		servers
+		use crate::schema::applications::dsl::*;
+		applications
 			.select(Self::as_select())
 			.filter(id.eq_any(ids))
 			.load(db)
@@ -601,9 +649,9 @@ impl Server {
 		db: &mut AsyncPgConnection,
 		dev_id: Uuid,
 	) -> Result<Vec<Self>> {
-		use crate::schema::{device_server_associations as a, servers::dsl::*};
+		use crate::schema::{applications::dsl::*, device_server_associations as a};
 
-		servers
+		applications
 			.inner_join(a::table.on(a::server_id.eq(id)))
 			.select(Self::as_select())
 			.filter(a::device_id.eq(dev_id))
@@ -613,14 +661,14 @@ impl Server {
 			.map_err(AppError::from)
 	}
 
-	/// All servers in the same group as `self`, excluding `self`. If the
+	/// All applications in the same group as `self`, excluding `self`. If the
 	/// server is ungrouped, returns an empty Vec.
 	pub async fn siblings(&self, db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
-		use crate::schema::servers::dsl::*;
+		use crate::schema::applications::dsl::*;
 		let Some(gid) = self.group_id else {
 			return Ok(Vec::new());
 		};
-		servers
+		applications
 			.select(Self::as_select())
 			.filter(group_id.eq(gid))
 			.filter(id.ne(self.id))
@@ -631,14 +679,14 @@ impl Server {
 			.map_err(AppError::from)
 	}
 
-	/// All live (non-archived) servers in a group, ordered by name. Used to
+	/// All live (non-archived) applications in a group, ordered by name. Used to
 	/// expand a group-wide restore-replica declaration into per-server entries.
 	pub async fn list_live_in_group(
 		db: &mut AsyncPgConnection,
 		group_id_: Uuid,
 	) -> Result<Vec<Self>> {
-		use crate::schema::servers::dsl::*;
-		servers
+		use crate::schema::applications::dsl::*;
+		applications
 			.select(Self::as_select())
 			.filter(group_id.eq(group_id_))
 			.filter(deleted_at.is_null())
@@ -648,10 +696,10 @@ impl Server {
 			.map_err(AppError::from)
 	}
 
-	/// All servers without a group, ordered by name. Used by the Ungrouped UI tab.
+	/// All applications without a group, ordered by name. Used by the Ungrouped UI tab.
 	pub async fn list_ungrouped(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
-		use crate::schema::servers::dsl::*;
-		servers
+		use crate::schema::applications::dsl::*;
+		applications
 			.select(Self::as_select())
 			.filter(group_id.is_null())
 			.filter(id.ne(Uuid::nil()))
@@ -663,8 +711,8 @@ impl Server {
 	}
 
 	pub async fn count_ungrouped(db: &mut AsyncPgConnection) -> Result<u64> {
-		use crate::schema::servers::dsl::*;
-		servers
+		use crate::schema::applications::dsl::*;
+		applications
 			.count()
 			.filter(group_id.is_null())
 			.filter(id.ne(Uuid::nil()))
@@ -682,12 +730,12 @@ impl Server {
 		db: &mut AsyncPgConnection,
 		ids: &[Uuid],
 	) -> Result<std::collections::HashMap<Uuid, (Option<String>, Option<String>)>> {
-		use crate::schema::servers::dsl;
+		use crate::schema::applications::dsl;
 
 		if ids.is_empty() {
 			return Ok(std::collections::HashMap::new());
 		}
-		let rows: Vec<(Uuid, Option<String>, Option<String>)> = dsl::servers
+		let rows: Vec<(Uuid, Option<String>, Option<String>)> = dsl::applications
 			.select((dsl::id, dsl::name, dsl::host))
 			.filter(dsl::id.eq_any(ids))
 			.load(db)
@@ -702,16 +750,18 @@ impl Server {
 		db: &mut AsyncPgConnection,
 		ids: &[Uuid],
 	) -> Result<std::collections::HashMap<Uuid, Option<String>>> {
-		use crate::schema::{server_groups, servers};
+		use crate::schema::{applications, server_groups};
 		use std::collections::HashMap;
 
 		if ids.is_empty() {
 			return Ok(HashMap::new());
 		}
-		let rows: Vec<(Uuid, Option<String>)> = servers::table
-			.left_join(server_groups::table.on(server_groups::id.nullable().eq(servers::group_id)))
-			.select((servers::id, server_groups::name.nullable()))
-			.filter(servers::id.eq_any(ids))
+		let rows: Vec<(Uuid, Option<String>)> = applications::table
+			.left_join(
+				server_groups::table.on(server_groups::id.nullable().eq(applications::group_id)),
+			)
+			.select((applications::id, server_groups::name.nullable()))
+			.filter(applications::id.eq_any(ids))
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
@@ -724,20 +774,22 @@ impl Server {
 		db: &mut AsyncPgConnection,
 		ids: &[Uuid],
 	) -> Result<std::collections::HashMap<Uuid, (Option<Uuid>, Option<String>)>> {
-		use crate::schema::{server_groups, servers};
+		use crate::schema::{applications, server_groups};
 		use std::collections::HashMap;
 
 		if ids.is_empty() {
 			return Ok(HashMap::new());
 		}
-		let rows: Vec<(Uuid, Option<Uuid>, Option<String>)> = servers::table
-			.left_join(server_groups::table.on(server_groups::id.nullable().eq(servers::group_id)))
+		let rows: Vec<(Uuid, Option<Uuid>, Option<String>)> = applications::table
+			.left_join(
+				server_groups::table.on(server_groups::id.nullable().eq(applications::group_id)),
+			)
 			.select((
-				servers::id,
-				servers::group_id,
+				applications::id,
+				applications::group_id,
 				server_groups::name.nullable(),
 			))
-			.filter(servers::id.eq_any(ids))
+			.filter(applications::id.eq_any(ids))
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
@@ -752,15 +804,15 @@ impl Server {
 		query: &str,
 		limit: i64,
 	) -> Result<Vec<Self>> {
-		use crate::schema::servers::dsl::*;
+		use crate::schema::applications::dsl::*;
 		let search_pattern = format!("%{}%", query);
 
 		// Both halves of eligibility, stated rather than implied: only a
-		// product canopy lists publicly, and only its central servers. The
+		// product canopy lists publicly, and only its central applications. The
 		// kind filter alone would exclude other products today, but by
 		// accident of their having no central role rather than on purpose.
 		// spec: APP#public-listing
-		let mut query_builder = servers
+		let mut query_builder = applications
 			.select(Self::as_select())
 			.filter(product.eq_any(Product::stored_values_where(|p| p.caps().public_listing)))
 			.filter(kind.eq(ServerKind::Central.to_string()))
@@ -791,7 +843,7 @@ impl Server {
 		server_id: Uuid,
 		updates: PartialServer,
 	) -> Result<Self> {
-		use crate::schema::servers::dsl;
+		use crate::schema::applications::dsl;
 
 		if let Some(tags) = &updates.tags {
 			crate::tags::reject_reserved_keys(tags)?;
@@ -807,7 +859,7 @@ impl Server {
 			.ok()
 			.and_then(|s| s.group_id);
 
-		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+		diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
 			.set(updates)
 			.execute(db)
 			.await
@@ -829,10 +881,10 @@ impl Server {
 		server_id: Uuid,
 		new_group_id: Option<Uuid>,
 	) -> Result<Self> {
-		use crate::schema::servers::dsl;
+		use crate::schema::applications::dsl;
 
 		let before = Self::get_by_id(db, server_id).await?;
-		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
+		diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
 			.set(dsl::group_id.eq(new_group_id))
 			.execute(db)
 			.await
@@ -911,7 +963,7 @@ impl Server {
 
 #[test]
 fn canonicalize_host_defaults_to_https() {
-	let h = |s: &str| Server::canonicalize_host(s).unwrap().0.to_string();
+	let h = |s: &str| Application::canonicalize_host(s).unwrap().0.to_string();
 	assert_eq!(h("foo.example.com"), "https://foo.example.com/");
 	assert_eq!(h("  bar.example.com  "), "https://bar.example.com/");
 	assert_eq!(h("http://insecure.example"), "http://insecure.example/");
@@ -920,16 +972,16 @@ fn canonicalize_host_defaults_to_https() {
 
 #[test]
 fn test_server_serialization() {
-	let server = Server {
+	let server = Application {
 		id: Uuid::nil(),
-		name: Some("Test Server".to_string()),
+		name: Some("Test Application".to_string()),
 		product: Product::Tamanu,
 		kind: ServerKind::Central,
 		rank: Some(ServerRank::Production),
 		host: Some(UrlField("https://example.com/".parse().unwrap())),
 		device_id: Some(Uuid::nil()),
 		group_id: None,
-		public_name: Some("Test Server".to_string()),
+		public_name: Some("Test Application".to_string()),
 		cloud: None,
 		geolocation: None,
 		is_monitored: true,
@@ -953,13 +1005,13 @@ fn test_server_serialization() {
 		serialized,
 		r#"{
   "id": "00000000-0000-0000-0000-000000000000",
-  "name": "Test Server",
+  "name": "Test Application",
   "host": "https://example.com",
   "product": "tamanu",
   "kind": "central",
   "rank": "production",
   "device_id": "00000000-0000-0000-0000-000000000000",
-  "public_name": "Test Server",
+  "public_name": "Test Application",
   "is_monitored": true,
   "alert_when_down_for": 600,
   "notes": "",
@@ -995,9 +1047,9 @@ pub struct NewServer {
 	pub group_id: Option<Uuid>,
 }
 
-impl From<NewServer> for Server {
+impl From<NewServer> for Application {
 	fn from(server: NewServer) -> Self {
-		Server {
+		Application {
 			id: Uuid::new_v4(),
 			name: server.name,
 			product: server.product,
@@ -1033,7 +1085,7 @@ impl From<NewServer> for Server {
 /// `cloud`, `geolocation`), sending an explicit `null` clears the value,
 /// while omitting the field entirely leaves it unchanged.
 #[derive(Debug, Deserialize, AsChangeset, utoipa::ToSchema)]
-#[diesel(table_name = crate::schema::servers)]
+#[diesel(table_name = crate::schema::applications)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct PartialServer {
 	/// The server to update.

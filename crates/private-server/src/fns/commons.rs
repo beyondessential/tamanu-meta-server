@@ -20,13 +20,13 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(products))
 }
 
-/// One product canopy monitors, with what canopy does for its servers and the
+/// One product canopy monitors, with what canopy does for its applications and the
 /// roles it defines.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ProductInfo {
 	/// The product itself.
 	pub product: Product,
-	/// What canopy does for this product's servers.
+	/// What canopy does for this product's applications.
 	pub caps: Caps,
 	/// The roles this product defines, in the order they rank when choosing a
 	/// group's canonical member.
@@ -95,7 +95,7 @@ pub async fn public_url() -> Result<Json<Option<String>>> {
 	path = "/server_versions_url",
 	tag = "commons",
 	responses(
-		(status = 200, description = "Server-versions URL with embedded auth secret, if configured.", body = Option<String>),
+		(status = 200, description = "Application-versions URL with embedded auth secret, if configured.", body = Option<String>),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]

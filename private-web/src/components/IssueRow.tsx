@@ -95,9 +95,9 @@ export default function IssueRow({
 				headerSnapshotOpen={headerSnapshotOpen}
 				toggleHeaderSnapshot={() => setHeaderSnapshotOpen((v) => !v)}
 			/>
-			{headerSnapshotOpen && issue.server_id && (
+			{headerSnapshotOpen && issue.application_id && (
 				<StatusSnapshotPanel
-					serverId={issue.server_id}
+					serverId={issue.application_id}
 					at={issue.last_seen}
 					onClose={() => setHeaderSnapshotOpen(false)}
 				/>
@@ -150,10 +150,10 @@ function Header({
 					<ExpandMoreIcon fontSize="small" />
 				)}
 			</IconButton>
-			{issue.server_id != null ? (
+			{issue.application_id != null ? (
 				<MuiLink
 					component={RouterLink}
-					to={`/servers/${issue.server_id}`}
+					to={`/servers/${issue.application_id}`}
 					underline="hover"
 					color="text.primary"
 					sx={{ fontWeight: 500, flexShrink: 0 }}
@@ -517,7 +517,7 @@ function IssueActions({
 						join incidents. Manage and un-silence from the detail page.
 					</Typography>
 					<Stack direction="row" spacing={1}>
-						{issue.server_id != null && (
+						{issue.application_id != null && (
 							<Button
 								variant="outlined"
 								size="small"
@@ -525,7 +525,7 @@ function IssueActions({
 								onClick={() =>
 									wrap(() =>
 										silenceServer.call({
-											server_id: issue.server_id,
+											server_id: issue.application_id,
 											source: issue.source,
 											ref: issue.ref,
 										}),

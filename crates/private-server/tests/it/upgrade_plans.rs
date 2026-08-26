@@ -244,7 +244,7 @@ async fn a_member_servers_own_restore_is_not_an_attempt() {
 			INSERT INTO devices (id, role) VALUES
 				('cccccccc-0000-0000-0000-0000000000d0', 'backup-restore'),
 				('cccccccc-0000-0000-0000-0000000000d1', 'server');
-			INSERT INTO servers (id, name, host, kind, group_id, device_id) VALUES
+			INSERT INTO applications (id, name, host, kind, group_id, device_id) VALUES
 				('cccccccc-0000-0000-0000-0000000000a0', 'clone',
 				 'https://clone.example.com', 'central',
 				 'cccccccc-0000-0000-0000-000000000001',

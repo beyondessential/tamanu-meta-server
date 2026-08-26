@@ -131,7 +131,7 @@
             "description": "Capabilities registered."
           },
           "409": {
-            "description": "Server is not in a group.",
+            "description": "Application is not in a group.",
             "content": {
               "application/json": {
                 "schema": {
@@ -188,7 +188,7 @@
             }
           },
           "409": {
-            "description": "Server ungrouped, no ready config, backup type not enabled, or restore window not open.",
+            "description": "Application ungrouped, no ready config, backup type not enabled, or restore window not open.",
             "content": {
               "application/json": {
                 "schema": {
@@ -248,7 +248,7 @@
             "description": "Progress recorded."
           },
           "409": {
-            "description": "Server is not in a group.",
+            "description": "Application is not in a group.",
             "content": {
               "application/json": {
                 "schema": {
@@ -308,7 +308,7 @@
             "description": "Run recorded."
           },
           "409": {
-            "description": "Server ungrouped, or duplicate run_id.",
+            "description": "Application ungrouped, or duplicate run_id.",
             "content": {
               "application/json": {
                 "schema": {
@@ -355,7 +355,7 @@
             }
           },
           "409": {
-            "description": "Server ungrouped or no ready config.",
+            "description": "Application ungrouped or no ready config.",
             "content": {
               "application/json": {
                 "schema": {
@@ -791,14 +791,14 @@
     "/servers": {
       "get": {
         "tags": [
-          "servers"
+          "applications"
         ],
-        "summary": "List publicly-listed central servers.",
+        "summary": "List publicly-listed central applications.",
         "description": "Returns every central server that has both a public display name and a\nreachable host configured, ordered by environment tier (production\nfirst, then clone, demo, test, dev) and then by name. Used by clients\nto let a user pick which server to connect to.",
         "operationId": "list_servers",
         "responses": {
           "200": {
-            "description": "Publicly-listed central servers, ordered by rank then name.",
+            "description": "Publicly-listed central applications, ordered by rank then name.",
             "content": {
               "application/json": {
                 "schema": {
@@ -826,7 +826,7 @@
     "/servers/register/begin": {
       "post": {
         "tags": [
-          "servers"
+          "applications"
         ],
         "summary": "Start device enrollment against a server.",
         "description": "Validates the enrollment token against the given server and, if valid,\nissues a short-lived (5 minute) signed challenge bound to the server\nID, the token, and the caller's public key. The device must sign this\nchallenge and submit it to the completion endpoint to finish\nenrollment; the token itself is validated here but not yet consumed.\n\nThis endpoint is rate-limited per source IP and per target server; a\ntripped limit returns 429. Any other failure — an unknown or deleted\nserver, or an invalid or expired token — is surfaced as a generic 403,\ndeliberately not distinguishing which check failed.",
@@ -868,7 +868,7 @@
     "/servers/register/complete": {
       "post": {
         "tags": [
-          "servers"
+          "applications"
         ],
         "summary": "Complete device enrollment by presenting a signed challenge.",
         "description": "Verifies the signature over the challenge transcript using the public\nkey supplied here, then binds the device to the server: an existing\ndevice re-enrolling with the same key is reused as-is; a device\nre-enrolling with a different key replaces the server's previous\ndevice (revoking that device's access); otherwise a new device\nidentity is created. On success the device is granted the server\nrole, the enrollment token is consumed, and the server is marked as\nregistered.\n\nEnrollment is refused if the presented public key is already bound to\na different live server. Like the start-enrollment endpoint, this one\nis rate-limited per source IP and per target server (429 on a tripped\nlimit) and reports every other kind of failure as a generic 403.",
@@ -910,7 +910,7 @@
     "/servers/self": {
       "get": {
         "tags": [
-          "servers"
+          "applications"
         ],
         "summary": "Report the calling device's own identity.",
         "description": "Resolves the caller from its device certificate and returns the server\nit is enrolled as together with its own device ID — the same pair\nreturned when the device completed enrollment. A device authenticates\nentirely from its certificate, so it never needs these IDs to make\ncalls; this endpoint lets one that has lost track of them recover them.\n\n- **401**: the request has no client certificate, or the certificate\n  doesn't match a known device.\n- **409**: the calling device is attached to more than one server, which\n  should not normally happen; contact support if you see this.\n- **412**: the device is registered but has not yet been attached to a\n  server.",
@@ -3086,8 +3086,8 @@
       "description": "Managed restore replicas: consumer capability registration, worklist, and read-only restore credentials."
     },
     {
-      "name": "servers",
-      "description": "Server registry — listing for the public, self-registration for server devices."
+      "name": "applications",
+      "description": "Application registry — listing for the public, self-registration for server devices."
     },
     {
       "name": "statuses",

@@ -8,7 +8,7 @@ use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{devices::Device, server_groups::ServerGroup, servers::Server};
+use crate::{applications::Application, devices::Device, server_groups::ServerGroup};
 
 /// A tracked problem or condition on a server, or on a server group as a
 /// whole. An issue is opened the first time its source reports it and stays
@@ -18,7 +18,7 @@ use crate::{devices::Device, server_groups::ServerGroup, servers::Server};
 #[derive(
 	Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Associations, utoipa::ToSchema,
 )]
-#[diesel(belongs_to(Server))]
+#[diesel(belongs_to(Application))]
 #[diesel(belongs_to(Device))]
 #[diesel(table_name = crate::schema::issues)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -33,7 +33,7 @@ pub struct Issue {
 	pub updated_at: Timestamp,
 	/// The server this issue is attached to. `None` for a group-scoped issue
 	/// (see `server_group_id`) — exactly one of the two is always set.
-	pub server_id: Option<Uuid>,
+	pub application_id: Option<Uuid>,
 	/// The server group this issue is attached to, for a control-plane issue
 	/// (e.g. backup corruption, a failed preflight check) that isn't tied to
 	/// any single server. `None` for an ordinary server-scoped issue.
@@ -261,7 +261,7 @@ pub struct IssueListFilters {
 	/// Restrict to issues whose server belongs to this group.
 	pub server_group_id: Option<Uuid>,
 	/// Restrict to issues raised against this server.
-	pub server_id: Option<Uuid>,
+	pub application_id: Option<Uuid>,
 	/// When `Some`, restrict to issues last seen at or after this time.
 	pub since: Option<Timestamp>,
 }
@@ -334,11 +334,11 @@ async fn stamp_check_state(
 
 impl NewEvent {
 	/// Persist this event push:
-	/// 1. find-or-create the issue keyed by (server_id, source, ref),
+	/// 1. find-or-create the issue keyed by (application_id, source, ref),
 	///    updating its state from this report,
 	/// 2. if the server is in a group: (re)evaluate incident contribution.
 	///
-	/// `server_id` is the server the issue is attached to: derived from the
+	/// `application_id` is the server the issue is attached to: derived from the
 	/// device for public submissions, supplied by the operator for manual.
 	/// `device_id` is `None` for manual events.
 	///
@@ -346,16 +346,16 @@ impl NewEvent {
 	/// row goes in just like any other push — but the incident
 	/// flow is skipped (`server_group_id` would have nowhere to point).
 	/// When the operator later assigns the server to a group,
-	/// [`Server::assign_to_group`] runs `reevaluate_open_issues_for_server`
+	/// [`Application::assign_to_group`] runs `reevaluate_open_issues_for_server`
 	/// over the now-grouped issues so anything that should have opened an
 	/// incident does so retroactively.
 	pub async fn save(
 		self,
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		application_id: Uuid,
 		device_id: Option<Uuid>,
 	) -> Result<Issue> {
-		self.save_with_state(db, server_id, device_id, None, false)
+		self.save_with_state(db, application_id, device_id, None, false)
 			.await
 	}
 
@@ -365,7 +365,7 @@ impl NewEvent {
 	pub async fn save_with_state(
 		self,
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		application_id: Uuid,
 		device_id: Option<Uuid>,
 		state: Option<&CheckStateStamp>,
 		defer_incident_eval: bool,
@@ -395,7 +395,7 @@ impl NewEvent {
 		// catch-up path. `monitored` gates the incident workflow the same
 		// way: ungrouped *or* unmonitored → issue/event still recorded,
 		// but no incident contribution.
-		let server = Server::get_by_id(db, server_id).await?;
+		let server = Application::get_by_id(db, application_id).await?;
 		let server_group_id = server.group_id;
 		let monitored = server.is_monitored;
 
@@ -405,8 +405,8 @@ impl NewEvent {
 			let existing: Option<Issue> = issues::table
 				.select(Issue::as_select())
 				.filter(
-					issues::server_id
-						.eq(server_id)
+					issues::application_id
+						.eq(application_id)
 						.and(issues::source.eq(&self.source))
 						.and(issues::ref_.eq(&self.r#ref)),
 				)
@@ -470,7 +470,7 @@ impl NewEvent {
 			} else {
 				let inserted: Issue = diesel::insert_into(issues::table)
 					.values((
-						issues::server_id.eq(server_id),
+						issues::application_id.eq(application_id),
 						issues::device_id.eq(device_id),
 						issues::source.eq(&self.source),
 						issues::ref_.eq(&self.r#ref),
@@ -526,8 +526,8 @@ impl NewEvent {
 /// state; scope is not the lever for making something page.
 ///
 /// Mirrors [`NewEvent::save`] but keys the issue on
-/// `(server_group_id, source, ref)` instead of `(server_id, …)`:
-/// 1. find-or-create the group-scoped issue (server_id = NULL),
+/// `(server_group_id, source, ref)` instead of `(application_id, …)`:
+/// 1. find-or-create the group-scoped issue (application_id = NULL),
 ///    updating its state from this report,
 /// 2. run incident membership evaluation with `monitored = true` so the
 ///    incident opens/pages regardless of any member server's monitored flag.
@@ -710,7 +710,7 @@ pub async fn raise_global_event_with_state(
 		let existing: Option<Issue> = issues::table
 			.select(Issue::as_select())
 			.filter(
-				issues::server_id
+				issues::application_id
 					.is_null()
 					.and(issues::server_group_id.is_null())
 					.and(issues::source.eq(source))
@@ -795,33 +795,33 @@ pub async fn raise_global_event_with_state(
 /// The scope a check-state, issue, or scoped policy attaches to: one
 /// server, a server group, or canopy as a whole. This is the single scope
 /// vocabulary for check state — do not reintroduce a parallel scope enum or
-/// an ad-hoc `match (server_id, server_group_id)`; map through the methods
+/// an ad-hoc `match (application_id, server_group_id)`; map through the methods
 /// here. Provenance (which device reported a filing) is a separate concern
 /// (see `CheckFiling::device_id`), not part of scope.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scope {
-	Server(Uuid),
+	Application(Uuid),
 	Group(Uuid),
 	Global,
 }
 
 impl Scope {
-	/// The `(server_id, server_group_id)` storage columns for this scope.
+	/// The `(application_id, server_group_id)` storage columns for this scope.
 	pub fn to_columns(self) -> (Option<Uuid>, Option<Uuid>) {
 		match self {
-			Scope::Server(id) => (Some(id), None),
+			Scope::Application(id) => (Some(id), None),
 			Scope::Group(id) => (None, Some(id)),
 			Scope::Global => (None, None),
 		}
 	}
 
-	/// The scope encoded by a `(server_id, server_group_id)` pair. A set
+	/// The scope encoded by a `(application_id, server_group_id)` pair. A set
 	/// group wins (the storage CHECK allows at most one set; both null is
 	/// canopy-wide).
-	pub fn from_columns(server_id: Option<Uuid>, server_group_id: Option<Uuid>) -> Self {
-		match (server_id, server_group_id) {
+	pub fn from_columns(application_id: Option<Uuid>, server_group_id: Option<Uuid>) -> Self {
+		match (application_id, server_group_id) {
 			(_, Some(gid)) => Scope::Group(gid),
-			(Some(sid), None) => Scope::Server(sid),
+			(Some(sid), None) => Scope::Application(sid),
 			(None, None) => Scope::Global,
 		}
 	}
@@ -837,8 +837,8 @@ impl Scope {
 	) -> Result<Option<(IncidentTarget, bool)>> {
 		match self {
 			Scope::Group(gid) => Ok(Some((IncidentTarget::Group(gid), true))),
-			Scope::Server(sid) => {
-				let server = Server::get_by_id(conn, sid).await?;
+			Scope::Application(sid) => {
+				let server = Application::get_by_id(conn, sid).await?;
 				Ok(server
 					.group_id
 					.map(|gid| (IncidentTarget::Group(gid), server.is_monitored)))
@@ -992,7 +992,7 @@ pub async fn file_check_instances(
 
 	let source = filing.source;
 	debug_assert!(
-		matches!(filing.scope, Scope::Server(_)) || source == crate::statuses::CANOPY_SOURCE,
+		matches!(filing.scope, Scope::Application(_)) || source == crate::statuses::CANOPY_SOURCE,
 		"group- and canopy-wide filings are canopy's own",
 	);
 	debug_assert!(
@@ -1015,8 +1015,8 @@ pub async fn file_check_instances(
 		Option<Uuid>,
 		Option<Uuid>,
 	) = match filing.scope {
-		Scope::Server(server_id) => {
-			let server = Server::get_by_id(conn, server_id).await?;
+		Scope::Application(application_id) => {
+			let server = Application::get_by_id(conn, application_id).await?;
 			let group_id = server.group_id;
 			let tags = server
 				.tags_merged_with_group(conn)
@@ -1025,7 +1025,7 @@ pub async fn file_check_instances(
 				.into_iter()
 				.map(|(k, v)| (k, serde_json::Value::String(v)))
 				.collect();
-			(tags, Some(server_id), group_id)
+			(tags, Some(application_id), group_id)
 		}
 		Scope::Group(group_id) => (Default::default(), None, Some(group_id)),
 		Scope::Global => (Default::default(), None, None),
@@ -1134,7 +1134,7 @@ pub async fn file_check_instances(
 	};
 
 	match filing.scope {
-		Scope::Server(server_id) => {
+		Scope::Application(application_id) => {
 			NewEvent {
 				source: source.to_string(),
 				r#ref: filing.check.to_string(),
@@ -1143,7 +1143,7 @@ pub async fn file_check_instances(
 				active: Some(active),
 				occurred_at: None,
 			}
-			.save_with_state(conn, server_id, filing.device_id, Some(&stamp), false)
+			.save_with_state(conn, application_id, filing.device_id, Some(&stamp), false)
 			.await
 		}
 		Scope::Group(gid) => {
@@ -1215,7 +1215,7 @@ fn instance_detail(
 	}))
 }
 
-/// One rollup input row: `(server_id, source, check_name, effective_result)`.
+/// One rollup input row: `(application_id, source, check_name, effective_result)`.
 type HealthCheckRow = (Option<Uuid>, String, Option<String>, Option<String>);
 
 /// Per-server health rollup from current check state: the worst
@@ -1226,26 +1226,26 @@ type HealthCheckRow = (Option<Uuid>, String, Option<String>, Option<String>);
 /// matching the "no signal" semantics).
 pub async fn health_from_check_state(
 	conn: &mut AsyncPgConnection,
-	servers: &[(Uuid, Option<Uuid>)],
+	applications: &[(Uuid, Option<Uuid>)],
 ) -> Result<std::collections::HashMap<Uuid, commons_types::status::HealthState>> {
 	use crate::schema::{issues, scoped_check_policies};
 	use commons_types::status::HealthState;
 	use std::collections::{HashMap, HashSet};
 
-	if servers.is_empty() {
+	if applications.is_empty() {
 		return Ok(HashMap::new());
 	}
-	let server_ids: Vec<Uuid> = servers.iter().map(|(id, _)| *id).collect();
-	let group_of: HashMap<Uuid, Option<Uuid>> = servers.iter().copied().collect();
+	let server_ids: Vec<Uuid> = applications.iter().map(|(id, _)| *id).collect();
+	let group_of: HashMap<Uuid, Option<Uuid>> = applications.iter().copied().collect();
 
 	let rows: Vec<HealthCheckRow> = issues::table
 		.select((
-			issues::server_id,
+			issues::application_id,
 			issues::source,
 			issues::check_name,
 			issues::effective_result,
 		))
-		.filter(issues::server_id.eq_any(&server_ids))
+		.filter(issues::application_id.eq_any(&server_ids))
 		.filter(issues::check_name.is_not_null())
 		.filter(issues::effective_result.is_not_null())
 		// Only states currently contributing count: an operator-resolved
@@ -1266,14 +1266,14 @@ pub async fn health_from_check_state(
 	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
 		scoped_check_policies::table
 			.select((
-				scoped_check_policies::server_id,
+				scoped_check_policies::application_id,
 				scoped_check_policies::server_group_id,
 				scoped_check_policies::source,
 				scoped_check_policies::check_name,
 			))
 			.filter(scoped_check_policies::ceiling.eq("skipped"))
 			.filter(
-				scoped_check_policies::server_id
+				scoped_check_policies::application_id
 					.eq_any(&server_ids)
 					.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
 			)
@@ -1281,8 +1281,8 @@ pub async fn health_from_check_state(
 			.await?;
 	let mut server_silences: HashSet<(Uuid, String, String)> = HashSet::new();
 	let mut group_silences: HashSet<(Uuid, String, String)> = HashSet::new();
-	for (server_id, group_id, source, check) in silence_rows {
-		if let Some(sid) = server_id {
+	for (application_id, group_id, source, check) in silence_rows {
+		if let Some(sid) = application_id {
 			server_silences.insert((sid, source, check));
 		} else if let Some(gid) = group_id {
 			group_silences.insert((gid, source, check));
@@ -1292,21 +1292,21 @@ pub async fn health_from_check_state(
 	// Collect each server's surviving effective results, then roll up
 	// through the one shared classifier — the same rules everywhere.
 	let mut contributing: HashMap<Uuid, Vec<CheckResult>> = HashMap::new();
-	for (server_id, source, check_name, effective) in rows {
-		let Some(server_id) = server_id else {
+	for (application_id, source, check_name, effective) in rows {
+		let Some(application_id) = application_id else {
 			continue;
 		};
 		let Some(check_name) = check_name else {
 			continue;
 		};
-		let key = (server_id, source, check_name);
+		let key = (application_id, source, check_name);
 		if !cataloged.contains(&(key.1.clone(), key.2.clone())) {
 			continue;
 		}
 		if server_silences.contains(&key) {
 			continue;
 		}
-		if let Some(Some(gid)) = group_of.get(&server_id)
+		if let Some(Some(gid)) = group_of.get(&application_id)
 			&& group_silences.contains(&(*gid, key.1.clone(), key.2.clone()))
 		{
 			continue;
@@ -1317,16 +1317,16 @@ pub async fn health_from_check_state(
 		else {
 			continue;
 		};
-		contributing.entry(server_id).or_default().push(result);
+		contributing.entry(application_id).or_default().push(result);
 	}
 
 	Ok(contributing
 		.into_iter()
-		.map(|(server_id, results)| (server_id, HealthState::from_results(results)))
+		.map(|(application_id, results)| (application_id, HealthState::from_results(results)))
 		.collect())
 }
 
-/// One fleet check-detail row: `(server_id, source, check_name,
+/// One fleet check-detail row: `(application_id, source, check_name,
 /// observed_result, effective_result, detail)`.
 type FleetCheckRow = (
 	Option<Uuid>,
@@ -1337,7 +1337,7 @@ type FleetCheckRow = (
 	Option<serde_json::Value>,
 );
 
-/// Every named check's current state across the given servers, as one JSON
+/// Every named check's current state across the given applications, as one JSON
 /// object per server keyed by check name.
 ///
 /// Each check's value is the detail its source attached, with `result` and
@@ -1354,27 +1354,27 @@ type FleetCheckRow = (
 // spec: FIG#fleet-spread
 pub async fn check_detail_by_server(
 	conn: &mut AsyncPgConnection,
-	servers: &[(Uuid, Option<Uuid>)],
+	applications: &[(Uuid, Option<Uuid>)],
 ) -> Result<std::collections::HashMap<Uuid, serde_json::Map<String, serde_json::Value>>> {
 	use crate::schema::{issues, scoped_check_policies};
 	use std::collections::{HashMap, HashSet};
 
-	if servers.is_empty() {
+	if applications.is_empty() {
 		return Ok(HashMap::new());
 	}
-	let server_ids: Vec<Uuid> = servers.iter().map(|(id, _)| *id).collect();
-	let group_of: HashMap<Uuid, Option<Uuid>> = servers.iter().copied().collect();
+	let server_ids: Vec<Uuid> = applications.iter().map(|(id, _)| *id).collect();
+	let group_of: HashMap<Uuid, Option<Uuid>> = applications.iter().copied().collect();
 
 	let rows: Vec<FleetCheckRow> = issues::table
 		.select((
-			issues::server_id,
+			issues::application_id,
 			issues::source,
 			issues::check_name,
 			issues::observed_result,
 			issues::effective_result,
 			issues::detail,
 		))
-		.filter(issues::server_id.eq_any(&server_ids))
+		.filter(issues::application_id.eq_any(&server_ids))
 		.filter(issues::check_name.is_not_null())
 		.filter(issues::effective_result.is_not_null())
 		// Oldest first, so a later source's fields overwrite an earlier
@@ -1389,14 +1389,14 @@ pub async fn check_detail_by_server(
 	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
 		scoped_check_policies::table
 			.select((
-				scoped_check_policies::server_id,
+				scoped_check_policies::application_id,
 				scoped_check_policies::server_group_id,
 				scoped_check_policies::source,
 				scoped_check_policies::check_name,
 			))
 			.filter(scoped_check_policies::ceiling.eq("skipped"))
 			.filter(
-				scoped_check_policies::server_id
+				scoped_check_policies::application_id
 					.eq_any(&server_ids)
 					.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
 			)
@@ -1404,8 +1404,8 @@ pub async fn check_detail_by_server(
 			.await?;
 	let mut server_silences: HashSet<(Uuid, String, String)> = HashSet::new();
 	let mut group_silences: HashSet<(Uuid, String, String)> = HashSet::new();
-	for (server_id, group_id, source, check) in silence_rows {
-		if let Some(sid) = server_id {
+	for (application_id, group_id, source, check) in silence_rows {
+		if let Some(sid) = application_id {
 			server_silences.insert((sid, source, check));
 		} else if let Some(gid) = group_id {
 			group_silences.insert((gid, source, check));
@@ -1413,8 +1413,8 @@ pub async fn check_detail_by_server(
 	}
 
 	let mut by_server: HashMap<Uuid, serde_json::Map<String, serde_json::Value>> = HashMap::new();
-	for (server_id, source, check_name, observed, effective, detail) in rows {
-		let (Some(server_id), Some(check)) = (server_id, check_name) else {
+	for (application_id, source, check_name, observed, effective, detail) in rows {
+		let (Some(application_id), Some(check)) = (application_id, check_name) else {
 			continue;
 		};
 		if !cataloged.contains(&(source.clone(), check.clone())) {
@@ -1426,8 +1426,8 @@ pub async fn check_detail_by_server(
 		else {
 			continue;
 		};
-		let silenced = server_silences.contains(&(server_id, source.clone(), check.clone()))
-			|| matches!(group_of.get(&server_id), Some(Some(gid))
+		let silenced = server_silences.contains(&(application_id, source.clone(), check.clone()))
+			|| matches!(group_of.get(&application_id), Some(Some(gid))
 				if group_silences.contains(&(*gid, source.clone(), check.clone())));
 		let effective = if silenced {
 			CheckResult::Skipped
@@ -1436,7 +1436,7 @@ pub async fn check_detail_by_server(
 		};
 
 		let entry = by_server
-			.entry(server_id)
+			.entry(application_id)
 			.or_default()
 			.entry(check)
 			.or_insert_with(|| serde_json::Value::Object(Default::default()));
@@ -1477,16 +1477,16 @@ type ConsolidatedRow = (
 /// shape from status history.
 pub async fn consolidated_checks_latest(
 	conn: &mut AsyncPgConnection,
-	server_id: Uuid,
+	application_id: Uuid,
 	group_id: Option<Uuid>,
 ) -> Result<commons_types::status::ConsolidatedChecks> {
 	use crate::schema::{issues, scoped_check_policies};
 	use commons_types::status::{ConsolidatedCheck, ConsolidatedChecks};
 	use std::collections::HashSet;
 
-	let health_state = health_from_check_state(conn, &[(server_id, group_id)])
+	let health_state = health_from_check_state(conn, &[(application_id, group_id)])
 		.await?
-		.get(&server_id)
+		.get(&application_id)
 		.copied()
 		.unwrap_or_default();
 
@@ -1498,7 +1498,7 @@ pub async fn consolidated_checks_latest(
 			issues::effective_result,
 			issues::detail,
 		))
-		.filter(issues::server_id.eq(server_id))
+		.filter(issues::application_id.eq(application_id))
 		.filter(issues::check_name.is_not_null())
 		.filter(issues::effective_result.is_not_null())
 		.load(conn)
@@ -1514,15 +1514,15 @@ pub async fn consolidated_checks_latest(
 	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
 		scoped_check_policies::table
 			.select((
-				scoped_check_policies::server_id,
+				scoped_check_policies::application_id,
 				scoped_check_policies::server_group_id,
 				scoped_check_policies::source,
 				scoped_check_policies::check_name,
 			))
 			.filter(scoped_check_policies::ceiling.eq("skipped"))
 			.filter(
-				scoped_check_policies::server_id
-					.eq(server_id)
+				scoped_check_policies::application_id
+					.eq(application_id)
 					.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
 			)
 			.load(conn)
@@ -1641,7 +1641,7 @@ pub async fn get_global_issue(conn: &mut AsyncPgConnection, r#ref: &str) -> Resu
 	dsl::issues
 		.select(Issue::as_select())
 		.filter(
-			dsl::server_id
+			dsl::application_id
 				.is_null()
 				.and(dsl::server_group_id.is_null())
 				.and(dsl::source.eq(crate::statuses::CANOPY_SOURCE))
@@ -1712,12 +1712,12 @@ async fn re_evaluate_incident_membership(
 
 	let was_in = is_issue_in_open_incident(conn, issue.id).await?;
 	let snoozed = issue.snoozed_until.is_some_and(|t| t > Timestamp::now());
-	// A group-scoped issue (server_id = None) can only be silenced at the
+	// A group-scoped issue (application_id = None) can only be silenced at the
 	// group level; pass the nil server so only the group list is consulted.
 	// Canopy-wide issues have no silence scope (yet).
 	let silenced = crate::silenced_refs::is_silenced(
 		conn,
-		issue.server_id.unwrap_or(Uuid::nil()),
+		issue.application_id.unwrap_or(Uuid::nil()),
 		target.group_id(),
 		&issue.source,
 		&issue.r#ref,
@@ -1959,7 +1959,7 @@ async fn re_evaluate_incident_membership(
 /// Resolve the `(target, monitored)` pair an issue should be re-evaluated
 /// against, handling all three scopes.
 ///
-/// - Server-scoped (`server_id = Some`): look the server up; its `group_id`
+/// - Application-scoped (`application_id = Some`): look the server up; its `group_id`
 ///   and `is_monitored` drive the evaluation. `None` group → ungrouped, no
 ///   incident path.
 /// - Group-scoped (`server_group_id = Some`): use the group directly and force
@@ -1970,26 +1970,26 @@ async fn issue_target_and_monitored(
 	conn: &mut AsyncPgConnection,
 	issue: &Issue,
 ) -> Result<Option<(IncidentTarget, bool)>> {
-	Scope::from_columns(issue.server_id, issue.server_group_id)
+	Scope::from_columns(issue.application_id, issue.server_group_id)
 		.resolve_incident_target(conn)
 		.await
 }
 
-/// Re-evaluate every currently-open issue on `server_id` against incident
+/// Re-evaluate every currently-open issue on `application_id` against incident
 /// membership. Used as a catch-up when the operator flips a property of
 /// the server that changes its incident eligibility — currently:
-/// ungrouped→grouped (via [`Server::assign_to_group`]) and monitored
+/// ungrouped→grouped (via [`Application::assign_to_group`]) and monitored
 /// toggles (via the private-server's server update handler). On flips
 /// that should *remove* issues from an incident (e.g. monitored→
 /// unmonitored), `re_evaluate_incident_membership` will leave them and
 /// close the incident if nothing else props it up.
 pub async fn reevaluate_open_issues_for_server(
 	db: &mut AsyncPgConnection,
-	server_id: Uuid,
+	application_id: Uuid,
 ) -> Result<()> {
 	use crate::schema::issues::dsl;
 
-	let server = Server::get_by_id(db, server_id).await?;
+	let server = Application::get_by_id(db, application_id).await?;
 	let Some(gid) = server.group_id else {
 		return Ok(());
 	};
@@ -1997,7 +1997,7 @@ pub async fn reevaluate_open_issues_for_server(
 
 	let open_issues: Vec<Issue> = dsl::issues
 		.select(Issue::as_select())
-		.filter(dsl::server_id.eq(server_id))
+		.filter(dsl::application_id.eq(application_id))
 		.filter(dsl::active.eq(true))
 		.filter(dsl::resolved_at.is_null())
 		.load(db)
@@ -2018,7 +2018,7 @@ pub async fn reevaluate_open_issues_for_server(
 	Ok(())
 }
 
-/// Enqueue `server_id` for deferred incident (re-)evaluation.
+/// Enqueue `application_id` for deferred incident (re-)evaluation.
 ///
 /// The device status-ingest path calls this in place of the inline
 /// `re_evaluate_incident_membership` it used to run: recording the issue
@@ -2030,18 +2030,21 @@ pub async fn reevaluate_open_issues_for_server(
 /// unit. A push arriving while a re-evaluation is already pending is a
 /// no-op — the pending run reads current state when it fires, so it already
 /// covers the later push.
-pub async fn enqueue_incident_reeval(conn: &mut AsyncPgConnection, server_id: Uuid) -> Result<()> {
+pub async fn enqueue_incident_reeval(
+	conn: &mut AsyncPgConnection,
+	application_id: Uuid,
+) -> Result<()> {
 	use crate::schema::incident_reeval_queue::dsl;
 	diesel::insert_into(dsl::incident_reeval_queue)
-		.values(dsl::server_id.eq(server_id))
-		.on_conflict(dsl::server_id)
+		.values(dsl::application_id.eq(application_id))
+		.on_conflict(dsl::application_id)
 		.do_nothing()
 		.execute(conn)
 		.await?;
 	Ok(())
 }
 
-/// Re-evaluate incident membership for every issue on `server_id` that can
+/// Re-evaluate incident membership for every issue on `application_id` that can
 /// currently affect an incident: issues that are active-and-unresolved
 /// (candidates to *join*), plus issues still linked to an open incident
 /// (candidates to *leave* — e.g. a check that just recovered and went
@@ -2056,11 +2059,11 @@ pub async fn enqueue_incident_reeval(conn: &mut AsyncPgConnection, server_id: Uu
 /// order.
 pub async fn reevaluate_incidents_for_server(
 	conn: &mut AsyncPgConnection,
-	server_id: Uuid,
+	application_id: Uuid,
 ) -> Result<()> {
 	use crate::schema::{incident_issues, incidents, issues};
 
-	let server = Server::get_by_id(conn, server_id).await?;
+	let server = Application::get_by_id(conn, application_id).await?;
 	let Some(gid) = server.group_id else {
 		return Ok(());
 	};
@@ -2068,7 +2071,7 @@ pub async fn reevaluate_incidents_for_server(
 
 	let mut candidates: Vec<Issue> = issues::table
 		.select(Issue::as_select())
-		.filter(issues::server_id.eq(server_id))
+		.filter(issues::application_id.eq(application_id))
 		.filter(
 			issues::active
 				.eq(true)
@@ -2105,8 +2108,8 @@ pub async fn reevaluate_incidents_for_server(
 }
 
 /// Drain the incident re-evaluation queue, running
-/// [`reevaluate_incidents_for_server`] for up to `limit` queued servers and
-/// removing each once handled. Returns the number of servers processed.
+/// [`reevaluate_incidents_for_server`] for up to `limit` queued applications and
+/// removing each once handled. Returns the number of applications processed.
 ///
 /// Each server is claimed and processed in its own transaction with
 /// `FOR UPDATE SKIP LOCKED`, so a slow re-evaluation doesn't hold a batch of
@@ -2122,8 +2125,8 @@ pub async fn process_incident_reeval_queue(
 	while (processed as i64) < limit {
 		let claimed: Option<Uuid> = conn
 			.transaction::<_, AppError, _>(async |tx| {
-				let Some(server_id): Option<Uuid> = dsl::incident_reeval_queue
-					.select(dsl::server_id)
+				let Some(application_id): Option<Uuid> = dsl::incident_reeval_queue
+					.select(dsl::application_id)
 					.order(dsl::enqueued_at.asc())
 					.for_update()
 					.skip_locked()
@@ -2133,11 +2136,13 @@ pub async fn process_incident_reeval_queue(
 				else {
 					return Ok(None);
 				};
-				reevaluate_incidents_for_server(tx, server_id).await?;
-				diesel::delete(dsl::incident_reeval_queue.filter(dsl::server_id.eq(server_id)))
-					.execute(tx)
-					.await?;
-				Ok(Some(server_id))
+				reevaluate_incidents_for_server(tx, application_id).await?;
+				diesel::delete(
+					dsl::incident_reeval_queue.filter(dsl::application_id.eq(application_id)),
+				)
+				.execute(tx)
+				.await?;
+				Ok(Some(application_id))
 			})
 			.await?;
 		match claimed {
@@ -2148,19 +2153,19 @@ pub async fn process_incident_reeval_queue(
 	Ok(processed)
 }
 
-/// Re-evaluate every currently-open issue on `server_id` with the given
+/// Re-evaluate every currently-open issue on `application_id` with the given
 /// `(source, ref)`. Narrower variant of [`reevaluate_open_issues_for_server`]
 /// used after a server-scoped silence is added or removed: only the matching
 /// refs need to revisit their incident membership.
 pub async fn reevaluate_open_issues_for_server_ref(
 	db: &mut AsyncPgConnection,
-	server_id: Uuid,
+	application_id: Uuid,
 	source: &str,
 	r#ref: &str,
 ) -> Result<()> {
 	use crate::schema::issues::dsl;
 
-	let server = Server::get_by_id(db, server_id).await?;
+	let server = Application::get_by_id(db, application_id).await?;
 	let Some(gid) = server.group_id else {
 		return Ok(());
 	};
@@ -2168,7 +2173,7 @@ pub async fn reevaluate_open_issues_for_server_ref(
 
 	let open_issues: Vec<Issue> = dsl::issues
 		.select(Issue::as_select())
-		.filter(dsl::server_id.eq(server_id))
+		.filter(dsl::application_id.eq(application_id))
 		.filter(dsl::source.eq(source))
 		.filter(dsl::ref_.eq(r#ref))
 		.filter(dsl::active.eq(true))
@@ -2199,11 +2204,11 @@ pub async fn reevaluate_open_issues_for_group_ref(
 	source: &str,
 	r#ref: &str,
 ) -> Result<()> {
-	use crate::schema::{issues, servers};
+	use crate::schema::{applications, issues};
 
-	let server_ids: Vec<Uuid> = servers::table
-		.select(servers::id)
-		.filter(servers::group_id.eq(server_group_id))
+	let server_ids: Vec<Uuid> = applications::table
+		.select(applications::id)
+		.filter(applications::group_id.eq(server_group_id))
 		.load(db)
 		.await?;
 
@@ -2212,7 +2217,7 @@ pub async fn reevaluate_open_issues_for_group_ref(
 	let open_issues: Vec<Issue> = issues::table
 		.select(Issue::as_select())
 		.filter(
-			issues::server_id
+			issues::application_id
 				.eq_any(&server_ids)
 				.or(issues::server_group_id.eq(server_group_id)),
 		)
@@ -2229,12 +2234,12 @@ pub async fn reevaluate_open_issues_for_group_ref(
 	let mut monitored_by_server: std::collections::HashMap<Uuid, bool> =
 		std::collections::HashMap::new();
 	for sid in &server_ids {
-		let s = Server::get_by_id(db, *sid).await?;
+		let s = Application::get_by_id(db, *sid).await?;
 		monitored_by_server.insert(*sid, s.is_monitored);
 	}
 	for issue in open_issues {
 		// Group-scoped issues bypass the per-server monitored gate.
-		let monitored = match issue.server_id {
+		let monitored = match issue.application_id {
 			Some(sid) => monitored_by_server.get(&sid).copied().unwrap_or(true),
 			None => true,
 		};
@@ -2355,13 +2360,15 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 		}
 
 		let server_ids: Vec<Uuid> = {
-			let mut s: std::collections::HashSet<Uuid> =
-				open_issues.iter().filter_map(|i| i.server_id).collect();
+			let mut s: std::collections::HashSet<Uuid> = open_issues
+				.iter()
+				.filter_map(|i| i.application_id)
+				.collect();
 			s.drain().collect()
 		};
-		let servers = Server::get_by_ids(conn, &server_ids).await?;
-		let by_id: std::collections::HashMap<Uuid, Server> =
-			servers.into_iter().map(|s| (s.id, s)).collect();
+		let applications = Application::get_by_ids(conn, &server_ids).await?;
+		let by_id: std::collections::HashMap<Uuid, Application> =
+			applications.into_iter().map(|s| (s.id, s)).collect();
 
 		let now = Timestamp::now();
 		let mut evaluated = 0usize;
@@ -2370,7 +2377,7 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 			// server case from the batched `by_id` map (rather than
 			// `Scope::resolve_incident_target`, which queries per issue) to
 			// keep this startup sweep to a single server fetch.
-			match Scope::from_columns(issue.server_id, issue.server_group_id) {
+			match Scope::from_columns(issue.application_id, issue.server_group_id) {
 				// Group-scoped issue: resolve its group directly, bypass the
 				// per-server is_monitored gate (monitored = true).
 				Scope::Group(gid) => {
@@ -2385,13 +2392,13 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 					.await?;
 					evaluated += 1;
 				}
-				// Server-scoped issue: look up the server and its group.
-				Scope::Server(sid) => {
+				// Application-scoped issue: look up the server and its group.
+				Scope::Application(sid) => {
 					let Some(server) = by_id.get(&sid) else {
 						continue;
 					};
 					let Some(gid) = server.group_id else {
-						// Ungrouped servers can't have incidents; nothing to reconcile.
+						// Ungrouped applications can't have incidents; nothing to reconcile.
 						continue;
 					};
 					re_evaluate_incident_membership(
@@ -2577,7 +2584,7 @@ async fn is_issue_in_open_incident(db: &mut AsyncPgConnection, issue_id: Uuid) -
 
 /// What an issue's incident contribution attaches to: its server's group,
 /// or canopy as a whole for canopy-wide issues (self-alerts). Issues on
-/// ungrouped servers have no target and no incident path.
+/// ungrouped applications have no target and no incident path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IncidentTarget {
 	Group(Uuid),
@@ -2728,8 +2735,8 @@ async fn enqueue_slack_open(
 	let (label, open_delay) = match target {
 		IncidentTarget::Group(gid) => {
 			let group = ServerGroup::get_by_id(conn, gid).await?;
-			let server = match issue.server_id {
-				Some(sid) => Some(Server::get_by_id(conn, sid).await?),
+			let server = match issue.application_id {
+				Some(sid) => Some(Application::get_by_id(conn, sid).await?),
 				None => None,
 			};
 			(
@@ -2866,7 +2873,7 @@ async fn enqueue_slack_resolve_inner(
 	Ok(())
 }
 
-pub(crate) fn format_group_label(group: &ServerGroup, server: Option<&Server>) -> String {
+pub(crate) fn format_group_label(group: &ServerGroup, server: Option<&Application>) -> String {
 	if let Some(server) = server {
 		let host = server.host.as_ref().map(|h| h.0.to_string());
 		let server_part = match (&server.name, host) {
@@ -2911,7 +2918,7 @@ impl Issue {
 
 	pub async fn list_for_server(
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		application_id: Uuid,
 		filter: IssueFilter,
 		limit: i64,
 	) -> Result<Vec<Self>> {
@@ -2919,7 +2926,7 @@ impl Issue {
 
 		let mut q = dsl::issues
 			.select(Self::as_select())
-			.filter(dsl::server_id.eq(server_id))
+			.filter(dsl::application_id.eq(application_id))
 			// Healthy check state (rows that never degraded) isn't an
 			// issue; it has its own read surfaces.
 			.filter(dsl::active.eq(true).or(dsl::last_degraded_at.is_not_null()))
@@ -2944,8 +2951,8 @@ impl Issue {
 	/// - `results`: when `Some` and non-empty, restrict to issues whose
 	///   latest effective result is one of those.
 	/// - `server_group_id`: when `Some`, restrict to issues whose server is
-	///   in that group. A direct `IN (SELECT id FROM servers WHERE group_id = $)`.
-	/// - `server_id`: when `Some`, restrict to issues on that server.
+	///   in that group. A direct `IN (SELECT id FROM applications WHERE group_id = $)`.
+	/// - `application_id`: when `Some`, restrict to issues on that server.
 	///
 	/// Every filter is applied in SQL, so `limit` bounds the *filtered* set.
 	/// Narrowing a page after the fact would let a busy fleet push a quiet
@@ -2955,8 +2962,8 @@ impl Issue {
 		filters: IssueListFilters,
 		limit: i64,
 	) -> Result<Vec<Self>> {
+		use crate::schema::applications;
 		use crate::schema::issues::dsl;
-		use crate::schema::servers;
 
 		let mut q = dsl::issues
 			.select(Self::as_select())
@@ -2964,7 +2971,7 @@ impl Issue {
 			// group-scoped) have their own surface (`crate::self_alerts`);
 			// they are not fleet issues.
 			.filter(
-				dsl::server_id
+				dsl::application_id
 					.is_not_null()
 					.or(dsl::server_group_id.is_not_null()),
 			)
@@ -2982,15 +2989,15 @@ impl Issue {
 			q = q.filter(dsl::effective_result.eq_any(strs));
 		}
 		if let Some(gid) = filters.server_group_id {
-			let server_ids: Vec<Uuid> = servers::table
-				.select(servers::id)
-				.filter(servers::group_id.eq(gid))
+			let server_ids: Vec<Uuid> = applications::table
+				.select(applications::id)
+				.filter(applications::group_id.eq(gid))
 				.load(db)
 				.await?;
-			q = q.filter(dsl::server_id.eq_any(server_ids));
+			q = q.filter(dsl::application_id.eq_any(server_ids));
 		}
-		if let Some(sid) = filters.server_id {
-			q = q.filter(dsl::server_id.eq(sid));
+		if let Some(sid) = filters.application_id {
+			q = q.filter(dsl::application_id.eq(sid));
 		}
 		if let Some(since) = filters.since {
 			q = q.filter(dsl::last_seen.ge(jiff_diesel::Timestamp::from(since)));
@@ -3023,7 +3030,7 @@ impl Issue {
 	/// push didn't report a failure.
 	pub async fn active_refs_with_prefix(
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		application_id: Uuid,
 		source: &str,
 		prefix: &str,
 	) -> Result<Vec<String>> {
@@ -3035,8 +3042,8 @@ impl Issue {
 		dsl::issues
 			.select(dsl::ref_)
 			.filter(
-				dsl::server_id
-					.eq(server_id)
+				dsl::application_id
+					.eq(application_id)
 					.and(dsl::source.eq(source))
 					.and(dsl::ref_.like(format!("{prefix}%")))
 					.and(dsl::active.eq(true)),
@@ -3047,7 +3054,7 @@ impl Issue {
 	}
 
 	/// Bulk lookup of issues that share the same `(source, ref)` across many
-	/// servers. Each `(server_id, source, ref)` is unique, so at most one row
+	/// applications. Each `(application_id, source, ref)` is unique, so at most one row
 	/// per server is returned. Used by the canopy reachability sweep.
 	/// Group ids carrying an active group-scoped issue with this
 	/// `(source, ref)`. Used by sweeps to recover only where an alert is
@@ -3069,7 +3076,7 @@ impl Issue {
 			.map_err(AppError::from)
 	}
 
-	/// Server ids carrying an active server-scoped issue with this
+	/// Application ids carrying an active server-scoped issue with this
 	/// `(source, ref)`. The counterpart to
 	/// [`Self::active_group_ids_by_source_ref`], for the sweeps whose work list is
 	/// "what is wrong now" and which need "what was wrong last time" to know what
@@ -3084,8 +3091,8 @@ impl Issue {
 			.filter(dsl::source.eq(source))
 			.filter(dsl::ref_.eq(ref_))
 			.filter(dsl::active.eq(true))
-			.filter(dsl::server_id.is_not_null())
-			.select(dsl::server_id.assume_not_null())
+			.filter(dsl::application_id.is_not_null())
+			.select(dsl::application_id.assume_not_null())
 			.load(db)
 			.await
 			.map_err(AppError::from)
@@ -3107,7 +3114,7 @@ impl Issue {
 				dsl::source
 					.eq(source)
 					.and(dsl::ref_.eq(ref_))
-					.and(dsl::server_id.eq_any(server_ids)),
+					.and(dsl::application_id.eq_any(server_ids)),
 			)
 			.load(db)
 			.await
@@ -3133,7 +3140,7 @@ impl Issue {
 				dsl::source
 					.eq(source)
 					.and(dsl::ref_.eq_any(refs))
-					.and(dsl::server_id.eq_any(server_ids)),
+					.and(dsl::application_id.eq_any(server_ids)),
 			)
 			.load(db)
 			.await
@@ -3162,14 +3169,14 @@ impl Issue {
 		// catalog row: this drops sources whose every check is decommissioned,
 		// and orphaned sources whose check-states have no catalog row at all
 		// (e.g. a superseded reporter like bestool-alertd) — otherwise a dead
-		// source would hold servers into a reachability warning forever, with
+		// source would hold applications into a reachability warning forever, with
 		// no catalog entry to silence or decommission. Mirrors the health
 		// rollup (see [`health_from_check_state`]).
 		let cataloged = CheckPolicy::live_cataloged_pairs(db).await?;
 
 		let rows: Vec<(Uuid, String, String, jiff_diesel::Timestamp)> = dsl::issues
 			.filter(
-				dsl::server_id
+				dsl::application_id
 					.eq_any(server_ids)
 					.and(
 						dsl::source
@@ -3178,7 +3185,7 @@ impl Issue {
 					.and(dsl::check_name.is_not_null()),
 			)
 			.select((
-				dsl::server_id.assume_not_null(),
+				dsl::application_id.assume_not_null(),
 				dsl::source,
 				dsl::check_name.assume_not_null(),
 				dsl::last_seen,
@@ -3431,16 +3438,16 @@ impl Incident {
 	/// Incidents are owned by the server's group, so a caller asking for a
 	/// specific server's incidents really wants the group's. Look up the
 	/// server's `group_id` and list incidents on that group; ungrouped
-	/// servers return an empty Vec.
+	/// applications return an empty Vec.
 	pub async fn list_for_server(
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		application_id: Uuid,
 		include_closed: bool,
 		limit: i64,
 	) -> Result<Vec<Self>> {
 		use crate::schema::incidents::dsl;
 
-		let Some(gid) = Server::get_by_id(db, server_id).await?.group_id else {
+		let Some(gid) = Application::get_by_id(db, application_id).await?.group_id else {
 			return Ok(Vec::new());
 		};
 		let mut q = dsl::incidents
@@ -3678,9 +3685,9 @@ impl Incident {
 				// The issue is now resolved so the leave path fires
 				// regardless of `monitored`; pass the live value
 				// anyway so the function never sees stale state. Group-scoped
-				// issues (server_id = None) bypass the per-server gate.
-				let monitored = match issue.server_id {
-					Some(sid) => Server::get_by_id(conn, sid).await?.is_monitored,
+				// issues (application_id = None) bypass the per-server gate.
+				let monitored = match issue.application_id {
+					Some(sid) => Application::get_by_id(conn, sid).await?.is_monitored,
 					None => true,
 				};
 				re_evaluate_incident_membership(conn, &issue, target, monitored, now, Some(by))

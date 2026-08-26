@@ -1,6 +1,6 @@
 use base64::Engine;
 use commons_types::device::DeviceRole;
-use database::servers::Server;
+use database::applications::Application;
 use database::{Device, DeviceConnection, DeviceKey};
 
 #[tokio::test(flavor = "multi_thread")]
@@ -85,13 +85,13 @@ async fn test_get_servers_for_device() {
 		// Create a device
 		let device = Device::create(&mut conn, vec![1, 2, 3]).await.unwrap();
 
-		// Get servers for the device (should be empty initially)
-		let servers = Server::get_by_device_id(&mut conn, device.id)
+		// Get applications for the device (should be empty initially)
+		let applications = Application::get_by_device_id(&mut conn, device.id)
 			.await
 			.unwrap();
 
-		// Should be empty since no servers have been associated
-		assert_eq!(servers.len(), 0);
+		// Should be empty since no applications have been associated
+		assert_eq!(applications.len(), 0);
 	})
 	.await;
 }

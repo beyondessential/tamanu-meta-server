@@ -25,13 +25,13 @@ use commons_types::backup::{
 use commons_types::server::product::RedactionManifest;
 use database::{
 	Db,
+	applications::Application,
 	backups::{BackupRun, NewBackupCredentialIssuance, ServerGroupBackupConfig},
 	migration_tests::{self, MigrationTest, NewMigrationTest},
 	pg_duration::PgDuration,
 	restore::{
 		BackupRestoreCheck, NewBackupRestoreCheck, RestoreConsumerCapability, RestoreReplica,
 	},
-	servers::Server,
 };
 use diesel_async::AsyncPgConnection;
 use jiff::{SignedDuration, Timestamp};
@@ -233,9 +233,9 @@ async fn worklist(
 			continue;
 		}
 
-		let servers = match d.server_id {
+		let applications = match d.server_id {
 			Some(sid) => {
-				let s = Server::get_by_id(&mut conn, sid).await?;
+				let s = Application::get_by_id(&mut conn, sid).await?;
 				// Skip a declaration whose server has left the group or been
 				// archived; it lingers as a no-op until the operator retires it.
 				if s.group_id == Some(d.group_id) && s.deleted_at.is_none() {
@@ -244,7 +244,7 @@ async fn worklist(
 					vec![]
 				}
 			}
-			None => Server::list_live_in_group(&mut conn, d.group_id).await?,
+			None => Application::list_live_in_group(&mut conn, d.group_id).await?,
 		};
 
 		if let std::collections::hash_map::Entry::Vacant(e) = snapshot_cache.entry(d.group_id) {
@@ -270,7 +270,7 @@ async fn worklist(
 		let params = resolve_params(&descriptor.params, &replica_values);
 
 		let region = cfg.region.clone().unwrap_or_else(deployment_default_region);
-		for server in servers {
+		for server in applications {
 			let key = (server.id, d.name.clone());
 			if !seen.insert(key) {
 				continue;

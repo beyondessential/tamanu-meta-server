@@ -19,11 +19,11 @@ use commons_types::{
 };
 use database::{
 	Db,
+	applications::Application,
 	check_policies::{CheckPolicy, EvaluationContext, GradedResult},
 	devices::Device,
 	diesel_async::{AsyncConnection, AsyncPgConnection},
 	issues::{CheckStateStamp, Issue, NewEvent},
-	servers::Server,
 	silenced_refs::silenced_health_checks_for_server,
 	statuses::{NewStatus, Status},
 };
@@ -233,7 +233,7 @@ async fn create(
 	let mut db = db.get().await?;
 	let Device { role, id, .. } = device.0.0;
 
-	let server = Server::get_by_id(&mut db, server_id).await?;
+	let server = Application::get_by_id(&mut db, server_id).await?;
 	let is_authorized = role == DeviceRole::Admin || server.device_id == Some(id);
 
 	if !is_authorized {
@@ -397,7 +397,7 @@ async fn check_severities(
 	let mut db = db.get().await?;
 	let Device { role, id, .. } = device.0.0;
 
-	let server = Server::get_by_id(&mut db, server_id).await?;
+	let server = Application::get_by_id(&mut db, server_id).await?;
 	if role != DeviceRole::Admin && server.device_id != Some(id) {
 		return Err(AppError::custom(
 			"device is not authorized to read this server's check severities",
@@ -678,7 +678,7 @@ async fn file_health_events(
 	// Incident (re-)evaluation is deferred off this request: the issue state
 	// above is recorded synchronously, but the incident work — which takes
 	// the per-group `server_groups` lock — is handed to the reeval worker so
-	// concurrent check-ins never convoy on that lock. Only grouped servers
+	// concurrent check-ins never convoy on that lock. Only grouped applications
 	// participate in incidents.
 	if group_id.is_some() {
 		database::issues::enqueue_incident_reeval(conn, server_id).await?;

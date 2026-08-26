@@ -21,7 +21,7 @@ struct Count {
 	count: i64,
 }
 
-/// Count active `restore-verification` check-states across a group's servers.
+/// Count active `restore-verification` check-states across a group's applications.
 ///
 /// Sweeps first: `sweep_restore_checks` is the sole filer of the restore checks and
 /// rebuilds each server's from its live declarations, so what a recorded report
@@ -33,7 +33,7 @@ async fn active_restore_issues(conn: &mut AsyncPgConnection, group: Uuid) -> i64
 		.expect("sweep");
 	sql_query(
 		"SELECT count(*) AS count FROM issues i \
-		 JOIN servers s ON s.id = i.server_id \
+		 JOIN applications s ON s.id = i.application_id \
 		 WHERE s.group_id = $1 AND i.ref = 'restore-verification' AND i.active = true",
 	)
 	.bind::<sql_types::Uuid, _>(group)
@@ -115,13 +115,15 @@ async fn insert_group(conn: &mut AsyncPgConnection, name: &str) -> Uuid {
 
 async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uuid {
 	let host = format!("http://test.invalid/{}", Uuid::new_v4());
-	sql_query("INSERT INTO servers (host, kind, group_id) VALUES ($1, 'central', $2) RETURNING id")
-		.bind::<sql_types::Text, _>(host)
-		.bind::<sql_types::Uuid, _>(group_id)
-		.get_result::<RowId>(conn)
-		.await
-		.expect("insert server")
-		.id
+	sql_query(
+		"INSERT INTO applications (host, kind, group_id) VALUES ($1, 'central', $2) RETURNING id",
+	)
+	.bind::<sql_types::Text, _>(host)
+	.bind::<sql_types::Uuid, _>(group_id)
+	.get_result::<RowId>(conn)
+	.await
+	.expect("insert server")
+	.id
 }
 
 async fn insert_consumer(conn: &mut AsyncPgConnection) -> Uuid {
@@ -581,7 +583,7 @@ async fn record_report_files_server_scoped_with_stable_name() {
 		// server is the scope (issues.server_id) and the replica an instance,
 		// neither of them baked into the check name.
 		let rows: Vec<VerifRow> = sql_query(
-			"SELECT check_name, server_id, server_group_id FROM issues \
+			"SELECT check_name, application_id, server_group_id FROM issues \
 			 WHERE source = 'canopy' AND ref = 'restore-verification' AND active",
 		)
 		.load(&mut conn)
@@ -1394,7 +1396,7 @@ async fn a_version_without_a_published_manifest_is_a_redaction_gap() {
 	TestDb::run(|mut conn, _url| async move {
 		let group = insert_group(&mut conn, "redaction-gap").await;
 		let server_id = insert_server(&mut conn, group).await;
-		let server = database::servers::Server::get_by_id(&mut conn, server_id)
+		let server = database::applications::Application::get_by_id(&mut conn, server_id)
 			.await
 			.expect("server");
 
@@ -1518,7 +1520,7 @@ async fn a_finding_survives_its_capability_being_withdrawn() {
 
 /// A report about a server the declaration doesn't name still surfaces. The
 /// ingest authorizes a report per (group, type), so a consumer maintaining one
-/// replica can report on any of the group's servers, and the finding belongs to
+/// replica can report on any of the group's applications, and the finding belongs to
 /// the server the report is about.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_report_about_an_unnamed_server_still_surfaces() {
@@ -1579,7 +1581,7 @@ struct NameRow {
 async fn issue_refs(conn: &mut AsyncPgConnection, server_id: Uuid, pattern: &str) -> Vec<String> {
 	sql_query(
 		"SELECT \"ref\" AS name FROM issues \
-		 WHERE server_id = $1 AND source = 'canopy' AND \"ref\" LIKE $2 ORDER BY \"ref\"",
+		 WHERE application_id = $1 AND source = 'canopy' AND \"ref\" LIKE $2 ORDER BY \"ref\"",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Text, _>(pattern)
@@ -1618,7 +1620,7 @@ struct FiledRow {
 async fn filed(conn: &mut AsyncPgConnection, server_id: Uuid, r#ref: &str) -> FiledRow {
 	sql_query(
 		"SELECT message, detail FROM issues \
-		 WHERE server_id = $1 AND source = 'canopy' AND \"ref\" = $2 AND active",
+		 WHERE application_id = $1 AND source = 'canopy' AND \"ref\" = $2 AND active",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Text, _>(r#ref)

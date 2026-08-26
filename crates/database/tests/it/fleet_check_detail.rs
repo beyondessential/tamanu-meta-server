@@ -15,7 +15,7 @@ struct RowId {
 }
 
 async fn insert_server(conn: &mut diesel_async::AsyncPgConnection, host: &str) -> Uuid {
-	let row: RowId = sql_query("INSERT INTO servers (host) VALUES ($1) RETURNING id")
+	let row: RowId = sql_query("INSERT INTO applications (host) VALUES ($1) RETURNING id")
 		.bind::<sql_types::Text, _>(host)
 		.get_result(conn)
 		.await
@@ -32,7 +32,7 @@ fn filing<'a>(
 ) -> CheckFiling<'a> {
 	CheckFiling {
 		source,
-		scope: Scope::Server(server_id),
+		scope: Scope::Application(server_id),
 		device_id: None,
 		check,
 		observed,
@@ -142,7 +142,7 @@ async fn silenced_reads_skipped_and_decommissioned_is_absent() {
 		.expect("file");
 
 		sql_query(
-			"INSERT INTO scoped_check_policies (server_id, source, check_name, ceiling, created_by) \
+			"INSERT INTO scoped_check_policies (application_id, source, check_name, ceiling, created_by) \
 			 VALUES ($1, 'alertd', 'hushed', 'skipped', 'op')",
 		)
 		.bind::<sql_types::Uuid, _>(server_id)
@@ -212,7 +212,7 @@ async fn same_check_name_from_two_sources_merges_newest_first() {
 		// the filings landing in distinguishable instants.
 		sql_query(
 			"UPDATE issues SET updated_at = now() - INTERVAL '1 hour' \
-			 WHERE server_id = $1 AND source = 'alertd'",
+			 WHERE application_id = $1 AND source = 'alertd'",
 		)
 		.bind::<sql_types::Uuid, _>(server_id)
 		.execute(&mut conn)

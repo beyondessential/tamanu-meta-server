@@ -1,7 +1,7 @@
 //! The `2026-06-03-150906-0000_backfill_registered_at` migration fills
-//! `servers.registered_at` for servers enrolled before the column
+//! `applications.registered_at` for applications enrolled before the column
 //! existed (the add_server_archival migration introduced it with no
-//! backfill, so live, status-reporting servers showed as "hasn't
+//! backfill, so live, status-reporting applications showed as "hasn't
 //! checked in yet"). Seeds the pre-backfill states and replays the
 //! migration's SQL.
 
@@ -22,11 +22,12 @@ async fn registered_at(
 	conn: &mut diesel_async::AsyncPgConnection,
 	server_id: Uuid,
 ) -> Option<jiff::Timestamp> {
-	let row: RegisteredRow = diesel::sql_query("SELECT registered_at FROM servers WHERE id = $1")
-		.bind::<sql_types::Uuid, _>(server_id)
-		.get_result(conn)
-		.await
-		.expect("fetch registered_at");
+	let row: RegisteredRow =
+		diesel::sql_query("SELECT registered_at FROM applications WHERE id = $1")
+			.bind::<sql_types::Uuid, _>(server_id)
+			.get_result(conn)
+			.await
+			.expect("fetch registered_at");
 	row.registered_at.map(Into::into)
 }
 
@@ -43,7 +44,7 @@ async fn matches_first_status(conn: &mut diesel_async::AsyncPgConnection, server
 	let row: MatchRow = diesel::sql_query(
 		"SELECT s.registered_at = \
 			(SELECT MIN(st.created_at) FROM statuses st WHERE st.server_id = s.id) AS matches \
-		 FROM servers s WHERE s.id = $1",
+		 FROM applications s WHERE s.id = $1",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.get_result(conn)
@@ -55,7 +56,7 @@ async fn matches_first_status(conn: &mut diesel_async::AsyncPgConnection, server
 #[tokio::test(flavor = "multi_thread")]
 async fn migration_backfills_enrolled_servers_only() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		// device_id is unique across servers — one device per server.
+		// device_id is unique across applications — one device per server.
 		let device_a = Uuid::new_v4();
 		let device_c = Uuid::new_v4();
 		let device_e = Uuid::new_v4();
@@ -73,7 +74,7 @@ async fn migration_backfills_enrolled_servers_only() {
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role) VALUES \
 				('{device_a}', 'server'), ('{device_c}', 'server'), ('{device_e}', 'server'); \
-			 INSERT INTO servers (id, host, kind, device_id, registered_at) VALUES \
+			 INSERT INTO applications (id, host, kind, device_id, registered_at) VALUES \
 				('{with_statuses}', 'https://a.example.com', 'central', '{device_a}', NULL), \
 				('{device_gone}', 'https://b.example.com', 'central', NULL, NULL), \
 				('{device_only}', 'https://c.example.com', 'central', '{device_c}', NULL), \
@@ -110,7 +111,7 @@ async fn migration_backfills_enrolled_servers_only() {
 		assert_eq!(
 			registered_at(&mut conn, unenrolled).await,
 			None,
-			"never-enrolled servers must keep showing setup instructions"
+			"never-enrolled applications must keep showing setup instructions"
 		);
 
 		let ts = registered_at(&mut conn, already_set).await;

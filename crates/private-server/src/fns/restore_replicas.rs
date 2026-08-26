@@ -29,7 +29,8 @@ use database::pg_duration::PgDuration;
 use database::restore::{self, RedactionGapReason};
 use database::{
 	BackupRestoreCheck, NewRestoreReplica, RestoreConsumerCapability, RestoreReplica,
-	RestoreReplicaUpdate, backups::BackupCredentialIssuance, devices::Device, servers::Server,
+	RestoreReplicaUpdate, applications::Application, backups::BackupCredentialIssuance,
+	devices::Device,
 };
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -65,7 +66,7 @@ pub struct RestoreReplicaView {
 	pub consumer_name: Option<String>,
 	/// Identifier of the server group whose backups the declaration covers.
 	pub group_id: Uuid,
-	/// Specific server within the group, or null to cover all current servers
+	/// Specific server within the group, or null to cover all current applications
 	/// in the group.
 	pub server_id: Option<Uuid>,
 	/// The backup type to restore, for example `tamanu-postgres`.
@@ -163,7 +164,7 @@ pub struct RestoreReplicasCreateArgs {
 	/// Identifier of the server group whose backups to restore.
 	pub group_id: Uuid,
 	/// Specific server within the group; omit or null to cover all current
-	/// servers in the group.
+	/// applications in the group.
 	pub server_id: Option<Uuid>,
 	/// The backup type to restore, for example `tamanu-postgres`.
 	#[schema(value_type = String)]
@@ -209,7 +210,7 @@ pub struct RestoreReplicasUpdateArgs {
 	/// Identifier of the server group whose backups to restore.
 	pub group_id: Uuid,
 	/// Specific server within the group; omit or null to cover all current
-	/// servers in the group.
+	/// applications in the group.
 	pub server_id: Option<Uuid>,
 	/// The backup type to restore, for example `tamanu-postgres`.
 	#[schema(value_type = String)]
@@ -305,24 +306,24 @@ async fn normalized_params_for_intent(
 	Ok(normalized)
 }
 
-/// The servers a redacting declaration covers that can't be redacted, so an
+/// The applications a redacting declaration covers that can't be redacted, so an
 /// operator sees which of its replicas are being withheld and why.
 // spec: RST#the-masking-manifest
 async fn redaction_gaps_for(
 	conn: &mut AsyncPgConnection,
 	replica: &RestoreReplica,
 ) -> Result<Vec<RedactionGap>> {
-	let servers = match replica.server_id {
-		Some(sid) => Server::get_by_id(conn, sid)
+	let applications = match replica.server_id {
+		Some(sid) => Application::get_by_id(conn, sid)
 			.await
 			.ok()
 			.into_iter()
 			.collect(),
-		None => Server::list_live_in_group(conn, replica.group_id).await?,
+		None => Application::list_live_in_group(conn, replica.group_id).await?,
 	};
 
 	let mut gaps = Vec::new();
-	for server in servers {
+	for server in applications {
 		if let Some((reason, version)) = restore::redaction_gap_for(conn, &server).await? {
 			gaps.push(RedactionGap {
 				server_id: server.id,
@@ -359,7 +360,7 @@ async fn to_views(
 	}
 
 	// Only a redacting declaration can have a redaction gap, and resolving
-	// one walks the declaration's servers, so this is keyed by declaration
+	// one walks the declaration's applications, so this is keyed by declaration
 	// and computed only for those that redact.
 	let mut gaps: HashMap<Uuid, Vec<RedactionGap>> = HashMap::new();
 	for r in replicas.iter().filter(|r| r.redacts) {
@@ -587,7 +588,7 @@ pub async fn checks(
 	// Member-server devices run *manual* restores, tracked in the backup panel;
 	// this table is for restore *consumers*, so their issuances are the ones we
 	// pair here (the complement of the backup panel's member-device filter).
-	let member_devices: HashSet<Uuid> = Server::list_live_in_group(&mut conn, group_id)
+	let member_devices: HashSet<Uuid> = Application::list_live_in_group(&mut conn, group_id)
 		.await?
 		.into_iter()
 		.filter_map(|s| s.device_id)

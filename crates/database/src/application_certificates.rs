@@ -82,12 +82,12 @@ impl OrderState {
 
 /// A certificate Canopy holds, or an order in flight to obtain one.
 #[derive(Debug, Clone, Serialize, Queryable, Selectable, utoipa::ToSchema)]
-#[diesel(table_name = crate::schema::server_certificates)]
+#[diesel(table_name = crate::schema::application_certificates)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct ServerCertificate {
+pub struct ApplicationCertificate {
 	pub id: Uuid,
 	/// The server the certificate was obtained for.
-	pub server_id: Uuid,
+	pub application_id: Uuid,
 	/// The single name it covers, normalised.
 	pub name: String,
 	/// Hex SHA-256 over the subject public key info of the certified key.
@@ -195,7 +195,7 @@ impl RevocationReason {
 /// to say who has forgotten what.
 #[derive(Debug, Clone)]
 pub struct PausedLapse {
-	pub server_id: Uuid,
+	pub application_id: Uuid,
 	pub server_name: String,
 	/// The name the certificate covers.
 	pub name: String,
@@ -219,7 +219,7 @@ pub enum Risk {
 	Critical,
 }
 
-impl ServerCertificate {
+impl ApplicationCertificate {
 	pub fn order_state(&self) -> OrderState {
 		OrderState::from_column(&self.state)
 	}
@@ -308,12 +308,12 @@ impl ServerCertificate {
 	/// new order.
 	pub async fn request(
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		application_id: Uuid,
 		name: &str,
 		key_fingerprint: &str,
 		csr: &[u8],
 	) -> Result<Self> {
-		use crate::schema::server_certificates::dsl;
+		use crate::schema::application_certificates::dsl;
 
 		let name = normalize_domain(name)?;
 
@@ -336,9 +336,9 @@ impl ServerCertificate {
 				// Expired, or given up on: try again now, from the start. The
 				// server may have changed hands, so the requester is recorded
 				// afresh.
-				_ => diesel::update(dsl::server_certificates.filter(dsl::id.eq(existing.id)))
+				_ => diesel::update(dsl::application_certificates.filter(dsl::id.eq(existing.id)))
 					.set((
-						dsl::server_id.eq(server_id),
+						dsl::application_id.eq(application_id),
 						dsl::state.eq(OrderState::Pending.as_str()),
 						dsl::renewing.eq(existing.chain.is_some()),
 						dsl::attempts.eq(0),
@@ -352,9 +352,9 @@ impl ServerCertificate {
 			};
 		}
 
-		diesel::insert_into(dsl::server_certificates)
+		diesel::insert_into(dsl::application_certificates)
 			.values((
-				dsl::server_id.eq(server_id),
+				dsl::application_id.eq(application_id),
 				dsl::name.eq(&name),
 				dsl::key_fingerprint.eq(key_fingerprint),
 				dsl::csr.eq(csr),
@@ -371,9 +371,9 @@ impl ServerCertificate {
 		name: &str,
 		key_fingerprint: &str,
 	) -> Result<Option<Self>> {
-		use crate::schema::server_certificates::dsl;
+		use crate::schema::application_certificates::dsl;
 		let name = normalize_domain(name)?;
-		dsl::server_certificates
+		dsl::application_certificates
 			.select(Self::as_select())
 			.filter(dsl::name.eq(name))
 			.filter(dsl::key_fingerprint.eq(key_fingerprint))
@@ -384,8 +384,8 @@ impl ServerCertificate {
 	}
 
 	pub async fn get(db: &mut AsyncPgConnection, id: Uuid) -> Result<Self> {
-		use crate::schema::server_certificates::dsl;
-		dsl::server_certificates
+		use crate::schema::application_certificates::dsl;
+		dsl::application_certificates
 			.select(Self::as_select())
 			.filter(dsl::id.eq(id))
 			.first(db)
@@ -396,11 +396,11 @@ impl ServerCertificate {
 	}
 
 	/// Every certificate and in-flight order for a server, newest first.
-	pub async fn for_server(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Vec<Self>> {
-		use crate::schema::server_certificates::dsl;
-		dsl::server_certificates
+	pub async fn for_server(db: &mut AsyncPgConnection, application_id: Uuid) -> Result<Vec<Self>> {
+		use crate::schema::application_certificates::dsl;
+		dsl::application_certificates
 			.select(Self::as_select())
-			.filter(dsl::server_id.eq(server_id))
+			.filter(dsl::application_id.eq(application_id))
 			.order((dsl::name.asc(), dsl::created_at.desc()))
 			.load(db)
 			.await
@@ -410,27 +410,27 @@ impl ServerCertificate {
 	/// Orders due to be attempted, soonest first. Claimed with `SKIP LOCKED` so
 	/// two workers never drive the same order.
 	///
-	/// Skips paused servers: while a server is paused Canopy makes no new changes
+	/// Skips paused applications: while a server is paused Canopy makes no new changes
 	/// on its behalf, so its orders sit where they are and resume when the pause
 	/// lifts.
 	// spec: CRT#pausing-a-server
 	pub async fn claim_due(db: &mut AsyncPgConnection, limit: i64) -> Result<Vec<Self>> {
-		use crate::schema::{server_certificates, servers};
+		use crate::schema::{application_certificates, applications};
 
 		let now = jiff_diesel::Timestamp::from(Timestamp::now());
 
-		// Two steps on purpose. The eligibility question spans `servers` (is it
+		// Two steps on purpose. The eligibility question spans `applications` (is it
 		// paused? archived?), but the lock belongs on the certificate rows alone:
 		// `FOR UPDATE` over the join would lock server rows too, and an unrelated
 		// edit to a server would then block a worker claiming its orders.
-		let candidates: Vec<Uuid> = server_certificates::table
-			.inner_join(servers::table)
-			.filter(server_certificates::state.eq(OrderState::Pending.as_str()))
-			.filter(server_certificates::next_attempt_at.le(now))
-			.filter(servers::deleted_at.is_null())
-			.filter(servers::name_management_paused_at.is_null())
-			.select(server_certificates::id)
-			.order(server_certificates::next_attempt_at.asc())
+		let candidates: Vec<Uuid> = application_certificates::table
+			.inner_join(applications::table)
+			.filter(application_certificates::state.eq(OrderState::Pending.as_str()))
+			.filter(application_certificates::next_attempt_at.le(now))
+			.filter(applications::deleted_at.is_null())
+			.filter(applications::name_management_paused_at.is_null())
+			.select(application_certificates::id)
+			.order(application_certificates::next_attempt_at.asc())
 			.limit(limit)
 			.load(db)
 			.await
@@ -442,12 +442,12 @@ impl ServerCertificate {
 
 		// Re-apply the row-local filters: a candidate may have been worked by
 		// another worker between the two statements.
-		server_certificates::table
-			.filter(server_certificates::id.eq_any(candidates))
-			.filter(server_certificates::state.eq(OrderState::Pending.as_str()))
-			.filter(server_certificates::next_attempt_at.le(now))
+		application_certificates::table
+			.filter(application_certificates::id.eq_any(candidates))
+			.filter(application_certificates::state.eq(OrderState::Pending.as_str()))
+			.filter(application_certificates::next_attempt_at.le(now))
 			.select(Self::as_select())
-			.order(server_certificates::next_attempt_at.asc())
+			.order(application_certificates::next_attempt_at.asc())
 			.for_update()
 			.skip_locked()
 			.load(db)
@@ -467,12 +467,12 @@ impl ServerCertificate {
 		profile: Option<&str>,
 		renew_after: Option<Timestamp>,
 	) -> Result<()> {
-		use crate::schema::server_certificates::dsl;
+		use crate::schema::application_certificates::dsl;
 
 		let issued_at = Timestamp::now();
 		let renew_after = renew_after.unwrap_or_else(|| default_renew_after(issued_at, not_after));
 
-		diesel::update(dsl::server_certificates.filter(dsl::id.eq(id)))
+		diesel::update(dsl::application_certificates.filter(dsl::id.eq(id)))
 			.set((
 				dsl::state.eq(OrderState::Issued.as_str()),
 				dsl::chain.eq(Some(chain)),
@@ -496,13 +496,13 @@ impl ServerCertificate {
 	/// is worth continuing to try, and the alerting is what tells an operator it
 	/// isn't working.
 	pub async fn record_failure(db: &mut AsyncPgConnection, id: Uuid, error: &str) -> Result<()> {
-		use crate::schema::server_certificates::dsl;
+		use crate::schema::application_certificates::dsl;
 
 		let current = Self::get(db, id).await?;
 		let attempts = current.attempts.saturating_add(1);
 		let backoff = backoff_for(attempts);
 
-		diesel::update(dsl::server_certificates.filter(dsl::id.eq(id)))
+		diesel::update(dsl::application_certificates.filter(dsl::id.eq(id)))
 			.set((
 				dsl::attempts.eq(attempts),
 				dsl::next_attempt_at.eq(jiff_diesel::Timestamp::from(Timestamp::now() + backoff)),
@@ -517,25 +517,25 @@ impl ServerCertificate {
 	/// is time to renew. Marks each pending so the worker picks it up, and
 	/// returns them.
 	pub async fn start_renewals(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
-		use crate::schema::server_certificates::dsl;
+		use crate::schema::application_certificates::dsl;
 
 		let now = Timestamp::now();
-		// Paused servers are skipped: their renewals fall due again when the
+		// Paused applications are skipped: their renewals fall due again when the
 		// pause lifts.
 		// spec: CRT#pausing-a-server
 		let due: Vec<Uuid> = {
-			use crate::schema::{server_certificates, servers};
-			server_certificates::table
-				.inner_join(servers::table)
-				.filter(server_certificates::state.eq(OrderState::Issued.as_str()))
-				.filter(server_certificates::renew_after.is_not_null())
+			use crate::schema::{application_certificates, applications};
+			application_certificates::table
+				.inner_join(applications::table)
+				.filter(application_certificates::state.eq(OrderState::Issued.as_str()))
+				.filter(application_certificates::renew_after.is_not_null())
 				.filter(
-					server_certificates::renew_after
+					application_certificates::renew_after
 						.le(jiff_diesel::NullableTimestamp::from(Some(now))),
 				)
-				.filter(servers::deleted_at.is_null())
-				.filter(servers::name_management_paused_at.is_null())
-				.select(server_certificates::id)
+				.filter(applications::deleted_at.is_null())
+				.filter(applications::name_management_paused_at.is_null())
+				.select(application_certificates::id)
 				.load(db)
 				.await
 				.map_err(AppError::from)?
@@ -545,7 +545,7 @@ impl ServerCertificate {
 			return Ok(Vec::new());
 		}
 
-		diesel::update(dsl::server_certificates.filter(dsl::id.eq_any(&due)))
+		diesel::update(dsl::application_certificates.filter(dsl::id.eq_any(&due)))
 			.set((
 				dsl::state.eq(OrderState::Pending.as_str()),
 				dsl::renewing.eq(true),
@@ -555,7 +555,7 @@ impl ServerCertificate {
 			.execute(db)
 			.await?;
 
-		dsl::server_certificates
+		dsl::application_certificates
 			.select(Self::as_select())
 			.filter(dsl::id.eq_any(due))
 			.load(db)
@@ -575,22 +575,22 @@ impl ServerCertificate {
 	/// brings its certificates back into scope.
 	// spec: CRT#when-issuance-fails
 	pub async fn at_risk(db: &mut AsyncPgConnection) -> Result<Vec<(Self, Risk)>> {
-		use crate::schema::{server_certificates, servers};
+		use crate::schema::{application_certificates, applications};
 
-		let held: Vec<(Self, Option<Uuid>, bool)> = server_certificates::table
-			.inner_join(servers::table)
-			.filter(server_certificates::state.eq(OrderState::Issued.as_str()))
-			.filter(servers::deleted_at.is_null())
-			.filter(servers::may_manage_tls.eq(true))
+		let held: Vec<(Self, Option<Uuid>, bool)> = application_certificates::table
+			.inner_join(applications::table)
+			.filter(application_certificates::state.eq(OrderState::Issued.as_str()))
+			.filter(applications::deleted_at.is_null())
+			.filter(applications::may_manage_tls.eq(true))
 			// A paused server raises nothing: Canopy was told to stop acting on
 			// its behalf, so a certificate running down is the expected
 			// consequence. The pause is what gets reported instead.
 			// spec: CRT#pausing-a-server
-			.filter(servers::name_management_paused_at.is_null())
+			.filter(applications::name_management_paused_at.is_null())
 			.select((
 				Self::as_select(),
-				servers::group_id,
-				servers::may_manage_tls,
+				applications::group_id,
+				applications::may_manage_tls,
 			))
 			.load(db)
 			.await
@@ -632,7 +632,7 @@ impl ServerCertificate {
 	/// acting for.
 	///
 	/// This is the other half of [`Self::at_risk`], which deliberately skips paused
-	/// servers. A pause suppresses the per-server alerting that would chase a
+	/// applications. A pause suppresses the per-server alerting that would chase a
 	/// certificate running out, so the forgetting is what has to become visible —
 	/// and against Canopy rather than the deployment, since nobody on that
 	/// deployment can lift a pause.
@@ -642,30 +642,30 @@ impl ServerCertificate {
 	/// stopped renewing it on purpose.
 	// spec: CRT#pausing-a-server
 	pub async fn lapsing_under_pause(db: &mut AsyncPgConnection) -> Result<Vec<PausedLapse>> {
-		use crate::schema::{server_certificates, servers};
+		use crate::schema::{application_certificates, applications};
 
 		/// `(certificate, group, server name, paused at, pause reason)` — the
 		/// columns the report needs from either side of the join.
 		type PausedRow = (
-			ServerCertificate,
+			ApplicationCertificate,
 			Option<Uuid>,
 			Option<String>,
 			jiff_diesel::NullableTimestamp,
 			Option<String>,
 		);
 
-		let held: Vec<PausedRow> = server_certificates::table
-			.inner_join(servers::table)
-			.filter(server_certificates::state.eq(OrderState::Issued.as_str()))
-			.filter(servers::deleted_at.is_null())
-			.filter(servers::may_manage_tls.eq(true))
-			.filter(servers::name_management_paused_at.is_not_null())
+		let held: Vec<PausedRow> = application_certificates::table
+			.inner_join(applications::table)
+			.filter(application_certificates::state.eq(OrderState::Issued.as_str()))
+			.filter(applications::deleted_at.is_null())
+			.filter(applications::may_manage_tls.eq(true))
+			.filter(applications::name_management_paused_at.is_not_null())
 			.select((
 				Self::as_select(),
-				servers::group_id,
-				servers::name,
-				servers::name_management_paused_at,
-				servers::name_management_pause_reason,
+				applications::group_id,
+				applications::name,
+				applications::name_management_paused_at,
+				applications::name_management_pause_reason,
 			))
 			.load(db)
 			.await
@@ -699,10 +699,10 @@ impl ServerCertificate {
 				continue;
 			}
 			out.push(PausedLapse {
-				server_id: cert.server_id,
+				application_id: cert.application_id,
 				// A server with no name of its own is named by its id, which is what
 				// the rest of the UI falls back to.
-				server_name: server_name.unwrap_or_else(|| cert.server_id.to_string()),
+				server_name: server_name.unwrap_or_else(|| cert.application_id.to_string()),
 				name: cert.name.clone(),
 				not_after: cert.not_after,
 				expired,
@@ -720,8 +720,8 @@ impl ServerCertificate {
 		db: &mut AsyncPgConnection,
 		min_attempts: i32,
 	) -> Result<Vec<Self>> {
-		use crate::schema::server_certificates::dsl;
-		dsl::server_certificates
+		use crate::schema::application_certificates::dsl;
+		dsl::application_certificates
 			.select(Self::as_select())
 			.filter(dsl::chain.is_null())
 			.filter(dsl::attempts.ge(min_attempts))
@@ -746,14 +746,14 @@ impl ServerCertificate {
 		reason: RevocationReason,
 		revoked_by: Option<&str>,
 	) -> Result<()> {
-		use crate::schema::{compromised_keys, server_certificates::dsl};
+		use crate::schema::{application_certificates::dsl, compromised_keys};
 		use diesel_async::AsyncConnection;
 
 		let cert = Self::get(db, id).await?;
 		let by = revoked_by.map(str::to_string);
 
 		db.transaction::<_, AppError, _>(async |conn| {
-			diesel::update(dsl::server_certificates.filter(dsl::id.eq(id)))
+			diesel::update(dsl::application_certificates.filter(dsl::id.eq(id)))
 				.set((
 					dsl::state.eq(OrderState::Revoked.as_str()),
 					dsl::revoked_at
@@ -772,9 +772,9 @@ impl ServerCertificate {
 			// because the host was compromised that hands the same attacker a
 			// fresh certificate. An operator decides when to start again.
 			// spec: CRT#pausing-a-server
-			crate::servers::Server::pause_name_management(
+			crate::applications::Application::pause_name_management(
 				conn,
-				cert.server_id,
+				cert.application_id,
 				by.as_deref(),
 				&format!(
 					"certificate for {} revoked ({})",
@@ -806,8 +806,8 @@ impl ServerCertificate {
 	/// Stop working an order and stop renewing what it produced — the name is no
 	/// longer the group's, or the server may no longer hold it.
 	pub async fn stop(db: &mut AsyncPgConnection, id: Uuid, reason: &str) -> Result<()> {
-		use crate::schema::server_certificates::dsl;
-		diesel::update(dsl::server_certificates.filter(dsl::id.eq(id)))
+		use crate::schema::application_certificates::dsl;
+		diesel::update(dsl::application_certificates.filter(dsl::id.eq(id)))
 			.set((
 				dsl::state.eq(OrderState::Failed.as_str()),
 				dsl::last_error.eq(Some(reason)),

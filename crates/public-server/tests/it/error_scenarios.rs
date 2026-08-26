@@ -30,7 +30,7 @@ async fn status_missing_auth_headers() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		// Create a test server
 		conn.batch_execute(
-			"INSERT INTO servers (id, host, kind) VALUES ('11111111-1111-1111-1111-111111111111', 'https://test.com', 'facility')",
+			"INSERT INTO applications (id, host, kind) VALUES ('11111111-1111-1111-1111-111111111111', 'https://test.com', 'facility')",
 		)
 		.await
 		.unwrap();
@@ -223,7 +223,7 @@ async fn malformed_json_body() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		// Create a server for status endpoint
 		conn.batch_execute(
-			"INSERT INTO servers (id, host, kind) VALUES ('11111111-1111-1111-1111-111111111111', 'https://test.com', 'central')",
+			"INSERT INTO applications (id, host, kind) VALUES ('11111111-1111-1111-1111-111111111111', 'https://test.com', 'central')",
 		)
 		.await
 		.unwrap();

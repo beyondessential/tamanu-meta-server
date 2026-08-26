@@ -1,5 +1,5 @@
 //! Model-level tests for the product axis: what the migration backfilled, what
-//! a mixed-product group's figures resolve to, and which servers a
+//! a mixed-product group's figures resolve to, and which applications a
 //! version-bearing query covers.
 //!
 //! spec: APP
@@ -8,10 +8,10 @@ use commons_types::server::{
 	RESERVED_TAG_PREFIX, TagMap, kind::ServerKind, product::Product, rank::ServerRank,
 };
 use database::{
+	applications::Application,
 	pg_duration::PgDuration,
 	reported_detail::ReportedDetail,
 	server_groups::{NewServerGroup, ServerGroup},
-	servers::Server,
 	url_field::UrlField,
 };
 use diesel::prelude::*;
@@ -19,8 +19,8 @@ use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::SignedDuration;
 use uuid::Uuid;
 
-fn server(product: Product, kind: ServerKind, rank: Option<ServerRank>) -> Server {
-	Server {
+fn server(product: Product, kind: ServerKind, rank: Option<ServerRank>) -> Application {
+	Application {
 		id: Uuid::new_v4(),
 		name: Some(format!("{product}-{kind}")),
 		host: Some(UrlField(
@@ -73,26 +73,26 @@ async fn group(conn: &mut AsyncPgConnection, name: &str) -> ServerGroup {
 #[tokio::test(flavor = "multi_thread")]
 async fn product_defaults_to_tamanu() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
-		use database::schema::servers;
+		use database::schema::applications;
 
 		let id = Uuid::new_v4();
 		diesel::sql_query(
-			"INSERT INTO servers (id, host, kind) VALUES ($1, 'https://legacy.example', 'central')",
+			"INSERT INTO applications (id, host, kind) VALUES ($1, 'https://legacy.example', 'central')",
 		)
 		.bind::<diesel::sql_types::Uuid, _>(id)
 		.execute(&mut conn)
 		.await
 		.unwrap();
 
-		let stored: String = servers::table
-			.select(servers::product)
-			.filter(servers::id.eq(id))
+		let stored: String = applications::table
+			.select(applications::product)
+			.filter(applications::id.eq(id))
 			.first(&mut conn)
 			.await
 			.unwrap();
 		assert_eq!(stored, "tamanu");
 		assert_eq!(
-			Server::get_by_id(&mut conn, id).await.unwrap().product,
+			Application::get_by_id(&mut conn, id).await.unwrap().product,
 			Product::Tamanu
 		);
 	})
@@ -107,7 +107,7 @@ async fn legacy_canopy_kind_still_reads() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		let id = Uuid::new_v4();
 		diesel::sql_query(
-			"INSERT INTO servers (id, host, kind, product) \
+			"INSERT INTO applications (id, host, kind, product) \
 			 VALUES ($1, 'https://canopy.example', 'canopy', 'canopy')",
 		)
 		.bind::<diesel::sql_types::Uuid, _>(id)
@@ -115,7 +115,7 @@ async fn legacy_canopy_kind_still_reads() {
 		.await
 		.unwrap();
 
-		let loaded = Server::get_by_id(&mut conn, id).await.unwrap();
+		let loaded = Application::get_by_id(&mut conn, id).await.unwrap();
 		assert_eq!(loaded.product, Product::Canopy);
 		assert_eq!(loaded.kind, ServerKind::Standalone);
 	})
@@ -134,9 +134,9 @@ async fn mixed_group_headline_version_comes_from_the_tamanu_member() {
 		// priority among equals if product isn't considered — standalone would
 		// still lose to central, so give it the higher rank to make the test
 		// bite on product rather than on the ordering.
-		let lims = Server::create(
+		let lims = Application::create(
 			&mut conn,
-			Server {
+			Application {
 				group_id: Some(g.id),
 				..server(
 					Product::Senaite,
@@ -147,9 +147,9 @@ async fn mixed_group_headline_version_comes_from_the_tamanu_member() {
 		)
 		.await
 		.unwrap();
-		let central = Server::create(
+		let central = Application::create(
 			&mut conn,
-			Server {
+			Application {
 				group_id: Some(g.id),
 				..server(Product::Tamanu, ServerKind::Central, Some(ServerRank::Test))
 			},
@@ -172,7 +172,7 @@ async fn mixed_group_headline_version_comes_from_the_tamanu_member() {
 
 		let after = ServerGroup::get_by_id(&mut conn, g.id).await.unwrap();
 		assert_eq!(
-			after.version_server_id,
+			after.version_application_id,
 			Some(central.id),
 			"the versioned member speaks for the group even when outranked"
 		);
@@ -192,9 +192,9 @@ async fn mixed_group_headline_version_comes_from_the_tamanu_member() {
 async fn group_without_a_versioned_member_has_no_headline_version() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		let g = group(&mut conn, "labs-only").await;
-		Server::create(
+		Application::create(
 			&mut conn,
-			Server {
+			Application {
 				group_id: Some(g.id),
 				..server(
 					Product::Senaite,
@@ -211,18 +211,18 @@ async fn group_without_a_versioned_member_has_no_headline_version() {
 			.unwrap();
 
 		let after = ServerGroup::get_by_id(&mut conn, g.id).await.unwrap();
-		assert_eq!(after.version_server_id, None);
+		assert_eq!(after.version_application_id, None);
 		assert_eq!(after.effective_version, None);
 	})
 	.await
 }
 
 /// The production-version summary answers what the fleet is running, so it
-/// counts only the servers whose product canopy holds a release train for.
+/// counts only the applications whose product canopy holds a release train for.
 #[tokio::test(flavor = "multi_thread")]
 async fn production_versions_skip_untracked_products() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
-		let tamanu = Server::create(
+		let tamanu = Application::create(
 			&mut conn,
 			server(
 				Product::Tamanu,
@@ -232,7 +232,7 @@ async fn production_versions_skip_untracked_products() {
 		)
 		.await
 		.unwrap();
-		let canopy = Server::create(
+		let canopy = Application::create(
 			&mut conn,
 			server(
 				Product::Canopy,
@@ -280,7 +280,7 @@ async fn production_versions_skip_untracked_products() {
 #[tokio::test(flavor = "multi_thread")]
 async fn device_tags_carry_the_product() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
-		let s = Server::create(
+		let s = Application::create(
 			&mut conn,
 			server(Product::Senaite, ServerKind::Standalone, None),
 		)
@@ -307,9 +307,9 @@ async fn public_search_excludes_products_that_are_not_listed() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		// Deliberately give the SENAITE server the central kind and a public
 		// name, so only the product filter can keep it out.
-		Server::create(
+		Application::create(
 			&mut conn,
-			Server {
+			Application {
 				name: Some("Lab Portal".into()),
 				public_name: Some("Lab Portal".into()),
 				..server(Product::Senaite, ServerKind::Central, None)
@@ -317,9 +317,9 @@ async fn public_search_excludes_products_that_are_not_listed() {
 		)
 		.await
 		.unwrap();
-		Server::create(
+		Application::create(
 			&mut conn,
-			Server {
+			Application {
 				name: Some("Lab Central".into()),
 				public_name: Some("Lab Central".into()),
 				..server(Product::Tamanu, ServerKind::Central, None)
@@ -328,7 +328,9 @@ async fn public_search_excludes_products_that_are_not_listed() {
 		.await
 		.unwrap();
 
-		let found = Server::search_central(&mut conn, "Lab", 50).await.unwrap();
+		let found = Application::search_central(&mut conn, "Lab", 50)
+			.await
+			.unwrap();
 		let names: Vec<String> = found.into_iter().filter_map(|s| s.public_name).collect();
 		assert_eq!(names, vec!["Lab Central".to_string()]);
 	})
@@ -349,9 +351,9 @@ async fn sole_member_product_is_absent_for_a_mixed_group() {
 			(mixed.id, Product::Senaite),
 		] {
 			let kind = product.default_kind();
-			Server::create(
+			Application::create(
 				&mut conn,
-				Server {
+				Application {
 					group_id: Some(g),
 					..server(product, kind, None)
 				},

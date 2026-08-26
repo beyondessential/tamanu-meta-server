@@ -34,12 +34,12 @@ use commons_servers::device_auth::ServerDevice;
 use commons_types::backup::{BackupConfigStatus, BackupPurpose, BackupType, RunOutcome};
 use database::{
 	Db,
+	applications::Application,
 	backups::BackupTypeDefault,
 	backups::{
 		BackupRequest, NewBackupCredentialIssuance, NewBackupRun, ServerBackupCapability,
 		ServerGroupBackupConfig,
 	},
-	servers::Server,
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -80,8 +80,8 @@ pub fn routes() -> OpenApiRouter<AppState> {
 async fn resolve_server(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	device_id: Uuid,
-) -> Result<Server> {
-	Server::live_by_device_id(conn, device_id)
+) -> Result<Application> {
+	Application::live_by_device_id(conn, device_id)
 		.await?
 		.into_iter()
 		.next()
@@ -89,7 +89,7 @@ async fn resolve_server(
 }
 
 /// Read the server's `group_id`; ungrouped ⇒ 409.
-fn require_group(server: &Server) -> Result<Uuid> {
+fn require_group(server: &Application) -> Result<Uuid> {
 	server
 		.group_id
 		.ok_or_else(|| AppError::Conflict("server is not in a group".into()))
@@ -161,7 +161,7 @@ async fn require_backupable_capability(
 /// only while that deliberate window is open — it is not always available.
 /// (Canopy still drives *automated* restores separately, via the PGRO
 /// restore-replica path.) Window closed or expired ⇒ 409.
-fn require_restore_allowed(server: &Server) -> Result<()> {
+fn require_restore_allowed(server: &Application) -> Result<()> {
 	if server.restore_allowed() {
 		Ok(())
 	} else {
@@ -211,7 +211,7 @@ pub struct BackupCapabilitiesArgs {
 	responses(
 		(status = 204, description = "Capabilities registered."),
 		(status = 412, description = "Device is not bound to a live server.", body = ProblemDetailsSchema),
-		(status = 409, description = "Server is not in a group.", body = ProblemDetailsSchema),
+		(status = 409, description = "Application is not in a group.", body = ProblemDetailsSchema),
 	),
 )]
 async fn capabilities(
@@ -388,7 +388,7 @@ pub fn backup_session_policy(bucket: &str, prefix: &str) -> String {
 	request_body = BackupCredentialsArgs,
 	responses(
 		(status = 200, body = CredentialProcessOutput),
-		(status = 409, description = "Server ungrouped, no ready config, backup type not enabled, or restore window not open.", body = ProblemDetailsSchema),
+		(status = 409, description = "Application ungrouped, no ready config, backup type not enabled, or restore window not open.", body = ProblemDetailsSchema),
 		(status = 412, description = "Device is not bound to a live server.", body = ProblemDetailsSchema),
 		(status = 502, description = "STS issuance failed or is not configured.", body = ProblemDetailsSchema),
 	),
@@ -533,7 +533,7 @@ pub struct BackupTarget {
 	security(("server-device" = [])),
 	responses(
 		(status = 200, body = BackupTarget),
-		(status = 409, description = "Server ungrouped or no ready config.", body = ProblemDetailsSchema),
+		(status = 409, description = "Application ungrouped or no ready config.", body = ProblemDetailsSchema),
 		(status = 412, description = "Device is not bound to a live server.", body = ProblemDetailsSchema),
 		(status = 502, description = "Repo-password Secret unavailable or kube not configured.", body = ProblemDetailsSchema),
 	),
@@ -682,7 +682,7 @@ pub struct ProgressArgs {
 	request_body = ProgressArgs,
 	responses(
 		(status = 204, description = "Progress recorded."),
-		(status = 409, description = "Server is not in a group.", body = ProblemDetailsSchema),
+		(status = 409, description = "Application is not in a group.", body = ProblemDetailsSchema),
 		(status = 412, description = "Device is not bound to a live server.", body = ProblemDetailsSchema),
 		(status = 429, description = "Reporting progress too frequently.", body = ProblemDetailsSchema),
 	),
@@ -812,7 +812,7 @@ pub struct ReportArgs {
 	request_body = ReportArgs,
 	responses(
 		(status = 204, description = "Run recorded."),
-		(status = 409, description = "Server ungrouped, or duplicate run_id.", body = ProblemDetailsSchema),
+		(status = 409, description = "Application ungrouped, or duplicate run_id.", body = ProblemDetailsSchema),
 		(status = 412, description = "Device is not bound to a live server.", body = ProblemDetailsSchema),
 	),
 )]

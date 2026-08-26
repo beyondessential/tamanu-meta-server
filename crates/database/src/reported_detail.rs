@@ -193,17 +193,20 @@ impl ReportedDetail {
 	/// was last seen at any point in the past.
 	// spec: FIG#active-versions
 	pub async fn production_versions(db: &mut AsyncPgConnection) -> Result<Vec<VersionStr>> {
-		use crate::schema::{server_reported_detail as detail, servers};
+		use crate::schema::{applications, server_reported_detail as detail};
 
 		let rows: Vec<Option<VersionStr>> = detail::table
-			.inner_join(servers::table.on(servers::id.eq(detail::server_id)))
-			.filter(servers::rank.eq(ServerRank::Production))
+			.inner_join(applications::table.on(applications::id.eq(detail::server_id)))
+			.filter(applications::rank.eq(ServerRank::Production))
 			// A release branch only means something for a product canopy holds
 			// a release train for. Others would each contribute a branch of
 			// their own to a count of what the fleet is running.
 			// spec: APP#versions
-			.filter(servers::product.eq_any(Product::stored_values_where(Product::tracks_versions)))
-			.filter(servers::deleted_at.is_null())
+			.filter(
+				applications::product
+					.eq_any(Product::stored_values_where(Product::tracks_versions)),
+			)
+			.filter(applications::deleted_at.is_null())
 			.filter(detail::version.is_not_null())
 			.filter(detail::reported_at.ge(diesel::dsl::sql(ACTIVE_LOOKBACK_SQL)))
 			.distinct_on(detail::server_id)
@@ -223,7 +226,7 @@ impl ReportedDetail {
 	}
 
 	/// The same resolution for a whole fleet's worth of rows, keyed by
-	/// server. Rows for servers the caller didn't ask about are ignored.
+	/// server. Rows for applications the caller didn't ask about are ignored.
 	pub fn merge_by_server(
 		reports: Vec<Self>,
 	) -> std::collections::HashMap<Uuid, (MergedDetail, Option<VersionStr>)> {

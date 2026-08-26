@@ -10,7 +10,7 @@
 //!   repository does not hold it: the case reports alone cannot catch, a device
 //!   lying about success or an upload that didn't persist. Detecting it needs
 //!   the group's repo inventory, but the finding is about the one server whose
-//!   report didn't hold up, so it is filed against that server: two servers in
+//!   report didn't hold up, so it is filed against that server: two applications in
 //!   a group can fail it independently, and one recovering must not clear the
 //!   other.
 //! - **the repo looks behind the report** → `backup-reconcile-recency`
@@ -55,12 +55,12 @@ use jiff::{SignedDuration, Timestamp};
 use uuid::Uuid;
 
 use crate::{
+	applications::Application,
 	backup::{
 		refs,
 		staleness::{ScanRow, label_list},
 	},
 	issues::{CheckInstance, InstancedCheckFiling, Scope, file_check_instances},
-	servers::Server,
 };
 
 /// Slack allowed when comparing a snapshot's recorded time against the moment
@@ -144,7 +144,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 			let mut s: std::collections::HashSet<Uuid> = rows.iter().map(|r| r.server_id).collect();
 			s.drain().collect()
 		};
-		Server::get_by_ids(db, &ids)
+		Application::get_by_ids(db, &ids)
 			.await?
 			.iter()
 			.map(|s| (s.id, crate::backup::staleness::server_label(s)))
@@ -179,7 +179,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 	for server_id in order {
 		let server_rows = &by_server[&server_id];
 		let device_id = server_rows.iter().find_map(|r| r.device_id);
-		// A scanned server always exists (the scan joins servers), so the
+		// A scanned server always exists (the scan joins applications), so the
 		// fallback is unreachable in practice — it just avoids a panic path.
 		let label = labels
 			.get(&server_id)
@@ -355,7 +355,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				db,
 				InstancedCheckFiling {
 					source: crate::statuses::CANOPY_SOURCE,
-					scope: Scope::Server(server_id),
+					scope: Scope::Application(server_id),
 					device_id,
 					check: refs::RECONCILE_MISSING,
 					title: None,
@@ -365,13 +365,13 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					documentation: Some(refs::RECONCILE_MISSING_DOC),
 				},
 				&|degraded| match degraded {
-					[] => format!("Server {label} backup reports and repo snapshots agree again"),
+					[] => format!("Application {label} backup reports and repo snapshots agree again"),
 					[one] => format!(
-						"Server {label} reported a successful {} backup but its snapshot is not in the repo",
+						"Application {label} reported a successful {} backup but its snapshot is not in the repo",
 						one.label
 					),
 					many => format!(
-						"Server {label} reported {} of its {total} backups successful with snapshots the repo doesn't hold: {}",
+						"Application {label} reported {} of its {total} backups successful with snapshots the repo doesn't hold: {}",
 						many.len(),
 						label_list(many),
 					),
@@ -391,7 +391,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				db,
 				InstancedCheckFiling {
 					source: crate::statuses::CANOPY_SOURCE,
-					scope: Scope::Server(server_id),
+					scope: Scope::Application(server_id),
 					device_id,
 					check: refs::RECONCILE_RECENCY,
 					title: None,
@@ -426,7 +426,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				db,
 				InstancedCheckFiling {
 					source: crate::statuses::CANOPY_SOURCE,
-					scope: Scope::Server(server_id),
+					scope: Scope::Application(server_id),
 					device_id,
 					check: refs::RECONCILE_REPORT_GAP,
 					title: None,
@@ -458,7 +458,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				db,
 				InstancedCheckFiling {
 					source: crate::statuses::CANOPY_SOURCE,
-					scope: Scope::Server(server_id),
+					scope: Scope::Application(server_id),
 					device_id,
 					check: refs::RECONCILE_SIZE_MISMATCH,
 					title: None,
@@ -470,11 +470,11 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				&|degraded| match degraded {
 					[] => format!("Reported and repo snapshot sizes for {label} agree again"),
 					[one] => format!(
-						"Server {label} reported a {} snapshot size that disagrees with the repo",
+						"Application {label} reported a {} snapshot size that disagrees with the repo",
 						one.label
 					),
 					many => format!(
-						"Server {label} reported snapshot sizes disagreeing with the repo for {} of its {total} types: {}",
+						"Application {label} reported snapshot sizes disagreeing with the repo for {} of its {total} types: {}",
 						many.len(),
 						label_list(many),
 					),

@@ -2,14 +2,14 @@
 
 use commons_types::server::{TagMap, kind::ServerKind, product::Product};
 use database::{
-	Device, DeviceKey, pg_duration::PgDuration, server_enrollment_tokens::ServerEnrollmentToken,
-	servers::Server, url_field::UrlField,
+	Device, DeviceKey, applications::Application, pg_duration::PgDuration,
+	server_enrollment_tokens::ServerEnrollmentToken, url_field::UrlField,
 };
 use jiff::SignedDuration;
 use uuid::Uuid;
 
-fn new_server(host: &str) -> Server {
-	Server {
+fn new_server(host: &str) -> Application {
+	Application {
 		id: Uuid::new_v4(),
 		name: Some("t".into()),
 		host: Some(UrlField(host.parse().unwrap())),
@@ -41,7 +41,7 @@ fn new_server(host: &str) -> Server {
 #[tokio::test(flavor = "multi_thread")]
 async fn soft_delete_releases_and_deactivates_device_and_hides_row() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		// Server bound to a device with an active key.
+		// Application bound to a device with an active key.
 		let device = Device::create(&mut conn, b"key-bytes-1".to_vec())
 			.await
 			.unwrap();
@@ -54,20 +54,22 @@ async fn soft_delete_releases_and_deactivates_device_and_hides_row() {
 		.unwrap();
 		let mut s = new_server("https://archive-me.example/");
 		s.device_id = Some(device.id);
-		let server = Server::create(&mut conn, s).await.unwrap();
+		let server = Application::create(&mut conn, s).await.unwrap();
 
-		Server::soft_delete(&mut conn, server.id).await.unwrap();
+		Application::soft_delete(&mut conn, server.id)
+			.await
+			.unwrap();
 
 		// Hidden from live listings, still resolvable by id.
 		assert!(
-			Server::get_all(&mut conn, 0, None)
+			Application::get_all(&mut conn, 0, None)
 				.await
 				.unwrap()
 				.iter()
 				.all(|x| x.id != server.id),
 			"archived server hidden from get_all"
 		);
-		let after = Server::get_by_id(&mut conn, server.id).await.unwrap();
+		let after = Application::get_by_id(&mut conn, server.id).await.unwrap();
 		assert!(after.deleted_at.is_some());
 		assert!(after.device_id.is_none(), "device released");
 
@@ -85,7 +87,7 @@ async fn soft_delete_releases_and_deactivates_device_and_hides_row() {
 		);
 
 		// Recreating a server at the same host is allowed once archived.
-		Server::create(&mut conn, new_server("https://archive-me.example/"))
+		Application::create(&mut conn, new_server("https://archive-me.example/"))
 			.await
 			.expect("host freed for reuse after archival");
 	})
@@ -95,7 +97,7 @@ async fn soft_delete_releases_and_deactivates_device_and_hides_row() {
 #[tokio::test(flavor = "multi_thread")]
 async fn token_reissue_invalidates_prior_and_consume_is_single_use() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let server = Server::create(&mut conn, new_server("https://tok.example/"))
+		let server = Application::create(&mut conn, new_server("https://tok.example/"))
 			.await
 			.unwrap();
 
@@ -138,7 +140,7 @@ async fn token_reissue_invalidates_prior_and_consume_is_single_use() {
 #[tokio::test(flavor = "multi_thread")]
 async fn revoke_invalidates_the_active_token() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let server = Server::create(&mut conn, new_server("https://revoke.example/"))
+		let server = Application::create(&mut conn, new_server("https://revoke.example/"))
 			.await
 			.unwrap();
 		let (_t, token) =

@@ -37,7 +37,7 @@ export default function GroupEdit() {
 	return (
 		<EditForm
 			group={result.data.group}
-			memberCount={result.data.servers.length}
+			memberCount={result.data.applications.length}
 		/>
 	);
 }

@@ -17,7 +17,7 @@ fn filing_result<'a>(
 ) -> CheckFiling<'a> {
 	CheckFiling {
 		source,
-		scope: Scope::Server(server_id),
+		scope: Scope::Application(server_id),
 		device_id: None,
 		check,
 		observed,
@@ -37,18 +37,19 @@ struct RowId {
 }
 
 async fn insert_server(conn: &mut diesel_async::AsyncPgConnection) -> Uuid {
-	let row: RowId =
-		sql_query("INSERT INTO servers (host) VALUES ('http://liveness.invalid/') RETURNING id")
-			.get_result(conn)
-			.await
-			.expect("insert server");
+	let row: RowId = sql_query(
+		"INSERT INTO applications (host) VALUES ('http://liveness.invalid/') RETURNING id",
+	)
+	.get_result(conn)
+	.await
+	.expect("insert server");
 	row.id
 }
 
 fn filing<'a>(server_id: Uuid, source: &'a str, check: &'a str) -> CheckFiling<'a> {
 	CheckFiling {
 		source,
-		scope: Scope::Server(server_id),
+		scope: Scope::Application(server_id),
 		device_id: None,
 		check,
 		observed: CheckResult::Passed,
@@ -141,7 +142,7 @@ async fn orphaned_source_drops_out_of_freshness() {
 
 		// Strand the check-state by deleting its catalog row — a superseded
 		// source whose issue rows linger with no catalog entry. It must stop
-		// being "expected", or it would hold servers into a reachability
+		// being "expected", or it would hold applications into a reachability
 		// warning forever with no catalog row to silence or decommission.
 		sql_query("DELETE FROM check_policies WHERE source = 'bestool-alertd'")
 			.execute(&mut conn)

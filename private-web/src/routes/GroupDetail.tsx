@@ -69,7 +69,7 @@ export default function GroupDetail() {
 		return <Alert severity="error">{detail.error.message}</Alert>;
 	}
 
-	const { group, servers, billing_labels } = detail.data;
+	const { group, applications, billing_labels } = detail.data;
 	const tagEntries = Object.entries(group.tags ?? {});
 	const operators =
 		groupStatuses.status === "ok"
@@ -82,11 +82,11 @@ export default function GroupDetail() {
 
 	// A group archives when empty, or when all its members are "gone" (no
 	// recent status) — in which case archiving cascades to those servers.
-	const allGone = servers.every((s) => s.up === "gone");
+	const allGone = applications.every((s) => s.up === "gone");
 	const onArchive = async () => {
 		const cascade =
-			servers.length > 0
-				? ` This also archives its ${servers.length} gone server${servers.length === 1 ? "" : "s"}.`
+			applications.length > 0
+				? ` This also archives its ${applications.length} gone server${applications.length === 1 ? "" : "s"}.`
 				: "";
 		if (
 			!confirm(
@@ -227,16 +227,16 @@ export default function GroupDetail() {
 
 			<Box>
 				<Typography variant="h5" component="h2" gutterBottom>
-					Servers ({servers.length})
+					Servers ({applications.length})
 				</Typography>
-				{servers.length === 0 ? (
+				{applications.length === 0 ? (
 					<Alert severity="info">
 						No servers in this group yet. Use “Add server” above to enroll
 						one into this group.
 					</Alert>
 				) : (
 					<Stack spacing={2}>
-						{groupServersByRank(servers).map(([rank, members]) => (
+						{groupServersByRank(applications).map(([rank, members]) => (
 							<Box key={rank ?? "_unranked"}>
 								{rank && (
 									<Typography
@@ -260,7 +260,7 @@ export default function GroupDetail() {
 
 			<BackupsCard groupId={group.id} isAdmin={admin} />
 
-			<MigrationTestsSection groupId={group.id} servers={servers} />
+			<MigrationTestsSection groupId={group.id} servers={applications} />
 
 			<GroupDomainsSection groupId={group.id} />
 

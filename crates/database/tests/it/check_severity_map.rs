@@ -27,7 +27,7 @@ async fn insert_group(conn: &mut diesel_async::AsyncPgConnection) -> Uuid {
 async fn insert_server(conn: &mut diesel_async::AsyncPgConnection, group_id: Option<Uuid>) -> Uuid {
 	let server_id = Uuid::new_v4();
 	sql_query(
-		"INSERT INTO servers (id, host, kind, group_id) \
+		"INSERT INTO applications (id, host, kind, group_id) \
 		 VALUES ($1, 'https://severity-map.example.com', 'facility', $2)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
@@ -122,7 +122,7 @@ async fn silenced_checks_combine_scopes_and_stay_per_source() {
 			.expect("group silence");
 		// None of these may leak into alertd's set: a check's identity is
 		// the (source, check) pair, so another source's silence never
-		// applies; nor do canopy's own silences or other servers'.
+		// applies; nor do canopy's own silences or other applications'.
 		ServerSilencedRef::add(
 			&mut conn,
 			server_id,

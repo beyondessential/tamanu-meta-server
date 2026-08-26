@@ -39,7 +39,7 @@ async fn make_config(conn: &mut AsyncPgConnection, group_id: Uuid, status: &str)
 async fn make_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uuid {
 	let server_id = Uuid::new_v4();
 	let host = format!("https://srv-{server_id}.example.com");
-	sql_query("INSERT INTO servers (id, host, kind, group_id) VALUES ($1, $2, 'central', $3)")
+	sql_query("INSERT INTO applications (id, host, kind, group_id) VALUES ($1, $2, 'central', $3)")
 		.bind::<sql_types::Uuid, _>(server_id)
 		.bind::<sql_types::Text, _>(host)
 		.bind::<sql_types::Uuid, _>(group_id)
@@ -390,7 +390,7 @@ async fn make_senaite_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uu
 	let server_id = Uuid::new_v4();
 	let host = format!("https://lims-{server_id}.example.com");
 	sql_query(
-		"INSERT INTO servers (id, host, kind, product, group_id) \
+		"INSERT INTO applications (id, host, kind, product, group_id) \
 		 VALUES ($1, $2, 'standalone', 'senaite', $3)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
@@ -786,7 +786,7 @@ async fn restore_verification_records_and_raises_alert() {
 				count(
 					&mut conn,
 					"SELECT count(*) AS count FROM issues i \
-					 JOIN servers s ON s.id = i.server_id \
+					 JOIN applications s ON s.id = i.application_id \
 					 WHERE s.group_id = $1 AND i.ref = 'restore-verification' AND i.active = true",
 					group,
 				)
@@ -797,7 +797,7 @@ async fn restore_verification_records_and_raises_alert() {
 				count(
 					&mut conn,
 					"SELECT count(*) AS count FROM issues i \
-					 JOIN servers s ON s.id = i.server_id \
+					 JOIN applications s ON s.id = i.application_id \
 					 WHERE s.group_id = $1 AND i.ref = 'redaction'",
 					group,
 				)
@@ -864,7 +864,7 @@ async fn a_partial_redaction_warns_while_the_restore_stays_healthy() {
 				count(
 					&mut conn,
 					"SELECT count(*) AS count FROM issues i \
-					 JOIN servers s ON s.id = i.server_id \
+					 JOIN applications s ON s.id = i.application_id \
 					 WHERE s.group_id = $1 AND i.ref = 'redaction' AND i.active = true",
 					group,
 				)
@@ -876,7 +876,7 @@ async fn a_partial_redaction_warns_while_the_restore_stays_healthy() {
 				count(
 					&mut conn,
 					"SELECT count(*) AS count FROM issues i \
-					 JOIN servers s ON s.id = i.server_id \
+					 JOIN applications s ON s.id = i.application_id \
 					 WHERE s.group_id = $1 AND i.ref = 'restore-verification' AND i.active = true",
 					group,
 				)
@@ -927,7 +927,7 @@ async fn a_failed_redaction_warns_and_then_recovers_when_it_applies() {
 				.expect("sweep");
 
 			const ACTIVE_REDACTION_CHECKS: &str = "SELECT count(*) AS count FROM issues i \
-				 JOIN servers s ON s.id = i.server_id \
+				 JOIN applications s ON s.id = i.application_id \
 				 WHERE s.group_id = $1 AND i.ref = 'redaction' AND i.active = true";
 			assert_eq!(
 				count(&mut conn, ACTIVE_REDACTION_CHECKS, group).await,

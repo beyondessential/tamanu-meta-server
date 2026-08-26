@@ -21,7 +21,7 @@ use utoipa::{Modify, OpenApi, openapi::security::SecurityScheme};
 		(name = "certificates", description = "TLS certificates for a server's own names: requesting one for a signing request, and collecting it once Canopy has obtained it."),
 		(name = "names", description = "Public names a server may act on: what it is entitled to, and the addresses to publish for them."),
 		(name = "restore", description = "Managed restore replicas: consumer capability registration, worklist, and read-only restore credentials."),
-		(name = "servers", description = "Server registry — listing for the public, self-registration for server devices."),
+		(name = "applications", description = "Application registry — listing for the public, self-registration for server devices."),
 		(name = "statuses", description = "Heartbeat / status submissions from server devices."),
 		(name = "tags", description = "Key/value tags describing a server."),
 		(name = "versions", description = "Canopy release versions and their downloadable artifacts."),

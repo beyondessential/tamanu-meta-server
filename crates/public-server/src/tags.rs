@@ -3,7 +3,9 @@ use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::{backup_jobs::BillingLabels, device_auth::ServerDevice};
 use commons_types::server::TagMap;
-use database::{Db, diesel_async::AsyncPgConnection, server_groups::ServerGroup, servers::Server};
+use database::{
+	Db, applications::Application, diesel_async::AsyncPgConnection, server_groups::ServerGroup,
+};
 
 use crate::state::AppState;
 
@@ -58,14 +60,14 @@ pub fn routes() -> OpenApiRouter<AppState> {
 pub async fn get_self(device: ServerDevice, State(db): State<Db>) -> Result<Json<TagMap>> {
 	let mut conn = db.get().await?;
 	let device_id = device.0.0.id;
-	let mut servers = Server::get_by_device_id(&mut conn, device_id).await?;
-	if servers.len() > 1 {
+	let mut applications = Application::get_by_device_id(&mut conn, device_id).await?;
+	if applications.len() > 1 {
 		return Err(AppError::Conflict(format!(
-			"device {device_id} is attached to {} servers; expected at most one",
-			servers.len(),
+			"device {device_id} is attached to {} applications; expected at most one",
+			applications.len(),
 		)));
 	}
-	let server = servers.pop().ok_or(AppError::DeviceHasNoServer)?;
+	let server = applications.pop().ok_or(AppError::DeviceHasNoServer)?;
 	Ok(Json(effective_tags_for_server(&mut conn, &server).await?))
 }
 
@@ -75,7 +77,7 @@ pub async fn get_self(device: ServerDevice, State(db): State<Db>) -> Result<Json
 /// endpoint and the status-push response, so the two always agree.
 pub async fn effective_tags_for_server(
 	conn: &mut AsyncPgConnection,
-	server: &Server,
+	server: &Application,
 ) -> Result<TagMap> {
 	let mut merged = server.tags_for_device(conn).await?;
 

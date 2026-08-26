@@ -17,7 +17,7 @@ struct RowId {
 
 async fn insert_server(conn: &mut diesel_async::AsyncPgConnection) -> Uuid {
 	let row: RowId = sql_query(
-		"INSERT INTO servers (host) VALUES ('http://consolidated.invalid/') RETURNING id",
+		"INSERT INTO applications (host) VALUES ('http://consolidated.invalid/') RETURNING id",
 	)
 	.get_result(conn)
 	.await
@@ -33,7 +33,7 @@ fn filing<'a>(
 ) -> CheckFiling<'a> {
 	CheckFiling {
 		source,
-		scope: Scope::Server(server_id),
+		scope: Scope::Application(server_id),
 		device_id: None,
 		check,
 		observed,
@@ -156,7 +156,7 @@ async fn latest_excludes_decommissioned_and_flags_silenced() {
 		.await
 		.expect("decommission");
 		sql_query(
-			"INSERT INTO scoped_check_policies (server_id, source, check_name, ceiling, created_by) \
+			"INSERT INTO scoped_check_policies (application_id, source, check_name, ceiling, created_by) \
 			 VALUES ($1, 'alertd', 'hushed', 'skipped', 'op')",
 		)
 		.bind::<sql_types::Uuid, _>(server_id)
@@ -226,7 +226,7 @@ async fn synthesised_reachability_reflects_a_silence() {
 			.expect("seed canopy's own checks");
 		let server_id = insert_server(&mut conn).await;
 		sql_query(
-			"INSERT INTO scoped_check_policies (server_id, source, check_name, ceiling, created_by) \
+			"INSERT INTO scoped_check_policies (application_id, source, check_name, ceiling, created_by) \
 			 VALUES ($1, $2, $3, 'skipped', 'op')",
 		)
 		.bind::<sql_types::Uuid, _>(server_id)

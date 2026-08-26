@@ -13,12 +13,12 @@ use commons_types::{
 	version::VersionStr,
 };
 use database::{
+	applications::{Application, PartialServer},
 	devices::{Device, DeviceConnection, TailscaleIdentity},
 	pg_duration::PgDuration,
 	reported_detail::ReportedDetail,
 	server_enrollment_tokens::ServerEnrollmentToken,
 	server_groups::ServerGroup,
-	servers::{PartialServer, Server},
 	statuses::Status,
 	versions::Version,
 };
@@ -59,7 +59,7 @@ pub struct ServerDetailData {
 	/// render the "Group" section without a second fetch. `None` when the
 	/// server is ungrouped.
 	pub group: Option<ServerGroup>,
-	/// Other servers in the same group (excluding `server`). Empty when the
+	/// Other applications in the same group (excluding `server`). Empty when the
 	/// server is ungrouped or alone in its group. Each entry carries its
 	/// own `up` / `health` so the UI can render a status dot per sibling.
 	pub siblings: Vec<ServerInfo>,
@@ -93,7 +93,7 @@ pub struct ServerInfo {
 	/// Where this server sits in its deployment's promotion order (e.g.
 	/// production vs. staging), if applicable.
 	pub rank: Option<ServerRank>,
-	/// The server's stored URL, if any. May be absent for device-only servers.
+	/// The server's stored URL, if any. May be absent for device-only applications.
 	pub host: Option<String>,
 	/// Effective URL for display: the stored `host`, or `https://{tailnet
 	/// hostname}` when the server has no URL but is bound to a Tailscale
@@ -294,7 +294,7 @@ where
 	Deserialize::deserialize(deserializer).map(Some)
 }
 
-pub(super) fn server_to_info(s: Server) -> ServerInfo {
+pub(super) fn server_to_info(s: Application) -> ServerInfo {
 	ServerInfo {
 		id: s.id,
 		name: s.name,
@@ -303,7 +303,7 @@ pub(super) fn server_to_info(s: Server) -> ServerInfo {
 		rank: s.rank,
 		host: s.host.as_ref().map(|h| h.0.to_string()),
 		// Default the display host to the raw host; `fill_display_hosts` later
-		// supplies the tailnet fallback for hostless, device-bound servers.
+		// supplies the tailnet fallback for hostless, device-bound applications.
 		display_host: s.host.as_ref().map(|h| h.0.to_string()).unwrap_or_default(),
 		device_id: s.device_id,
 		group_id: s.group_id,
@@ -361,7 +361,7 @@ pub(super) async fn decorate_with_status(
 	Ok(())
 }
 
-/// For servers with no stored URL but a bound device, set `display_host` to
+/// For applications with no stored URL but a bound device, set `display_host` to
 /// `https://{tailnet hostname}`. (Servers with a URL already have
 /// `display_host == host` from `server_to_info`.)
 pub(super) async fn fill_display_hosts(
@@ -391,7 +391,7 @@ pub(super) async fn fill_display_hosts(
 /// Like [`server_to_info`] but populates `group_name` by looking it up from
 /// the supplied map (caller pre-fetches the relevant groups in one batch).
 fn server_to_info_with_group(
-	s: Server,
+	s: Application,
 	group_names: &std::collections::HashMap<Uuid, String>,
 ) -> ServerInfo {
 	let group_name = s.group_id.and_then(|gid| group_names.get(&gid).cloned());
@@ -418,10 +418,10 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(attach_tailscale_device))
 }
 
-/// Filter and pagination parameters for listing servers.
+/// Filter and pagination parameters for listing applications.
 #[derive(Deserialize, ToSchema)]
 pub struct ServerListArgs {
-	/// Restrict results to servers of this deployment kind. Omit to
+	/// Restrict results to applications of this deployment kind. Omit to
 	/// include all kinds.
 	pub kind: Option<ServerKind>,
 	/// Number of items to skip from the start of the result set.
@@ -430,15 +430,15 @@ pub struct ServerListArgs {
 	pub limit: Option<u64>,
 }
 
-/// List servers, optionally filtered by kind, paginated.
+/// List applications, optionally filtered by kind, paginated.
 ///
-/// Returns a page of servers plus the total matching count. Entries include
+/// Returns a page of applications plus the total matching count. Entries include
 /// their group name where applicable, but not current reachability/health —
 /// use the detail endpoint for that.
 #[utoipa::path(
 	post,
 	path = "/list_some",
-	tag = "servers",
+	tag = "applications",
 	request_body = ServerListArgs,
 	responses(
 		(status = 200, body = Page<ServerInfo>),
@@ -450,17 +450,17 @@ pub async fn list_some(
 ) -> Result<Json<Page<ServerInfo>>> {
 	let mut conn = state.db.get().await?;
 	let total = if let Some(kind) = args.kind {
-		Server::count_by_kind(&mut conn, kind).await?
+		Application::count_by_kind(&mut conn, kind).await?
 	} else {
-		Server::count_all(&mut conn).await?
+		Application::count_all(&mut conn).await?
 	};
-	let servers = if let Some(kind) = args.kind {
-		Server::list_by_kind(&mut conn, kind, args.offset, args.limit).await?
+	let applications = if let Some(kind) = args.kind {
+		Application::list_by_kind(&mut conn, kind, args.offset, args.limit).await?
 	} else {
-		Server::get_all(&mut conn, args.offset, args.limit).await?
+		Application::get_all(&mut conn, args.offset, args.limit).await?
 	};
-	let group_names = collect_group_names(&mut conn, &servers).await?;
-	let mut items: Vec<ServerInfo> = servers
+	let group_names = collect_group_names(&mut conn, &applications).await?;
+	let mut items: Vec<ServerInfo> = applications
 		.into_iter()
 		.map(|s| server_to_info_with_group(s, &group_names))
 		.collect();
@@ -468,14 +468,14 @@ pub async fn list_some(
 	Ok(Json(Page { items, total }))
 }
 
-/// List servers that don't belong to any group.
+/// List applications that don't belong to any group.
 ///
-/// Returns a page of ungrouped servers, each with current
-/// reachability/health, plus the total count of ungrouped servers.
+/// Returns a page of ungrouped applications, each with current
+/// reachability/health, plus the total count of ungrouped applications.
 #[utoipa::path(
 	post,
 	path = "/list_ungrouped",
-	tag = "servers",
+	tag = "applications",
 	security(("tailscale-admin" = [])),
 	responses(
 		(status = 200, body = Page<ServerInfo>),
@@ -487,22 +487,22 @@ pub async fn list_ungrouped(
 	_body: Json<serde_json::Value>,
 ) -> Result<Json<Page<ServerInfo>>> {
 	let mut conn = state.db.get().await?;
-	let total = Server::count_ungrouped(&mut conn).await?;
-	let servers = Server::list_ungrouped(&mut conn).await?;
-	let mut items: Vec<ServerInfo> = servers.into_iter().map(server_to_info).collect();
+	let total = Application::count_ungrouped(&mut conn).await?;
+	let applications = Application::list_ungrouped(&mut conn).await?;
+	let mut items: Vec<ServerInfo> = applications.into_iter().map(server_to_info).collect();
 	decorate_with_status(&mut conn, &mut items).await?;
 	fill_display_hosts(&mut conn, &mut items).await?;
 	Ok(Json(Page { items, total }))
 }
 
-/// List archived (soft-deleted) servers.
+/// List archived (soft-deleted) applications.
 ///
 /// Each entry has `archived: true` and includes current reachability/health.
-/// Archived servers can be brought back with the restore endpoint.
+/// Archived applications can be brought back with the restore endpoint.
 #[utoipa::path(
 	post,
 	path = "/list_archived",
-	tag = "servers",
+	tag = "applications",
 	security(("tailscale-admin" = [])),
 	responses(
 		(status = 200, body = Vec<ServerInfo>),
@@ -514,8 +514,8 @@ pub async fn list_archived(
 	_body: Json<serde_json::Value>,
 ) -> Result<Json<Vec<ServerInfo>>> {
 	let mut conn = state.db.get().await?;
-	let servers = Server::list_archived(&mut conn).await?;
-	let mut items: Vec<ServerInfo> = servers.into_iter().map(server_to_info).collect();
+	let applications = Application::list_archived(&mut conn).await?;
+	let mut items: Vec<ServerInfo> = applications.into_iter().map(server_to_info).collect();
 	decorate_with_status(&mut conn, &mut items).await?;
 	fill_display_hosts(&mut conn, &mut items).await?;
 	Ok(Json(items))
@@ -536,7 +536,7 @@ pub struct ServerIdArgs {
 #[utoipa::path(
 	post,
 	path = "/get_name",
-	tag = "servers",
+	tag = "applications",
 	request_body = ServerIdArgs,
 	responses(
 		(status = 200, body = String, content_type = "application/json"),
@@ -548,7 +548,7 @@ pub async fn get_name(
 	Json(args): Json<ServerIdArgs>,
 ) -> Result<Json<String>> {
 	let mut conn = state.db.get().await?;
-	let server = Server::get_by_id(&mut conn, args.server_id).await?;
+	let server = Application::get_by_id(&mut conn, args.server_id).await?;
 	Ok(Json(
 		server
 			.name
@@ -566,7 +566,7 @@ pub async fn get_name(
 #[utoipa::path(
 	post,
 	path = "/get_info",
-	tag = "servers",
+	tag = "applications",
 	request_body = ServerIdArgs,
 	responses(
 		(status = 200, body = ServerInfo),
@@ -579,7 +579,7 @@ pub async fn get_info(
 ) -> Result<Json<ServerInfo>> {
 	let db = state.db;
 	let mut conn = db.get().await?;
-	let server = Server::get_by_id(&mut conn, args.server_id).await?;
+	let server = Application::get_by_id(&mut conn, args.server_id).await?;
 	let group_name = if let Some(gid) = server.group_id {
 		Some(ServerGroup::get_by_id(&mut conn, gid).await?.name)
 	} else {
@@ -595,12 +595,12 @@ pub async fn get_info(
 ///
 /// Returns the server's record, its bound device (if any), its most recent
 /// status report, current reachability/health, its group (if any) together
-/// with sibling servers in the same group, and the group's billing labels.
+/// with sibling applications in the same group, and the group's billing labels.
 /// Returns 404 if no server exists with that id.
 #[utoipa::path(
 	post,
 	path = "/get_detail",
-	tag = "servers",
+	tag = "applications",
 	request_body = ServerIdArgs,
 	responses(
 		(status = 200, body = ServerDetailData),
@@ -613,7 +613,7 @@ pub async fn get_detail(
 ) -> Result<Json<ServerDetailData>> {
 	let db = state.db.clone();
 	let mut conn = db.get().await?;
-	let server = Server::get_by_id(&mut conn, args.server_id).await?;
+	let server = Application::get_by_id(&mut conn, args.server_id).await?;
 	let device_id = server.device_id;
 
 	let (group, status, latest_version) = {
@@ -843,19 +843,19 @@ async fn settle_kind(
 			// Nothing to check: neither half of the pair is moving.
 			None => return Ok(None),
 			// The stored product has to define the requested kind.
-			Some(_) => Server::get_by_id(conn, server_id).await?.product,
+			Some(_) => Application::get_by_id(conn, server_id).await?.product,
 		},
 	};
 
 	match kind {
 		Some(kind) if !target.defines_kind(kind) => Err(AppError::BadRequest(format!(
-			"{target} servers have no {kind} role"
+			"{target} applications have no {kind} role"
 		))),
 		Some(kind) => Ok(Some(kind)),
 		// A product change with no kind: keep the stored kind when the new
 		// product defines it, else move to that product's default.
 		None => {
-			let current = Server::get_by_id(conn, server_id).await?;
+			let current = Application::get_by_id(conn, server_id).await?;
 			Ok((!target.defines_kind(current.kind)).then(|| target.default_kind()))
 		}
 	}
@@ -872,7 +872,7 @@ async fn settle_kind(
 	post,
 	path = "/update",
 	operation_id = "server_update",
-	tag = "servers",
+	tag = "applications",
 	security(("tailscale-admin" = [])),
 	request_body = ServerUpdateArgs,
 	responses(
@@ -894,7 +894,7 @@ pub async fn update(
 	// symmetrically — on enrols open issues, off cascades them out).
 	let touches_catchup_field = args.data.group_id.is_some() || args.data.is_monitored.is_some();
 	let before = if touches_catchup_field {
-		Some(Server::get_by_id(&mut conn, args.server_id).await?)
+		Some(Application::get_by_id(&mut conn, args.server_id).await?)
 	} else {
 		None
 	};
@@ -912,7 +912,7 @@ pub async fn update(
 		// The form always sends `host`; an empty string clears it.
 		host: match args.data.host {
 			Some(s) if s.trim().is_empty() => Some(None),
-			Some(s) => Some(Some(Server::canonicalize_host(&s)?)),
+			Some(s) => Some(Some(Application::canonicalize_host(&s)?)),
 			None => None,
 		},
 		device_id: args.data.device_id,
@@ -930,7 +930,7 @@ pub async fn update(
 		may_manage_dns: args.data.may_manage_dns,
 		may_manage_tls: args.data.may_manage_tls,
 	};
-	Server::update(&mut conn, args.server_id, update_data).await?;
+	Application::update(&mut conn, args.server_id, update_data).await?;
 
 	let group_just_set = matches!(
 		(before.as_ref().map(|s| s.group_id), new_group_id),
@@ -946,7 +946,7 @@ pub async fn update(
 	Ok(Json(()))
 }
 
-/// Default downtime threshold for newly-created servers (10 minutes).
+/// Default downtime threshold for newly-created applications (10 minutes).
 const DEFAULT_ALERT_SECS: i64 = 600;
 /// Enrollment token lifetime: 7 days (human operational timescale).
 const ENROLLMENT_TTL: jiff::SignedDuration = jiff::SignedDuration::from_hours(24 * 7);
@@ -1001,7 +1001,7 @@ pub struct CreateServerArgs {
 #[utoipa::path(
 	post,
 	path = "/create",
-	tag = "servers",
+	tag = "applications",
 	security(("tailscale-admin" = [])),
 	request_body = CreateServerArgs,
 	responses(
@@ -1021,7 +1021,7 @@ pub async fn create(
 		.host
 		.as_deref()
 		.filter(|s| !s.trim().is_empty())
-		.map(Server::canonicalize_host)
+		.map(Application::canonicalize_host)
 		.transpose()?;
 
 	// Optionally pre-bind a Tailscale device.
@@ -1062,12 +1062,12 @@ pub async fn create(
 	// spec: APP#product-and-kind
 	if !args.product.defines_kind(args.kind) {
 		return Err(AppError::BadRequest(format!(
-			"{} servers have no {} role",
+			"{} applications have no {} role",
 			args.product, args.kind
 		)));
 	}
 
-	let server = Server {
+	let server = Application {
 		id: Uuid::new_v4(),
 		name: args.name,
 		host,
@@ -1099,7 +1099,7 @@ pub async fn create(
 		name_management_pause_reason: None,
 	};
 
-	let created = Server::create(&mut conn, server).await?;
+	let created = Application::create(&mut conn, server).await?;
 	Ok(Json(created.id))
 }
 
@@ -1112,12 +1112,12 @@ pub struct ServerIdOnlyArgs {
 
 /// Archive (soft-delete) a server.
 ///
-/// Releases and demotes its device. Archived servers no longer appear in
+/// Releases and demotes its device. Archived applications no longer appear in
 /// regular listings but can be restored later.
 #[utoipa::path(
 	post,
 	path = "/delete",
-	tag = "servers",
+	tag = "applications",
 	security(("tailscale-admin" = [])),
 	request_body = ServerIdOnlyArgs,
 	responses(
@@ -1131,7 +1131,7 @@ pub async fn delete(
 	Json(args): Json<ServerIdOnlyArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	Server::soft_delete(&mut conn, args.server_id).await?;
+	Application::soft_delete(&mut conn, args.server_id).await?;
 	Ok(Json(()))
 }
 
@@ -1143,7 +1143,7 @@ pub async fn delete(
 #[utoipa::path(
 	post,
 	path = "/restore",
-	tag = "servers",
+	tag = "applications",
 	security(("tailscale-admin" = [])),
 	request_body = ServerIdOnlyArgs,
 	responses(
@@ -1157,7 +1157,7 @@ pub async fn restore(
 	Json(args): Json<ServerIdOnlyArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	Server::restore(&mut conn, args.server_id).await?;
+	Application::restore(&mut conn, args.server_id).await?;
 	Ok(Json(()))
 }
 
@@ -1186,7 +1186,7 @@ pub struct EnrollmentTicket {
 #[utoipa::path(
 	post,
 	path = "/mint_enrollment",
-	tag = "servers",
+	tag = "applications",
 	security(("tailscale-admin" = [])),
 	request_body = ServerIdOnlyArgs,
 	responses(
@@ -1206,7 +1206,7 @@ pub async fn mint_enrollment(
 
 	let mut conn = state.db.get().await?;
 
-	let server = Server::get_by_id(&mut conn, args.server_id).await?;
+	let server = Application::get_by_id(&mut conn, args.server_id).await?;
 	if server.deleted_at.is_some() {
 		return Err(AppError::Conflict("server is archived".into()));
 	}
@@ -1257,7 +1257,7 @@ pub async fn mint_enrollment(
 #[utoipa::path(
 	post,
 	path = "/revoke_enrollment",
-	tag = "servers",
+	tag = "applications",
 	security(("tailscale-admin" = [])),
 	request_body = ServerIdOnlyArgs,
 	responses(
@@ -1301,7 +1301,7 @@ pub struct EnrollmentStatus {
 #[utoipa::path(
 	post,
 	path = "/enrollment_status",
-	tag = "servers",
+	tag = "applications",
 	security(("tailscale-admin" = [])),
 	request_body = ServerIdOnlyArgs,
 	responses(
@@ -1315,7 +1315,7 @@ pub async fn enrollment_status(
 	Json(args): Json<ServerIdOnlyArgs>,
 ) -> Result<Json<EnrollmentStatus>> {
 	let mut conn = state.db.get().await?;
-	let server = Server::get_by_id(&mut conn, args.server_id).await?;
+	let server = Application::get_by_id(&mut conn, args.server_id).await?;
 	let active = ServerEnrollmentToken::active_for(&mut conn, args.server_id).await?;
 	Ok(Json(EnrollmentStatus {
 		registered_at: server.registered_at,
@@ -1344,7 +1344,7 @@ pub struct AttachTailscaleDeviceArgs {
 #[utoipa::path(
 	post,
 	path = "/attach_tailscale_device",
-	tag = "servers",
+	tag = "applications",
 	security(("tailscale-admin" = [])),
 	request_body = AttachTailscaleDeviceArgs,
 	responses(
@@ -1389,9 +1389,9 @@ pub async fn attach_tailscale_device(
 		};
 
 	// Refuse if the device is already attached to a *different* live server
-	// — the operator should clear that one first. Archived servers don't count
+	// — the operator should clear that one first. Archived applications don't count
 	// (their device is already released), so scope to the live set.
-	let other_servers = Server::live_by_device_id(&mut conn, device.id).await?;
+	let other_servers = Application::live_by_device_id(&mut conn, device.id).await?;
 	if other_servers.iter().any(|s| s.id != args.server_id) {
 		return Err(AppError::Conflict(format!(
 			"device {} is already attached to another server",
@@ -1399,7 +1399,7 @@ pub async fn attach_tailscale_device(
 		)));
 	}
 
-	Server::update(
+	Application::update(
 		&mut conn,
 		args.server_id,
 		PartialServer {
@@ -1441,9 +1441,9 @@ pub(crate) async fn compute_min_chrome_version(
 
 pub(crate) async fn collect_group_names(
 	conn: &mut database::diesel_async::AsyncPgConnection,
-	servers: &[Server],
+	applications: &[Application],
 ) -> Result<std::collections::HashMap<Uuid, String>> {
-	let ids: Vec<Uuid> = servers.iter().filter_map(|s| s.group_id).collect();
+	let ids: Vec<Uuid> = applications.iter().filter_map(|s| s.group_id).collect();
 	if ids.is_empty() {
 		return Ok(std::collections::HashMap::new());
 	}

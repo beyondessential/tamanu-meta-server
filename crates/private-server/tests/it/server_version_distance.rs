@@ -7,8 +7,8 @@ async fn version_distance_calculation_up_to_date() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		// Create a server
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Test Server', 'https://test.example.com', 'production', 'central')"
+			"INSERT INTO applications (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Test Application', 'https://test.example.com', 'production', 'central')"
 		)
 		.await
 		.unwrap();
@@ -68,8 +68,8 @@ async fn version_distance_calculation_minor_behind() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		// Create a server
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Test Server', 'https://test.example.com', 'production', 'central')"
+			"INSERT INTO applications (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Test Application', 'https://test.example.com', 'production', 'central')"
 		)
 		.await
 		.unwrap();
@@ -83,7 +83,7 @@ async fn version_distance_calculation_minor_behind() {
 		.await
 		.unwrap();
 
-		// Server is on 2.10.0 (2 minors behind)
+		// Application is on 2.10.0 (2 minors behind)
 		conn.batch_execute(
 			"INSERT INTO statuses (id, server_id, version, extra) VALUES
 			('44444444-4444-4444-4444-444444444444', '11111111-1111-1111-1111-111111111111', '2.10.0', '{}')"
@@ -123,8 +123,8 @@ async fn version_distance_calculation_major_behind() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		// Create a server
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Test Server', 'https://test.example.com', 'production', 'central')"
+			"INSERT INTO applications (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Test Application', 'https://test.example.com', 'production', 'central')"
 		)
 		.await
 		.unwrap();
@@ -138,7 +138,7 @@ async fn version_distance_calculation_major_behind() {
 		.await
 		.unwrap();
 
-		// Server is on 2.10.0 (different major version)
+		// Application is on 2.10.0 (different major version)
 		conn.batch_execute(
 			"INSERT INTO statuses (id, server_id, version, extra) VALUES
 			('44444444-4444-4444-4444-444444444444', '11111111-1111-1111-1111-111111111111', '2.10.0', '{}')"
@@ -179,8 +179,8 @@ async fn version_distance_none_when_no_published_versions() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		// Create a server
 		conn.batch_execute(
-			"INSERT INTO servers (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Test Server', 'https://test.example.com', 'production', 'central')"
+			"INSERT INTO applications (id, name, host, rank, kind) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Test Application', 'https://test.example.com', 'production', 'central')"
 		)
 		.await
 		.unwrap();
@@ -193,7 +193,7 @@ async fn version_distance_none_when_no_published_versions() {
 		.await
 		.unwrap();
 
-		// Server has a version
+		// Application has a version
 		conn.batch_execute(
 			"INSERT INTO statuses (id, server_id, version, extra) VALUES
 			('44444444-4444-4444-4444-444444444444', '11111111-1111-1111-1111-111111111111', '2.9.0', '{}')"

@@ -27,12 +27,13 @@ async fn insert_grouped_server(conn: &mut diesel_async::AsyncPgConnection, host:
 			.get_result(conn)
 			.await
 			.expect("group");
-	let row: RowId = sql_query("INSERT INTO servers (host, group_id) VALUES ($1, $2) RETURNING id")
-		.bind::<sql_types::Text, _>(host)
-		.bind::<sql_types::Uuid, _>(group.id)
-		.get_result(conn)
-		.await
-		.expect("server");
+	let row: RowId =
+		sql_query("INSERT INTO applications (host, group_id) VALUES ($1, $2) RETURNING id")
+			.bind::<sql_types::Text, _>(host)
+			.bind::<sql_types::Uuid, _>(group.id)
+			.get_result(conn)
+			.await
+			.expect("server");
 	row.id
 }
 
@@ -492,7 +493,7 @@ async fn debug_filing_still_records_the_issue_row() {
 		)
 		.await;
 		let issue: RowId =
-			sql_query("SELECT id FROM issues WHERE ref = 'logspam' AND server_id = $1")
+			sql_query("SELECT id FROM issues WHERE ref = 'logspam' AND application_id = $1")
 				.bind::<sql_types::Uuid, _>(server_id)
 				.get_result(&mut conn)
 				.await

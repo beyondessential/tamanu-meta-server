@@ -38,7 +38,7 @@ struct Count {
 	n: i64,
 }
 
-/// Server in a fresh group whose linger window is zero, so a recovery closes
+/// Application in a fresh group whose linger window is zero, so a recovery closes
 /// the incident on the spot rather than leaving it to the sweep.
 async fn insert_grouped_server(conn: &mut diesel_async::AsyncPgConnection) -> (Uuid, Uuid) {
 	let group: RowId = sql_query(
@@ -49,7 +49,7 @@ async fn insert_grouped_server(conn: &mut diesel_async::AsyncPgConnection) -> (U
 	.await
 	.expect("group");
 	let server: RowId = sql_query(
-		"INSERT INTO servers (host, group_id) VALUES ('http://stranded.invalid/', $1) RETURNING id",
+		"INSERT INTO applications (host, group_id) VALUES ('http://stranded.invalid/', $1) RETURNING id",
 	)
 	.bind::<sql_types::Uuid, _>(group.id)
 	.get_result(conn)
@@ -104,7 +104,7 @@ async fn issue_id(
 	server_id: Uuid,
 	r#ref: &str,
 ) -> Uuid {
-	let row: RowId = sql_query("SELECT id FROM issues WHERE server_id = $1 AND ref = $2")
+	let row: RowId = sql_query("SELECT id FROM issues WHERE application_id = $1 AND ref = $2")
 		.bind::<sql_types::Uuid, _>(server_id)
 		.bind::<sql_types::Text, _>(r#ref)
 		.get_result(conn)
@@ -123,7 +123,7 @@ async fn unstamped_memberships(
 	let row: Count = sql_query(
 		"SELECT count(*) AS n FROM incident_issues ii \
 		 JOIN issues i ON i.id = ii.issue_id \
-		 WHERE i.server_id = $1 AND i.ref = $2 AND ii.left_at IS NULL",
+		 WHERE i.application_id = $1 AND i.ref = $2 AND ii.left_at IS NULL",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Text, _>(r#ref)
@@ -143,7 +143,7 @@ async fn stranded_as_legacy_data(
 	sql_query(
 		"UPDATE incident_issues ii SET left_at = NULL \
 		 FROM issues i WHERE i.id = ii.issue_id \
-		 AND i.server_id = $1 AND i.ref = $2",
+		 AND i.application_id = $1 AND i.ref = $2",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Text, _>(r#ref)

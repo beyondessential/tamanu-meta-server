@@ -4,6 +4,7 @@
 // Nextest still runs every #[tokio::test] in parallel as usual.
 
 mod admins;
+mod application_certificates;
 mod backfill_registered_at_migration;
 mod backup_detection;
 mod backups;
@@ -41,7 +42,6 @@ mod rotation_interlock;
 mod scope;
 mod scoped_check_policies;
 mod self_alerts;
-mod server_certificates;
 mod server_domains;
 mod server_enrollment;
 mod server_group_archival;

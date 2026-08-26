@@ -1,6 +1,6 @@
-//! Server creation via the admin API, focused on the optional URL behaviour.
+//! Application creation via the admin API, focused on the optional URL behaviour.
 
-use database::servers::Server;
+use database::applications::Application;
 use serde_json::json;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -13,7 +13,7 @@ async fn create_server_without_url_succeeds() {
 			.await;
 		response.assert_status_ok();
 		let id: String = response.json();
-		let server = Server::get_by_id(&mut conn, id.parse().unwrap())
+		let server = Application::get_by_id(&mut conn, id.parse().unwrap())
 			.await
 			.unwrap();
 		assert!(server.host.is_none(), "created without a URL");
@@ -25,7 +25,7 @@ async fn create_server_without_url_succeeds() {
 			.await;
 		response.assert_status_ok();
 		let id: String = response.json();
-		let server = Server::get_by_id(&mut conn, id.parse().unwrap())
+		let server = Application::get_by_id(&mut conn, id.parse().unwrap())
 			.await
 			.unwrap();
 		assert!(server.host.is_none(), "empty URL stored as null");
@@ -42,7 +42,7 @@ async fn create_server_defaults_schemeless_url_to_https() {
 			.await;
 		response.assert_status_ok();
 		let id: String = response.json();
-		let server = Server::get_by_id(&mut conn, id.parse().unwrap())
+		let server = Application::get_by_id(&mut conn, id.parse().unwrap())
 			.await
 			.unwrap();
 		assert_eq!(

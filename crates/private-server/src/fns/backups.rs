@@ -28,8 +28,8 @@ use database::{
 	BackupMaintenanceRun, BackupRecoveryVerification, BackupRepoStats, BackupRequest, BackupRun,
 	BackupTypeDefault, NewBackupTypeDefault, NewServerGroupBackupConfig,
 	NewServerGroupBackupSchedule, RecoveryVaultWrite, RetentionPolicy, ServerBackupCapability,
-	ServerGroupBackupConfig, ServerGroupBackupSchedule, server_groups::ServerGroup,
-	servers::Server,
+	ServerGroupBackupConfig, ServerGroupBackupSchedule, applications::Application,
+	server_groups::ServerGroup,
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -699,7 +699,7 @@ fn build_recent_runs_with_progress(
 		.collect();
 
 	// Unreported issuances become inferred rows — but only for the group's member
-	// servers. Issuances minted for a restore-replica *consumer* device are
+	// applications. Issuances minted for a restore-replica *consumer* device are
 	// tracked in the restore-checks table, not this backup panel.
 	for attempt in attempts {
 		if !device_to_server.contains_key(&attempt.first.device_id) {
@@ -760,7 +760,7 @@ fn build_recent_runs_with_progress(
 pub struct BackupStatsView {
 	/// Cached repository-level statistics, if available.
 	pub stats: Option<BackupRepoStats>,
-	/// The most recent backup and restore runs across the group's member servers,
+	/// The most recent backup and restore runs across the group's member applications,
 	/// including runs still in flight or inferred from credential issuances that
 	/// were never reported.
 	pub recent_runs: Vec<RecentRun>,
@@ -770,10 +770,10 @@ pub struct BackupStatsView {
 	pub pending_requests: Vec<PendingRequestRow>,
 	/// Backup types each member server has advertised it can run (with their
 	/// enabled state), so the "back up now" panel can offer the right types per
-	/// server and grey out servers that have declared none.
+	/// server and grey out applications that have declared none.
 	pub capabilities: Vec<ServerBackupCapabilityView>,
-	/// Member servers whose restore window is currently open, so the panel can
-	/// show which servers may restore right now and until when. Servers with no
+	/// Member applications whose restore window is currently open, so the panel can
+	/// show which applications may restore right now and until when. Servers with no
 	/// open window are omitted.
 	pub restore_windows: Vec<RestoreWindowRow>,
 	/// Total raw S3 bytes uploaded to the bucket by the group's device backup
@@ -812,7 +812,7 @@ pub struct RestoreWindowView {
 impl RestoreWindowView {
 	/// The window as reported to operators: reflects the stored values only
 	/// while the window is still open, so an expired window reads as closed.
-	fn of(server: &database::servers::Server) -> Self {
+	fn of(server: &database::applications::Application) -> Self {
 		if server.restore_allowed() {
 			Self {
 				allowed_until: server.restore_allowed_until,
@@ -1597,7 +1597,7 @@ pub struct GroupTypeScheduleView {
 }
 
 /// List the effective schedule and retention for every backup type a group's
-/// servers have declared support for (not just the ones currently enabled).
+/// applications have declared support for (not just the ones currently enabled).
 ///
 /// A type with no scheduled interval still appears, with a null
 /// `effective_interval`, since a manually run backup of that type is still
@@ -1621,7 +1621,7 @@ pub async fn group_schedules(
 		ServerBackupCapability::declared_types_for_group(&mut conn, args.server_group_id).await?;
 
 	// Anchor for the next-expected-run estimate: the group's most recent
-	// successful backup per type (max over its servers).
+	// successful backup per type (max over its applications).
 	let mut last_success: std::collections::HashMap<BackupType, Timestamp> =
 		std::collections::HashMap::new();
 	for ((_, ty), run) in
@@ -1907,7 +1907,7 @@ pub async fn restore_window(
 	Json(args): Json<ServerArgs>,
 ) -> Result<Json<RestoreWindowView>> {
 	let mut conn = state.db.get().await?;
-	let server = Server::get_by_id(&mut conn, args.server_id).await?;
+	let server = Application::get_by_id(&mut conn, args.server_id).await?;
 	Ok(Json(RestoreWindowView::of(&server)))
 }
 
@@ -1938,7 +1938,7 @@ pub async fn allow_restore(
 ) -> Result<Json<RestoreWindowView>> {
 	let mut conn = state.db.get().await?;
 	let allowed_until =
-		Server::allow_restore(&mut conn, args.server_id, Some(&admin.login)).await?;
+		Application::allow_restore(&mut conn, args.server_id, Some(&admin.login)).await?;
 	Ok(Json(RestoreWindowView {
 		allowed_until: Some(allowed_until),
 		allowed_by: Some(admin.login),
@@ -1966,7 +1966,7 @@ pub async fn disallow_restore(
 	Json(args): Json<ServerArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	Server::disallow_restore(&mut conn, args.server_id).await?;
+	Application::disallow_restore(&mut conn, args.server_id).await?;
 	Ok(Json(()))
 }
 
@@ -2072,7 +2072,7 @@ pub async fn stats(
 	let (s3_month_sent_bytes, s3_month_received_bytes) =
 		BackupRun::s3_traffic_this_month_for_group(&mut conn, args.server_group_id).await?;
 
-	// Pending requests + declared capabilities across the group's member servers.
+	// Pending requests + declared capabilities across the group's member applications.
 	let members = group.list_servers(&mut conn).await?;
 	// Latest successful backup per (server, type), to decorate each capability.
 	let latest_by =
@@ -2348,7 +2348,7 @@ pub async fn capabilities(
 	Json(args): Json<ServerArgs>,
 ) -> Result<Json<Vec<ServerBackupCapabilityView>>> {
 	let mut conn = state.db.get().await?;
-	let (group_id, device_id) = Server::get_by_id(&mut conn, args.server_id)
+	let (group_id, device_id) = Application::get_by_id(&mut conn, args.server_id)
 		.await
 		.ok()
 		.map(|s| (s.group_id, s.device_id))

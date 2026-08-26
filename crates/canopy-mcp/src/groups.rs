@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
 	CanopyMcp,
-	servers::{Retained, ServerSummary, summarize},
+	applications::{Retained, ServerSummary, summarize},
 	util::{mcp_err, not_found, ok_json, parse_uuid},
 };
 

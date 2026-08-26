@@ -8,14 +8,16 @@ use commons_servers::device_auth::keygen;
 use commons_servers::tailnet_directory::DirectoryEntry;
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::{Uuid, device::DeviceRole};
+use database::applications::Application;
 use database::devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo, TailscaleIdentity};
-use database::servers::Server;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::fns::Page;
-use crate::fns::servers::{ServerInfo, decorate_with_status, fill_display_hosts, server_to_info};
+use crate::fns::applications::{
+	ServerInfo, decorate_with_status, fill_display_hosts, server_to_info,
+};
 use crate::state::AppState;
 
 /// Full record for a device: its identity and role, every authentication
@@ -298,9 +300,9 @@ pub struct PaginationArgs {
 	pub limit: Option<u64>,
 }
 
-/// List the servers a device is currently associated with.
+/// List the applications a device is currently associated with.
 ///
-/// Returns the servers this device is currently bound to (usually zero or
+/// Returns the applications this device is currently bound to (usually zero or
 /// one), including reachability status and a best-effort display address
 /// for each.
 #[utoipa::path(
@@ -319,14 +321,14 @@ pub async fn get_servers_for_device(
 	Json(args): Json<DeviceIdArgs>,
 ) -> Result<Json<Vec<ServerInfo>>> {
 	let mut conn = state.db.get().await?;
-	let servers = Server::get_by_device_id(&mut conn, args.device_id).await?;
-	let mut infos: Vec<ServerInfo> = servers.into_iter().map(server_to_info).collect();
+	let applications = Application::get_by_device_id(&mut conn, args.device_id).await?;
+	let mut infos: Vec<ServerInfo> = applications.into_iter().map(server_to_info).collect();
 	decorate_with_status(&mut conn, &mut infos).await?;
 	fill_display_hosts(&mut conn, &mut infos).await?;
 	Ok(Json(infos))
 }
 
-/// List servers a device was previously associated with, but no longer is.
+/// List applications a device was previously associated with, but no longer is.
 ///
 /// Useful for tracing a device's history when it has since been reassigned
 /// or replaced on a different server.
@@ -346,8 +348,9 @@ pub async fn get_past_server_associations(
 	Json(args): Json<DeviceIdArgs>,
 ) -> Result<Json<Vec<ServerInfo>>> {
 	let mut conn = state.db.get().await?;
-	let servers = Server::get_past_associations_for_device(&mut conn, args.device_id).await?;
-	let mut infos: Vec<ServerInfo> = servers.into_iter().map(server_to_info).collect();
+	let applications =
+		Application::get_past_associations_for_device(&mut conn, args.device_id).await?;
+	let mut infos: Vec<ServerInfo> = applications.into_iter().map(server_to_info).collect();
 	decorate_with_status(&mut conn, &mut infos).await?;
 	fill_display_hosts(&mut conn, &mut infos).await?;
 	Ok(Json(infos))

@@ -38,7 +38,7 @@ async fn insert_status(
 
 async fn insert_server(conn: &mut AsyncPgConnection) -> Uuid {
 	let host = format!("http://figures.invalid/{}", Uuid::new_v4());
-	let server: RowId = sql_query("INSERT INTO servers (host) VALUES ($1) RETURNING id")
+	let server: RowId = sql_query("INSERT INTO applications (host) VALUES ($1) RETURNING id")
 		.bind::<sql_types::Text, _>(host)
 		.get_result(conn)
 		.await

@@ -379,11 +379,11 @@ async fn probe_reports_state_and_already_configured() {
 #[tokio::test(flavor = "multi_thread")]
 async fn request_now_upserts_and_cancel_deletes() {
 	commons_tests::server::run(async |mut conn, _public, private| {
-		// Server in a group so we can read the pending request back via stats.
+		// Application in a group so we can read the pending request back via stats.
 		let group_id = seed_group(&mut conn).await;
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind, group_id) VALUES \
+			"INSERT INTO applications (id, host, kind, group_id) VALUES \
 				('{server_id}', 'https://e.test', 'central', '{group_id}');"
 		))
 		.await
@@ -444,7 +444,7 @@ async fn allow_disallow_restore_window_round_trip() {
 		let group_id = seed_group(&mut conn).await;
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind, group_id) VALUES \
+			"INSERT INTO applications (id, host, kind, group_id) VALUES \
 				('{server_id}', 'https://e.test', 'central', '{group_id}');"
 		))
 		.await
@@ -605,7 +605,7 @@ async fn stats_includes_runs_and_pending_requests() {
 		let run_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'server');
-			 INSERT INTO servers (id, host, kind, group_id, device_id) VALUES \
+			 INSERT INTO applications (id, host, kind, group_id, device_id) VALUES \
 				('{server_id}', 'https://e.test', 'central', '{group_id}', '{device_id}');
 			 INSERT INTO backup_repo_stats (group_id, snapshot_count, source_count, logical_bytes, physical_bytes, bucket_bytes, bucket_bytes_observed_at) \
 				VALUES ('{group_id}', 12, 3, 1000, 800, 2000, now() - interval '1 day');
@@ -697,7 +697,7 @@ async fn stats_restore_run_resolves_snapshot_size_from_the_producing_backup() {
 		// producing backup immediately, not wait for the backfill.
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'server');
-			 INSERT INTO servers (id, host, kind, group_id, device_id) VALUES \
+			 INSERT INTO applications (id, host, kind, group_id, device_id) VALUES \
 				('{server_id}', 'https://e.test', 'central', '{group_id}', '{device_id}');
 			 INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, \
 				bytes_uploaded, snapshot_id, reported_at) \
@@ -746,7 +746,7 @@ async fn group_schedules_reports_next_run_from_last_success_plus_interval() {
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'server');
-			 INSERT INTO servers (id, host, kind, group_id, device_id) VALUES \
+			 INSERT INTO applications (id, host, kind, group_id, device_id) VALUES \
 				('{server_id}', 'https://e.test', 'central', '{group_id}', '{device_id}');
 			 INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES \
 				('{server_id}', 'tamanu-postgres', true);
@@ -783,7 +783,7 @@ async fn group_schedules_reports_manual_only_override_as_no_schedule() {
 		// An override row with a NULL interval is manual-only, even though
 		// `tamanu-postgres` has a canopy-wide 6h default to inherit from.
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind, group_id) VALUES \
+			"INSERT INTO applications (id, host, kind, group_id) VALUES \
 				('{server_id}', 'https://e.test', 'central', '{group_id}');
 			 INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES \
 				('{server_id}', 'tamanu-postgres', true);
@@ -822,7 +822,7 @@ async fn group_schedules_includes_disabled_declared_types() {
 		// A *declared but disabled* type (manual-only): retention still applies, so
 		// it must surface in schedule/retention as a manual-only entry.
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind, group_id) VALUES \
+			"INSERT INTO applications (id, host, kind, group_id) VALUES \
 				('{server_id}', 'https://e.test', 'central', '{group_id}');
 			 INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES \
 				('{server_id}', 'files', false);"

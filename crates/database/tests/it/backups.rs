@@ -37,13 +37,15 @@ async fn insert_group(conn: &mut AsyncPgConnection, name: &str) -> Uuid {
 
 async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uuid {
 	let host = format!("http://test.invalid/{}", Uuid::new_v4());
-	sql_query("INSERT INTO servers (host, kind, group_id) VALUES ($1, 'central', $2) RETURNING id")
-		.bind::<sql_types::Text, _>(host)
-		.bind::<sql_types::Uuid, _>(group_id)
-		.get_result::<RowId>(conn)
-		.await
-		.expect("insert server")
-		.id
+	sql_query(
+		"INSERT INTO applications (host, kind, group_id) VALUES ($1, 'central', $2) RETURNING id",
+	)
+	.bind::<sql_types::Text, _>(host)
+	.bind::<sql_types::Uuid, _>(group_id)
+	.get_result::<RowId>(conn)
+	.await
+	.expect("insert server")
+	.id
 }
 
 async fn insert_device(conn: &mut AsyncPgConnection) -> Uuid {
@@ -190,7 +192,7 @@ async fn hard_deleting_a_group_with_backup_rows_is_blocked() {
 		.await
 		.unwrap();
 
-		// Groups/servers are archived, never hard-deleted; the FKs are plain
+		// Groups/applications are archived, never hard-deleted; the FKs are plain
 		// references (no cascade), so a hard DELETE is blocked rather than
 		// silently cascading the config/audit away.
 		let res = sql_query("DELETE FROM server_groups WHERE id = $1")

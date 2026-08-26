@@ -109,7 +109,7 @@ impl Device {
 			.map_err(AppError::from)
 	}
 
-	/// Create a device with an initial key. The device is a `Server`: this is
+	/// Create a device with an initial key. The device is a `Application`: this is
 	/// the enrollment path, which only ever mints server devices (other roles
 	/// are provisioned through [`create_at_role`]).
 	pub async fn create(db: &mut AsyncPgConnection, key: Vec<u8>) -> Result<Self> {
@@ -169,7 +169,7 @@ impl Device {
 
 	/// Insert a tailnet device at `role`, identified by its Tailscale identity
 	/// with no mTLS key yet (`device_keys` left empty). Used by the operator
-	/// attach/create flows, which trust the tailnet identity as a `Server`.
+	/// attach/create flows, which trust the tailnet identity as a `Application`.
 	pub async fn create_with_tailscale(
 		db: &mut AsyncPgConnection,
 		identity: TailscaleIdentity,
@@ -259,8 +259,8 @@ impl Device {
 	/// - Both source and target hold a tailscale identity. The
 	///   operator must `detach_tailscale` on one side first.
 	/// - Both source and target are attached to a server
-	///   (`servers.device_id`). The operator must clear one
-	///   `servers.device_id` first; otherwise the unique constraint
+	///   (`applications.device_id`). The operator must clear one
+	///   `applications.device_id` first; otherwise the unique constraint
 	///   would fail during the rewrite.
 	///
 	/// Target wins for `role` and for `tailscale_*` (if it already
@@ -272,8 +272,8 @@ impl Device {
 		target_id: Uuid,
 	) -> Result<()> {
 		use crate::schema::{
-			artifacts, device_connections, device_keys, device_server_associations, devices,
-			issues, servers, statuses, versions,
+			applications, artifacts, device_connections, device_keys, device_server_associations,
+			devices, issues, statuses, versions,
 		};
 
 		if source_id == target_id {
@@ -302,14 +302,14 @@ impl Device {
 			}
 
 			// Conflict: both attached to a (possibly different) server.
-			let source_server_count: i64 = servers::table
-				.filter(servers::device_id.eq(source_id))
+			let source_server_count: i64 = applications::table
+				.filter(applications::device_id.eq(source_id))
 				.count()
 				.get_result(conn)
 				.await
 				.map_err(AppError::from)?;
-			let target_server_count: i64 = servers::table
-				.filter(servers::device_id.eq(target_id))
+			let target_server_count: i64 = applications::table
+				.filter(applications::device_id.eq(target_id))
 				.count()
 				.get_result(conn)
 				.await
@@ -383,11 +383,11 @@ impl Device {
 				.await
 				.map_err(AppError::from)?;
 
-			// servers.device_id is UNIQUE. We already ruled out the
+			// applications.device_id is UNIQUE. We already ruled out the
 			// both-attached case above; here the only writers are
 			// source-attached (rewrite to target) or neither (no-op).
-			diesel::update(servers::table.filter(servers::device_id.eq(source_id)))
-				.set(servers::device_id.eq(target_id))
+			diesel::update(applications::table.filter(applications::device_id.eq(source_id)))
+				.set(applications::device_id.eq(target_id))
 				.execute(conn)
 				.await
 				.map_err(AppError::from)?;
@@ -638,7 +638,7 @@ impl Device {
 	}
 
 	/// Bulk-fetch the Tailscale hostname (`tailscale_node_name`) for each given
-	/// device that has one. Used to derive a display URL for servers that have
+	/// device that has one. Used to derive a display URL for applications that have
 	/// no stored URL but are bound to a tailnet node.
 	pub async fn tailscale_names_by_ids(
 		db: &mut AsyncPgConnection,
@@ -1091,20 +1091,20 @@ impl Device {
 	/// Every `(device, attached_server_id, node_id)` triple for devices
 	/// that have a Tailscale node id and at least one attached server.
 	/// Drives the key-expiry sweep: the tailnet carries plenty of nodes
-	/// that aren't canopy-managed servers (operator laptops, other
+	/// that aren't canopy-managed applications (operator laptops, other
 	/// infra, …), and the sweep deliberately ignores those — it's
 	/// scoped to the headless devices canopy actually runs.
 	pub async fn list_tailnet_attached_with_server(
 		db: &mut AsyncPgConnection,
 	) -> Result<Vec<(Self, Uuid, String)>> {
-		use crate::schema::{devices, servers};
+		use crate::schema::{applications, devices};
 
 		let rows: Vec<(Self, Uuid, String)> = devices::table
-			.inner_join(servers::table.on(servers::device_id.eq(devices::id.nullable())))
+			.inner_join(applications::table.on(applications::device_id.eq(devices::id.nullable())))
 			.filter(devices::tailscale_node_id.is_not_null())
 			.select((
 				Self::as_select(),
-				servers::id,
+				applications::id,
 				devices::tailscale_node_id.assume_not_null(),
 			))
 			.load(db)

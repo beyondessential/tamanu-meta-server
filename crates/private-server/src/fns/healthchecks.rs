@@ -10,8 +10,8 @@ use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::source::{IngestMode, ReachabilityMode};
 use commons_types::status::CheckResult;
+use database::applications::Application;
 use database::check_policies::{CheckPolicy, IfLadder};
-use database::servers::Server;
 use database::source_policies::SourcePolicy;
 use database::statuses::Status;
 use jiff::Timestamp;
@@ -43,7 +43,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 pub struct CheckPolicyData {
 	/// The source that reports this check.
 	pub source: String,
-	/// The healthcheck's name, exactly as reported by monitored servers.
+	/// The healthcheck's name, exactly as reported by monitored applications.
 	pub check_name: String,
 	/// The maximum effective result for this check when no conditional
 	/// rule (see `rules`) overrides it: an observed result more urgent
@@ -183,7 +183,7 @@ pub async fn list(
 pub struct SourceData {
 	/// The source name, as reported by devices.
 	pub source: String,
-	/// How this source's silence bears on its servers' reachability: `on`
+	/// How this source's silence bears on its applications' reachability: `on`
 	/// (a stale source warns, all-stale is unreachable), `quiet` (never
 	/// warns, still counts toward unreachable), or `off` (excluded).
 	pub reachability: ReachabilityMode,
@@ -243,7 +243,7 @@ pub struct SetSourceReachabilityArgs {
 
 /// Set a source's reachability mode.
 ///
-/// Governs how the source's silence bears on its servers' reachability:
+/// Governs how the source's silence bears on its applications' reachability:
 /// `on` warns, `quiet` never warns but still counts toward unreachable,
 /// `off` is excluded. The reserved `canopy`/`manual` names are rejected.
 #[utoipa::path(
@@ -561,7 +561,7 @@ pub struct SampleArgs {
 
 /// A real-world sample of the data a conditional rule can reference for a
 /// given healthcheck, taken from the most recent status report (across
-/// all servers) from the check's own source that included it.
+/// all applications) from the check's own source that included it.
 #[derive(Serialize, ToSchema)]
 pub struct HealthcheckSample {
 	/// Additional top-level fields submitted with the status report that
@@ -629,7 +629,7 @@ pub async fn sample(
 			sample: None,
 		}));
 	};
-	let server = Server::get_by_id(&mut conn, status.server_id).await?;
+	let server = Application::get_by_id(&mut conn, status.server_id).await?;
 
 	// Top-level extras — the column is always an object after our
 	// ingestion path strips reserved keys.

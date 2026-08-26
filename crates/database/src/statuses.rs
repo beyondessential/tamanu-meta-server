@@ -10,8 +10,8 @@ use node_semver::Version;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::applications::Application;
 use crate::issues::Issue;
-use crate::servers::Server;
 
 /// Source value canopy uses when it files reachability issues on behalf of a
 /// server. Combined with [`REACHABILITY_REF`] to dedupe / find-or-create.
@@ -56,7 +56,7 @@ const GRACE_LOOKBACK_SQL: &str = "NOW() - INTERVAL '30 days'";
 /// caller-supplied point in time rather than to `NOW()`.
 const GRACE_LOOKBACK: SignedDuration = SignedDuration::from_hours(24 * 30);
 
-fn server_label(s: &Server) -> String {
+fn server_label(s: &Application) -> String {
 	s.name
 		.clone()
 		.or_else(|| s.host.as_ref().map(|h| h.0.to_string()))
@@ -90,7 +90,7 @@ fn format_secs(secs: i64) -> String {
 	QueryableByName,
 	utoipa::ToSchema,
 )]
-#[diesel(belongs_to(Server))]
+#[diesel(belongs_to(Application, foreign_key = server_id))]
 #[diesel(table_name = crate::schema::statuses)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Status {
@@ -109,7 +109,7 @@ pub struct Status {
 	/// Free-form extra data from the report (uptime, database version,
 	/// timezone, etc.), stored verbatim as a JSON object.
 	pub extra: serde_json::Value,
-	/// Server's overall self-reported health. A report that omits this is
+	/// Application's overall self-reported health. A report that omits this is
 	/// recorded as healthy.
 	pub healthy: bool,
 	/// Per-check breakdown, as an array of objects each with at least a
@@ -123,7 +123,7 @@ pub struct Status {
 }
 
 #[derive(Debug, Insertable)]
-#[diesel(belongs_to(Server))]
+#[diesel(belongs_to(Application, foreign_key = server_id))]
 #[diesel(table_name = crate::schema::statuses)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewStatus {
@@ -152,6 +152,172 @@ impl Status {
 		self.extra.as_object().and_then(|obj| obj.get(key))
 	}
 
+<<<<<<< HEAD
+||||||| parent of a9e64f71 (Pre-PR commit)
+	pub async fn ping_server(client: &reqwest::Client, server: &Server) -> Option<Self> {
+		// A server with no URL can't be reached externally — nothing to ping.
+		let host = &server.host.as_ref()?.0;
+		let start = Instant::now();
+		let url = host.join("/api/public/ping").unwrap();
+		debug!(%url, "pinging");
+		match client.get(url).send().await.map(|res| {
+			res.headers()
+				.get("X-Version")
+				.and_then(|value| value.to_str().ok())
+				.and_then(|value| VersionStr::from_str(value).ok())
+		}) {
+			Ok(version) => {
+				let latency = start.elapsed().as_millis().try_into().unwrap_or(i32::MAX);
+				info!(server=%server.id, host=%host, %latency, "ping success");
+				Some(Self {
+					id: Uuid::new_v4(),
+					server_id: server.id,
+					device_id: None,
+					created_at: Timestamp::now(),
+					version,
+					extra: Default::default(),
+					// Pingtask doesn't know the server's self-reported health;
+					// it only knows the server is reachable. Default to healthy
+					// to avoid false-positive unhealthy events from this path.
+					healthy: true,
+					health: serde_json::Value::Array(Default::default()),
+					source: CANOPY_SOURCE.into(),
+				})
+			}
+			Err(err) => {
+				warn!(server=%server.id, host=%host, "ping failure: {err}");
+				None
+			}
+		}
+	}
+
+	pub async fn ping_servers(db: &mut AsyncPgConnection) -> Result<Vec<(Self, Server)>> {
+		let client = reqwest::ClientBuilder::new()
+			.timeout(Duration::from_secs(10))
+			.build()
+			.map_err(|err| AppError::custom(format!("failed to build HTTP client: {err}")))?;
+		let statuses =
+			FuturesOrdered::from_iter(Server::all_pingable(db).await?.into_iter().map({
+				let client = client.clone();
+				move |server| {
+					let client = client.clone();
+					async move {
+						Self::ping_server(&client, &server)
+							.await
+							.map(|ping| (ping, server))
+					}
+				}
+			}));
+
+		Ok(statuses
+			.collect::<Vec<Option<_>>>()
+			.await
+			.into_iter()
+			.flatten()
+			.collect())
+	}
+
+	pub async fn ping_servers_and_save(db: &mut AsyncPgConnection) -> Result<()> {
+		use crate::schema::statuses::dsl::*;
+
+		let servers = Self::ping_servers(db).await?;
+		diesel::insert_into(statuses)
+			.values(
+				servers
+					.iter()
+					.map(|(status, _)| status.clone())
+					.collect::<Vec<_>>(),
+			)
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(())
+	}
+
+=======
+	pub async fn ping_server(client: &reqwest::Client, server: &Application) -> Option<Self> {
+		// A server with no URL can't be reached externally — nothing to ping.
+		let host = &server.host.as_ref()?.0;
+		let start = Instant::now();
+		let url = host.join("/api/public/ping").unwrap();
+		debug!(%url, "pinging");
+		match client.get(url).send().await.map(|res| {
+			res.headers()
+				.get("X-Version")
+				.and_then(|value| value.to_str().ok())
+				.and_then(|value| VersionStr::from_str(value).ok())
+		}) {
+			Ok(version) => {
+				let latency = start.elapsed().as_millis().try_into().unwrap_or(i32::MAX);
+				info!(server=%server.id, host=%host, %latency, "ping success");
+				Some(Self {
+					id: Uuid::new_v4(),
+					server_id: server.id,
+					device_id: None,
+					created_at: Timestamp::now(),
+					version,
+					extra: Default::default(),
+					// Pingtask doesn't know the server's self-reported health;
+					// it only knows the server is reachable. Default to healthy
+					// to avoid false-positive unhealthy events from this path.
+					healthy: true,
+					health: serde_json::Value::Array(Default::default()),
+					source: CANOPY_SOURCE.into(),
+				})
+			}
+			Err(err) => {
+				warn!(server=%server.id, host=%host, "ping failure: {err}");
+				None
+			}
+		}
+	}
+
+	pub async fn ping_servers(db: &mut AsyncPgConnection) -> Result<Vec<(Self, Application)>> {
+		let client = reqwest::ClientBuilder::new()
+			.timeout(Duration::from_secs(10))
+			.build()
+			.map_err(|err| AppError::custom(format!("failed to build HTTP client: {err}")))?;
+		let statuses =
+			FuturesOrdered::from_iter(Application::all_pingable(db).await?.into_iter().map({
+				let client = client.clone();
+				move |server| {
+					let client = client.clone();
+					async move {
+						Self::ping_server(&client, &server)
+							.await
+							.map(|ping| (ping, server))
+					}
+				}
+			}));
+
+		Ok(statuses
+			.collect::<Vec<Option<_>>>()
+			.await
+			.into_iter()
+			.flatten()
+			.collect())
+	}
+
+	pub async fn ping_servers_and_save(db: &mut AsyncPgConnection) -> Result<()> {
+		use crate::schema::statuses::dsl::*;
+
+		let applications = Self::ping_servers(db).await?;
+		diesel::insert_into(statuses)
+			.values(
+				applications
+					.iter()
+					.map(|(status, _)| status.clone())
+					.collect::<Vec<_>>(),
+			)
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(())
+	}
+
+>>>>>>> a9e64f71 (Pre-PR commit)
 	/// File (or update) each server's single `reachability` check
 	/// from the freshness of the sources it is expected to report, against
 	/// its per-server `alert_when_down_for` threshold. Passed when every
@@ -163,7 +329,7 @@ impl Status {
 	/// toward unreachable, or is ignored. Servers with no counted source
 	/// fall back to whether anything at all has reached canopy.
 	///
-	/// Unmonitored servers are swept alongside the rest: their reachability
+	/// Unmonitored applications are swept alongside the rest: their reachability
 	/// is recorded and presented, and the monitoring gate in
 	/// [`crate::issues::NewEvent::save_with_state`] is what keeps it out of
 	/// incidents. The UI marks them so an operator reads "unreachable and
@@ -175,8 +341,11 @@ impl Status {
 		use commons_types::source::ReachabilityMode;
 		use std::collections::HashMap;
 
-		let servers = Server::get_all(db, 0, None).await?;
-		let swept: Vec<&Server> = servers.iter().filter(|s| s.id != Uuid::nil()).collect();
+		let applications = Application::get_all(db, 0, None).await?;
+		let swept: Vec<&Application> = applications
+			.iter()
+			.filter(|s| s.id != Uuid::nil())
+			.collect();
 		if swept.is_empty() {
 			return Ok(0);
 		}
@@ -193,8 +362,16 @@ impl Status {
 			by_server.entry(sid).or_default().push((source, last_seen));
 		}
 
+<<<<<<< HEAD
 		// Backstop for servers with no counted source (never reported, or
 		// every source excluded): the latest status row, any source.
+||||||| parent of a9e64f71 (Pre-PR commit)
+		// Backstop for servers with no counted source (never reported, or
+		// only reached by pingtask): the latest status row, any source.
+=======
+		// Backstop for applications with no counted source (never reported, or
+		// only reached by pingtask): the latest status row, any source.
+>>>>>>> a9e64f71 (Pre-PR commit)
 		let statuses = Self::latest_for_servers(db, &server_ids).await?;
 		let status_map: HashMap<Uuid, Status> =
 			statuses.into_iter().map(|s| (s.server_id, s)).collect();
@@ -203,7 +380,7 @@ impl Status {
 			Issue::list_by_source_ref(db, CANOPY_SOURCE, REACHABILITY_REF, &server_ids).await?;
 		let issue_map: HashMap<Uuid, &Issue> = existing_issues
 			.iter()
-			.filter_map(|i| i.server_id.map(|sid| (sid, i)))
+			.filter_map(|i| i.application_id.map(|sid| (sid, i)))
 			.collect();
 
 		let now = Timestamp::now();
@@ -239,12 +416,12 @@ impl Status {
 				if down {
 					let message = match elapsed {
 						Some(e) => format!(
-							"Server {label} has not reported for {} (threshold {})",
+							"Application {label} has not reported for {} (threshold {})",
 							format_secs(e.as_secs()),
 							format_secs(threshold.as_secs()),
 						),
 						None => format!(
-							"Server {label} has never reported (threshold {})",
+							"Application {label} has never reported (threshold {})",
 							format_secs(threshold.as_secs()),
 						),
 					};
@@ -259,7 +436,7 @@ impl Status {
 				} else {
 					(
 						CheckResult::Passed,
-						format!("Server {label} is reachable"),
+						format!("Application {label} is reachable"),
 						serde_json::json!({ "threshold_secs": threshold.as_secs() }),
 					)
 				}
@@ -287,7 +464,7 @@ impl Status {
 					(
 						CheckResult::Failed,
 						format!(
-							"Server {label} is unreachable: every source is stale ({stale_names})"
+							"Application {label} is unreachable: every source is stale ({stale_names})"
 						),
 						detail,
 					)
@@ -304,7 +481,7 @@ impl Status {
 					// Some stale, but every stale source is quiet: no warning.
 					(
 						CheckResult::Passed,
-						format!("Server {label} is reachable"),
+						format!("Application {label} is reachable"),
 						serde_json::json!({ "threshold_secs": threshold.as_secs() }),
 					)
 				}
@@ -324,11 +501,11 @@ impl Status {
 				db,
 				crate::issues::CheckFiling {
 					source: CANOPY_SOURCE,
-					scope: crate::issues::Scope::Server(server.id),
+					scope: crate::issues::Scope::Application(server.id),
 					device_id: None,
 					check: REACHABILITY_REF,
 					observed,
-					title: Some("Server reachability"),
+					title: Some("Application reachability"),
 					message: &message,
 					detail: Some(detail),
 					default_ceiling: CheckResult::Failed,
@@ -343,7 +520,7 @@ impl Status {
 		Ok(filed)
 	}
 
-	/// Most recent status row (across all servers) pushed by `source`
+	/// Most recent status row (across all applications) pushed by `source`
 	/// whose `health` array contains an entry for `check_name`. Used by
 	/// the rule-editor UI to surface a realistic sample of the variables
 	/// an operator can predicate on (the check's extras, the status-level

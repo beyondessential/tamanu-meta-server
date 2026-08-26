@@ -739,12 +739,12 @@ impl ServerBackupCapability {
 		group_id: Uuid,
 		enabled_only: bool,
 	) -> Result<Vec<BackupType>> {
-		use crate::schema::{server_backup_capabilities as cap, servers};
+		use crate::schema::{applications, server_backup_capabilities as cap};
 
 		let mut q = cap::table
-			.inner_join(servers::table.on(servers::id.eq(cap::server_id)))
-			.filter(servers::group_id.eq(group_id))
-			.filter(servers::deleted_at.is_null())
+			.inner_join(applications::table.on(applications::id.eq(cap::server_id)))
+			.filter(applications::group_id.eq(group_id))
+			.filter(applications::deleted_at.is_null())
 			.into_boxed();
 		if enabled_only {
 			q = q.filter(cap::enabled.eq(true));
@@ -1620,7 +1620,7 @@ pub struct BackupRunProgress {
 	pub r#type: BackupType,
 	/// Whether the run is a backup (upload) or a restore (download).
 	pub purpose: BackupPurpose,
-	/// When Canopy received this sample. Server-stamped, not device-supplied:
+	/// When Canopy received this sample. Application-stamped, not device-supplied:
 	/// transfer rate is derived from it, and "is this run moving, as far as
 	/// Canopy can tell" is a receipt-time question.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
@@ -2105,8 +2105,8 @@ pub struct BackupRepoSnapshot {
 	/// combines a host and path). Used to match this inventory row back to a
 	/// server and backup type.
 	pub source: String,
-	/// Server this source was matched to, if the source identifier could be
-	/// parsed as one of the group's servers.
+	/// Application this source was matched to, if the source identifier could be
+	/// parsed as one of the group's applications.
 	pub server_id: Option<Uuid>,
 	/// Backup type this source was matched to, if the source identifier could
 	/// be parsed as a known backup type.
@@ -2344,7 +2344,7 @@ pub struct BackupRepoStats {
 	pub group_id: Uuid,
 	/// Total number of snapshots currently in the repository, if known.
 	pub snapshot_count: Option<i32>,
-	/// Number of distinct backup sources (servers/types) currently in the
+	/// Number of distinct backup sources (applications/types) currently in the
 	/// repository, if known.
 	pub source_count: Option<i32>,
 	/// Total logical (uncompressed, pre-dedup) size of all data in the

@@ -5,11 +5,11 @@ use commons_types::{
 	backup::{BackupType, MaintenanceKind, RunOutcome},
 };
 use database::{
+	applications::Application,
 	backups::{
 		BackupMaintenanceRun, BackupMaintenanceRunFilters, BackupRun, BackupRunFilters,
 		BackupTypeDefault, MaintenanceOutcomeFilter, RetentionPolicy,
 	},
-	servers::Server,
 };
 use jiff::Timestamp;
 use rmcp::{
@@ -178,8 +178,8 @@ impl CanopyMcp {
 		.map_err(mcp_err)?;
 
 		let group_names = group_names(&mut conn, &unique(runs.iter().map(|r| r.group_id))).await?;
-		let server_names =
-			Server::names_by_ids(&mut conn, &unique(runs.iter().filter_map(|r| r.server_id)))
+		let application_names =
+			Application::names_by_ids(&mut conn, &unique(runs.iter().filter_map(|r| r.server_id)))
 				.await
 				.map_err(mcp_err)?;
 
@@ -194,7 +194,7 @@ impl CanopyMcp {
 				server_id: r.server_id,
 				server_name: r
 					.server_id
-					.and_then(|s| server_names.get(&s))
+					.and_then(|s| application_names.get(&s))
 					.and_then(|(n, _)| n.clone()),
 				device_id: r.device_id,
 				r#type: r.r#type.to_string(),

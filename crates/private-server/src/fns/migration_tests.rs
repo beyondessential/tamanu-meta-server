@@ -21,7 +21,7 @@ pub struct ForGroupArgs {
 	pub group_id: Uuid,
 }
 
-/// Where each of a group's servers stands against the version it would take
+/// Where each of a group's applications stands against the version it would take
 /// next.
 ///
 /// One entry per server that has a candidate version, which is the version its
@@ -85,11 +85,12 @@ pub async fn attempt_state(
 	// Member-server devices restore for their own purposes (clone refreshes,
 	// manual restores) and never report; only consumer issuances speak for the
 	// pipeline. Same filter as the restore-activity view.
-	let member_devices: Vec<Uuid> = database::servers::Server::list_live_in_group(conn, group_id)
-		.await?
-		.into_iter()
-		.filter_map(|s| s.device_id)
-		.collect();
+	let member_devices: Vec<Uuid> =
+		database::applications::Application::list_live_in_group(conn, group_id)
+			.await?
+			.into_iter()
+			.filter_map(|s| s.device_id)
+			.collect();
 	let since =
 		crate::run_pairing::issuance_since(now, reports.iter().map(|c| c.reported_at).min());
 	let issuances: Vec<_> =

@@ -29,12 +29,13 @@ async fn insert_group(conn: &mut AsyncPgConnection) -> Uuid {
 }
 
 async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uuid {
-	let row: RowId = sql_query("INSERT INTO servers (host, group_id) VALUES ($1, $2) RETURNING id")
-		.bind::<sql_types::Text, _>("https://central.kamaka.example")
-		.bind::<sql_types::Uuid, _>(group_id)
-		.get_result(conn)
-		.await
-		.expect("server");
+	let row: RowId =
+		sql_query("INSERT INTO applications (host, group_id) VALUES ($1, $2) RETURNING id")
+			.bind::<sql_types::Text, _>("https://central.kamaka.example")
+			.bind::<sql_types::Uuid, _>(group_id)
+			.get_result(conn)
+			.await
+			.expect("server");
 	row.id
 }
 
@@ -244,7 +245,7 @@ async fn migration_check(conn: &mut AsyncPgConnection, server: Uuid) -> Option<F
 	sql_query(
 		"SELECT i.observed_result AS observed, i.effective_result AS effective, i.escalates
 		 FROM issues i
-		 WHERE i.server_id = $1 AND i.ref = 'migration-test' AND i.active = true",
+		 WHERE i.application_id = $1 AND i.ref = 'migration-test' AND i.active = true",
 	)
 	.bind::<sql_types::Uuid, _>(server)
 	.get_result(conn)
@@ -261,7 +262,7 @@ async fn unresolved_issues_for(conn: &mut AsyncPgConnection, server: Uuid) -> i6
 	}
 	sql_query(
 		"SELECT count(*) AS count FROM version_known_issues
-		 WHERE server_id = $1 AND resolved_at IS NULL",
+		 WHERE application_id = $1 AND resolved_at IS NULL",
 	)
 	.bind::<sql_types::Uuid, _>(server)
 	.get_result::<Count>(conn)
@@ -588,7 +589,7 @@ async fn restore_check(conn: &mut AsyncPgConnection, server: Uuid) -> Option<Fil
 	sql_query(
 		"SELECT i.observed_result AS observed, i.effective_result AS effective, i.escalates
 		 FROM issues i
-		 WHERE i.server_id = $1 AND i.ref = 'restore-verification' AND i.active = true",
+		 WHERE i.application_id = $1 AND i.ref = 'restore-verification' AND i.active = true",
 	)
 	.bind::<sql_types::Uuid, _>(server)
 	.get_result(conn)

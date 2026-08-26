@@ -1,5 +1,5 @@
 //! Candidate derivation: which version a server is asked to be tested against.
-//! The version its group's open plan names, and only for Tamanu servers.
+//! The version its group's open plan names, and only for Tamanu applications.
 
 use commons_tests::db::TestDb;
 use commons_types::{server::product::Product, version::VersionStatus};
@@ -54,14 +54,15 @@ async fn insert_server(
 	host: &str,
 	product: Product,
 ) -> Uuid {
-	let server: RowId =
-		sql_query("INSERT INTO servers (host, group_id, product) VALUES ($1, $2, $3) RETURNING id")
-			.bind::<sql_types::Text, _>(host)
-			.bind::<sql_types::Uuid, _>(group)
-			.bind::<sql_types::Text, _>(product.to_string())
-			.get_result(conn)
-			.await
-			.expect("server");
+	let server: RowId = sql_query(
+		"INSERT INTO applications (host, group_id, product) VALUES ($1, $2, $3) RETURNING id",
+	)
+	.bind::<sql_types::Text, _>(host)
+	.bind::<sql_types::Uuid, _>(group)
+	.bind::<sql_types::Text, _>(product.to_string())
+	.get_result(conn)
+	.await
+	.expect("server");
 	server.id
 }
 

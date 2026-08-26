@@ -495,7 +495,7 @@ pub enum RedactionGapReason {
 // spec: RST#the-masking-manifest
 pub async fn redaction_gap_for(
 	db: &mut AsyncPgConnection,
-	server: &crate::servers::Server,
+	server: &crate::applications::Application,
 ) -> Result<Option<(RedactionGapReason, Option<String>)>> {
 	let Some(manifest) = server.product.caps().redaction else {
 		return Ok(Some((RedactionGapReason::ProductHasNoManifest, None)));
@@ -1004,7 +1004,7 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 		HashMap::new();
 
 	let mut work: HashMap<ReplicaKey, KeyWork> = HashMap::new();
-	let mut servers: HashMap<Uuid, crate::servers::Server> = HashMap::new();
+	let mut applications: HashMap<Uuid, crate::applications::Application> = HashMap::new();
 
 	for d in &declarations {
 		let capabilities = match capability_cache.entry(d.consumer_device_id) {
@@ -1022,12 +1022,15 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 		let once = descriptor.is_some_and(|desc| desc.has_semantic(semantics::ONCE));
 		let migrates = descriptor.is_some_and(|desc| desc.has_semantic(semantics::MIGRATE));
 
-		let covered_servers: Vec<crate::servers::Server> = match d.server_id {
-			Some(sid) => match crate::servers::Server::get_by_id(db, sid).await.ok() {
+		let covered_servers: Vec<crate::applications::Application> = match d.server_id {
+			Some(sid) => match crate::applications::Application::get_by_id(db, sid)
+				.await
+				.ok()
+			{
 				Some(s) if s.group_id == Some(d.group_id) && s.deleted_at.is_none() => vec![s],
 				_ => vec![],
 			},
-			None => crate::servers::Server::list_live_in_group(db, d.group_id).await?,
+			None => crate::applications::Application::list_live_in_group(db, d.group_id).await?,
 		};
 		if covered_servers.is_empty() {
 			continue;
@@ -1078,7 +1081,7 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 				_ => false,
 			};
 
-			servers.entry(sid).or_insert(server);
+			applications.entry(sid).or_insert(server);
 			let w = work.entry(key).or_default();
 			w.declared = true;
 			w.reports_count = true;
@@ -1102,7 +1105,7 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 		if work.contains_key(key) || !declared.contains(&declaration) {
 			continue;
 		}
-		if live_server(db, &mut servers, key.0).await?.is_none() {
+		if live_server(db, &mut applications, key.0).await?.is_none() {
 			continue;
 		}
 		work.entry(key.clone()).or_default().reports_count = true;
@@ -1113,7 +1116,7 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 		if work.contains_key(key) {
 			continue;
 		}
-		if live_server(db, &mut servers, key.0).await?.is_none() {
+		if live_server(db, &mut applications, key.0).await?.is_none() {
 			continue;
 		}
 		work.entry(key.clone()).or_default();
@@ -1178,7 +1181,8 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 	)
 	.await?
 	{
-		if per_server.contains_key(&sid) || live_server(db, &mut servers, sid).await?.is_none() {
+		if per_server.contains_key(&sid) || live_server(db, &mut applications, sid).await?.is_none()
+		{
 			continue;
 		}
 		per_server.insert(sid, ServerInstances::default());
@@ -1189,7 +1193,9 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 	for sid in server_order {
 		let found = per_server.remove(&sid).expect("entered with its server");
 		let label = crate::backup::staleness::server_label(
-			servers.get(&sid).expect("cached when the key was derived"),
+			applications
+				.get(&sid)
+				.expect("cached when the key was derived"),
 		);
 		degraded += file_verification(db, sid, &label, found.verification).await?;
 		degraded += file_redaction(db, sid, &label, found.redaction).await?;
@@ -1204,11 +1210,11 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 /// check against a server that isn't there.
 async fn live_server<'a>(
 	db: &mut AsyncPgConnection,
-	cache: &'a mut HashMap<Uuid, crate::servers::Server>,
+	cache: &'a mut HashMap<Uuid, crate::applications::Application>,
 	server_id: Uuid,
-) -> Result<Option<&'a crate::servers::Server>> {
+) -> Result<Option<&'a crate::applications::Application>> {
 	if let Entry::Vacant(e) = cache.entry(server_id) {
-		match crate::servers::Server::get_by_id(db, server_id).await {
+		match crate::applications::Application::get_by_id(db, server_id).await {
 			Ok(server) if server.deleted_at.is_none() => {
 				e.insert(server);
 			}
@@ -1265,7 +1271,7 @@ fn is_overdue(
 async fn untried_candidate(
 	db: &mut AsyncPgConnection,
 	declaration: &RestoreReplica,
-	server: &crate::servers::Server,
+	server: &crate::applications::Application,
 	snapshots: &HashMap<(Uuid, BackupType), BackupRun>,
 	now: Timestamp,
 ) -> Result<Option<(String, String)>> {
@@ -1608,7 +1614,7 @@ async fn file_restore_check(
 			db,
 			crate::issues::CheckFiling {
 				source: crate::statuses::CANOPY_SOURCE,
-				scope: Scope::Server(server_id),
+				scope: Scope::Application(server_id),
 				device_id: None,
 				check: r#ref,
 				observed: CheckResult::Passed,
@@ -1626,7 +1632,7 @@ async fn file_restore_check(
 			db,
 			InstancedCheckFiling {
 				source: crate::statuses::CANOPY_SOURCE,
-				scope: Scope::Server(server_id),
+				scope: Scope::Application(server_id),
 				device_id: None,
 				check: r#ref,
 				title: Some(title),

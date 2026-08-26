@@ -79,7 +79,7 @@ async fn raise_enqueues_once_and_flap_recovery_is_silent() {
 		// First raise: issue + canopy-wide incident + one open row, delayed
 		// by the grace (non-escalating).
 		let issue = raise_with(&mut conn, false).await;
-		assert_eq!(issue.server_id, None);
+		assert_eq!(issue.application_id, None);
 		assert_eq!(issue.server_group_id, None);
 		assert!(issue.active);
 		let rows = outbox_rows(&mut conn).await;
@@ -239,11 +239,12 @@ async fn insert_server(conn: &mut diesel_async::AsyncPgConnection) -> uuid::Uuid
 		#[diesel(sql_type = diesel::sql_types::Uuid)]
 		id: uuid::Uuid,
 	}
-	let row: RowId =
-		diesel::sql_query("INSERT INTO servers (host) VALUES ('http://sc.invalid/') RETURNING id")
-			.get_result(conn)
-			.await
-			.expect("insert server");
+	let row: RowId = diesel::sql_query(
+		"INSERT INTO applications (host) VALUES ('http://sc.invalid/') RETURNING id",
+	)
+	.get_result(conn)
+	.await
+	.expect("insert server");
 	row.id
 }
 
@@ -255,7 +256,7 @@ async fn quiet_check(conn: &mut diesel_async::AsyncPgConnection, check: &str, ho
 		conn,
 		database::issues::CheckFiling {
 			source: "alertd",
-			scope: database::issues::Scope::Server(server_id),
+			scope: database::issues::Scope::Application(server_id),
 			device_id: None,
 			check,
 			observed: CheckResult::Passed,

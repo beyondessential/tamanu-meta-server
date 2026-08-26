@@ -17,15 +17,15 @@ use commons_servers::acme::RevokeFor;
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::Uuid;
 use commons_types::dns::{is_within, match_zone};
-use database::server_certificates::{RevocationReason, ServerCertificate};
-use database::servers::Server;
-use database::{ServerGroupDomain, ServerName};
+use database::application_certificates::{ApplicationCertificate, RevocationReason};
+use database::applications::Application;
+use database::{ApplicationName, ServerGroupDomain};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::fns::applications::ServerIdArgs;
 use crate::fns::server_groups::GroupIdArgs;
-use crate::fns::servers::ServerIdArgs;
 use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
@@ -111,7 +111,7 @@ pub struct CertificateView {
 
 /// What a server's page shows about its names and certificates.
 #[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct ServerNamesView {
+pub struct ApplicationNamesView {
 	/// Whether an operator has allowed this server to manage its own DNS.
 	pub may_manage_dns: bool,
 	/// Whether an operator has allowed this server to obtain its own
@@ -140,7 +140,7 @@ pub struct ServerNamesView {
 	pub certificates: Vec<CertificateView>,
 }
 
-fn name_view(row: ServerName, zones: &[commons_types::dns::ManagedZone]) -> NameView {
+fn name_view(row: ApplicationName, zones: &[commons_types::dns::ManagedZone]) -> NameView {
 	NameView {
 		published: row.is_reconciled(),
 		addresses: row.wanted().iter().map(|a| a.to_string()).collect(),
@@ -153,8 +153,8 @@ fn name_view(row: ServerName, zones: &[commons_types::dns::ManagedZone]) -> Name
 	}
 }
 
-fn certificate_view(cert: ServerCertificate) -> CertificateView {
-	use database::server_certificates::Risk;
+fn certificate_view(cert: ApplicationCertificate) -> CertificateView {
+	use database::application_certificates::Risk;
 	CertificateView {
 		remaining_seconds: cert.remaining().map(|d| d.as_secs()),
 		collectable: cert.is_collectable(),
@@ -193,7 +193,7 @@ fn certificate_view(cert: ServerCertificate) -> CertificateView {
 	security(("tailscale-user" = [])),
 	request_body = ServerIdArgs,
 	responses(
-		(status = 200, body = ServerNamesView),
+		(status = 200, body = ApplicationNamesView),
 		(status = 404, body = ProblemDetailsSchema),
 	),
 )]
@@ -201,9 +201,9 @@ pub async fn for_server(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
 	Json(args): Json<ServerIdArgs>,
-) -> Result<Json<ServerNamesView>> {
+) -> Result<Json<ApplicationNamesView>> {
 	let mut conn = state.db_read.get().await?;
-	let server = Server::get_by_id(&mut conn, args.server_id).await?;
+	let server = Application::get_by_id(&mut conn, args.server_id).await?;
 
 	let domains = match server.group_id {
 		Some(group) => ServerGroupDomain::list_for_group(&mut conn, group)
@@ -213,10 +213,10 @@ pub async fn for_server(
 			.collect(),
 		None => Vec::new(),
 	};
-	let names = ServerName::for_server(&mut conn, args.server_id).await?;
-	let certificates = ServerCertificate::for_server(&mut conn, args.server_id).await?;
+	let names = ApplicationName::for_server(&mut conn, args.server_id).await?;
+	let certificates = ApplicationCertificate::for_server(&mut conn, args.server_id).await?;
 
-	Ok(Json(ServerNamesView {
+	Ok(Json(ApplicationNamesView {
 		may_manage_dns: server.may_manage_dns,
 		may_manage_tls: server.may_manage_tls,
 		paused: server.name_management_paused(),
@@ -269,7 +269,7 @@ pub struct DomainHealthView {
 /// current certificate.
 ///
 /// So that whether a deployment's names are healthy is answerable from the
-/// group's page, without visiting each of its servers.
+/// group's page, without visiting each of its applications.
 // spec: CRT#presentation
 #[utoipa::path(
 	post,
@@ -285,7 +285,7 @@ pub async fn for_group(
 	_user: TailscaleUser,
 	Json(args): Json<GroupIdArgs>,
 ) -> Result<Json<Vec<DomainHealthView>>> {
-	use database::server_certificates::Risk;
+	use database::application_certificates::Risk;
 	use std::collections::BTreeMap;
 
 	let mut conn = state.db_read.get().await?;
@@ -294,14 +294,14 @@ pub async fn for_group(
 		return Ok(Json(Vec::new()));
 	}
 
-	let servers = Server::list_live_in_group(&mut conn, args.server_group_id).await?;
+	let applications = Application::list_live_in_group(&mut conn, args.server_group_id).await?;
 
 	// Gathered per name across both registrations and certificates: a name may
 	// have one, the other, or both, and the group's view is of names rather than
 	// of either table.
 	let mut rows: BTreeMap<String, DomainNameView> = BTreeMap::new();
-	for server in &servers {
-		for row in ServerName::for_server(&mut conn, server.id).await? {
+	for server in &applications {
+		for row in ApplicationName::for_server(&mut conn, server.id).await? {
 			rows.entry(row.name.clone())
 				.or_insert_with(|| DomainNameView {
 					name: row.name.clone(),
@@ -314,7 +314,7 @@ pub async fn for_group(
 				})
 				.published = Some(row.is_reconciled());
 		}
-		for cert in ServerCertificate::for_server(&mut conn, server.id).await? {
+		for cert in ApplicationCertificate::for_server(&mut conn, server.id).await? {
 			let entry = rows
 				.entry(cert.name.clone())
 				.or_insert_with(|| DomainNameView {
@@ -481,7 +481,8 @@ pub async fn set_profile(
 	}
 
 	let mut conn = state.db.get().await?;
-	Server::set_certificate_profile(&mut conn, args.server_id, args.profile.as_deref()).await?;
+	Application::set_certificate_profile(&mut conn, args.server_id, args.profile.as_deref())
+		.await?;
 	Ok(Json(()))
 }
 
@@ -518,7 +519,7 @@ pub async fn pause(
 	Json(args): Json<PauseArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	Server::pause_name_management(&mut conn, args.server_id, Some(&admin.login), &args.reason)
+	Application::pause_name_management(&mut conn, args.server_id, Some(&admin.login), &args.reason)
 		.await?;
 	Ok(Json(()))
 }
@@ -543,7 +544,7 @@ pub async fn resume(
 	Json(args): Json<ServerIdArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	Server::resume_name_management(&mut conn, args.server_id).await?;
+	Application::resume_name_management(&mut conn, args.server_id).await?;
 	Ok(Json(()))
 }
 
@@ -595,7 +596,7 @@ pub async fn revoke(
 	Json(args): Json<RevokeArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	let cert = ServerCertificate::get(&mut conn, args.id).await?;
+	let cert = ApplicationCertificate::get(&mut conn, args.id).await?;
 
 	let Some(chain) = cert.chain.as_deref() else {
 		return Err(AppError::Conflict(format!(
@@ -624,6 +625,7 @@ pub async fn revoke(
 	acme.revoke(chain, RevokeFor::from_stored(args.reason.as_str()))
 		.await?;
 
-	ServerCertificate::record_revoked(&mut conn, args.id, args.reason, Some(&admin.login)).await?;
+	ApplicationCertificate::record_revoked(&mut conn, args.id, args.reason, Some(&admin.login))
+		.await?;
 	Ok(Json(()))
 }

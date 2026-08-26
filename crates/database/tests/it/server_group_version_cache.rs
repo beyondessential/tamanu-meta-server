@@ -37,7 +37,7 @@ async fn insert_server(
 	}
 	let host = format!("http://test.invalid/{}", Uuid::new_v4());
 	let row: RowId = sql_query(
-		"INSERT INTO servers (host, kind, rank, group_id) VALUES ($1, $2, $3, $4) RETURNING id",
+		"INSERT INTO applications (host, kind, rank, group_id) VALUES ($1, $2, $3, $4) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>(host)
 	.bind::<sql_types::Text, _>(kind)
@@ -92,7 +92,7 @@ async fn cache(
 ) -> (Option<Uuid>, Option<String>) {
 	use database::schema::server_groups::dsl;
 	dsl::server_groups
-		.select((dsl::version_server_id, dsl::effective_version))
+		.select((dsl::version_application_id, dsl::effective_version))
 		.filter(dsl::id.eq(group_id))
 		.first(conn)
 		.await
@@ -157,7 +157,7 @@ async fn recompute_picks_canonical_and_trigger_updates_only_it() {
 
 		// (d) deleting the canonical member then recomputing falls back to the
 		// next-ranked member.
-		sql_query("DELETE FROM servers WHERE id = $1")
+		sql_query("DELETE FROM applications WHERE id = $1")
 			.bind::<sql_types::Uuid, _>(prod)
 			.execute(&mut conn)
 			.await
@@ -189,7 +189,7 @@ async fn recompute_clears_cache_when_no_members() {
 		assert_eq!(vsid, Some(server));
 		assert_eq!(ver.as_deref(), Some("3.0.0"));
 
-		sql_query("DELETE FROM servers WHERE id = $1")
+		sql_query("DELETE FROM applications WHERE id = $1")
 			.bind::<sql_types::Uuid, _>(server)
 			.execute(&mut conn)
 			.await

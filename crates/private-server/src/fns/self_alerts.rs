@@ -27,7 +27,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 
 /// A self-alert: a problem with canopy's own operation, such as an
 /// expiring credential or a failed notification delivery — distinct from
-/// issues raised against monitored servers.
+/// issues raised against monitored applications.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct SelfAlertView {
 	/// Unique identifier of this self-alert.

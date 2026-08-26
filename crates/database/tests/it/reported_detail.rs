@@ -16,7 +16,7 @@ struct RowId {
 
 async fn insert_server(conn: &mut AsyncPgConnection) -> Uuid {
 	let host = format!("http://detail.invalid/{}", Uuid::new_v4());
-	let server: RowId = sql_query("INSERT INTO servers (host) VALUES ($1) RETURNING id")
+	let server: RowId = sql_query("INSERT INTO applications (host) VALUES ($1) RETURNING id")
 		.bind::<sql_types::Text, _>(host)
 		.get_result(conn)
 		.await
@@ -27,7 +27,7 @@ async fn insert_server(conn: &mut AsyncPgConnection) -> Uuid {
 async fn insert_production_server(conn: &mut AsyncPgConnection) -> Uuid {
 	let host = format!("http://prod.invalid/{}", Uuid::new_v4());
 	let server: RowId =
-		sql_query("INSERT INTO servers (host, rank) VALUES ($1, 'production') RETURNING id")
+		sql_query("INSERT INTO applications (host, rank) VALUES ($1, 'production') RETURNING id")
 			.bind::<sql_types::Text, _>(host)
 			.get_result(conn)
 			.await
@@ -177,7 +177,7 @@ async fn production_versions_counts_reporting_servers_once() {
 	.await
 }
 
-/// Only production servers that are still reporting count as actively
+/// Only production applications that are still reporting count as actively
 /// running something.
 // spec: FIG#active-versions
 #[tokio::test(flavor = "multi_thread")]
@@ -403,7 +403,7 @@ async fn reported_detail_is_deleted_with_its_server() {
 		.await
 		.expect("record");
 
-		sql_query("DELETE FROM servers WHERE id = $1")
+		sql_query("DELETE FROM applications WHERE id = $1")
 			.bind::<sql_types::Uuid, _>(server_id)
 			.execute(&mut conn)
 			.await

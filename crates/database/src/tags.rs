@@ -16,7 +16,7 @@ pub fn reject_reserved_keys(tags: &TagMap) -> Result<()> {
 	}
 }
 
-/// Distinct top-level tag keys across all servers and server groups,
+/// Distinct top-level tag keys across all applications and server groups,
 /// sorted. Used by the admin rule editor to populate autocomplete
 /// suggestions for `tag.*` variables — a key that exists on any
 /// server or group is a valid thing to predicate on, even if the
@@ -29,7 +29,7 @@ pub async fn all_known_keys(conn: &mut AsyncPgConnection) -> Result<Vec<String>>
 	}
 	let rows: Vec<Row> = sql_query(
 		"SELECT key FROM ( \
-		    SELECT jsonb_object_keys(tags) AS key FROM servers \
+		    SELECT jsonb_object_keys(tags) AS key FROM applications \
 		    UNION SELECT jsonb_object_keys(tags) AS key FROM server_groups \
 		 ) k ORDER BY key",
 	)

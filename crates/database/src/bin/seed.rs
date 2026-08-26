@@ -24,6 +24,7 @@ use commons_types::{
 use database::{
 	Device, DeviceKey,
 	admins::Admin,
+	applications::Application,
 	check_policies::CheckPolicy,
 	devices::NewDeviceConnection,
 	issues::{Incident, Issue, NewEvent},
@@ -31,7 +32,6 @@ use database::{
 	pg_duration::PgDuration,
 	server_enrollment_tokens::ServerEnrollmentToken,
 	server_groups::{NewServerGroup, ServerGroup},
-	servers::Server,
 	silenced_refs::{ServerGroupSilencedRef, ServerSilencedRef},
 	statuses::Status,
 	url_field::UrlField,
@@ -49,7 +49,7 @@ const TEN_MINUTES: PgDuration = PgDuration(SignedDuration::from_secs(600));
 /// re-run produces a clean, deterministic dataset. The migrations table and the
 /// partition machinery are deliberately absent — we never touch schema.
 ///
-/// `servers` is excluded from the blanket TRUNCATE because the nil "meta"
+/// `applications` is excluded from the blanket TRUNCATE because the nil "meta"
 /// server row (id all-zeroes) is inserted by a migration and must survive; we
 /// delete only the non-nil rows below.
 const TRUNCATE_TABLES: &[&str] = &[
@@ -158,30 +158,32 @@ async fn seed(conn: &mut AsyncPgConnection) -> Result<()> {
 
 	let devices = seed_devices(conn).await?;
 	let groups = seed_groups(conn).await?;
-	let servers = seed_servers(conn, &groups, &devices).await?;
-	seed_enrollment_tokens(conn, &servers).await?;
-	seed_statuses(conn, &servers, &devices, &versions).await?;
-	seed_issues_and_incidents(conn, &servers, &admins).await?;
-	seed_silences(conn, &servers, &groups, &admins).await?;
+	let applications = seed_servers(conn, &groups, &devices).await?;
+	seed_enrollment_tokens(conn, &applications).await?;
+	seed_statuses(conn, &applications, &devices, &versions).await?;
+	seed_issues_and_incidents(conn, &applications, &admins).await?;
+	seed_silences(conn, &applications, &groups, &admins).await?;
 
 	report(conn).await
 }
 
-/// TRUNCATE every app table we manage, then delete the non-nil servers. We
-/// can't TRUNCATE `servers` because of the nil meta row, and CASCADE from the
+/// TRUNCATE every app table we manage, then delete the non-nil applications. We
+/// can't TRUNCATE `applications` because of the nil meta row, and CASCADE from the
 /// truncated children already cleared everything that referenced these rows.
 async fn clear(conn: &mut AsyncPgConnection) -> Result<()> {
 	conn.transaction::<_, AppError, _>(async |conn| {
 		// Release device references and drop every server except the nil meta
 		// server (inserted by a migration) BEFORE truncating `devices` — a
-		// TRUNCATE ... CASCADE would otherwise demand truncating `servers`
+		// TRUNCATE ... CASCADE would otherwise demand truncating `applications`
 		// wholesale (taking the nil row with it) to satisfy the FK.
-		diesel::sql_query("UPDATE servers SET device_id = NULL")
+		diesel::sql_query("UPDATE applications SET device_id = NULL")
 			.execute(conn)
 			.await?;
-		diesel::sql_query("DELETE FROM servers WHERE id <> '00000000-0000-0000-0000-000000000000'")
-			.execute(conn)
-			.await?;
+		diesel::sql_query(
+			"DELETE FROM applications WHERE id <> '00000000-0000-0000-0000-000000000000'",
+		)
+		.execute(conn)
+		.await?;
 
 		let stmt = format!("TRUNCATE TABLE {} CASCADE", TRUNCATE_TABLES.join(", "));
 		diesel::sql_query(stmt).execute(conn).await?;
@@ -384,9 +386,9 @@ async fn seed_healthchecks(conn: &mut AsyncPgConnection, admins: &[String]) -> R
 	Ok(())
 }
 
-/// Identities seeded into `devices`, returned for wiring servers/statuses.
+/// Identities seeded into `devices`, returned for wiring applications/statuses.
 struct SeededDevices {
-	/// Trusted server devices, mTLS-keyed, bound to registered servers.
+	/// Trusted server devices, mTLS-keyed, bound to registered applications.
 	mtls_server: Vec<Uuid>,
 	/// A trusted server device that also carries a Tailscale identity.
 	tailscale_server: Uuid,
@@ -406,7 +408,7 @@ async fn seed_devices(conn: &mut AsyncPgConnection) -> Result<SeededDevices> {
 		k
 	}
 
-	// Three mTLS-keyed server devices, promoted to the Server role.
+	// Three mTLS-keyed server devices, promoted to the Application role.
 	let mut mtls_server = Vec::new();
 	for i in 0..3u8 {
 		let dev = Device::create(conn, fake_key(0x10 + i)).await?;
@@ -575,7 +577,7 @@ async fn seed_groups(conn: &mut AsyncPgConnection) -> Result<SeededGroups> {
 	})
 }
 
-/// Handles onto the seeded servers, grouped by the role they play in later
+/// Handles onto the seeded applications, grouped by the role they play in later
 /// seeding (statuses, issues).
 struct SeededServers {
 	/// Registered, monitored, grouped, healthy production central.
@@ -605,18 +607,18 @@ async fn seed_servers(
 	groups: &SeededGroups,
 	devices: &SeededDevices,
 ) -> Result<SeededServers> {
-	// Helper to build a fully-specified Server row and insert it via the model.
-	async fn insert(conn: &mut AsyncPgConnection, server: Server) -> Result<Uuid> {
-		let created = Server::create(conn, server).await?;
+	// Helper to build a fully-specified Application row and insert it via the model.
+	async fn insert(conn: &mut AsyncPgConnection, server: Application) -> Result<Uuid> {
+		let created = Application::create(conn, server).await?;
 		Ok(created.id)
 	}
 
-	fn base(host: &str, kind: ServerKind) -> Server {
+	fn base(host: &str, kind: ServerKind) -> Application {
 		base_of(Product::Tamanu, host, kind)
 	}
 
-	fn base_of(product: Product, host: &str, kind: ServerKind) -> Server {
-		Server {
+	fn base_of(product: Product, host: &str, kind: ServerKind) -> Application {
+		Application {
 			id: Uuid::new_v4(),
 			name: None,
 			host: Some(url(host)),
@@ -650,7 +652,7 @@ async fn seed_servers(
 	// Registered, monitored, grouped, healthy production central.
 	let healthy_central = insert(
 		conn,
-		Server {
+		Application {
 			name: Some("Pacific Central".to_string()),
 			rank: Some(ServerRank::Production),
 			device_id: Some(devices.tailscale_server),
@@ -672,7 +674,7 @@ async fn seed_servers(
 	// Registered, monitored, grouped facility — will carry an open incident.
 	let unhealthy_facility = insert(
 		conn,
-		Server {
+		Application {
 			name: Some("Suva Facility".to_string()),
 			rank: Some(ServerRank::Production),
 			device_id: Some(devices.mtls_server[0]),
@@ -689,7 +691,7 @@ async fn seed_servers(
 	// Registered, monitored, grouped facility that is "down" (no recent status).
 	let down_facility = insert(
 		conn,
-		Server {
+		Application {
 			name: Some("Nadi Facility".to_string()),
 			rank: Some(ServerRank::Production),
 			device_id: Some(devices.mtls_server[1]),
@@ -705,7 +707,7 @@ async fn seed_servers(
 	// Registered, monitored, grouped facility with warning-level health.
 	let warning_facility = insert(
 		conn,
-		Server {
+		Application {
 			name: Some("Goroka Facility".to_string()),
 			rank: Some(ServerRank::Clone),
 			device_id: Some(devices.mtls_server[2]),
@@ -721,7 +723,7 @@ async fn seed_servers(
 	// Registered but unmonitored demo server.
 	let demo_server = insert(
 		conn,
-		Server {
+		Application {
 			name: Some("Demo Sandbox".to_string()),
 			rank: Some(ServerRank::Demo),
 			group_id: Some(groups.demo),
@@ -737,8 +739,8 @@ async fn seed_servers(
 	// Ungrouped registered server (test rank).
 	let ungrouped = insert(
 		conn,
-		Server {
-			name: Some("Lab Test Server".to_string()),
+		Application {
+			name: Some("Lab Test Application".to_string()),
 			rank: Some(ServerRank::Test),
 			is_monitored: true,
 			notes: "Ungrouped — appears under the Ungrouped tab.".to_string(),
@@ -750,7 +752,7 @@ async fn seed_servers(
 	// Pending enrollment WITH an active token (registered_at + device_id NULL).
 	let pending_with_token = insert(
 		conn,
-		Server {
+		Application {
 			name: Some("New Lautoka Facility".to_string()),
 			rank: Some(ServerRank::Production),
 			group_id: Some(groups.pacific),
@@ -767,7 +769,7 @@ async fn seed_servers(
 	// Pending enrollment with NO token yet (operator hasn't minted one).
 	let pending_no_token = insert(
 		conn,
-		Server {
+		Application {
 			name: Some("New Mendi Facility".to_string()),
 			rank: Some(ServerRank::Production),
 			group_id: Some(groups.highlands),
@@ -780,7 +782,7 @@ async fn seed_servers(
 	// An ungrouped, unranked pending server (drives the bare "set up" path).
 	insert(
 		conn,
-		Server {
+		Application {
 			notes: "Bare pending server — no name, rank, or group yet.".to_string(),
 			..base("https://unconfigured.example.com/", ServerKind::Central)
 		},
@@ -792,7 +794,7 @@ async fn seed_servers(
 	// group the version rollup and billing attribution have to cope with.
 	let senaite_lims = insert(
 		conn,
-		Server {
+		Application {
 			name: Some("Pacific LIMS".to_string()),
 			rank: Some(ServerRank::Production),
 			group_id: Some(groups.pacific),
@@ -811,7 +813,7 @@ async fn seed_servers(
 	// real archival path runs (releases device, deactivates keys).
 	let archived = insert(
 		conn,
-		Server {
+		Application {
 			name: Some("Decommissioned Old Central".to_string()),
 			rank: Some(ServerRank::Production),
 			device_id: Some(devices.releaser), // any device; soft_delete releases it
@@ -822,7 +824,7 @@ async fn seed_servers(
 		},
 	)
 	.await?;
-	Server::soft_delete(conn, archived).await?;
+	Application::soft_delete(conn, archived).await?;
 
 	// Re-assert the releaser role for the device listing (soft_delete revoked
 	// the device's credentials but kept its role).
@@ -848,15 +850,15 @@ async fn seed_servers(
 /// mints a fresh, usable blob on demand.
 async fn seed_enrollment_tokens(
 	conn: &mut AsyncPgConnection,
-	servers: &SeededServers,
+	applications: &SeededServers,
 ) -> Result<()> {
 	let (_token, _plaintext) = ServerEnrollmentToken::mint(
 		conn,
-		servers.pending_with_token,
+		applications.pending_with_token,
 		SignedDuration::from_hours(48),
 	)
 	.await?;
-	let _ = servers.pending_no_token;
+	let _ = applications.pending_no_token;
 	Ok(())
 }
 
@@ -867,7 +869,7 @@ async fn seed_enrollment_tokens(
 /// "away"/"blip" short-status cases (still within the current week's partition).
 async fn seed_statuses(
 	conn: &mut AsyncPgConnection,
-	servers: &SeededServers,
+	applications: &SeededServers,
 	devices: &SeededDevices,
 	versions: &[VersionStr],
 ) -> Result<()> {
@@ -926,7 +928,7 @@ async fn seed_statuses(
 	// Healthy central — up to date, fresh, all checks passing.
 	insert_status(
 		conn,
-		servers.healthy_central,
+		applications.healthy_central,
 		Some(devices.tailscale_server),
 		now,
 		Some(latest.clone()),
@@ -943,7 +945,7 @@ async fn seed_statuses(
 	// Unhealthy facility — top-level unhealthy, behind on version.
 	insert_status(
 		conn,
-		servers.unhealthy_facility,
+		applications.unhealthy_facility,
 		Some(devices.mtls_server[0]),
 		now,
 		Some(behind.clone()),
@@ -959,7 +961,7 @@ async fn seed_statuses(
 	// Warning facility — top-level healthy but one check failing.
 	insert_status(
 		conn,
-		servers.warning_facility,
+		applications.warning_facility,
 		Some(devices.mtls_server[2]),
 		now,
 		Some(latest.clone()),
@@ -975,7 +977,7 @@ async fn seed_statuses(
 	// Demo server — healthy but unmonitored; recent.
 	insert_status(
 		conn,
-		servers.demo_server,
+		applications.demo_server,
 		None,
 		now,
 		Some(latest.clone()),
@@ -988,7 +990,7 @@ async fn seed_statuses(
 	// Ungrouped server — last reported ~20 minutes ago → "Away" short status.
 	insert_status(
 		conn,
-		servers.ungrouped,
+		applications.ungrouped,
 		None,
 		now - SignedDuration::from_mins(20),
 		Some(behind.clone()),
@@ -1004,7 +1006,7 @@ async fn seed_statuses(
 	// has to come from a Tamanu member.
 	insert_status(
 		conn,
-		servers.senaite_lims,
+		applications.senaite_lims,
 		None,
 		now,
 		None,
@@ -1022,18 +1024,18 @@ async fn seed_statuses(
 	.await?;
 
 	// down_facility: intentionally NO recent status row → "down".
-	let _ = servers.down_facility;
+	let _ = applications.down_facility;
 
 	Ok(())
 }
 
 /// Drive the real issue/event/incident machinery via `NewEvent::save`, then
 /// resolve some so the UI shows open and closed states. Because the unhealthy
-/// servers are grouped + monitored, error/critical issues roll up into
+/// applications are grouped + monitored, error/critical issues roll up into
 /// incidents automatically.
 async fn seed_issues_and_incidents(
 	conn: &mut AsyncPgConnection,
-	servers: &SeededServers,
+	applications: &SeededServers,
 	admins: &[String],
 ) -> Result<()> {
 	let now = Timestamp::now();
@@ -1075,7 +1077,7 @@ async fn seed_issues_and_incidents(
 	// Critical DB issue on the unhealthy facility (opens an incident on Pacific).
 	let crit = push(
 		conn,
-		servers.unhealthy_facility,
+		applications.unhealthy_facility,
 		"healthcheck",
 		"database_connectivity",
 		CheckResult::Failed,
@@ -1092,7 +1094,7 @@ async fn seed_issues_and_incidents(
 	for _ in 0..2 {
 		push(
 			conn,
-			servers.unhealthy_facility,
+			applications.unhealthy_facility,
 			"healthcheck",
 			"database_connectivity",
 			CheckResult::Failed,
@@ -1109,7 +1111,7 @@ async fn seed_issues_and_incidents(
 	// incident for context but wouldn't open one on its own.
 	push(
 		conn,
-		servers.healthy_central,
+		applications.healthy_central,
 		"healthcheck",
 		"certificate_expiry",
 		CheckResult::Warning,
@@ -1124,7 +1126,7 @@ async fn seed_issues_and_incidents(
 	// second incident on a different group.
 	let highlands_issue = push(
 		conn,
-		servers.warning_facility,
+		applications.warning_facility,
 		"healthcheck",
 		"sync_lag",
 		CheckResult::Failed,
@@ -1139,7 +1141,7 @@ async fn seed_issues_and_incidents(
 	// resolve the issue, which cascades the incident closed.
 	let transient = push(
 		conn,
-		servers.warning_facility,
+		applications.warning_facility,
 		"healthcheck",
 		"disk_space",
 		CheckResult::Failed,
@@ -1154,7 +1156,7 @@ async fn seed_issues_and_incidents(
 	// A warning on the ungrouped server (recorded, no incident).
 	push(
 		conn,
-		servers.ungrouped,
+		applications.ungrouped,
 		"app",
 		"slow-query",
 		CheckResult::Warning,
@@ -1168,7 +1170,7 @@ async fn seed_issues_and_incidents(
 	// A skipped-graded condition (recorded, never participates).
 	push(
 		conn,
-		servers.demo_server,
+		applications.demo_server,
 		"app",
 		"debug-trace",
 		CheckResult::Skipped,
@@ -1219,13 +1221,13 @@ async fn seed_issues_and_incidents(
 /// rows, and the incident workflow's "silenced" branch has coverage.
 async fn seed_silences(
 	conn: &mut AsyncPgConnection,
-	servers: &SeededServers,
+	applications: &SeededServers,
 	groups: &SeededGroups,
 	admins: &[String],
 ) -> Result<()> {
 	ServerSilencedRef::add(
 		conn,
-		servers.demo_server,
+		applications.demo_server,
 		"app",
 		"debug-trace",
 		Some(&admins[0]),
@@ -1264,7 +1266,7 @@ async fn report(conn: &mut AsyncPgConnection) -> Result<()> {
 		"device_keys",
 		"device_connections",
 		"server_groups",
-		"servers",
+		"applications",
 		"server_enrollment_tokens",
 		"statuses",
 		"issues",

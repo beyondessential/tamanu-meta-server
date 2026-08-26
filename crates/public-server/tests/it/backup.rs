@@ -33,7 +33,7 @@ async fn make_server(
 ) -> Uuid {
 	let server_id = Uuid::new_v4();
 	sql_query(
-		"INSERT INTO servers (id, host, kind, device_id, group_id) \
+		"INSERT INTO applications (id, host, kind, device_id, group_id) \
 		 VALUES ($1, 'https://srv.example.com', 'central', $2, $3)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
@@ -84,20 +84,24 @@ async fn declare_capability_disabled(conn: &mut AsyncPgConnection, server_id: Uu
 
 /// Open the server's restore window, expiring an hour from now.
 async fn allow_restore(conn: &mut AsyncPgConnection, server_id: Uuid) {
-	sql_query("UPDATE servers SET restore_allowed_until = now() + interval '1 hour' WHERE id = $1")
-		.bind::<sql_types::Uuid, _>(server_id)
-		.execute(conn)
-		.await
-		.expect("open restore window");
+	sql_query(
+		"UPDATE applications SET restore_allowed_until = now() + interval '1 hour' WHERE id = $1",
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.execute(conn)
+	.await
+	.expect("open restore window");
 }
 
 /// Set an already-expired restore window (was opened, but the 24h lapsed).
 async fn expire_restore(conn: &mut AsyncPgConnection, server_id: Uuid) {
-	sql_query("UPDATE servers SET restore_allowed_until = now() - interval '1 hour' WHERE id = $1")
-		.bind::<sql_types::Uuid, _>(server_id)
-		.execute(conn)
-		.await
-		.expect("expire restore window");
+	sql_query(
+		"UPDATE applications SET restore_allowed_until = now() - interval '1 hour' WHERE id = $1",
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.execute(conn)
+	.await
+	.expect("expire restore window");
 }
 
 async fn enqueue_request(

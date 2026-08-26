@@ -1,6 +1,6 @@
 //! Staleness scan over reported runs + maintenance-staleness, DB-driven.
 //!
-//! Server-centric, per `(server, type)`: the subject is the server being
+//! Application-centric, per `(server, type)`: the subject is the server being
 //! protected; the device is the actor recorded in `backup_runs`.
 //!
 //! The scanned set is every enabled `(server, type)` capability whose
@@ -26,12 +26,12 @@ use jiff::{SignedDuration, Span, SpanRelativeTo, SpanRound, Timestamp, Unit};
 use uuid::Uuid;
 
 use crate::{
+	applications::Application,
 	backup::refs,
 	issues::{
 		CheckFiling, CheckInstance, GradedInstance, InstancedCheckFiling, Scope, file_check,
 		file_check_instances,
 	},
-	servers::Server,
 };
 
 /// Maintenance cadence threshold. Independent of any backup `expected_interval`
@@ -148,33 +148,33 @@ struct ScanRowBase {
 /// and the `MIN(first_seen)` anchor.
 pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 	use crate::schema::{
-		backup_type_defaults as defaults, device_server_associations as dsa,
+		applications, backup_type_defaults as defaults, device_server_associations as dsa,
 		server_backup_capabilities as cap, server_group_backup_config as cfg,
-		server_group_backup_schedule as sched, servers,
+		server_group_backup_schedule as sched,
 	};
 
-	// Join: servers -> their group's ready config -> enabled capability, with
+	// Join: applications -> their group's ready config -> enabled capability, with
 	// both interval sources left-joined. The effective interval is resolved in
 	// Rust below rather than in SQL, because "override row present but NULL"
 	// (manual-only) and "no override row" (inherit the default) have to stay
 	// distinguishable — a COALESCE would flatten them together.
-	let base: Vec<ScanBaseRow> = servers::table
-		.inner_join(cfg::table.on(cfg::group_id.nullable().eq(servers::group_id)))
-		.inner_join(cap::table.on(cap::server_id.eq(servers::id)))
+	let base: Vec<ScanBaseRow> = applications::table
+		.inner_join(cfg::table.on(cfg::group_id.nullable().eq(applications::group_id)))
+		.inner_join(cap::table.on(cap::server_id.eq(applications::id)))
 		.left_join(
 			sched::table.on(sched::group_id
 				.eq(cfg::group_id)
 				.and(sched::type_.eq(cap::type_))),
 		)
 		.left_join(defaults::table.on(defaults::type_.eq(cap::type_)))
-		.filter(servers::deleted_at.is_null())
+		.filter(applications::deleted_at.is_null())
 		.filter(cfg::status.eq("ready"))
 		.filter(cap::enabled.eq(true))
 		.select((
-			servers::id,
+			applications::id,
 			cfg::group_id,
-			servers::is_monitored,
-			servers::device_id,
+			applications::is_monitored,
+			applications::device_id,
 			cap::type_,
 			sched::group_id.nullable().is_not_null(),
 			sched::expected_interval.nullable(),
@@ -334,7 +334,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 	for server_id in order {
 		let server_rows = &by_server[&server_id];
 		let device_id = server_rows.iter().find_map(|r| r.device_id);
-		let server = Server::get_by_id(db, server_id).await?;
+		let server = Application::get_by_id(db, server_id).await?;
 		let label = server_label(&server);
 
 		// Both flags are per-server now that the check is: whether this
@@ -395,7 +395,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				db,
 				InstancedCheckFiling {
 					source: crate::statuses::CANOPY_SOURCE,
-					scope: Scope::Server(server_id),
+					scope: Scope::Application(server_id),
 					device_id,
 					check: refs::STALENESS,
 					title: None,
@@ -405,14 +405,14 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					documentation: Some(refs::STALENESS_DOC),
 				},
 				&|degraded| match degraded {
-					[] => format!("Server {label} is backing up on schedule again"),
+					[] => format!("Application {label} is backing up on schedule again"),
 					[one] => format!(
-						"Server {label} has no recent {} backup (last success {})",
+						"Application {label} has no recent {} backup (last success {})",
 						one.label,
 						last_success_of(one),
 					),
 					many => format!(
-						"Server {label} has no recent backup for {} of its {total} types: {}",
+						"Application {label} has no recent backup for {} of its {total} types: {}",
 						many.len(),
 						label_list(many),
 					),
@@ -428,7 +428,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				db,
 				InstancedCheckFiling {
 					source: crate::statuses::CANOPY_SOURCE,
-					scope: Scope::Server(server_id),
+					scope: Scope::Application(server_id),
 					device_id,
 					check: refs::NEVER,
 					title: None,
@@ -438,13 +438,15 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 					documentation: Some(refs::NEVER_DOC),
 				},
 				&|degraded| match degraded {
-					[] => format!("Server {label} has now backed up everything expected of it"),
+					[] => {
+						format!("Application {label} has now backed up everything expected of it")
+					}
 					[one] => format!(
-						"Server {label} has never reported a successful {} backup",
+						"Application {label} has never reported a successful {} backup",
 						one.label
 					),
 					many => format!(
-						"Server {label} has never backed up {} of its {total} types: {}",
+						"Application {label} has never backed up {} of its {total} types: {}",
 						many.len(),
 						label_list(many),
 					),
@@ -613,7 +615,7 @@ pub(crate) async fn open_server_issue_active(
 ) -> Result<bool> {
 	use crate::schema::issues::dsl;
 	let n: i64 = dsl::issues
-		.filter(dsl::server_id.eq(server_id))
+		.filter(dsl::application_id.eq(server_id))
 		.filter(dsl::source.eq(refs::CANOPY_SOURCE))
 		.filter(dsl::ref_.eq(r#ref))
 		.filter(dsl::active.eq(true))
@@ -638,7 +640,7 @@ pub(crate) async fn server_check_observed_degraded(
 ) -> Result<bool> {
 	use crate::schema::issues::dsl;
 	let n: i64 = dsl::issues
-		.filter(dsl::server_id.eq(server_id))
+		.filter(dsl::application_id.eq(server_id))
 		.filter(dsl::source.eq(refs::CANOPY_SOURCE))
 		.filter(dsl::ref_.eq(r#ref))
 		.filter(dsl::observed_result.is_not_null())
@@ -653,7 +655,7 @@ pub(crate) async fn server_check_observed_degraded(
 /// these checks.
 ///
 /// A sweep that re-derives its checks from current state has to visit these
-/// servers even when it derives nothing for them: a check whose last instance is
+/// applications even when it derives nothing for them: a check whose last instance is
 /// gone is recovered by being filed as passing, and a server nobody visits is a
 /// check left open with nothing that could ever clear it.
 pub(crate) async fn servers_with_open_checks(
@@ -662,9 +664,9 @@ pub(crate) async fn servers_with_open_checks(
 ) -> Result<Vec<Uuid>> {
 	use crate::schema::issues::dsl;
 	let ids: Vec<Option<Uuid>> = dsl::issues
-		.select(dsl::server_id)
+		.select(dsl::application_id)
 		.distinct()
-		.filter(dsl::server_id.is_not_null())
+		.filter(dsl::application_id.is_not_null())
 		.filter(dsl::source.eq(refs::CANOPY_SOURCE))
 		.filter(dsl::ref_.eq_any(checks.to_vec()))
 		.filter(dsl::active.eq(true))
@@ -696,9 +698,9 @@ pub(crate) async fn open_group_issue_active(
 /// How an alert message names a server: the name an operator knows it by,
 /// qualified with its host when both are known, falling back to the host
 /// alone and finally to the id. Shared across every canopy-determined check
-/// so they all name servers the same way — never interpolate a bare id.
+/// so they all name applications the same way — never interpolate a bare id.
 // spec: BKJ#alerting
-pub fn server_label(server: &Server) -> String {
+pub fn server_label(server: &Application) -> String {
 	let host = server.host.as_ref().map(|h| h.0.to_string());
 	match (&server.name, host) {
 		(Some(n), Some(h)) if !n.is_empty() => format!("{n} ({h})"),

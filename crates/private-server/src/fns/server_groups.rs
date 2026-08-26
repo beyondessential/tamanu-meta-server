@@ -50,16 +50,16 @@ pub async fn list(
 	Ok(Json(groups))
 }
 
-/// The number of live servers in one server group.
+/// The number of live applications in one server group.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct GroupServerCount {
 	/// Identifier of the server group.
 	pub server_group_id: Uuid,
-	/// Number of live (non-archived) servers currently in the group.
+	/// Number of live (non-archived) applications currently in the group.
 	pub server_count: i64,
 }
 
-/// Count live servers per group.
+/// Count live applications per group.
 ///
 /// Returns one entry per server group that has at least one live
 /// (non-archived) member server. Groups with no live members are omitted, so
@@ -140,14 +140,14 @@ pub(crate) async fn group_billing_labels(
 	)
 }
 
-/// A server group together with its member servers and billing labels.
+/// A server group together with its member applications and billing labels.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct GroupDetail {
 	/// The group itself.
 	pub group: ServerGroup,
-	/// The group's member servers, sorted by name, with current status and
+	/// The group's member applications, sorted by name, with current status and
 	/// display host included.
-	pub servers: Vec<super::servers::ServerInfo>,
+	pub applications: Vec<super::applications::ServerInfo>,
 	/// The group's effective `billing.*` labels (product/deployment/stage).
 	pub billing_labels: Vec<BillingTag>,
 	/// Whether a maintenance window (or its settle period) suspends the group.
@@ -159,7 +159,7 @@ pub struct GroupDetail {
 
 /// Get a server group with its members.
 ///
-/// Returns the group, its member servers (sorted by name, with current status
+/// Returns the group, its member applications (sorted by name, with current status
 /// and display host), and the group's effective billing labels. Responds 404
 /// if no group exists with the given identifier.
 #[utoipa::path(
@@ -183,22 +183,22 @@ pub async fn get(
 	let group = ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
 	let members = group.list_servers(&mut conn).await?;
 	let group_name = group.name.clone();
-	let mut servers: Vec<super::servers::ServerInfo> = members
+	let mut applications: Vec<super::applications::ServerInfo> = members
 		.into_iter()
 		.map(|s| {
-			let mut info = super::servers::server_to_info(s);
+			let mut info = super::applications::server_to_info(s);
 			info.group_name = Some(group_name.clone());
 			info
 		})
 		.collect();
-	servers.sort_by(|a, b| {
+	applications.sort_by(|a, b| {
 		a.name
 			.as_deref()
 			.unwrap_or("")
 			.cmp(b.name.as_deref().unwrap_or(""))
 	});
-	super::servers::decorate_with_status(&mut conn, &mut servers).await?;
-	super::servers::fill_display_hosts(&mut conn, &mut servers).await?;
+	super::applications::decorate_with_status(&mut conn, &mut applications).await?;
+	super::applications::fill_display_hosts(&mut conn, &mut applications).await?;
 	let billing_labels = group_billing_labels(&mut conn, &group).await?;
 	let maintained = database::maintenance_windows::MaintenanceWindow::suspends(
 		&mut conn,
@@ -215,7 +215,7 @@ pub async fn get(
 		.is_none();
 	Ok(Json(GroupDetail {
 		group,
-		servers,
+		applications,
 		maintained,
 		maintenance_settling,
 		billing_labels,
@@ -328,7 +328,7 @@ pub async fn update(
 ///
 /// Soft-deletes the group: it disappears from live listings but is kept and
 /// can be restored later. Requires the caller to be on the admin allow-list.
-/// Responds 409 if the group still has live member servers; move or archive
+/// Responds 409 if the group still has live member applications; move or archive
 /// those first.
 #[utoipa::path(
 	post,

@@ -7,10 +7,10 @@ use commons_types::{
 	backup::{IntentDescriptor, RestoreIntent, RunOutcome},
 };
 use database::{
+	applications::Application,
 	devices::Device,
 	diesel_async::AsyncPgConnection,
 	restore::{BackupRestoreCheck, RestoreConsumerCapability, RestoreReplica},
-	servers::Server,
 };
 use jiff::Timestamp;
 use rmcp::{
@@ -64,7 +64,7 @@ struct RestoreReplicaOut {
 	/// Timestamp of the latest healthy restore-verification report for this
 	/// exact `(server, type, intent)`. Only populated for server-scoped
 	/// declarations; a group-wide declaration (`server_id: null`) covers many
-	/// servers so has no single answer here — use `get_restore_replica` or
+	/// applications so has no single answer here — use `get_restore_replica` or
 	/// `find_backup_problems` for a specific server.
 	last_healthy_at: Option<Timestamp>,
 	created_at: Timestamp,
@@ -110,7 +110,7 @@ impl CanopyMcp {
 		description = "List managed-restore replica declarations (fleet-wide, or narrowed by group/consumer), \
 		               with the consumer's display name and whether the consumer currently advertises the \
 		               declared intent (`gap: true` means Canopy is not dispatching it — the declaration is \
-		               unsatisfiable until the consumer registers that intent again). Server-scoped \
+		               unsatisfiable until the consumer registers that intent again). Application-scoped \
 		               declarations also carry the latest healthy restore-verification timestamp for that \
 		               exact (server, type, intent); use get_restore_replica for the recent-checks history \
 		               and the consumer's full intent descriptor."
@@ -167,7 +167,7 @@ impl CanopyMcp {
 			BackupRestoreCheck::list_recent_for_replica(&mut conn, replica.id, 50)
 				.await
 				.map_err(mcp_err)?;
-		let check_server_names = Server::names_by_ids(
+		let check_server_names = Application::names_by_ids(
 			&mut conn,
 			&unique(relevant.iter().filter_map(|c| c.server_id)),
 		)
@@ -229,8 +229,8 @@ impl CanopyMcp {
 			.map_err(mcp_err)?;
 		let group_ids = unique(replicas.iter().map(|r| r.group_id));
 		let g_names = group_names(conn, &group_ids).await?;
-		let server_names =
-			Server::names_by_ids(conn, &unique(replicas.iter().filter_map(|r| r.server_id)))
+		let application_names =
+			Application::names_by_ids(conn, &unique(replicas.iter().filter_map(|r| r.server_id)))
 				.await
 				.map_err(mcp_err)?;
 
@@ -282,7 +282,7 @@ impl CanopyMcp {
 					server_id: r.server_id,
 					server_name: r
 						.server_id
-						.and_then(|s| server_names.get(&s))
+						.and_then(|s| application_names.get(&s))
 						.and_then(|(n, _)| n.clone()),
 					r#type: r.r#type.to_string(),
 					intent: r.intent.to_string(),

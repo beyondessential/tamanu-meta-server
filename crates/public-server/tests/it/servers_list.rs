@@ -8,7 +8,7 @@ pub struct PublicServer {
 	pub rank: Option<String>,
 }
 
-// GET /servers tests. (The device-driven create/edit/remove endpoints were
+// GET /applications tests. (The device-driven create/edit/remove endpoints were
 // removed in favour of operator-first enrollment; see server_enrollment.rs.)
 
 #[tokio::test(flavor = "multi_thread")]
@@ -25,7 +25,7 @@ async fn get_empty_list() {
 async fn get_with_central_server() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO servers (name, host, kind, rank, public_name) VALUES ('Test Server', 'https://test.com', 'central', 'production', 'Test Server')",
+			"INSERT INTO applications (name, host, kind, rank, public_name) VALUES ('Test Application', 'https://test.com', 'central', 'production', 'Test Application')",
 		)
 		.await
 		.unwrap();
@@ -33,7 +33,7 @@ async fn get_with_central_server() {
 		let response = public.get("/servers").await;
 		response.assert_status_ok();
 		response.assert_json::<Vec<PublicServer>>(&vec![PublicServer {
-			name: "Test Server".to_string(),
+			name: "Test Application".to_string(),
 			host: "https://test.com".to_string(),
 			rank: Some("production".to_string()),
 		}]);
@@ -45,7 +45,7 @@ async fn get_with_central_server() {
 async fn get_without_public_name() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO servers (name, host, kind, rank) VALUES ('Internal Server', 'https://test.com', 'central', 'production')",
+			"INSERT INTO applications (name, host, kind, rank) VALUES ('Internal Application', 'https://test.com', 'central', 'production')",
 		)
 		.await
 		.unwrap();
@@ -61,9 +61,9 @@ async fn get_without_public_name() {
 async fn get_filters_facility_servers() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO servers (name, host, kind, rank, public_name) VALUES
-			('Central Server', 'https://central.com', 'central', 'production', 'Central Server'),
-			('Facility Server', 'https://facility.com', 'facility', 'production', NULL)",
+			"INSERT INTO applications (name, host, kind, rank, public_name) VALUES
+			('Central Application', 'https://central.com', 'central', 'production', 'Central Application'),
+			('Facility Application', 'https://facility.com', 'facility', 'production', NULL)",
 		)
 		.await
 		.unwrap();
@@ -71,7 +71,7 @@ async fn get_filters_facility_servers() {
 		let response = public.get("/servers").await;
 		response.assert_status_ok();
 		response.assert_json::<Vec<PublicServer>>(&vec![PublicServer {
-			name: "Central Server".to_string(),
+			name: "Central Application".to_string(),
 			host: "https://central.com".to_string(),
 			rank: Some("production".to_string()),
 		}]);
@@ -83,26 +83,26 @@ async fn get_filters_facility_servers() {
 async fn get_multiple_central_servers() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"INSERT INTO servers (name, host, kind, rank, public_name) VALUES
-			('Server A', 'https://a.com', 'central', 'production', 'Server A'),
-			('Server B', 'https://b.com', 'central', 'staging', 'Server B')",
+			"INSERT INTO applications (name, host, kind, rank, public_name) VALUES
+			('Application A', 'https://a.com', 'central', 'production', 'Application A'),
+			('Application B', 'https://b.com', 'central', 'staging', 'Application B')",
 		)
 		.await
 		.unwrap();
 
 		let response = public.get("/servers").await;
 		response.assert_status_ok();
-		let servers: Vec<PublicServer> = response.json();
-		assert_eq!(servers.len(), 2);
+		let applications: Vec<PublicServer> = response.json();
+		assert_eq!(applications.len(), 2);
 		assert!(
-			servers
+			applications
 				.iter()
-				.any(|s| s.name == "Server A" && s.host == "https://a.com")
+				.any(|s| s.name == "Application A" && s.host == "https://a.com")
 		);
 		assert!(
-			servers
+			applications
 				.iter()
-				.any(|s| s.name == "Server B" && s.host == "https://b.com")
+				.any(|s| s.name == "Application B" && s.host == "https://b.com")
 		);
 	})
 	.await

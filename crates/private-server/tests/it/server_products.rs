@@ -5,7 +5,7 @@
 //! spec: APP
 
 use commons_types::server::{kind::ServerKind, product::Product};
-use database::servers::Server;
+use database::applications::Application;
 use serde_json::json;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -19,7 +19,7 @@ async fn create_defaults_to_tamanu_and_round_trips_a_product() {
 			.await;
 		response.assert_status_ok();
 		let id: String = response.json();
-		let server = Server::get_by_id(&mut conn, id.parse().unwrap())
+		let server = Application::get_by_id(&mut conn, id.parse().unwrap())
 			.await
 			.unwrap();
 		assert_eq!(server.product, Product::Tamanu);
@@ -30,7 +30,7 @@ async fn create_defaults_to_tamanu_and_round_trips_a_product() {
 			.await;
 		response.assert_status_ok();
 		let id: String = response.json();
-		let server = Server::get_by_id(&mut conn, id.parse().unwrap())
+		let server = Application::get_by_id(&mut conn, id.parse().unwrap())
 			.await
 			.unwrap();
 		assert_eq!(server.product, Product::Senaite);
@@ -75,7 +75,7 @@ async fn changing_product_moves_an_orphaned_kind_to_the_new_default() {
 			.await;
 		response.assert_status_ok();
 
-		let server = Server::get_by_id(&mut conn, id.parse().unwrap())
+		let server = Application::get_by_id(&mut conn, id.parse().unwrap())
 			.await
 			.unwrap();
 		assert_eq!(server.product, Product::Senaite);
@@ -110,7 +110,7 @@ async fn changing_product_keeps_a_kind_the_new_product_defines() {
 			.await;
 		response.assert_status_ok();
 
-		let server = Server::get_by_id(&mut conn, id.parse().unwrap())
+		let server = Application::get_by_id(&mut conn, id.parse().unwrap())
 			.await
 			.unwrap();
 		assert_eq!(server.product, Product::Canopy);
@@ -208,7 +208,7 @@ async fn public_name_survives_losing_eligibility() {
 			.await;
 		response.assert_status_ok();
 
-		let server = Server::get_by_id(&mut conn, server_id).await.unwrap();
+		let server = Application::get_by_id(&mut conn, server_id).await.unwrap();
 		assert_eq!(server.product, Product::Senaite);
 		assert_eq!(
 			server.public_name.as_deref(),
@@ -216,10 +216,10 @@ async fn public_name_survives_losing_eligibility() {
 			"the stored name is kept rather than cleared"
 		);
 		// It is nonetheless not listed while ineligible.
-		let listed = Server::search_central(&mut conn, "Island", 50)
+		let listed = Application::search_central(&mut conn, "Island", 50)
 			.await
 			.unwrap();
-		assert!(listed.is_empty(), "ineligible servers are not offered");
+		assert!(listed.is_empty(), "ineligible applications are not offered");
 
 		// Back to Tamanu central, and the name takes effect again.
 		let response = private
@@ -231,7 +231,7 @@ async fn public_name_survives_losing_eligibility() {
 			.await;
 		response.assert_status_ok();
 
-		let listed = Server::search_central(&mut conn, "Island", 50)
+		let listed = Application::search_central(&mut conn, "Island", 50)
 			.await
 			.unwrap();
 		assert_eq!(

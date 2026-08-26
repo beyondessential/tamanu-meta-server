@@ -11,8 +11,8 @@ use base64::Engine;
 use commons_tests::server::{make_signing_certificate, run, run_with_tailnet_device_auth};
 use commons_types::server::{TagMap, kind::ServerKind, product::Product};
 use database::{
-	pg_duration::PgDuration, server_enrollment_tokens::ServerEnrollmentToken, servers::Server,
-	url_field::UrlField,
+	applications::Application, pg_duration::PgDuration,
+	server_enrollment_tokens::ServerEnrollmentToken, url_field::UrlField,
 };
 use jiff::SignedDuration;
 use serde_json::{Value, json};
@@ -22,8 +22,8 @@ fn b64() -> base64::engine::general_purpose::GeneralPurpose {
 	base64::engine::general_purpose::STANDARD
 }
 
-fn new_server(host: &str) -> Server {
-	Server {
+fn new_server(host: &str) -> Application {
+	Application {
 		id: Uuid::new_v4(),
 		name: Some("test".into()),
 		host: Some(UrlField(host.parse().unwrap())),
@@ -149,7 +149,7 @@ async fn tailnet_enrollment_happy_path() {
 		async |mut conn, fwd_ip, _node, _dev, _public, private| {
 			use database::Device;
 			let (spki, _cert, key) = make_signing_certificate();
-			let server = Server::create(&mut conn, new_server("https://ts-enroll.example/"))
+			let server = Application::create(&mut conn, new_server("https://ts-enroll.example/"))
 				.await
 				.unwrap();
 			let (_t, token) =
@@ -162,7 +162,7 @@ async fn tailnet_enrollment_happy_path() {
 				.assert_status_ok();
 
 			// Registered + bound to a device carrying the body-supplied key; token spent.
-			let after = Server::get_by_id(&mut conn, server.id).await.unwrap();
+			let after = Application::get_by_id(&mut conn, server.id).await.unwrap();
 			assert!(after.registered_at.is_some(), "registered_at set");
 			assert!(after.device_id.is_some(), "device bound");
 			let bound = Device::from_key(&mut conn, &spki).await.unwrap().unwrap();
@@ -188,7 +188,7 @@ async fn internet_path_rejects_body_spki() {
 		// On the internet mTLS mount there is no tailnet directory, so a
 		// body-supplied SPKI must NOT be accepted — the cert can't be skipped.
 		let (spki, _cert, _key) = make_signing_certificate();
-		let server = Server::create(&mut conn, new_server("https://gate.example/"))
+		let server = Application::create(&mut conn, new_server("https://gate.example/"))
 			.await
 			.unwrap();
 		let (_t, token) =
@@ -219,7 +219,7 @@ async fn tailnet_ignores_the_mtls_certificate_header() {
 			// cert sent in the (forgeable) client-certificate header.
 			let (spki_real, _c, key_real) = make_signing_certificate();
 			let (spki_forged, cert_forged, _k) = make_signing_certificate();
-			let server = Server::create(&mut conn, new_server("https://ts-forge.example/"))
+			let server = Application::create(&mut conn, new_server("https://ts-forge.example/"))
 				.await
 				.unwrap();
 			let (_t, token) =
@@ -282,7 +282,7 @@ async fn enrollment_adds_key_to_tailscale_precreated_device() {
 		.unwrap();
 		let mut s = new_server("https://ts.example/");
 		s.device_id = Some(device.id);
-		let server = Server::create(&mut conn, s).await.unwrap();
+		let server = Application::create(&mut conn, s).await.unwrap();
 		let (_t, token) =
 			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
 				.await
@@ -293,7 +293,7 @@ async fn enrollment_adds_key_to_tailscale_precreated_device() {
 			.assert_status_ok();
 
 		// The key landed on the *existing* device; no second device was made.
-		let after = Server::get_by_id(&mut conn, server.id).await.unwrap();
+		let after = Application::get_by_id(&mut conn, server.id).await.unwrap();
 		assert_eq!(
 			after.device_id,
 			Some(device.id),
@@ -310,8 +310,8 @@ async fn enrollment_rejects_key_bound_to_another_live_server() {
 	run(async |mut conn, public, _private| {
 		let (spki, cert, key) = make_signing_certificate();
 
-		// Server A enrolls with this cert.
-		let a = Server::create(&mut conn, new_server("https://a.example/"))
+		// Application A enrolls with this cert.
+		let a = Application::create(&mut conn, new_server("https://a.example/"))
 			.await
 			.unwrap();
 		let (_ta, token_a) =
@@ -322,8 +322,8 @@ async fn enrollment_rejects_key_bound_to_another_live_server() {
 			.await
 			.assert_status_ok();
 
-		// Server B tries to enroll with the SAME key while A is live → refused.
-		let b = Server::create(&mut conn, new_server("https://b.example/"))
+		// Application B tries to enroll with the SAME key while A is live → refused.
+		let b = Application::create(&mut conn, new_server("https://b.example/"))
 			.await
 			.unwrap();
 		let (_tb, token_b) =
@@ -341,7 +341,7 @@ async fn enrollment_rejects_key_bound_to_another_live_server() {
 async fn enrollment_happy_path() {
 	run(async |mut conn, public, _private| {
 		let (spki, cert, signing_key) = make_signing_certificate();
-		let server = Server::create(&mut conn, new_server("https://happy.example/"))
+		let server = Application::create(&mut conn, new_server("https://happy.example/"))
 			.await
 			.unwrap();
 		let (_t, token) =
@@ -378,7 +378,7 @@ async fn enrollment_happy_path() {
 		resp.assert_status_ok();
 
 		// server is now registered + bound; token is spent.
-		let after = Server::get_by_id(&mut conn, server.id).await.unwrap();
+		let after = Application::get_by_id(&mut conn, server.id).await.unwrap();
 		assert!(after.registered_at.is_some(), "registered_at set");
 		assert!(after.device_id.is_some(), "device bound");
 		assert!(
@@ -395,7 +395,7 @@ async fn enrollment_happy_path() {
 async fn enrollment_bad_signature_is_opaque_and_keeps_token() {
 	run(async |mut conn, public, _private| {
 		let (_spki, cert, _key) = make_signing_certificate();
-		let server = Server::create(&mut conn, new_server("https://badsig.example/"))
+		let server = Application::create(&mut conn, new_server("https://badsig.example/"))
 			.await
 			.unwrap();
 		let (_t, token) =
@@ -470,7 +470,7 @@ async fn enrollment_unknown_server_and_bad_token_are_opaque() {
 		resp.assert_status_forbidden();
 
 		// known server, wrong token
-		let server = Server::create(&mut conn, new_server("https://badtok.example/"))
+		let server = Application::create(&mut conn, new_server("https://badtok.example/"))
 			.await
 			.unwrap();
 		let resp = public
@@ -490,7 +490,7 @@ async fn re_enrollment_replaces_the_device() {
 
 		// First enrollment with cert A.
 		let (spki_a, cert_a, key_a) = make_signing_certificate();
-		let server = Server::create(&mut conn, new_server("https://reenroll.example/"))
+		let server = Application::create(&mut conn, new_server("https://reenroll.example/"))
 			.await
 			.unwrap();
 		let (_ta, token_a) =
@@ -500,7 +500,7 @@ async fn re_enrollment_replaces_the_device() {
 		run_handshake(&public, server.id, &token_a, &spki_a, &cert_a, &key_a)
 			.await
 			.assert_status_ok();
-		let device_a = Server::get_by_id(&mut conn, server.id)
+		let device_a = Application::get_by_id(&mut conn, server.id)
 			.await
 			.unwrap()
 			.device_id
@@ -516,7 +516,7 @@ async fn re_enrollment_replaces_the_device() {
 			.await
 			.assert_status_ok();
 
-		let device_b = Server::get_by_id(&mut conn, server.id)
+		let device_b = Application::get_by_id(&mut conn, server.id)
 			.await
 			.unwrap()
 			.device_id
@@ -607,7 +607,7 @@ async fn channel_binding_happy_path() {
 	unsafe { std::env::set_var("CANOPY_ENROLL_EKM_HEADER", EKM_HEADER) };
 	run(async |mut conn, public, _private| {
 		let (spki, cert, key) = make_signing_certificate();
-		let server = Server::create(&mut conn, new_server("https://cb.example/"))
+		let server = Application::create(&mut conn, new_server("https://cb.example/"))
 			.await
 			.unwrap();
 		let (_t, token) =
@@ -635,7 +635,7 @@ async fn channel_binding_happy_path() {
 		);
 		complete.assert_status_ok();
 		assert!(
-			Server::get_by_id(&mut conn, server.id)
+			Application::get_by_id(&mut conn, server.id)
 				.await
 				.unwrap()
 				.registered_at
@@ -651,7 +651,7 @@ async fn channel_binding_missing_header_is_rejected() {
 	unsafe { std::env::set_var("CANOPY_ENROLL_EKM_HEADER", EKM_HEADER) };
 	run(async |mut conn, public, _private| {
 		let (spki, cert, key) = make_signing_certificate();
-		let server = Server::create(&mut conn, new_server("https://cb-missing.example/"))
+		let server = Application::create(&mut conn, new_server("https://cb-missing.example/"))
 			.await
 			.unwrap();
 		let (_t, token) =
@@ -689,7 +689,7 @@ async fn channel_binding_mismatch_is_rejected() {
 	unsafe { std::env::set_var("CANOPY_ENROLL_EKM_HEADER", EKM_HEADER) };
 	run(async |mut conn, public, _private| {
 		let (spki, cert, key) = make_signing_certificate();
-		let server = Server::create(&mut conn, new_server("https://cb-mismatch.example/"))
+		let server = Application::create(&mut conn, new_server("https://cb-mismatch.example/"))
 			.await
 			.unwrap();
 		let (_t, token) =
@@ -723,7 +723,7 @@ async fn tailnet_path_skips_channel_binding() {
 		"server",
 		async |mut conn, fwd_ip, _node, _dev, _public, private| {
 			let (spki, _cert, key) = make_signing_certificate();
-			let server = Server::create(&mut conn, new_server("https://cb-tailnet.example/"))
+			let server = Application::create(&mut conn, new_server("https://cb-tailnet.example/"))
 				.await
 				.unwrap();
 			let (_t, token) =

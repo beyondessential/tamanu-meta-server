@@ -4,12 +4,12 @@ use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::{Uuid, issue::ResolvedReason, status::CheckResult};
+use database::applications::Application;
 use database::issues::{
 	CheckFiling, Incident, Issue, IssueFilter, IssueIncidentRef, IssueListFilters, MANUAL_SOURCE,
 	Scope, file_check,
 };
 use database::notes::IssueNote;
-use database::servers::Server;
 use database::tailscale_users::TailscaleUser as CachedTailscaleUser;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ use crate::state::AppState;
 
 const DEFAULT_LIMIT: i64 = 100;
 
-/// A problem raised against a server (or a group of servers), tracking its
+/// A problem raised against a server (or a group of applications), tracking its
 /// current severity, whether it's still ongoing, and how it's been handled
 /// by an operator.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -27,8 +27,8 @@ pub struct IssueData {
 	/// Unique identifier for this issue.
 	pub id: Uuid,
 	/// The server this issue was raised against. Absent for issues that
-	/// apply to a whole group of servers rather than a single one.
-	pub server_id: Option<Uuid>,
+	/// apply to a whole group of applications rather than a single one.
+	pub application_id: Option<Uuid>,
 	/// Display name of the affected server, when one is set. Falls back to
 	/// `server_host` when absent.
 	pub server_name: Option<String>,
@@ -137,7 +137,7 @@ impl IssueData {
 		let (res_name, res_pic) = lookup_user(e.users, i.resolved_by.as_deref());
 		Self {
 			id: i.id,
-			server_id: i.server_id,
+			application_id: i.application_id,
 			server_name: e.server_name,
 			server_host: e.server_host,
 			server_group_id: e.server_group_id,
@@ -193,14 +193,14 @@ fn collect_user_logins(issues: &[Issue]) -> Vec<&str> {
 
 /// Enrich a list of issues with their server names/hosts, acker/resolver
 /// display info, and the incidents each issue is attached to. Three extra
-/// batch queries (servers, users, incidents).
+/// batch queries (applications, users, incidents).
 pub(crate) async fn enrich_issues(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	issues: Vec<Issue>,
 ) -> Result<Vec<IssueData>> {
-	let server_ids: Vec<Uuid> = issues.iter().filter_map(|i| i.server_id).collect();
-	let names = Server::names_by_ids(conn, &server_ids).await?;
-	let group_refs = Server::group_refs_by_server_ids(conn, &server_ids).await?;
+	let server_ids: Vec<Uuid> = issues.iter().filter_map(|i| i.application_id).collect();
+	let names = Application::names_by_ids(conn, &server_ids).await?;
+	let group_refs = Application::group_refs_by_server_ids(conn, &server_ids).await?;
 	let user_logins = collect_user_logins(&issues);
 	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
 	let issue_ids: Vec<Uuid> = issues.iter().map(|i| i.id).collect();
@@ -209,11 +209,11 @@ pub(crate) async fn enrich_issues(
 		.into_iter()
 		.map(|i| {
 			let (name, host) = i
-				.server_id
+				.application_id
 				.and_then(|sid| names.get(&sid).cloned())
 				.unwrap_or((None, None));
 			let (group_id, group_name) = i
-				.server_id
+				.application_id
 				.and_then(|sid| group_refs.get(&sid).cloned())
 				.unwrap_or((None, None));
 			let links = incidents
@@ -242,15 +242,15 @@ pub(crate) async fn enrich_issue(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	issue: Issue,
 ) -> Result<IssueData> {
-	let server_ids: Vec<Uuid> = issue.server_id.into_iter().collect();
-	let mut names = Server::names_by_ids(conn, &server_ids).await?;
+	let server_ids: Vec<Uuid> = issue.application_id.into_iter().collect();
+	let mut names = Application::names_by_ids(conn, &server_ids).await?;
 	let (name, host) = issue
-		.server_id
+		.application_id
 		.and_then(|sid| names.remove(&sid))
 		.unwrap_or((None, None));
-	let mut group_refs = Server::group_refs_by_server_ids(conn, &server_ids).await?;
+	let mut group_refs = Application::group_refs_by_server_ids(conn, &server_ids).await?;
 	let (group_id, group_name) = issue
-		.server_id
+		.application_id
 		.and_then(|sid| group_refs.remove(&sid))
 		.unwrap_or((None, None));
 	let user_logins = collect_user_logins(std::slice::from_ref(&issue));
@@ -297,7 +297,7 @@ fn filter_from(active_only: Option<bool>) -> IssueFilter {
 	}
 }
 
-/// Filters for listing issues across all servers.
+/// Filters for listing issues across all applications.
 #[derive(Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct IssueListArgs {
@@ -318,7 +318,7 @@ pub struct IssueListArgs {
 	pub limit: Option<i64>,
 }
 
-/// List issues across all servers, with optional filtering.
+/// List issues across all applications, with optional filtering.
 ///
 /// Returns the most relevant issues fleet-wide, matching the given filters.
 /// By default only currently active issues are returned; pass
@@ -346,7 +346,7 @@ pub async fn list(
 			active_only: args.active_only.unwrap_or(true),
 			results: args.results,
 			server_group_id: args.server_group_id,
-			server_id: None,
+			application_id: None,
 			since: None,
 		},
 		args.limit.unwrap_or(DEFAULT_LIMIT),
@@ -404,7 +404,7 @@ pub async fn list_for_device(
 #[derive(Deserialize, ToSchema)]
 pub struct IssueListForServerArgs {
 	/// Id of the server whose issues to list.
-	pub server_id: Uuid,
+	pub application_id: Uuid,
 	/// When `false`, include resolved and inactive issues as well as active
 	/// ones. Defaults to `true` (active issues only) when omitted.
 	#[serde(default)]
@@ -438,7 +438,7 @@ pub async fn list_for_server(
 	let mut conn = state.db_read.get().await?;
 	let issues = Issue::list_for_server(
 		&mut conn,
-		args.server_id,
+		args.application_id,
 		filter_from(args.active_only),
 		args.limit.unwrap_or(DEFAULT_LIMIT),
 	)
@@ -451,7 +451,7 @@ pub async fn list_for_server(
 #[serde(rename_all = "camelCase")]
 pub struct SubmitManualEventArgs {
 	/// Id of the server the condition applies to.
-	pub server_id: Uuid,
+	pub application_id: Uuid,
 	/// Identifier for the underlying condition. Reports with the same
 	/// `ref` on the same server update the same issue rather than opening
 	/// a new one each time; use a fresh unique value if that deduplication
@@ -518,7 +518,7 @@ pub async fn submit_manual_event(
 		&mut conn,
 		CheckFiling {
 			source: MANUAL_SOURCE,
-			scope: Scope::Server(args.server_id),
+			scope: Scope::Application(args.application_id),
 			device_id: None,
 			check: &args.r#ref,
 			observed,

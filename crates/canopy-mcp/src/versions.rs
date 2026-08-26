@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use commons_types::{Uuid, version::VersionStr};
 use database::{
-	diesel_async::AsyncPgConnection, servers::Server, statuses::Status,
+	applications::Application, diesel_async::AsyncPgConnection, statuses::Status,
 	version_known_issues::VersionKnownIssue, versions::Version,
 };
 use jiff::Timestamp;
@@ -44,7 +44,7 @@ struct VersionSummary {
 	status: String,
 	head_release_date: Option<Timestamp>,
 	changelog_summary: String,
-	/// Live servers currently reporting this version.
+	/// Live applications currently reporting this version.
 	adoption: u32,
 }
 
@@ -70,7 +70,7 @@ struct VersionDetail {
 impl CanopyMcp {
 	#[tool(
 		description = "List known Tamanu versions with release date, changelog summary, and how \
-		               many live servers currently run each."
+		               many live applications currently run each."
 	)]
 	async fn list_versions(
 		&self,
@@ -106,7 +106,7 @@ impl CanopyMcp {
 
 	#[tool(
 		description = "Detail for one Tamanu version: changelog, known issues, available updates, \
-		               and which live servers run it."
+		               and which live applications run it."
 	)]
 	async fn get_version(
 		&self,
@@ -135,9 +135,11 @@ impl CanopyMcp {
 			.await
 			.ok();
 
-		// Adoption: live servers whose latest status reports this version.
-		let servers = Server::get_all(&mut conn, 0, None).await.map_err(mcp_err)?;
-		let ids: Vec<Uuid> = servers.iter().map(|s| s.id).collect();
+		// Adoption: live applications whose latest status reports this version.
+		let applications = Application::get_all(&mut conn, 0, None)
+			.await
+			.map_err(mcp_err)?;
+		let ids: Vec<Uuid> = applications.iter().map(|s| s.id).collect();
 		let statuses = Status::latest_for_servers(&mut conn, &ids)
 			.await
 			.map_err(mcp_err)?;
@@ -147,7 +149,7 @@ impl CanopyMcp {
 			.filter(|s| s.version.as_ref().map(|v| v.to_string()) == Some(target.clone()))
 			.map(|s| s.server_id)
 			.collect();
-		let adopting_servers: Vec<ServerRef> = servers
+		let adopting_servers: Vec<ServerRef> = applications
 			.iter()
 			.filter(|s| on_version.contains(&s.id))
 			.map(|s| ServerRef {
@@ -170,13 +172,13 @@ impl CanopyMcp {
 }
 
 impl CanopyMcp {
-	/// Count of live servers reporting each version (by version string).
+	/// Count of live applications reporting each version (by version string).
 	async fn version_adoption(
 		&self,
 		conn: &mut AsyncPgConnection,
 	) -> Result<HashMap<String, u32>, McpError> {
-		let servers = Server::get_all(conn, 0, None).await.map_err(mcp_err)?;
-		let ids: Vec<Uuid> = servers.iter().map(|s| s.id).collect();
+		let applications = Application::get_all(conn, 0, None).await.map_err(mcp_err)?;
+		let ids: Vec<Uuid> = applications.iter().map(|s| s.id).collect();
 		let statuses = Status::latest_for_servers(conn, &ids)
 			.await
 			.map_err(mcp_err)?;

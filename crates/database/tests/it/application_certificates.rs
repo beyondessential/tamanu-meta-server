@@ -4,9 +4,9 @@
 
 use commons_tests::db::TestDb;
 use commons_types::dns::ManagedZone;
+use database::application_certificates::{OrderState, RevocationReason, Risk, default_renew_after};
 use database::diesel_async::AsyncPgConnection;
-use database::server_certificates::{OrderState, RevocationReason, Risk, default_renew_after};
-use database::{ServerCertificate, ServerGroupDomain, ServerName};
+use database::{ApplicationCertificate, ApplicationName, ServerGroupDomain};
 use diesel::{sql_query, sql_types};
 use diesel_async::RunQueryDsl;
 use jiff::{SignedDuration, Timestamp};
@@ -21,7 +21,7 @@ struct RowId {
 
 async fn insert_server(conn: &mut AsyncPgConnection, name: &str) -> Uuid {
 	let host = format!("https://{}.example.invalid", Uuid::new_v4());
-	sql_query("INSERT INTO servers (name, host, kind) VALUES ($1, $2, 'central') RETURNING id")
+	sql_query("INSERT INTO applications (name, host, kind) VALUES ($1, $2, 'central') RETURNING id")
 		.bind::<sql_types::Text, _>(name)
 		.bind::<sql_types::Text, _>(host)
 		.get_result::<RowId>(conn)
@@ -40,7 +40,7 @@ fn addr(raw: &str) -> IpAddr {
 async fn registering_normalises_and_starts_unpublished() {
 	TestDb::run(async |mut conn, _url| {
 		let server = insert_server(&mut conn, "central").await;
-		let row = ServerName::register(
+		let row = ApplicationName::register(
 			&mut conn,
 			server,
 			"Central.Fiji.Tamanu.App.",
@@ -54,7 +54,7 @@ async fn registering_normalises_and_starts_unpublished() {
 		assert!(row.published().is_empty());
 		assert!(!row.is_reconciled(), "nothing published yet");
 
-		let work = ServerName::needing_publish(&mut conn, 10)
+		let work = ApplicationName::needing_publish(&mut conn, 10)
 			.await
 			.expect("work list");
 		assert_eq!(work.len(), 1);
@@ -67,22 +67,23 @@ async fn registering_normalises_and_starts_unpublished() {
 async fn publishing_settles_the_registration() {
 	TestDb::run(async |mut conn, _url| {
 		let server = insert_server(&mut conn, "central").await;
-		let row = ServerName::register(&mut conn, server, "a.tamanu.app", &[addr("192.0.2.1")])
-			.await
-			.expect("register");
+		let row =
+			ApplicationName::register(&mut conn, server, "a.tamanu.app", &[addr("192.0.2.1")])
+				.await
+				.expect("register");
 
-		ServerName::record_published(&mut conn, row.id, &[addr("192.0.2.1")])
+		ApplicationName::record_published(&mut conn, row.id, &[addr("192.0.2.1")])
 			.await
 			.expect("record published");
 
-		let after = ServerName::for_name(&mut conn, "a.tamanu.app")
+		let after = ApplicationName::for_name(&mut conn, "a.tamanu.app")
 			.await
 			.expect("read")
 			.expect("present");
 		assert!(after.is_reconciled());
 		assert!(after.published_at.is_some());
 		assert!(
-			ServerName::needing_publish(&mut conn, 10)
+			ApplicationName::needing_publish(&mut conn, 10)
 				.await
 				.expect("work list")
 				.is_empty(),
@@ -90,11 +91,11 @@ async fn publishing_settles_the_registration() {
 		);
 
 		// A change of address is work again.
-		ServerName::register(&mut conn, server, "a.tamanu.app", &[addr("192.0.2.9")])
+		ApplicationName::register(&mut conn, server, "a.tamanu.app", &[addr("192.0.2.9")])
 			.await
 			.expect("re-register");
 		assert_eq!(
-			ServerName::needing_publish(&mut conn, 10)
+			ApplicationName::needing_publish(&mut conn, 10)
 				.await
 				.expect("work list")
 				.len(),
@@ -108,7 +109,7 @@ async fn publishing_settles_the_registration() {
 async fn address_order_is_not_a_change() {
 	TestDb::run(async |mut conn, _url| {
 		let server = insert_server(&mut conn, "central").await;
-		let row = ServerName::register(
+		let row = ApplicationName::register(
 			&mut conn,
 			server,
 			"a.tamanu.app",
@@ -117,11 +118,15 @@ async fn address_order_is_not_a_change() {
 		.await
 		.expect("register");
 		// Published in the other order: the same set, so no work.
-		ServerName::record_published(&mut conn, row.id, &[addr("192.0.2.2"), addr("192.0.2.1")])
-			.await
-			.expect("record published");
+		ApplicationName::record_published(
+			&mut conn,
+			row.id,
+			&[addr("192.0.2.2"), addr("192.0.2.1")],
+		)
+		.await
+		.expect("record published");
 		assert!(
-			ServerName::needing_publish(&mut conn, 10)
+			ApplicationName::needing_publish(&mut conn, 10)
 				.await
 				.expect("work list")
 				.is_empty()
@@ -135,11 +140,11 @@ async fn a_name_belongs_to_one_server_at_a_time() {
 	TestDb::run(async |mut conn, _url| {
 		let one = insert_server(&mut conn, "one").await;
 		let two = insert_server(&mut conn, "two").await;
-		ServerName::register(&mut conn, one, "a.tamanu.app", &[addr("192.0.2.1")])
+		ApplicationName::register(&mut conn, one, "a.tamanu.app", &[addr("192.0.2.1")])
 			.await
 			.expect("first");
 
-		let err = ServerName::register(&mut conn, two, "a.tamanu.app", &[addr("192.0.2.2")])
+		let err = ApplicationName::register(&mut conn, two, "a.tamanu.app", &[addr("192.0.2.2")])
 			.await
 			.expect_err("the other server may not take it");
 		assert!(
@@ -148,7 +153,7 @@ async fn a_name_belongs_to_one_server_at_a_time() {
 		);
 
 		// The holder may keep changing its own.
-		ServerName::register(&mut conn, one, "a.tamanu.app", &[addr("192.0.2.3")])
+		ApplicationName::register(&mut conn, one, "a.tamanu.app", &[addr("192.0.2.3")])
 			.await
 			.expect("holder updates");
 	})
@@ -160,31 +165,33 @@ async fn withdrawing_frees_the_name_once_records_are_gone() {
 	TestDb::run(async |mut conn, _url| {
 		let one = insert_server(&mut conn, "one").await;
 		let two = insert_server(&mut conn, "two").await;
-		let row = ServerName::register(&mut conn, one, "a.tamanu.app", &[addr("192.0.2.1")])
+		let row = ApplicationName::register(&mut conn, one, "a.tamanu.app", &[addr("192.0.2.1")])
 			.await
 			.expect("register");
-		ServerName::record_published(&mut conn, row.id, &[addr("192.0.2.1")])
+		ApplicationName::record_published(&mut conn, row.id, &[addr("192.0.2.1")])
 			.await
 			.expect("published");
 
 		// No addresses: a withdrawal, which is work until the records are gone.
-		let withdrawn = ServerName::register(&mut conn, one, "a.tamanu.app", &[])
+		let withdrawn = ApplicationName::register(&mut conn, one, "a.tamanu.app", &[])
 			.await
 			.expect("withdraw");
 		assert!(withdrawn.is_withdrawing());
 		assert!(!withdrawn.is_reconciled());
 
 		// Still held until the reconcile has cleaned up.
-		ServerName::register(&mut conn, two, "a.tamanu.app", &[addr("192.0.2.2")])
+		ApplicationName::register(&mut conn, two, "a.tamanu.app", &[addr("192.0.2.2")])
 			.await
 			.expect_err("not free yet");
 
-		ServerName::record_published(&mut conn, row.id, &[])
+		ApplicationName::record_published(&mut conn, row.id, &[])
 			.await
 			.expect("records removed");
-		ServerName::forget(&mut conn, row.id).await.expect("forget");
+		ApplicationName::forget(&mut conn, row.id)
+			.await
+			.expect("forget");
 
-		ServerName::register(&mut conn, two, "a.tamanu.app", &[addr("192.0.2.2")])
+		ApplicationName::register(&mut conn, two, "a.tamanu.app", &[addr("192.0.2.2")])
 			.await
 			.expect("free now");
 	})
@@ -200,26 +207,29 @@ const KEY_B: &str = "bb000000000000000000000000000000000000000000000000000000000
 async fn requesting_opens_one_order_per_name_and_key() {
 	TestDb::run(async |mut conn, _url| {
 		let server = insert_server(&mut conn, "central").await;
-		let first = ServerCertificate::request(&mut conn, server, "a.tamanu.app", KEY_A, b"csr-a")
-			.await
-			.expect("request");
+		let first =
+			ApplicationCertificate::request(&mut conn, server, "a.tamanu.app", KEY_A, b"csr-a")
+				.await
+				.expect("request");
 		assert_eq!(first.order_state(), OrderState::Pending);
 		assert!(!first.renewing, "a first issuance is not a renewal");
 
 		// The same key again is the same order, not a second one.
-		let again = ServerCertificate::request(&mut conn, server, "a.tamanu.app", KEY_A, b"csr-a")
-			.await
-			.expect("repeat");
+		let again =
+			ApplicationCertificate::request(&mut conn, server, "a.tamanu.app", KEY_A, b"csr-a")
+				.await
+				.expect("repeat");
 		assert_eq!(again.id, first.id);
 
 		// A different key for the same name is its own order.
-		let other = ServerCertificate::request(&mut conn, server, "a.tamanu.app", KEY_B, b"csr-b")
-			.await
-			.expect("other key");
+		let other =
+			ApplicationCertificate::request(&mut conn, server, "a.tamanu.app", KEY_B, b"csr-b")
+				.await
+				.expect("other key");
 		assert_ne!(other.id, first.id);
 
 		assert_eq!(
-			ServerCertificate::for_server(&mut conn, server)
+			ApplicationCertificate::for_server(&mut conn, server)
 				.await
 				.expect("list")
 				.len(),
@@ -233,11 +243,12 @@ async fn requesting_opens_one_order_per_name_and_key() {
 async fn a_repeat_request_is_answered_from_the_held_certificate() {
 	TestDb::run(async |mut conn, _url| {
 		let server = insert_server(&mut conn, "central").await;
-		let order = ServerCertificate::request(&mut conn, server, "a.tamanu.app", KEY_A, b"csr")
-			.await
-			.expect("request");
+		let order =
+			ApplicationCertificate::request(&mut conn, server, "a.tamanu.app", KEY_A, b"csr")
+				.await
+				.expect("request");
 		let expiry = Timestamp::now() + SignedDuration::from_hours(90 * 24);
-		ServerCertificate::record_issued(
+		ApplicationCertificate::record_issued(
 			&mut conn,
 			order.id,
 			"-----BEGIN...",
@@ -248,15 +259,16 @@ async fn a_repeat_request_is_answered_from_the_held_certificate() {
 		.await
 		.expect("issued");
 
-		let again = ServerCertificate::request(&mut conn, server, "a.tamanu.app", KEY_A, b"csr")
-			.await
-			.expect("repeat");
+		let again =
+			ApplicationCertificate::request(&mut conn, server, "a.tamanu.app", KEY_A, b"csr")
+				.await
+				.expect("repeat");
 		assert_eq!(again.id, order.id);
 		assert_eq!(again.order_state(), OrderState::Issued);
 		assert!(again.is_current());
 		assert_eq!(again.chain.as_deref(), Some("-----BEGIN..."));
 		assert!(
-			ServerCertificate::claim_due(&mut conn, 10)
+			ApplicationCertificate::claim_due(&mut conn, 10)
 				.await
 				.expect("due")
 				.is_empty(),
@@ -270,17 +282,19 @@ async fn a_repeat_request_is_answered_from_the_held_certificate() {
 async fn an_expired_certificate_is_ordered_again_on_request() {
 	TestDb::run(async |mut conn, _url| {
 		let server = insert_server(&mut conn, "central").await;
-		let order = ServerCertificate::request(&mut conn, server, "a.tamanu.app", KEY_A, b"csr")
-			.await
-			.expect("request");
+		let order =
+			ApplicationCertificate::request(&mut conn, server, "a.tamanu.app", KEY_A, b"csr")
+				.await
+				.expect("request");
 		let past = Timestamp::now() - SignedDuration::from_hours(1);
-		ServerCertificate::record_issued(&mut conn, order.id, "chain", past, None, None)
+		ApplicationCertificate::record_issued(&mut conn, order.id, "chain", past, None, None)
 			.await
 			.expect("issued");
 
-		let again = ServerCertificate::request(&mut conn, server, "a.tamanu.app", KEY_A, b"csr")
-			.await
-			.expect("repeat");
+		let again =
+			ApplicationCertificate::request(&mut conn, server, "a.tamanu.app", KEY_A, b"csr")
+				.await
+				.expect("repeat");
 		assert_eq!(again.id, order.id);
 		assert_eq!(again.order_state(), OrderState::Pending);
 		assert!(again.renewing, "it had a chain, so this extends one");
@@ -292,15 +306,16 @@ async fn an_expired_certificate_is_ordered_again_on_request() {
 async fn a_failed_attempt_backs_off_and_stays_pending() {
 	TestDb::run(async |mut conn, _url| {
 		let server = insert_server(&mut conn, "central").await;
-		let order = ServerCertificate::request(&mut conn, server, "a.tamanu.app", KEY_A, b"csr")
-			.await
-			.expect("request");
+		let order =
+			ApplicationCertificate::request(&mut conn, server, "a.tamanu.app", KEY_A, b"csr")
+				.await
+				.expect("request");
 
-		ServerCertificate::record_failure(&mut conn, order.id, "the authority said no")
+		ApplicationCertificate::record_failure(&mut conn, order.id, "the authority said no")
 			.await
 			.expect("record failure");
 
-		let after = ServerCertificate::get(&mut conn, order.id)
+		let after = ApplicationCertificate::get(&mut conn, order.id)
 			.await
 			.expect("get");
 		assert_eq!(after.attempts, 1);
@@ -312,7 +327,7 @@ async fn a_failed_attempt_backs_off_and_stays_pending() {
 		assert_eq!(after.last_error.as_deref(), Some("the authority said no"));
 		assert!(after.next_attempt_at > Timestamp::now(), "backed off");
 		assert!(
-			ServerCertificate::claim_due(&mut conn, 10)
+			ApplicationCertificate::claim_due(&mut conn, 10)
 				.await
 				.expect("due")
 				.is_empty(),
@@ -320,10 +335,10 @@ async fn a_failed_attempt_backs_off_and_stays_pending() {
 		);
 
 		// The second failure waits longer than the first.
-		ServerCertificate::record_failure(&mut conn, order.id, "again")
+		ApplicationCertificate::record_failure(&mut conn, order.id, "again")
 			.await
 			.expect("record failure");
-		let second = ServerCertificate::get(&mut conn, order.id)
+		let second = ApplicationCertificate::get(&mut conn, order.id)
 			.await
 			.expect("get");
 		assert_eq!(second.attempts, 2);
@@ -339,10 +354,10 @@ async fn renewal_follows_the_stored_window_and_reuses_the_request() {
 
 		// Due: the authority named a window that has already opened.
 		let soon =
-			ServerCertificate::request(&mut conn, server, "soon.tamanu.app", KEY_A, b"csr-1")
+			ApplicationCertificate::request(&mut conn, server, "soon.tamanu.app", KEY_A, b"csr-1")
 				.await
 				.expect("request");
-		ServerCertificate::record_issued(
+		ApplicationCertificate::record_issued(
 			&mut conn,
 			soon.id,
 			"chain",
@@ -355,10 +370,10 @@ async fn renewal_follows_the_stored_window_and_reuses_the_request() {
 
 		// Not due: a long-lived certificate issued just now.
 		let later =
-			ServerCertificate::request(&mut conn, server, "later.tamanu.app", KEY_B, b"csr-2")
+			ApplicationCertificate::request(&mut conn, server, "later.tamanu.app", KEY_B, b"csr-2")
 				.await
 				.expect("request");
-		ServerCertificate::record_issued(
+		ApplicationCertificate::record_issued(
 			&mut conn,
 			later.id,
 			"chain",
@@ -369,7 +384,7 @@ async fn renewal_follows_the_stored_window_and_reuses_the_request() {
 		.await
 		.expect("issued");
 
-		let started = ServerCertificate::start_renewals(&mut conn)
+		let started = ApplicationCertificate::start_renewals(&mut conn)
 			.await
 			.expect("start renewals");
 		assert_eq!(started.len(), 1, "only the one whose window has opened");
@@ -384,7 +399,7 @@ async fn renewal_follows_the_stored_window_and_reuses_the_request() {
 			"the old chain stays until the new one lands"
 		);
 
-		let due = ServerCertificate::claim_due(&mut conn, 10)
+		let due = ApplicationCertificate::claim_due(&mut conn, 10)
 			.await
 			.expect("due");
 		assert_eq!(due.len(), 1);
@@ -434,7 +449,7 @@ async fn entitled_server(conn: &mut AsyncPgConnection, domain: &str) -> Uuid {
 
 	let host = format!("https://{}.example.invalid", Uuid::new_v4());
 	sql_query(
-		"INSERT INTO servers (name, host, kind, group_id, may_manage_tls) \
+		"INSERT INTO applications (name, host, kind, group_id, may_manage_tls) \
 		 VALUES ($1, $2, 'central', $3, true) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>("entitled")
@@ -453,12 +468,17 @@ async fn risk_is_judged_against_the_certificates_own_lifetime() {
 
 		// Two days left. Comfortable on a ninety-day life, critical on a six-day
 		// one — the same reading has to mean different things.
-		let long =
-			ServerCertificate::request(&mut conn, server, "long.fiji.tamanu.app", KEY_A, b"c1")
-				.await
-				.expect("request");
+		let long = ApplicationCertificate::request(
+			&mut conn,
+			server,
+			"long.fiji.tamanu.app",
+			KEY_A,
+			b"c1",
+		)
+		.await
+		.expect("request");
 		sql_query(
-			"UPDATE server_certificates SET state = 'issued', chain = 'x', \
+			"UPDATE application_certificates SET state = 'issued', chain = 'x', \
 			 issued_at = now() - interval '88 days', not_after = now() + interval '2 days' \
 			 WHERE id = $1",
 		)
@@ -467,12 +487,17 @@ async fn risk_is_judged_against_the_certificates_own_lifetime() {
 		.await
 		.expect("age the long one");
 
-		let short =
-			ServerCertificate::request(&mut conn, server, "short.fiji.tamanu.app", KEY_B, b"c2")
-				.await
-				.expect("request");
+		let short = ApplicationCertificate::request(
+			&mut conn,
+			server,
+			"short.fiji.tamanu.app",
+			KEY_B,
+			b"c2",
+		)
+		.await
+		.expect("request");
 		sql_query(
-			"UPDATE server_certificates SET state = 'issued', chain = 'x', \
+			"UPDATE application_certificates SET state = 'issued', chain = 'x', \
 			 issued_at = now() - interval '4 days', not_after = now() + interval '2 days' \
 			 WHERE id = $1",
 		)
@@ -481,7 +506,7 @@ async fn risk_is_judged_against_the_certificates_own_lifetime() {
 		.await
 		.expect("age the short one");
 
-		let risks = ServerCertificate::at_risk(&mut conn)
+		let risks = ApplicationCertificate::at_risk(&mut conn)
 			.await
 			.expect("at risk");
 		let by_id: std::collections::HashMap<Uuid, Risk> =
@@ -499,11 +524,12 @@ async fn risk_is_judged_against_the_certificates_own_lifetime() {
 async fn an_expired_certificate_for_an_unentitled_name_raises_nothing() {
 	TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
-		let cert = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
-			.await
-			.expect("request");
+		let cert =
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+				.await
+				.expect("request");
 		sql_query(
-			"UPDATE server_certificates SET state = 'issued', chain = 'x', \
+			"UPDATE application_certificates SET state = 'issued', chain = 'x', \
 			 issued_at = now() - interval '91 days', not_after = now() - interval '1 day' \
 			 WHERE id = $1",
 		)
@@ -513,7 +539,7 @@ async fn an_expired_certificate_for_an_unentitled_name_raises_nothing() {
 		.expect("expire it");
 
 		// Entitled and expired: reported.
-		let risks = ServerCertificate::at_risk(&mut conn)
+		let risks = ApplicationCertificate::at_risk(&mut conn)
 			.await
 			.expect("at risk");
 		assert_eq!(risks.len(), 1);
@@ -526,7 +552,7 @@ async fn an_expired_certificate_for_an_unentitled_name_raises_nothing() {
 			.await
 			.expect("release the domain");
 		assert!(
-			ServerCertificate::at_risk(&mut conn)
+			ApplicationCertificate::at_risk(&mut conn)
 				.await
 				.expect("at risk")
 				.is_empty(),
@@ -540,11 +566,12 @@ async fn an_expired_certificate_for_an_unentitled_name_raises_nothing() {
 async fn revoking_the_grant_or_archiving_the_server_silences_the_alert() {
 	TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
-		let cert = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
-			.await
-			.expect("request");
+		let cert =
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+				.await
+				.expect("request");
 		sql_query(
-			"UPDATE server_certificates SET state = 'issued', chain = 'x', \
+			"UPDATE application_certificates SET state = 'issued', chain = 'x', \
 			 issued_at = now() - interval '91 days', not_after = now() - interval '1 day' \
 			 WHERE id = $1",
 		)
@@ -553,20 +580,20 @@ async fn revoking_the_grant_or_archiving_the_server_silences_the_alert() {
 		.await
 		.expect("expire it");
 		assert_eq!(
-			ServerCertificate::at_risk(&mut conn)
+			ApplicationCertificate::at_risk(&mut conn)
 				.await
 				.expect("at risk")
 				.len(),
 			1
 		);
 
-		sql_query("UPDATE servers SET may_manage_tls = false WHERE id = $1")
+		sql_query("UPDATE applications SET may_manage_tls = false WHERE id = $1")
 			.bind::<sql_types::Uuid, _>(server)
 			.execute(&mut conn)
 			.await
 			.expect("revoke");
 		assert!(
-			ServerCertificate::at_risk(&mut conn)
+			ApplicationCertificate::at_risk(&mut conn)
 				.await
 				.expect("at risk")
 				.is_empty(),
@@ -575,26 +602,26 @@ async fn revoking_the_grant_or_archiving_the_server_silences_the_alert() {
 
 		// Granted again, and it is back in scope: entitlement is asked now, not
 		// remembered from when renewal stopped.
-		sql_query("UPDATE servers SET may_manage_tls = true WHERE id = $1")
+		sql_query("UPDATE applications SET may_manage_tls = true WHERE id = $1")
 			.bind::<sql_types::Uuid, _>(server)
 			.execute(&mut conn)
 			.await
 			.expect("re-grant");
 		assert_eq!(
-			ServerCertificate::at_risk(&mut conn)
+			ApplicationCertificate::at_risk(&mut conn)
 				.await
 				.expect("at risk")
 				.len(),
 			1
 		);
 
-		sql_query("UPDATE servers SET deleted_at = now() WHERE id = $1")
+		sql_query("UPDATE applications SET deleted_at = now() WHERE id = $1")
 			.bind::<sql_types::Uuid, _>(server)
 			.execute(&mut conn)
 			.await
 			.expect("archive");
 		assert!(
-			ServerCertificate::at_risk(&mut conn)
+			ApplicationCertificate::at_risk(&mut conn)
 				.await
 				.expect("at risk")
 				.is_empty(),
@@ -609,16 +636,16 @@ async fn a_first_issuance_that_keeps_failing_is_told_apart() {
 	TestDb::run(async |mut conn, _url| {
 		let server = insert_server(&mut conn, "central").await;
 		let never =
-			ServerCertificate::request(&mut conn, server, "never.tamanu.app", KEY_B, b"csr-2")
+			ApplicationCertificate::request(&mut conn, server, "never.tamanu.app", KEY_B, b"csr-2")
 				.await
 				.expect("request");
 		for _ in 0..4 {
-			ServerCertificate::record_failure(&mut conn, never.id, "nope")
+			ApplicationCertificate::record_failure(&mut conn, never.id, "nope")
 				.await
 				.expect("fail");
 		}
 
-		let stuck = ServerCertificate::stuck_first_issuances(&mut conn, 3)
+		let stuck = ApplicationCertificate::stuck_first_issuances(&mut conn, 3)
 			.await
 			.expect("stuck");
 		assert_eq!(stuck.len(), 1, "only the one that never produced a chain");
@@ -631,21 +658,22 @@ async fn a_first_issuance_that_keeps_failing_is_told_apart() {
 async fn stopping_an_order_takes_it_out_of_the_work_list() {
 	TestDb::run(async |mut conn, _url| {
 		let server = insert_server(&mut conn, "central").await;
-		let order = ServerCertificate::request(&mut conn, server, "a.tamanu.app", KEY_A, b"csr")
-			.await
-			.expect("request");
+		let order =
+			ApplicationCertificate::request(&mut conn, server, "a.tamanu.app", KEY_A, b"csr")
+				.await
+				.expect("request");
 
-		ServerCertificate::stop(&mut conn, order.id, "the group released the domain")
+		ApplicationCertificate::stop(&mut conn, order.id, "the group released the domain")
 			.await
 			.expect("stop");
 
 		assert!(
-			ServerCertificate::claim_due(&mut conn, 10)
+			ApplicationCertificate::claim_due(&mut conn, 10)
 				.await
 				.expect("due")
 				.is_empty()
 		);
-		let after = ServerCertificate::get(&mut conn, order.id)
+		let after = ApplicationCertificate::get(&mut conn, order.id)
 			.await
 			.expect("get");
 		assert_eq!(after.order_state(), OrderState::Failed);
@@ -661,10 +689,11 @@ async fn stopping_an_order_takes_it_out_of_the_work_list() {
 async fn revoking_stops_renewal_and_unholds_the_certificate() {
 	TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
-		let cert = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
-			.await
-			.expect("request");
-		ServerCertificate::record_issued(
+		let cert =
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+				.await
+				.expect("request");
+		ApplicationCertificate::record_issued(
 			&mut conn,
 			cert.id,
 			"chain",
@@ -676,13 +705,13 @@ async fn revoking_stops_renewal_and_unholds_the_certificate() {
 		.expect("issued");
 		// Due for renewal, until it isn't.
 		assert_eq!(
-			ServerCertificate::start_renewals(&mut conn)
+			ApplicationCertificate::start_renewals(&mut conn)
 				.await
 				.expect("renewals")
 				.len(),
 			1
 		);
-		ServerCertificate::record_issued(
+		ApplicationCertificate::record_issued(
 			&mut conn,
 			cert.id,
 			"chain",
@@ -693,7 +722,7 @@ async fn revoking_stops_renewal_and_unholds_the_certificate() {
 		.await
 		.expect("reissued");
 
-		ServerCertificate::record_revoked(
+		ApplicationCertificate::record_revoked(
 			&mut conn,
 			cert.id,
 			RevocationReason::Superseded,
@@ -702,7 +731,7 @@ async fn revoking_stops_renewal_and_unholds_the_certificate() {
 		.await
 		.expect("revoke");
 
-		let after = ServerCertificate::get(&mut conn, cert.id)
+		let after = ApplicationCertificate::get(&mut conn, cert.id)
 			.await
 			.expect("get");
 		assert_eq!(after.order_state(), OrderState::Revoked);
@@ -718,14 +747,14 @@ async fn revoking_stops_renewal_and_unholds_the_certificate() {
 		);
 
 		assert!(
-			ServerCertificate::start_renewals(&mut conn)
+			ApplicationCertificate::start_renewals(&mut conn)
 				.await
 				.expect("renewals")
 				.is_empty(),
 			"a revoked certificate is not renewed"
 		);
 		assert!(
-			ServerCertificate::at_risk(&mut conn)
+			ApplicationCertificate::at_risk(&mut conn)
 				.await
 				.expect("at risk")
 				.is_empty(),
@@ -739,10 +768,11 @@ async fn revoking_stops_renewal_and_unholds_the_certificate() {
 async fn a_key_revoked_as_compromised_is_never_certified_again() {
 	TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
-		let cert = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
-			.await
-			.expect("request");
-		ServerCertificate::record_issued(
+		let cert =
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+				.await
+				.expect("request");
+		ApplicationCertificate::record_issued(
 			&mut conn,
 			cert.id,
 			"chain",
@@ -753,7 +783,7 @@ async fn a_key_revoked_as_compromised_is_never_certified_again() {
 		.await
 		.expect("issued");
 
-		ServerCertificate::record_revoked(
+		ApplicationCertificate::record_revoked(
 			&mut conn,
 			cert.id,
 			RevocationReason::KeyCompromise,
@@ -765,9 +795,10 @@ async fn a_key_revoked_as_compromised_is_never_certified_again() {
 		// The same key, for the same name: refused — and refused with its own
 		// problem type, so an agent can rotate the key on the type alone rather
 		// than parsing the message.
-		let err = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
-			.await
-			.expect_err("a compromised key must not be certified again");
+		let err =
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+				.await
+				.expect_err("a compromised key must not be certified again");
 		assert!(
 			matches!(err, commons_errors::AppError::CertificateKeyCompromised(_)),
 			"an agent has to be able to act on this without reading prose; got {err:?}"
@@ -775,12 +806,12 @@ async fn a_key_revoked_as_compromised_is_never_certified_again() {
 
 		// And for any other name, by anyone: a leaked key is leaked whoever asks.
 		let other = insert_server(&mut conn, "other").await;
-		ServerCertificate::request(&mut conn, other, "b.fiji.tamanu.app", KEY_A, b"c")
+		ApplicationCertificate::request(&mut conn, other, "b.fiji.tamanu.app", KEY_A, b"c")
 			.await
 			.expect_err("still barred for another name and server");
 
 		// A fresh key is fine.
-		ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_B, b"c2")
+		ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_B, b"c2")
 			.await
 			.expect("a new key is certifiable");
 	})
@@ -791,10 +822,11 @@ async fn a_key_revoked_as_compromised_is_never_certified_again() {
 async fn revoking_for_another_reason_leaves_the_key_usable() {
 	TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
-		let cert = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
-			.await
-			.expect("request");
-		ServerCertificate::record_issued(
+		let cert =
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+				.await
+				.expect("request");
+		ApplicationCertificate::record_issued(
 			&mut conn,
 			cert.id,
 			"chain",
@@ -804,7 +836,7 @@ async fn revoking_for_another_reason_leaves_the_key_usable() {
 		)
 		.await
 		.expect("issued");
-		ServerCertificate::record_revoked(
+		ApplicationCertificate::record_revoked(
 			&mut conn,
 			cert.id,
 			RevocationReason::CessationOfOperation,
@@ -815,9 +847,10 @@ async fn revoking_for_another_reason_leaves_the_key_usable() {
 
 		// A certificate retired says nothing about the key, so asking again
 		// re-opens the order rather than being refused.
-		let again = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
-			.await
-			.expect("the key is still usable");
+		let again =
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+				.await
+				.expect("the key is still usable");
 		assert_eq!(again.id, cert.id);
 		assert_eq!(again.order_state(), OrderState::Pending);
 	})
@@ -828,10 +861,11 @@ async fn revoking_for_another_reason_leaves_the_key_usable() {
 async fn a_key_compromise_revocation_tells_the_server_to_replace_the_key() {
 	TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
-		let cert = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
-			.await
-			.expect("request");
-		ServerCertificate::record_issued(
+		let cert =
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+				.await
+				.expect("request");
+		ApplicationCertificate::record_issued(
 			&mut conn,
 			cert.id,
 			"chain",
@@ -841,7 +875,7 @@ async fn a_key_compromise_revocation_tells_the_server_to_replace_the_key() {
 		)
 		.await
 		.expect("issued");
-		ServerCertificate::record_revoked(
+		ApplicationCertificate::record_revoked(
 			&mut conn,
 			cert.id,
 			RevocationReason::KeyCompromise,
@@ -852,7 +886,7 @@ async fn a_key_compromise_revocation_tells_the_server_to_replace_the_key() {
 
 		// What a collecting server reads: stop serving this, and the key itself
 		// is condemned — not just the certificate.
-		let after = ServerCertificate::get(&mut conn, cert.id)
+		let after = ApplicationCertificate::get(&mut conn, cert.id)
 			.await
 			.expect("get");
 		assert!(after.is_revoked());
@@ -867,16 +901,17 @@ async fn a_key_compromise_revocation_tells_the_server_to_replace_the_key() {
 
 // ── Pausing ─────────────────────────────────────────────────────────────────
 
-use database::servers::Server;
+use database::applications::Application;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn revoking_pauses_the_server_so_reissuance_cannot_chase_it() {
 	TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
-		let cert = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
-			.await
-			.expect("request");
-		ServerCertificate::record_issued(
+		let cert =
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+				.await
+				.expect("request");
+		ApplicationCertificate::record_issued(
 			&mut conn,
 			cert.id,
 			"chain",
@@ -888,14 +923,14 @@ async fn revoking_pauses_the_server_so_reissuance_cannot_chase_it() {
 		.expect("issued");
 
 		assert!(
-			!Server::get_by_id(&mut conn, server)
+			!Application::get_by_id(&mut conn, server)
 				.await
 				.expect("get")
 				.name_management_paused(),
 			"not paused to start with"
 		);
 
-		ServerCertificate::record_revoked(
+		ApplicationCertificate::record_revoked(
 			&mut conn,
 			cert.id,
 			RevocationReason::KeyCompromise,
@@ -904,7 +939,9 @@ async fn revoking_pauses_the_server_so_reissuance_cannot_chase_it() {
 		.await
 		.expect("revoke");
 
-		let after = Server::get_by_id(&mut conn, server).await.expect("get");
+		let after = Application::get_by_id(&mut conn, server)
+			.await
+			.expect("get");
 		assert!(after.name_management_paused(), "revoking pauses the server");
 		assert_eq!(
 			after.name_management_paused_by.as_deref(),
@@ -921,11 +958,11 @@ async fn revoking_pauses_the_server_so_reissuance_cannot_chase_it() {
 
 		// The whole point: a fresh key on a paused server gets no new order
 		// worked, so the attacker who took the old key gets nothing.
-		ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_B, b"c2")
+		ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_B, b"c2")
 			.await
 			.expect("recording the request is fine");
 		assert!(
-			ServerCertificate::claim_due(&mut conn, 10)
+			ApplicationCertificate::claim_due(&mut conn, 10)
 				.await
 				.expect("due")
 				.is_empty(),
@@ -942,13 +979,14 @@ async fn a_pause_stops_every_kind_of_work_and_withdraws_nothing() {
 
 		// An address change waiting to be published, and a renewal falling due.
 		let name =
-			ServerName::register(&mut conn, server, "a.fiji.tamanu.app", &[addr("192.0.2.1")])
+			ApplicationName::register(&mut conn, server, "a.fiji.tamanu.app", &[addr("192.0.2.1")])
 				.await
 				.expect("register");
-		let cert = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
-			.await
-			.expect("request");
-		ServerCertificate::record_issued(
+		let cert =
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+				.await
+				.expect("request");
+		ApplicationCertificate::record_issued(
 			&mut conn,
 			cert.id,
 			"chain",
@@ -961,47 +999,52 @@ async fn a_pause_stops_every_kind_of_work_and_withdraws_nothing() {
 
 		// Unpaused: all three queues have work.
 		assert_eq!(
-			ServerName::needing_publish(&mut conn, 10)
+			ApplicationName::needing_publish(&mut conn, 10)
 				.await
 				.expect("names")
 				.len(),
 			1
 		);
 		assert_eq!(
-			ServerCertificate::start_renewals(&mut conn)
+			ApplicationCertificate::start_renewals(&mut conn)
 				.await
 				.expect("renew")
 				.len(),
 			1
 		);
 		assert_eq!(
-			ServerCertificate::claim_due(&mut conn, 10)
+			ApplicationCertificate::claim_due(&mut conn, 10)
 				.await
 				.expect("due")
 				.len(),
 			1
 		);
 
-		Server::pause_name_management(&mut conn, server, Some("op@example.test"), "investigating")
-			.await
-			.expect("pause");
+		Application::pause_name_management(
+			&mut conn,
+			server,
+			Some("op@example.test"),
+			"investigating",
+		)
+		.await
+		.expect("pause");
 
 		assert!(
-			ServerName::needing_publish(&mut conn, 10)
+			ApplicationName::needing_publish(&mut conn, 10)
 				.await
 				.expect("names")
 				.is_empty(),
 			"no record changes while paused"
 		);
 		assert!(
-			ServerCertificate::start_renewals(&mut conn)
+			ApplicationCertificate::start_renewals(&mut conn)
 				.await
 				.expect("renew")
 				.is_empty(),
 			"no renewals while paused"
 		);
 		assert!(
-			ServerCertificate::claim_due(&mut conn, 10)
+			ApplicationCertificate::claim_due(&mut conn, 10)
 				.await
 				.expect("due")
 				.is_empty(),
@@ -1009,7 +1052,7 @@ async fn a_pause_stops_every_kind_of_work_and_withdraws_nothing() {
 		);
 
 		// But nothing was withdrawn: the registration and the certificate stand.
-		let held = ServerCertificate::get(&mut conn, cert.id)
+		let held = ApplicationCertificate::get(&mut conn, cert.id)
 			.await
 			.expect("get");
 		// A renewal is in flight, so the row is pending again — but the chain it
@@ -1021,7 +1064,7 @@ async fn a_pause_stops_every_kind_of_work_and_withdraws_nothing() {
 		);
 		assert!(held.chain.is_some());
 		assert!(
-			ServerName::for_name(&mut conn, "a.fiji.tamanu.app")
+			ApplicationName::for_name(&mut conn, "a.fiji.tamanu.app")
 				.await
 				.expect("read")
 				.is_some(),
@@ -1030,18 +1073,18 @@ async fn a_pause_stops_every_kind_of_work_and_withdraws_nothing() {
 		assert_eq!(name.wanted(), vec![addr("192.0.2.1")]);
 
 		// Resuming picks the work back up where it left off.
-		Server::resume_name_management(&mut conn, server)
+		Application::resume_name_management(&mut conn, server)
 			.await
 			.expect("resume");
 		assert_eq!(
-			ServerName::needing_publish(&mut conn, 10)
+			ApplicationName::needing_publish(&mut conn, 10)
 				.await
 				.expect("names")
 				.len(),
 			1
 		);
 		assert_eq!(
-			ServerCertificate::claim_due(&mut conn, 10)
+			ApplicationCertificate::claim_due(&mut conn, 10)
 				.await
 				.expect("due")
 				.len(),
@@ -1055,11 +1098,12 @@ async fn a_pause_stops_every_kind_of_work_and_withdraws_nothing() {
 async fn a_paused_server_raises_no_expiry_alert_but_the_pause_is_reportable() {
 	TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
-		let cert = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
-			.await
-			.expect("request");
+		let cert =
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+				.await
+				.expect("request");
 		sql_query(
-			"UPDATE server_certificates SET state = 'issued', chain = 'x', \
+			"UPDATE application_certificates SET state = 'issued', chain = 'x', \
 			 issued_at = now() - interval '91 days', not_after = now() - interval '1 day' \
 			 WHERE id = $1",
 		)
@@ -1069,7 +1113,7 @@ async fn a_paused_server_raises_no_expiry_alert_but_the_pause_is_reportable() {
 		.expect("expire it");
 
 		assert_eq!(
-			ServerCertificate::at_risk(&mut conn)
+			ApplicationCertificate::at_risk(&mut conn)
 				.await
 				.expect("at risk")
 				.len(),
@@ -1077,11 +1121,11 @@ async fn a_paused_server_raises_no_expiry_alert_but_the_pause_is_reportable() {
 			"expired and entitled: reported"
 		);
 
-		Server::pause_name_management(&mut conn, server, None, "investigating a leak")
+		Application::pause_name_management(&mut conn, server, None, "investigating a leak")
 			.await
 			.expect("pause");
 		assert!(
-			ServerCertificate::at_risk(&mut conn)
+			ApplicationCertificate::at_risk(&mut conn)
 				.await
 				.expect("at risk")
 				.is_empty(),
@@ -1092,11 +1136,11 @@ async fn a_paused_server_raises_no_expiry_alert_but_the_pause_is_reportable() {
 		// under it — otherwise a forgotten pause is how certificates quietly
 		// expire. The alerting reads this list; what it does with it is covered in
 		// `certificate_alerts`.
-		let lapsing = ServerCertificate::lapsing_under_pause(&mut conn)
+		let lapsing = ApplicationCertificate::lapsing_under_pause(&mut conn)
 			.await
 			.expect("lapsing");
 		assert_eq!(lapsing.len(), 1);
-		assert_eq!(lapsing[0].server_id, server);
+		assert_eq!(lapsing[0].application_id, server);
 		assert!(lapsing[0].expired);
 		assert_eq!(
 			lapsing[0].pause_reason.as_deref(),
@@ -1110,7 +1154,7 @@ async fn a_paused_server_raises_no_expiry_alert_but_the_pause_is_reportable() {
 async fn pausing_again_keeps_the_original_pause() {
 	TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
-		Server::pause_name_management(
+		Application::pause_name_management(
 			&mut conn,
 			server,
 			Some("first@example.test"),
@@ -1118,7 +1162,7 @@ async fn pausing_again_keeps_the_original_pause() {
 		)
 		.await
 		.expect("pause");
-		Server::pause_name_management(
+		Application::pause_name_management(
 			&mut conn,
 			server,
 			Some("second@example.test"),
@@ -1127,7 +1171,9 @@ async fn pausing_again_keeps_the_original_pause() {
 		.await
 		.expect("pause again");
 
-		let after = Server::get_by_id(&mut conn, server).await.expect("get");
+		let after = Application::get_by_id(&mut conn, server)
+			.await
+			.expect("get");
 		assert_eq!(
 			after.name_management_paused_by.as_deref(),
 			Some("first@example.test"),
@@ -1145,10 +1191,11 @@ async fn pausing_again_keeps_the_original_pause() {
 async fn a_renewal_in_flight_does_not_stop_the_old_chain_being_collectable() {
 	TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
-		let cert = ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
-			.await
-			.expect("request");
-		ServerCertificate::record_issued(
+		let cert =
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"c")
+				.await
+				.expect("request");
+		ApplicationCertificate::record_issued(
 			&mut conn,
 			cert.id,
 			"chain",
@@ -1159,11 +1206,11 @@ async fn a_renewal_in_flight_does_not_stop_the_old_chain_being_collectable() {
 		.await
 		.expect("issued");
 
-		ServerCertificate::start_renewals(&mut conn)
+		ApplicationCertificate::start_renewals(&mut conn)
 			.await
 			.expect("renew");
 
-		let during = ServerCertificate::get(&mut conn, cert.id)
+		let during = ApplicationCertificate::get(&mut conn, cert.id)
 			.await
 			.expect("get");
 		assert_eq!(
@@ -1178,11 +1225,16 @@ async fn a_renewal_in_flight_does_not_stop_the_old_chain_being_collectable() {
 		);
 
 		// Revoked or expired are the things that actually disqualify a chain.
-		ServerCertificate::record_revoked(&mut conn, cert.id, RevocationReason::Superseded, None)
-			.await
-			.expect("revoke");
+		ApplicationCertificate::record_revoked(
+			&mut conn,
+			cert.id,
+			RevocationReason::Superseded,
+			None,
+		)
+		.await
+		.expect("revoke");
 		assert!(
-			!ServerCertificate::get(&mut conn, cert.id)
+			!ApplicationCertificate::get(&mut conn, cert.id)
 				.await
 				.expect("get")
 				.is_collectable(),
