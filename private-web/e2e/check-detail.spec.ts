@@ -272,12 +272,12 @@ test.describe("check detail page", () => {
 		// (inactive, no streak), which renders the placeholder.
 		await sql.query(
 			`UPDATE issues SET degraded_since = NOW() - INTERVAL '3 hours'
-			 WHERE server_id = $1 AND ref = 'health/postgres'`,
+			 WHERE application_id = $1 AND ref = 'health/postgres'`,
 			[failing.id],
 		);
 		await sql.query(
 			`UPDATE issues SET active = false, degraded_since = NULL
-			 WHERE server_id = $1 AND ref = 'health/postgres'`,
+			 WHERE application_id = $1 AND ref = 'health/postgres'`,
 			[fresh.id],
 		);
 

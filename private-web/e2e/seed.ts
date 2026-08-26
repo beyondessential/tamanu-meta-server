@@ -47,7 +47,7 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, server_reported_detail, issues, device_keys, servers, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, upgrade_plans, maintenance_windows, version_known_issues, recovery_vault_writes, server_names, server_certificates, compromised_keys RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, server_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, upgrade_plans, maintenance_windows, version_known_issues, recovery_vault_writes, application_names, application_certificates, compromised_keys RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" server with it;
 	// self-alerts attach to that row, so put it back. `kind = 'canopy'` is the
@@ -55,7 +55,7 @@ export async function resetSeededTables(sql: Sql): Promise<void> {
 	// also keeps the read alias exercised; `product` has to be set explicitly
 	// since that migration's backfill has already run by now.
 	await sql.query(
-		"INSERT INTO servers (id, product, kind, name, host) VALUES ('00000000-0000-0000-0000-000000000000', 'canopy', 'canopy', 'Canopy', 'http://localhost')",
+		"INSERT INTO applications (id, product, kind, name, host) VALUES ('00000000-0000-0000-0000-000000000000', 'canopy', 'canopy', 'Canopy', 'http://localhost')",
 	);
 	// Same for the migration's one seeded source policy: tamanu reports on
 	// its own schedule, so its silence is not a reachability signal.
@@ -165,7 +165,7 @@ export async function seedServer(
 	const isMonitored = opts.isMonitored ?? false;
 	const alertWhenDownFor = opts.alertWhenDownFor ?? 600;
 	await sql.query(
-		`INSERT INTO servers (id, name, host, product, kind, rank, group_id, device_id, is_monitored, alert_when_down_for, notes, tags, may_manage_dns, may_manage_tls)
+		`INSERT INTO applications (id, name, host, product, kind, rank, group_id, device_id, is_monitored, alert_when_down_for, notes, tags, may_manage_dns, may_manage_tls)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14)`,
 		[
 			id,
@@ -324,7 +324,7 @@ export async function seedStatus(
 		const degraded = ["failed", "warning", "broken"].includes(result);
 		await sql.query(
 			`INSERT INTO issues
-			 (server_id, source, ref, check_name, observed_result, effective_result, detail, message, active, first_seen, last_seen, degraded_since, last_degraded_at)
+			 (application_id, source, ref, check_name, observed_result, effective_result, detail, message, active, first_seen, last_seen, degraded_since, last_degraded_at)
 			 VALUES ($1, $10, $2, $3, $4, $4, $5::jsonb, $6, $7, NOW(), NOW(), $8, $9)
 			 ON CONFLICT DO NOTHING`,
 			[
@@ -372,7 +372,7 @@ export async function seedCheckStability(
 		`INSERT INTO check_stability
 		 (issue_id, observations, degraded_observations, last_observed_at, last_observed_degraded, transitions, duty_cycle)
 		 SELECT id, $4, $5, $6::timestamptz, $7, $8::jsonb, $9::jsonb
-		 FROM issues WHERE server_id = $1 AND source = $2 AND ref = $3`,
+		 FROM issues WHERE application_id = $1 AND source = $2 AND ref = $3`,
 		[
 			opts.serverId,
 			opts.source ?? "alertd",
@@ -451,7 +451,7 @@ export async function seedServerSilencedRef(
 	},
 ): Promise<void> {
 	await sql.query(
-		`INSERT INTO scoped_check_policies (server_id, source, check_name, ceiling, created_by)
+		`INSERT INTO scoped_check_policies (application_id, source, check_name, ceiling, created_by)
 		 VALUES ($1, $2, $3, 'skipped', $4)
 		 ON CONFLICT DO NOTHING`,
 		[
@@ -564,7 +564,7 @@ export async function seedIssue(
 	// an issue rather than healthy check state, which the listings exclude.
 	await sql.query(
 		`INSERT INTO issues
-		 (id, server_id, server_group_id, device_id, source, ref, check_name, observed_result, effective_result, escalates, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason, degraded_since, last_degraded_at)
+		 (id, application_id, server_group_id, device_id, source, ref, check_name, observed_result, effective_result, escalates, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason, degraded_since, last_degraded_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, COALESCE($13::timestamptz, NOW()), NOW(), $14, $15, $16, $17, NOW())`,
 		[
 			id,
@@ -1399,8 +1399,8 @@ export async function seedServerName(
 	const toInet = (addresses: string[]) =>
 		`{${addresses.map((a) => `"${a}"`).join(",")}}`;
 	await sql.query(
-		`INSERT INTO server_names
-		   (id, server_id, name, addresses, published_addresses, published_at, last_error)
+		`INSERT INTO application_names
+		   (id, application_id, name, addresses, published_addresses, published_at, last_error)
 		 VALUES ($1, $2, $3, $4::inet[], $5::inet[], $6, $7)`,
 		[
 			id,
@@ -1451,8 +1451,8 @@ export async function seedServerCertificate(
 		? new Date(Date.now() - (lifetimeDays - expiresInDays) * 86400_000)
 		: null;
 	await sql.query(
-		`INSERT INTO server_certificates
-		   (id, server_id, name, key_fingerprint, csr, state, chain, not_after,
+		`INSERT INTO application_certificates
+		   (id, application_id, name, key_fingerprint, csr, state, chain, not_after,
 		    issued_at, renewing, attempts, last_error, profile, renew_after,
 		    revoked_at, revoked_by, revocation_reason)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,

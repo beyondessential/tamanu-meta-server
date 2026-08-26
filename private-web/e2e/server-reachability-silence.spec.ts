@@ -15,7 +15,7 @@ import {
 async function reachabilitySilences(sql: Sql, serverId: string): Promise<number> {
 	const rows = await sql.query<{ n: string }>(
 		"SELECT COUNT(*) AS n FROM scoped_check_policies \
-		 WHERE server_id = $1 AND source = 'canopy' AND check_name = 'reachability' \
+		 WHERE application_id = $1 AND source = 'canopy' AND check_name = 'reachability' \
 		 AND ceiling = 'skipped'",
 		[serverId],
 	);

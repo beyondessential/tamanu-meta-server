@@ -142,7 +142,7 @@ test.describe("server edit page", () => {
 		await page.waitForURL(`**/servers/${server.id}`);
 
 		const rows = await sql.query<{ name: string }>(
-			"SELECT name FROM servers WHERE id = $1",
+			"SELECT name FROM applications WHERE id = $1",
 			[server.id],
 		);
 		expect(rows[0]!.name).toBe("edit-save-renamed");
@@ -164,7 +164,7 @@ test.describe("archived view", () => {
 		await sql.query("UPDATE server_groups SET deleted_at = now() WHERE id = $1", [
 			group.id,
 		]);
-		await sql.query("UPDATE servers SET deleted_at = now() WHERE id = $1", [
+		await sql.query("UPDATE applications SET deleted_at = now() WHERE id = $1", [
 			server.id,
 		]);
 

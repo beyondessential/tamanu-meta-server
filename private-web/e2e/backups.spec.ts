@@ -1426,7 +1426,7 @@ test.describe("restore window", () => {
 			by: string | null;
 		}>(
 			`SELECT restore_allowed_until AS until, restore_allowed_by AS by
-			 FROM servers WHERE id = $1`,
+			 FROM applications WHERE id = $1`,
 			[server.id],
 		);
 		expect(opened[0]!.until).not.toBeNull();
@@ -1438,7 +1438,7 @@ test.describe("restore window", () => {
 			row.getByRole("button", { name: /allow restores/i }),
 		).toBeVisible();
 		const closed = await sql.query<{ until: string | null }>(
-			`SELECT restore_allowed_until AS until FROM servers WHERE id = $1`,
+			`SELECT restore_allowed_until AS until FROM applications WHERE id = $1`,
 			[server.id],
 		);
 		expect(closed[0]!.until).toBeNull();
@@ -1466,7 +1466,7 @@ test.describe("restore window", () => {
 			backups.getByText(/restores are allowed for this server until/i),
 		).toBeVisible();
 		const opened = await sql.query<{ until: string | null }>(
-			`SELECT restore_allowed_until AS until FROM servers WHERE id = $1`,
+			`SELECT restore_allowed_until AS until FROM applications WHERE id = $1`,
 			[server.id],
 		);
 		expect(opened[0]!.until).not.toBeNull();
@@ -1476,7 +1476,7 @@ test.describe("restore window", () => {
 			backups.getByRole("button", { name: /allow restores/i }),
 		).toBeVisible();
 		const closed = await sql.query<{ until: string | null }>(
-			`SELECT restore_allowed_until AS until FROM servers WHERE id = $1`,
+			`SELECT restore_allowed_until AS until FROM applications WHERE id = $1`,
 			[server.id],
 		);
 		expect(closed[0]!.until).toBeNull();

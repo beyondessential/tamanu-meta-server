@@ -218,7 +218,7 @@ test.describe("server names and certificates", () => {
 		await expect
 			.poll(async () => {
 				const [row] = await sql.query<{ certificate_profile: string | null }>(
-					"SELECT certificate_profile FROM servers WHERE id = $1",
+					"SELECT certificate_profile FROM applications WHERE id = $1",
 					[server.id],
 				);
 				return row.certificate_profile;
@@ -317,7 +317,7 @@ test.describe("server names and certificates", () => {
 			revocation_reason: string | null;
 			revoked_by: string | null;
 		}>(
-			"SELECT state, revocation_reason, revoked_by FROM server_certificates WHERE id = $1",
+			"SELECT state, revocation_reason, revoked_by FROM application_certificates WHERE id = $1",
 			[cert.id],
 		);
 		expect(row.state).toBe("revoked");
