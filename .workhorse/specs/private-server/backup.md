@@ -4,12 +4,12 @@ id: BKO
 
 # Operator backup control
 
-An operator configures, through Canopy, how a server group backs up: where its repo lives, on what cadence, with what retention, and which servers and types participate.
+An operator configures, through Canopy, how a server group backs up: where its repo lives, on what cadence, with what retention, and which machines and types participate.
 Canopy owns the repo passphrase throughout — it is generated or accepted once, stored in Canopy's secret store, and never handed back except through the audited recovery ceremony.
 
 ## Scope
 
-This spec covers the operator-facing control surface: per-group backup configuration and its lifecycle, scheduling and retention, per-server participation, on-demand backups, the status view, and passphrase recovery.
+This spec covers the operator-facing control surface: per-group backup configuration and its lifecycle, scheduling and retention, per-machine participation, on-demand backups, the status view, and passphrase recovery.
 
 It does not cover the device contract (see [BAK](../public-server/backup.md)) or Canopy's autonomous maintenance, inspection, detection, and alerting (see [BKJ](../jobs/backup.md)).
 
@@ -56,13 +56,14 @@ Retention is floored to an organisational minimum; a configuration may deliberat
 
 ## Participation and on-demand
 
-A server participates in a type when that type is an enabled capability on it; an operator toggles participation per `(server, type)`.
-An operator may queue a one-off backup — or restore — for a `(server, type)` to run on the next cycle, and may cancel a queued one before it runs.
+A machine participates in a type when that type is an enabled capability on it; an operator toggles participation per `(machine, type)`.
+Participation is a machine's, not an application's: a box hosting two workloads is one participant, and an operator configures it once (see [FLT](../servers/overview.md)).
+An operator may queue a one-off backup — or restore — for a `(machine, type)` to run on the next cycle, and may cancel a queued one before it runs.
 An operator may also request a one-off full maintenance run for a group, to reclaim storage or apply repo-settings changes without waiting for the scheduled cadence, and may cancel it before the scheduler picks it up (see [BKJ](../jobs/backup.md)); at most one such request is pending per group.
 
 ## Status
 
-The operator can see, per group: the repo's size and cost basis, recent runs with their outcomes and errors, recent maintenance, the latest snapshot per server, and any in-flight or pending one-off requests — including a pending on-demand full maintenance request and who made it.
+The operator can see, per group: the repo's size and cost basis, recent runs with their outcomes and errors, recent maintenance, the latest snapshot per machine, and any in-flight or pending one-off requests — including a pending on-demand full maintenance request and who made it.
 
 Each run's duration is the time from its first credential issuance to its report; a run that re-issues credentials while it runs is measured from the first issuance of the sequence.
 A run for which credentials were issued but no report has arrived is shown from that issuance: in progress while the credentials remain valid, otherwise as a run whose outcome is unknown. This makes runs that don't report — such as an ad-hoc restore — visible; a later report for the same run replaces its issuance-derived entry.
@@ -70,7 +71,7 @@ Where a run reported the moment its data was frozen (see [BAK](../public-server/
 
 For a run reporting progress, the operator can see how far it has got without waiting for it to finish: what it has transferred against the total it expects, its current transfer rate, and how long since the device last made contact.
 These figures advance while the view stays open, without the operator reloading it; the view watches more closely while a run is in flight than when it is showing settled history.
-They appear wherever a backup of a type is shown as running — on the group's activity and per-server views, and on the server's own page — so an operator watching a particular server need not go to the group to see whether its backup is moving.
+They appear wherever a backup of a type is shown as running — on the group's activity and per-machine views, and on the machine's own page — so an operator watching a particular machine need not go to the group to see whether its backup is moving.
 A run whose device reports no progress is still shown as in progress, unchanged from a run that cannot report it — an absent figure reads as unknown rather than as zero or as a fault.
 The rate over a run's life is available as a series, for a run in flight or a finished one, for as long as its progress is retained.
 The backup engine's own transferred figure and the object-storage traffic Canopy's proxy tallied are shown against each other, so a divergence between what a run believes it sent and what crossed the wire is visible.

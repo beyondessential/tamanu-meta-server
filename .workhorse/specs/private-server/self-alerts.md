@@ -29,5 +29,5 @@ When the notification channel is not configured, self-alerts are still recorded 
 ## Presentation
 
 Active self-alerts are presented on their own surface in the operator UI, apart from fleet issues and incidents: a persistent notice visible from any page while any alert is active, leading to a view of the active alerts and recent recoveries.
-Self-alerts do not appear in the fleet issue listings, and are not presented as belonging to any server.
+Self-alerts do not appear in the fleet issue listings, and are not presented as belonging to any machine or application.
 Each alert presents its effective result, when it became active, and a description of the condition and what to do about it.

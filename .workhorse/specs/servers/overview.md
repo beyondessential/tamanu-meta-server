@@ -13,14 +13,13 @@ Machine-level facts belong to the machine and application-level facts to the app
 
 ## Cardinality
 
-An application runs on at most one machine.
+An application runs on exactly one machine.
 A machine hosts any number of applications, including none.
-
-An application without a machine is a first-class case rather than a degenerate one: on Kubernetes an application is scheduled across a cluster and has no host in the sense a machine means.
-A Kubernetes cluster is its own entity beside machines, not a machine of a special class.
 
 A machine has at most one identity, and an identity belongs to at most one machine.
 Identities that authenticate something other than a machine — an operator's credential, a relay — belong to no machine at all.
+
+How an application scheduled across a cluster rather than run on a box fits this model is being settled in the Kubernetes project, not here.
 
 ## Machines come from operators
 
@@ -67,14 +66,13 @@ An archived machine or application leaves the live fleet, and its record and his
 An application belongs to exactly one group, and so does a machine.
 
 An operator sets the group on the machine, and the applications on that machine take it.
-An application without a machine takes its group from whatever registers it.
 
 An application's group is never set independently of its machine's, so the two cannot disagree.
 Moving a machine to another group moves the applications on it, and there is no separate move for an application that runs on a machine.
 
 ## What each carries
 
-A **machine** carries its identity, its group, where it is (whether it is cloud-hosted and its geolocation), and how long it may be silent before it is considered unreachable.
+A **machine** carries the name its operator gave it, its identity, its group, where it is (whether it is cloud-hosted and its geolocation), and how long it may be silent before it is considered unreachable.
 
 An **application** carries its type, its rank, its optional name, its public name, the URL it serves at and the name-management permissions and pause state that work from that URL, its notes and tags, and how long it may be silent before it is considered unreachable.
 

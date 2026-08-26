@@ -12,11 +12,11 @@ A plan makes the fleet's intended upgrades visible in one place, and it tells th
 This spec covers what a plan records, who sets it, when Canopy considers it met, and what reads it.
 
 It does not cover performing an upgrade.
-Canopy serves versions to servers and records what they report running; the act of upgrading is the deployment's own, and a plan is a statement of intent rather than an instruction to anything.
+Canopy serves versions to applications and records what they report running; the act of upgrading is the deployment's own, and a plan is a statement of intent rather than an instruction to anything.
 
 ## Why it exists
 
-Canopy already knows what every server runs and every version that exists.
+Canopy already knows what every application runs and every version that exists.
 What it cannot derive is where a deployment is going: which minor a deployment moves to next is a decision made by people, weighing what the release contains against what the site can absorb.
 
 Left unrecorded, that decision costs twice.

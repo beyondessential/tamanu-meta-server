@@ -9,8 +9,11 @@ It aggregates the issues active on that target over its lifetime, from when it o
 At most one incident is open per target at a time.
 
 Issues and effective results are defined by the check-state model (see [CHK](checks.md)).
-Issues on a machine or an application belong to the target of its group; an issue on something belonging to no group belongs to no target and cannot contribute to incidents.
-Group-targeted issues belong to that group's target; Canopy-wide issues belong to the Canopy target.
+An issue is scoped to what its check asserts something about — an application, a machine, a group, or Canopy as a whole — and that scope decides which target's incident it belongs to.
+
+Machine-scoped and application-scoped issues belong to the target of the group the machine or application is in; an issue on something belonging to no group belongs to no target and cannot contribute to incidents.
+Group-scoped issues belong to that group's target; Canopy-wide issues belong to the Canopy target.
+So a deployment's trouble is one incident whether it began on a box or in the software on it, and a machine's failure is not split across the applications it hosts.
 
 ## Membership
 

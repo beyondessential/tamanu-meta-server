@@ -22,7 +22,7 @@ Canopy-wide checks are Canopy monitoring its own operation (see [SELF](../privat
 Every machine check appears on every application on that machine, marked as belonging to the machine.
 An operator triaging an application sees every check bearing on it, its own and its host's, in one list.
 
-There is one filing per machine check however many applications present it, so a degraded machine check opens one incident from the machine's scope rather than one per application.
+There is one filing per machine check however many applications present it, so a degraded machine check contributes one issue at machine scope rather than one per application (see [INC](incidents.md)).
 A silence on a machine check is machine-scoped and quiets it everywhere it appears, being one check seen from several places.
 
 Reachability is not presented this way, each grain having its own (see "Reachability").
@@ -165,7 +165,7 @@ A check that goes away has recovered; an application that goes away has stopped 
 ## Reachability
 
 A target is reachable while something is currently reporting about it, and unreachable while nothing is.
-Machines and applications each have reachability, computed the same way at each: a machine is reported on by its agent, and an application by whatever machine or cluster carries it.
+Machines and applications each have reachability, computed the same way at each: a machine is reported on by its agent, and an application by the machine that carries it.
 
 Canopy tracks, for each target, the sources expected to report — those that have reported, are not in reachability mode `off`, and whose checks are not all decommissioned — and when each last reported.
 It keeps one `reachability` check per target, under the `canopy` source, reflecting how many expected sources are currently reporting within that target's down threshold:

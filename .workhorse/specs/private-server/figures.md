@@ -83,7 +83,6 @@ A crossing counts machines, whatever figures are on its axes.
 One unit for every crossing reads more clearly than a unit that changes with what an operator picked, and the view names the unit it is counting.
 
 A machine whose applications disagree on an application figure has a value in more than one cell and appears in each, so a crossing's cells can sum to more than the fleet.
-An application with no machine is absent from crossings, having no machine to count.
 
 Targets reporting no value for either field occupy their own row and column, so a combination is never silently dropped.
 The rows and columns order the same two ways a spread does, and the crossing opens on the coarse version figures against each other.

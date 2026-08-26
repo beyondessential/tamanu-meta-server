@@ -75,7 +75,7 @@ A unified push describes one application, the format having no way to say otherw
 
 ## Legacy pushes
 
-A push without a health field is a legacy report from a Tamanu server.
+A push without a health field is a legacy report from a Tamanu application.
 It is recorded with its detail like any other status, and is treated as the source `tamanu` reporting a single check `tasks` as passed — a liveness heartbeat that participates in source staleness like any source.
 
 ## Response
@@ -85,4 +85,4 @@ The response to a push carries only what the pushing source needs; a source is s
 - Each check in the push is answered with the policy applied to it (see [CHK](../monitoring/checks.md), "Policy"), so a source sees how its reports are graded and can stop running checks whose policy is `skipped`.
 - Whether a backup should start now is returned only to the source that runs backups (`alertd`).
 - The effective tags of the machine and of each application described are returned to every source, so an agent can read the classification Canopy holds for what it reports on.
-- The names an application is entitled to act on are likewise returned to every source, so an agent learns of a new domain or a newly granted permission from a push it was making anyway (see [CRT](certificates.md), "What a server may act on").
+- The names an application is entitled to act on are likewise returned to every source, so an agent learns of a new domain or a newly granted permission from a push it was making anyway (see [CRT](certificates.md), "What an application may act on").
