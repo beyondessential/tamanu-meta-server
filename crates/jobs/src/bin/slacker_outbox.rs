@@ -71,6 +71,13 @@ struct Config {
 	private_url: Option<String>,
 }
 
+/// Empty reads as unset. A deployment that renders an unconfigured URL into
+/// `value: ""` sets the variable rather than omitting it, and an empty URL
+/// would have the drainer post to nowhere and retry the row forever.
+fn present(value: Option<String>) -> Option<String> {
+	value.filter(|v| !v.trim().is_empty())
+}
+
 impl Config {
 	fn from_env() -> miette::Result<Self> {
 		Self::build(
@@ -89,6 +96,9 @@ impl Config {
 		maintenance_ended: Option<String>,
 		private_url: Option<String>,
 	) -> miette::Result<Self> {
+		let (open, resolve, private_url) = (present(open), present(resolve), present(private_url));
+		let maintenance_declared = present(maintenance_declared);
+		let maintenance_ended = present(maintenance_ended);
 		let inputs: [(&str, &Option<String>); 2] = [
 			("SLACK_WEBHOOK_OPEN_URL", &open),
 			("SLACK_WEBHOOK_RESOLVE_URL", &resolve),
@@ -551,6 +561,20 @@ mod tests {
 	fn config_ok_when_no_hooks_set_even_without_private_url() {
 		let cfg = Config::build(None, None, None, None, None).expect("no-op mode is fine");
 		assert!(!cfg.any_hook());
+	}
+
+	#[test]
+	fn empty_urls_read_as_unset() {
+		let cfg = Config::build(
+			Some(String::new()),
+			Some(String::new()),
+			Some("  ".into()),
+			None,
+			Some(String::new()),
+		)
+		.expect("empty is unset, so this is no-op mode rather than a partial config");
+		assert!(!cfg.any_hook());
+		assert_eq!(cfg.url_for(KIND_MAINTENANCE_DECLARED), Ok(None));
 	}
 
 	#[test]
