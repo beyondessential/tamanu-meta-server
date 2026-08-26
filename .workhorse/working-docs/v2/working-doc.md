@@ -272,9 +272,19 @@ Liveness is not per-application on Kubernetes, because the namespace is a *filin
 So reachability is carried by machines and by clusters, and by neither applications nor namespaces.
 This keeps "machine" an honest name: it does not have to stretch to cover clusters, because a cluster is its own entity carrying its own reachability.
 
-An application never goes quiet in its own right.
-A dead application on a live machine is not silence — bestool keeps reporting and grades the application's own checks as failed or broken.
-Silence only ever means the agent stopped, and the agent belongs to the machine or the cluster.
+An application is unreachable when no current report covers it, and there are two ways that happens.
+Its machine can go quiet, taking everything on it, or its machine can keep reporting while no longer mentioning that application at all.
+
+The second is distinct from an application being broken.
+A dead application on a live machine is still reported: its checks arrive and grade as failed or broken, and it is unhealthy rather than unreachable.
+An application that stops appearing in its machine's reports is a different thing, and it reads as unreachable because nothing current is being said about it.
+
+**A report never removes an application.** Only an operator archives one.
+An application that vanishes from its machine's reports goes unreachable and stays, however long it stays away.
+
+That is a deliberate backstop rather than caution about a rare case.
+Reports create applications, so without this rule a reporter that malfunctions and reports nothing would silently delete the fleet's applications, and the monitoring would disappear at exactly the moment something was wrong.
+Making removal an operator action means the worst a bad report can do is make things look unreachable, which is loud, rather than make them absent, which is quiet.
 
 Health is already documented as independent of reachability (`status.rs:406`), so the two axes are established; this adds a grain to one of them.
 
@@ -393,7 +403,7 @@ Three mockups put the open presentation and wire questions side by side as optio
 
 ## Open questions
 
-- [ ] What happens to an application that stops being reported? A machine that drops one from its pushes has removed it, but silence from the whole machine is unreachability rather than removal, so the two need telling apart.
+- [ ] Does an application dropping out of a live machine's reports file a check of its own, so it can alert and be silenced, or is it presentation-only? Its machine is reachable, so the machine's reachability check cannot carry it.
 - [ ] Where does an application's name come from, now that no operator types one? Derived from its type, with an operator able to rename it afterwards, is the obvious answer but not a decided one.
 - [ ] Does Canopy adopt a reported type silently, or surface the change for an operator to see? Adoption is settled; whether it is announced is not.
 - [ ] What breaks a tie for a group's canonical member now that kind is gone? Ordering application types directly is the obvious replacement, but it means the type list carries a precedence rather than being a flat set.
