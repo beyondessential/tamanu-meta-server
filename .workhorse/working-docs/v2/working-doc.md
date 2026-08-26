@@ -22,24 +22,23 @@ A machine usually has an identity, and one or more applications on it.
 ### Cardinality
 
 - An application has zero or one machine, never two.
-- A machine has one or more applications, always. A machine with none does not exist.
+- A machine has any number of applications, including none. A freshly enrolled machine has none until it reports.
 - On Kubernetes an application has no machine at all; machine-less is a first-class case, not a degenerate one.
 - A Kubernetes cluster is a separate entity beside machines, not a machine of a special class.
 
-### How a machine comes into being
+### Operators create machines; applications arrive by themselves
 
-There is no standalone "create a machine" flow, at least not initially.
-Machines are created through creating applications, which keeps the invariant that a machine has applications on it reachable by construction.
+An operator creates a machine, in a group, and nothing else.
+Canopy issues an enrolment ticket, that goes onto the box, and from the first report onwards Canopy creates and maintains the applications on it from what is actually running.
 
-- The migration creates one machine per existing server, 1:1.
-- The application creation form gains a machine section.
-  By default it creates a new machine for that application.
-  Unticking that offers a search dropdown to select an existing machine instead, among the machines in that application's group.
+The group is the bootstrap because it is the only part an operator uniquely knows.
+Which deployment a box belongs to is an organisational fact that exists nowhere on the machine; what is installed on it is not, and asking an operator to type it in asks them to transcribe something the machine already knows.
 
-A machine ends with its last application, which is what keeps "at least one application" true rather than merely encouraged.
-It is archived rather than deleted, as an application is, so it leaves the live fleet without the record going away.
-Removing the last application off a machine warns first, saying that the machine goes with it, and that if the box is still alive the new applications should be put on before the old one is removed.
-So the delete-then-recreate case is answered by doing it in the other order, rather than by admitting an empty machine to the model.
+So no operator ever fills in an application, its type, its kind, or its version.
+Those are all reported, and a report is the only thing that creates an application.
+
+This is what makes the application the source of truth rather than a bootstrap that reporting later corrects.
+There is no earlier operator-entered value to correct.
 
 ### Identities and the machine link
 
@@ -61,12 +60,13 @@ Most of what a machine is gets *reported*, so it arrives as sourced detail and p
 Stays with the application, and `host` is renamed **`url`** while we are here, since it is a URL and calling it a host was part of the confusion:
 
 - `url` (today `host`), and the name-management fields that work from it: `may_manage_dns`, `may_manage_tls`, `certificate_profile`, the name-management pause fields.
-- its type (what `product` was), `kind`, `rank`, `name`, `public_name`, `group_id`, `notes`, `tags`.
-- `registered_at`, `deleted_at`, the restore-window fields.
+- its type (what `product` was), `kind`, `rank`, `name`, `public_name`, `notes`, `tags`.
+- `deleted_at` and the restore-window fields.
 
 Moves to the machine:
 
-- The identity link (today `device_id`).
+- The identity link (today `device_id`), and `registered_at`, since enrolment is now a machine's.
+- The group, which an operator sets on the machine and its applications take.
 - `cloud` and `geolocation`, both operator-set today (`detect_cloud` only seeds `cloud` from an enrollment hint).
 - `alert_when_down_for`, since reachability is a machine fact.
 
@@ -82,26 +82,24 @@ On Kubernetes there is no machine and the cost attaches to the application serve
 
 ### Groups
 
-The group lives on the application and only on the application, because a machine-less application still has to belong to one.
-A machine's group is never independently set and can never disagree with its applications'.
+The group is set where an operator creates something, and an operator creates machines.
+So on a VM the group is the machine's, and the applications on it take it.
+That inverts what an earlier pass here assumed, and it follows from operators no longer creating applications: there is no moment at which anyone could set an application's group by hand.
 
-A machine still needs a group in hand: `Scope::resolve_incident_target` (`crates/database/src/issues.rs:834`) resolves through it, so a machine-targeted check with no group has no incident path, and `disk_free` and `memory` are exactly the checks that should page.
+An application still carries a group of its own, because a machine-less one has no machine to take it from.
+On Kubernetes that comes from whatever registers the application; on a VM it is the machine's, maintained from it.
 
-Taking the call left open: the machine carries a **derived** group column, maintained from its applications rather than edited.
-It is a denormalisation for query performance, with the application's column the source of truth, so the two cannot drift by construction.
+Both grains need one in hand: `Scope::resolve_incident_target` (`crates/database/src/issues.rs:834`) resolves through the group, so a target without one has no incident path, and `disk_free` and `memory` are exactly the checks that should page.
 
-This holds because a shared machine is always shared within one deployment, so every application on a machine is in the same group and the derived value is never ambiguous.
-That is a real constraint, not just an observation: it makes the machine dropdown in the application creation form a choice among the machines already in that application's group.
-
-Moving an application to a different group while it shares a machine with applications staying behind is refused.
-It has no meaning in the model, and forbidding it stops it happening by accident rather than leaving a machine with two groups to derive from.
+Moving a machine to another group takes its applications with it, which is the only sensible reading: the box moved, and everything on it moved with it.
+There is no separate move for an application on a machine, so the case of one leaving its siblings behind cannot arise and needs no rule forbidding it.
 
 ### Billing attribution for a machine
 
 A machine's billing attribution carries a stage and a deployment, and no product.
 
 Its **stage** is the highest rank across its applications, on the existing ordering (`ServerRank` derives `Ord` production-first, `crates/commons-types/src/server/rank.rs:30`), so a box shared by a production and a test workload bills as production.
-Its **deployment** is the group, which is unambiguous given the rule above.
+Its **deployment** is its group, which it holds directly.
 
 Only an application knows what it is, so only an application's billing labels name it.
 A machine's labels and a group's labels carry no product, because neither a box nor a deployment is one.
@@ -352,14 +350,12 @@ Picking a name here would pre-empt that, so the group tables keep their names an
 bestool's `server_id` is the *machine* ID and keeps that meaning through the transition, while `servers.id` becomes `applications.id`.
 So a mechanical rename of `server_id` to `application_id` is wrong at exactly the places where it touches the device API, and each of those has to be read rather than swept.
 
-### The machine's group column is trigger-maintained
+### The applications' group column is trigger-maintained
 
-A trigger recomputes the machine's group from its applications, so the denormalisation cannot drift however the applications are written.
+A trigger propagates a machine's group onto its applications, so the denormalisation cannot drift however either is written.
 Triggers-for-denormalisation is established here already — the table being dropped below was itself trigger-maintained off `statuses`.
 
-This puts the invariant and its guard in the right order rather than in two places.
-The trigger is where "a machine's group is its applications' group" is *true*, and it raises if a write would leave a machine's applications disagreeing.
-The application-code refusal to move an application's group off a shared machine then sits in front of that as an operator-facing error, explaining the problem in the operator's terms instead of surfacing a constraint violation — but it is not the only thing standing between the model and an inconsistent row.
+An application could instead read its machine's group through the join, but it carries the column anyway for the machine-less case, so keeping it filled costs nothing and keeps every query against a group uniform across both kinds of application.
 
 ### The identity link, and dropping the association table
 
@@ -389,6 +385,7 @@ Three mockups put the open presentation and wire questions side by side as optio
   Every machine is a pill enclosure, one application or several, so a one-application machine is a single dot in a pill.
   That last part is what makes it work: the enclosure carries no meaning on its own, only its contents, so an operator never has to notice whether a pill is there, only how many dots are inside.
 - **Application and machine detail pages** — the two pages side by side, with what sits on each, the amalgamated check list, and the backlinks between them.
+  Also the state the new flow creates and the old one could not: a machine created a minute ago, with an enrolment ticket and no applications yet.
   Indicators follow the status page: a dot is an application's health, an enclosure is a machine, and an enclosure appears only where a machine is the subject.
 - **Machine navigation** — superseded by the two above, and kept only as the record of the options considered.
   Its flat-listing option is the one worth remembering as rejected: it had nowhere to show machine state, so a dead box read as a coincidence of failing applications.
@@ -396,7 +393,8 @@ Three mockups put the open presentation and wire questions side by side as optio
 
 ## Open questions
 
-- [ ] An operator can create an application before its machine reports. When a first report arrives with a key that matches nothing, does Canopy bind it to that waiting application, or create a second one and leave them to reconcile?
+- [ ] What happens to an application that stops being reported? A machine that drops one from its pushes has removed it, but silence from the whole machine is unreachability rather than removal, so the two need telling apart.
+- [ ] Where does an application's name come from, now that no operator types one? Derived from its type and kind, with an operator able to rename it afterwards, is the obvious answer but not a decided one.
 - [ ] Do check names carry their application type (all of Tamanu's being `tamanu_*`), or does the wire qualify each check by application and Canopy key on the pair? The first needs no per-application qualification, if the names can bear it.
 - [ ] What becomes of `kind` now that product is the application's type? Central, facility and standalone are kinds within a type, so the two are a pair rather than one replacing the other, but the vocabulary needs settling.
 - [ ] Does Canopy adopt a reported type or kind silently, or surface the change for an operator to see? Adoption is settled; whether it is announced is not.
@@ -558,4 +556,7 @@ The catalog is keyed by (source, check) fleet-wide while scope is per-filing (se
 ### Migration
 
 Every existing server becomes one application and one machine, 1:1, so the backfill is mechanical.
-`alert_when_down_for` moves to the machine, and with one application per machine at migration time there is nothing to reconcile.
+`alert_when_down_for`, the group and the identity link move to the machine, and with one application per machine at migration time there is nothing to reconcile.
+
+The migrated applications are the one population that was operator-entered rather than reported, since they predate the model.
+Reporting corrects them as each machine's pushes arrive, which is the same path any application takes; they simply start from a value rather than from nothing.

@@ -398,6 +398,25 @@
 		margin: 12px 0 4px;
 	}
 
+	.alert {
+		display: flex;
+		gap: 12px;
+		align-items: flex-start;
+		padding: 6px 16px;
+		border-radius: 4px;
+		background: rgba(2, 136, 209, 0.10);
+		color: #014361;
+		font-size: 0.875rem;
+	}
+
+	.alert svg { width: 22px; height: 22px; fill: var(--info); flex: none; margin-top: 7px; }
+
+	.empty {
+		color: var(--text-secondary);
+		font-size: 0.875rem;
+		font-style: italic;
+	}
+
 	.callout {
 		background: var(--paper);
 		border: 1px solid var(--divider);
@@ -835,6 +854,49 @@
 	</div>
 
 </div>
+
+<h2>A machine before its first report</h2>
+<p class="note">
+	An operator creates a machine in a group and nothing else, so between creation and
+	the first push a machine has no applications at all. This is the state the old flow
+	could not have, because a server was created with its application already filled in.
+</p>
+
+<div style="max-width:560px">
+	<div class="stack">
+		<div>
+			<div class="head-chips">
+				<span class="chip solid">not yet reporting</span>
+			</div>
+			<h4 class="title"><span class="group-part">Nauru /</span> nauru-prod-02</h4>
+		</div>
+
+		<div class="alert">
+			<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+			<p style="margin:8px 0">This machine hasn't checked in yet. Follow the setup instructions below to enrol it.</p>
+		</div>
+
+		<div class="paper">
+			<h5 class="sub-title">Enrolment</h5>
+			<p style="margin:0 0 8px;font-size:0.875rem;color:var(--text-secondary)">Run this on the machine. The ticket expires in 24 hours.</p>
+			<div class="url" style="display:block;margin:0">bestool enrol --ticket 7Q2F-9XKD-4M1P</div>
+		</div>
+
+		<div>
+			<h5 class="section-title">Applications</h5>
+			<p class="empty">None yet. Applications appear here as the machine reports them.</p>
+		</div>
+	</div>
+</div>
+
+<p class="verdict">
+	<b>Nothing here asks the operator what is on the box.</b> They named it, put it in a
+	group, and ran one command. Everything else arrives.
+	<br><br>
+	The empty state is not an error and does not read as one. A machine with no
+	applications is the normal condition of a machine that was created a minute ago,
+	and it resolves itself.
+</p>
 
 <p class="verdict">
 	<b>The amalgamated list is what stops the split costing anything.</b> An operator
