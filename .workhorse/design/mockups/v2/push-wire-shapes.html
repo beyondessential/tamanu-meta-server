@@ -226,12 +226,13 @@
       <span class="k">"osVersion"</span>: <span class="s">"22.04"</span>,
       <span class="k">"osTimezone"</span>: <span class="s">"UTC"</span>,
       <span class="k">"cpuCores"</span>: <span class="n">4</span>,
+      <span class="k">"services"</span>: [<span class="s">"tamanu-central"</span>, <span class="s">"postgresql"</span>],
       <span class="k">"bestoolVersion"</span>: <span class="s">"0.41.2"</span>
     }
   },
   <span class="mark-app k">"applications"</span>: {
     <span class="k">"a1f4c2"</span>: {
-      <span class="k">"type"</span>: <span class="s">"tamanu"</span>,
+      <span class="k">"type"</span>: <span class="s">"tamanu-central"</span>,
       <span class="k">"health"</span>: [
         { <span class="k">"check"</span>: <span class="s">"tamanu_http"</span>, <span class="k">"result"</span>: <span class="s">"passed"</span> },
         { <span class="k">"check"</span>: <span class="s">"sync_facility_stale"</span>, <span class="k">"result"</span>: <span class="s">"warning"</span>,
@@ -269,6 +270,12 @@
 			property of the format: a payload with two applications sharing a key cannot
 			be written. <code>type</code> then says what each one is, since the key only
 			says which.
+			<br><br>
+			<b>Check names stay bare on the wire.</b> Canopy qualifies them with the type
+			of the application they were filed against, so the catalog entry reads
+			<code>tamanu-central.tamanu_http</code> while the reporter sends
+			<code>tamanu_http</code>. Two types reporting one bare name are two entries.
+			A machine check has no application to qualify it and keeps its bare name.
 			<br><br>
 			<b>Free-form fields nest under <code>detail</code> instead of flattening.</b>
 			Today they are spread at the top level and inside each health entry, so a
@@ -346,10 +353,10 @@
 
 <div class="paper" style="max-width:1300px;margin-top:16px">
 	<p style="margin:0 0 10px;font-size:0.8125rem;color:var(--text-secondary)">
-		<b style="color:var(--text-primary)">Machine-subject detail fields.</b> 22 of
-		30; the rest are application-subject.
+		<b style="color:var(--text-primary)">Machine-subject detail fields.</b> 23 of
+		31; the rest are application-subject.
 	</p>
-	<div class="names"><code>hostname</code><code>osKind</code><code>osName</code><code>osVersion</code><code>kernel</code><code>arch</code><code>osTimezone</code><code>cpuCores</code><code>totalMemoryBytes</code><code>filesystems</code><code>uptimeSecs</code><code>virtualised</code><code>virtualisation</code><code>ipv4</code><code>ipv6</code><code>nat64</code><code>lanIps</code><code>wanIpv4</code><code>wanIpv6</code><code>bestoolVersion</code><code>instanceTags</code><code>munin</code></div>
+	<div class="names"><code>hostname</code><code>osKind</code><code>osName</code><code>osVersion</code><code>kernel</code><code>arch</code><code>osTimezone</code><code>cpuCores</code><code>totalMemoryBytes</code><code>filesystems</code><code>uptimeSecs</code><code>virtualised</code><code>virtualisation</code><code>ipv4</code><code>ipv6</code><code>nat64</code><code>lanIps</code><code>wanIpv4</code><code>wanIpv6</code><code>bestoolVersion</code><code>instanceTags</code><code>munin</code><code>services</code></div>
 </div>
 
 <p class="verdict" style="max-width:68ch">

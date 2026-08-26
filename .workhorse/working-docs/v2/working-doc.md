@@ -34,7 +34,7 @@ Canopy issues an enrolment ticket, that goes onto the box, and from the first re
 The group is the bootstrap because it is the only part an operator uniquely knows.
 Which deployment a box belongs to is an organisational fact that exists nowhere on the machine; what is installed on it is not, and asking an operator to type it in asks them to transcribe something the machine already knows.
 
-So no operator ever fills in an application, its type, its kind, or its version.
+So no operator ever fills in an application, its type, or its version.
 Those are all reported, and a report is the only thing that creates an application.
 
 This is what makes the application the source of truth rather than a bootstrap that reporting later corrects.
@@ -60,7 +60,7 @@ Most of what a machine is gets *reported*, so it arrives as sourced detail and p
 Stays with the application, and `host` is renamed **`url`** while we are here, since it is a URL and calling it a host was part of the confusion:
 
 - `url` (today `host`), and the name-management fields that work from it: `may_manage_dns`, `may_manage_tls`, `certificate_profile`, the name-management pause fields.
-- its type (what `product` was), `kind`, `rank`, `name`, `public_name`, `notes`, `tags`.
+- its type (what `product` and `kind` were, together), `rank`, `name`, `public_name`, `notes`, `tags`.
 - `deleted_at` and the restore-window fields.
 
 Moves to the machine:
@@ -74,7 +74,7 @@ Carried by both, rather than moving:
 
 - **Tags, and resolved billing tags.** A machine-subject check is graded by policy rules against its target's tags, so a machine without tags could not be graded the way an application is.
   Both grains carry both, and a check decides which it reads.
-  An application's type and kind stay reserved read-only tags on applications only, since neither is a property of a box.
+  An application's type stays a reserved read-only tag on applications only, not being a property of a box.
 
 Billing is why both need billing tags rather than one.
 On a VM the cost is incurred by the machine, so its billing tags belong there.
@@ -394,12 +394,10 @@ Three mockups put the open presentation and wire questions side by side as optio
 ## Open questions
 
 - [ ] What happens to an application that stops being reported? A machine that drops one from its pushes has removed it, but silence from the whole machine is unreachability rather than removal, so the two need telling apart.
-- [ ] Where does an application's name come from, now that no operator types one? Derived from its type and kind, with an operator able to rename it afterwards, is the obvious answer but not a decided one.
-- [ ] Do check names carry their application type (all of Tamanu's being `tamanu_*`), or does the wire qualify each check by application and Canopy key on the pair? The first needs no per-application qualification, if the names can bear it.
-- [ ] What becomes of `kind` now that product is the application's type? Central, facility and standalone are kinds within a type, so the two are a pair rather than one replacing the other, but the vocabulary needs settling.
-- [ ] Does Canopy adopt a reported type or kind silently, or surface the change for an operator to see? Adoption is settled; whether it is announced is not.
+- [ ] Where does an application's name come from, now that no operator types one? Derived from its type, with an operator able to rename it afterwards, is the obvious answer but not a decided one.
+- [ ] Does Canopy adopt a reported type silently, or surface the change for an operator to see? Adoption is settled; whether it is announced is not.
+- [ ] What breaks a tie for a group's canonical member now that kind is gone? Ordering application types directly is the obvious replacement, but it means the type list carries a precedence rather than being a flat set.
 - [ ] Confirm the crossing unit: a crossing involving any application figure counts applications, a crossing of two machine figures counts machines. Derived from cardinality rather than chosen, so it should hold, but the view has to label which it is showing.
-- [ ] Is `services`, the reported service inventory, a ninth application detail field? bestool's count of 30 is 22 plus 8, which leaves it outside the total.
 
 ## Transition
 
@@ -460,34 +458,32 @@ People are on a box rather than in an application, so the machine is the truer h
 
 `billing_tags` is machine-subject, which agrees from bestool's side with both grains carrying billing tags: on a VM the cost is incurred by the box.
 
-The detail fields split 30 ways: 22 machine-subject and 8 application-subject.
-Machine takes identity and OS (`hostname`, `osKind`, `osName`, `osVersion`, `kernel`, `arch`, `osTimezone`), hardware and capacity (`cpuCores`, `totalMemoryBytes`, `filesystems`, `uptimeSecs`), virtualisation (`virtualised`, `virtualisation`), addressing (`ipv4`, `ipv6`, `nat64`, `lanIps`, `wanIpv4`, `wanIpv6`), and the agent and platform (`bestoolVersion`, `instanceTags`, `munin`).
-The application takes `tamanuVersion`, `tamanuRoot`, `tamanuServerKind`, `nodeVersion`, `canonicalUrl`, `currentSyncTick`, `timezone`, `pgVersion`, and the service inventory.
+The detail fields split 31 ways: 23 machine-subject and 8 application-subject.
+Machine takes identity and OS (`hostname`, `osKind`, `osName`, `osVersion`, `kernel`, `arch`, `osTimezone`), hardware and capacity (`cpuCores`, `totalMemoryBytes`, `filesystems`, `uptimeSecs`), virtualisation (`virtualised`, `virtualisation`), addressing (`ipv4`, `ipv6`, `nat64`, `lanIps`, `wanIpv4`, `wanIpv6`), the agent and platform (`bestoolVersion`, `instanceTags`, `munin`), and `services`, the service inventory, which describes the box rather than any one application on it.
+The application takes `tamanuVersion`, `tamanuRoot`, `tamanuServerKind`, `nodeVersion`, `canonicalUrl`, `currentSyncTick`, `timezone` and `pgVersion`.
+
+`tamanuServerKind` no longer feeds a kind, since there is none; it is one of the things that tells Canopy the application's type.
 
 Two of these agree with decisions this card reached from the other direction.
 `instanceTags` is machine-subject, matching the machine carrying billing tags, and `canonicalUrl` is application-subject, matching `host` becoming the application's `url`.
 
-### Product is what an application is
-
-`product` was a poorly-typed application.
-It exists because Canopy had one record per box and needed somewhere to say which software that box ran; with applications as records in their own right, the thing a product named *is* the application.
-
-So product is not a separate field an operator maintains alongside the application. An application is a Tamanu, or a SENAITE, or a Canopy, and that is its type.
-An operator creating one says which type it is and which kind within that type, and once the machine reports, Canopy learns the type, kind and version from what arrives and keeps its record in step.
-
-This is why the reported detail carries a kind but no product: there was never anything to report beyond what the application already is.
-
 ### An application needs a type on the wire
 
-A random identifier alone does not say what an application is, and Canopy cannot treat it as a Tamanu without being told.
+A random identifier alone does not say what an application is, and Canopy cannot treat it as a Tamanu central without being told.
 
 The type is what makes reported material addressable.
 A detail field is `timezone` on some application, and an operator writing a policy rule or reading the fleet figures needs to distinguish a Tamanu's timezone from a SENAITE's rather than seeing them merged into one column.
 
 The same holds for checks, which are keyed by `(source, check)` fleet-wide.
 Two applications of different types reporting the same check name would collide into one catalog entry today.
-Either check names carry their application type, so all of Tamanu's are `tamanu_*`, or the wire qualifies them per application and Canopy keys on the pair.
-Names carrying the type would mean the wire needs no per-application qualification at all, which is the simpler shape if the names can bear it.
+
+A check name on the wire is bare, and Canopy qualifies it with the type of the application it was filed against.
+So a catalog entry for an application check reads `<type>.<check>`, and two types reporting the same bare name are two entries rather than one.
+A machine check has no application to qualify it and keeps its bare name.
+
+A reporter therefore needs no knowledge of the naming scheme, and the qualification cannot fall out of step with where a check was actually filed, because it is derived from that rather than asserted alongside it.
+Some existing names already carry a type in them, which the qualification will duplicate.
+That is history rather than a rule, and worth leaving alone rather than renaming a fielded catalog; new names are chosen bare.
 
 ### Reports are self-describing, because bestool cannot know Canopy's identifiers
 
@@ -518,18 +514,25 @@ Uniqueness is then a property of the format rather than a rule stated beside it,
 
 Each entry carries the application's **type** alongside its `health` and `detail`, since the key says which application and the type says what it is.
 
-### The application is the source of truth for what it is
+### The application is the source of truth for what it is, and kind is gone
 
-`tamanuServerKind` arriving as reported detail is not a rival to the operator-set kind, and reading it as one gets the model backwards.
+An application knows its own type, because it follows from the software it is running.
+An operator never sets it: an application exists only because a report created it.
 
-An application knows its own kind and product, because they follow from the software it is running.
-An operator sets them in Canopy only because the Canopy record is created before the real thing connects, so something has to fill the gap in the meantime.
-That is a bootstrap value for the window before first contact, not a standing claim that Canopy knows better than the application does.
+**Kind goes entirely.** A Tamanu central and a Tamanu facility are not one type in two configurations; they are two types.
+The evidence was already there in the check registry, where a large set of checks exists only on centrals and another only on facilities, which is not what two instances of one thing look like.
 
-Once the application reports, its own answer is the authoritative one and Canopy's record follows it.
+So the types are `tamanu-central` and `tamanu-facility` rather than a Tamanu with a kind.
+A product whose servers held no role relative to each other collapses to a single type, since standalone was only ever the absence of a kind.
 
-[APP](../../specs/servers/products.md) states this more strongly than intended: it says product and kind are "set by an operator rather than reported by the server", which reads as a permanent property of the model rather than a description of a fleet that could not report yet.
-The split is the moment to correct that wording, since reporting is exactly what is arriving.
+`product` and `kind` were both approximations of this.
+Canopy had one record per box, so it needed a field for which software ran there and another for that software's role, and between them they described what is now simply the application's type.
+
+The migration maps them together: a server with product `tamanu` and kind `central` becomes an application of type `tamanu-central`.
+
+Removing kind reaches one rule that leaned on it.
+A group's headline version comes from its canonical member, chosen as the highest-ranked live member with kind breaking a tie in the order central, then facility, then standalone (see [APP](../../specs/servers/products.md)).
+With no kind, that tie-break needs another basis, and application type is the obvious one since it now carries what kind carried.
 
 ### Two timezones
 
