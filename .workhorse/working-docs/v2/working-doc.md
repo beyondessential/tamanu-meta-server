@@ -61,7 +61,7 @@ Most of what a machine is gets *reported*, so it arrives as sourced detail and p
 Stays with the application, and `host` is renamed **`url`** while we are here, since it is a URL and calling it a host was part of the confusion:
 
 - `url` (today `host`), and the name-management fields that work from it: `may_manage_dns`, `may_manage_tls`, `certificate_profile`, the name-management pause fields.
-- `product`, `kind`, `rank`, `name`, `public_name`, `group_id`, `notes`, `tags`.
+- its type (what `product` was), `kind`, `rank`, `name`, `public_name`, `group_id`, `notes`, `tags`.
 - `registered_at`, `deleted_at`, the restore-window fields.
 
 Moves to the machine:
@@ -74,7 +74,7 @@ Carried by both, rather than moving:
 
 - **Tags, and resolved billing tags.** A machine-subject check is graded by policy rules against its target's tags, so a machine without tags could not be graded the way an application is.
   Both grains carry both, and a check decides which it reads.
-  `product` and `kind` stay reserved read-only tags on applications only, since neither is a property of a box.
+  An application's type and kind stay reserved read-only tags on applications only, since neither is a property of a box.
 
 Billing is why both need billing tags rather than one.
 On a VM the cost is incurred by the machine, so its billing tags belong there.
@@ -98,19 +98,21 @@ It has no meaning in the model, and forbidding it stops it happening by accident
 
 ### Billing attribution for a machine
 
-A machine's billing attribution is assembled from the applications on it, since `product` and `rank` stay there.
+A machine's billing attribution carries a stage and a deployment, and no product.
 
-- **Product** is the list of its applications' products, rather than one picked among them.
-- **Stage** is the highest rank across its applications, on the existing ordering (`ServerRank` derives `Ord` production-first, `crates/commons-types/src/server/rank.rs:30`), so a box shared by a production and a test workload bills as production.
-- **Deployment** is the group, which is unambiguous given the rule above.
+Its **stage** is the highest rank across its applications, on the existing ordering (`ServerRank` derives `Ord` production-first, `crates/commons-types/src/server/rank.rs:30`), so a box shared by a production and a test workload bills as production.
+Its **deployment** is the group, which is unambiguous given the rule above.
 
-A group's attribution is not the precedent here.
-[APP](../../specs/servers/products.md) has a group attribute no product when its live members span products, justified as avoiding charging the shared cost to the wrong place.
-That justification does not hold up: product is not a group-level fact at all, so there is nothing to get right or wrong.
-Arguably a group should carry no product in its attribution in the first place, and the "only when they agree" rule is working around a field that should not be there.
+Only an application knows what it is, so only an application's billing labels name it.
+A machine's labels and a group's labels carry no product, because neither a box nor a deployment is one.
+Each grain's labels carry what that grain definitely knows and nothing inferred from what sits inside it.
 
-A machine is different in kind, not a special case of the same rule.
-A machine spanning products is one box genuinely running both, so the cost really is shared and listing both products is the truthful answer.
+This removes the rule that had a group name a product only when its members agreed.
+That rule was working around a field which should not have been at that grain, and the field goes rather than the workaround.
+
+The agent is where the grains are recombined, not the data model.
+The billing-tags check reads the labels of the machine and of every application on it, and works out from both what the instance should be tagged as.
+Canopy's records stay correct at each grain, and the joining happens where the joined answer is needed.
 
 Reported rather than stored as a column:
 
@@ -118,15 +120,44 @@ Reported rather than stored as a column:
   bestool will report it, and it attaches to the machine as sourced data — a figure like any other, not a dedicated field.
   This matters because it is the machine's own name, which is a different thing from an application's `url`, and two applications on one machine have one hostname between them and a `url` each.
 
-### The model splits; the UI mostly does not
+### Navigation
 
-The separation is a modelling one, and an operator should not have to navigate it.
+The hierarchy stays Fleet, then groups, then a group's detail; nothing new is added above it.
+There is no machines tab, because a machine is not a way into the fleet, only something a group contains.
+The ungrouped listing goes, having nothing left to list.
 
-The edit form is **machine-first**: one form per machine, holding a machine section and one section per application on it.
-So a shared machine is edited in the one place that shows everything sharing it, and a change to the machine's fields is visibly a change to all of them.
-A one-application machine reads as a single form with two sections, which is close to the server form as it stands.
+A group's detail lists by rank as it does now, and within a rank by machine, and within a machine its applications.
+Machines are visually grouped rather than merely labelled, so a shared box reads as one thing at every level the fleet is browsed.
 
-The status page presents applications grouped by machine.
+### Two detail pages
+
+Editing is machine-first: one form per machine, holding a machine section and one section per application on it, so a shared machine is edited where everything sharing it is visible and a change to its fields is visibly a change to all of them.
+
+Reading is two pages, because the two grains hold genuinely different material.
+
+The **application** page is the one an operator lands on, and is close to the server page as it stands.
+It presents the application's checks and its machine's checks amalgamated into one list, its own notes, tags and billing labels, and its `url`.
+It carries no backups and no identity, both of which belong to the box.
+
+The **machine** page presents the checks that are about the box and not those of the applications on it, the identity, the machine's own notes and tags, and its backups.
+It carries no `url`, that being an application's.
+
+Each page lists the group's other pages at the bottom, so any application or machine in the group is one hop away, and the application page links up to its machine at the top.
+
+`/servers/{id}` redirects to the application, so every deep link that exists today keeps working and lands on the page that replaced what it pointed at.
+An incident that named a server names an application.
+
+The status dot goes from the top of both pages.
+The health badge already says how the thing is, at a size the dot was never trying to compete with, and the group's own listing says how everything around it is.
+
+### Operator presence
+
+Operators attribute to machines, never to applications, since `external_users` is a machine check and a person is on a box.
+
+A group's operator count counts people rather than sightings: someone logged into two machines in a group counts once.
+Its tooltip names each of them and the machines they are on.
+
+### Status page
 That keeps the application as the unit an operator reads while making a shared box visible as one thing, so a machine going down reads as one failure with its applications under it rather than as several unrelated ones.
 
 The group card restructures to carry this.
@@ -352,25 +383,20 @@ Three mockups put the open presentation and wire questions side by side as optio
   Ranks become rows separated by a rule lighter than the band borders, replacing the hollow triangle.
   Every machine is a pill enclosure, one application or several, so a one-application machine is a single dot in a pill.
   That last part is what makes it work: the enclosure carries no meaning on its own, only its contents, so an operator never has to notice whether a pill is there, only how many dots are inside.
-- **Machine navigation** — application page with a machine section against a machine page with applications nested, the group listing flat against shared machines enclosing, and a machine list.
-  The detail and list questions answer each other, so they are shown together.
+- **Application and machine detail pages** — the two pages side by side, with what sits on each, the amalgamated check list, and the backlinks between them.
   Indicators follow the status page: a dot is an application's health, an enclosure is a machine, and an enclosure appears only where a machine is the subject.
-  This exposes a weakness in the flat listing that was not visible before: it has nowhere to show machine state, so a dead box reads as a coincidence of failing applications.
+- **Machine navigation** — superseded by the two above, and kept only as the record of the options considered.
+  Its flat-listing option is the one worth remembering as rejected: it had nowhere to show machine state, so a dead box read as a coincidence of failing applications.
 - **Status push wire shapes** — unified against split, the discriminator, and the unified split rule as a table.
 
 ## Open questions
 
-- [ ] Confirm the trigger also *enforces* rather than only recomputing — raising when a write would leave a machine's applications in disagreeing groups, with the application-code refusal in front of it as the readable error.
+- [ ] Does an application's type ride in its identifier on the wire, or sit beside it as its own field?
+- [ ] Do check names carry their application type (all of Tamanu's being `tamanu_*`), or does the wire qualify each check by application and Canopy key on the pair? The first needs no per-application qualification, if the names can bear it.
+- [ ] What becomes of `kind` now that product is the application's type? Central, facility and standalone are kinds within a type, so the two are a pair rather than one replacing the other, but the vocabulary needs settling.
+- [ ] Does Canopy adopt a reported type or kind silently, or surface the change for an operator to see? Adoption is settled; whether it is announced is not.
 - [ ] Confirm the crossing unit: a crossing involving any application figure counts applications, a crossing of two machine figures counts machines. Derived from cardinality rather than chosen, so it should hold, but the view has to label which it is showing.
-- [ ] The edit form is machine-first, so is the *detail* view too, or does an application keep a page of its own with its machine's facts presented on it?
-- [ ] Is there a machine list, or is the fleet still listed as applications?
-- [ ] Confirm the discriminator: the presence of a `machine` key means split, `health` without it means unified, neither means the legacy Tamanu push. Proposed in the wire mockup; needs agreeing with bestool.
-- [ ] Which timezone do the figures present, the machine's or the application's, and is a disagreement between them worth surfacing?
-- [ ] Does Canopy adopt a reported kind or product silently, or surface the change for an operator to see? Adoption is settled; whether it is announced is not.
-- [ ] Product is not in the reported detail, only kind is. Does an application report its product too, or does Canopy keep inferring it from which reporter is talking?
-- [ ] Operator presence becomes a machine fact, since `external_users` is machine-subject. Does the group card's operator mark count operators per machine, and does anything still attribute a person to an application?
-
-- [ ] Should a group carry a product in its billing attribution at all? Product is not a group-level fact, and dropping it would remove the "only when members agree" rule rather than working around it. In scope for this card, or its own?
+- [ ] Is `services`, the reported service inventory, a ninth application detail field? bestool's count of 30 is 22 plus 8, which leaves it outside the total.
 
 ## Transition
 
@@ -438,6 +464,29 @@ The application takes `tamanuVersion`, `tamanuRoot`, `tamanuServerKind`, `nodeVe
 Two of these agree with decisions this card reached from the other direction.
 `instanceTags` is machine-subject, matching the machine carrying billing tags, and `canonicalUrl` is application-subject, matching `host` becoming the application's `url`.
 
+### Product is what an application is
+
+`product` was a poorly-typed application.
+It exists because Canopy had one record per box and needed somewhere to say which software that box ran; with applications as records in their own right, the thing a product named *is* the application.
+
+So product is not a separate field an operator maintains alongside the application. An application is a Tamanu, or a SENAITE, or a Canopy, and that is its type.
+An operator creating one says which type it is and which kind within that type, and once the machine reports, Canopy learns the type, kind and version from what arrives and keeps its record in step.
+
+This is why the reported detail carries a kind but no product: there was never anything to report beyond what the application already is.
+
+### An application needs a type on the wire
+
+A random identifier alone does not say what an application is, and Canopy cannot treat it as a Tamanu without being told.
+Either the identifier carries the type, or the entry carries a type field beside its identifier.
+
+The type is what makes reported material addressable.
+A detail field is `timezone` on some application, and an operator writing a policy rule or reading the fleet figures needs to distinguish a Tamanu's timezone from a SENAITE's rather than seeing them merged into one column.
+
+The same holds for checks, which are keyed by `(source, check)` fleet-wide.
+Two applications of different types reporting the same check name would collide into one catalog entry today.
+Either check names carry their application type, so all of Tamanu's are `tamanu_*`, or the wire qualifies them per application and Canopy keys on the pair.
+Names carrying the type would mean the wire needs no per-application qualification at all, which is the simpler shape if the names can bear it.
+
 ### The application is the source of truth for what it is
 
 `tamanuServerKind` arriving as reported detail is not a rival to the operator-set kind, and reading it as one gets the model backwards.
@@ -456,9 +505,11 @@ The split is the moment to correct that wording, since reporting is exactly what
 The detail split turns one figure into two that can disagree.
 `osTimezone` is the machine's clock and `timezone` is the application's own setting, and a Tamanu configured for one zone on a box set to another is a real configuration rather than a contradiction.
 
-The figures present a single timezone today, described as the server's own configured timezone so an operator can read its local time.
-Which one that now means has to be decided: the box's, the application's, or both with the disagreement visible.
-A disagreement is often the thing worth seeing, since a timestamp read in the wrong zone is a class of bug that survives a long time.
+The figure is the machine's, and is named for what it is: the operating system's timezone.
+That is the one an operator reads a log line or a timestamp against, and naming it removes the question of which timezone an unqualified figure meant.
+
+Both remain available as fields, so an operator who wants an application's configured timezone can spread or cross on it like any other reported field.
+The figure row leads with the machine's; the application's is there for whoever needs it.
 
 ### Figure fallbacks now cross grains
 

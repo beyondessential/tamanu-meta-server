@@ -1,0 +1,601 @@
+<!-- spec: monitoring/checks.md -->
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<title>Application and machine detail pages</title>
+<style>
+	:root {
+		--paper: #fff;
+		--divider: rgba(0, 0, 0, 0.12);
+		--enclosure: rgba(0, 0, 0, 0.18);
+		--text-primary: rgba(0, 0, 0, 0.87);
+		--text-secondary: rgba(0, 0, 0, 0.6);
+		--text-disabled: rgba(0, 0, 0, 0.38);
+		--action-hover: rgba(0, 0, 0, 0.04);
+		--success: #2e7d32;
+		--error: #d32f2f;
+		--warning: #ed6c02;
+		--info: #0288d1;
+		--secondary: #32669a;
+		--leaf: #388e3c;
+		--health-warning: rgb(132, 223, 91);
+	}
+
+	body {
+		font-family: Roboto, Helvetica, Arial, sans-serif;
+		margin: 0;
+		padding: 32px;
+		background: #fafafa;
+		color: var(--text-primary);
+		font-size: 16px;
+		line-height: 1.5;
+	}
+
+	h1 { font-size: 1.5rem; font-weight: 400; margin: 0 0 4px; }
+	h2 { font-size: 1.25rem; font-weight: 400; margin: 40px 0 4px; }
+
+	.lede, .note {
+		color: var(--text-secondary);
+		font-size: 0.875rem;
+		max-width: 68ch;
+		margin: 0 0 24px;
+	}
+
+	.note { margin: 8px 0 16px; }
+
+	.pages {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+		gap: 32px;
+		max-width: 1400px;
+		align-items: start;
+	}
+
+	.page > h3 {
+		font-size: 0.75rem;
+		font-weight: 500;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--text-secondary);
+		margin: 0 0 4px;
+	}
+
+	.url {
+		font-family: "SF Mono", Menlo, Consolas, monospace;
+		font-size: 0.75rem;
+		color: var(--text-secondary);
+		background: var(--action-hover);
+		border-radius: 3px;
+		padding: 2px 6px;
+		display: inline-block;
+		margin-bottom: 12px;
+	}
+
+	.stack > * + * { margin-top: 24px; }
+
+	.paper {
+		background: var(--paper);
+		border: 1px solid var(--divider);
+		border-radius: 4px;
+		padding: 16px;
+	}
+
+	/* Header */
+	.head-chips {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin-bottom: 6px;
+	}
+
+	.title {
+		font-size: 2.125rem;
+		font-weight: 400;
+		margin: 0 0 12px;
+		line-height: 1.235;
+	}
+
+	.title .group-part { color: var(--text-secondary); }
+
+	.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+	.btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		height: 30px;
+		padding: 0 10px;
+		border: 1px solid rgba(50, 102, 154, 0.5);
+		border-radius: 4px;
+		color: var(--secondary);
+		font-size: 0.8125rem;
+		text-transform: uppercase;
+		letter-spacing: 0.02857em;
+		background: none;
+		white-space: nowrap;
+	}
+
+	.btn.up {
+		border-color: var(--divider);
+		color: var(--text-secondary);
+	}
+
+	.chip {
+		display: inline-flex;
+		align-items: center;
+		height: 24px;
+		padding: 0 8px;
+		border-radius: 12px;
+		font-size: 0.75rem;
+		border: 1px solid var(--divider);
+		color: var(--text-secondary);
+		white-space: nowrap;
+	}
+
+	.chip.solid { background: var(--action-hover); border-color: transparent; }
+
+	/* Health badge */
+	.badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		padding: 6px 14px;
+		border-radius: 4px;
+		font-size: 1rem;
+		font-weight: 500;
+		margin-bottom: 16px;
+	}
+
+	.badge.healthy { background: rgba(46, 125, 50, 0.12); color: var(--success); }
+	.badge.warning { background: rgba(237, 108, 2, 0.12); color: var(--warning); }
+	.badge.unhealthy { background: rgba(211, 47, 47, 0.12); color: var(--error); }
+
+	.badge-sub {
+		font-size: 0.8125rem;
+		font-weight: 400;
+		color: var(--text-secondary);
+		margin-left: 4px;
+	}
+
+	/* Info fields */
+	.fields {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 32px;
+		margin-bottom: 16px;
+	}
+
+	.field-label {
+		display: block;
+		font-size: 0.75rem;
+		color: var(--text-secondary);
+	}
+
+	.field-value { font-size: 0.875rem; }
+
+	.section-title {
+		font-size: 1.25rem;
+		font-weight: 500;
+		margin: 0 0 12px;
+	}
+
+	.sub-title {
+		font-size: 1.125rem;
+		font-weight: 500;
+		margin: 0 0 12px;
+	}
+
+	/* Checks table */
+	table { border-collapse: collapse; width: 100%; font-size: 0.875rem; }
+	th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--divider); }
+	th {
+		font-weight: 500;
+		color: var(--text-secondary);
+		font-size: 0.75rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+	tbody tr:last-child td { border-bottom: none; }
+	td.name { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 0.8125rem; }
+	td.msg { color: var(--text-secondary); }
+
+	.res {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 0.8125rem;
+		white-space: nowrap;
+	}
+
+	.res::before {
+		content: "";
+		width: 0.7em;
+		height: 0.7em;
+		border-radius: 50%;
+		background: var(--success);
+		flex: none;
+	}
+
+	.res.warning::before { background: var(--health-warning); }
+	.res.failed::before { background: var(--error); }
+
+	.subject {
+		font-size: 0.6875rem;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--text-secondary);
+		background: rgba(50, 102, 154, 0.10);
+		border-radius: 3px;
+		padding: 1px 6px;
+	}
+
+	/* Sibling rows */
+	.shorty {
+		display: flex;
+		align-items: center;
+		gap: 14px;
+		padding: 10px 12px;
+		border: 1px solid var(--divider);
+		border-radius: 4px;
+	}
+
+	.shorty + .shorty { margin-top: 8px; }
+
+	.shorty-name { font-weight: 500; text-decoration: none; color: var(--text-primary); }
+	.shorty-host { margin-left: auto; font-size: 0.875rem; color: var(--text-secondary); }
+
+	.dot {
+		display: inline-block;
+		width: 0.85em;
+		height: 0.85em;
+		border-radius: 50%;
+		background: var(--success);
+		flex: none;
+	}
+
+	.dot.warning { background: var(--health-warning); }
+	.dot.down { background: var(--error); }
+
+	.machine {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.35em;
+		padding: 4px;
+		border: 1px solid var(--enclosure);
+		border-radius: 999px;
+		flex: none;
+	}
+
+	.overline {
+		font-size: 0.75rem;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--text-secondary);
+		display: block;
+		margin: 12px 0 4px;
+	}
+
+	.callout {
+		background: var(--paper);
+		border: 1px solid var(--divider);
+		border-radius: 4px;
+		padding: 20px 24px;
+		max-width: 1000px;
+	}
+
+	.callout table td { vertical-align: top; }
+	.callout table td:first-child { width: 30%; font-weight: 500; }
+
+	.verdict {
+		font-size: 0.8125rem;
+		color: var(--text-secondary);
+		max-width: 68ch;
+		margin: 16px 0 0;
+	}
+
+	.verdict b { color: var(--text-primary); font-weight: 500; }
+</style>
+</head>
+<body>
+
+<h1>Application and machine detail pages</h1>
+<p class="lede">
+	One page each, with the checks that belong to that grain, backlinks between them,
+	and the group's other pages at the foot of both. The application page is where an
+	operator lands; the machine page is a hop up from it.
+</p>
+
+<h2>What sits where</h2>
+
+<div class="callout">
+	<table>
+		<tbody>
+			<tr>
+				<td>Application only</td>
+				<td><code>url</code> and the certificates that follow it, its own notes and tags, its billing labels, and the mobile listing.</td>
+			</tr>
+			<tr>
+				<td>Machine only</td>
+				<td>The identity, backups, the machine's own notes and tags, hardware and OS figures, and the reachability threshold.</td>
+			</tr>
+			<tr>
+				<td>Both, separately</td>
+				<td>Notes and tags, since each grain has its own. The group and its siblings, listed from each grain's point of view.</td>
+			</tr>
+			<tr>
+				<td>Amalgamated</td>
+				<td>The application's checks are presented together with its machine's, in one list, each marked with its subject.</td>
+			</tr>
+			<tr>
+				<td>Gone from both</td>
+				<td>The status dot beside the title. The health badge answers the same question at a size the dot could not.</td>
+			</tr>
+		</tbody>
+	</table>
+</div>
+
+<h2>The two pages</h2>
+
+<div class="pages">
+
+	<div class="page">
+		<h3>Application detail</h3>
+		<span class="url">/fleet/applications/9f1c… &nbsp;·&nbsp; /servers/9f1c… redirects here</span>
+
+		<div class="stack">
+			<div>
+				<div class="head-chips">
+					<span class="chip">production</span>
+					<span class="chip">tamanu</span>
+					<span class="chip">central</span>
+				</div>
+				<h4 class="title"><span class="group-part">Nauru /</span> Nauru Central</h4>
+				<div class="actions">
+					<span class="btn up">↑ nauru-prod-01</span>
+					<span class="btn">Open</span>
+					<span class="btn">Incidents</span>
+					<span class="btn">Edit</span>
+				</div>
+			</div>
+
+			<div class="paper">
+				<div class="badge warning">
+					Warning
+					<span class="badge-sub">1 check degraded</span>
+				</div>
+
+				<div class="fields">
+					<div><span class="field-label">Application</span><span class="field-value">2.33.0</span></div>
+					<div><span class="field-label">Postgres</span><span class="field-value">16.4</span></div>
+					<div><span class="field-label">Node</span><span class="field-value">22.11.0</span></div>
+					<div><span class="field-label">Timezone</span><span class="field-value">Pacific/Nauru</span></div>
+					<div><span class="field-label">Mobile list</span><span class="field-value">nauru</span></div>
+				</div>
+
+				<table>
+					<thead>
+						<tr><th>Check</th><th>Source</th><th></th><th>Result</th></tr>
+					</thead>
+					<tbody>
+						<tr>
+							<td class="name">tamanu_http</td>
+							<td>alertd</td>
+							<td></td>
+							<td><span class="res">passed</span></td>
+						</tr>
+						<tr>
+							<td class="name">sync_facility_stale</td>
+							<td>alertd</td>
+							<td></td>
+							<td><span class="res warning">warning</span></td>
+						</tr>
+						<tr>
+							<td class="name">db_connect</td>
+							<td>alertd</td>
+							<td></td>
+							<td><span class="res">passed</span></td>
+						</tr>
+						<tr>
+							<td class="name">disk_free</td>
+							<td>alertd</td>
+							<td><span class="subject">machine</span></td>
+							<td><span class="res">passed</span></td>
+						</tr>
+						<tr>
+							<td class="name">memory</td>
+							<td>alertd</td>
+							<td><span class="subject">machine</span></td>
+							<td><span class="res">passed</span></td>
+						</tr>
+						<tr>
+							<td class="name">reachability</td>
+							<td>canopy</td>
+							<td><span class="subject">machine</span></td>
+							<td><span class="res">passed</span></td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+
+			<div class="paper">
+				<h5 class="sub-title">Group</h5>
+				<div class="fields" style="margin-bottom:0">
+					<div><span class="field-label">Group</span><span class="field-value">Nauru</span></div>
+					<div><span class="field-label">Billing</span><span class="field-value">product=tamanu · stage=production · deployment=nauru</span></div>
+				</div>
+			</div>
+
+			<div class="paper">
+				<h5 class="sub-title">Notes and tags</h5>
+				<p style="margin:0 0 8px;font-size:0.875rem">Migrated from the old central in March.</p>
+				<span class="chip solid">owner=pacific</span>
+			</div>
+
+			<div class="paper">
+				<h5 class="sub-title">Certificates</h5>
+				<p style="margin:0;font-size:0.875rem;color:var(--text-secondary)">nauru.example, renews in 46 days</p>
+			</div>
+
+			<div>
+				<h5 class="section-title">Elsewhere in Nauru</h5>
+				<span class="overline">applications</span>
+				<div class="shorty">
+					<span class="dot warning"></span>
+					<a class="shorty-name" href="#">Nauru Facility</a>
+					<span class="chip">facility</span>
+					<span class="shorty-host">nauru-fac.example</span>
+				</div>
+				<div class="shorty">
+					<span class="dot"></span>
+					<a class="shorty-name" href="#">Nauru Test</a>
+					<span class="chip">facility</span>
+					<span class="shorty-host">nauru-test.example</span>
+				</div>
+				<span class="overline">machines</span>
+				<div class="shorty">
+					<span class="machine"><span class="dot"></span><span class="dot warning"></span></span>
+					<a class="shorty-name" href="#">nauru-prod-01</a>
+					<span class="shorty-host">Ubuntu 22.04</span>
+				</div>
+				<div class="shorty">
+					<span class="machine"><span class="dot"></span></span>
+					<a class="shorty-name" href="#">nauru-test-01</a>
+					<span class="shorty-host">Ubuntu 22.04</span>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<div class="page">
+		<h3>Machine detail</h3>
+		<span class="url">/fleet/machines/4a72…</span>
+
+		<div class="stack">
+			<div>
+				<div class="head-chips">
+					<span class="chip">production</span>
+					<span class="chip solid">2 applications</span>
+				</div>
+				<h4 class="title"><span class="group-part">Nauru /</span> nauru-prod-01</h4>
+				<div class="actions">
+					<span class="btn">Munin</span>
+					<span class="btn">Incidents</span>
+					<span class="btn">Edit</span>
+				</div>
+			</div>
+
+			<div class="paper">
+				<div class="badge healthy">
+					Healthy
+					<span class="badge-sub">2 operators on it</span>
+				</div>
+
+				<div class="fields">
+					<div><span class="field-label">Platform</span><span class="field-value">Ubuntu 22.04</span></div>
+					<div><span class="field-label">OS timezone</span><span class="field-value">UTC</span></div>
+					<div><span class="field-label">bestool</span><span class="field-value">0.41.2</span></div>
+					<div><span class="field-label">CPU / memory</span><span class="field-value">4 cores · 16 GB</span></div>
+					<div><span class="field-label">Status alerts</span><span class="field-value">After 30 minutes</span></div>
+					<div><span class="field-label">Location</span><span class="field-value">Cloud · ap-southeast-2</span></div>
+				</div>
+
+				<table>
+					<thead>
+						<tr><th>Check</th><th>Source</th><th>Result</th></tr>
+					</thead>
+					<tbody>
+						<tr><td class="name">disk_free</td><td>alertd</td><td><span class="res">passed</span></td></tr>
+						<tr><td class="name">memory</td><td>alertd</td><td><span class="res">passed</span></td></tr>
+						<tr><td class="name">load</td><td>alertd</td><td><span class="res">passed</span></td></tr>
+						<tr><td class="name">time_sync</td><td>alertd</td><td><span class="res">passed</span></td></tr>
+						<tr><td class="name">tailscale</td><td>alertd</td><td><span class="res">passed</span></td></tr>
+						<tr><td class="name">external_users</td><td>alertd</td><td><span class="res">passed</span></td></tr>
+						<tr><td class="name">reachability</td><td>canopy</td><td><span class="res">passed</span></td></tr>
+					</tbody>
+				</table>
+			</div>
+
+			<div>
+				<h5 class="section-title">Applications (2)</h5>
+				<div class="shorty">
+					<span class="dot"></span>
+					<a class="shorty-name" href="#">Nauru Central</a>
+					<span class="chip">tamanu</span>
+					<span class="chip">central</span>
+					<span class="shorty-host">nauru.example</span>
+				</div>
+				<div class="shorty">
+					<span class="dot warning"></span>
+					<a class="shorty-name" href="#">Nauru Facility</a>
+					<span class="chip">tamanu</span>
+					<span class="chip">facility</span>
+					<span class="shorty-host">nauru-fac.example</span>
+				</div>
+			</div>
+
+			<div class="paper">
+				<h5 class="sub-title">Backups</h5>
+				<div class="fields" style="margin-bottom:0">
+					<div><span class="field-label">Last successful</span><span class="field-value">4 hours ago</span></div>
+					<div><span class="field-label">Types</span><span class="field-value">tamanu-postgres</span></div>
+				</div>
+			</div>
+
+			<div class="paper">
+				<h5 class="sub-title">Identity</h5>
+				<div class="fields" style="margin-bottom:0">
+					<div><span class="field-label">Role</span><span class="field-value">machine</span></div>
+					<div><span class="field-label">Tailnet</span><span class="field-value">nauru-prod-01.tail1234.ts.net</span></div>
+					<div><span class="field-label">Enrolled</span><span class="field-value">14 March 2026</span></div>
+				</div>
+			</div>
+
+			<div class="paper">
+				<h5 class="sub-title">Notes and tags</h5>
+				<p style="margin:0 0 8px;font-size:0.875rem">Resized to m6i.xlarge after the March load spike.</p>
+				<span class="chip solid">rack=aws-syd</span>
+			</div>
+
+			<div>
+				<h5 class="section-title">Elsewhere in Nauru</h5>
+				<span class="overline">machines</span>
+				<div class="shorty">
+					<span class="machine"><span class="dot"></span></span>
+					<a class="shorty-name" href="#">nauru-test-01</a>
+					<span class="shorty-host">Ubuntu 22.04</span>
+				</div>
+				<span class="overline">applications</span>
+				<div class="shorty">
+					<span class="dot"></span>
+					<a class="shorty-name" href="#">Nauru Test</a>
+					<span class="chip">facility</span>
+					<span class="shorty-host">nauru-test.example</span>
+				</div>
+			</div>
+		</div>
+	</div>
+
+</div>
+
+<p class="verdict">
+	<b>The amalgamated list is what stops the split costing anything.</b> An operator
+	triaging an application sees every check bearing on it, its own and its box's, in
+	the order of urgency they always did. The machine tag says where a check came from
+	without making it somewhere else to look.
+	<br><br>
+	The machine page shows the same checks unamalgamated, because from the box's point
+	of view its applications' checks are not its business. It is the page for "is this
+	host healthy", not "is this deployment healthy".
+	<br><br>
+	<b>Reachability appears on both</b>, as one filing seen from two places. Silencing
+	it from either is the same machine-scoped silence.
+	<br><br>
+	<b>Every page ends with the group's other pages</b>, applications and machines
+	both, so moving sideways never goes back through the group. The application page
+	adds one link upward to its machine, which is the only hop the hierarchy needs.
+</p>
+
+</body>
+</html>
