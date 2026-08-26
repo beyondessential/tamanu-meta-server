@@ -1179,7 +1179,7 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 			let entry = &dispatched[0];
 
 			// Report it back the way a consumer would: naming the version by its
-				// semver, not echoing the identifier.
+			// semver, not echoing the identifier.
 			public
 				.post("/restore-verification")
 				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))

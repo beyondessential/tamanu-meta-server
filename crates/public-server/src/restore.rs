@@ -16,7 +16,6 @@
 use aws_sdk_sts::operation::RequestId as _;
 use axum::{Json, extract::State, http::StatusCode};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
-use diesel_async::AsyncPgConnection;
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::device_auth::BackupRestoreDevice;
 use commons_types::backup::{
@@ -34,6 +33,7 @@ use database::{
 	},
 	servers::Server,
 };
+use diesel_async::AsyncPgConnection;
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -802,9 +802,11 @@ async fn resolve_migration_target(
 	migration: &MigrationArgs,
 ) -> Result<Uuid> {
 	if let Some(semver) = &migration.target_version {
-		return Ok(database::versions::Version::get_by_version(conn, semver.parse()?)
-			.await?
-			.id);
+		return Ok(
+			database::versions::Version::get_by_version(conn, semver.parse()?)
+				.await?
+				.id,
+		);
 	}
 	migration
 		.target_version_id
