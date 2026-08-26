@@ -366,7 +366,8 @@ Three mockups put the open presentation and wire questions side by side as optio
 - [ ] Is there a machine list, or is the fleet still listed as applications?
 - [ ] Confirm the discriminator: the presence of a `machine` key means split, `health` without it means unified, neither means the legacy Tamanu push. Proposed in the wire mockup; needs agreeing with bestool.
 - [ ] Which timezone do the figures present, the machine's or the application's, and is a disagreement between them worth surfacing?
-- [ ] `tamanuServerKind` is reported while a kind is operator-set (see [APP](../../specs/servers/products.md)). Is the reported value ignored, or used to flag an application whose operator-set kind disagrees with what it says it is?
+- [ ] Does Canopy adopt a reported kind or product silently, or surface the change for an operator to see? Adoption is settled; whether it is announced is not.
+- [ ] Product is not in the reported detail, only kind is. Does an application report its product too, or does Canopy keep inferring it from which reporter is talking?
 - [ ] Operator presence becomes a machine fact, since `external_users` is machine-subject. Does the group card's operator mark count operators per machine, and does anything still attribute a person to an application?
 
 - [ ] Should a group carry a product in its billing attribution at all? Product is not a group-level fact, and dropping it would remove the "only when members agree" rule rather than working around it. In scope for this card, or its own?
@@ -436,6 +437,19 @@ The application takes `tamanuVersion`, `tamanuRoot`, `tamanuServerKind`, `nodeVe
 
 Two of these agree with decisions this card reached from the other direction.
 `instanceTags` is machine-subject, matching the machine carrying billing tags, and `canonicalUrl` is application-subject, matching `host` becoming the application's `url`.
+
+### The application is the source of truth for what it is
+
+`tamanuServerKind` arriving as reported detail is not a rival to the operator-set kind, and reading it as one gets the model backwards.
+
+An application knows its own kind and product, because they follow from the software it is running.
+An operator sets them in Canopy only because the Canopy record is created before the real thing connects, so something has to fill the gap in the meantime.
+That is a bootstrap value for the window before first contact, not a standing claim that Canopy knows better than the application does.
+
+Once the application reports, its own answer is the authoritative one and Canopy's record follows it.
+
+[APP](../../specs/servers/products.md) states this more strongly than intended: it says product and kind are "set by an operator rather than reported by the server", which reads as a permanent property of the model rather than a description of a fleet that could not report yet.
+The split is the moment to correct that wording, since reporting is exactly what is arriving.
 
 ### Two timezones
 
