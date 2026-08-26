@@ -2,6 +2,30 @@
 
 Implementation notes for the split. Behaviour lives in the specs: [FLT](../../specs/servers/overview.md), [APP](../../specs/servers/application-types.md), [CHK](../../specs/monitoring/checks.md), [STA](../../specs/public-server/statuses.md), [FIG](../../specs/private-server/figures.md), [DID](../../specs/public-server/machine-identity.md).
 
+## Steps
+
+Each item is a section below; the section carries the detail and the traps.
+
+- [x] **Rename `servers` to `applications`** — storage, the workspace sweep, and the e2e suite
+- [x] **Machine grain: table and model** — `machines`, the 1:1 backfill, `applications.machine_id`
+- [x] **Extending scope** — `Scope::Machine`, `machine_id` on `issues` and `scoped_check_policies`
+- [ ] **Group denormalisation** — the trigger propagating a machine's group onto its applications
+- [ ] **Dropping `device_server_associations`** — rehome the backup-staleness anchor first
+- [ ] **Ingest** — the machine-subject check rule and the detail-field split; this is what first files at machine scope
+- [ ] **Declared names and certificate routing** — identity to machine to application, and the plural entitlement answer
+- [ ] **Restore replicas** — declarations move grain; `migration-test` stays application-scoped
+- [ ] **Retiring the graded reachability states** — `short_status`'s hardcoded thresholds
+- [ ] **Fleet query interface** — MCP gains `Get machine` and `Find machines`
+- [ ] **Migration** — `{product, kind}` becomes `{type}`
+- [ ] **Frontend** — two detail pages, the group tree, the status-page bands
+- [ ] **Routes** — deprecation aliases for every renamed path
+
+Carried deferrals, each gated on a step above rather than on a vague later:
+
+- [ ] Remove the `application_default_machine()` scaffolding default — with **Ingest**, when reports create applications against a named machine
+- [ ] Add `machine_id` to the `Application` struct (49 construction sites) — with the first step that reads it
+- [ ] Carry the machine on `IssueData` — with **Fleet query interface** / **Frontend**, whichever presents machine checks first
+
 ## Sequencing
 
 **Rename first, then split.** The `servers` → `applications` rename lands before the machine grain, so the machine work is written against names that already read correctly and the affected tables are touched once rather than twice.
