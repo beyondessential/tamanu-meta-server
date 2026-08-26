@@ -404,7 +404,6 @@ Three mockups put the open presentation and wire questions side by side as optio
 ## Open questions
 
 - [ ] Does an application dropping out of a live machine's reports file a check of its own, so it can alert and be silenced, or is it presentation-only? Its machine is reachable, so the machine's reachability check cannot carry it.
-- [ ] Where does an application's name come from, now that no operator types one? Derived from its type, with an operator able to rename it afterwards, is the obvious answer but not a decided one.
 - [ ] Does Canopy adopt a reported type silently, or surface the change for an operator to see? Adoption is settled; whether it is announced is not.
 - [ ] What breaks a tie for a group's canonical member now that kind is gone? Ordering application types directly is the obvious replacement, but it means the type list carries a precedence rather than being a flat set.
 - [ ] Confirm the crossing unit: a crossing involving any application figure counts applications, a crossing of two machine figures counts machines. Derived from cardinality rather than chosen, so it should hold, but the view has to label which it is showing.
@@ -539,6 +538,13 @@ A product whose servers held no role relative to each other collapses to a singl
 Canopy had one record per box, so it needed a field for which software ran there and another for that software's role, and between them they described what is now simply the application's type.
 
 The migration maps them together: a server with product `tamanu` and kind `central` becomes an application of type `tamanu-central`.
+
+An application's name is an operator's to set and nobody else's, and it is optional.
+Unset, an application presents as the sentence case of its type, so a `tamanu-central` reads as "Tamanu central" without anyone having typed it.
+An operator names one only where the default is not enough, which on a machine running one of each type it usually is.
+
+A group with several applications of one type shows that name repeated, distinguished by the machine each sits on and the rank it sits under.
+The tree does that for free by nesting them; a flat listing would not, and is a reason to name them.
 
 Removing kind reaches one rule that leaned on it.
 A group's headline version comes from its canonical member, chosen as the highest-ranked live member with kind breaking a tie in the order central, then facility, then standalone (see [APP](../../specs/servers/products.md)).
