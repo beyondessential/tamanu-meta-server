@@ -23,13 +23,7 @@ Warnings never hold an incident open.
 When the last effective failure leaves because its result recovered, the incident does not close immediately: it **lingers** for its target's linger window, remaining the target's open incident.
 A check whose effective result becomes failed during the window — a fresh failure or the same one returning — ends the lingering and the incident continues.
 An incident whose linger window elapses without an effective failure closes, recording the close as of when its last effective failure left.
-<<<<<<< HEAD
-Lingering damps reporter flapping, not operator action: a last failure leaving through resolution, snooze, silence, a maintenance window declared over its target (see [MNT](maintenance.md)), or its server's monitoring being turned off closes the incident immediately.
-||||||| parent of 11d2523e (V2: update 17 specs, update machine-navigation-options.html)
-Lingering damps reporter flapping, not operator action: a last failure leaving through resolution, snooze, silence, or its server's monitoring being turned off closes the incident immediately.
-=======
-Lingering damps reporter flapping, not operator action: a last failure leaving through resolution, snooze, silence, or its target's monitoring being turned off closes the incident immediately.
->>>>>>> 11d2523e (V2: update 17 specs, update machine-navigation-options.html)
+Lingering damps reporter flapping, not operator action: a last failure leaving through resolution, snooze, silence, a maintenance window declared over its target (see [MNT](maintenance.md)), or its target's monitoring being turned off closes the incident immediately.
 
 The membership history — which issues joined and left, and when — is kept and presented as the incident's timeline.
 An issue can leave and rejoin the same incident.
