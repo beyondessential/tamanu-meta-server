@@ -29,6 +29,10 @@ A device registers the backup types it can run on its machine.
 A newly seen type is enabled for scheduling or not according to that type's fleet default; a type already known keeps the operator's setting.
 Registration requires the machine to be grouped, but not the group's configuration to be ready.
 
+What a type captures is the agent's to decide, and Canopy does not interpret it.
+A type is a name Canopy schedules against, issues credentials for, and tracks snapshots under, with no view of what was written beneath it and no meaning attached to the name itself.
+So a machine's backups are its own whatever it runs, and Canopy never derives from a type which of a box's workloads a snapshot belongs to.
+
 ## Credentials
 
 A device requests credentials for a `(type, purpose)`.
