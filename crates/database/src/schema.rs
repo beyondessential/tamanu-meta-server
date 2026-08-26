@@ -75,6 +75,7 @@ diesel::table! {
 		name_management_paused_at -> Nullable<Timestamptz>,
 		name_management_paused_by -> Nullable<Text>,
 		name_management_pause_reason -> Nullable<Text>,
+		machine_id -> Uuid,
 	}
 }
 
@@ -472,6 +473,21 @@ diesel::table! {
 }
 
 diesel::table! {
+	machines (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+		name -> Nullable<Text>,
+		group_id -> Nullable<Uuid>,
+		device_id -> Nullable<Uuid>,
+		cloud -> Nullable<Bool>,
+		geolocation -> Nullable<Array<Nullable<Float8>>>,
+		alert_when_down_for -> Interval,
+		is_monitored -> Bool,
+		notes -> Text,
+		tags -> Jsonb,
+		deleted_at -> Nullable<Timestamptz>,
+		registered_at -> Nullable<Timestamptz>,
 	maintenance_windows (id) {
 		id -> Uuid,
 		server_id -> Nullable<Uuid>,
@@ -801,6 +817,7 @@ diesel::table! {
 diesel::joinable!(application_certificates -> applications (application_id));
 diesel::joinable!(application_names -> applications (application_id));
 diesel::joinable!(applications -> devices (device_id));
+diesel::joinable!(applications -> machines (machine_id));
 diesel::joinable!(artifacts -> devices (device_id));
 diesel::joinable!(artifacts -> versions (version_id));
 diesel::joinable!(backup_credential_issuances -> devices (device_id));
@@ -836,6 +853,8 @@ diesel::joinable!(issue_notes -> issues (issue_id));
 diesel::joinable!(issues -> applications (application_id));
 diesel::joinable!(issues -> devices (device_id));
 diesel::joinable!(issues -> server_groups (server_group_id));
+diesel::joinable!(machines -> devices (device_id));
+diesel::joinable!(machines -> server_groups (group_id));
 diesel::joinable!(migration_tests -> backup_restore_checks (check_id));
 diesel::joinable!(migration_tests -> versions (target_version_id));
 diesel::joinable!(migration_timings -> migration_tests (check_id));
@@ -897,6 +916,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	incidents,
 	issue_notes,
 	issues,
+	machines,
 	maintenance_windows,
 	mcp_tokens,
 	migration_tests,

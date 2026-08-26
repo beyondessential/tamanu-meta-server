@@ -4,12 +4,12 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 
 ## Model and lifecycle
 
-- [ ] Creating a machine in a group, with no applications, presents as not-yet-checked-in rather than as an error (verifies spec: FLT)
+- [x] Creating a machine in a group, with no applications, presents as not-yet-checked-in rather than as an error (verifies spec: FLT)
 - [ ] A machine's first report creates the applications it describes (verifies spec: FLT)
 - [ ] An application Canopy has not seen before is adopted silently, with no operator step (verifies spec: APP)
 - [ ] A report that omits a previously-reported application does not remove it (verifies spec: FLT)
 - [ ] Only an operator archives an application; an archived one leaves the live fleet with its history intact (verifies spec: FLT)
-- [ ] Archiving a machine archives the applications on it (verifies spec: FLT)
+- [x] Archiving a machine archives the applications on it (verifies spec: FLT)
 - [ ] An application with no operator-set name presents as the sentence case of its type (verifies spec: FLT)
 - [ ] An operator-set name overrides the default and survives further reports (verifies spec: FLT)
 - [ ] A machine with two applications reports its platform, memory and filesystems once, not once per application (verifies spec: FLT)

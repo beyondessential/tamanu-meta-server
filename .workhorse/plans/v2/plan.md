@@ -39,6 +39,21 @@ What the rename step deliberately did **not** move, because each belongs to the 
 
 **Pre-existing drift, not this card's to fix.** `diesel migration run` regenerates `crates/database/src/schema.rs`, and a fresh migrate puts `server_group_backup_config.maintenance_role_arn` at ordinal 12 where the committed schema has it at 5 (and adds `source_policies` to `allow_tables_to_appear_in_same_query`). `ServerGroupBackupConfig` derives positional `Queryable`, so taking the regenerated order fails to compile. Both were restored to the committed values to keep this diff purely the rename. **Anyone regenerating the schema has to restore them again**, and the underlying disagreement is worth its own card.
 
+### Machine grain: table and model landed
+
+Migration `2026-08-26-124937-0000_add_machines`. The `machines` table, a 1:1 backfill from `applications`, and `applications.machine_id NOT NULL`. Model at `crates/database/src/machines.rs`.
+
+The backfill keeps `machine.id == application.id` for pre-split rows, so the two are trivially correlatable while the split is half-landed; they diverge the moment a second application joins a machine.
+
+**Additive on `applications` by design.** `device_id`, `cloud`, `geolocation` and `registered_at` are copied onto the machine and left in place, so nothing that reads them breaks while the grain is wired up. Dropping them is a later step, once every reader has moved. `group_id` stays for good as the denormalisation the trigger keeps honest.
+
+**`notes` and `tags` are not copied.** An operator wrote them against the thing they were managing, which becomes the application. Duplicating them would mean two copies of one note drifting apart and a policy rule matching a tag twice. A machine starts with neither.
+
+**Two deliberate deferrals, both with a trigger condition rather than a vague "later".**
+
+1. **`applications.machine_id` has a volatile default that creates a machine** (`application_default_machine()`). An application inserted without a machine gets one of its own, which is exactly the 1:1 the backfill performed and exactly what the pre-split model meant. It exists so the column can be `NOT NULL` from the outset instead of nullable-and-tightened-later, which would push `Option<Uuid>` through every reader and invite a bad default at each. **The hazard it carries:** a caller that should attach to an *existing* machine but omits `machine_id` silently gets a second machine rather than an error — wrong for exactly the two-workload host this card exists for. **Remove it in the step that makes reports create applications against a named machine.** Until then no such caller exists.
+2. **`Application` does not yet carry a `machine_id` field.** 49 sites construct that struct and nothing reads the column yet, so the field goes in with the step that reads it (machine detail, scope resolution) and those sites get updated once, with purpose.
+
 ## Extending scope
 
 The storage pattern already takes another grain and has taken two. Each scope is a nullable FK column, with a CHECK that at most one is set and a partial unique index keying find-or-create for that grain. `issues` (the check-state table) and `scoped_check_policies` both carry `server_id` and `server_group_id`; `incidents` carries `server_group_id` as its target.

@@ -29,6 +29,7 @@ mod incident_result_semantics;
 mod incident_stats;
 mod incident_stranded_membership;
 mod issue_list_filters;
+mod machines;
 mod maintenance_windows;
 mod mcp_tokens;
 mod migration_test_candidates;

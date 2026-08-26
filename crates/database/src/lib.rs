@@ -18,6 +18,7 @@ pub mod check_policies;
 pub mod chrome_releases;
 pub mod devices;
 pub mod issues;
+pub mod machines;
 pub mod maintenance_windows;
 pub mod mcp_tokens;
 pub mod migration_tests;
@@ -64,6 +65,7 @@ pub use commons_types::backup::{
 	RunOutcome,
 };
 pub use devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
+pub use machines::{Machine, NewMachine};
 pub use recovery_vault::RecoveryVaultWrite;
 pub use restore::{
 	BackupRestoreCheck, NewBackupRestoreCheck, NewRestoreReplica, RestoreConsumerCapability,
