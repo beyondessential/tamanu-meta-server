@@ -396,7 +396,8 @@ Three mockups put the open presentation and wire questions side by side as optio
 
 ## Open questions
 
-- [ ] Does an application's type ride in its identifier on the wire, or sit beside it as its own field?
+- [ ] What is the local key that tells two applications of one type apart on a machine — the install root (already on the wire as `tamanuRoot`), the service unit, or an identifier bestool persists per instance?
+- [ ] What happens when a report cannot be bound unambiguously to an application an operator already created: does Canopy create a new one and leave them to reconcile, or hold the report and ask?
 - [ ] Do check names carry their application type (all of Tamanu's being `tamanu_*`), or does the wire qualify each check by application and Canopy key on the pair? The first needs no per-application qualification, if the names can bear it.
 - [ ] What becomes of `kind` now that product is the application's type? Central, facility and standalone are kinds within a type, so the two are a pair rather than one replacing the other, but the vocabulary needs settling.
 - [ ] Does Canopy adopt a reported type or kind silently, or surface the change for an operator to see? Adoption is settled; whether it is announced is not.
@@ -482,7 +483,6 @@ This is why the reported detail carries a kind but no product: there was never a
 ### An application needs a type on the wire
 
 A random identifier alone does not say what an application is, and Canopy cannot treat it as a Tamanu without being told.
-Either the identifier carries the type, or the entry carries a type field beside its identifier.
 
 The type is what makes reported material addressable.
 A detail field is `timezone` on some application, and an operator writing a policy rule or reading the fleet figures needs to distinguish a Tamanu's timezone from a SENAITE's rather than seeing them merged into one column.
@@ -491,6 +491,43 @@ The same holds for checks, which are keyed by `(source, check)` fleet-wide.
 Two applications of different types reporting the same check name would collide into one catalog entry today.
 Either check names carry their application type, so all of Tamanu's are `tamanu_*`, or the wire qualifies them per application and Canopy keys on the pair.
 Names carrying the type would mean the wire needs no per-application qualification at all, which is the simpler shape if the names can bear it.
+
+### Reports are self-describing, because bestool cannot know Canopy's identifiers
+
+bestool holds one thing Canopy gave it: its machine registration, which is what the current server ID really is.
+It has no idea what Canopy calls the applications on that machine, and on first contact there may be nothing for it to know.
+What it knows is what it found: a Tamanu is installed here, at this root, running this version.
+
+Making it learn Canopy's identifiers would mean fetching the applications Canopy believes are on this machine, matching them against what is actually installed, and reporting back against the identifiers it was handed.
+That inverts the direction the model has just settled on.
+An application would have to be declared by an operator in Canopy before anything could be reported about it, which is precisely the pre-connection bootstrap being demoted from a source of truth, made mandatory instead.
+
+So a report describes what is there and Canopy decides where it goes.
+That also opens a flow which is not possible today: provision a machine first, give it an identity and an enrolment ticket, and let its first report populate the applications on it rather than an operator entering them by hand.
+
+### Telling two of the same thing apart
+
+The difficulty is a machine running more than one application of the same type.
+It is not what the fleet does today, but the model allows it and a scheme that only says "a Tamanu is here" cannot survive a second one.
+
+So a reported application needs something that distinguishes it from its siblings, derived locally by bestool.
+It must be stable across restarts, upgrades and reporting gaps, unique among applications of that type on that machine, and require no knowledge from Canopy.
+Canopy then correlates on the machine, the type and that local key, and keeps its own identifier to itself for its links, incidents and silences.
+
+`tamanuRoot` is already on the wire and is the natural candidate: an install lives at a path, and two installs on one box have different ones.
+It costs no new state in bestool.
+Its weakness is that moving an install changes the key, so the same application would read as one going away and another arriving.
+
+The alternatives trade that off differently.
+A service unit name is as stable as the path and no better if the unit is renamed.
+An identifier bestool persists per discovered instance survives a move, at the cost of bestool holding state it must not lose, and of being meaningless to anyone reading it.
+
+### Binding a report to an application an operator already made
+
+An operator creates an application before the box exists, which stays a supported flow, so a first report has to find it rather than duplicate it.
+
+Where a machine has exactly one application of the reported type and no local key recorded against it, the binding is unambiguous and Canopy makes it.
+Where it is ambiguous — two unbound Tamanus, or a report whose key matches nothing — something has to give: either Canopy creates a new application and leaves an operator to reconcile, or it holds the report unbound and asks.
 
 ### The application is the source of truth for what it is
 
