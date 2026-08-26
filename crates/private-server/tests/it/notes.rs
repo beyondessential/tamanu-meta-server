@@ -18,7 +18,7 @@ async fn seed_issue_and_incident(
 	let r = private
 		.post("/api/issues/submit_manual_event")
 		.json(&serde_json::json!({
-			"serverId": server_id,
+			"applicationId": server_id,
 			"ref": "x",
 			"result": "failed",
 			"message": "trouble",

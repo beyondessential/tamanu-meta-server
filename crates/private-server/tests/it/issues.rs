@@ -34,7 +34,7 @@ async fn list_issues_for_device_and_server() {
 		// Include resolved.
 		let resp = private
 			.post("/api/issues/list_for_server")
-			.json(&serde_json::json!({ "server_id": server_id, "active_only": false }))
+			.json(&serde_json::json!({ "application_id": server_id, "active_only": false }))
 			.await;
 		resp.assert_status_ok();
 		let items: Vec<serde_json::Value> = resp.json();
@@ -57,7 +57,7 @@ async fn manual_event_submit_creates_issue_without_device() {
 		let resp = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "operator-note-1",
 				"message": "manually opened",
 			}))
@@ -103,7 +103,7 @@ async fn incident_groups_at_server_group() {
 		let resp = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_b_id,
+				"applicationId": server_b_id,
 				"ref": "x",
 				"result": "failed",
 				"message": "trouble in B",
@@ -165,7 +165,7 @@ async fn ungrouped_server_event_skips_incident() {
 		let resp = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "x",
 				"result": "failed",
 				"message": "no group yet",
@@ -208,7 +208,7 @@ async fn assigning_group_opens_pending_incident() {
 		let resp = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "stuck",
 				"result": "failed",
 				"message": "waiting to be grouped",
@@ -266,7 +266,7 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 		let r1 = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "x",
 				"result": "failed",
 				"message": "trouble",
@@ -285,7 +285,7 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 		let r2 = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "x",
 				"result": "failed",
 				"active": false,
@@ -319,7 +319,7 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 		let r3 = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "x",
 				"result": "failed",
 				"escalates": true,
@@ -371,7 +371,7 @@ async fn low_severity_issue_joins_existing_open_incident() {
 		private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "a",
 				"result": "failed",
 				"message": "primary trouble",
@@ -384,7 +384,7 @@ async fn low_severity_issue_joins_existing_open_incident() {
 		private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "b",
 				"result": "warning",
 				"message": "ride-along",
@@ -427,7 +427,7 @@ async fn low_severity_alone_does_not_open_incident() {
 		private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "b",
 				"result": "warning",
 				"message": "minor",
@@ -465,7 +465,7 @@ async fn severity_downgrade_keeps_issue_in_incident() {
 		private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "x",
 				"result": "failed",
 				"message": "trouble",
@@ -477,7 +477,7 @@ async fn severity_downgrade_keeps_issue_in_incident() {
 		private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "x",
 				"result": "warning",
 				"message": "less bad now",
@@ -516,7 +516,7 @@ async fn open_issue(
 	let r = private
 		.post("/api/issues/submit_manual_event")
 		.json(&serde_json::json!({
-			"serverId": server_id,
+			"applicationId": server_id,
 			"ref": "x",
 			"result": "failed",
 			"message": "trouble",
@@ -709,7 +709,7 @@ async fn snooze_leaves_incident_and_blocks_rejoin() {
 		private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "x",
 				"result": "failed",
 				"escalates": true,
@@ -771,7 +771,7 @@ async fn unmonitored_server_event_does_not_open_incident() {
 		let resp = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "ignored",
 				"result": "failed",
 				"message": "should not open an incident",
@@ -793,7 +793,7 @@ async fn unmonitored_server_event_does_not_open_incident() {
 		// The issue itself is still there for the record.
 		let resp = private
 			.post("/api/issues/list_for_server")
-			.json(&serde_json::json!({ "server_id": server_id }))
+			.json(&serde_json::json!({ "application_id": server_id }))
 			.await;
 		let issues: Vec<serde_json::Value> = resp.json();
 		assert_eq!(issues.len(), 1, "issue rows are kept even when unmonitored");
@@ -822,7 +822,7 @@ async fn enabling_monitoring_opens_pending_incident() {
 		let resp = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "stuck",
 				"result": "failed",
 				"message": "waiting to be re-enabled",
@@ -915,7 +915,7 @@ async fn silencing_server_ref_closes_only_matching_open_incident() {
 		let resp = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "other",
 				"result": "failed",
 				"message": "second contributor",
@@ -1038,7 +1038,7 @@ async fn group_silence_blocks_events_from_all_members() {
 			let resp = private
 				.post("/api/issues/submit_manual_event")
 				.json(&serde_json::json!({
-					"serverId": sid,
+					"applicationId": sid,
 					"ref": "noisy",
 					"result": "failed",
 					"message": "should not fire",
@@ -1057,7 +1057,7 @@ async fn group_silence_blocks_events_from_all_members() {
 		let resp = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_a,
+				"applicationId": server_a,
 				"ref": "other",
 				"result": "failed",
 				"message": "should still fire",
@@ -1194,7 +1194,7 @@ async fn empty_validation_input_is_a_400_not_a_500() {
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
 				"ref": "   ",
-				"serverId": server_id,
+				"applicationId": server_id,
 				"message": "m",
 			}))
 			.await;

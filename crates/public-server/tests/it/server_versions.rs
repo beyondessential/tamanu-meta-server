@@ -59,7 +59,7 @@ async fn server_versions_correct_secret() {
 		let response = public.get("/server-versions?s=test-secret").await;
 		assert_eq!(response.status_code(), StatusCode::OK);
 		let body = response.text();
-		assert!(body.contains("Production Application Versions"));
+		assert!(body.contains("Production Server Versions"));
 
 		// Should display production central applications only
 		assert!(body.contains("Production Application 1"));

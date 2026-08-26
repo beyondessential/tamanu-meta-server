@@ -902,7 +902,7 @@ async fn check_stability_returns_full_records_for_pairs() {
 		let rows = out["rows"].as_array().expect("rows array");
 		assert_eq!(rows.len(), 1, "one matching state: {rows:?}");
 		let row = &rows[0];
-		assert_eq!(row["server_id"], serde_json::json!(SRV_GROUPED));
+		assert_eq!(row["application_id"], serde_json::json!(SRV_GROUPED));
 		assert_eq!(row["server_name"], serde_json::json!("Prod Central"));
 		assert_eq!(row["source"], serde_json::json!("test"));
 		assert_eq!(row["check_name"], serde_json::json!("wobbly"));
@@ -927,7 +927,7 @@ async fn check_stability_returns_full_records_for_pairs() {
 			"get_check_stability",
 			serde_json::json!({
 				"checks": [{ "source": "test", "check_name": "wobbly" }],
-				"server_id": SRV_UNGROUPED,
+				"application_id": SRV_UNGROUPED,
 			})
 		);
 		assert_eq!(out["rows"].as_array().map(|r| r.len()), Some(0));

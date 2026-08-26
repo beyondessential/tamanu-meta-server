@@ -473,11 +473,13 @@ async fn sweep_clears_reachability_when_source_reports_again() {
 		assert!(issue_for(&mut conn, id).await.unwrap().active);
 
 		// The source reports again: ingestion re-stamps its check state.
-		sql_query("UPDATE issues SET last_seen = NOW() WHERE application_id = $1 AND source = 'alertd'")
-			.bind::<sql_types::Uuid, _>(id)
-			.execute(&mut conn)
-			.await
-			.expect("restamp state");
+		sql_query(
+			"UPDATE issues SET last_seen = NOW() WHERE application_id = $1 AND source = 'alertd'",
+		)
+		.bind::<sql_types::Uuid, _>(id)
+		.execute(&mut conn)
+		.await
+		.expect("restamp state");
 		Status::sweep_staleness(&mut conn)
 			.await
 			.expect("second sweep");

@@ -548,7 +548,7 @@ struct VerifRow {
 	#[diesel(sql_type = sql_types::Text)]
 	check_name: String,
 	#[diesel(sql_type = sql_types::Nullable<sql_types::Uuid>)]
-	server_id: Option<Uuid>,
+	application_id: Option<Uuid>,
 	#[diesel(sql_type = sql_types::Nullable<sql_types::Uuid>)]
 	server_group_id: Option<Uuid>,
 }
@@ -580,7 +580,7 @@ async fn record_report_files_server_scoped_with_stable_name() {
 			.expect("sweep");
 
 		// The check is server-scoped and named for the condition alone: the
-		// server is the scope (issues.server_id) and the replica an instance,
+		// server is the scope (issues.application_id) and the replica an instance,
 		// neither of them baked into the check name.
 		let rows: Vec<VerifRow> = sql_query(
 			"SELECT check_name, application_id, server_group_id FROM issues \
@@ -591,7 +591,7 @@ async fn record_report_files_server_scoped_with_stable_name() {
 		.expect("load");
 		assert_eq!(rows.len(), 1);
 		assert_eq!(rows[0].check_name, "restore-verification");
-		assert_eq!(rows[0].server_id, Some(server));
+		assert_eq!(rows[0].application_id, Some(server));
 		assert_eq!(rows[0].server_group_id, None);
 	})
 	.await;

@@ -204,7 +204,7 @@ WITH obs AS (
 		END AS degraded
 	FROM statuses s
 	CROSS JOIN LATERAL jsonb_array_elements(s.health) e
-	WHERE s.application_id = $1
+	WHERE s.server_id = $1
 		AND s.created_at > NOW() - INTERVAL '30 days'
 		AND e ->> 'check' IS NOT NULL
 ),
@@ -315,7 +315,7 @@ const BACKFILL_LOCK: i64 = 818_723_002;
 /// fleet-wide INSERT..SELECT would hold FK row locks (FOR KEY SHARE) on
 /// most live issues rows until commit, blocking every concurrent filing's
 /// SELECT .. FOR UPDATE for the whole run — ingestion downtime. Per-server
-/// statements ride the (application_id, created_at) statuses index and hold
+/// statements ride the (server_id, created_at) statuses index and hold
 /// their handful of row locks for milliseconds.
 ///
 /// Gated by the `check_stability_backfill` marker (written only on

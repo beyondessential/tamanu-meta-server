@@ -501,12 +501,7 @@ pub async fn register_complete(
 				None => bind_fresh_device(conn, args.server_id, &spki).await?,
 			};
 
-			Device::trust(
-				conn,
-				device_id,
-				commons_types::device::DeviceRole::Server,
-			)
-			.await?;
+			Device::trust(conn, device_id, commons_types::device::DeviceRole::Server).await?;
 			ServerEnrollmentToken::consume(conn, args.server_id, &challenge.token_hash).await?;
 			Application::mark_registered(conn, args.server_id).await?;
 			Ok(device_id)

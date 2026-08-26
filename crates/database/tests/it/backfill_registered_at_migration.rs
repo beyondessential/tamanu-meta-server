@@ -9,8 +9,19 @@ use diesel::sql_types;
 use diesel_async::{RunQueryDsl, SimpleAsyncConnection as _};
 use uuid::Uuid;
 
-const MIGRATION_UP: &str =
+const MIGRATION_UP_HISTORICAL: &str =
 	include_str!("../../../../migrations/2026-06-03-150906-0000_backfill_registered_at/up.sql");
+
+/// The migration's own text, retargeted at the table's current name.
+///
+/// This replays historical SQL against the schema as it stands now, and
+/// `servers` has since been renamed to `applications`. Editing the migration
+/// itself is not an option — it has already run everywhere — so the rename is
+/// applied to the text here instead. `statuses.server_id` is left alone: that
+/// column keeps its name.
+fn migration_up() -> String {
+	MIGRATION_UP_HISTORICAL.replace("UPDATE servers s", "UPDATE applications s")
+}
 
 #[derive(diesel::QueryableByName)]
 struct RegisteredRow {
@@ -89,7 +100,7 @@ async fn migration_backfills_enrolled_servers_only() {
 		.await
 		.expect("seed");
 
-		conn.batch_execute(MIGRATION_UP)
+		conn.batch_execute(&migration_up())
 			.await
 			.expect("replay migration up.sql");
 

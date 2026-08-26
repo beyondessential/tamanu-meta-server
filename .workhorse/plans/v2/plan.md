@@ -19,6 +19,26 @@ How deep the rename goes, and which grain each table lands on:
 
 **Trap.** The wire's `server_id` and the database's `servers.id` stop meaning the same thing. bestool's `server_id` is the *machine* ID and keeps that meaning through the transition, while `servers.id` becomes `applications.id`. A mechanical sweep of `server_id` → `application_id` is wrong at exactly the places touching the device API; each of those has to be read rather than swept.
 
+### Rename step: done
+
+Migration `2026-08-26-101808-0000_rename_servers_to_applications`. `servers` → `applications`, `server_certificates` → `application_certificates`, `server_names` → `application_names`, and the `server_id` column on the tables that stay application-grain (`issues`, `scoped_check_policies`, `incident_reeval_queue`, `version_known_issues`, plus `server_groups.version_server_id`). `Scope::Server` is now `Scope::Application`.
+
+The machine-grain tables were **deliberately left alone**, so each is touched once rather than twice: `statuses`, `server_reported_detail`, `server_backup_capabilities`, `server_enrollment_tokens`, `server_enrollment_challenges`, `backup_*`, `restore_replicas`, `device_server_associations`. Their `server_id` still points at `applications.id`; the FK followed the table rename by itself.
+
+What the rename step deliberately did **not** move, because each belongs to the split:
+
+- **Routes.** Every path is still `/servers/...` on both APIs. Moving them is the split's job, alongside the deprecation aliases.
+- **`DeviceRole::Server`.** An identity concept, and the variant name drives the serialised value. Renaming it to `Application` silently changed the wire value from `server` to `application` and broke the enrolment role. It becomes the machine role in the split, with `server` as an input alias (see [DTR](../../specs/private-server/device-trust.md)).
+- **Product-facing copy.** The public versions page still reads "Production Server Versions"; `ServerKind`, `ServerRank` and `Product` keep their names and their prose.
+
+**Three traps this step actually hit**, all of them silent rather than loud:
+
+1. **A PL/pgSQL body does not follow a column rename.** Views and CHECK expressions store parsed references and follow it; a function body is text and does not. `update_server_group_effective_version` reads `version_application_id`, so the migration restates it. Missed, every status push fails at the trigger. Worth re-checking on the split: `upsert_device_server_association` is the other trigger function, untouched here only because both columns it names are unrenamed.
+2. **Raw SQL in tests fails soft.** `fetch_issue` ends `.ok()`, so a query naming a column that no longer exists returns `None` and reads as "nothing filed" rather than as an error. Renaming a column means sweeping SQL string literals, not just the diesel DSL — and a literal that joins a renamed table to a kept one has to be split by hand.
+3. **A blanket per-file sweep is wrong wherever one file spans both grains.** `stability.rs` queries `issues` *and* `statuses`; sweeping the file rewrote `statuses.server_id`, which the schema still has. The compiler cannot catch this — it is inside a SQL string.
+
+**Pre-existing drift, not this card's to fix.** `diesel migration run` regenerates `crates/database/src/schema.rs`, and a fresh migrate puts `server_group_backup_config.maintenance_role_arn` at ordinal 12 where the committed schema has it at 5 (and adds `source_policies` to `allow_tables_to_appear_in_same_query`). `ServerGroupBackupConfig` derives positional `Queryable`, so taking the regenerated order fails to compile. Both were restored to the committed values to keep this diff purely the rename. **Anyone regenerating the schema has to restore them again**, and the underlying disagreement is worth its own card.
+
 ## Extending scope
 
 The storage pattern already takes another grain and has taken two. Each scope is a nullable FK column, with a CHECK that at most one is set and a partial unique index keying find-or-create for that grain. `issues` (the check-state table) and `scoped_check_policies` both carry `server_id` and `server_group_id`; `incidents` carries `server_group_id` as its target.
