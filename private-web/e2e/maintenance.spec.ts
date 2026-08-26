@@ -39,7 +39,7 @@ test.describe("maintenance windows", () => {
 
 		await page.goto(`/servers/${server.id}`);
 		const section = page.getByTestId("maintenance-section");
-		await expect(section).toContainText("Under maintenance until");
+		await expect(section).toContainText("Under maintenance, ending");
 		await expect(section).toContainText("Upgrading to 2.62");
 		await expect(section).toContainText("daniel@bes.au");
 		await expect(page.getByTestId("maintenance-marker")).toBeVisible();
@@ -99,7 +99,7 @@ test.describe("maintenance windows", () => {
 
 		await page.goto(`/servers/${server.id}`);
 		const covering = page.getByTestId("covering-group-window");
-		await expect(covering).toContainText("Under maintenance until");
+		await expect(covering).toContainText("Under maintenance, ending");
 		await expect(covering).toContainText("Cutting over the database");
 		await expect(
 			covering.getByRole("link", { name: "whole-region" }),

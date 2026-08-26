@@ -105,8 +105,8 @@ export default function MaintenanceSection({
 					data-testid="covering-group-window"
 				>
 					<Typography variant="body2">
-						Under maintenance until{" "}
-						<TimeAgo timestamp={fromGroup.expected_end} /> as part of{" "}
+						Under maintenance, ending{" "}
+						<TimeAgo timestamp={fromGroup.expected_end} />, as part of{" "}
 						<MuiLink component={RouterLink} to={`/groups/${groupId}`}>
 							{groupName ?? "its group"}
 						</MuiLink>
@@ -150,8 +150,9 @@ export default function MaintenanceSection({
 					}
 				>
 					<Typography variant="body2">
-						Under maintenance until <TimeAgo timestamp={open.expected_end} />
+						Under maintenance, ending <TimeAgo timestamp={open.expected_end} />
 						{open.declared_by && `, declared by ${open.declared_by}`}.
+
 						Checks are recorded and shown; nothing on this{" "}
 						{scope === "server" ? "server" : "group"} alerts.
 					</Typography>
@@ -170,7 +171,7 @@ export default function MaintenanceSection({
 						onClick={() => setDialogOpen(true)}
 						sx={{ mb: history.length ? 2 : 0 }}
 					>
-						Declare maintenance
+						{fromGroup ? "Declare for this server as well" : "Declare maintenance"}
 					</Button>
 				)
 			)}
