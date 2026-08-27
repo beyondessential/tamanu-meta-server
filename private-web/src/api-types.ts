@@ -5445,6 +5445,13 @@ export interface components {
             billing_labels: components["schemas"]["BillingTag"][];
             /** @description The group itself. */
             group: components["schemas"]["ServerGroup"];
+            /** @description Whether a maintenance window (or its settle period) suspends the group. */
+            maintained: boolean;
+            /**
+             * @description Whether the suspension is only the settle period: the window has
+             *     ended and watching resumes when it elapses.
+             */
+            maintenance_settling: boolean;
             /**
              * @description The group's member servers, sorted by name, with current status and
              *     display host included.
@@ -8353,6 +8360,11 @@ export interface components {
              *     group's: its checks are recorded and shown, and raise nothing.
              */
             maintained: boolean;
+            /**
+             * @description Whether the suspension is only the settle period: the window has
+             *     ended and watching resumes when it elapses.
+             */
+            maintenance_settling: boolean;
             /**
              * @description Whether the server is known to run Munin, from the most recent source
              *     to report the flag. The UI offers a Munin link only when this is true.

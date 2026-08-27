@@ -25,7 +25,6 @@ import {
 	Typography,
 } from "@mui/material";
 import BuildCircleIcon from "@mui/icons-material/BuildCircle";
-import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CancelIcon from "@mui/icons-material/Cancel";
 import RemoveCircleOutlinedIcon from "@mui/icons-material/RemoveCircleOutlined";
@@ -170,21 +169,6 @@ export default function ServerDetail() {
 				onEventSubmitted={bumpRefresh}
 				onArchived={() => detail.reload()}
 			/>
-			{data.maintained && !archived && (
-				<Alert
-					severity="info"
-					icon={<BuildOutlinedIcon fontSize="inherit" />}
-					data-testid="maintenance-banner"
-					action={
-						<Button size="small" color="inherit" href="#maintenance">
-							Details
-						</Button>
-					}
-				>
-					Under maintenance: checks are recorded and shown, but nothing on
-					this server alerts.
-				</Alert>
-			)}
 			{archived ? (
 				<ArchivedBanner
 					serverId={data.server.id}
@@ -213,6 +197,7 @@ export default function ServerDetail() {
 				onSilenced={bumpRefresh}
 				up={data.up}
 				maintained={data.maintained}
+				maintenanceSettling={data.maintenance_settling}
 				refreshTick={refreshTick}
 			/>
 			{data.group && (
@@ -793,6 +778,7 @@ function InfoSection({
 	onSilenced,
 	up,
 	maintained,
+	maintenanceSettling,
 	refreshTick,
 }: {
 	server: ServerInfo;
@@ -802,6 +788,7 @@ function InfoSection({
 	onSilenced: () => void;
 	up: ShortStatus;
 	maintained: boolean;
+	maintenanceSettling: boolean;
 	refreshTick: number;
 }) {
 	return (
@@ -812,6 +799,7 @@ function InfoSection({
 					up={up}
 					monitored={server.is_monitored !== false}
 					maintained={maintained}
+					maintenanceSettling={maintenanceSettling}
 					operators={status.operators}
 				/>
 			)}
@@ -900,12 +888,14 @@ function HealthIndicator({
 	up,
 	monitored,
 	maintained,
+	maintenanceSettling,
 	operators,
 }: {
 	health: HealthState;
 	up: ShortStatus;
 	monitored: boolean;
 	maintained: boolean;
+	maintenanceSettling: boolean;
 	operators: OperatorPresence[];
 }) {
 	const reporting = up === "up" || up === "blip";
@@ -921,6 +911,8 @@ function HealthIndicator({
 				stale={!reporting}
 				monitored={monitored}
 				maintained={maintained}
+				maintenanceSettling={maintenanceSettling}
+				maintenanceHref="#maintenance"
 			/>
 			{reporting && operators.length > 0 && (
 				<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>

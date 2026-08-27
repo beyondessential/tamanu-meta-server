@@ -130,11 +130,12 @@ export default function MaintenanceSection({
 					action={
 						isAdmin ? (
 							<Stack direction="row" spacing={1}>
-								<Button size="small" onClick={() => setDialogOpen(true)}>
+								<Button size="small" color="info" onClick={() => setDialogOpen(true)}>
 									Amend
 								</Button>
 								<Button
 									size="small"
+									color="info"
 									variant="outlined"
 									disabled={lift.pending}
 									onClick={async () => {
@@ -153,8 +154,7 @@ export default function MaintenanceSection({
 					}
 				>
 					<Typography variant="body2">
-						Under maintenance, ending <TimeAgo timestamp={open.expected_end} />
-						{open.declared_by && `, declared by ${open.declared_by}`}.
+						Under maintenance, ending <TimeAgo timestamp={open.expected_end} />.
 
 						Checks are recorded and shown; nothing on this{" "}
 						{scope === "server" ? "server" : "group"} alerts.

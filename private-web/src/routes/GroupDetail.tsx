@@ -9,6 +9,7 @@ import {
 	Typography,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
+import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
 import BackupIcon from "@mui/icons-material/Backup";
 import EditIcon from "@mui/icons-material/Edit";
@@ -108,9 +109,28 @@ export default function GroupDetail() {
 				spacing={2}
 				sx={{ alignItems: "center", justifyContent: "space-between" }}
 			>
-				<Typography variant="h4" component="h1">
-					{group.name}
-				</Typography>
+				<Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
+					<Typography variant="h4" component="h1">
+						{group.name}
+					</Typography>
+					{detail.data.maintained && (
+						<Chip
+							size="small"
+							variant="outlined"
+							color="info"
+							icon={<BuildOutlinedIcon />}
+							label={
+								detail.data.maintenance_settling
+									? "Maintenance just ended"
+									: "Under maintenance"
+							}
+							component="a"
+							href="#maintenance"
+							clickable
+							data-testid="maintenance-marker"
+						/>
+					)}
+				</Stack>
 				{admin && (
 					<Stack direction="row" spacing={1}>
 						<Button
@@ -246,6 +266,7 @@ export default function GroupDetail() {
 
 			<MaintenanceSection
 				scope="group"
+				anchor="maintenance"
 				id={group.id}
 				targetLabel={group.name}
 			/>

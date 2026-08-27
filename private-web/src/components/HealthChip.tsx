@@ -50,6 +50,8 @@ export default function HealthChip({
 	stale = false,
 	monitored = true,
 	maintained = false,
+	maintenanceSettling = false,
+	maintenanceHref,
 }: {
 	health: HealthState;
 	stale?: boolean;
@@ -58,6 +60,10 @@ export default function HealthChip({
 	 * takes a maintenance marker, distinct from the unmonitored one. */
 	// spec: MNT#presentation
 	maintained?: boolean;
+	/** The window has ended; only the settle period still suspends. */
+	maintenanceSettling?: boolean;
+	/** Where the maintenance chip links, e.g. the page's maintenance section. */
+	maintenanceHref?: string;
 }) {
 	const chip = stale ? (
 		<Tooltip title="Server isn't currently reporting status; this reflects its most recent received report.">
@@ -93,9 +99,21 @@ export default function HealthChip({
 			<Box sx={{ opacity: 0.5, display: "inline-flex" }}>{chip}</Box>
 			{maintained && (
 				<Tooltip title={MAINTAINED_TOOLTIP}>
-					<BuildOutlinedIcon
-						fontSize="small"
+					<Chip
+						size="small"
+						variant="outlined"
 						color="info"
+						icon={<BuildOutlinedIcon />}
+						label={
+							maintenanceSettling
+								? "Maintenance just ended"
+								: "Under maintenance"
+						}
+						{...(maintenanceHref && {
+							component: "a",
+							href: maintenanceHref,
+							clickable: true,
+						})}
 						data-testid="maintenance-marker"
 					/>
 				</Tooltip>

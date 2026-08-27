@@ -49,6 +49,9 @@ pub struct ServerDetailData {
 	/// group's: its checks are recorded and shown, and raise nothing.
 	// spec: MNT#presentation
 	pub maintained: bool,
+	/// Whether the suspension is only the settle period: the window has
+	/// ended and watching resumes when it elapses.
+	pub maintenance_settling: bool,
 	/// The server's current checks across every source, graded and
 	/// classified — the live consolidated checks view.
 	pub checks: commons_types::status::ConsolidatedChecks,
@@ -779,6 +782,19 @@ pub async fn get_detail(
 		server.group_id,
 	)
 	.await?;
+	let maintenance_settling = maintained && {
+		use database::issues::Scope;
+		use database::maintenance_windows::MaintenanceWindow;
+		let mut open = MaintenanceWindow::open_for(&mut conn, Scope::Server(args.server_id))
+			.await?
+			.is_some();
+		if !open && let Some(gid) = server.group_id {
+			open = MaintenanceWindow::open_for(&mut conn, Scope::Group(gid))
+				.await?
+				.is_some();
+		}
+		!open
+	};
 
 	Ok(Json(ServerDetailData {
 		server: server_details,
@@ -787,6 +803,7 @@ pub async fn get_detail(
 		up,
 		health,
 		maintained,
+		maintenance_settling,
 		checks,
 		group,
 		siblings,

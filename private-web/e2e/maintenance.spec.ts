@@ -43,9 +43,7 @@ test.describe("maintenance windows", () => {
 		const section = page.getByTestId("maintenance-section");
 		await expect(section).toContainText("Under maintenance, ending");
 		await expect(section).toContainText("Upgrading to 2.62");
-		await expect(section).toContainText("daniel@bes.au");
-		await expect(page.getByTestId("maintenance-marker")).toBeVisible();
-		await expect(page.getByTestId("maintenance-banner")).toContainText(
+		await expect(page.getByTestId("maintenance-marker")).toContainText(
 			"Under maintenance",
 		);
 	});
@@ -110,6 +108,36 @@ test.describe("maintenance windows", () => {
 			covering.getByRole("link", { name: "whole-region" }),
 		).toHaveAttribute("href", `/groups/${group.id}`);
 		await expect(page.getByTestId("maintenance-marker")).toBeVisible();
+
+		await page.goto(`/groups/${group.id}`);
+		await expect(page.getByTestId("maintenance-marker")).toContainText(
+			"Under maintenance",
+		);
+	});
+
+	test("a just-ended window reads as settling, not as maintenance", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "coming-back" });
+		const server = await seedServer(sql, {
+			name: "just-returned",
+			groupId: group.id,
+		});
+		await seedStatus(sql, { serverId: server.id, healthy: true });
+		await seedMaintenanceWindow(sql, {
+			serverId: server.id,
+			endedMinutesAgo: 2,
+			note: "Rebooted",
+		});
+
+		await page.goto(`/servers/${server.id}`);
+		await expect(page.getByTestId("maintenance-marker")).toContainText(
+			"Maintenance just ended",
+		);
+		await expect(
+			page.getByRole("button", { name: "Declare maintenance" }),
+		).toBeVisible();
 	});
 
 	test("the maintenance page lists what the fleet is not watching", async ({
@@ -125,6 +153,7 @@ test.describe("maintenance windows", () => {
 		await page.goto("/maintenance");
 		const row = page.getByRole("row", { name: /whole-deployment/ });
 		await expect(row).toContainText("Cutting over the database");
+		await expect(row).toContainText("seed@bes.au");
 		await expect(
 			page.getByRole("link", { name: "whole-deployment" }),
 		).toHaveAttribute("href", `/groups/${group.id}`);

@@ -10134,7 +10134,9 @@
         "required": [
           "group",
           "servers",
-          "billing_labels"
+          "billing_labels",
+          "maintained",
+          "maintenance_settling"
         ],
         "properties": {
           "billing_labels": {
@@ -10147,6 +10149,14 @@
           "group": {
             "$ref": "#/components/schemas/ServerGroup",
             "description": "The group itself."
+          },
+          "maintained": {
+            "type": "boolean",
+            "description": "Whether a maintenance window (or its settle period) suspends the group."
+          },
+          "maintenance_settling": {
+            "type": "boolean",
+            "description": "Whether the suspension is only the settle period: the window has\nended and watching resumes when it elapses."
           },
           "servers": {
             "type": "array",
@@ -14636,6 +14646,7 @@
           "up",
           "health",
           "maintained",
+          "maintenance_settling",
           "checks",
           "siblings",
           "billing_labels",
@@ -14693,6 +14704,10 @@
           "maintained": {
             "type": "boolean",
             "description": "Whether a maintenance window suspends this server, its own or its\ngroup's: its checks are recorded and shown, and raise nothing."
+          },
+          "maintenance_settling": {
+            "type": "boolean",
+            "description": "Whether the suspension is only the settle period: the window has\nended and watching resumes when it elapses."
           },
           "munin": {
             "type": "boolean",
