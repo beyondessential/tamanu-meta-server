@@ -96,9 +96,11 @@ Canopy's own checks register already reviewed, with the policy their condition w
 Beyond the fleet catalog, a transform can be scoped to a target: per server, per group, or Canopy-wide.
 Transforms apply in order — fleet catalog, then group, then server — each acting on the previous effective result, so the most specific scope has the last word.
 
-The operator interface presents one scoped policy: the **silence**, a scoped ceiling of `skipped`, recording who silenced and when.
+The operator interface presents two scoped policies.
+The **silence** is a scoped ceiling of `skipped` on one check, recording who silenced and when.
 A silenced check keeps recording its observed results; its effective result is skipped, so it raises nothing and counts nowhere.
-The model admits arbitrary scoped transforms; surfaces beyond the silence are deliberately not offered yet.
+The **maintenance window** is the same ceiling applied to every check on a target for a bounded time, so that work an operator is doing raises nothing while it runs (see [MNT](maintenance.md)).
+The model admits arbitrary scoped transforms; surfaces beyond these two are deliberately not offered yet.
 
 ## Documentation
 

@@ -82,6 +82,7 @@ export type ServerRank = Solidify<Schemas["ServerRank"]>;
 export type VersionStatus = Solidify<Schemas["VersionStatus"]>;
 export type DeviceRole = Solidify<Schemas["DeviceRole"]>;
 export type ProvisionedCredential = Solidify<Schemas["ProvisionedCredential"]>;
+export type MaintenanceWindow = Solidify<Schemas["MaintenanceWindow"]>;
 export type ResolvedReason = Solidify<Schemas["ResolvedReason"]>;
 
 export type VersionStr = Solidify<Schemas["VersionStr"]>;

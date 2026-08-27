@@ -150,6 +150,11 @@ pub struct GroupDetail {
 	pub servers: Vec<super::servers::ServerInfo>,
 	/// The group's effective `billing.*` labels (product/deployment/stage).
 	pub billing_labels: Vec<BillingTag>,
+	/// Whether a maintenance window (or its settle period) suspends the group.
+	pub maintained: bool,
+	/// Whether the suspension is only the settle period: the window has
+	/// ended and watching resumes when it elapses.
+	pub maintenance_settling: bool,
 }
 
 /// Get a server group with its members.
@@ -195,9 +200,24 @@ pub async fn get(
 	super::servers::decorate_with_status(&mut conn, &mut servers).await?;
 	super::servers::fill_display_hosts(&mut conn, &mut servers).await?;
 	let billing_labels = group_billing_labels(&mut conn, &group).await?;
+	let maintained = database::maintenance_windows::MaintenanceWindow::suspends(
+		&mut conn,
+		None,
+		Some(args.server_group_id),
+	)
+	.await?;
+	let maintenance_settling = maintained
+		&& database::maintenance_windows::MaintenanceWindow::open_for(
+			&mut conn,
+			database::issues::Scope::Group(args.server_group_id),
+		)
+		.await?
+		.is_none();
 	Ok(Json(GroupDetail {
 		group,
 		servers,
+		maintained,
+		maintenance_settling,
 		billing_labels,
 	}))
 }

@@ -47,7 +47,7 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, server_reported_detail, issues, device_keys, servers, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, upgrade_plans, version_known_issues, recovery_vault_writes, server_names, server_certificates, compromised_keys RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, server_reported_detail, issues, device_keys, servers, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, upgrade_plans, maintenance_windows, version_known_issues, recovery_vault_writes, server_names, server_certificates, compromised_keys RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" server with it;
 	// self-alerts attach to that row, so put it back. `kind = 'canopy'` is the
@@ -1271,6 +1271,46 @@ export async function seedMigrationTest(
 
 /** Record where a group is going. `plannedFor` is `YYYY-MM-DD`; omit for a plan
  * with no date. */
+export interface SeededMaintenanceWindow {
+	id: string;
+}
+
+/** A maintenance window over a server or a group. `endsInHours` places the
+ * expected end, so a negative value seeds one the sweep will end. */
+export async function seedMaintenanceWindow(
+	sql: Sql,
+	opts: {
+		serverId?: string;
+		serverGroupId?: string;
+		endsInHours?: number;
+		/** Seed the window already ended this many minutes ago (still inside
+		 * the settle period when under 10). */
+		endedMinutesAgo?: number;
+		note?: string | null;
+		declaredBy?: string | null;
+	},
+): Promise<SeededMaintenanceWindow> {
+	const rows = await sql.query<{ id: string }>(
+		`INSERT INTO maintenance_windows
+		   (server_id, server_group_id, expected_end, ended_at, note, declared_by)
+		 VALUES ($1, $2, NOW() + make_interval(mins => $3),
+		         CASE WHEN $4::int IS NULL THEN NULL ELSE NOW() - make_interval(mins => $4::int) END,
+		         $5, $6)
+		 RETURNING id`,
+		[
+			opts.serverId ?? null,
+			opts.serverGroupId ?? null,
+			opts.endedMinutesAgo != null
+				? -opts.endedMinutesAgo
+				: Math.round((opts.endsInHours ?? 2) * 60),
+			opts.endedMinutesAgo ?? null,
+			opts.note ?? null,
+			opts.declaredBy ?? "seed@bes.au",
+		],
+	);
+	return { id: rows[0]!.id };
+}
+
 export async function seedUpgradePlan(
 	sql: Sql,
 	opts: {

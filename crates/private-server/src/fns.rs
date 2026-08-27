@@ -11,6 +11,7 @@ pub mod domains;
 pub mod healthchecks;
 pub mod incidents;
 pub mod issues;
+pub mod maintenance;
 pub mod mcp_tokens;
 pub mod migration_tests;
 pub mod restore_replicas;
@@ -70,6 +71,7 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 			.nest("/self_alerts", self_alerts::routes())
 			.nest("/server_groups", server_groups::routes())
 			.nest("/servers", servers::routes())
+			.nest("/maintenance", maintenance::routes())
 			.nest("/silenced_refs", silenced_refs::routes())
 			.nest("/sql", sql::routes())
 			.nest("/statuses", statuses::routes())

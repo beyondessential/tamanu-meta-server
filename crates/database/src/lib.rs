@@ -15,6 +15,7 @@ pub mod check_policies;
 pub mod chrome_releases;
 pub mod devices;
 pub mod issues;
+pub mod maintenance_windows;
 pub mod mcp_tokens;
 pub mod migration_tests;
 pub mod notes;

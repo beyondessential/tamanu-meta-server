@@ -241,6 +241,16 @@ pub fn spawn() -> JoinHandle<()> {
 				Err(err) => error!("incident linger sweep failed: {err}"),
 			}
 
+			// Maintenance windows that have reached their expected end, and
+			// targets whose settle period has elapsed and are watched again.
+			match database::maintenance_windows::MaintenanceWindow::sweep(&mut db).await {
+				Ok((0, 0)) => {}
+				Ok((ended, settled)) => {
+					debug!("maintenance: ended {ended} window(s), settled {settled}")
+				}
+				Err(err) => error!("maintenance window sweep failed: {err}"),
+			}
+
 			// Backstop drain of the incident-reeval queue in case the dedicated
 			// worker task above has died. Safe to run concurrently with it:
 			// `process_incident_reeval_queue` claims rows `FOR UPDATE SKIP

@@ -25,6 +25,7 @@ import {
 	Typography,
 } from "@mui/material";
 import BuildCircleIcon from "@mui/icons-material/BuildCircle";
+import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CancelIcon from "@mui/icons-material/Cancel";
 import RemoveCircleOutlinedIcon from "@mui/icons-material/RemoveCircleOutlined";
@@ -57,6 +58,7 @@ import IncidentsLink from "../components/IncidentsLink";
 import OperatorAvatars from "../components/OperatorAvatars";
 import ManualEventButton from "../components/ManualEventButton";
 import ServerCertificatesSection from "../components/ServerCertificatesSection";
+import MaintenanceSection from "../components/MaintenanceSection";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import StatusDot from "../components/StatusDot";
 import TailnetIdentitySection from "../components/TailnetIdentitySection";
@@ -195,6 +197,8 @@ export default function ServerDetail() {
 				checks={data.checks}
 				onSilenced={bumpRefresh}
 				up={data.up}
+				maintained={data.maintained}
+				maintenanceSettling={data.maintenance_settling}
 				refreshTick={refreshTick}
 			/>
 			{data.group && (
@@ -228,6 +232,15 @@ export default function ServerDetail() {
 					onEventSubmitted={bumpRefresh}
 				/>
 			)}
+			<MaintenanceSection
+				scope="server"
+				anchor="maintenance"
+				id={data.server.id}
+				targetLabel={data.server.name ?? data.server.display_host}
+				groupId={data.group?.id ?? null}
+				groupName={data.group?.name ?? null}
+				onChanged={() => detail.reload()}
+			/>
 			<SilencedRefsSection
 				scope="server"
 				id={data.server.id}
@@ -765,6 +778,8 @@ function InfoSection({
 	checks,
 	onSilenced,
 	up,
+	maintained,
+	maintenanceSettling,
 	refreshTick,
 }: {
 	server: ServerInfo;
@@ -773,6 +788,8 @@ function InfoSection({
 	checks: ConsolidatedChecks;
 	onSilenced: () => void;
 	up: ShortStatus;
+	maintained: boolean;
+	maintenanceSettling: boolean;
 	refreshTick: number;
 }) {
 	return (
@@ -782,6 +799,8 @@ function InfoSection({
 					health={health}
 					up={up}
 					monitored={server.is_monitored !== false}
+					maintained={maintained}
+					maintenanceSettling={maintenanceSettling}
 					operators={status.operators}
 				/>
 			)}
@@ -828,6 +847,7 @@ function InfoSection({
 				operators={status?.operators ?? []}
 				serverId={server.id}
 				groupId={server.group_id}
+				maintained={maintained}
 				refreshTick={refreshTick}
 				onSilenced={onSilenced}
 			/>
@@ -869,11 +889,15 @@ function HealthIndicator({
 	health,
 	up,
 	monitored,
+	maintained,
+	maintenanceSettling,
 	operators,
 }: {
 	health: HealthState;
 	up: ShortStatus;
 	monitored: boolean;
+	maintained: boolean;
+	maintenanceSettling: boolean;
 	operators: OperatorPresence[];
 }) {
 	const reporting = up === "up" || up === "blip";
@@ -884,7 +908,14 @@ function HealthIndicator({
 			useFlexGap
 			sx={{ mb: 1.5, alignItems: "center", flexWrap: "wrap" }}
 		>
-			<HealthChip health={health} stale={!reporting} monitored={monitored} />
+			<HealthChip
+				health={health}
+				stale={!reporting}
+				monitored={monitored}
+				maintained={maintained}
+				maintenanceSettling={maintenanceSettling}
+				maintenanceHref="#maintenance"
+			/>
 			{reporting && operators.length > 0 && (
 				<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 					<OperatorAvatars operators={operators} size={24} />
@@ -915,6 +946,7 @@ function ChecksTable(props: {
 	operators: OperatorPresence[];
 	serverId: string;
 	groupId: string | null;
+	maintained: boolean;
 	refreshTick: number;
 	onSilenced: () => void;
 }) {
@@ -949,6 +981,7 @@ function ChecksTableGrouped(props: {
 	operators: OperatorPresence[];
 	serverId: string;
 	groupId: string;
+	maintained: boolean;
 	refreshTick: number;
 	onSilenced: () => void;
 	serverSilences: ServerSilencedRef[];
@@ -968,6 +1001,7 @@ function ChecksTableBody({
 	operators,
 	serverId,
 	groupId,
+	maintained,
 	onSilenced,
 	serverSilences,
 	groupSilences,
@@ -976,6 +1010,7 @@ function ChecksTableBody({
 	operators: OperatorPresence[];
 	serverId: string;
 	groupId: string | null;
+	maintained: boolean;
 	onSilenced: () => void;
 	serverSilences: ServerSilencedRef[];
 	groupSilences: ServerGroupSilencedRef[];
@@ -1013,6 +1048,7 @@ function ChecksTableBody({
 							operators={operators}
 							serverId={serverId}
 							groupId={groupId}
+							maintained={maintained}
 							onSilenced={onSilenced}
 							serverSilence={serverSilence}
 							groupSilence={groupSilence}
@@ -1047,6 +1083,7 @@ function CheckRow({
 	operators,
 	serverId,
 	groupId,
+	maintained,
 	onSilenced,
 	serverSilence,
 	groupSilence,
@@ -1055,6 +1092,7 @@ function CheckRow({
 	operators: OperatorPresence[];
 	serverId: string;
 	groupId: string | null;
+	maintained: boolean;
 	onSilenced: () => void;
 	serverSilence: ServerSilencedRef | null;
 	groupSilence: ServerGroupSilencedRef | null;
@@ -1115,6 +1153,9 @@ function CheckRow({
 						serverSilence={serverSilence}
 						groupSilence={groupSilence}
 					/>
+					{maintained && effective === "skipped" && (
+						<MaintenanceSkipChip />
+					)}
 				</Stack>
 				{sessions !== null && (
 					<ExternalUsersDetails
@@ -1212,6 +1253,23 @@ function CheckResultIcon({
  * is already in the silence list at one or both scopes. Shown for all
  * viewers (silences are listable without admin); the row's silence
  * button still gates the manage actions on admin. */
+/** Why a check under a window graded to skipped. Without it the row reads
+ * as a precondition the check itself did not meet.
+ * spec: MNT#presentation */
+function MaintenanceSkipChip() {
+	return (
+		<Tooltip title="A maintenance window holds here, so every check on this server grades to skipped and raises nothing.">
+			<Chip
+				size="small"
+				variant="outlined"
+				icon={<BuildOutlinedIcon />}
+				label="skipped: under maintenance"
+				data-testid="check-maintenance-skip"
+			/>
+		</Tooltip>
+	);
+}
+
 function SilencedChip({
 	serverSilence,
 	groupSilence,
@@ -1615,6 +1673,7 @@ function SiblingServers({
 										up={sib.up ?? "gone"}
 										health={sib.health ?? undefined}
 										monitored={sib.is_monitored !== false}
+										maintained={sib.maintained === true}
 									/>
 									<MuiLink
 										component={RouterLink}
@@ -2119,6 +2178,7 @@ function SiblingDotStrip({
 							up={(m.entry.up as ShortStatus | undefined) ?? "gone"}
 							health={(m.entry.health as HealthState | undefined) ?? undefined}
 							monitored={m.entry.is_monitored !== false}
+							maintained={m.entry.maintained === true}
 							title={m.entry.name ?? ""}
 							dim={!m.focused}
 							size="0.8em"

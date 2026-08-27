@@ -58,6 +58,12 @@ export function StatusLegend() {
 					Cut through: unmonitored (state shown, nothing alerts)
 				</Typography>
 			</Stack>
+			<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
+				<StatusDot up="down" maintained />
+				<Typography variant="body2" color="text.secondary">
+					Cut the other way: under maintenance (being worked on)
+				</Typography>
+			</Stack>
 		</Stack>
 	);
 }

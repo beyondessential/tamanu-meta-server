@@ -40,6 +40,11 @@ pub const KIND_INCIDENT_RESOLVE: &str = "incident_resolve";
 /// Legacy: direct self-alert notices, from before self-alerts flowed
 /// through canopy-wide incidents. Nothing enqueues these anymore; the
 /// constants remain so the drainer can drain straggler rows harmlessly.
+/// A maintenance window declared over a server or a group.
+pub const KIND_MAINTENANCE_DECLARED: &str = "maintenance_declared";
+/// A maintenance window ended, whether an operator lifted it or its
+/// expected end passed.
+pub const KIND_MAINTENANCE_ENDED: &str = "maintenance_ended";
 pub const KIND_SELF_ALERT_OPEN: &str = "self_alert_open";
 /// Legacy: see [`KIND_SELF_ALERT_OPEN`].
 pub const KIND_SELF_ALERT_RESOLVE: &str = "self_alert_resolve";

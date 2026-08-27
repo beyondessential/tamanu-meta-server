@@ -21,8 +21,8 @@ use std::time::Duration;
 use clap::Parser;
 use commons_types::status::CheckResult;
 use database::slack_outbox::{
-	KIND_INCIDENT_OPEN, KIND_INCIDENT_RESOLVE, KIND_SELF_ALERT_OPEN, KIND_SELF_ALERT_RESOLVE,
-	SlackOutbox,
+	KIND_INCIDENT_OPEN, KIND_INCIDENT_RESOLVE, KIND_MAINTENANCE_DECLARED, KIND_MAINTENANCE_ENDED,
+	KIND_SELF_ALERT_OPEN, KIND_SELF_ALERT_RESOLVE, SlackOutbox,
 };
 use diesel_async::AsyncConnection;
 use lloggs::{LoggingArgs, PreArgs};
@@ -63,7 +63,19 @@ const WATCHDOG_CHECK_EVERY: Duration = Duration::from_secs(30);
 struct Config {
 	open: Option<String>,
 	resolve: Option<String>,
+	/// Maintenance hooks are optional independently of the incident ones: a
+	/// deployment that hasn't built the workflows still records its windows
+	/// and suspends on them, it just doesn't announce them.
+	maintenance_declared: Option<String>,
+	maintenance_ended: Option<String>,
 	private_url: Option<String>,
+}
+
+/// Empty reads as unset. A deployment that renders an unconfigured URL into
+/// `value: ""` sets the variable rather than omitting it, and an empty URL
+/// would have the drainer post to nowhere and retry the row forever.
+fn present(value: Option<String>) -> Option<String> {
+	value.filter(|v| !v.trim().is_empty())
 }
 
 impl Config {
@@ -71,6 +83,8 @@ impl Config {
 		Self::build(
 			std::env::var("SLACK_WEBHOOK_OPEN_URL").ok(),
 			std::env::var("SLACK_WEBHOOK_RESOLVE_URL").ok(),
+			std::env::var("SLACK_WEBHOOK_MAINTENANCE_DECLARED_URL").ok(),
+			std::env::var("SLACK_WEBHOOK_MAINTENANCE_ENDED_URL").ok(),
 			std::env::var("PRIVATE_URL").ok(),
 		)
 	}
@@ -78,8 +92,13 @@ impl Config {
 	fn build(
 		open: Option<String>,
 		resolve: Option<String>,
+		maintenance_declared: Option<String>,
+		maintenance_ended: Option<String>,
 		private_url: Option<String>,
 	) -> miette::Result<Self> {
+		let (open, resolve, private_url) = (present(open), present(resolve), present(private_url));
+		let maintenance_declared = present(maintenance_declared);
+		let maintenance_ended = present(maintenance_ended);
 		let inputs: [(&str, &Option<String>); 2] = [
 			("SLACK_WEBHOOK_OPEN_URL", &open),
 			("SLACK_WEBHOOK_RESOLVE_URL", &resolve),
@@ -111,6 +130,8 @@ impl Config {
 		Ok(Self {
 			open,
 			resolve,
+			maintenance_declared,
+			maintenance_ended,
 			private_url: Some(private_url),
 		})
 	}
@@ -125,6 +146,8 @@ impl Config {
 		match kind {
 			KIND_INCIDENT_OPEN => Ok(self.open.as_deref()),
 			KIND_INCIDENT_RESOLVE => Ok(self.resolve.as_deref()),
+			KIND_MAINTENANCE_DECLARED => Ok(self.maintenance_declared.as_deref()),
+			KIND_MAINTENANCE_ENDED => Ok(self.maintenance_ended.as_deref()),
 			// Legacy: nothing enqueues self-alert rows anymore; stragglers
 			// from before an upgrade drain as delivered without posting.
 			KIND_SELF_ALERT_OPEN | KIND_SELF_ALERT_RESOLVE => Ok(None),
@@ -132,13 +155,17 @@ impl Config {
 		}
 	}
 
-	/// The `link` variable for a row: its incident page, or the self-alerts
-	/// view for rows that have no incident.
+	/// The `link` variable for a row: the fleet's open maintenance windows
+	/// for a maintenance row, its incident page for one carrying an
+	/// incident, or the self-alerts view otherwise.
 	fn link_for(&self, row: &SlackOutbox) -> Option<String> {
 		let base = self.private_url.as_deref()?.trim_end_matches('/');
-		Some(match row.incident_id {
-			Some(incident_id) => format!("{base}/incidents/{incident_id}"),
-			None => format!("{base}/alerts"),
+		Some(match (row.kind.as_str(), row.incident_id) {
+			(KIND_MAINTENANCE_DECLARED | KIND_MAINTENANCE_ENDED, _) => {
+				format!("{base}/maintenance")
+			}
+			(_, Some(incident_id)) => format!("{base}/incidents/{incident_id}"),
+			(_, None) => format!("{base}/alerts"),
 		})
 	}
 }
@@ -387,6 +414,12 @@ async fn deliver(
 			debug!(id = %row.id, kind = %row.kind, "legacy self-alert row; marked delivered without posting");
 			return Ok(String::new());
 		}
+		// A deployment with no maintenance workflow records its windows
+		// without announcing them, rather than failing every row forever.
+		Ok(None) if row.kind == KIND_MAINTENANCE_DECLARED || row.kind == KIND_MAINTENANCE_ENDED => {
+			debug!(id = %row.id, kind = %row.kind, "no maintenance webhook configured; marked delivered without posting");
+			return Ok(String::new());
+		}
 		Ok(None) => {
 			return Err(DeliveryError {
 				msg: format!("no webhook url configured for kind {:?}", row.kind),
@@ -500,6 +533,8 @@ mod tests {
 		let err = Config::build(
 			Some("http://example/open".into()),
 			None,
+			None,
+			None,
 			Some("https://canopy.test".into()),
 		)
 		.expect_err("must require every incident SLACK_WEBHOOK_*_URL when any is set");
@@ -515,6 +550,8 @@ mod tests {
 			Some("http://example/open".into()),
 			Some("http://example/resolve".into()),
 			None,
+			None,
+			None,
 		)
 		.expect_err("must require PRIVATE_URL");
 		assert!(err.to_string().contains("PRIVATE_URL"));
@@ -522,8 +559,22 @@ mod tests {
 
 	#[test]
 	fn config_ok_when_no_hooks_set_even_without_private_url() {
-		let cfg = Config::build(None, None, None).expect("no-op mode is fine");
+		let cfg = Config::build(None, None, None, None, None).expect("no-op mode is fine");
 		assert!(!cfg.any_hook());
+	}
+
+	#[test]
+	fn empty_urls_read_as_unset() {
+		let cfg = Config::build(
+			Some(String::new()),
+			Some(String::new()),
+			Some("  ".into()),
+			None,
+			Some(String::new()),
+		)
+		.expect("empty is unset, so this is no-op mode rather than a partial config");
+		assert!(!cfg.any_hook());
+		assert_eq!(cfg.url_for(KIND_MAINTENANCE_DECLARED), Ok(None));
 	}
 
 	#[test]
@@ -531,6 +582,8 @@ mod tests {
 		let cfg = Config::build(
 			Some("http://example/open".into()),
 			Some("http://example/resolve".into()),
+			None,
+			None,
 			Some("https://canopy.test".into()),
 		)
 		.expect("complete config is fine");
@@ -543,6 +596,8 @@ mod tests {
 			cfg.url_for(KIND_INCIDENT_RESOLVE),
 			Ok(Some("http://example/resolve"))
 		);
+		assert_eq!(cfg.url_for(KIND_MAINTENANCE_DECLARED), Ok(None));
+		assert_eq!(cfg.url_for(KIND_MAINTENANCE_ENDED), Ok(None));
 		assert_eq!(cfg.url_for(KIND_SELF_ALERT_OPEN), Ok(None));
 		assert_eq!(cfg.url_for(KIND_SELF_ALERT_RESOLVE), Ok(None));
 		assert_eq!(cfg.url_for("mystery"), Err(()));
@@ -564,6 +619,7 @@ mod tests {
 			open: Some(url),
 			resolve: None,
 			private_url: Some("https://canopy.example.ts.net".into()),
+			..Default::default()
 		};
 		let mut r = row(
 			KIND_INCIDENT_OPEN,
@@ -609,6 +665,7 @@ mod tests {
 			open: Some(url),
 			resolve: None,
 			private_url: Some("https://new.example/".into()),
+			..Default::default()
 		};
 		let mut r = row(
 			KIND_INCIDENT_OPEN,
@@ -648,6 +705,7 @@ mod tests {
 			open: Some("http://127.0.0.1:1/open-should-not-be-hit".into()),
 			resolve: Some(resolve_url),
 			private_url: Some("https://canopy.test".into()),
+			..Default::default()
 		};
 		let r = row(
 			KIND_INCIDENT_RESOLVE,
@@ -677,6 +735,7 @@ mod tests {
 			open: Some(url),
 			resolve: None,
 			private_url: Some("https://canopy.test".into()),
+			..Default::default()
 		};
 		let r = row(KIND_INCIDENT_OPEN, serde_json::json!({}));
 		let err = deliver(&reqwest::Client::new(), &cfg, &r)
@@ -700,6 +759,7 @@ mod tests {
 			open: Some("http://127.0.0.1:1/should-not-be-hit".into()),
 			resolve: Some("http://127.0.0.1:1/should-not-be-hit".into()),
 			private_url: Some("https://canopy.test".into()),
+			..Default::default()
 		};
 		let r = row("bogus_kind", serde_json::json!({}));
 		let err = deliver(&reqwest::Client::new(), &cfg, &r)
@@ -720,6 +780,7 @@ mod tests {
 			open: Some("http://127.0.0.1:1/should-not-be-hit".into()),
 			resolve: Some("http://127.0.0.1:1/should-not-be-hit".into()),
 			private_url: Some("https://canopy.test".into()),
+			..Default::default()
 		};
 		let mut r = row(KIND_SELF_ALERT_OPEN, serde_json::json!({}));
 		r.incident_id = None;

@@ -9,6 +9,7 @@ import {
 	Typography,
 } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
+import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
 import BackupIcon from "@mui/icons-material/Backup";
 import EditIcon from "@mui/icons-material/Edit";
@@ -19,6 +20,7 @@ import GroupDomainsSection from "../components/GroupDomainsSection";
 import MigrationTestsSection from "../components/MigrationTestsSection";
 import { OperatorAvatar, connectedFor } from "../components/OperatorAvatars";
 import ServerShorty from "../components/ServerShorty";
+import MaintenanceSection from "../components/MaintenanceSection";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import TimeAgo from "../components/TimeAgo";
 import { useApi, useApiAction } from "../api";
@@ -107,9 +109,28 @@ export default function GroupDetail() {
 				spacing={2}
 				sx={{ alignItems: "center", justifyContent: "space-between" }}
 			>
-				<Typography variant="h4" component="h1">
-					{group.name}
-				</Typography>
+				<Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
+					<Typography variant="h4" component="h1">
+						{group.name}
+					</Typography>
+					{detail.data.maintained && (
+						<Chip
+							size="small"
+							variant="outlined"
+							color="info"
+							icon={<BuildOutlinedIcon />}
+							label={
+								detail.data.maintenance_settling
+									? "Maintenance just ended"
+									: "Under maintenance"
+							}
+							component="a"
+							href="#maintenance"
+							clickable
+							data-testid="maintenance-marker"
+						/>
+					)}
+				</Stack>
 				{admin && (
 					<Stack direction="row" spacing={1}>
 						<Button
@@ -243,6 +264,12 @@ export default function GroupDetail() {
 
 			<GroupDomainsSection groupId={group.id} />
 
+			<MaintenanceSection
+				scope="group"
+				anchor="maintenance"
+				id={group.id}
+				targetLabel={group.name}
+			/>
 			<SilencedRefsSection scope="group" id={group.id} />
 		</Stack>
 	);

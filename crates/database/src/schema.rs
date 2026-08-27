@@ -401,6 +401,25 @@ diesel::table! {
 }
 
 diesel::table! {
+	maintenance_windows (id) {
+		id -> Uuid,
+		server_id -> Nullable<Uuid>,
+		server_group_id -> Nullable<Uuid>,
+		expected_end -> Timestamptz,
+		note -> Nullable<Text>,
+		declared_by -> Nullable<Text>,
+		declared_at -> Timestamptz,
+		amended_by -> Nullable<Text>,
+		amended_at -> Nullable<Timestamptz>,
+		ended_at -> Nullable<Timestamptz>,
+		ended_by -> Nullable<Text>,
+		settled_at -> Nullable<Timestamptz>,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	mcp_tokens (id) {
 		id -> Uuid,
 		name -> Text,
@@ -820,6 +839,8 @@ diesel::joinable!(restore_consumer_capabilities -> devices (consumer_device_id))
 diesel::joinable!(restore_replicas -> devices (consumer_device_id));
 diesel::joinable!(restore_replicas -> server_groups (group_id));
 diesel::joinable!(restore_replicas -> servers (server_id));
+diesel::joinable!(maintenance_windows -> server_groups (server_group_id));
+diesel::joinable!(maintenance_windows -> servers (server_id));
 diesel::joinable!(scoped_check_policies -> server_groups (server_group_id));
 diesel::joinable!(scoped_check_policies -> servers (server_id));
 diesel::joinable!(server_backup_capabilities -> servers (server_id));
@@ -873,6 +894,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	incidents,
 	issue_notes,
 	issues,
+	maintenance_windows,
 	mcp_tokens,
 	migration_tests,
 	migration_timings,

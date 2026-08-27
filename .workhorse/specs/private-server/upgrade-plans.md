@@ -74,6 +74,9 @@ Recording a plan is what asks for the testing, and no restore is spent on a vers
 
 A plan changes what is tested, so changing one invalidates nothing already recorded: earlier verdicts stand against the versions they named, and the new target simply becomes the one that has not been tested yet.
 
+Declaring maintenance reads the open plan for its prefill: an operator starting the work is offered a window carrying the plan's window and note (see [MNT](../monitoring/maintenance.md)).
+The plan is read at the moment someone declares, so a planned hour arriving suspends nothing on its own.
+
 ## The dashboard
 
 Canopy presents planned upgrades across the fleet in one view, so the question "what is moving, and when" is answered without reading each group.

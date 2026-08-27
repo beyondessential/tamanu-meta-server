@@ -1,12 +1,16 @@
 import { Box, Chip, Stack, Tooltip } from "@mui/material";
 import CancelIcon from "@mui/icons-material/Cancel";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import NotificationsOffIcon from "@mui/icons-material/NotificationsOff";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import type { HealthState } from "../types";
 
 const UNMONITORED_TOOLTIP =
 	"This server is unmonitored — its checks are recorded and shown, but nothing alerts on them.";
+
+const MAINTAINED_TOOLTIP =
+	"A maintenance window is being worked on here — its checks are recorded and shown, and raise nothing until the window ends.";
 
 const LABEL: Record<HealthState, string> = {
 	healthy: "Healthy",
@@ -45,10 +49,21 @@ export default function HealthChip({
 	health,
 	stale = false,
 	monitored = true,
+	maintained = false,
+	maintenanceSettling = false,
+	maintenanceHref,
 }: {
 	health: HealthState;
 	stale?: boolean;
 	monitored?: boolean;
+	/** Whether a maintenance window suspends the server: the chip fades and
+	 * takes a maintenance marker, distinct from the unmonitored one. */
+	// spec: MNT#presentation
+	maintained?: boolean;
+	/** The window has ended; only the settle period still suspends. */
+	maintenanceSettling?: boolean;
+	/** Where the maintenance chip links, e.g. the page's maintenance section. */
+	maintenanceHref?: string;
 }) {
 	const chip = stale ? (
 		<Tooltip title="Server isn't currently reporting status; this reflects its most recent received report.">
@@ -78,17 +93,40 @@ export default function HealthChip({
 			/>
 		</Tooltip>
 	);
-	if (monitored) return chip;
+	if (monitored && !maintained) return chip;
 	return (
 		<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
 			<Box sx={{ opacity: 0.5, display: "inline-flex" }}>{chip}</Box>
-			<Tooltip title={UNMONITORED_TOOLTIP}>
-				<NotificationsOffIcon
-					fontSize="small"
-					color="info"
-					data-testid="unmonitored-marker"
-				/>
-			</Tooltip>
+			{maintained && (
+				<Tooltip title={MAINTAINED_TOOLTIP}>
+					<Chip
+						size="small"
+						variant="outlined"
+						color="info"
+						icon={<BuildOutlinedIcon />}
+						label={
+							maintenanceSettling
+								? "Maintenance just ended"
+								: "Under maintenance"
+						}
+						{...(maintenanceHref && {
+							component: "a",
+							href: maintenanceHref,
+							clickable: true,
+						})}
+						data-testid="maintenance-marker"
+					/>
+				</Tooltip>
+			)}
+			{!monitored && (
+				<Tooltip title={UNMONITORED_TOOLTIP}>
+					<NotificationsOffIcon
+						fontSize="small"
+						color="info"
+						data-testid="unmonitored-marker"
+					/>
+				</Tooltip>
+			)}
 		</Stack>
 	);
 }
