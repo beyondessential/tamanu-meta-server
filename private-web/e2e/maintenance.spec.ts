@@ -1,6 +1,8 @@
 import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
+	seedIncident,
+	seedIssue,
 	seedMaintenanceWindow,
 	seedServer,
 	seedServerGroup,
@@ -130,5 +132,83 @@ test.describe("maintenance windows", () => {
 		await expect(
 			page.getByText("Nothing is under maintenance"),
 		).toBeVisible();
+	});
+
+	test("amending prefills the open window and keeps it the same window", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "running-long" });
+		const server = await seedServer(sql, {
+			name: "not-done-yet",
+			groupId: group.id,
+		});
+		await seedStatus(sql, { serverId: server.id, healthy: true });
+		await seedMaintenanceWindow(sql, {
+			serverId: server.id,
+			note: "Rebooting",
+		});
+
+		await page.goto(`/servers/${server.id}`);
+		await page.getByRole("button", { name: "Amend" }).click();
+		await expect(
+			page.getByRole("heading", { name: /Amend maintenance/ }),
+		).toBeVisible();
+		const note = page.getByLabel("What's being done");
+		await expect(note).toHaveValue("Rebooting");
+		await note.fill("Rebooting, running long");
+		await page.getByRole("button", { name: "Amend", exact: true }).click();
+
+		await expect(
+			page.getByTestId("maintenance-section"),
+		).toContainText("Rebooting, running long");
+		const rows = await sql.query<{ n: string; amended: string | null }>(
+			"SELECT COUNT(*) AS n, MAX(amended_at::text) AS amended \
+			 FROM maintenance_windows WHERE server_id = $1 AND ended_at IS NULL",
+			[server.id],
+		);
+		expect(Number(rows[0]!.n)).toBe(1);
+		expect(rows[0]!.amended).not.toBeNull();
+	});
+
+	test("an open incident offers the declaration over its target", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "mid-upgrade" });
+		const server = await seedServer(sql, {
+			name: "alerting-on-purpose",
+			groupId: group.id,
+		});
+		await seedStatus(sql, { serverId: server.id, healthy: false });
+		const issue = await seedIssue(sql, {
+			serverId: server.id,
+			source: "canopy",
+			ref: "reachability",
+			message: "unreachable",
+		});
+		const incident = await seedIncident(sql, {
+			serverGroupId: group.id,
+			issues: [{ issueId: issue.id }],
+		});
+
+		await page.goto(`/incidents/${incident.id}`);
+		await page.getByRole("button", { name: "This is maintenance…" }).click();
+		await page.getByLabel("What's being done").fill("It's us, upgrading");
+		await page.getByRole("button", { name: "Declare", exact: true }).click();
+
+		await expect(
+			page.getByRole("heading", { name: /Declare maintenance/ }),
+		).toBeHidden();
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ n: string }>(
+					"SELECT COUNT(*) AS n FROM maintenance_windows \
+					 WHERE server_group_id = $1 AND ended_at IS NULL",
+					[group.id],
+				);
+				return Number(rows[0]!.n);
+			})
+			.toBe(1);
 	});
 });
