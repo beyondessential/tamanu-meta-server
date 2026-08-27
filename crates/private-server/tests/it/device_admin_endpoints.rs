@@ -383,8 +383,9 @@ async fn server_attach_tailscale_is_404_for_an_unresolvable_identifier() {
 
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO applications (id, host, kind) \
-			 VALUES ('{server_id}', 'https://attach.example.com', 'central');"
+			"INSERT INTO machines (id) VALUES ('{server_id}'); \
+			 INSERT INTO applications (id, host, kind, machine_id) \
+			 VALUES ('{server_id}', 'https://attach.example.com', 'central', '{server_id}');"
 		))
 		.await
 		.expect("insert server");

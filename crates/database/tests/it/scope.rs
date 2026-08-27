@@ -52,12 +52,18 @@ async fn insert_server(
 	group: Option<Uuid>,
 	monitored: bool,
 ) -> Uuid {
+	let machine: RowId = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
+		.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group)
+		.get_result(conn)
+		.await
+		.expect("insert machine");
 	let row: RowId = sql_query(
-		"INSERT INTO applications (host, group_id, is_monitored) VALUES ($1, $2, $3) RETURNING id",
+		"INSERT INTO applications (host, group_id, is_monitored, machine_id) VALUES ($1, $2, $3, $4) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>(host)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group)
 	.bind::<sql_types::Bool, _>(monitored)
+	.bind::<sql_types::Uuid, _>(machine.id)
 	.get_result(conn)
 	.await
 	.expect("insert server");

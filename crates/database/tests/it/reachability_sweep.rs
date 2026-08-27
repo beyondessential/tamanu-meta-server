@@ -31,16 +31,21 @@ async fn insert_server_full(
 	alert_when_down_for_secs: i64,
 	is_monitored: bool,
 ) -> Uuid {
+	let machine: RowId = sql_query("INSERT INTO machines DEFAULT VALUES RETURNING id")
+		.get_result(conn)
+		.await
+		.expect("insert machine");
 	let row: RowId = sql_query(
 		r#"
-			INSERT INTO applications (host, alert_when_down_for, is_monitored)
-			VALUES ($1, ($2 || ' seconds')::INTERVAL, $3)
+			INSERT INTO applications (host, alert_when_down_for, is_monitored, machine_id)
+			VALUES ($1, ($2 || ' seconds')::INTERVAL, $3, $4)
 			RETURNING id
 		"#,
 	)
 	.bind::<sql_types::Text, _>(host)
 	.bind::<sql_types::Text, _>(alert_when_down_for_secs.to_string())
 	.bind::<sql_types::Bool, _>(is_monitored)
+	.bind::<sql_types::Uuid, _>(machine.id)
 	.get_result(conn)
 	.await
 	.expect("insert server");
@@ -60,10 +65,15 @@ async fn insert_grouped_server(
 		.get_result(conn)
 		.await
 		.expect("insert group");
+	let machine: RowId = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
+		.bind::<sql_types::Uuid, _>(group.id)
+		.get_result(conn)
+		.await
+		.expect("insert machine");
 	let row: RowId = sql_query(
 		r#"
-			INSERT INTO applications (host, alert_when_down_for, is_monitored, group_id)
-			VALUES ($1, ($2 || ' seconds')::INTERVAL, $3, $4)
+			INSERT INTO applications (host, alert_when_down_for, is_monitored, group_id, machine_id)
+			VALUES ($1, ($2 || ' seconds')::INTERVAL, $3, $4, $5)
 			RETURNING id
 		"#,
 	)
@@ -71,6 +81,7 @@ async fn insert_grouped_server(
 	.bind::<sql_types::Text, _>(alert_when_down_for_secs.to_string())
 	.bind::<sql_types::Bool, _>(is_monitored)
 	.bind::<sql_types::Uuid, _>(group.id)
+	.bind::<sql_types::Uuid, _>(machine.id)
 	.get_result(conn)
 	.await
 	.expect("insert server");
@@ -291,7 +302,12 @@ struct RowSecs {
 #[tokio::test(flavor = "multi_thread")]
 async fn new_servers_default_to_ten_minutes() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		sql_query("INSERT INTO applications (host) VALUES ('http://new.invalid/')")
+		let machine: RowId = sql_query("INSERT INTO machines DEFAULT VALUES RETURNING id")
+			.get_result(&mut conn)
+			.await
+			.expect("insert machine");
+		sql_query("INSERT INTO applications (host, machine_id) VALUES ('http://new.invalid/', $1)")
+			.bind::<sql_types::Uuid, _>(machine.id)
 			.execute(&mut conn)
 			.await
 			.expect("insert default");
@@ -317,9 +333,14 @@ async fn new_servers_default_to_ten_minutes() {
 async fn check_constraint_forbids_non_positive_duration() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		for bad in ["INTERVAL '-1 second'", "INTERVAL '0'"] {
+			let machine: RowId = sql_query("INSERT INTO machines DEFAULT VALUES RETURNING id")
+				.get_result(&mut conn)
+				.await
+				.expect("insert machine");
 			let res = sql_query(&format!(
-				"INSERT INTO applications (host, alert_when_down_for) \
-				 VALUES ('http://bad.invalid/', {bad})"
+				"INSERT INTO applications (host, alert_when_down_for, machine_id) \
+				 VALUES ('http://bad.invalid/', {bad}, '{machine_id}')",
+				machine_id = machine.id
 			))
 			.execute(&mut conn)
 			.await;

@@ -29,13 +29,20 @@ async fn insert_group(conn: &mut AsyncPgConnection) -> Uuid {
 }
 
 async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uuid {
-	let row: RowId =
-		sql_query("INSERT INTO applications (host, group_id) VALUES ($1, $2) RETURNING id")
-			.bind::<sql_types::Text, _>("https://central.kamaka.example")
-			.bind::<sql_types::Uuid, _>(group_id)
-			.get_result(conn)
-			.await
-			.expect("server");
+	let machine: RowId = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
+		.bind::<sql_types::Uuid, _>(group_id)
+		.get_result(conn)
+		.await
+		.expect("machine");
+	let row: RowId = sql_query(
+		"INSERT INTO applications (host, group_id, machine_id) VALUES ($1, $2, $3) RETURNING id",
+	)
+	.bind::<sql_types::Text, _>("https://central.kamaka.example")
+	.bind::<sql_types::Uuid, _>(group_id)
+	.bind::<sql_types::Uuid, _>(machine.id)
+	.get_result(conn)
+	.await
+	.expect("server");
 	row.id
 }
 

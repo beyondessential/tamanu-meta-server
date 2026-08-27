@@ -54,8 +54,13 @@ export async function resetSeededTables(sql: Sql): Promise<void> {
 	// legacy value the product migration deliberately left in place, so this
 	// also keeps the read alias exercised; `product` has to be set explicitly
 	// since that migration's backfill has already run by now.
+	// The machine goes back with it: an application runs on exactly one, and
+	// the split's backfill gave this row a machine sharing its id.
 	await sql.query(
-		"INSERT INTO applications (id, product, kind, name, host) VALUES ('00000000-0000-0000-0000-000000000000', 'canopy', 'canopy', 'Canopy', 'http://localhost')",
+		"INSERT INTO machines (id, name) VALUES ('00000000-0000-0000-0000-000000000000', 'Canopy')",
+	);
+	await sql.query(
+		"INSERT INTO applications (id, product, kind, name, host, machine_id) VALUES ('00000000-0000-0000-0000-000000000000', 'canopy', 'canopy', 'Canopy', 'http://localhost', '00000000-0000-0000-0000-000000000000')",
 	);
 	// Same for the migration's one seeded source policy: tamanu reports on
 	// its own schedule, so its silence is not a reachability signal.
@@ -164,9 +169,16 @@ export async function seedServer(
 	const rank = opts.rank ?? "production";
 	const isMonitored = opts.isMonitored ?? false;
 	const alertWhenDownFor = opts.alertWhenDownFor ?? 600;
+	// A box of its own for each seeded workload, 1:1, carrying the same group
+	// so the machine and the application agree on which deployment they're in.
+	const machineId = randomUUID();
 	await sql.query(
-		`INSERT INTO applications (id, name, host, product, kind, rank, group_id, device_id, is_monitored, alert_when_down_for, notes, tags, may_manage_dns, may_manage_tls)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14)`,
+		`INSERT INTO machines (id, name, group_id) VALUES ($1, $2, $3)`,
+		[machineId, name, opts.groupId ?? null],
+	);
+	await sql.query(
+		`INSERT INTO applications (id, name, host, product, kind, rank, group_id, device_id, is_monitored, alert_when_down_for, notes, tags, may_manage_dns, may_manage_tls, machine_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15)`,
 		[
 			id,
 			name,
@@ -182,6 +194,7 @@ export async function seedServer(
 			JSON.stringify(opts.tags ?? {}),
 			opts.mayManageDns ?? false,
 			opts.mayManageTls ?? false,
+			machineId,
 		],
 	);
 	return { id, name, host, product, kind, rank };

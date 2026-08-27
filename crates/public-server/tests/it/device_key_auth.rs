@@ -286,10 +286,15 @@ async fn key_deactivation_works() {
 			use diesel::{sql_query, sql_types};
 			use diesel_async::RunQueryDsl;
 			let server_id = uuid::Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
+			sql_query("INSERT INTO machines (id) VALUES ($1)")
+				.bind::<sql_types::Uuid, _>(server_id)
+				.execute(&mut conn)
+				.await
+				.expect("insert machine");
 			sql_query(
 				r#"
-				INSERT INTO applications (id, host, kind, device_id)
-				VALUES ($1, 'https://test.example.com', 'facility', $2)
+				INSERT INTO applications (id, host, kind, device_id, machine_id)
+				VALUES ($1, 'https://test.example.com', 'facility', $2, $1)
 			"#,
 			)
 			.bind::<sql_types::Uuid, _>(server_id)

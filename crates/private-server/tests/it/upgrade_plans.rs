@@ -244,11 +244,15 @@ async fn a_member_servers_own_restore_is_not_an_attempt() {
 			INSERT INTO devices (id, role) VALUES
 				('cccccccc-0000-0000-0000-0000000000d0', 'backup-restore'),
 				('cccccccc-0000-0000-0000-0000000000d1', 'server');
-			INSERT INTO applications (id, name, host, kind, group_id, device_id) VALUES
+			INSERT INTO machines (id, group_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a0',
+				 'cccccccc-0000-0000-0000-000000000001');
+			INSERT INTO applications (id, name, host, kind, group_id, device_id, machine_id) VALUES
 				('cccccccc-0000-0000-0000-0000000000a0', 'clone',
 				 'https://clone.example.com', 'central',
 				 'cccccccc-0000-0000-0000-000000000001',
-				 'cccccccc-0000-0000-0000-0000000000d1');
+				 'cccccccc-0000-0000-0000-0000000000d1',
+				 'cccccccc-0000-0000-0000-0000000000a0');
 			INSERT INTO restore_consumer_capabilities
 				(consumer_device_id, intent, semantics)
 			 VALUES ('cccccccc-0000-0000-0000-0000000000d0', 'upgrade', '[\"migrate\"]');

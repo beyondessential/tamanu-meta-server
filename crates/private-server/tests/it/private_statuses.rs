@@ -134,8 +134,10 @@ async fn status_json_basic_server() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Test cluster');
-			INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Test Application', 'https://test.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')",
+			INSERT INTO machines (id, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+			INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Test Application', 'https://test.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111')",
 		)
 		.await
 		.unwrap();
@@ -179,8 +181,10 @@ async fn status_json_server_with_recent_status() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Active cluster');
-			INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Active Application', 'https://active.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+			INSERT INTO machines (id, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+			INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Active Application', 'https://active.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111');
 
 			INSERT INTO statuses (server_id, version, extra, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '1.2.3', '{\"uptime\": 3600}'::jsonb, NOW());
@@ -244,9 +248,12 @@ async fn status_json_server_status_ages() {
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Down cluster'),
 			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Away cluster');
-			INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Down Application', 'https://down.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
-			('22222222-2222-2222-2222-222222222222', 'Away Application', 'https://away.example.com', 'production', 'central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+			INSERT INTO machines (id, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('22222222-2222-2222-2222-222222222222', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+			INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Down Application', 'https://down.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111'),
+			('22222222-2222-2222-2222-222222222222', 'Away Application', 'https://away.example.com', 'production', 'central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '22222222-2222-2222-2222-222222222222');
 
 			INSERT INTO statuses (server_id, version, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '1.0.0', NOW() - INTERVAL '45 minutes'),
@@ -304,10 +311,14 @@ async fn status_json_platform_detection() {
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Windows cluster'),
 			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Linux cluster'),
 			('cccccccc-cccc-cccc-cccc-cccccccccccc', 'Windows cluster 2');
-			INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Windows Application', 'https://win.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
-			('22222222-2222-2222-2222-222222222222', 'Linux Application', 'https://linux.example.com', 'production', 'central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'),
-			('33333333-3333-3333-3333-333333333333', 'Windows Application 2', 'https://win2.example.com', 'production', 'central', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
+			INSERT INTO machines (id, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('22222222-2222-2222-2222-222222222222', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'),
+			('33333333-3333-3333-3333-333333333333', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
+			INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Windows Application', 'https://win.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111'),
+			('22222222-2222-2222-2222-222222222222', 'Linux Application', 'https://linux.example.com', 'production', 'central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '22222222-2222-2222-2222-222222222222'),
+			('33333333-3333-3333-3333-333333333333', 'Windows Application 2', 'https://win2.example.com', 'production', 'central', 'cccccccc-cccc-cccc-cccc-cccccccccccc', '33333333-3333-3333-3333-333333333333');
 
 			INSERT INTO statuses (server_id, version, extra, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '1.0.0', '{\"pgVersion\": \"PostgreSQL 13.7 on x86_64-pc-windows-msvc, compiled by Visual C++ build 1914\"}'::jsonb, NOW()),
@@ -369,10 +380,14 @@ async fn status_json_mixed_server_ranks() {
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Production'),
 			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Dev'),
 			('cccccccc-cccc-cccc-cccc-cccccccccccc', 'Clone');
-			INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Production', 'https://prod.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
-			('22222222-2222-2222-2222-222222222222', 'Dev', 'https://dev.example.com', 'dev', 'central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'),
-			('33333333-3333-3333-3333-333333333333', 'Clone', 'https://clone.example.com', 'clone', 'central', 'cccccccc-cccc-cccc-cccc-cccccccccccc')",
+			INSERT INTO machines (id, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('22222222-2222-2222-2222-222222222222', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'),
+			('33333333-3333-3333-3333-333333333333', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
+			INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Production', 'https://prod.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111'),
+			('22222222-2222-2222-2222-222222222222', 'Dev', 'https://dev.example.com', 'dev', 'central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '22222222-2222-2222-2222-222222222222'),
+			('33333333-3333-3333-3333-333333333333', 'Clone', 'https://clone.example.com', 'clone', 'central', 'cccccccc-cccc-cccc-cccc-cccccccccccc', '33333333-3333-3333-3333-333333333333')",
 		)
 		.await
 		.unwrap();
@@ -419,9 +434,12 @@ async fn status_json_unnamed_servers_excluded() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Mixed cluster');
-			INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Named Application', 'https://named.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
-			('22222222-2222-2222-2222-222222222222', NULL, 'https://unnamed.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')",
+			INSERT INTO machines (id, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
+			('22222222-2222-2222-2222-222222222222', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+			INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Named Application', 'https://named.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111'),
+			('22222222-2222-2222-2222-222222222222', NULL, 'https://unnamed.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '22222222-2222-2222-2222-222222222222')",
 		)
 		.await
 		.unwrap();
@@ -458,8 +476,10 @@ async fn status_json_blip_status() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Blip cluster');
-			INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Blip Application', 'https://blip.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+			INSERT INTO machines (id, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+			INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Blip Application', 'https://blip.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111');
 			INSERT INTO statuses (server_id, version, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '1.0.0', NOW() - INTERVAL '4 minutes')",
 		)
@@ -506,8 +526,10 @@ async fn status_json_gone_server() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Gone cluster');
-			INSERT INTO applications (id, name, host, rank, kind, group_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Gone Application', 'https://gone.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')",
+			INSERT INTO machines (id, group_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+			INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Gone Application', 'https://gone.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111')",
 		)
 		.await
 		.unwrap();
@@ -545,8 +567,10 @@ async fn get_detail_basic() {
 		.unwrap();
 
 		conn.batch_execute(
-			"INSERT INTO applications (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Test Application', 'https://test.example.com', 'production', 'central')"
+			"INSERT INTO machines (id) VALUES
+			('11111111-1111-1111-1111-111111111111');
+			INSERT INTO applications (id, name, host, rank, kind, machine_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Test Application', 'https://test.example.com', 'production', 'central', '11111111-1111-1111-1111-111111111111')"
 		)
 		.await
 		.unwrap();
@@ -574,9 +598,13 @@ async fn get_detail_basic() {
 async fn get_detail_munin_flag() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO applications (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Munin Application', 'https://munin.example.com', 'production', 'central'),
-			('22222222-2222-2222-2222-222222222222', 'Plain Application', 'https://plain.example.com', 'production', 'central');
+			"INSERT INTO machines (id) VALUES
+			('11111111-1111-1111-1111-111111111111'),
+			('22222222-2222-2222-2222-222222222222');
+
+			INSERT INTO applications (id, name, host, rank, kind, machine_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Munin Application', 'https://munin.example.com', 'production', 'central', '11111111-1111-1111-1111-111111111111'),
+			('22222222-2222-2222-2222-222222222222', 'Plain Application', 'https://plain.example.com', 'production', 'central', '22222222-2222-2222-2222-222222222222');
 
 			INSERT INTO statuses (server_id, extra, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '{\"munin\": true}'::jsonb, NOW()),
@@ -621,8 +649,11 @@ async fn get_detail_with_status() {
 		.unwrap();
 
 		conn.batch_execute(
-			"INSERT INTO applications (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Status Application', 'https://status.example.com', 'test', 'central');
+			"INSERT INTO machines (id) VALUES
+			('11111111-1111-1111-1111-111111111111');
+
+			INSERT INTO applications (id, name, host, rank, kind, machine_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Status Application', 'https://status.example.com', 'test', 'central', '11111111-1111-1111-1111-111111111111');
 
 			INSERT INTO statuses (server_id, version, extra, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '2.5.1', '{\"timezone\": \"Pacific/Auckland\", \"pgVersion\": \"PostgreSQL 17.2, (x86_64-pc-linux-gnu, compiled by gcc)\"}'::jsonb, NOW());
@@ -661,9 +692,13 @@ async fn get_detail_with_status() {
 async fn get_detail_figures_resolve_across_sources() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO applications (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Bestool Application', 'https://bestool.example.com', 'test', 'central'),
-			('22222222-2222-2222-2222-222222222222', 'Tamanu Only', 'https://tamanuonly.example.com', 'test', 'central');
+			"INSERT INTO machines (id) VALUES
+			('11111111-1111-1111-1111-111111111111'),
+			('22222222-2222-2222-2222-222222222222');
+
+			INSERT INTO applications (id, name, host, rank, kind, machine_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Bestool Application', 'https://bestool.example.com', 'test', 'central', '11111111-1111-1111-1111-111111111111'),
+			('22222222-2222-2222-2222-222222222222', 'Tamanu Only', 'https://tamanuonly.example.com', 'test', 'central', '22222222-2222-2222-2222-222222222222');
 
 			INSERT INTO statuses (server_id, source, extra, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd',

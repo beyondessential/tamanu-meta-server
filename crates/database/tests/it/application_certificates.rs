@@ -21,13 +21,22 @@ struct RowId {
 
 async fn insert_server(conn: &mut AsyncPgConnection, name: &str) -> Uuid {
 	let host = format!("https://{}.example.invalid", Uuid::new_v4());
-	sql_query("INSERT INTO applications (name, host, kind) VALUES ($1, $2, 'central') RETURNING id")
-		.bind::<sql_types::Text, _>(name)
-		.bind::<sql_types::Text, _>(host)
+	let machine = sql_query("INSERT INTO machines DEFAULT VALUES RETURNING id")
 		.get_result::<RowId>(conn)
 		.await
-		.expect("insert server")
-		.id
+		.expect("insert machine")
+		.id;
+	sql_query(
+		"INSERT INTO applications (name, host, kind, machine_id) \
+		 VALUES ($1, $2, 'central', $3) RETURNING id",
+	)
+	.bind::<sql_types::Text, _>(name)
+	.bind::<sql_types::Text, _>(host)
+	.bind::<sql_types::Uuid, _>(machine)
+	.get_result::<RowId>(conn)
+	.await
+	.expect("insert server")
+	.id
 }
 
 fn addr(raw: &str) -> IpAddr {
@@ -447,14 +456,22 @@ async fn entitled_server(conn: &mut AsyncPgConnection, domain: &str) -> Uuid {
 		.await
 		.expect("claim domain");
 
+	let machine = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
+		.bind::<sql_types::Uuid, _>(group)
+		.get_result::<RowId>(conn)
+		.await
+		.expect("insert machine")
+		.id;
+
 	let host = format!("https://{}.example.invalid", Uuid::new_v4());
 	sql_query(
-		"INSERT INTO applications (name, host, kind, group_id, may_manage_tls) \
-		 VALUES ($1, $2, 'central', $3, true) RETURNING id",
+		"INSERT INTO applications (name, host, kind, group_id, may_manage_tls, machine_id) \
+		 VALUES ($1, $2, 'central', $3, true, $4) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>("entitled")
 	.bind::<sql_types::Text, _>(host)
 	.bind::<sql_types::Uuid, _>(group)
+	.bind::<sql_types::Uuid, _>(machine)
 	.get_result::<RowId>(conn)
 	.await
 	.expect("insert server")

@@ -54,12 +54,18 @@ async fn insert_server(
 	host: &str,
 	product: Product,
 ) -> Uuid {
+	let machine: RowId = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
+		.bind::<sql_types::Uuid, _>(group)
+		.get_result(conn)
+		.await
+		.expect("machine");
 	let server: RowId = sql_query(
-		"INSERT INTO applications (host, group_id, product) VALUES ($1, $2, $3) RETURNING id",
+		"INSERT INTO applications (host, group_id, product, machine_id) VALUES ($1, $2, $3, $4) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>(host)
 	.bind::<sql_types::Uuid, _>(group)
 	.bind::<sql_types::Text, _>(product.to_string())
+	.bind::<sql_types::Uuid, _>(machine.id)
 	.get_result(conn)
 	.await
 	.expect("server");

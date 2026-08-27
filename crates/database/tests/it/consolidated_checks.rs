@@ -16,9 +16,15 @@ struct RowId {
 }
 
 async fn insert_server(conn: &mut diesel_async::AsyncPgConnection) -> Uuid {
+	let machine: RowId = sql_query("INSERT INTO machines DEFAULT VALUES RETURNING id")
+		.get_result(conn)
+		.await
+		.expect("insert machine");
 	let row: RowId = sql_query(
-		"INSERT INTO applications (host) VALUES ('http://consolidated.invalid/') RETURNING id",
+		"INSERT INTO applications (host, machine_id) \
+		 VALUES ('http://consolidated.invalid/', $1) RETURNING id",
 	)
+	.bind::<sql_types::Uuid, _>(machine.id)
 	.get_result(conn)
 	.await
 	.expect("insert server");

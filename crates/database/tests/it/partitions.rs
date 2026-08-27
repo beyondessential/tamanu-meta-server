@@ -25,11 +25,17 @@ struct RowName {
 }
 
 async fn insert_server(conn: &mut AsyncPgConnection, host: &str) -> Uuid {
-	let row: RowId = sql_query("INSERT INTO applications (host) VALUES ($1) RETURNING id")
-		.bind::<sql_types::Text, _>(host)
+	let machine: RowId = sql_query("INSERT INTO machines DEFAULT VALUES RETURNING id")
 		.get_result(conn)
 		.await
-		.expect("insert server");
+		.expect("insert machine");
+	let row: RowId =
+		sql_query("INSERT INTO applications (host, machine_id) VALUES ($1, $2) RETURNING id")
+			.bind::<sql_types::Text, _>(host)
+			.bind::<sql_types::Uuid, _>(machine.id)
+			.get_result(conn)
+			.await
+			.expect("insert server");
 	row.id
 }
 

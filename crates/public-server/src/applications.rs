@@ -504,6 +504,14 @@ pub async fn register_complete(
 			Device::trust(conn, device_id, commons_types::device::DeviceRole::Server).await?;
 			ServerEnrollmentToken::consume(conn, args.server_id, &challenge.token_hash).await?;
 			Application::mark_registered(conn, args.server_id).await?;
+			// Enrolment admits a box, so the identity and the registration
+			// belong to the machine. The application is marked too while
+			// enrolment is still keyed by application; that goes when
+			// enrolment moves to the machine outright.
+			// spec: FLT#identities
+			let application = Application::get_by_id(conn, args.server_id).await?;
+			database::machines::Machine::mark_registered(conn, application.machine_id, device_id)
+				.await?;
 			Ok(device_id)
 		})
 		.await?;
