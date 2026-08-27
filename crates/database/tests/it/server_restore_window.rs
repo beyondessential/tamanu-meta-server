@@ -1,11 +1,16 @@
 //! Model-level tests for the per-server restore window.
 
 use commons_types::server::{TagMap, kind::ServerKind, product::Product};
-use database::{applications::Application, pg_duration::PgDuration, url_field::UrlField};
+use database::{
+	applications::Application,
+	machines::{Machine, NewMachine},
+	pg_duration::PgDuration,
+	url_field::UrlField,
+};
 use jiff::{SignedDuration, Timestamp};
 use uuid::Uuid;
 
-fn new_server() -> Application {
+fn new_server(machine_id: Uuid) -> Application {
 	Application {
 		id: Uuid::new_v4(),
 		name: Some("t".into()),
@@ -14,6 +19,7 @@ fn new_server() -> Application {
 		kind: ServerKind::Central,
 		rank: None,
 		device_id: None,
+		machine_id,
 		group_id: None,
 		public_name: None,
 		cloud: None,
@@ -38,7 +44,12 @@ fn new_server() -> Application {
 #[tokio::test(flavor = "multi_thread")]
 async fn restore_window_opens_for_a_day_then_closes() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
-		let created = Application::create(&mut conn, new_server()).await.unwrap();
+		let machine = Machine::create(&mut conn, NewMachine::default())
+			.await
+			.unwrap();
+		let created = Application::create(&mut conn, new_server(machine.id))
+			.await
+			.unwrap();
 		assert!(!created.restore_allowed(), "restores start disallowed");
 		assert!(created.restore_allowed_until.is_none());
 
@@ -79,7 +90,10 @@ async fn restore_window_opens_for_a_day_then_closes() {
 #[tokio::test(flavor = "multi_thread")]
 async fn expired_window_reads_as_closed() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
-		let mut server = new_server();
+		let machine = Machine::create(&mut conn, NewMachine::default())
+			.await
+			.unwrap();
+		let mut server = new_server(machine.id);
 		// A window that already lapsed: set but in the past.
 		server.restore_allowed_until = Some(Timestamp::now() - SignedDuration::from_hours(1));
 		server.restore_allowed_by = Some("op@example".into());

@@ -107,6 +107,27 @@ pub struct NewMachine {
 	pub geolocation: Option<GeoPoint>,
 }
 
+/// A partial update to a machine. An absent field is left alone; a present
+/// `Option` field sets or clears it.
+///
+/// `device_id` and `registered_at` are deliberately absent: an identity is
+/// bound by enrolment, not by an operator editing a form.
+#[derive(Debug, Clone, Default, Deserialize, AsChangeset)]
+#[diesel(table_name = crate::schema::machines)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+#[diesel(treat_none_as_null = false)]
+pub struct MachineUpdate {
+	pub name: Option<Option<String>>,
+	pub group_id: Option<Option<Uuid>>,
+	pub cloud: Option<Option<bool>>,
+	pub geolocation: Option<Option<GeoPoint>>,
+	pub is_monitored: Option<bool>,
+	#[diesel(serialize_as = PgDuration)]
+	pub alert_when_down_for: Option<PgDuration>,
+	pub notes: Option<String>,
+	pub tags: Option<TagMap>,
+}
+
 impl Machine {
 	/// Create a machine. An operator supplies the group; enrolment and
 	/// reporting fill in the rest.
@@ -117,6 +138,88 @@ impl Machine {
 			.get_result(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// Apply an operator's edit.
+	///
+	/// Moving a machine between groups moves the applications on it, so this
+	/// owns the two things that used to hang off setting an application's
+	/// group directly:
+	///
+	/// - open issues are re-evaluated for anything that gains a group, so
+	///   those warranting promotion to an incident do so;
+	/// - both the old and the new group recompute their cached effective
+	///   version, whose canonical member may have changed.
+	///
+	/// A trigger propagating the group onto the applications would do neither,
+	/// which is why the group write goes through here rather than through raw
+	/// SQL.
+	// spec: FLT#groups
+	pub async fn update(
+		db: &mut AsyncPgConnection,
+		machine_id: Uuid,
+		updates: MachineUpdate,
+	) -> Result<Self> {
+		use crate::schema::machines::dsl;
+
+		if let Some(tags) = &updates.tags {
+			crate::tags::reject_reserved_keys(tags)?;
+		}
+
+		let before = Self::get_by_id(db, machine_id).await?;
+
+		diesel::update(dsl::machines.filter(dsl::id.eq(machine_id)))
+			.set(updates)
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+
+		let after = Self::get_by_id(db, machine_id).await?;
+
+		if before.group_id != after.group_id {
+			// The applications take their machine's group; they never hold one
+			// of their own choosing.
+			diesel::update(crate::schema::applications::table)
+				.filter(crate::schema::applications::machine_id.eq(machine_id))
+				.set(crate::schema::applications::group_id.eq(after.group_id))
+				.execute(db)
+				.await
+				.map_err(AppError::from)?;
+
+			if before.group_id.is_none() && after.group_id.is_some() {
+				for application in after.applications(db).await? {
+					crate::issues::reevaluate_open_issues_for_server(db, application.id).await?;
+				}
+			}
+
+			for group in [before.group_id, after.group_id].into_iter().flatten() {
+				crate::server_groups::ServerGroup::recompute_version(db, group).await?;
+			}
+		}
+
+		Ok(after)
+	}
+
+	/// Bind an identity to this machine and mark it enrolled. Idempotent on
+	/// `registered_at`: a re-enrolment does not restart the clock a backup
+	/// deadline counts from.
+	// spec: FLT#identities
+	pub async fn mark_registered(
+		db: &mut AsyncPgConnection,
+		machine_id: Uuid,
+		device_id: Uuid,
+	) -> Result<()> {
+		use crate::schema::machines::dsl;
+		diesel::update(dsl::machines.filter(dsl::id.eq(machine_id)))
+			.set((
+				dsl::device_id.eq(Some(device_id)),
+				dsl::registered_at.eq(diesel::dsl::sql::<
+					diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>,
+				>("COALESCE(machines.registered_at, NOW())")),
+			))
+			.execute(db)
+			.await?;
+		Ok(())
 	}
 
 	pub async fn get_by_id(db: &mut AsyncPgConnection, machine_id: Uuid) -> Result<Self> {

@@ -9,6 +9,7 @@ use commons_types::server::{
 };
 use database::{
 	applications::Application,
+	machines::{Machine, NewMachine},
 	pg_duration::PgDuration,
 	reported_detail::ReportedDetail,
 	server_groups::{NewServerGroup, ServerGroup},
@@ -19,7 +20,12 @@ use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::SignedDuration;
 use uuid::Uuid;
 
-fn server(product: Product, kind: ServerKind, rank: Option<ServerRank>) -> Application {
+fn server(
+	product: Product,
+	kind: ServerKind,
+	rank: Option<ServerRank>,
+	machine_id: Uuid,
+) -> Application {
 	Application {
 		id: Uuid::new_v4(),
 		name: Some(format!("{product}-{kind}")),
@@ -32,6 +38,7 @@ fn server(product: Product, kind: ServerKind, rank: Option<ServerRank>) -> Appli
 		kind,
 		rank,
 		device_id: None,
+		machine_id,
 		group_id: None,
 		public_name: None,
 		cloud: None,
@@ -51,6 +58,20 @@ fn server(product: Product, kind: ServerKind, rank: Option<ServerRank>) -> Appli
 		name_management_paused_by: None,
 		name_management_pause_reason: None,
 	}
+}
+
+/// The box an application runs on, in the same group the application claims.
+async fn machine(conn: &mut AsyncPgConnection, group_id: Option<Uuid>) -> Uuid {
+	Machine::create(
+		conn,
+		NewMachine {
+			group_id,
+			..Default::default()
+		},
+	)
+	.await
+	.unwrap()
+	.id
 }
 
 async fn group(conn: &mut AsyncPgConnection, name: &str) -> ServerGroup {
@@ -134,6 +155,7 @@ async fn mixed_group_headline_version_comes_from_the_tamanu_member() {
 		// priority among equals if product isn't considered — standalone would
 		// still lose to central, so give it the higher rank to make the test
 		// bite on product rather than on the ordering.
+		let lims_machine = machine(&mut conn, Some(g.id)).await;
 		let lims = Application::create(
 			&mut conn,
 			Application {
@@ -142,16 +164,23 @@ async fn mixed_group_headline_version_comes_from_the_tamanu_member() {
 					Product::Senaite,
 					ServerKind::Standalone,
 					Some(ServerRank::Production),
+					lims_machine,
 				)
 			},
 		)
 		.await
 		.unwrap();
+		let central_machine = machine(&mut conn, Some(g.id)).await;
 		let central = Application::create(
 			&mut conn,
 			Application {
 				group_id: Some(g.id),
-				..server(Product::Tamanu, ServerKind::Central, Some(ServerRank::Test))
+				..server(
+					Product::Tamanu,
+					ServerKind::Central,
+					Some(ServerRank::Test),
+					central_machine,
+				)
 			},
 		)
 		.await
@@ -192,6 +221,7 @@ async fn mixed_group_headline_version_comes_from_the_tamanu_member() {
 async fn group_without_a_versioned_member_has_no_headline_version() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		let g = group(&mut conn, "labs-only").await;
+		let m = machine(&mut conn, Some(g.id)).await;
 		Application::create(
 			&mut conn,
 			Application {
@@ -200,6 +230,7 @@ async fn group_without_a_versioned_member_has_no_headline_version() {
 					Product::Senaite,
 					ServerKind::Standalone,
 					Some(ServerRank::Production),
+					m,
 				)
 			},
 		)
@@ -222,22 +253,26 @@ async fn group_without_a_versioned_member_has_no_headline_version() {
 #[tokio::test(flavor = "multi_thread")]
 async fn production_versions_skip_untracked_products() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
+		let tamanu_machine = machine(&mut conn, None).await;
 		let tamanu = Application::create(
 			&mut conn,
 			server(
 				Product::Tamanu,
 				ServerKind::Central,
 				Some(ServerRank::Production),
+				tamanu_machine,
 			),
 		)
 		.await
 		.unwrap();
+		let canopy_machine = machine(&mut conn, None).await;
 		let canopy = Application::create(
 			&mut conn,
 			server(
 				Product::Canopy,
 				ServerKind::Standalone,
 				Some(ServerRank::Production),
+				canopy_machine,
 			),
 		)
 		.await
@@ -280,9 +315,10 @@ async fn production_versions_skip_untracked_products() {
 #[tokio::test(flavor = "multi_thread")]
 async fn device_tags_carry_the_product() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
+		let m = machine(&mut conn, None).await;
 		let s = Application::create(
 			&mut conn,
-			server(Product::Senaite, ServerKind::Standalone, None),
+			server(Product::Senaite, ServerKind::Standalone, None, m),
 		)
 		.await
 		.unwrap();
@@ -307,22 +343,24 @@ async fn public_search_excludes_products_that_are_not_listed() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		// Deliberately give the SENAITE server the central kind and a public
 		// name, so only the product filter can keep it out.
+		let portal_machine = machine(&mut conn, None).await;
 		Application::create(
 			&mut conn,
 			Application {
 				name: Some("Lab Portal".into()),
 				public_name: Some("Lab Portal".into()),
-				..server(Product::Senaite, ServerKind::Central, None)
+				..server(Product::Senaite, ServerKind::Central, None, portal_machine)
 			},
 		)
 		.await
 		.unwrap();
+		let central_machine = machine(&mut conn, None).await;
 		Application::create(
 			&mut conn,
 			Application {
 				name: Some("Lab Central".into()),
 				public_name: Some("Lab Central".into()),
-				..server(Product::Tamanu, ServerKind::Central, None)
+				..server(Product::Tamanu, ServerKind::Central, None, central_machine)
 			},
 		)
 		.await
@@ -351,11 +389,12 @@ async fn sole_member_product_is_absent_for_a_mixed_group() {
 			(mixed.id, Product::Senaite),
 		] {
 			let kind = product.default_kind();
+			let m = machine(&mut conn, Some(g)).await;
 			Application::create(
 				&mut conn,
 				Application {
 					group_id: Some(g),
-					..server(product, kind, None)
+					..server(product, kind, None, m)
 				},
 			)
 			.await

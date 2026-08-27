@@ -28,6 +28,7 @@ use database::{
 	check_policies::CheckPolicy,
 	devices::NewDeviceConnection,
 	issues::{Incident, Issue, NewEvent},
+	machines::{Machine, NewMachine},
 	notes::{IncidentNote, IssueNote},
 	pg_duration::PgDuration,
 	server_enrollment_tokens::ServerEnrollmentToken,
@@ -607,9 +608,29 @@ async fn seed_servers(
 	groups: &SeededGroups,
 	devices: &SeededDevices,
 ) -> Result<SeededServers> {
-	// Helper to build a fully-specified Application row and insert it via the model.
+	// Helper to build a fully-specified Application row and insert it via the
+	// model. Each seeded application gets a machine of its own, 1:1, matching
+	// what the operator create flow does and what the split's backfill
+	// produced; `base_of` leaves `machine_id` unset for this to fill in.
 	async fn insert(conn: &mut AsyncPgConnection, server: Application) -> Result<Uuid> {
-		let created = Application::create(conn, server).await?;
+		let machine = Machine::create(
+			conn,
+			NewMachine {
+				name: server.name.clone(),
+				group_id: server.group_id,
+				cloud: server.cloud,
+				geolocation: server.geolocation,
+			},
+		)
+		.await?;
+		let created = Application::create(
+			conn,
+			Application {
+				machine_id: machine.id,
+				..server
+			},
+		)
+		.await?;
 		Ok(created.id)
 	}
 
@@ -626,6 +647,8 @@ async fn seed_servers(
 			kind,
 			rank: None,
 			device_id: None,
+			// Replaced by `insert`, which is the only path to the database.
+			machine_id: Uuid::nil(),
 			group_id: None,
 			public_name: None,
 			cloud: None,

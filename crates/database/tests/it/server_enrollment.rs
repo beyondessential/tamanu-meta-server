@@ -2,13 +2,17 @@
 
 use commons_types::server::{TagMap, kind::ServerKind, product::Product};
 use database::{
-	Device, DeviceKey, applications::Application, pg_duration::PgDuration,
-	server_enrollment_tokens::ServerEnrollmentToken, url_field::UrlField,
+	Device, DeviceKey,
+	applications::Application,
+	machines::{Machine, NewMachine},
+	pg_duration::PgDuration,
+	server_enrollment_tokens::ServerEnrollmentToken,
+	url_field::UrlField,
 };
 use jiff::SignedDuration;
 use uuid::Uuid;
 
-fn new_server(host: &str) -> Application {
+fn new_server(host: &str, machine_id: Uuid) -> Application {
 	Application {
 		id: Uuid::new_v4(),
 		name: Some("t".into()),
@@ -17,6 +21,7 @@ fn new_server(host: &str) -> Application {
 		kind: ServerKind::Central,
 		rank: None,
 		device_id: None,
+		machine_id,
 		group_id: None,
 		public_name: None,
 		cloud: None,
@@ -52,7 +57,10 @@ async fn soft_delete_releases_and_deactivates_device_and_hides_row() {
 		)
 		.await
 		.unwrap();
-		let mut s = new_server("https://archive-me.example/");
+		let machine = Machine::create(&mut conn, NewMachine::default())
+			.await
+			.unwrap();
+		let mut s = new_server("https://archive-me.example/", machine.id);
 		s.device_id = Some(device.id);
 		let server = Application::create(&mut conn, s).await.unwrap();
 
@@ -87,9 +95,15 @@ async fn soft_delete_releases_and_deactivates_device_and_hides_row() {
 		);
 
 		// Recreating a server at the same host is allowed once archived.
-		Application::create(&mut conn, new_server("https://archive-me.example/"))
+		let replacement = Machine::create(&mut conn, NewMachine::default())
 			.await
-			.expect("host freed for reuse after archival");
+			.unwrap();
+		Application::create(
+			&mut conn,
+			new_server("https://archive-me.example/", replacement.id),
+		)
+		.await
+		.expect("host freed for reuse after archival");
 	})
 	.await;
 }
@@ -97,7 +111,10 @@ async fn soft_delete_releases_and_deactivates_device_and_hides_row() {
 #[tokio::test(flavor = "multi_thread")]
 async fn token_reissue_invalidates_prior_and_consume_is_single_use() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let server = Application::create(&mut conn, new_server("https://tok.example/"))
+		let machine = Machine::create(&mut conn, NewMachine::default())
+			.await
+			.unwrap();
+		let server = Application::create(&mut conn, new_server("https://tok.example/", machine.id))
 			.await
 			.unwrap();
 
@@ -140,9 +157,13 @@ async fn token_reissue_invalidates_prior_and_consume_is_single_use() {
 #[tokio::test(flavor = "multi_thread")]
 async fn revoke_invalidates_the_active_token() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let server = Application::create(&mut conn, new_server("https://revoke.example/"))
+		let machine = Machine::create(&mut conn, NewMachine::default())
 			.await
 			.unwrap();
+		let server =
+			Application::create(&mut conn, new_server("https://revoke.example/", machine.id))
+				.await
+				.unwrap();
 		let (_t, token) =
 			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
 				.await

@@ -8,6 +8,7 @@ use commons_errors::AppError;
 use commons_types::server::{TagMap, kind::ServerKind, product::Product};
 use database::{
 	applications::{Application, PartialServer},
+	machines::{Machine, NewMachine},
 	pg_duration::PgDuration,
 	server_groups::{NewServerGroup, PartialServerGroup, ServerGroup},
 	url_field::UrlField,
@@ -21,7 +22,7 @@ fn reserved_tags() -> TagMap {
 	TagMap(map)
 }
 
-fn new_server(host: &str) -> Application {
+fn new_server(host: &str, machine_id: Uuid) -> Application {
 	Application {
 		id: Uuid::new_v4(),
 		name: Some("t".into()),
@@ -30,6 +31,7 @@ fn new_server(host: &str) -> Application {
 		kind: ServerKind::Central,
 		rank: None,
 		device_id: None,
+		machine_id,
 		group_id: None,
 		public_name: None,
 		cloud: None,
@@ -61,7 +63,10 @@ fn assert_bad_request<T: std::fmt::Debug>(result: Result<T, AppError>) {
 #[tokio::test(flavor = "multi_thread")]
 async fn server_create_rejects_reserved_tag_keys() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let mut s = new_server("https://create.example/");
+		let machine = Machine::create(&mut conn, NewMachine::default())
+			.await
+			.unwrap();
+		let mut s = new_server("https://create.example/", machine.id);
 		s.tags = reserved_tags();
 		assert_bad_request(Application::create(&mut conn, s).await);
 	})
@@ -71,9 +76,13 @@ async fn server_create_rejects_reserved_tag_keys() {
 #[tokio::test(flavor = "multi_thread")]
 async fn server_update_rejects_reserved_tag_keys() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let server = Application::create(&mut conn, new_server("https://update.example/"))
+		let machine = Machine::create(&mut conn, NewMachine::default())
 			.await
 			.unwrap();
+		let server =
+			Application::create(&mut conn, new_server("https://update.example/", machine.id))
+				.await
+				.unwrap();
 		let updates = PartialServer {
 			id: server.id,
 			name: None,

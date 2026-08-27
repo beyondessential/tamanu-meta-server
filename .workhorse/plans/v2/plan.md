@@ -121,6 +121,20 @@ What that blocks, concretely:
 
 So this lands first: operator create/update on the machine, enrolment writing the machine's identity and registration, `Application` gaining its `machine_id` field, and the `application_default_machine()` default removed.
 
+### Model half done
+
+`Application.machine_id` is a real field, so every struct-literal insert names its machine and the compiler enforces it. `Machine::update` takes a `MachineUpdate` changeset and **owns the group write**: it propagates the new group onto the applications on the machine, re-evaluates their open issues on an ungrouped-to-grouped transition, and recomputes both groups' cached effective version. That is deliberately a model method rather than a trigger, because a trigger does the column and none of the three consequences. `MachineUpdate` has no `device_id` or `registered_at`: an identity is bound by enrolment, not by editing a form. `Machine::mark_registered` does that, and `COALESCE`s `registered_at` so a re-enrolment does not restart the clock a backup deadline counts from.
+
+The operator create flow now creates the machine first and hangs the application off it, carrying name, group, cloud and geolocation to the machine. Still 1:1 — a second workload on a box arrives by report, not through that form.
+
+Removed `NewServer` and its `From<Application>` conversion: dead since the crate split, in neither OpenAPI spec, and the only thing that would have needed a machine invented for it.
+
+**Still open in this step:**
+
+- [ ] Operator-facing machine handlers (`/api/machines`), and pointing the create form at a machine rather than a server
+- [ ] Enrolment calling `mark_registered` on the machine — the model method exists and the operator create path uses it, but the enrolment flow itself still only marks the application
+- [ ] The `application_default_machine()` default, and with it the ~188 raw-SQL `INSERT INTO applications` in tests that rely on it. Two in `server_products.rs` are already known to depend on it silently
+
 **Traps found while scouting, worth carrying in:**
 
 - A trigger-driven group change fires no Rust side effects. `reevaluate_open_issues_for_server` and `recompute_groups` both hang off `Application::assign_to_group`; a SQL `UPDATE` from a trigger bypasses both, so open issues never get promoted to incidents and a group's cached effective version goes stale. `assign_to_group` has no production callers today, so it is cheap to move — but its semantics have to be relocated, not dropped.

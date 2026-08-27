@@ -1067,6 +1067,28 @@ pub async fn create(
 		)));
 	}
 
+	// The operator is really describing a box and the workload on it. Create
+	// the machine first and hang the application off it, so the machine-ish
+	// facts land on the machine and the application takes its group from
+	// there rather than holding one of its own.
+	//
+	// Still 1:1 here: a second workload on a box arrives by report, not
+	// through this form.
+	// spec: FLT#machines-come-from-operators
+	let machine = database::machines::Machine::create(
+		&mut conn,
+		database::machines::NewMachine {
+			name: args.name.clone(),
+			group_id: args.group_id,
+			cloud: args.cloud,
+			geolocation: args.geolocation,
+		},
+	)
+	.await?;
+	if let Some(device_id) = device_id {
+		database::machines::Machine::mark_registered(&mut conn, machine.id, device_id).await?;
+	}
+
 	let server = Application {
 		id: Uuid::new_v4(),
 		name: args.name,
@@ -1075,6 +1097,7 @@ pub async fn create(
 		kind: args.kind,
 		rank: args.rank,
 		device_id,
+		machine_id: machine.id,
 		group_id: args.group_id,
 		public_name: args.public_name,
 		cloud: args.cloud,

@@ -12,8 +12,6 @@ use uuid::Uuid;
 use super::pg_duration::PgDuration;
 use super::url_field::UrlField;
 
-const TEN_MINUTES: PgDuration = PgDuration(SignedDuration::from_secs(600));
-
 /// How long a restore window stays open once an operator allows restores for a
 /// server. Restores read the group's backup repo, so the window is deliberately
 /// short-lived; opening it again re-arms it from the moment of the new request.
@@ -75,7 +73,15 @@ pub struct Application {
 	/// The device enrolled against this server, if any.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub device_id: Option<Uuid>,
+	/// The machine this application runs on. An application runs on exactly
+	/// one; a machine hosts any number.
+	// spec: FLT#cardinality
+	pub machine_id: Uuid,
 	/// The server group this server belongs to, if any.
+	///
+	/// A denormalisation of the machine's group: an operator sets the group on
+	/// the machine and the applications on it take it. Carried here so a group
+	/// query reads one column rather than joining through the machine.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub group_id: Option<Uuid>,
 	/// If set, the server is listed publicly under this name (used by
@@ -932,12 +938,13 @@ fn test_server_serialization() {
 		rank: Some(ServerRank::Production),
 		host: Some(UrlField("https://example.com/".parse().unwrap())),
 		device_id: Some(Uuid::nil()),
+		machine_id: Uuid::nil(),
 		group_id: None,
 		public_name: Some("Test Application".to_string()),
 		cloud: None,
 		geolocation: None,
 		is_monitored: true,
-		alert_when_down_for: TEN_MINUTES,
+		alert_when_down_for: PgDuration(SignedDuration::from_secs(600)),
 		notes: String::new(),
 		tags: TagMap::default(),
 		deleted_at: None,
@@ -963,6 +970,7 @@ fn test_server_serialization() {
   "kind": "central",
   "rank": "production",
   "device_id": "00000000-0000-0000-0000-000000000000",
+  "machine_id": "00000000-0000-0000-0000-000000000000",
   "public_name": "Test Application",
   "is_monitored": true,
   "alert_when_down_for": 600,
@@ -972,63 +980,6 @@ fn test_server_serialization() {
   "may_manage_tls": false
 }"#
 	);
-}
-
-/// Fields required to create a new server. Other server fields (monitoring
-/// settings, tags, notes, etc.) start at their defaults and are set with a
-/// separate update.
-#[derive(Debug, Deserialize, utoipa::ToSchema)]
-pub struct NewServer {
-	/// The server's display name, scoped within its group.
-	pub name: Option<String>,
-	/// The server's URL, if known up front.
-	#[serde(default)]
-	pub host: Option<UrlField>,
-	/// The application this server runs. Defaults to tamanu.
-	#[serde(default)]
-	pub product: Product,
-	/// The server's role within its product's topology, for example central
-	/// or facility.
-	pub kind: ServerKind,
-	/// The server's environment tier, for example production, test, or dev.
-	pub rank: Option<ServerRank>,
-	/// The device to enroll against this server, if already known.
-	pub device_id: Option<Uuid>,
-	/// The server group to add this server to, if any.
-	#[serde(default)]
-	pub group_id: Option<Uuid>,
-}
-
-impl From<NewServer> for Application {
-	fn from(server: NewServer) -> Self {
-		Application {
-			id: Uuid::new_v4(),
-			name: server.name,
-			product: server.product,
-			kind: server.kind,
-			rank: server.rank,
-			host: server.host,
-			device_id: server.device_id,
-			group_id: server.group_id,
-			public_name: None,
-			cloud: None,
-			geolocation: None,
-			is_monitored: true,
-			alert_when_down_for: TEN_MINUTES,
-			notes: String::new(),
-			tags: TagMap::default(),
-			deleted_at: None,
-			registered_at: None,
-			restore_allowed_until: None,
-			restore_allowed_by: None,
-			may_manage_dns: false,
-			may_manage_tls: false,
-			certificate_profile: None,
-			name_management_paused_at: None,
-			name_management_paused_by: None,
-			name_management_pause_reason: None,
-		}
-	}
 }
 
 /// Fields to update on an existing server. Only the fields present are
