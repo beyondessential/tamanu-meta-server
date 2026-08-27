@@ -370,15 +370,6 @@ diesel::table! {
 }
 
 diesel::table! {
-	device_server_associations (device_id, server_id) {
-		device_id -> Uuid,
-		server_id -> Uuid,
-		first_seen -> Timestamptz,
-		last_seen -> Timestamptz,
-	}
-}
-
-diesel::table! {
 	devices (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -844,8 +835,6 @@ diesel::joinable!(check_stability -> issues (issue_id));
 diesel::joinable!(compromised_keys -> application_certificates (certificate_id));
 diesel::joinable!(device_connections -> devices (device_id));
 diesel::joinable!(device_keys -> devices (device_id));
-diesel::joinable!(device_server_associations -> applications (server_id));
-diesel::joinable!(device_server_associations -> devices (device_id));
 diesel::joinable!(incident_issues -> incidents (incident_id));
 diesel::joinable!(incident_issues -> issues (issue_id));
 diesel::joinable!(incident_notes -> incidents (incident_id));
@@ -912,7 +901,6 @@ diesel::allow_tables_to_appear_in_same_query!(
 	compromised_keys,
 	device_connections,
 	device_keys,
-	device_server_associations,
 	devices,
 	incident_issues,
 	incident_notes,

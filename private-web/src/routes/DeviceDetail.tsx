@@ -82,7 +82,6 @@ function DeviceView({
 			<KeysBox device={device} refresh={refresh} />
 			<RoleControls device={device} refresh={refresh} />
 			<AssociatedServersSection deviceId={device.device.id} />
-			<PastServersSection deviceId={device.device.id} />
 			<ConnectionHistory deviceId={device.device.id} />
 		</Stack>
 	);
@@ -440,22 +439,6 @@ function AssociatedServersSection({ deviceId }: { deviceId: string }) {
 			result={result}
 			emptyText="No servers are associated with this device."
 			sort
-		/>
-	);
-}
-
-function PastServersSection({ deviceId }: { deviceId: string }) {
-	const result = useApi(
-		"devices",
-		"get_past_server_associations",
-		{ device_id: deviceId },
-		[deviceId],
-	);
-	return (
-		<ServersListSection
-			title="Past server associations"
-			result={result}
-			emptyText="No past server associations found."
 		/>
 	);
 }

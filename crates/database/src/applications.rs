@@ -600,25 +600,6 @@ impl Application {
 			.map_err(AppError::from)
 	}
 
-	/// Servers this device has reported a status for in the past, excluding any
-	/// it is currently linked to. Reads from the denormalised
-	/// `device_server_associations` table maintained by a trigger on `statuses`.
-	pub async fn get_past_associations_for_device(
-		db: &mut AsyncPgConnection,
-		dev_id: Uuid,
-	) -> Result<Vec<Self>> {
-		use crate::schema::{applications::dsl::*, device_server_associations as a};
-
-		applications
-			.inner_join(a::table.on(a::server_id.eq(id)))
-			.select(Self::as_select())
-			.filter(a::device_id.eq(dev_id))
-			.filter(device_id.is_distinct_from(dev_id))
-			.load(db)
-			.await
-			.map_err(AppError::from)
-	}
-
 	/// All applications in the same group as `self`, excluding `self`. If the
 	/// server is ungrouped, returns an empty Vec.
 	pub async fn siblings(&self, db: &mut AsyncPgConnection) -> Result<Vec<Self>> {

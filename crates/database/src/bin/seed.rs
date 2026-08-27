@@ -63,7 +63,6 @@ const TRUNCATE_TABLES: &[&str] = &[
 	"incidents",
 	"issues",
 	"scoped_check_policies",
-	"device_server_associations",
 	"device_connections",
 	"device_keys",
 	"devices",

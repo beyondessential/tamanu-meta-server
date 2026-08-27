@@ -11,7 +11,7 @@ Each item is a section below; the section carries the detail and the traps.
 - [x] **Extending scope** — `Scope::Machine`, `machine_id` on `issues` and `scoped_check_policies`
 - [x] **The machine becomes the operator and enrolment surface** — create/update a machine, enrolment writes `machines.device_id` and `machines.registered_at`, `Application` gains its `machine_id` field, scaffolding default removed. **Unblocks the two below**
 - [x] **Group denormalisation** — the trigger propagating a machine's group onto its applications
-- [ ] **Dropping `device_server_associations`** — rehome the backup-staleness anchor first
+- [x] **Dropping `device_server_associations`** — rehome the backup-staleness anchor first
 - [ ] **Ingest** — the machine-subject check rule and the detail-field split; this is what first files at machine scope
 - [ ] **Declared names and certificate routing** — identity to machine to application, and the plural entitlement answer
 - [ ] **Restore replicas** — declarations move grain; `migration-test` stays application-scoped
@@ -191,6 +191,16 @@ That is a correction rather than a substitution: anchoring a backup deadline on 
 4. **`seed.rs` truncates the table by name**, so `just seed` breaks at startup rather than at any reader.
 
 The anchor itself: `min_first_seen` aggregates over every device ever associated with the application, so it is effectively "first status this application ever pushed". Moving to `machines.registered_at` shifts it *earlier* (enrolment precedes first push), which makes the `config_created_at` branch of the `max` win more often. That is the intended direction but it is a behaviour change, not a like-for-like swap — and it is inert until something actually writes `machines.registered_at`.
+
+### Done
+
+Migration `2026-08-27-061117-0000_drop_device_server_associations`, in the order the scouting warned about: trigger, then function, then table. `statuses` is partitioned and the trigger lived on the parent, so one DROP covered every partition and any created later.
+
+The vertical slice went with it: `Application::get_past_associations_for_device`, the `/api/devices/get_past_server_associations` endpoint and its OpenAPI path, the generated TS, and the "Past server associations" panel on the device detail page. The device-merge fix-up and the seeder's truncate entry went too.
+
+**The anchor moved to `machines.registered_at`**, and became a join rather than a second query — the scan already reaches `applications`, so the machine comes with it. Anchored on the box because the box is what gets backed up: anchoring on an application's registration would restart a machine's backup deadline every time a workload was added to it, so a box failing to back up for a month would read as freshly onboarded the moment someone deployed a second application onto it. Both cases have tests.
+
+That is a behaviour change rather than a like-for-like swap. `min_first_seen` was effectively "first status this application ever pushed"; enrolment precedes first push, so the anchor shifts earlier and the `config_created_at` branch of the `max` wins more often. Intended direction, but worth knowing when reading a `backup-never` that fires sooner than it used to.
 
 ## Declared names and certificate routing
 

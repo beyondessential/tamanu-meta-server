@@ -272,8 +272,8 @@ impl Device {
 		target_id: Uuid,
 	) -> Result<()> {
 		use crate::schema::{
-			applications, artifacts, device_connections, device_keys, device_server_associations,
-			devices, issues, statuses, versions,
+			applications, artifacts, device_connections, device_keys, devices, issues, statuses,
+			versions,
 		};
 
 		if source_id == target_id {
@@ -391,36 +391,6 @@ impl Device {
 				.execute(conn)
 				.await
 				.map_err(AppError::from)?;
-
-			// device_server_associations has composite PK (device_id, server_id).
-			// Two cases:
-			// 1. source has an association for a server that target doesn't —
-			//    rewrite source's device_id to target.
-			// 2. source has an association for a server that target also has —
-			//    collapse: keep target's row, drop source's. (Operator-facing
-			//    semantics: the timeline is now under the target id.)
-			diesel::sql_query(
-				"UPDATE device_server_associations \
-					 SET device_id = $1 \
-					 WHERE device_id = $2 \
-					   AND NOT EXISTS ( \
-					     SELECT 1 FROM device_server_associations target_dsa \
-					     WHERE target_dsa.device_id = $1 \
-					       AND target_dsa.server_id = device_server_associations.server_id \
-					   )",
-			)
-			.bind::<diesel::sql_types::Uuid, _>(target_id)
-			.bind::<diesel::sql_types::Uuid, _>(source_id)
-			.execute(conn)
-			.await
-			.map_err(AppError::from)?;
-			diesel::delete(
-				device_server_associations::table
-					.filter(device_server_associations::device_id.eq(source_id)),
-			)
-			.execute(conn)
-			.await
-			.map_err(AppError::from)?;
 
 			// Finally, delete the source device row.
 			diesel::delete(devices::table.filter(devices::id.eq(source_id)))

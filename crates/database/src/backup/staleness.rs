@@ -52,8 +52,9 @@ pub struct ScanRow {
 	pub is_monitored: bool,
 	pub expected_interval: SignedDuration,
 	pub config_created_at: Timestamp,
-	/// `MIN(first_seen)` over this server's `device_server_associations`.
-	pub min_first_seen: Option<Timestamp>,
+	/// When this application's machine was enrolled. `None` for a machine that
+	/// has never enrolled.
+	pub machine_registered_at: Option<Timestamp>,
 	/// Latest `purpose='backup' AND outcome='success'` for this `(server, type)`.
 	pub last_success_at: Option<Timestamp>,
 }
@@ -77,11 +78,20 @@ impl ScanRow {
 		self.expected_interval.saturating_mul(2)
 	}
 
-	/// `anchor = max(min_first_seen, config_created_at)`. When the server has
-	/// no associations (`min_first_seen` is NULL), the anchor degenerates to
-	/// `config_created_at` alone.
+	/// `anchor = max(machine_registered_at, config_created_at)`, so a box
+	/// onboarded into a backup configuration that predates it is not stale on
+	/// arrival. A machine that has never enrolled has no enrolment moment, and
+	/// the anchor degenerates to `config_created_at` alone.
+	///
+	/// Anchored on the MACHINE rather than the application, because the thing
+	/// being backed up is the box. Anchoring on an application's registration
+	/// would restart a machine's backup deadline every time a workload was
+	/// added to it, so a box that had been failing to back up for a month
+	/// would read as freshly onboarded the moment someone deployed a second
+	/// application onto it.
+	// spec: BKJ
 	fn anchor(&self) -> Timestamp {
-		match self.min_first_seen {
+		match self.machine_registered_at {
 			Some(fs) if fs > self.config_created_at => fs,
 			_ => self.config_created_at,
 		}
@@ -128,6 +138,7 @@ type ScanBaseRow = (
 	Option<crate::pg_duration::PgDuration>,
 	Option<crate::pg_duration::PgDuration>,
 	jiff_diesel::Timestamp,
+	Option<jiff_diesel::Timestamp>,
 );
 
 /// A scan-set row with its effective interval resolved, before the success and
@@ -140,15 +151,16 @@ struct ScanRowBase {
 	r#type: BackupType,
 	expected_interval: SignedDuration,
 	config_created_at: Timestamp,
+	machine_registered_at: Option<Timestamp>,
 }
 
 /// Build the scan set: every enabled `(server, type)` capability in a
 /// `status='ready'` group whose effective schedule has a non-NULL
 /// `expected_interval`. Per `(server, type)`, attach the latest backup success
-/// and the `MIN(first_seen)` anchor.
+/// and the machine's enrolment moment as the anchor.
 pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 	use crate::schema::{
-		applications, backup_type_defaults as defaults, device_server_associations as dsa,
+		applications, backup_type_defaults as defaults, machines,
 		server_backup_capabilities as cap, server_group_backup_config as cfg,
 		server_group_backup_schedule as sched,
 	};
@@ -161,6 +173,7 @@ pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 	let base: Vec<ScanBaseRow> = applications::table
 		.inner_join(cfg::table.on(cfg::group_id.nullable().eq(applications::group_id)))
 		.inner_join(cap::table.on(cap::server_id.eq(applications::id)))
+		.inner_join(machines::table.on(machines::id.eq(applications::machine_id)))
 		.left_join(
 			sched::table.on(sched::group_id
 				.eq(cfg::group_id)
@@ -180,6 +193,7 @@ pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 			sched::expected_interval.nullable(),
 			defaults::default_interval.nullable(),
 			cfg::created_at,
+			machines::registered_at.nullable(),
 		))
 		.load(db)
 		.await?;
@@ -200,6 +214,7 @@ pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 				override_interval,
 				default_interval,
 				created_at,
+				machine_registered_at,
 			)| {
 				let interval = if has_override {
 					override_interval
@@ -214,6 +229,7 @@ pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 					r#type: BackupType::from(ty),
 					expected_interval: interval.0,
 					config_created_at: Timestamp::from(created_at),
+					machine_registered_at: machine_registered_at.map(Timestamp::from),
 				})
 			},
 		)
@@ -222,22 +238,6 @@ pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 	if base.is_empty() {
 		return Ok(Vec::new());
 	}
-
-	// Anchors: MIN(first_seen) per server over all its association rows.
-	let server_ids: Vec<Uuid> = {
-		let mut s: std::collections::HashSet<Uuid> = base.iter().map(|r| r.server_id).collect();
-		s.drain().collect()
-	};
-	let assoc: Vec<(Uuid, Option<jiff_diesel::Timestamp>)> = dsa::table
-		.group_by(dsa::server_id)
-		.select((dsa::server_id, diesel::dsl::min(dsa::first_seen)))
-		.filter(dsa::server_id.eq_any(&server_ids))
-		.load(db)
-		.await?;
-	let min_first_seen: HashMap<Uuid, Timestamp> = assoc
-		.into_iter()
-		.filter_map(|(sid, ts)| ts.map(|t| (sid, Timestamp::from(t))))
-		.collect();
 
 	// Latest success per (server, type), fetched per distinct group.
 	let group_ids: Vec<Uuid> = {
@@ -272,7 +272,7 @@ pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 				is_monitored: row.is_monitored,
 				expected_interval: row.expected_interval,
 				config_created_at: row.config_created_at,
-				min_first_seen: min_first_seen.get(&row.server_id).copied(),
+				machine_registered_at: row.machine_registered_at,
 				last_success_at,
 			}
 		})

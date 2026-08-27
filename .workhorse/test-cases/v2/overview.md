@@ -16,9 +16,9 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 
 ## Groups
 
-- [ ] An application takes its machine's group (verifies spec: FLT)
-- [ ] Moving a machine to another group moves every application on it (verifies spec: FLT)
-- [ ] An application on a machine cannot be moved to a different group on its own (verifies spec: FLT)
+- [x] An application takes its machine's group (verifies spec: FLT)
+- [x] Moving a machine to another group moves every application on it (verifies spec: FLT)
+- [x] An application on a machine cannot be moved to a different group on its own (verifies spec: FLT)
 - [x] A machine-targeted check on a grouped machine resolves an incident target through that group (verifies spec: CHK, INC)
 
 ## Application types
@@ -97,8 +97,8 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 
 ## Backups and restores
 
-- [ ] A machine onboarded into an existing backup configuration is not stale on arrival (verifies spec: BKJ)
-- [ ] Adding a second application to a machine does not restart that machine's backup staleness anchor (verifies spec: BKJ)
+- [x] A machine onboarded into an existing backup configuration is not stale on arrival (verifies spec: BKJ)
+- [x] Adding a second application to a machine does not restart that machine's backup staleness anchor (verifies spec: BKJ)
 - [ ] Backup capability and participation follow the machine, and a two-application box is one participant (verifies spec: BAK, BKO)
 - [ ] A device request resolves identity to machine to group, without reaching the applications on it (verifies spec: BAK)
 - [ ] A restore-replica declaration names a machine, and a whole-group declaration expands over machines (verifies spec: RST)

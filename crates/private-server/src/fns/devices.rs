@@ -238,7 +238,6 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(get_device_by_id))
 		.routes(routes!(get_servers_for_device))
-		.routes(routes!(get_past_server_associations))
 		.routes(routes!(connection_history))
 		.routes(routes!(connection_count))
 		.routes(routes!(list_trusted))
@@ -322,34 +321,6 @@ pub async fn get_servers_for_device(
 ) -> Result<Json<Vec<ServerInfo>>> {
 	let mut conn = state.db.get().await?;
 	let applications = Application::get_by_device_id(&mut conn, args.device_id).await?;
-	let mut infos: Vec<ServerInfo> = applications.into_iter().map(server_to_info).collect();
-	decorate_with_status(&mut conn, &mut infos).await?;
-	fill_display_hosts(&mut conn, &mut infos).await?;
-	Ok(Json(infos))
-}
-
-/// List applications a device was previously associated with, but no longer is.
-///
-/// Useful for tracing a device's history when it has since been reassigned
-/// or replaced on a different server.
-#[utoipa::path(
-	post,
-	path = "/get_past_server_associations",
-	tag = "devices",
-	security(("tailscale-admin" = [])),
-	request_body = DeviceIdArgs,
-	responses(
-		(status = 200, body = Vec<ServerInfo>),
-	),
-)]
-pub async fn get_past_server_associations(
-	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
-	Json(args): Json<DeviceIdArgs>,
-) -> Result<Json<Vec<ServerInfo>>> {
-	let mut conn = state.db.get().await?;
-	let applications =
-		Application::get_past_associations_for_device(&mut conn, args.device_id).await?;
 	let mut infos: Vec<ServerInfo> = applications.into_iter().map(server_to_info).collect();
 	decorate_with_status(&mut conn, &mut infos).await?;
 	fill_display_hosts(&mut conn, &mut infos).await?;

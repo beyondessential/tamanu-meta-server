@@ -502,7 +502,7 @@ fn scan_row(
 		is_monitored: true,
 		expected_interval: interval,
 		config_created_at,
-		min_first_seen: None,
+		machine_registered_at: None,
 		last_success_at,
 	}
 }
@@ -2090,6 +2090,115 @@ async fn staleness_is_one_check_per_server_with_the_types_as_instances() {
 			vec![refs::STALENESS.to_string()],
 			"one catalog entry to configure, not one per backup type",
 		);
+	})
+	.await;
+}
+
+/// The staleness anchor is when the BOX was enrolled, not when its backup
+/// configuration was created. A machine onboarded into a configuration that
+/// predates it is not stale on arrival: it is given its grace from the moment
+/// it joined.
+// spec: BKJ
+#[tokio::test(flavor = "multi_thread")]
+async fn a_machine_onboarded_into_an_existing_config_is_not_stale_on_arrival() {
+	TestDb::run(|mut conn, _url| async move {
+		let pg = BackupType::TamanuPostgres;
+		let group_id = insert_group(&mut conn, "long-running").await;
+		let server_id = insert_server(&mut conn, group_id, true).await;
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(12)).await;
+		enable_capability(&mut conn, server_id, &pg).await;
+
+		// The configuration has existed for a month; the box joined an hour ago
+		// and has never backed up.
+		sql_query(
+			"UPDATE server_group_backup_config SET created_at = NOW() - interval '30 days' \
+			 WHERE group_id = $1",
+		)
+		.bind::<sql_types::Uuid, _>(group_id)
+		.execute(&mut conn)
+		.await
+		.expect("age the config");
+		sql_query(
+			"UPDATE machines SET registered_at = NOW() - interval '1 hour' \
+			 WHERE id = (SELECT machine_id FROM applications WHERE id = $1)",
+		)
+		.bind::<sql_types::Uuid, _>(server_id)
+		.execute(&mut conn)
+		.await
+		.expect("enrol the machine");
+
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan");
+		let row = rows
+			.iter()
+			.find(|r| r.server_id == server_id && r.r#type == pg)
+			.expect("the pair is in the scan set");
+		assert_eq!(
+			row.classify(Timestamp::now(), false),
+			StalenessVerdict::Ok,
+			"a freshly-onboarded box is inside its grace, not overdue since the config was made",
+		);
+	})
+	.await;
+}
+
+/// Anchored on the machine rather than the application, so deploying a second
+/// workload onto a box does not restart the box's backup deadline. Both
+/// applications answer with the same anchor, and a machine that has been
+/// failing to back up stays overdue.
+// spec: BKJ
+#[tokio::test(flavor = "multi_thread")]
+async fn a_second_application_does_not_restart_the_machines_anchor() {
+	TestDb::run(|mut conn, _url| async move {
+		let pg = BackupType::TamanuPostgres;
+		let group_id = insert_group(&mut conn, "two-workloads").await;
+		let first = insert_server(&mut conn, group_id, true).await;
+		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(12)).await;
+		enable_capability(&mut conn, first, &pg).await;
+
+		// The box was enrolled a month ago and has never backed up.
+		sql_query(
+			"UPDATE machines SET registered_at = NOW() - interval '30 days' \
+			 WHERE id = (SELECT machine_id FROM applications WHERE id = $1)",
+		)
+		.bind::<sql_types::Uuid, _>(first)
+		.execute(&mut conn)
+		.await
+		.expect("enrol the machine");
+
+		// A second workload lands on the same box today.
+		let host = format!("http://test.invalid/{}", Uuid::new_v4());
+		// The group comes from the box, as it does for any caller: the trigger
+		// corrects an application's group on update, not on insert.
+		let second = sql_query(
+			"INSERT INTO applications (host, kind, machine_id, group_id) \
+			 SELECT $1, 'central', machine_id, group_id FROM applications WHERE id = $2 \
+			 RETURNING id",
+		)
+		.bind::<sql_types::Text, _>(host)
+		.bind::<sql_types::Uuid, _>(first)
+		.get_result::<RowId>(&mut conn)
+		.await
+		.expect("insert second application")
+		.id;
+		enable_capability(&mut conn, second, &pg).await;
+
+		let rows = database::backup::staleness::scan_rows(&mut conn)
+			.await
+			.expect("scan");
+		let now = Timestamp::now();
+		for id in [first, second] {
+			let row = rows
+				.iter()
+				.find(|r| r.server_id == id && r.r#type == pg)
+				.expect("both pairs are in the scan set");
+			assert_eq!(
+				row.classify(now, false),
+				StalenessVerdict::Never,
+				"the box has been failing to back up for a month; a new workload does not reset that",
+			);
+		}
 	})
 	.await;
 }
