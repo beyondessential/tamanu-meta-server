@@ -421,3 +421,201 @@ async fn lifting_records_the_operator_and_is_idempotent() {
 	})
 	.await
 }
+
+#[derive(QueryableByName)]
+struct OutboxVars {
+	#[diesel(sql_type = sql_types::Text)]
+	target: String,
+	#[diesel(sql_type = sql_types::Text)]
+	by: String,
+}
+
+async fn outbox_vars(conn: &mut diesel_async::AsyncPgConnection, kind: &str) -> Vec<OutboxVars> {
+	sql_query(
+		"SELECT payload->>'target' AS target, payload->>'by' AS by \
+		 FROM slack_outbox WHERE kind = $1 ORDER BY created_at",
+	)
+	.bind::<sql_types::Text, _>(kind)
+	.get_results(conn)
+	.await
+	.expect("read outbox")
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn declaring_and_ending_notify_operators() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn, None).await;
+		let window = MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Server(server_id),
+			in_an_hour(),
+			Some("swapping the disk"),
+			Some("op"),
+		)
+		.await
+		.expect("declare");
+
+		let declared = outbox_vars(&mut conn, "maintenance_declared").await;
+		assert_eq!(declared.len(), 1, "declaring notifies once");
+		assert_eq!(declared[0].by, "op");
+
+		MaintenanceWindow::lift(&mut conn, window.id, Some("other"))
+			.await
+			.expect("lift");
+		let ended = outbox_vars(&mut conn, "maintenance_ended").await;
+		assert_eq!(ended.len(), 1, "ending notifies once");
+		assert_eq!(ended[0].by, "other", "the ending names who lifted it");
+		assert_eq!(ended[0].target, declared[0].target);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_window_expiring_notifies_as_the_expected_end_passing() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn, None).await;
+		let window = MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Server(server_id),
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare");
+
+		backdate_expected_end(&mut conn, window.id, SignedDuration::from_mins(1)).await;
+		MaintenanceWindow::sweep(&mut conn).await.expect("sweep");
+
+		let ended = outbox_vars(&mut conn, "maintenance_ended").await;
+		assert_eq!(ended.len(), 1);
+		assert_eq!(
+			ended[0].by, "its expected end passing",
+			"nobody lifted it, so the notice names the expiry, not an operator"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_incident_closed_by_a_declaration_says_so() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let server_id = insert_server(&mut conn, Some(group_id)).await;
+
+		file_check(
+			&mut conn,
+			filing(server_id, "reachability", CheckResult::Failed),
+		)
+		.await
+		.expect("file");
+		assert_eq!(open_incidents(&mut conn, group_id).await, 1);
+
+		// A resolve notice is suppressed while the open is still pending
+		// delivery; the drainer has shipped it in any real timeline.
+		sql_query("UPDATE slack_outbox SET delivered_at = now() WHERE kind = 'incident_open'")
+			.execute(&mut conn)
+			.await
+			.expect("mark open delivered");
+
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Server(server_id),
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare");
+
+		#[derive(QueryableByName)]
+		struct ResolveBy {
+			#[diesel(sql_type = sql_types::Text)]
+			by: String,
+		}
+		let resolves: Vec<ResolveBy> = sql_query(
+			"SELECT payload->>'by' AS by FROM slack_outbox WHERE kind = 'incident_resolve'",
+		)
+		.get_results(&mut conn)
+		.await
+		.expect("read resolves");
+		assert_eq!(resolves.len(), 1, "the close is notified");
+		assert_eq!(
+			resolves[0].by, "maintenance declared by op",
+			"the notice says maintenance was declared, not that the problem went away"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_joining_a_group_under_a_window_is_covered() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		MaintenanceWindow::declare(&mut conn, Scope::Group(group_id), in_an_hour(), None, None)
+			.await
+			.expect("declare");
+
+		// Joins while the window holds.
+		let server_id = insert_server(&mut conn, Some(group_id)).await;
+		file_check(
+			&mut conn,
+			filing(server_id, "reachability", CheckResult::Failed),
+		)
+		.await
+		.expect("file");
+
+		assert_eq!(
+			state_for(&mut conn, server_id, "reachability")
+				.await
+				.effective_result,
+			Some(CheckResult::Skipped),
+			"a group's window covers servers that join while it holds"
+		);
+		assert_eq!(open_incidents(&mut conn, group_id).await, 0);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn canopy_wide_checks_are_never_suspended() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let server_id = insert_server(&mut conn, Some(group_id)).await;
+		MaintenanceWindow::declare(&mut conn, Scope::Group(group_id), in_an_hour(), None, None)
+			.await
+			.expect("declare group window");
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Server(server_id),
+			in_an_hour(),
+			None,
+			None,
+		)
+		.await
+		.expect("declare server window");
+
+		let mut global = filing(server_id, "self-heartbeat", CheckResult::Failed);
+		global.scope = Scope::Global;
+		file_check(&mut conn, global).await.expect("file global");
+
+		#[derive(QueryableByName)]
+		struct Effective {
+			#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+			effective_result: Option<String>,
+		}
+		let row: Effective = sql_query(
+			"SELECT effective_result FROM issues \
+			 WHERE check_name = 'self-heartbeat' AND server_id IS NULL AND server_group_id IS NULL",
+		)
+		.get_result(&mut conn)
+		.await
+		.expect("global state row");
+		assert_eq!(
+			row.effective_result.as_deref(),
+			Some("failed"),
+			"a window over a server or a group never suspends canopy's own checks"
+		);
+	})
+	.await
+}
