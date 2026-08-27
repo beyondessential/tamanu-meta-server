@@ -98,7 +98,7 @@ async fn product_defaults_to_tamanu() {
 
 		let id = Uuid::new_v4();
 		diesel::sql_query(
-			"INSERT INTO applications (id, host, kind) VALUES ($1, 'https://legacy.example', 'central')",
+			"WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, kind, machine_id) VALUES ($1, 'https://legacy.example', 'central', $1)",
 		)
 		.bind::<diesel::sql_types::Uuid, _>(id)
 		.execute(&mut conn)
@@ -128,8 +128,8 @@ async fn legacy_canopy_kind_still_reads() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		let id = Uuid::new_v4();
 		diesel::sql_query(
-			"INSERT INTO applications (id, host, kind, product) \
-			 VALUES ($1, 'https://canopy.example', 'canopy', 'canopy')",
+			"WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, kind, product, machine_id) \
+			 VALUES ($1, 'https://canopy.example', 'canopy', 'canopy', $1)",
 		)
 		.bind::<diesel::sql_types::Uuid, _>(id)
 		.execute(&mut conn)

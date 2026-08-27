@@ -30,7 +30,7 @@ async fn insert_grouped_server(conn: &mut diesel_async::AsyncPgConnection) -> Uu
 	.await
 	.expect("group");
 	let server: RowId = sql_query(
-		"INSERT INTO applications (host, group_id) VALUES ('http://reeval.invalid/', $1) RETURNING id",
+		"WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (host, group_id, machine_id) SELECT 'http://reeval.invalid/', $1, m.id FROM m RETURNING id",
 	)
 	.bind::<sql_types::Uuid, _>(group.id)
 	.get_result(conn)

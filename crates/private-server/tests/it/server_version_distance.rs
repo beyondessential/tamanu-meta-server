@@ -7,8 +7,8 @@ async fn version_distance_calculation_up_to_date() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		// Create a server
 		conn.batch_execute(
-			"INSERT INTO applications (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Test Application', 'https://test.example.com', 'production', 'central')"
+			"WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, machine_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Test Application', 'https://test.example.com', 'production', 'central', '11111111-1111-1111-1111-111111111111')"
 		)
 		.await
 		.unwrap();
@@ -68,8 +68,8 @@ async fn version_distance_calculation_minor_behind() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		// Create a server
 		conn.batch_execute(
-			"INSERT INTO applications (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Test Application', 'https://test.example.com', 'production', 'central')"
+			"WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, machine_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Test Application', 'https://test.example.com', 'production', 'central', '11111111-1111-1111-1111-111111111111')"
 		)
 		.await
 		.unwrap();
@@ -123,8 +123,8 @@ async fn version_distance_calculation_major_behind() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		// Create a server
 		conn.batch_execute(
-			"INSERT INTO applications (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Test Application', 'https://test.example.com', 'production', 'central')"
+			"WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, machine_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Test Application', 'https://test.example.com', 'production', 'central', '11111111-1111-1111-1111-111111111111')"
 		)
 		.await
 		.unwrap();
@@ -179,8 +179,8 @@ async fn version_distance_none_when_no_published_versions() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		// Create a server
 		conn.batch_execute(
-			"INSERT INTO applications (id, name, host, rank, kind) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Test Application', 'https://test.example.com', 'production', 'central')"
+			"WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, machine_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Test Application', 'https://test.example.com', 'production', 'central', '11111111-1111-1111-1111-111111111111')"
 		)
 		.await
 		.unwrap();

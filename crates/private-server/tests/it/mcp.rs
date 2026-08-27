@@ -66,10 +66,10 @@ const SRV_UNGROUPED: &str = "33333333-3333-3333-3333-333333333333";
 async fn seed(conn: &mut impl SimpleAsyncConnection) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{GROUP}', 'Prod Group'); \
-		 INSERT INTO applications (id, host, name, kind, rank, group_id, is_monitored) VALUES \
-			('{SRV_GROUPED}', 'https://prod-central', 'Prod Central', 'central', 'production', '{GROUP}', true); \
-		 INSERT INTO applications (id, host, name, kind) VALUES \
-			('{SRV_UNGROUPED}', 'https://lonely', 'Lonely Facility', 'facility'); \
+		 WITH m AS (INSERT INTO machines (id) VALUES ('{SRV_GROUPED}') RETURNING id) INSERT INTO applications (id, host, name, kind, rank, group_id, is_monitored, machine_id) VALUES \
+			('{SRV_GROUPED}', 'https://prod-central', 'Prod Central', 'central', 'production', '{GROUP}', true, '{SRV_GROUPED}'); \
+		 WITH m AS (INSERT INTO machines (id) VALUES ('{SRV_UNGROUPED}') RETURNING id) INSERT INTO applications (id, host, name, kind, machine_id) VALUES \
+			('{SRV_UNGROUPED}', 'https://lonely', 'Lonely Facility', 'facility', '{SRV_UNGROUPED}'); \
 		 INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES \
 			('{SRV_GROUPED}', '2.34.1', true, '[]'::jsonb, \
 			 '{{\"pgVersion\": \"PostgreSQL 14.2 on x86_64-pc-linux-gnu\"}}'::jsonb, NOW() - interval '1 minute'); \
@@ -354,8 +354,8 @@ const INC_CLOSED: &str = "aaaaaaaa-0000-0000-0000-0000000000a2";
 async fn seed_incidents(conn: &mut impl SimpleAsyncConnection) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{IGROUP}', 'Inc Group'); \
-		 INSERT INTO applications (id, host, name, kind, group_id, is_monitored) VALUES \
-			('{ISRV}', 'https://inc', 'Inc Application', 'central', '{IGROUP}', true); \
+		 WITH m AS (INSERT INTO machines (id) VALUES ('{ISRV}') RETURNING id) INSERT INTO applications (id, host, name, kind, group_id, is_monitored, machine_id) VALUES \
+			('{ISRV}', 'https://inc', 'Inc Application', 'central', '{IGROUP}', true, '{ISRV}'); \
 		 INSERT INTO issues (id, created_at, updated_at, application_id, source, ref, check_name, observed_result, effective_result, description, message, active, first_seen, last_seen, last_degraded_at) VALUES \
 			('{ISSUE1}', NOW(), NOW(), '{ISRV}', 'test', 'r1', 'r1', 'failed', 'failed', 'Disk full', 'disk usage 98%', true, NOW() - interval '2 days', NOW() - interval '1 hour', NOW() - interval '1 hour'), \
 			('{ISSUE2}', NOW(), NOW(), '{ISRV}', 'test', 'r2', 'r2', 'warning', 'warning', NULL, 'slow query', false, NOW() - interval '10 days', NOW() - interval '9 days', NOW() - interval '9 days'); \
@@ -523,8 +523,8 @@ async fn backup_problems_finds_a_failure_behind_many_later_successes() {
 
 		let mut sql = format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group}', 'Chatty'); \
-			 INSERT INTO applications (id, host, name, kind, group_id) VALUES \
-				('{server}', 'https://chatty', 'Chatty', 'central', '{group}'); \
+			 WITH m AS (INSERT INTO machines (id) VALUES ('{server}') RETURNING id) INSERT INTO applications (id, host, name, kind, group_id, machine_id) VALUES \
+				('{server}', 'https://chatty', 'Chatty', 'central', '{group}', '{server}'); \
 			 INSERT INTO devices (id, role) VALUES ('{device}', 'server'); \
 			 INSERT INTO server_group_backup_config \
 				(group_id, bucket, prefix, target_role_arn, maintenance_role_arn, \
@@ -588,8 +588,8 @@ const REPLICA_GAP: &str = "bbbbbbbb-0000-0000-0000-0000000000b3";
 async fn seed_backup_runs(conn: &mut impl SimpleAsyncConnection) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{RGROUP}', 'Backup Group'); \
-		 INSERT INTO applications (id, host, name, kind, group_id) VALUES \
-			('{RSERVER}', 'https://backup-target', 'Backup Target', 'central', '{RGROUP}'); \
+		 WITH m AS (INSERT INTO machines (id) VALUES ('{RSERVER}') RETURNING id) INSERT INTO applications (id, host, name, kind, group_id, machine_id) VALUES \
+			('{RSERVER}', 'https://backup-target', 'Backup Target', 'central', '{RGROUP}', '{RSERVER}'); \
 		 INSERT INTO devices (id, role) VALUES ('{RDEVICE}', 'server'); \
 		 INSERT INTO backup_runs \
 			(id, device_id, group_id, server_id, type, purpose, outcome, snapshot_id, bytes_uploaded, s3_sent_raw_bytes, snapshot_logical_bytes, reported_at) \
@@ -974,8 +974,8 @@ const SRV_OFFLINE: &str = "44444444-4444-4444-4444-444444444444";
 async fn find_servers_retains_the_version_of_a_long_offline_server() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		conn.batch_execute(&format!(
-			"INSERT INTO applications (id, host, name, kind, rank) VALUES \
-				('{SRV_OFFLINE}', 'https://long-gone', 'Long Gone', 'central', 'production'); \
+			"WITH m AS (INSERT INTO machines (id) VALUES ('{SRV_OFFLINE}') RETURNING id) INSERT INTO applications (id, host, name, kind, rank, machine_id) VALUES \
+				('{SRV_OFFLINE}', 'https://long-gone', 'Long Gone', 'central', 'production', '{SRV_OFFLINE}'); \
 			 INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES \
 				('{SRV_OFFLINE}', '2.30.0', true, '[]'::jsonb, '{{}}'::jsonb, \
 				 NOW() - interval '30 days'); \

@@ -26,6 +26,7 @@ use utoipa::{
 		(name = "healthchecks", description = "Healthcheck catalog: severities, conditional rules, and sample data."),
 		(name = "incidents", description = "Operational incidents (groups of issues against a server)."),
 		(name = "issues", description = "Per-server issues raised from device events."),
+		(name = "machines", description = "The hosts applications run on: their group, location, and monitoring."),
 		(name = "maintenance", description = "Windows declaring that a server or a group is being worked on."),
 		(name = "mcp_tokens", description = "Bearer tokens for the public MCP mount."),
 		(name = "upgrade_plans", description = "Where each deployment is going: the version a group intends to move to, and when."),

@@ -49,6 +49,11 @@ pub struct MachineDetail {
 }
 
 /// List the live fleet's machines.
+///
+/// Every machine that has not been archived, ordered by name. A machine with
+/// no applications on it is included: one created but not yet reporting is
+/// awaiting check-in, not an error. The request body is ignored; send an empty
+/// JSON object.
 #[utoipa::path(
 	post,
 	path = "/list",
@@ -66,6 +71,10 @@ pub async fn list(State(state): State<AppState>) -> Result<Json<Vec<Machine>>> {
 }
 
 /// Get one machine and the applications running on it.
+///
+/// Returns the machine's own facts — its group, where it is, how long it may
+/// be silent — together with the applications it hosts. Returns 404 if the
+/// machine doesn't exist.
 #[utoipa::path(
 	post,
 	path = "/get",
@@ -98,9 +107,14 @@ pub async fn get(
 /// deployment a box belongs to is the one thing the box has no way of knowing.
 #[derive(Deserialize, ToSchema)]
 pub struct MachineCreateArgs {
+	/// What to call the box. Distinct from the hostname its operating system
+	/// reports, which arrives as a reported figure.
 	pub name: Option<String>,
+	/// The group this machine belongs to. The applications on it take it.
 	pub group_id: Option<Uuid>,
+	/// Whether the box is cloud-hosted, if known.
 	pub cloud: Option<bool>,
+	/// Where the box is, if known.
 	pub geolocation: Option<GeoPoint>,
 }
 
@@ -143,15 +157,25 @@ pub async fn create(
 /// nullable ones an explicit `null` clears the value.
 #[derive(Deserialize, ToSchema)]
 pub struct MachineUpdateArgs {
+	/// The machine to edit.
 	pub machine_id: Uuid,
+	/// New name for the box, or `null` to clear it.
 	pub name: Option<Option<String>>,
+	/// New group, or `null` to remove it from its current one. The
+	/// applications on this machine move with it.
 	pub group_id: Option<Option<Uuid>>,
+	/// New value for whether the box is cloud-hosted, or `null` to clear it.
 	pub cloud: Option<Option<bool>>,
+	/// New location for the box, or `null` to clear it.
 	pub geolocation: Option<Option<GeoPoint>>,
+	/// New monitored state. Switching it off quiets the machine's own checks
+	/// and leaves the applications on it alone.
 	pub is_monitored: Option<bool>,
 	/// How long the machine may be silent before it is unreachable, in seconds.
 	pub alert_when_down_for: Option<i64>,
+	/// New free-form operator notes for the box.
 	pub notes: Option<String>,
+	/// New set of key/value tags. Replaces the whole set.
 	pub tags: Option<TagMap>,
 }
 

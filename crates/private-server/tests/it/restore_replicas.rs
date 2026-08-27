@@ -30,9 +30,9 @@ async fn insert_consumer(conn: &mut AsyncPgConnection) -> Uuid {
 async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uuid {
 	let id = Uuid::new_v4();
 	conn.batch_execute(&format!(
-		"INSERT INTO applications (id, name, host, kind, rank, group_id) VALUES
+		"WITH m AS (INSERT INTO machines (id) VALUES ('{id}') RETURNING id) INSERT INTO applications (id, name, host, kind, rank, group_id, machine_id) VALUES
 			('{id}', 'rr-test-server', 'https://{id}.example.com', 'facility',
-			 'production', '{group_id}')"
+			 'production', '{group_id}', '{id}')"
 	))
 	.await
 	.expect("insert server");
@@ -295,9 +295,9 @@ async fn a_server_that_cannot_be_redacted_shows_as_a_gap() {
 		advertise_redacting_analytics(&mut conn, consumer).await;
 		let senaite = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO applications (id, name, host, kind, product, rank, group_id) VALUES
+			"WITH m AS (INSERT INTO machines (id) VALUES ('{senaite}') RETURNING id) INSERT INTO applications (id, name, host, kind, product, rank, group_id, machine_id) VALUES
 				('{senaite}', 'lims', 'https://{senaite}.example.com', 'standalone',
-				 'senaite', 'production', '{group}')"
+				 'senaite', 'production', '{group}', '{senaite}')"
 		))
 		.await
 		.expect("insert senaite server");
@@ -583,8 +583,8 @@ async fn checks_reports_duration_and_surfaces_unreported_restores() {
 		let member_run = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role) VALUES ('{member_device}', 'server');
-			 INSERT INTO applications (id, host, kind, group_id, device_id) VALUES
-				('{server}', 'https://s.test', 'central', '{group}', '{member_device}');
+			 WITH m AS (INSERT INTO machines (id) VALUES ('{server}') RETURNING id) INSERT INTO applications (id, host, kind, group_id, device_id, machine_id) VALUES
+				('{server}', 'https://s.test', 'central', '{group}', '{member_device}', '{server}');
 			 -- A reported check plus the issuance that started it 5 minutes before
 			 -- the report → the row carries a ~300s duration.
 			 INSERT INTO backup_restore_checks

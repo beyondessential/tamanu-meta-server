@@ -52,8 +52,7 @@ async fn entitled_server(conn: &mut AsyncPgConnection, domain: &str) -> Uuid {
 
 	let host = format!("https://{}.example.invalid", Uuid::new_v4());
 	sql_query(
-		"INSERT INTO applications (name, host, kind, group_id, may_manage_dns, may_manage_tls) \
-		 VALUES ($1, $2, 'central', $3, true, true) RETURNING id",
+		"WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (name, host, kind, group_id, may_manage_dns, may_manage_tls, machine_id) SELECT $1, $2, 'central', $3, true, true, m.id FROM m RETURNING id",
 	)
 	.bind::<sql_types::Text, _>("entitled")
 	.bind::<sql_types::Text, _>(host)

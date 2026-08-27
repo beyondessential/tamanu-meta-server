@@ -65,8 +65,7 @@ async fn insert_server_with_delay(
 	};
 	let row: RowId = sql_query(
 		r#"
-			INSERT INTO applications (host, group_id)
-			VALUES ($1, $2)
+			WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (host, group_id, machine_id) SELECT $1, $2, m.id FROM m
 			RETURNING id
 		"#,
 	)

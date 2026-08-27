@@ -18,7 +18,7 @@ struct RowId {
 
 async fn insert_server(conn: &mut diesel_async::AsyncPgConnection) -> Uuid {
 	let row: RowId =
-		sql_query("INSERT INTO applications (host) VALUES ('http://rollup.invalid/') RETURNING id")
+		sql_query("WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (host, machine_id) SELECT 'http://rollup.invalid/', m.id FROM m RETURNING id")
 			.get_result(conn)
 			.await
 			.expect("insert server");

@@ -55,9 +55,9 @@ async fn entitled(
 
 	let server = Uuid::new_v4();
 	conn.batch_execute(&format!(
-		"INSERT INTO applications (id, name, host, kind, group_id, device_id, may_manage_dns, may_manage_tls) \
+		"WITH m AS (INSERT INTO machines (id) VALUES ('{server}') RETURNING id) INSERT INTO applications (id, name, host, kind, group_id, device_id, may_manage_dns, may_manage_tls, machine_id) \
 		 VALUES ('{server}', 'crt', 'https://{server}.example.invalid', 'central', '{group}', \
-		 '{device_id}', {dns}, {tls})"
+		 '{device_id}', {dns}, {tls}, '{server}')"
 	))
 	.await
 	.expect("insert server");

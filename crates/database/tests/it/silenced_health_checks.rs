@@ -40,7 +40,7 @@ async fn insert_server(
 	}
 	let host = format!("http://test.invalid/{}", Uuid::new_v4());
 	let row: RowId = sql_query(
-		"INSERT INTO applications (host, kind, group_id) VALUES ($1, 'central', $2) RETURNING id",
+		"WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (host, kind, group_id, machine_id) SELECT $1, 'central', $2, m.id FROM m RETURNING id",
 	)
 	.bind::<sql_types::Text, _>(host)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group_id)

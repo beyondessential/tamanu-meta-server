@@ -34,7 +34,7 @@ async fn insert_grouped_server(
 	.await
 	.expect("group");
 	let row: RowId = sql_query(
-		"INSERT INTO applications (host, group_id) VALUES ('http://linger.invalid/', $1) RETURNING id",
+		"WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (host, group_id, machine_id) SELECT 'http://linger.invalid/', $1, m.id FROM m RETURNING id",
 	)
 	.bind::<sql_types::Uuid, _>(group.id)
 	.get_result(conn)

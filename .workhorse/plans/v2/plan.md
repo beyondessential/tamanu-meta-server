@@ -9,7 +9,7 @@ Each item is a section below; the section carries the detail and the traps.
 - [x] **Rename `servers` to `applications`** — storage, the workspace sweep, and the e2e suite
 - [x] **Machine grain: table and model** — `machines`, the 1:1 backfill, `applications.machine_id`
 - [x] **Extending scope** — `Scope::Machine`, `machine_id` on `issues` and `scoped_check_policies`
-- [ ] **The machine becomes the operator and enrolment surface** — create/update a machine, enrolment writes `machines.device_id` and `machines.registered_at`, `Application` gains its `machine_id` field, scaffolding default removed. **Unblocks the two below**
+- [x] **The machine becomes the operator and enrolment surface** — create/update a machine, enrolment writes `machines.device_id` and `machines.registered_at`, `Application` gains its `machine_id` field, scaffolding default removed. **Unblocks the two below**
 - [ ] **Group denormalisation** — the trigger propagating a machine's group onto its applications
 - [ ] **Dropping `device_server_associations`** — rehome the backup-staleness anchor first
 - [ ] **Ingest** — the machine-subject check rule and the detail-field split; this is what first files at machine scope
@@ -23,8 +23,8 @@ Each item is a section below; the section carries the detail and the traps.
 
 Carried deferrals, each gated on a step above rather than on a vague later:
 
-- [ ] Remove the `application_default_machine()` scaffolding default — with **Ingest**, when reports create applications against a named machine
-- [ ] Add `machine_id` to the `Application` struct (49 construction sites) — with the first step that reads it
+- [x] Remove the `application_default_machine()` scaffolding default — done early, with the operator/enrolment surface
+- [x] Add `machine_id` to the `Application` struct — done with the operator/enrolment surface
 - [ ] Carry the machine on `IssueData` — with **Fleet query interface** / **Frontend**, whichever presents machine checks first
 
 ## Sequencing
@@ -129,11 +129,22 @@ The operator create flow now creates the machine first and hangs the application
 
 Removed `NewServer` and its `From<Application>` conversion: dead since the crate split, in neither OpenAPI spec, and the only thing that would have needed a machine invented for it.
 
-**Still open in this step:**
+### Complete
 
-- [ ] Operator-facing machine handlers (`/api/machines`), and pointing the create form at a machine rather than a server
-- [ ] Enrolment calling `mark_registered` on the machine — the model method exists and the operator create path uses it, but the enrolment flow itself still only marks the application
-- [ ] The `application_default_machine()` default, and with it the ~188 raw-SQL `INSERT INTO applications` in tests that rely on it. Two in `server_products.rs` are already known to depend on it silently
+`/api/machines` exists — list, get (with the applications on the box), create, update, archive — all admin-gated except the two reads, with `machines` registered as an OpenAPI tag.
+
+Enrolment now marks the machine as well as the application. The application is still marked too, because enrolment is keyed by application until that flow moves to the machine outright.
+
+**The `application_default_machine()` default is gone.** Omitting a machine is now a NOT NULL violation, which is what it should always have been: the hazard was a caller that should attach to an *existing* machine silently getting a second one, wrong for exactly the two-workload host this card serves.
+
+That cost 137 raw-SQL fixture rewrites across 40 files. The uniform shape is a data-modifying CTE, which keeps it a single statement (`sql_query` cannot run two) and preserves bind numbering:
+
+    WITH m AS (INSERT INTO machines (id) VALUES (…) RETURNING id)
+    INSERT INTO applications (…, machine_id) VALUES (…, <same id>)
+
+Where the application had an explicit id, the machine reuses it — the same 1:1 the real backfill produced. Where it had none, the machine is minted anonymously and selected from the CTE.
+
+Two things worth knowing about that sweep. Fixture machines carry no group even where their application does; nothing reads `machines.group_id` on those paths, so it is inert, but it is a disagreement a future machine-scoped assertion would trip over. And each fixture application gets its own machine, so no existing test exercises two applications sharing a box — the cases that do are in `machines.rs` and `scope.rs`, written deliberately.
 
 **Traps found while scouting, worth carrying in:**
 
