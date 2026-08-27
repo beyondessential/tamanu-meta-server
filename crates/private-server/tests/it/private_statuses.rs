@@ -870,7 +870,7 @@ async fn server_grouped_ids_with_data() {
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Production cluster'),
 			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Clone cluster'),
 			('cccccccc-cccc-cccc-cccc-cccccccccccc', 'Demo cluster');
-			WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111'), ('44444444-4444-4444-4444-444444444444'), ('55555555-5555-5555-5555-555555555555'), ('22222222-2222-2222-2222-222222222222'), ('33333333-3333-3333-3333-333333333333') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
+			WITH m AS (INSERT INTO machines (id, group_id) VALUES ('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('44444444-4444-4444-4444-444444444444', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('55555555-5555-5555-5555-555555555555', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('22222222-2222-2222-2222-222222222222', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'), ('33333333-3333-3333-3333-333333333333', 'cccccccc-cccc-cccc-cccc-cccccccccccc') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Prod Central', 'https://prod.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111'),
 			('44444444-4444-4444-4444-444444444444', 'Prod Facility A', 'https://facility-a.example.com', 'production', 'facility', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '44444444-4444-4444-4444-444444444444'),
 			('55555555-5555-5555-5555-555555555555', 'Prod Facility B', 'https://facility-b.example.com', 'production', 'facility', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '55555555-5555-5555-5555-555555555555'),
@@ -931,7 +931,7 @@ async fn server_grouped_ids_excludes_ungrouped() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Production cluster');
-			WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111'), ('22222222-2222-2222-2222-222222222222') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
+			WITH m AS (INSERT INTO machines (id, group_id) VALUES ('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('22222222-2222-2222-2222-222222222222', NULL) RETURNING id) INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Grouped Central', 'https://grouped.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111'),
 			('22222222-2222-2222-2222-222222222222', 'Standalone', 'https://standalone.example.com', 'production', 'central', NULL, '22222222-2222-2222-2222-222222222222')",
 		)
@@ -1431,7 +1431,7 @@ async fn check_detail_lists_servers_reporting_that_check_ordered_failed_first() 
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Attention cluster');
-			WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111'), ('22222222-2222-2222-2222-222222222222'), ('33333333-3333-3333-3333-333333333333'), ('44444444-4444-4444-4444-444444444444') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
+			WITH m AS (INSERT INTO machines (id, group_id) VALUES ('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('22222222-2222-2222-2222-222222222222', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('33333333-3333-3333-3333-333333333333', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'), ('44444444-4444-4444-4444-444444444444', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Warning Application', 'https://warning.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111'),
 			('22222222-2222-2222-2222-222222222222', 'Failing Application', 'https://failing.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '22222222-2222-2222-2222-222222222222'),
 			('33333333-3333-3333-3333-333333333333', 'Healthy Application', 'https://healthy.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '33333333-3333-3333-3333-333333333333'),
@@ -1563,7 +1563,7 @@ async fn check_detail_failing_since_comes_from_the_active_issue() {
 async fn check_detail_excludes_ungrouped_and_archived_servers() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111'), ('22222222-2222-2222-2222-222222222222') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
+			"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('11111111-1111-1111-1111-111111111111', NULL), ('22222222-2222-2222-2222-222222222222', NULL) RETURNING id) INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Standalone Failing', 'https://standalone.example.com', 'production', 'central', NULL, '11111111-1111-1111-1111-111111111111'),
 			('22222222-2222-2222-2222-222222222222', 'Archived Failing', 'https://archived.example.com', 'production', 'central', NULL, '22222222-2222-2222-2222-222222222222');
 
@@ -1877,7 +1877,7 @@ async fn group_details_member_health_excludes_group_silenced_checks() {
 			INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Silenced cluster');
 
-			WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
+			WITH m AS (INSERT INTO machines (id, group_id) VALUES ('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Member Application', 'https://member.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111');
 
 			INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES

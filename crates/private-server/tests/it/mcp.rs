@@ -66,7 +66,7 @@ const SRV_UNGROUPED: &str = "33333333-3333-3333-3333-333333333333";
 async fn seed(conn: &mut impl SimpleAsyncConnection) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{GROUP}', 'Prod Group'); \
-		 WITH m AS (INSERT INTO machines (id) VALUES ('{SRV_GROUPED}') RETURNING id) INSERT INTO applications (id, host, name, kind, rank, group_id, is_monitored, machine_id) VALUES \
+		 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{SRV_GROUPED}', '{GROUP}') RETURNING id) INSERT INTO applications (id, host, name, kind, rank, group_id, is_monitored, machine_id) VALUES \
 			('{SRV_GROUPED}', 'https://prod-central', 'Prod Central', 'central', 'production', '{GROUP}', true, '{SRV_GROUPED}'); \
 		 WITH m AS (INSERT INTO machines (id) VALUES ('{SRV_UNGROUPED}') RETURNING id) INSERT INTO applications (id, host, name, kind, machine_id) VALUES \
 			('{SRV_UNGROUPED}', 'https://lonely', 'Lonely Facility', 'facility', '{SRV_UNGROUPED}'); \
@@ -354,7 +354,7 @@ const INC_CLOSED: &str = "aaaaaaaa-0000-0000-0000-0000000000a2";
 async fn seed_incidents(conn: &mut impl SimpleAsyncConnection) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{IGROUP}', 'Inc Group'); \
-		 WITH m AS (INSERT INTO machines (id) VALUES ('{ISRV}') RETURNING id) INSERT INTO applications (id, host, name, kind, group_id, is_monitored, machine_id) VALUES \
+		 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{ISRV}', '{IGROUP}') RETURNING id) INSERT INTO applications (id, host, name, kind, group_id, is_monitored, machine_id) VALUES \
 			('{ISRV}', 'https://inc', 'Inc Application', 'central', '{IGROUP}', true, '{ISRV}'); \
 		 INSERT INTO issues (id, created_at, updated_at, application_id, source, ref, check_name, observed_result, effective_result, description, message, active, first_seen, last_seen, last_degraded_at) VALUES \
 			('{ISSUE1}', NOW(), NOW(), '{ISRV}', 'test', 'r1', 'r1', 'failed', 'failed', 'Disk full', 'disk usage 98%', true, NOW() - interval '2 days', NOW() - interval '1 hour', NOW() - interval '1 hour'), \
@@ -523,7 +523,7 @@ async fn backup_problems_finds_a_failure_behind_many_later_successes() {
 
 		let mut sql = format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group}', 'Chatty'); \
-			 WITH m AS (INSERT INTO machines (id) VALUES ('{server}') RETURNING id) INSERT INTO applications (id, host, name, kind, group_id, machine_id) VALUES \
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server}', '{group}') RETURNING id) INSERT INTO applications (id, host, name, kind, group_id, machine_id) VALUES \
 				('{server}', 'https://chatty', 'Chatty', 'central', '{group}', '{server}'); \
 			 INSERT INTO devices (id, role) VALUES ('{device}', 'server'); \
 			 INSERT INTO server_group_backup_config \
@@ -588,7 +588,7 @@ const REPLICA_GAP: &str = "bbbbbbbb-0000-0000-0000-0000000000b3";
 async fn seed_backup_runs(conn: &mut impl SimpleAsyncConnection) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{RGROUP}', 'Backup Group'); \
-		 WITH m AS (INSERT INTO machines (id) VALUES ('{RSERVER}') RETURNING id) INSERT INTO applications (id, host, name, kind, group_id, machine_id) VALUES \
+		 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{RSERVER}', '{RGROUP}') RETURNING id) INSERT INTO applications (id, host, name, kind, group_id, machine_id) VALUES \
 			('{RSERVER}', 'https://backup-target', 'Backup Target', 'central', '{RGROUP}', '{RSERVER}'); \
 		 INSERT INTO devices (id, role) VALUES ('{RDEVICE}', 'server'); \
 		 INSERT INTO backup_runs \

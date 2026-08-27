@@ -142,7 +142,10 @@ async fn update_server_not_found() {
 				"data": {}
 			}))
 			.await;
-		response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+		// A missing server is a 404. It used to be a 500 only because diesel
+		// refused to build the empty changeset before anything looked the
+		// server up — the endpoint never actually checked that it existed.
+		response.assert_status(StatusCode::NOT_FOUND);
 	})
 	.await
 }
@@ -190,7 +193,7 @@ async fn update_server_clear_group_id() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Group');
-			WITH m AS (INSERT INTO machines (id) VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
+			WITH m AS (INSERT INTO machines (id, group_id) VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
 			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Member', 'https://m2.example.com', 'production', 'facility', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
 			INSERT INTO admins (email) VALUES ('admin@example.com')",
 		)

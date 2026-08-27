@@ -898,7 +898,28 @@ pub async fn update(
 	} else {
 		None
 	};
+	// An application's group is never set independently of its machine's, so a
+	// group change here is applied to the box. That keeps this endpoint's
+	// contract while giving it the model's meaning: moving "the server" to a
+	// group moves the machine, and the applications on it follow.
+	//
+	// Routed through `Machine::update` rather than a column write so the
+	// consequences come with it — open issues re-evaluated for anything that
+	// gains a group, and both groups' cached effective version recomputed.
+	// spec: FLT#groups
 	let new_group_id = args.data.group_id;
+	if let Some(group_id) = new_group_id {
+		let application = Application::get_by_id(&mut conn, args.server_id).await?;
+		database::machines::Machine::update(
+			&mut conn,
+			application.machine_id,
+			database::machines::MachineUpdate {
+				group_id: Some(group_id),
+				..Default::default()
+			},
+		)
+		.await?;
+	}
 
 	let kind = settle_kind(&mut conn, args.server_id, args.data.product, args.data.kind).await?;
 
@@ -916,7 +937,8 @@ pub async fn update(
 			None => None,
 		},
 		device_id: args.data.device_id,
-		group_id: new_group_id,
+		// Deliberately absent: the group came from the machine above.
+		group_id: None,
 		public_name: args.data.public_name,
 		cloud: args.data.cloud,
 		geolocation: args.data.geolocation,

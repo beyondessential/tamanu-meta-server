@@ -817,11 +817,18 @@ impl Application {
 			.ok()
 			.and_then(|s| s.group_id);
 
-		diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
+		// An empty changeset is a no-op, not an error. It became reachable when
+		// the group moved to the machine: an edit that changes only the group
+		// leaves nothing here to write, and diesel refuses to build that query.
+		match diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
 			.set(updates)
 			.execute(db)
 			.await
-			.map_err(AppError::from)?;
+		{
+			Ok(_) => {}
+			Err(diesel::result::Error::QueryBuilderError(_)) => {}
+			Err(err) => return Err(AppError::from(err)),
+		}
 
 		let after = Self::get_by_id(db, server_id).await?;
 		recompute_groups(db, [old_group_id, after.group_id]).await?;

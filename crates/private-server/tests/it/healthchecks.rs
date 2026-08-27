@@ -320,7 +320,8 @@ async fn sample_materialises_latest_push_for_this_check() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name, tags) VALUES \
 				('11111111-1111-1111-1111-111111111111', 'prod', '{\"env\": \"prod\"}'::jsonb); \
-			 WITH m AS (INSERT INTO machines (id) VALUES ('22222222-2222-2222-2222-222222222222') RETURNING id) INSERT INTO applications (id, host, name, kind, group_id, tags, machine_id) VALUES \
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('22222222-2222-2222-2222-222222222222', \
+				 '11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, host, name, kind, group_id, tags, machine_id) VALUES \
 				('22222222-2222-2222-2222-222222222222', 'https://prod-host', 'Prod Central', 'central', \
 				 '11111111-1111-1111-1111-111111111111', '{\"region\": \"au\"}'::jsonb, '22222222-2222-2222-2222-222222222222'); \
 			 INSERT INTO statuses (server_id, healthy, health, extra, created_at) VALUES \

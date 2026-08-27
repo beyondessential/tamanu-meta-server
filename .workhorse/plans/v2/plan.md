@@ -10,7 +10,7 @@ Each item is a section below; the section carries the detail and the traps.
 - [x] **Machine grain: table and model** — `machines`, the 1:1 backfill, `applications.machine_id`
 - [x] **Extending scope** — `Scope::Machine`, `machine_id` on `issues` and `scoped_check_policies`
 - [x] **The machine becomes the operator and enrolment surface** — create/update a machine, enrolment writes `machines.device_id` and `machines.registered_at`, `Application` gains its `machine_id` field, scaffolding default removed. **Unblocks the two below**
-- [ ] **Group denormalisation** — the trigger propagating a machine's group onto its applications
+- [x] **Group denormalisation** — the trigger propagating a machine's group onto its applications
 - [ ] **Dropping `device_server_associations`** — rehome the backup-staleness anchor first
 - [ ] **Ingest** — the machine-subject check rule and the detail-field split; this is what first files at machine scope
 - [ ] **Declared names and certificate routing** — identity to machine to application, and the plural entitlement answer
@@ -158,6 +158,18 @@ Two things worth knowing about that sweep. Fixture machines carry no group even 
 A trigger propagates a machine's group onto its applications, so the denormalisation cannot drift however either is written. Triggers-for-denormalisation is established here — the table being dropped below was itself trigger-maintained off `statuses`.
 
 An application could read its machine's group through the join, but it carries the column anyway so every group query reads one column rather than joining through the machine, and so the trigger has somewhere to write. An application always has a machine (see [FLT](../../specs/servers/overview.md), "Cardinality"), so the column is never the only source of an application's group — it is a denormalisation, and the trigger is what keeps it honest.
+
+### Done
+
+Migration `2026-08-27-050328-0000_applications_take_machine_group`. Two triggers: a machine's group change propagates to the applications on it, and an application's own group write is corrected back to its machine's. Existing rows were brought into agreement, a no-op on anything the 1:1 backfill produced.
+
+The trigger complements `Machine::update` rather than replacing it. The model method does the three things a column write cannot — re-evaluating open issues for anything that gains a group, and recomputing both groups' cached effective version — while the trigger covers every other writer so the denormalisation cannot drift even when the consequences are someone else's job.
+
+**The application update endpoint keeps its contract but changes meaning.** A group change on an application is applied to its *machine*, which propagates back down. Moving "the server" to a group moves the box, which is the model's semantics, and the frontend needs no change.
+
+**The trap: `BEFORE INSERT` was wrong and had to come out.** A data-modifying CTE's rows are not visible to the rest of the same statement, so `WITH m AS (INSERT INTO machines …) INSERT INTO applications …` had the trigger look the machine up, find nothing, and blank the group it was just handed. The foreign key still passed — constraint checks use a later snapshot than the trigger's SELECT — so the failure was silent: a correct-looking insert with a null group. It cost 124 test failures before the cause was clear. The trigger is `UPDATE`-only now, with the reason written into the migration so nobody adds `INSERT` back. Insert-time agreement is the caller's, which the operator flow gets right by creating the machine in its own statement.
+
+Two smaller consequences. Fixture machines now carry their application's group, which closes the disagreement flagged in the previous step. And an empty changeset is no longer an error in `Application::update`: it became reachable when the group moved to the machine, since a group-only edit leaves nothing to write. That turned `update` on a missing server from a 500 into a 404 — the 500 was an accident of diesel refusing the empty changeset before anything checked existence, so the test asserting it was updated rather than worked around.
 
 ## Dropping `device_server_associations`
 

@@ -304,3 +304,142 @@ async fn every_application_has_exactly_one_machine() {
 	})
 	.await;
 }
+
+/// An application takes its machine's group, and moving the box moves the
+/// workloads on it. There is no separate move for an application.
+// spec: FLT#groups
+#[tokio::test(flavor = "multi_thread")]
+async fn moving_a_machine_moves_the_applications_on_it() {
+	TestDb::run(async |mut conn, _url| {
+		let from = insert_group(&mut conn, "from").await;
+		let to = insert_group(&mut conn, "to").await;
+		let machine = Machine::create(
+			&mut conn,
+			NewMachine {
+				group_id: Some(from),
+				..Default::default()
+			},
+		)
+		.await
+		.expect("create machine");
+		let one = insert_application_on(&mut conn, machine.id).await;
+		let two = insert_application_on(&mut conn, machine.id).await;
+
+		let moved = Machine::update(
+			&mut conn,
+			machine.id,
+			database::machines::MachineUpdate {
+				group_id: Some(Some(to)),
+				..Default::default()
+			},
+		)
+		.await
+		.expect("move the box");
+		assert_eq!(moved.group_id, Some(to));
+
+		let in_new_group: i64 = sql_query(
+			"SELECT count(*) AS count FROM applications WHERE id IN ($1, $2) AND group_id = $3",
+		)
+		.bind::<sql_types::Uuid, _>(one)
+		.bind::<sql_types::Uuid, _>(two)
+		.bind::<sql_types::Uuid, _>(to)
+		.get_result::<Count>(&mut conn)
+		.await
+		.expect("count")
+		.count;
+		assert_eq!(in_new_group, 2, "both workloads moved with the box");
+	})
+	.await;
+}
+
+/// The denormalisation cannot drift, whichever side is written. A raw write
+/// setting an application's group on its own is corrected back to its
+/// machine's, because an application never holds a group of its own choosing.
+// spec: FLT#groups
+#[tokio::test(flavor = "multi_thread")]
+async fn an_application_cannot_hold_a_group_of_its_own() {
+	TestDb::run(async |mut conn, _url| {
+		let machines_group = insert_group(&mut conn, "the machine's").await;
+		let elsewhere = insert_group(&mut conn, "elsewhere").await;
+		let machine = Machine::create(
+			&mut conn,
+			NewMachine {
+				group_id: Some(machines_group),
+				..Default::default()
+			},
+		)
+		.await
+		.expect("create machine");
+		let application = insert_application_on(&mut conn, machine.id).await;
+
+		sql_query("UPDATE applications SET group_id = $1 WHERE id = $2")
+			.bind::<sql_types::Uuid, _>(elsewhere)
+			.bind::<sql_types::Uuid, _>(application)
+			.execute(&mut conn)
+			.await
+			.expect("write the group directly");
+
+		let disagreeing: i64 = sql_query(
+			"SELECT count(*) AS count FROM applications a JOIN machines m ON m.id = a.machine_id \
+			 WHERE a.id = $1 AND a.group_id IS DISTINCT FROM m.group_id",
+		)
+		.bind::<sql_types::Uuid, _>(application)
+		.get_result::<Count>(&mut conn)
+		.await
+		.expect("count")
+		.count;
+		assert_eq!(
+			disagreeing, 0,
+			"the write was corrected to the machine's group"
+		);
+	})
+	.await;
+}
+
+/// Reassigning an application to another machine takes that machine's group
+/// with it, rather than leaving the old one behind.
+// spec: FLT#groups
+#[tokio::test(flavor = "multi_thread")]
+async fn moving_an_application_between_machines_takes_the_new_group() {
+	TestDb::run(async |mut conn, _url| {
+		let here = insert_group(&mut conn, "here").await;
+		let there = insert_group(&mut conn, "there").await;
+		let origin = Machine::create(
+			&mut conn,
+			NewMachine {
+				group_id: Some(here),
+				..Default::default()
+			},
+		)
+		.await
+		.expect("create");
+		let destination = Machine::create(
+			&mut conn,
+			NewMachine {
+				group_id: Some(there),
+				..Default::default()
+			},
+		)
+		.await
+		.expect("create");
+		let application = insert_application_on(&mut conn, origin.id).await;
+
+		sql_query("UPDATE applications SET machine_id = $1 WHERE id = $2")
+			.bind::<sql_types::Uuid, _>(destination.id)
+			.bind::<sql_types::Uuid, _>(application)
+			.execute(&mut conn)
+			.await
+			.expect("reassign to another box");
+
+		let landed: i64 =
+			sql_query("SELECT count(*) AS count FROM applications WHERE id = $1 AND group_id = $2")
+				.bind::<sql_types::Uuid, _>(application)
+				.bind::<sql_types::Uuid, _>(there)
+				.get_result::<Count>(&mut conn)
+				.await
+				.expect("count")
+				.count;
+		assert_eq!(landed, 1, "the application took its new machine's group");
+	})
+	.await;
+}

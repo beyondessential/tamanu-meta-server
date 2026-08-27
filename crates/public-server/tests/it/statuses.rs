@@ -311,7 +311,7 @@ async fn submit_status_returns_effective_tags_matching_tags_endpoint() {
 			.await
 			.expect("insert group");
 			sql_query(
-				"WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, kind, device_id, group_id, rank, tags, machine_id) \
+				"WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, kind, device_id, group_id, rank, tags, machine_id) \
 				 VALUES ($1, 'https://tagged.example.com', 'central', $2, $3, 'production', \
 				 '{\"env\": \"server\"}'::jsonb, $1)",
 			)
@@ -639,7 +639,7 @@ async fn insert_health_test_server(
 	let server_id = Uuid::new_v4();
 	sql_query(
 		r#"
-		WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, kind, device_id, group_id, machine_id)
+		WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, kind, device_id, group_id, machine_id)
 		VALUES ($1, 'https://health.example.com', 'central', $2, $3, $1)
 	"#,
 	)
@@ -2546,7 +2546,7 @@ async fn seed_server_in_group(
 		.expect("insert group");
 	let server_id = Uuid::new_v4();
 	sql_query(
-		"WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, kind, device_id, group_id, machine_id) \
+		"WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, kind, device_id, group_id, machine_id) \
 		 VALUES ($1, 'https://srv.example.com', 'central', $2, $3, $1)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
