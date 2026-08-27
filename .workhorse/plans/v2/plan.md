@@ -9,6 +9,7 @@ Each item is a section below; the section carries the detail and the traps.
 - [x] **Rename `servers` to `applications`** — storage, the workspace sweep, and the e2e suite
 - [x] **Machine grain: table and model** — `machines`, the 1:1 backfill, `applications.machine_id`
 - [x] **Extending scope** — `Scope::Machine`, `machine_id` on `issues` and `scoped_check_policies`
+- [ ] **The machine becomes the operator and enrolment surface** — create/update a machine, enrolment writes `machines.device_id` and `machines.registered_at`, `Application` gains its `machine_id` field, scaffolding default removed. **Unblocks the two below**
 - [ ] **Group denormalisation** — the trigger propagating a machine's group onto its applications
 - [ ] **Dropping `device_server_associations`** — rehome the backup-staleness anchor first
 - [ ] **Ingest** — the machine-subject check rule and the detail-field split; this is what first files at machine scope
@@ -109,6 +110,24 @@ Policy chains take the machine dimension: `scoped_to`, `chain_for`, `chains_for_
 
 **`IssueData` does not carry the machine.** The private API's issue DTO still exposes only `application_id`, so a machine-scoped issue would present with a null application and no indication of which box it belongs to. Nothing files one yet, and the field goes in with the step that presents machine checks (MCP and the detail pages).
 
+## The machine becomes the operator and enrolment surface
+
+A step the plan originally did not name. Scouting the two steps that were meant to come next found both blocked on the same gap: **a machine is a table nobody writes.** `Machine` has `create`, `archive` and readers, no `update`, and no handlers at all under `crates/private-server/src/fns/`. Nothing in Rust ever writes `machines.registered_at` or `machines.device_id` — the only writer of any `registered_at` is `Application::mark_registered`.
+
+What that blocks, concretely:
+
+- **Group denormalisation.** An operator moving a machine between groups is the trigger's only real driver, and that write path does not exist. Worse, the scaffolding default creates the machine *inside* the application's INSERT, before the application row exists and with `group_id` NULL — so a machine-to-application trigger either never fires for the create path or blanks the group the operator just chose.
+- **The backup-staleness anchor.** Rehoming it to `machines.registered_at` collapses it to `config_created_at` for every machine, because nothing sets that column. The anchor would silently stop suppressing `backup-never` on newly-onboarded boxes — the exact false alert it exists to prevent.
+
+So this lands first: operator create/update on the machine, enrolment writing the machine's identity and registration, `Application` gaining its `machine_id` field, and the `application_default_machine()` default removed.
+
+**Traps found while scouting, worth carrying in:**
+
+- A trigger-driven group change fires no Rust side effects. `reevaluate_open_issues_for_server` and `recompute_groups` both hang off `Application::assign_to_group`; a SQL `UPDATE` from a trigger bypasses both, so open issues never get promoted to incidents and a group's cached effective version goes stale. `assign_to_group` has no production callers today, so it is cheap to move — but its semantics have to be relocated, not dropped.
+- `ON DELETE SET NULL` on both `applications.group_id` and `machines.group_id` means a hard group delete nulls each independently, at the DB level, without the trigger. They happen to agree; the trigger must not fight that.
+- Group archival cascades over `applications.group_id` and leaves machines untouched, so a restored group's machines and applications can disagree about liveness.
+- The test surface dwarfs the production surface: **188 raw `INSERT INTO applications` across 69 files** carry no `machine_id`, and none is compiler-checked. They break at runtime the moment the default goes. The 52 `Application { … }` struct literals *are* compiler-checked.
+
 ## Group denormalisation
 
 A trigger propagates a machine's group onto its applications, so the denormalisation cannot drift however either is written. Triggers-for-denormalisation is established here — the table being dropped below was itself trigger-maintained off `statuses`.
@@ -126,6 +145,15 @@ The third has to be rehomed. Backup staleness anchors "never backed up" on `max(
 The machine rather than the application, because the thing being backed up is the box. Anchoring on an application's registration would restart a machine's backup deadline every time a workload was added to it, so a box that has been failing to back up for a month would read as freshly onboarded the moment someone deployed a second application onto it.
 
 That is a correction rather than a substitution: anchoring a backup deadline on when a device was first associated with a server reads as an accident of what was available, and "has this been backed up in time" has nothing to do with certificates.
+
+**Scouted. Four corrections to the three-readers claim above:**
+
+1. **The trigger will outlive the table and break every status push.** `DROP TABLE device_server_associations` succeeds without complaint — a PL/pgSQL body is text, not a parsed dependency, so Postgres neither blocks the drop nor cascades to the function. `upsert_device_server_association` then fires on the next status insert and fails on a missing relation. Drop in order: trigger on `statuses`, then function, then table.
+2. **`get_past_associations_for_device` is a vertical slice, not a lookup.** It has a private-server route (`POST /api/devices/get_past_server_associations`), an OpenAPI path, generated TS types, and a rendered "Past server associations" panel on the device detail page. All of it goes.
+3. **The e2e suite will not catch getting that wrong.** The device-detail specs mount the panel, and the component renders an error state rather than throwing. There is no console-error or `pageerror` guard in the Playwright fixture, so dropping the table while leaving the endpoint gives a silently 500-ing panel that CI reports green.
+4. **`seed.rs` truncates the table by name**, so `just seed` breaks at startup rather than at any reader.
+
+The anchor itself: `min_first_seen` aggregates over every device ever associated with the application, so it is effectively "first status this application ever pushed". Moving to `machines.registered_at` shifts it *earlier* (enrolment precedes first push), which makes the `config_created_at` branch of the `max` win more often. That is the intended direction but it is a behaviour change, not a like-for-like swap — and it is inert until something actually writes `machines.registered_at`.
 
 ## Declared names and certificate routing
 
@@ -177,6 +205,18 @@ The rule matches whole names, not prefixes, and that is load-bearing. Caddy stra
 Detail fields split 23 machine / 8 application. Machine takes `hostname`, `osKind`, `osName`, `osVersion`, `kernel`, `arch`, `osTimezone`, `cpuCores`, `totalMemoryBytes`, `filesystems`, `uptimeSecs`, `virtualised`, `virtualisation`, `ipv4`, `ipv6`, `nat64`, `lanIps`, `wanIpv4`, `wanIpv6`, `bestoolVersion`, `instanceTags`, `munin`, `services`. Application takes `tamanuVersion`, `tamanuRoot`, `tamanuServerKind`, `nodeVersion`, `canonicalUrl`, `currentSyncTick`, `timezone`, `pgVersion`.
 
 During the transition a check name files against a machine from one reporter and an application from another, depending on which format that host sends. The catalog is keyed fleet-wide while scope is per-filing, so this costs nothing as long as the split rule agrees with bestool's — which is the one part of this card that cannot be verified from inside this repo.
+
+**Scouted.** The seam is a single `None` — the machine argument `apply_scoped` already takes in the grading loop. Nothing in the codebase does prefix or pattern matching on check names today, so a whole-name set is a clean fit with nothing existing to tempt a prefix rule. The status push resolves its target from the URL path rather than from the authenticating identity; `Machine::get_by_device_id` is the substitution point and is already unused outside tests.
+
+Five things that have to move with it, none of them obvious from the filing seam:
+
+- **`raise_machine_event_with_state` hardcodes `CANOPY_SOURCE`**, matching its group and global siblings. Machine-subject checks arrive from `alertd`, so reusing it as-is would record them under `canopy` and quietly break per-source silences, the `check_severities` response, source staleness, and the rule that a source's push only recovers its own checks. It needs the source as a parameter.
+- **A debug assertion rejects the filings this step creates.** `file_check` asserts a filing is application-scoped or from `canopy`; a machine-scope `alertd` filing trips it in debug builds.
+- **Silences do not know about machines.** `silenced_health_checks_for_server` filters application and group only, even though `scoped_check_policies.machine_id` exists and the policy chain already takes a machine. The `check_severities` block of the push response is built from it, so a machine-check silence would be invisible to the reporting agent.
+- **`enqueue_incident_reeval` keys on `application_id`**, column included, so machine filings have an incident path but no way to queue re-evaluation.
+- **Recovery bookkeeping is application-scoped.** `active_refs_with_prefix` filters on `application_id`, so the two grains need independent previously-active sets or a check that changes scope reads as unmentioned on the old one and close-then-reopens.
+
+Also: `server_reported_detail` has no machine column and replaces the whole body per `(server_id, source)`, so stripping machine fields out of an application's push loses them outright — there is no merge to fall back on. And only 8 detail field names appear anywhere in code; the other 23 exist solely in the working doc, seed data and tests, so the split list is written from scratch rather than amended.
 
 ## Migration
 
