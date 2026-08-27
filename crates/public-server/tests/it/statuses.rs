@@ -3236,3 +3236,120 @@ async fn duplicate_check_names_file_one_consistent_entry() {
 	)
 	.await
 }
+
+/// A unified push carries both grains' checks. The machine-subject ones file
+/// against the box, the rest against the workload, from one payload.
+// spec: STA
+#[tokio::test(flavor = "multi_thread")]
+async fn a_unified_push_files_each_check_at_its_own_grain() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			let response = public
+				.post(&format!("/status/{}", server_id))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"healthy": true,
+					"health": [
+						// The box's: disk and clock.
+						{ "check": "disk_free", "result": "failed", "free_pct": 2 },
+						{ "check": "time_sync", "result": "warning" },
+						// The workload's: its database, and an error stream
+						// that merely shares a prefix with the machine's `ips`.
+						{ "check": "postgres", "result": "failed" },
+						{ "check": "ips_errors", "result": "warning" },
+					],
+				}))
+				.await;
+			response.assert_status_ok();
+
+			#[derive(diesel::QueryableByName)]
+			struct Row {
+				#[diesel(sql_type = sql_types::Text)]
+				r#ref: String,
+			}
+			let on_machine: Vec<String> = sql_query(
+				"SELECT i.ref FROM issues i JOIN applications a ON a.machine_id = i.machine_id \
+				 WHERE a.id = $1 ORDER BY i.ref",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.load::<Row>(&mut conn)
+			.await
+			.expect("machine issues")
+			.into_iter()
+			.map(|r| r.r#ref)
+			.collect();
+			assert_eq!(
+				on_machine,
+				vec!["health/disk_free", "health/time_sync"],
+				"the box's checks file against the box"
+			);
+
+			let on_application: Vec<String> =
+				sql_query("SELECT ref FROM issues WHERE application_id = $1 ORDER BY ref")
+					.bind::<sql_types::Uuid, _>(server_id)
+					.load::<Row>(&mut conn)
+					.await
+					.expect("application issues")
+					.into_iter()
+					.map(|r| r.r#ref)
+					.collect();
+			assert_eq!(
+				on_application,
+				vec!["health/ips_errors", "health/postgres"],
+				"the workload's stay with the workload; ips_errors is not ips"
+			);
+		},
+	)
+	.await
+}
+
+/// A machine check keeps the source that reported it. Recording it under
+/// `canopy` would break per-source silences, the severities a push answers
+/// with, and the rule that a source's push only recovers its own checks.
+// spec: STA
+#[tokio::test(flavor = "multi_thread")]
+async fn a_machine_check_keeps_its_reporters_source() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			public
+				.post(&format!("/status/{}", server_id))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"healthy": true,
+					"health": [{ "check": "memory", "result": "failed" }],
+				}))
+				.await
+				.assert_status_ok();
+
+			#[derive(diesel::QueryableByName)]
+			struct Row {
+				#[diesel(sql_type = sql_types::Text)]
+				source: String,
+			}
+			let sources: Vec<String> = sql_query(
+				"SELECT i.source FROM issues i JOIN applications a ON a.machine_id = i.machine_id \
+				 WHERE a.id = $1 AND i.ref = 'health/memory'",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.load::<Row>(&mut conn)
+			.await
+			.expect("machine issue")
+			.into_iter()
+			.map(|r| r.source)
+			.collect();
+			assert_eq!(
+				sources,
+				vec!["alertd"],
+				"the reporter's source, not canopy's"
+			);
+		},
+	)
+	.await
+}

@@ -12,7 +12,8 @@ Each item is a section below; the section carries the detail and the traps.
 - [x] **The machine becomes the operator and enrolment surface** — create/update a machine, enrolment writes `machines.device_id` and `machines.registered_at`, `Application` gains its `machine_id` field, scaffolding default removed. **Unblocks the two below**
 - [x] **Group denormalisation** — the trigger propagating a machine's group onto its applications
 - [x] **Dropping `device_server_associations`** — rehome the backup-staleness anchor first
-- [ ] **Ingest** — the machine-subject check rule and the detail-field split; this is what first files at machine scope
+- [x] **Ingest: the machine-subject check rule** — what first files at machine scope
+- [ ] **Ingest: the detail-field split** — `server_reported_detail` splits by grain; carries the figure reads with it
 - [ ] **Declared names and certificate routing** — identity to machine to application, and the plural entitlement answer
 - [ ] **Restore replicas** — declarations move grain; `migration-test` stays application-scoped
 - [ ] **Retiring the graded reachability states** — `short_status`'s hardcoded thresholds
@@ -201,6 +202,26 @@ The vertical slice went with it: `Application::get_past_associations_for_device`
 **The anchor moved to `machines.registered_at`**, and became a join rather than a second query — the scan already reaches `applications`, so the machine comes with it. Anchored on the box because the box is what gets backed up: anchoring on an application's registration would restart a machine's backup deadline every time a workload was added to it, so a box failing to back up for a month would read as freshly onboarded the moment someone deployed a second application onto it. Both cases have tests.
 
 That is a behaviour change rather than a like-for-like swap. `min_first_seen` was effectively "first status this application ever pushed"; enrolment precedes first push, so the anchor shifts earlier and the `config_created_at` branch of the `max` wins more often. Intended direction, but worth knowing when reading a `backup-never` that fires sooner than it used to.
+
+### The check rule: done
+
+`CheckSubject` in commons-types names the 18 machine-subject checks and decides a check's grain. Whole names, never prefixes, with tests pinning the two cases that make prefixes wrong: `caddy_version` is the box's while `caddy_certs` is the workload's, and `ips` is the box's addresses while `ips_errors` is a Tamanu error stream. Anything unrecognised is the application's — a new check is far likelier to be a product's own than a new fact about the box.
+
+Ingest grades each check at its own grain and files it there, from one unified payload. Two end-to-end tests push both grains at once and assert where each lands.
+
+**All five scouted traps were real and are closed:**
+
+1. `raise_machine_event_with_state` took the source as a parameter. Its group and canopy-wide siblings assume `canopy` because they file conditions canopy determines for itself; a machine's checks come from `alertd`. Recording them under `canopy` would have broken per-source silences, the `check_severities` a push answers with, source staleness, and the rule that a source's push only recovers its own checks. There is a test asserting the reporter's source survives.
+2. The debug assertion rejecting non-`canopy` filings outside application scope now admits a machine's.
+3. `silenced_health_checks_for_server` covers the machine grain, so an operator's silence on a machine check reaches the agent instead of holding only on canopy's side.
+4. `enqueue_incident_reeval` keys on the application, so the machine path evaluates its incident inline instead — which it already did.
+5. Recovery bookkeeping is per grain: two previously-active sets. One shared set would make a check that moves grain read as unmentioned on the grain it left, closing and reopening it on every push.
+
+The machine filing path also carries `device_id`, so a machine issue records which reporter filed it.
+
+### The detail-field split: still open
+
+Split out as its own step rather than left implied. `server_reported_detail` becoming two tables is the easy half; the hard half is that every figure read goes through it, and `osName`, `osVersion`, `munin` and `bestoolVersion` are machine-subject but read today from the application's row. Stripping them from the application's `extra` breaks those reads immediately, because the table replaces the whole body per `(server_id, source)` — there is no merge to fall back on. So the split and the figure reads move together, which is the FIG work.
 
 ## Declared names and certificate routing
 

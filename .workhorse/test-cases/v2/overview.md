@@ -49,7 +49,7 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 - [ ] Every machine check presents on every application on that machine, marked as the machine's (verifies spec: CHK)
 - [x] A degraded machine check contributes one issue at machine scope, not one per application (verifies spec: CHK)
 - [ ] A machine-scoped and an application-scoped issue in one group join the same incident (verifies spec: INC)
-- [ ] A silence on a machine check quiets it on every application presenting it (verifies spec: CHK)
+- [x] A silence on a machine check quiets it on every application presenting it (verifies spec: CHK)
 - [ ] An application's health rollup counts its machine's checks (verifies spec: CHK)
 - [ ] An application check is catalogued as `<type>.<check>`; two types reporting one name are two entries (verifies spec: CHK)
 - [ ] A machine check is catalogued under its bare name (verifies spec: CHK)
@@ -59,15 +59,15 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 ## Status pushes
 
 - [ ] A split push is ingested against the machine and applications it names, unmodified (verifies spec: STA)
-- [ ] A unified push is separated by the machine-subject rule and ingested against both grains (verifies spec: STA)
+- [x] A unified push is separated by the machine-subject rule and ingested against both grains (verifies spec: STA)
 - [ ] A push with no health checks is still treated as a legacy Tamanu report (verifies spec: STA)
 - [ ] A reporter field named `source`, `health`, `check` or `result` inside `detail` is recorded and does not collide with the envelope (verifies spec: STA)
 - [ ] Two applications sharing a key cannot be expressed in a payload (verifies spec: STA)
 - [ ] Correlation is by machine, key and type together (verifies spec: STA)
 - [ ] A check name reported bare is catalogued qualified by the reporting application's type (verifies spec: STA, CHK)
 - [ ] A push response returns effective tags for the machine and each application described (verifies spec: STA)
-- [ ] `caddy_certs` files against the application while `caddy_version` files against the machine (verifies spec: STA)
-- [ ] `ips` files against the machine while `ips_errors` files against the application (verifies spec: STA)
+- [x] `caddy_certs` files against the application while `caddy_version` files against the machine (verifies spec: STA)
+- [x] `ips` files against the machine while `ips_errors` files against the application (verifies spec: STA)
 
 ## Figures
 

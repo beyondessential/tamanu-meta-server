@@ -12,6 +12,7 @@ use commons_servers::{
 };
 use commons_types::{
 	backup::BackupType,
+	check_subject::CheckSubject,
 	device::DeviceRole,
 	server::TagMap,
 	status::{CheckResult, CheckSeverity},
@@ -321,7 +322,16 @@ async fn create(
 			)
 			.await?;
 
-			file_health_events(conn, server_id, server.group_id, Some(id), &status, &tags).await?;
+			file_health_events(
+				conn,
+				server_id,
+				server.machine_id,
+				server.group_id,
+				Some(id),
+				&status,
+				&tags,
+			)
+			.await?;
 
 			Ok(())
 		})
@@ -342,8 +352,14 @@ async fn create(
 
 	// Computed after the transaction so checks first seen on this very push
 	// (upserted into the catalog above) are already in the map.
-	let check_severities =
-		effective_check_severities(&mut db, server_id, server.group_id, &source).await?;
+	let check_severities = effective_check_severities(
+		&mut db,
+		server_id,
+		server.machine_id,
+		server.group_id,
+		&source,
+	)
+	.await?;
 
 	// A server-wide fact, like the tags: every source gets it, so an agent
 	// reporting status learns of a new domain or grant without a second call.
@@ -404,21 +420,29 @@ async fn check_severities(
 		));
 	}
 
-	let map =
-		effective_check_severities(&mut db, server_id, server.group_id, DEFAULT_SOURCE).await?;
+	let map = effective_check_severities(
+		&mut db,
+		server_id,
+		server.machine_id,
+		server.group_id,
+		DEFAULT_SOURCE,
+	)
+	.await?;
 	Ok(Json(map))
 }
 
 /// Build the effective per-check map for a server and source: every check
 /// in the source's catalog mapped from its static policy ceiling (`failed`
 /// → `fail`, `warning`/`broken` → `warn`, `passed`/`skipped` → `skip`),
-/// then any check silenced for this server (at server or group scope)
+/// then any check silenced for this server (at application, machine, or group
+/// scope)
 /// forced to `skip`. Conditional rules are deliberately not consulted —
 /// they depend on each push's contents, so only the static ceiling can be
 /// mapped ahead of time.
 async fn effective_check_severities(
 	db: &mut AsyncPgConnection,
 	server_id: Uuid,
+	machine_id: Uuid,
 	group_id: Option<Uuid>,
 	source: &str,
 ) -> Result<BTreeMap<String, CheckSeverity>> {
@@ -430,7 +454,9 @@ async fn effective_check_severities(
 
 	// Silences are keyed per (source, check): only this source's own
 	// silences force its checks to skip.
-	for check in silenced_health_checks_for_server(db, server_id, group_id, source).await? {
+	for check in
+		silenced_health_checks_for_server(db, server_id, machine_id, group_id, source).await?
+	{
 		map.insert(check, CheckSeverity::Skip);
 	}
 
@@ -472,9 +498,11 @@ fn resolve_version(extra: &serde_json::Value, header: Option<VersionStr>) -> Opt
 /// the issue severity: failed → error (critical when the policy
 /// escalates), warning and broken → warning; passed and skipped file
 /// nothing and close prior issues.
+#[allow(clippy::too_many_arguments)]
 async fn file_health_events(
 	conn: &mut AsyncPgConnection,
 	server_id: Uuid,
+	machine_id: Uuid,
 	group_id: Option<Uuid>,
 	device_id: Option<Uuid>,
 	status: &Status,
@@ -514,17 +542,19 @@ async fn file_health_events(
 			check_extra: &check_extra,
 			tags,
 		};
+		let subject = CheckSubject::of(check);
 		let graded = CheckPolicy::apply_scoped(
 			conn,
 			&status.source,
 			check,
 			*result,
 			&ctx,
-			Some(server_id),
-			// A push still describes one application. Separating the
-			// machine-subject checks out of it is the ingest step's job; until
-			// then nothing here files at machine scope.
-			None,
+			// A unified push carries both grains' checks. Grade each at the
+			// grain its subject belongs to, so a machine check is graded
+			// against the box's tags and silenced by the box's policy.
+			// spec: STA
+			(!subject.is_machine()).then_some(server_id),
+			subject.is_machine().then_some(machine_id),
 			group_id,
 		)
 		.await?;
@@ -534,16 +564,31 @@ async fn file_health_events(
 	// The pushing source's previously-open issues: consulted for close
 	// messages ("recovered" vs "was never trouble") and for the
 	// unmentioned-check closes below.
+	//
+	// One set per grain. Sharing a single set would make a check that moves
+	// grain read as unmentioned on the grain it left, closing and reopening it
+	// as a new issue on every push.
 	let health_prefix = format!("{HEALTH_REF}/");
-	let previously_active: std::collections::BTreeSet<String> =
-		Issue::active_refs_with_prefix(conn, server_id, &status.source, &health_prefix)
-			.await?
-			.into_iter()
+	let strip = |refs: Vec<String>| -> std::collections::BTreeSet<String> {
+		refs.into_iter()
 			.filter_map(|r| {
 				r.strip_prefix(&health_prefix)
 					.map(|check| check.to_string())
 			})
-			.collect();
+			.collect()
+	};
+	let previously_active = strip(
+		Issue::active_refs_with_prefix(conn, server_id, &status.source, &health_prefix).await?,
+	);
+	let previously_active_on_machine = strip(
+		Issue::active_refs_with_prefix_for_machine(
+			conn,
+			machine_id,
+			&status.source,
+			&health_prefix,
+		)
+		.await?,
+	);
 
 	// File every check in the push — passing ones included, so the state
 	// row records the current result and when it was last reported. An
@@ -568,7 +613,12 @@ async fn file_health_events(
 			.filter(|(_, g)| matches!(g.effective, CheckResult::Passed | CheckResult::Skipped)),
 	);
 	for (check, graded) in filing_order {
-		let was_active = previously_active.contains(*check);
+		let subject = CheckSubject::of(check);
+		let was_active = if subject.is_machine() {
+			previously_active_on_machine.contains(*check)
+		} else {
+			previously_active.contains(*check)
+		};
 		let (effective, escalates, active, description, message) = match graded.effective {
 			CheckResult::Failed => (
 				CheckResult::Failed,
@@ -638,25 +688,52 @@ async fn file_health_events(
 			escalates,
 			detail: Some(serde_json::Value::Object(entry.clone())),
 		};
-		NewEvent {
-			source: status.source.clone(),
-			r#ref: format!("{HEALTH_REF}/{check}"),
-			description,
-			message: message
-				.or_else(|| per_check_description(entry))
-				.unwrap_or_default(),
-			active: Some(active),
-			occurred_at,
+		let r#ref = format!("{HEALTH_REF}/{check}");
+		let message = message
+			.or_else(|| per_check_description(entry))
+			.unwrap_or_default();
+		if subject.is_machine() {
+			// A degraded machine check is one issue at machine scope however
+			// many applications run on the box. Incident evaluation happens
+			// inside this call rather than through the deferred queue, which
+			// is keyed by application.
+			database::issues::raise_machine_event_with_state(
+				conn,
+				machine_id,
+				&status.source,
+				device_id,
+				&r#ref,
+				description.as_deref(),
+				&message,
+				active,
+				Some(&stamp),
+			)
+			.await?;
+		} else {
+			NewEvent {
+				source: status.source.clone(),
+				r#ref,
+				description,
+				message,
+				active: Some(active),
+				occurred_at,
+			}
+			.save_with_state(conn, server_id, device_id, Some(&stamp), true)
+			.await?;
 		}
-		.save_with_state(conn, server_id, device_id, Some(&stamp), true)
-		.await?;
 	}
 
 	// Unmentioned closes: a check the source previously reported but
 	// omits from this push has recovered ("trust the reporter"). Scoped
 	// to the pushing source: one source's push says nothing about
 	// another's checks.
-	for check in &previously_active {
+	//
+	// Walked per grain, against that grain's own previously-active set.
+	for (check, on_machine) in previously_active
+		.iter()
+		.map(|c| (c, false))
+		.chain(previously_active_on_machine.iter().map(|c| (c, true)))
+	{
 		if curr_check_results.contains_key(check) {
 			continue;
 		}
@@ -667,16 +744,33 @@ async fn file_health_events(
 			escalates: false,
 			detail: None,
 		};
-		NewEvent {
-			source: status.source.clone(),
-			r#ref: format!("{HEALTH_REF}/{check}"),
-			description: None,
-			message: format!("Health check '{check}' recovered"),
-			active: Some(false),
-			occurred_at,
+		let r#ref = format!("{HEALTH_REF}/{check}");
+		let message = format!("Health check '{check}' recovered");
+		if on_machine {
+			database::issues::raise_machine_event_with_state(
+				conn,
+				machine_id,
+				&status.source,
+				device_id,
+				&r#ref,
+				None,
+				&message,
+				false,
+				Some(&stamp),
+			)
+			.await?;
+		} else {
+			NewEvent {
+				source: status.source.clone(),
+				r#ref,
+				description: None,
+				message,
+				active: Some(false),
+				occurred_at,
+			}
+			.save_with_state(conn, server_id, device_id, Some(&stamp), true)
+			.await?;
 		}
-		.save_with_state(conn, server_id, device_id, Some(&stamp), true)
-		.await?;
 	}
 
 	// Incident (re-)evaluation is deferred off this request: the issue state

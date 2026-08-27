@@ -120,6 +120,7 @@ async fn silenced_checks_combine_scopes_and_stay_per_source() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn).await;
 		let server_id = insert_server(&mut conn, Some(group_id)).await;
+		let m_server_id = machine_of(&mut conn, server_id).await;
 		let other_server_id = insert_server(&mut conn, None).await;
 
 		ServerSilencedRef::add(&mut conn, server_id, "alertd", "health/flaky", None)
@@ -147,20 +148,43 @@ async fn silenced_checks_combine_scopes_and_stay_per_source() {
 			.await
 			.expect("other-server silence");
 
-		let checks =
-			silenced_health_checks_for_server(&mut conn, server_id, Some(group_id), "alertd")
-				.await
-				.expect("checks");
+		let checks = silenced_health_checks_for_server(
+			&mut conn,
+			server_id,
+			m_server_id,
+			Some(group_id),
+			"alertd",
+		)
+		.await
+		.expect("checks");
 		assert_eq!(
 			checks.into_iter().collect::<Vec<_>>(),
 			vec!["flaky", "groupwide"]
 		);
 
 		// Ungrouped lookup only sees the server-scope silences.
-		let checks = silenced_health_checks_for_server(&mut conn, server_id, None, "alertd")
-			.await
-			.expect("checks without group");
+		let checks =
+			silenced_health_checks_for_server(&mut conn, server_id, m_server_id, None, "alertd")
+				.await
+				.expect("checks without group");
 		assert_eq!(checks.into_iter().collect::<Vec<_>>(), vec!["flaky"]);
 	})
 	.await
+}
+
+/// The machine an application sits on. These tests exercise application- and
+/// group-scoped silences; the machine is passed because the lookup now covers
+/// that grain too, and it carries no silences of its own here.
+async fn machine_of(conn: &mut database::diesel_async::AsyncPgConnection, app: Uuid) -> Uuid {
+	#[derive(diesel::QueryableByName)]
+	struct M {
+		#[diesel(sql_type = sql_types::Uuid)]
+		machine_id: Uuid,
+	}
+	sql_query("SELECT machine_id FROM applications WHERE id = $1")
+		.bind::<sql_types::Uuid, _>(app)
+		.get_result::<M>(conn)
+		.await
+		.expect("machine of application")
+		.machine_id
 }

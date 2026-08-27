@@ -126,11 +126,17 @@ pub async fn is_silenced(
 pub async fn silenced_health_checks_for_server(
 	db: &mut AsyncPgConnection,
 	application_id: Uuid,
+	machine_id: Uuid,
 	group_id: Option<Uuid>,
 	source: &str,
 ) -> Result<BTreeSet<String>> {
 	use crate::schema::scoped_check_policies::dsl;
 
+	// A reporter pushes both grains' checks and gets one answer back, so this
+	// covers the machine as well. Without it a machine check silenced by an
+	// operator would keep being run and reported: the silence would hold on
+	// canopy's side and be invisible to the agent.
+	// spec: STA
 	let rows: Vec<String> = dsl::scoped_check_policies
 		.select(dsl::check_name)
 		.filter(dsl::ceiling.eq("skipped"))
@@ -138,6 +144,7 @@ pub async fn silenced_health_checks_for_server(
 		.filter(
 			dsl::application_id
 				.eq(application_id)
+				.or(dsl::machine_id.eq(machine_id))
 				.or(dsl::server_group_id
 					.is_not_distinct_from(group_id)
 					.and(dsl::server_group_id.is_not_null())),

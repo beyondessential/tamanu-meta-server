@@ -680,14 +680,24 @@ pub async fn raise_group_event_with_state(
 /// show, not theirs to own — so a two-workload host raises a single disk
 /// failure rather than two.
 ///
+/// Unlike its group and canopy-wide siblings, this takes the `source` rather
+/// than assuming `canopy`. Those two file conditions canopy determines for
+/// itself; a machine's checks arrive from a reporter like `alertd`, and
+/// recording them under `canopy` would break per-source silences, the
+/// `check_severities` a push answers with, source staleness, and the rule that
+/// a source's push only recovers its own checks.
+///
 /// Mirrors [`raise_group_event_with_state`]'s find-or-create. Incident
 /// evaluation resolves through the machine's group and carries the machine's
 /// own `is_monitored`, so excusing a box from monitoring does not quiet the
 /// applications on it.
 // spec: CHK
+#[allow(clippy::too_many_arguments)]
 pub async fn raise_machine_event_with_state(
 	conn: &mut AsyncPgConnection,
 	machine_id: Uuid,
+	source: &str,
+	device_id: Option<Uuid>,
 	r#ref: &str,
 	description: Option<&str>,
 	message: &str,
@@ -704,7 +714,6 @@ pub async fn raise_machine_event_with_state(
 		));
 	}
 
-	let source = crate::statuses::CANOPY_SOURCE;
 	let now = Timestamp::now();
 
 	conn.transaction::<_, AppError, _>(async |conn| {
@@ -766,6 +775,7 @@ pub async fn raise_machine_event_with_state(
 			diesel::insert_into(issues::table)
 				.values((
 					issues::machine_id.eq(machine_id),
+					issues::device_id.eq(device_id),
 					issues::source.eq(source),
 					issues::ref_.eq(r#ref),
 					issues::description.eq(description),
@@ -1148,8 +1158,9 @@ pub async fn file_check_instances(
 
 	let source = filing.source;
 	debug_assert!(
-		matches!(filing.scope, Scope::Application(_)) || source == crate::statuses::CANOPY_SOURCE,
-		"group- and canopy-wide filings are canopy's own",
+		matches!(filing.scope, Scope::Application(_) | Scope::Machine(_))
+			|| source == crate::statuses::CANOPY_SOURCE,
+		"group- and canopy-wide filings are canopy's own; a machine's come from its reporter",
 	);
 	debug_assert!(
 		!filing.instances.is_empty(),
@@ -1328,6 +1339,8 @@ pub async fn file_check_instances(
 			raise_machine_event_with_state(
 				conn,
 				machine_id,
+				source,
+				filing.device_id,
 				filing.check,
 				description,
 				filing.message,
@@ -3259,6 +3272,37 @@ impl Issue {
 	/// re-filing it — e.g. failed → broken → passed, where the failure
 	/// issue must close on the `passed` push even though the previous
 	/// push didn't report a failure.
+	/// The machine-grain counterpart of [`Self::active_refs_with_prefix`].
+	///
+	/// The two grains need separate previously-active sets. Sharing one would
+	/// make a check that moves grain read as unmentioned on the grain it left,
+	/// closing and reopening it as a new issue on every push.
+	// spec: STA
+	pub async fn active_refs_with_prefix_for_machine(
+		db: &mut AsyncPgConnection,
+		machine_id: Uuid,
+		source: &str,
+		prefix: &str,
+	) -> Result<Vec<String>> {
+		use crate::schema::issues::dsl;
+		debug_assert!(
+			!prefix.contains(['%', '_', '\\']),
+			"prefix is used in a LIKE pattern and must not contain wildcards"
+		);
+		dsl::issues
+			.select(dsl::ref_)
+			.filter(
+				dsl::machine_id
+					.eq(machine_id)
+					.and(dsl::source.eq(source))
+					.and(dsl::ref_.like(format!("{prefix}%")))
+					.and(dsl::active.eq(true)),
+			)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn active_refs_with_prefix(
 		db: &mut AsyncPgConnection,
 		application_id: Uuid,

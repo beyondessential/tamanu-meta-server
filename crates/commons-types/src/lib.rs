@@ -3,6 +3,7 @@ pub use uuid::Uuid;
 pub mod acme;
 pub mod backoff;
 pub mod backup;
+pub mod check_subject;
 pub mod device;
 pub mod dns;
 pub mod geo;

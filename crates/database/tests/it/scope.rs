@@ -199,6 +199,8 @@ async fn a_machine_issue_does_not_collide_with_a_canopy_wide_one() {
 		database::issues::raise_machine_event_with_state(
 			&mut conn,
 			machine,
+			"canopy",
+			None,
 			"disk_free",
 			None,
 			"the box's disk",
@@ -242,6 +244,8 @@ async fn a_machine_check_files_once_not_once_per_application() {
 			database::issues::raise_machine_event_with_state(
 				&mut conn,
 				machine,
+				"canopy",
+				None,
 				"disk_free",
 				None,
 				message,

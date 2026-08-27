@@ -872,6 +872,7 @@ async fn consolidated_checks_at(
 		let silenced = database::silenced_refs::silenced_health_checks_for_server(
 			conn,
 			server.id,
+			server.machine_id,
 			server.group_id,
 			&status.source,
 		)
