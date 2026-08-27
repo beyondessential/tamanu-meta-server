@@ -38,17 +38,29 @@ pub struct Page<T> {
 /// wordlist (~52 bits of entropy), e.g. `correct-horse-battery-staple`. Used to
 /// wrap secrets (enrollment tickets, provisioned device keys) that travel to an
 /// operator out of band.
+///
+/// Four of the 7776 words in that list are themselves hyphenated — `drop-down`,
+/// `felt-tip`, `t-shirt`, `yo-yo` — and they are skipped. A passphrase is read
+/// off one screen and typed into another, so a word carrying the separator
+/// makes the boundaries ambiguous: `disband-retrace-drop-down-bodacious` reads
+/// as five words, and the operator cannot tell which four were meant.
+///
+/// Dropping four words costs about a thousandth of a bit.
 pub(crate) fn generate_passphrase() -> String {
-	use chbs::{config::BasicConfig, prelude::*, probability::Probability, word::WordList};
+	use chbs::prelude::WordProvider;
 
-	let config = BasicConfig {
-		words: 4,
-		word_provider: WordList::builtin_eff_large().sampler(),
-		separator: "-".into(),
-		capitalize_first: Probability::Never,
-		capitalize_words: Probability::Never,
-	};
-	config.to_scheme().generate()
+	/// Built once. Constructing the list parses all 7776 words out of a static
+	/// string and taking a sampler clones them again, neither of which is
+	/// worth redoing per ticket. Sampling itself draws from a thread-local
+	/// CSPRNG, so one shared sampler is fine.
+	static SAMPLER: std::sync::LazyLock<chbs::word::WordSampler> =
+		std::sync::LazyLock::new(|| chbs::word::WordList::builtin_eff_large().sampler());
+
+	std::iter::repeat_with(|| SAMPLER.word())
+		.filter(|word| !word.contains('-'))
+		.take(4)
+		.collect::<Vec<_>>()
+		.join("-")
 }
 
 pub fn routes() -> OpenApiRouter<crate::state::AppState> {
@@ -78,4 +90,34 @@ pub fn routes() -> OpenApiRouter<crate::state::AppState> {
 			.nest("/upgrade_plans", upgrade_plans::routes())
 			.nest("/versions", versions::routes()),
 	)
+}
+
+#[cfg(test)]
+mod tests {
+	use super::generate_passphrase;
+
+	/// The generator's contract is four words separated by hyphens, so the
+	/// separator must never appear inside a word. The EFF large wordlist has
+	/// four hyphenated entries out of 7776, which a passphrase hits about one
+	/// time in five hundred — rare enough to pass review and pass CI for a
+	/// while, then fail somewhere unrelated. Enough draws to make that
+	/// certain rather than likely.
+	#[test]
+	fn a_passphrase_is_always_four_hyphen_separated_words() {
+		for _ in 0..20_000 {
+			let passphrase = generate_passphrase();
+			let words: Vec<&str> = passphrase.split('-').collect();
+			assert_eq!(
+				words.len(),
+				4,
+				"a hyphenated word made the boundaries ambiguous: {passphrase}"
+			);
+			assert!(
+				words
+					.iter()
+					.all(|w| !w.is_empty() && w.chars().all(|c| c.is_ascii_lowercase())),
+				"words are non-empty and lowercase: {passphrase}"
+			);
+		}
+	}
 }
