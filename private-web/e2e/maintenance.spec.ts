@@ -7,6 +7,8 @@ import {
 	seedServer,
 	seedServerGroup,
 	seedStatus,
+	seedUpgradePlan,
+	seedVersion,
 	type Sql,
 } from "./seed";
 
@@ -242,5 +244,95 @@ test.describe("maintenance windows", () => {
 				return Number(rows[0]!.n);
 			})
 			.toBe(1);
+	});
+
+	// spec: MNT#declaring, UPG
+	test("declaring from an open plan carries the plan's window and note", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		// 22:00 to 02:00 is a four-hour window that wraps midnight, which is
+		// what an upgrade slot usually looks like.
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			targetVersionId: target.id,
+			plannedFor: "2020-01-01",
+			plannedTime: "22:00",
+			plannedEndTime: "02:00",
+			plannedZone: "Pacific/Fiji",
+			note: "site can absorb 2.61 only",
+		});
+
+		await page.goto("/upgrades");
+		await page
+			.getByRole("button", { name: "Declare maintenance for kamaka" })
+			.click();
+
+		await expect(
+			page.getByRole("heading", { name: "Declare maintenance — kamaka" }),
+		).toBeVisible();
+		await expect(page.getByLabel("What's being done")).toHaveValue(
+			"site can absorb 2.61 only",
+		);
+
+		// The plan's slot is four hours long, so the declaration ends four
+		// hours from now: a window says the work is happening now, and the
+		// plan only supplies how long it takes.
+		const endsAt = await page.getByLabel("Expected to end").inputValue();
+		const hours = (new Date(endsAt).getTime() - Date.now()) / 3600_000;
+		expect(hours).toBeGreaterThan(3.9);
+		expect(hours).toBeLessThan(4.1);
+
+		await page.getByRole("button", { name: "Declare", exact: true }).click();
+
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ note: string | null }>(
+					"SELECT note FROM maintenance_windows \
+					 WHERE server_group_id = $1 AND ended_at IS NULL",
+					[group.id],
+				);
+				return rows.map((r) => r.note);
+			})
+			.toEqual(["site can absorb 2.61 only"]);
+	});
+
+	// spec: MNT#presentation
+	test("a check the window skipped says so, and the legend names the mark", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "mid-cutover" });
+		const server = await seedServer(sql, {
+			name: "failing-on-purpose",
+			groupId: group.id,
+		});
+		await seedStatus(sql, {
+			serverId: server.id,
+			healthy: false,
+			health: [
+				{ check: "database", healthy: false, message: "connection refused" },
+			],
+		});
+		// What ingestion records under a window: the reported result stands,
+		// the grade the window forces is what the fleet acts on.
+		await sql.query(
+			"UPDATE issues SET effective_result = 'skipped' WHERE server_id = $1",
+			[server.id],
+		);
+		await seedMaintenanceWindow(sql, {
+			serverId: server.id,
+			note: "Cutting over the database",
+		});
+
+		await page.goto(`/servers/${server.id}`);
+		await expect(
+			page.getByTestId("check-maintenance-skip"),
+		).toContainText("skipped: under maintenance");
+		await expect(
+			page.getByText("under maintenance (being worked on)"),
+		).toBeVisible();
 	});
 });
