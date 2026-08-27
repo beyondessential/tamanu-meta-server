@@ -2,10 +2,12 @@ import { Tooltip } from "@mui/material";
 import { useEffect, useState } from "react";
 
 function formatSecs(secs: number): string {
-	const s = Math.abs(Math.floor(secs));
-	if (s < 3600) return `${Math.floor(s / 60)}m`;
-	if (s < 86_400) return `${Math.floor(s / 3600)}h`;
-	return `${Math.floor(s / 86_400)}d`;
+	const s = Math.abs(secs);
+	const minutes = Math.round(s / 60);
+	if (minutes < 60) return `${minutes}m`;
+	const hours = Math.round(s / 3600);
+	if (hours < 24) return `${hours}h`;
+	return `${Math.round(s / 86_400)}d`;
 }
 
 /** Renders a relative time like "5m ago" — or "in 5m" when the timestamp is
