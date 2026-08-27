@@ -30,7 +30,10 @@ export default function MaintenanceSection({
 	groupId,
 	groupName,
 	onChanged,
+	anchor,
 }: {
+	/** DOM id, so a banner elsewhere on the page can link here. */
+	anchor?: string;
 	scope: "server" | "group";
 	id: string;
 	targetLabel?: string;
@@ -69,7 +72,7 @@ export default function MaintenanceSection({
 
 	if (result.status === "loading" || result.status === "idle") {
 		return (
-			<Paper variant="outlined" sx={{ p: 2 }}>
+			<Paper id={anchor} variant="outlined" sx={{ p: 2 }}>
 				<Heading />
 				<LinearProgress />
 			</Paper>
@@ -77,7 +80,7 @@ export default function MaintenanceSection({
 	}
 	if (result.status === "error") {
 		return (
-			<Paper variant="outlined" sx={{ p: 2 }}>
+			<Paper id={anchor} variant="outlined" sx={{ p: 2 }}>
 				<Heading />
 				<Alert severity="error">{result.error.message}</Alert>
 			</Paper>
@@ -95,7 +98,7 @@ export default function MaintenanceSection({
 	if (!open && !fromGroup && history.length === 0 && !isAdmin) return null;
 
 	return (
-		<Paper variant="outlined" sx={{ p: 2 }} data-testid="maintenance-section">
+		<Paper id={anchor} variant="outlined" sx={{ p: 2 }} data-testid="maintenance-section">
 			<Heading />
 			{fromGroup && (
 				<Alert

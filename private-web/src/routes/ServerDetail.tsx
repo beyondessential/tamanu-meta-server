@@ -25,6 +25,7 @@ import {
 	Typography,
 } from "@mui/material";
 import BuildCircleIcon from "@mui/icons-material/BuildCircle";
+import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import CancelIcon from "@mui/icons-material/Cancel";
 import RemoveCircleOutlinedIcon from "@mui/icons-material/RemoveCircleOutlined";
@@ -169,6 +170,21 @@ export default function ServerDetail() {
 				onEventSubmitted={bumpRefresh}
 				onArchived={() => detail.reload()}
 			/>
+			{data.maintained && !archived && (
+				<Alert
+					severity="info"
+					icon={<BuildOutlinedIcon fontSize="inherit" />}
+					data-testid="maintenance-banner"
+					action={
+						<Button size="small" color="inherit" href="#maintenance">
+							Details
+						</Button>
+					}
+				>
+					Under maintenance: checks are recorded and shown, but nothing on
+					this server alerts.
+				</Alert>
+			)}
 			{archived ? (
 				<ArchivedBanner
 					serverId={data.server.id}
@@ -232,6 +248,7 @@ export default function ServerDetail() {
 			)}
 			<MaintenanceSection
 				scope="server"
+				anchor="maintenance"
 				id={data.server.id}
 				targetLabel={data.server.name ?? data.server.display_host}
 				groupId={data.group?.id ?? null}

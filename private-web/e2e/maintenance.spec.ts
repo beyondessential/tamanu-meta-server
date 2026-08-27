@@ -45,6 +45,9 @@ test.describe("maintenance windows", () => {
 		await expect(section).toContainText("Upgrading to 2.62");
 		await expect(section).toContainText("daniel@bes.au");
 		await expect(page.getByTestId("maintenance-marker")).toBeVisible();
+		await expect(page.getByTestId("maintenance-banner")).toContainText(
+			"Under maintenance",
+		);
 	});
 
 	test("declaring from the server page opens a window", async ({
