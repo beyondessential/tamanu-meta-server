@@ -13,7 +13,7 @@ Each item is a section below; the section carries the detail and the traps.
 - [x] **Group denormalisation** — the trigger propagating a machine's group onto its applications
 - [x] **Dropping `device_server_associations`** — rehome the backup-staleness anchor first
 - [x] **Ingest: the machine-subject check rule** — what first files at machine scope
-- [ ] **Ingest: the detail-field split** — `server_reported_detail` splits by grain; carries the figure reads with it
+- [x] **Ingest: the detail-field split** — `server_reported_detail` splits by grain; carries the figure reads with it
 - [ ] **Declared names and certificate routing** — identity to machine to application, and the plural entitlement answer
 - [ ] **Restore replicas** — declarations move grain; `migration-test` stays application-scoped
 - [ ] **Retiring the graded reachability states** — `short_status`'s hardcoded thresholds
@@ -219,9 +219,17 @@ Ingest grades each check at its own grain and files it there, from one unified p
 
 The machine filing path also carries `device_id`, so a machine issue records which reporter filed it.
 
-### The detail-field split: still open
+### The detail-field split: done
 
-Split out as its own step rather than left implied. `server_reported_detail` becoming two tables is the easy half; the hard half is that every figure read goes through it, and `osName`, `osVersion`, `munin` and `bestoolVersion` are machine-subject but read today from the application's row. Stripping them from the application's `extra` breaks those reads immediately, because the table replaces the whole body per `(server_id, source)` — there is no merge to fall back on. So the split and the figure reads move together, which is the FIG work.
+Migration `2026-08-28-001655-0000_split_reported_detail_by_grain`. `server_reported_detail` becomes `application_reported_detail`, and `machine_reported_detail` joins it. Existing rows are split in place: the box's fields move to its machine and come out of the application's body, so each fact is stored once.
+
+**Reads did not change, which is what made this tractable.** `for_server` returns an application's own detail merged with its machine's, so every figure consumer sees exactly the view it saw before. The storage is what moved. The hard half the plan warned about — every figure read going through one table, with `osName`, `osVersion`, `munin` and `bestoolVersion` machine-subject but read from the application's row — is answered by merging on read rather than by moving the readers.
+
+`version` stays with the application and has no machine counterpart: a version is what the workload runs. The machine's own agent version (`bestoolVersion`) is a detail field like any other and goes to the box.
+
+The field list lives in `commons_types::subject` beside the check-subject list, since both answer the same question; the module was renamed from `check_subject` to `subject` to say so. The migration repeats the list once, to move the rows that already exist.
+
+**One regression this introduced and fixed.** Merging on read meant `for_server` looked up the application's machine, which made it *error* for an application that no longer exists where it used to return nothing. A deleted application has no detail rather than being an error, so the lookup is optional. Caught by an existing test, which is the argument for having had one.
 
 ## Declared names and certificate routing
 

@@ -47,6 +47,16 @@ diesel::table! {
 }
 
 diesel::table! {
+	application_reported_detail (application_id, source) {
+		application_id -> Uuid,
+		source -> Text,
+		extra -> Jsonb,
+		version -> Nullable<Text>,
+		reported_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	applications (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -465,6 +475,15 @@ diesel::table! {
 }
 
 diesel::table! {
+	machine_reported_detail (machine_id, source) {
+		machine_id -> Uuid,
+		source -> Text,
+		extra -> Jsonb,
+		reported_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	machines (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -683,16 +702,6 @@ diesel::table! {
 }
 
 diesel::table! {
-	server_reported_detail (server_id, source) {
-		server_id -> Uuid,
-		source -> Text,
-		extra -> Jsonb,
-		version -> Nullable<Text>,
-		reported_at -> Timestamptz,
-	}
-}
-
-diesel::table! {
 	slack_outbox (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -809,6 +818,7 @@ diesel::table! {
 
 diesel::joinable!(application_certificates -> applications (application_id));
 diesel::joinable!(application_names -> applications (application_id));
+diesel::joinable!(application_reported_detail -> applications (application_id));
 diesel::joinable!(applications -> devices (device_id));
 diesel::joinable!(applications -> machines (machine_id));
 diesel::joinable!(artifacts -> devices (device_id));
@@ -845,6 +855,7 @@ diesel::joinable!(issues -> applications (application_id));
 diesel::joinable!(issues -> devices (device_id));
 diesel::joinable!(issues -> machines (machine_id));
 diesel::joinable!(issues -> server_groups (server_group_id));
+diesel::joinable!(machine_reported_detail -> machines (machine_id));
 diesel::joinable!(machines -> devices (device_id));
 diesel::joinable!(machines -> server_groups (group_id));
 diesel::joinable!(migration_tests -> backup_restore_checks (check_id));
@@ -865,7 +876,6 @@ diesel::joinable!(server_enrollment_tokens -> applications (server_id));
 diesel::joinable!(server_group_backup_config -> server_groups (group_id));
 diesel::joinable!(server_group_backup_schedule -> server_groups (group_id));
 diesel::joinable!(server_group_domains -> server_groups (group_id));
-diesel::joinable!(server_reported_detail -> applications (server_id));
 diesel::joinable!(slack_outbox -> incident_notes (note_id));
 diesel::joinable!(slack_outbox -> incidents (incident_id));
 diesel::joinable!(slack_outbox -> issues (issue_id));
@@ -880,6 +890,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	admins,
 	application_certificates,
 	application_names,
+	application_reported_detail,
 	applications,
 	artifacts,
 	backup_credential_issuances,
@@ -908,6 +919,7 @@ diesel::allow_tables_to_appear_in_same_query!(
 	incidents,
 	issue_notes,
 	issues,
+	machine_reported_detail,
 	machines,
 	maintenance_windows,
 	mcp_tokens,
@@ -924,7 +936,6 @@ diesel::allow_tables_to_appear_in_same_query!(
 	server_group_backup_schedule,
 	server_group_domains,
 	server_groups,
-	server_reported_detail,
 	slack_outbox,
 	source_policies,
 	sql_playground_history,

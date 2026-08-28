@@ -12,10 +12,10 @@ use commons_servers::{
 };
 use commons_types::{
 	backup::BackupType,
-	check_subject::CheckSubject,
 	device::DeviceRole,
 	server::TagMap,
 	status::{CheckResult, CheckSeverity},
+	subject::CheckSubject,
 	version::VersionStr,
 };
 use database::{
@@ -316,6 +316,7 @@ async fn create(
 			database::reported_detail::ReportedDetail::record(
 				conn,
 				server_id,
+				server.machine_id,
 				&status.source,
 				&status.extra,
 				status.version.as_ref(),

@@ -191,7 +191,7 @@ async fn status_json_server_with_recent_status() {
 
 			-- Ingestion records the source's current detail alongside the
 			-- status, and that's what the group's headline version reads.
-			INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES
+			INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd', '{\"uptime\": 3600}'::jsonb, '1.2.3')"
 		)
 		.await
@@ -610,7 +610,7 @@ async fn get_detail_munin_flag() {
 			('11111111-1111-1111-1111-111111111111', '{\"munin\": true}'::jsonb, NOW()),
 			('22222222-2222-2222-2222-222222222222', '{\"uptime\": 3600}'::jsonb, NOW());
 
-			INSERT INTO server_reported_detail (server_id, source, extra) VALUES
+			INSERT INTO application_reported_detail (application_id, source, extra) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd', '{\"munin\": true}'::jsonb),
 			('22222222-2222-2222-2222-222222222222', 'alertd', '{\"uptime\": 3600}'::jsonb)",
 		)
@@ -658,7 +658,7 @@ async fn get_detail_with_status() {
 			INSERT INTO statuses (server_id, version, extra, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '2.5.1', '{\"timezone\": \"Pacific/Auckland\", \"pgVersion\": \"PostgreSQL 17.2, (x86_64-pc-linux-gnu, compiled by gcc)\"}'::jsonb, NOW());
 
-			INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES
+			INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd', '{\"timezone\": \"Pacific/Auckland\", \"pgVersion\": \"PostgreSQL 17.2, (x86_64-pc-linux-gnu, compiled by gcc)\"}'::jsonb, '2.5.1')"
 		)
 		.await
@@ -707,7 +707,7 @@ async fn get_detail_figures_resolve_across_sources() {
 			('11111111-1111-1111-1111-111111111111', 'tamanu', '{\"uptimeSecs\": 6038594}'::jsonb, NOW()),
 			('22222222-2222-2222-2222-222222222222', 'tamanu', '{\"uptimeSecs\": 42}'::jsonb, NOW());
 
-			INSERT INTO server_reported_detail (server_id, source, extra, reported_at) VALUES
+			INSERT INTO application_reported_detail (application_id, source, extra, reported_at) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd',
 			 '{\"bestoolVersion\": \"2.10.5\", \"pgVersion\": \"PostgreSQL 17.2, (x86_64-pc-linux-gnu, compiled by gcc)\", \"timezone\": \"Pacific/Auckland\"}'::jsonb,
 			 NOW() - INTERVAL '10 minutes'),
@@ -1105,7 +1105,7 @@ async fn fleet_detail_covers_live_servers() {
 			WITH m AS (INSERT INTO machines (id) VALUES ('30000000-0000-0000-0000-000000000003') RETURNING id) INSERT INTO applications (id, name, host, kind, deleted_at, machine_id) VALUES
 			('30000000-0000-0000-0000-000000000003', 'archived', 'https://archived.example.com', 'central', NOW(), '30000000-0000-0000-0000-000000000003');
 
-			INSERT INTO server_reported_detail (server_id, source, extra, reported_at) VALUES
+			INSERT INTO application_reported_detail (application_id, source, extra, reported_at) VALUES
 			('30000000-0000-0000-0000-000000000001', 'alertd',
 			 '{\"bestoolVersion\": \"2.10.5\", \"pgVersion\": \"PostgreSQL 16.3 on x86_64-pc-linux-gnu\"}'::jsonb,
 			 NOW() - INTERVAL '2 hours'),
@@ -1960,7 +1960,7 @@ async fn summary_covers_actively_reporting_production_servers() {
 			WITH m AS (INSERT INTO machines (id) VALUES ('40000000-0000-0000-0000-000000000004') RETURNING id) INSERT INTO applications (id, name, host, kind, rank, machine_id) VALUES
 			('40000000-0000-0000-0000-000000000004', 'testing', 'https://t.example.com', 'central', 'test', '40000000-0000-0000-0000-000000000004');
 
-			INSERT INTO server_reported_detail (server_id, source, extra, version, reported_at) VALUES
+			INSERT INTO application_reported_detail (application_id, source, extra, version, reported_at) VALUES
 			('40000000-0000-0000-0000-000000000001', 'alertd', '{}'::jsonb, '2.34.1', NOW() - INTERVAL '2 hours'),
 			-- A later source reports no version: live-a still runs 2.34.1.
 			('40000000-0000-0000-0000-000000000001', 'tamanu', '{\"uptimeSecs\": 42}'::jsonb, NULL, NOW()),

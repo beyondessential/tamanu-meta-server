@@ -1426,7 +1426,7 @@ async fn a_version_without_a_published_manifest_is_a_redaction_gap() {
 		.expect("insert version")
 		.id;
 		sql_query(
-			"INSERT INTO server_reported_detail (server_id, source, extra, version) \
+			"INSERT INTO application_reported_detail (application_id, source, extra, version) \
 			 VALUES ($1, 'tamanu', '{}'::jsonb, '2.41.3')",
 		)
 		.bind::<sql_types::Uuid, _>(server_id)

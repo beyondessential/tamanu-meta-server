@@ -975,7 +975,7 @@ async fn publish_version(conn: &mut AsyncPgConnection, minor: i32, patch: i32) -
 /// measured against.
 async fn report_version(conn: &mut AsyncPgConnection, server_id: Uuid, version: &str) {
 	sql_query(
-		"INSERT INTO server_reported_detail (server_id, source, extra, version)
+		"INSERT INTO application_reported_detail (application_id, source, extra, version)
 		 VALUES ($1, 'test', '{}'::jsonb, $2)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)

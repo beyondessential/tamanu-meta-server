@@ -73,7 +73,7 @@ async fn seed(conn: &mut impl SimpleAsyncConnection) {
 		 INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES \
 			('{SRV_GROUPED}', '2.34.1', true, '[]'::jsonb, \
 			 '{{\"pgVersion\": \"PostgreSQL 14.2 on x86_64-pc-linux-gnu\"}}'::jsonb, NOW() - interval '1 minute'); \
-		 INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES \
+		 INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES \
 			('{SRV_GROUPED}', 'alertd', \
 			 '{{\"pgVersion\": \"PostgreSQL 14.2 on x86_64-pc-linux-gnu\", \"bestoolVersion\": \"2.10.5\"}}'::jsonb, '2.34.1');"
 	))
@@ -979,7 +979,7 @@ async fn find_servers_retains_the_version_of_a_long_offline_server() {
 			 INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES \
 				('{SRV_OFFLINE}', '2.30.0', true, '[]'::jsonb, '{{}}'::jsonb, \
 				 NOW() - interval '30 days'); \
-			 INSERT INTO server_reported_detail (server_id, source, extra, version, reported_at) VALUES \
+			 INSERT INTO application_reported_detail (application_id, source, extra, version, reported_at) VALUES \
 				('{SRV_OFFLINE}', 'alertd', '{{}}'::jsonb, '2.30.0', NOW() - interval '30 days');"
 		))
 		.await
@@ -1001,7 +1001,7 @@ async fn find_servers_retains_the_version_of_a_long_offline_server() {
 		// Both still come from the windowed status read. Answering
 		// "when, however long ago" against `statuses` means scanning every
 		// weekly partition, which is exactly what the lookback cap exists to
-		// refuse; `server_reported_detail` carries the version without that
+		// refuse; `application_reported_detail` carries the version without that
 		// cost. So the version is retained and these two are not.
 		assert!(
 			s["last_seen"].is_null(),

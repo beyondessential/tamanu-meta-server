@@ -189,6 +189,7 @@ async fn mixed_group_headline_version_comes_from_the_tamanu_member() {
 		ReportedDetail::record(
 			&mut conn,
 			central.id,
+			central.machine_id,
 			"alertd",
 			&serde_json::json!({}),
 			Some(&"2.34.1".parse().unwrap()),
@@ -281,6 +282,7 @@ async fn production_versions_skip_untracked_products() {
 		ReportedDetail::record(
 			&mut conn,
 			tamanu.id,
+			tamanu.machine_id,
 			"alertd",
 			&serde_json::json!({}),
 			Some(&"2.34.1".parse().unwrap()),
@@ -292,6 +294,7 @@ async fn production_versions_skip_untracked_products() {
 		ReportedDetail::record(
 			&mut conn,
 			canopy.id,
+			canopy.machine_id,
 			"alertd",
 			&serde_json::json!({}),
 			Some(&"1.8.0".parse().unwrap()),

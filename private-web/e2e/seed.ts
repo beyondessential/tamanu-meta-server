@@ -47,7 +47,7 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, server_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, upgrade_plans, maintenance_windows, version_known_issues, recovery_vault_writes, application_names, application_certificates, compromised_keys RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, application_reported_detail, machine_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, upgrade_plans, maintenance_windows, version_known_issues, recovery_vault_writes, application_names, application_certificates, compromised_keys RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" server with it;
 	// self-alerts attach to that row, so put it back. `kind = 'canopy'` is the
@@ -292,16 +292,21 @@ export async function seedStatus(
 		params,
 	);
 
-	// Mirror ingestion: the push is the source's current server-wide detail,
-	// which is what the live figures (and the Munin flag) read — they never
-	// search status history. Ordered by the status's own timestamp so
-	// out-of-order seeding still resolves newest-wins correctly.
+	// Mirror ingestion: the push is the source's current detail, which is what
+	// the live figures (and the Munin flag) read — they never search status
+	// history. Ordered by the status's own timestamp so out-of-order seeding
+	// still resolves newest-wins correctly.
+	//
+	// Real ingestion splits this by grain, the box's fields going to
+	// `machine_reported_detail`. The seed writes the application's row alone
+	// and lets the merged read pick it up, which is the same view either way;
+	// the split itself is covered by the Rust tests.
 	await sql.query(
-		`INSERT INTO server_reported_detail (server_id, source, extra, version, reported_at)
+		`INSERT INTO application_reported_detail (application_id, source, extra, version, reported_at)
 		 VALUES ($1, $2, $3::jsonb, $4, $5)
-		 ON CONFLICT (server_id, source) DO UPDATE
+		 ON CONFLICT (application_id, source) DO UPDATE
 		 SET extra = EXCLUDED.extra, version = EXCLUDED.version, reported_at = EXCLUDED.reported_at
-		 WHERE server_reported_detail.reported_at <= EXCLUDED.reported_at`,
+		 WHERE application_reported_detail.reported_at <= EXCLUDED.reported_at`,
 		[
 			opts.serverId,
 			source,

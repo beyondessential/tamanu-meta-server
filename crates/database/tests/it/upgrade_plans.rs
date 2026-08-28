@@ -22,6 +22,16 @@ struct RowId {
 	id: Uuid,
 }
 
+/// An application and the machine it sits on: reported detail splits by grain,
+/// so recording a push names both.
+#[derive(diesel::QueryableByName)]
+struct AppRow {
+	#[diesel(sql_type = sql_types::Uuid)]
+	id: Uuid,
+	#[diesel(sql_type = sql_types::Uuid)]
+	machine_id: Uuid,
+}
+
 async fn publish(conn: &mut AsyncPgConnection, minor: i32, patch: i32) -> Version {
 	diesel::insert_into(database::schema::versions::table)
 		.values(NewVersion {
@@ -45,8 +55,8 @@ async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Ap
 		.get_result(conn)
 		.await
 		.expect("group");
-	let server: RowId = sql_query(
-		"WITH m AS (INSERT INTO machines (group_id) VALUES ($2) RETURNING id) INSERT INTO applications (host, kind, group_id, machine_id) SELECT $1, 'central', $2, m.id FROM m RETURNING id",
+	let server: AppRow = sql_query(
+		"WITH m AS (INSERT INTO machines (group_id) VALUES ($2) RETURNING id) INSERT INTO applications (host, kind, group_id, machine_id) SELECT $1, 'central', $2, m.id FROM m RETURNING id, machine_id",
 	)
 	.bind::<sql_types::Text, _>("https://central.kamaka.example")
 	.bind::<sql_types::Uuid, _>(group.id)
@@ -58,6 +68,7 @@ async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Ap
 	ReportedDetail::record(
 		conn,
 		server.id,
+		server.machine_id,
 		"test",
 		&serde_json::json!({}),
 		Some(&version),

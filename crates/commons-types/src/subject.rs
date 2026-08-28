@@ -1,4 +1,7 @@
-//! What a check asserts something about: the machine, or the application.
+//! What a reported fact is about: the machine, or the application.
+//!
+//! Both a check and a detail field answer the same question, so both are
+//! decided here.
 //!
 //! A check's *subject* is not the same question as what a check needs in order
 //! to run. bestool's registry categorises by inputs (`@tamanu`, `@db`, `host`),
@@ -72,7 +75,56 @@ impl CheckSubject {
 	pub fn is_machine(self) -> bool {
 		matches!(self, Self::Machine)
 	}
+
+	/// What a reported detail field describes.
+	///
+	/// The machine's platform, hardware, addresses and agent; the
+	/// application's version, runtime, database and configuration. Same
+	/// whole-name rule as the checks: `timezone` is the application's
+	/// configured zone while `osTimezone` is the box's, and they routinely
+	/// differ.
+	// spec: FIG
+	pub fn of_detail_field(field: &str) -> Self {
+		if MACHINE_SUBJECT_DETAIL.contains(&field) {
+			Self::Machine
+		} else {
+			Self::Application
+		}
+	}
 }
+
+/// The reported detail fields that describe the box.
+///
+/// Everything else stays with the application, on the same reasoning as the
+/// checks: an unrecognised field is likelier to be a product's own than a new
+/// fact about the box, and leaving it where detail has always gone keeps it
+/// readable rather than losing it to a grain nobody looks at.
+// spec: FIG
+const MACHINE_SUBJECT_DETAIL: &[&str] = &[
+	"arch",
+	"bestoolVersion",
+	"cpuCores",
+	"filesystems",
+	"hostname",
+	"instanceTags",
+	"ipv4",
+	"ipv6",
+	"kernel",
+	"lanIps",
+	"munin",
+	"nat64",
+	"osKind",
+	"osName",
+	"osTimezone",
+	"osVersion",
+	"services",
+	"totalMemoryBytes",
+	"uptimeSecs",
+	"virtualisation",
+	"virtualised",
+	"wanIpv4",
+	"wanIpv6",
+];
 
 #[cfg(test)]
 mod tests {
@@ -110,20 +162,46 @@ mod tests {
 	}
 
 	#[test]
-	fn the_machine_list_is_sorted_and_unique() {
-		// It is read by eye when a check moves grain; keep it scannable.
-		let mut sorted = MACHINE_SUBJECT_CHECKS.to_vec();
-		sorted.sort_unstable();
+	fn a_detail_field_lands_on_the_grain_it_describes() {
 		assert_eq!(
-			MACHINE_SUBJECT_CHECKS,
-			&sorted[..],
-			"keep the machine-subject list in alphabetical order"
+			CheckSubject::of_detail_field("osVersion"),
+			CheckSubject::Machine
 		);
-		sorted.dedup();
 		assert_eq!(
-			MACHINE_SUBJECT_CHECKS.len(),
-			sorted.len(),
-			"a check names its subject once"
+			CheckSubject::of_detail_field("tamanuVersion"),
+			CheckSubject::Application
 		);
+		// The box's clock and the application's configured zone are different
+		// facts and routinely differ.
+		assert_eq!(
+			CheckSubject::of_detail_field("osTimezone"),
+			CheckSubject::Machine
+		);
+		assert_eq!(
+			CheckSubject::of_detail_field("timezone"),
+			CheckSubject::Application
+		);
+		assert_eq!(
+			CheckSubject::of_detail_field("somethingNew"),
+			CheckSubject::Application
+		);
+	}
+
+	#[test]
+	fn the_machine_lists_are_sorted_and_unique() {
+		for (label, list) in [
+			("checks", MACHINE_SUBJECT_CHECKS),
+			("detail", MACHINE_SUBJECT_DETAIL),
+		] {
+			let mut sorted = list.to_vec();
+			sorted.sort_unstable();
+			assert_eq!(
+				list,
+				&sorted[..],
+				"keep the {label} list in alphabetical order"
+			);
+			sorted.dedup();
+			assert_eq!(list.len(), sorted.len(), "{label}: one entry per name");
+		}
 	}
 }

@@ -12,7 +12,7 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 - [x] Archiving a machine archives the applications on it (verifies spec: FLT)
 - [ ] An application with no operator-set name presents as the sentence case of its type (verifies spec: FLT)
 - [ ] An operator-set name overrides the default and survives further reports (verifies spec: FLT)
-- [ ] A machine with two applications reports its platform, memory and filesystems once, not once per application (verifies spec: FLT)
+- [x] A machine with two applications reports its platform, memory and filesystems once, not once per application (verifies spec: FLT)
 
 ## Groups
 
@@ -75,7 +75,7 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 - [ ] Application version spreads over applications (verifies spec: FIG)
 - [ ] A crossing counts machines whatever is on its axes, and names the unit it counts (verifies spec: FIG)
 - [ ] A machine whose applications disagree on an application figure appears in each matching cell (verifies spec: FIG)
-- [ ] The OS timezone and an application's configured timezone present as separate figures and may differ (verifies spec: FIG)
+- [x] The OS timezone and an application's configured timezone present as separate figures and may differ (verifies spec: FIG)
 - [ ] The Munin flag is a machine figure, and the Munin link is offered on the machine (verifies spec: SVC, FIG)
 - [ ] A machine reporting no OS falls back to the family its applications' database engine gives away (verifies spec: FIG)
 - [ ] Runtime version falls back to the reporting identity's connection metadata (verifies spec: FIG)

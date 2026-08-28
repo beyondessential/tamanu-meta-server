@@ -41,6 +41,8 @@ async fn seed(conn: &mut AsyncPgConnection) -> (Uuid, Version) {
 	ReportedDetail::record(
 		conn,
 		SERVER.parse().expect("uuid"),
+		// The fixture gives the box the same id as the application on it.
+		SERVER.parse().expect("uuid"),
 		"test",
 		&serde_json::json!({}),
 		Some(&running),

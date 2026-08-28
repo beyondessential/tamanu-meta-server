@@ -72,10 +72,10 @@ async fn insert_status(
 	// recompute reads — including its rule that a version-less push keeps the
 	// version the source last reported.
 	sql_query(
-		"INSERT INTO server_reported_detail (server_id, source, version, reported_at)
+		"INSERT INTO application_reported_detail (application_id, source, version, reported_at)
 		 VALUES ($1, 'alertd', $3, now() + ($2 || ' seconds')::interval)
-		 ON CONFLICT (server_id, source) DO UPDATE
-		 SET version = COALESCE(EXCLUDED.version, server_reported_detail.version),
+		 ON CONFLICT (application_id, source) DO UPDATE
+		 SET version = COALESCE(EXCLUDED.version, application_reported_detail.version),
 		     reported_at = EXCLUDED.reported_at",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)

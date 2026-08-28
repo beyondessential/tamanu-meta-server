@@ -365,7 +365,7 @@ impl CanopyMcp {
 /// windowed status read: `statuses` is partitioned by week and a predicate on
 /// `server_id` alone can't be pruned, so answering "when was it last seen,
 /// however long ago" means scanning every partition — the cost
-/// `statuses::GRACE_LOOKBACK_SQL` exists to refuse. `server_reported_detail`
+/// `statuses::GRACE_LOOKBACK_SQL` exists to refuse. `application_reported_detail`
 /// has no such problem: one row per (server, source), which is why
 /// `last_version` is already unbounded there.
 ///

@@ -3113,10 +3113,20 @@ async fn push_records_the_source_s_current_detail() {
 			.await
 			.unwrap();
 
+			// What a consumer sees: the application's own detail merged with
+			// its machine's. Detail splits by grain on the way in, so
+			// `bestoolVersion` lands on the box while `pgVersion` stays with
+			// the workload; a reader is not meant to care which.
 			let detail = async |conn: &mut diesel_async::AsyncPgConnection, source: &str| {
 				sql_query(
-					"SELECT extra FROM server_reported_detail \
-					 WHERE server_id = $1 AND source = $2",
+					"SELECT COALESCE(m.extra, '{}'::jsonb) || COALESCE(d.extra, '{}'::jsonb) \
+					   AS extra \
+					 FROM applications a \
+					 LEFT JOIN application_reported_detail d \
+					   ON d.application_id = a.id AND d.source = $2 \
+					 LEFT JOIN machine_reported_detail m \
+					   ON m.machine_id = a.machine_id AND m.source = $2 \
+					 WHERE a.id = $1 AND (d.source IS NOT NULL OR m.source IS NOT NULL)",
 				)
 				.bind::<sql_types::Uuid, _>(server_id)
 				.bind::<sql_types::Text, _>(source.to_owned())
