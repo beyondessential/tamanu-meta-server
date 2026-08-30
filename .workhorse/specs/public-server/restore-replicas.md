@@ -405,7 +405,7 @@ That is for whoever gave out the replica to act on, not for whoever is on call f
 
 - How a consumer provisions, runs, names, or tears down a replica, or how it applies migrations or a masking manifest to one.
 - A consumer's runtime placement, storage sizing, or scheduling.
-- Producing reporting schemas, or any other artefact, from a migrated replica.
+- Producing reporting schemas, or any other artefact, from a migrated replica (see [RPT](reporting-schemas.md)).
 - The contents of a masking manifest, and what each masking it names does to a value.
 - Deciding or scheduling when a deployment upgrades: verdicts inform that decision without making it.
 - Scoping object-storage credentials below the granularity of a group's repo: one repo holds all of a group's servers' snapshots, so credentials are necessarily group-wide while targeting and reporting are per-server.
