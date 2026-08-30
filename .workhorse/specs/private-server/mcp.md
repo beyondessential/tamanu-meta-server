@@ -5,7 +5,7 @@ id: MCP
 # Fleet query interface
 
 A read-only query interface to the Canopy fleet, exposed for AI agents and other automated clients that operators run.
-It lets such a client discover servers and groups, read their status and health, learn what Tamanu versions exist and which are deployed, see where each deployment plans to move next, and inspect backup state and problems — without granting any ability to change the fleet.
+It lets such a client discover servers and groups, read their status and health, learn what Tamanu versions exist and which are deployed, see where each group plans to move next, and inspect backup state and problems — without granting any ability to change the fleet.
 
 ## Why it exists
 
@@ -73,7 +73,7 @@ When the result is truncated to its bound, the result says so, so the client doe
 
 ### Planned upgrades
 
-**List upgrade plans** takes no input and returns where every deployment is going (see [UPG](upgrade-plans.md)): each group with an open plan, with the version it runs now, the version it plans to move to, the planned date where there is one, and whether that date has passed unmet; and separately the groups with nothing recorded, which pre-upgrade testing does not cover.
+**List upgrade plans** takes no input and returns where every group is going (see [UPG](upgrade-plans.md)): each group with an open plan, with the version it runs now, the version it plans to move to, the planned date where there is one, and whether that date has passed unmet; and separately the groups with nothing recorded, which pre-upgrade testing does not cover.
 
 **Get upgrade plan history** takes a group identifier and returns every plan that group has had, newest first, each with its target, planned date, note, and how it stands: open, met, replaced by a later plan, or withdrawn.
 A plan carries the operator who recorded it, who last amended it, and who withdrew it, with the times of each.

@@ -288,7 +288,7 @@ impl BillingLabels {
 	}
 
 	/// Labels for one server's own resources: its own product and its own rank,
-	/// against the deployment its group names.
+	/// under the deployment label its group names.
 	///
 	/// Every label describing the server carries the server's value rather than
 	/// its group's — a `rank = clone` server must report `stage = clone` and
@@ -414,7 +414,7 @@ pub fn shared_bucket_name(group_name: &str, random: &str) -> String {
 /// Billing tags for a canopy backup bucket. Built from the group's
 /// [`BillingLabels`] — so a group's explicit `billing.deployment` /
 /// `billing.stage` overrides are honored (keeping the bucket's cost attribution
-/// consistent with the deployment's other resources) — with `billing.product`
+/// consistent with the group's other resources) — with `billing.product`
 /// **forced to `backups`** (backup spend attributes to the backups product
 /// regardless of the group's own product). Applied at provision time and
 /// re-applied by the reconcile pass on drift.
@@ -853,7 +853,7 @@ mod tests {
 		assert_eq!(b.deployment, "my-group");
 		assert_eq!(b.stage, None);
 
-		// A computed deployment (group name) is lower-kebab-cased.
+		// A computed deployment label (group name) is lower-kebab-cased.
 		let b = BillingLabels::from_group(&empty, "Acme Prod", Some(Product::Tamanu), None);
 		assert_eq!(b.deployment, "acme-prod");
 
@@ -924,7 +924,7 @@ mod tests {
 
 	#[test]
 	fn backup_bucket_tags_attribute_to_the_backups_product() {
-		// Backup spend never charges to the deployment's application, and a
+		// Backup spend never charges to the group's application, and a
 		// group's own product label must not leak through.
 		let mut tags = TagMap::default();
 		tags.0.insert("billing.product".into(), "tamanu".into());
@@ -998,7 +998,7 @@ mod tests {
 			Some(ServerRank::Production),
 		);
 		assert!(t.contains(&("billing.product".to_string(), "backups".to_string())));
-		// Computed deployment (group name) is lower-kebab-cased.
+		// Computed deployment label (group name) is lower-kebab-cased.
 		assert!(t.contains(&("billing.deployment".to_string(), "acme-prod".to_string())));
 		// Production maps to "prod", not the Display "production".
 		assert!(t.contains(&("billing.stage".to_string(), "prod".to_string())));

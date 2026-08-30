@@ -29,7 +29,7 @@ use serde::{Deserialize, Serialize};
 #[diesel(sql_type = Text)]
 #[serde(rename_all = "lowercase")]
 pub enum ServerKind {
-	/// A deployment's central server, which its facility servers sync to.
+	/// A group's central server, which its facility servers sync to.
 	/// The default.
 	#[default]
 	Central,

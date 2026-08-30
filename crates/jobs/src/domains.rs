@@ -18,7 +18,7 @@
 //! is nothing to write into and both sweeps idle; without
 //! `CANOPY_ACME_ACCOUNT_KEY` there is no account to order with and the
 //! certificate sweeps idle while addresses carry on. Either is a legitimate
-//! deployment rather than an error, so each is reported once at startup and not
+//! configuration rather than an error, so each is reported once at startup and not
 //! per tick.
 // spec: CRT
 

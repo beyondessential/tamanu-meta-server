@@ -310,7 +310,7 @@ async fn detail_billing_labels_are_the_servers_own() {
 			labels.get("billing.stage").map(String::as_str),
 			Some("clone")
 		);
-		// The deployment still comes from the group.
+		// The deployment label still comes from the group.
 		assert_eq!(
 			labels.get("billing.deployment").map(String::as_str),
 			Some("pacific")

@@ -68,8 +68,8 @@ pub async fn products() -> Result<Json<Vec<ProductInfo>>> {
 
 /// Get the configured public API base URL.
 ///
-/// Returns the base URL of the device-facing public API for this
-/// deployment, or `null` if none is configured. Used by the operator UI to
+/// Returns the base URL of the device-facing public API for this Canopy
+/// instance, or `null` if none is configured. Used by the operator UI to
 /// build links out to device-facing resources.
 #[utoipa::path(
 	post,

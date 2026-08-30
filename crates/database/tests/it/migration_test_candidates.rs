@@ -113,7 +113,7 @@ async fn every_server_in_a_planned_group_is_a_candidate() {
 		];
 		want.sort_by_key(|c| c.server_id);
 
-		assert_eq!(found, want, "the plan covers the whole deployment");
+		assert_eq!(found, want, "the plan covers the whole group");
 	})
 	.await
 }
@@ -133,7 +133,7 @@ async fn a_group_with_no_plan_has_no_candidates() {
 
 		assert!(
 			candidates(&mut conn).await.expect("candidates").is_empty(),
-			"a restore costs hours, and nobody has said this deployment is moving"
+			"a restore costs hours, and nobody has said this group is moving"
 		);
 	})
 	.await
@@ -163,7 +163,7 @@ async fn a_withdrawn_plan_stops_the_testing() {
 
 		assert!(
 			candidates(&mut conn).await.expect("candidates").is_empty(),
-			"the deployment stopped going there, so there is nothing to hold its data against"
+			"the group stopped going there, so there is nothing to hold its data against"
 		);
 	})
 	.await

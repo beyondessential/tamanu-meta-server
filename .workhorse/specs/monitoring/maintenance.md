@@ -9,7 +9,7 @@ A window is bounded in time, ends itself, and records who declared it and what f
 
 ## Why it exists
 
-An upgrade looks exactly like a deployment falling over: the server stops reporting, its checks go stale, and the group opens an incident someone has to read before recognising it as work already under way.
+An upgrade looks exactly like a server falling over: the server stops reporting, its checks go stale, and the group opens an incident someone has to read before recognising it as work already under way.
 Alerting through planned work costs an operator the trust they place in the next alert.
 
 Neither existing control covers it.
@@ -46,16 +46,16 @@ Canopy-wide checks are Canopy monitoring its own operation, and are never suspen
 ## Ending
 
 A window ends when an operator lifts it or when its expected end passes, and Canopy records which, with the operator and the time.
-Ending at the expected end without asking anyone is what keeps a forgotten window from leaving a deployment unwatched.
+Ending at the expected end without asking anyone is what keeps a forgotten window from leaving a group unwatched.
 Work running long extends the window by amending its end before it passes; a window that has ended is history, and suspending again is a fresh declaration.
 
-Ended windows are retained as the target's maintenance history, so what was being done the last time a deployment went quiet is readable against it.
+Ended windows are retained as the target's maintenance history, so what was being done the last time a group went quiet is readable against it.
 
 ## Settling
 
 Suspension persists for a settle period after the window ends, unchanged in every respect from the window itself.
 
-A server is back before the sources on it have reported again, and a server whose every source is stale is unreachable (see [CHK](checks.md), "Reachability"), so ending suspension the instant the work finishes would report a deployment that has just come back as failed for as long as the work took.
+A server is back before the sources on it have reported again, and a server whose every source is stale is unreachable (see [CHK](checks.md), "Reachability"), so ending suspension the instant the work finishes would report a server that has just come back as failed for as long as the work took.
 The settle period is the same for every window.
 When it elapses, every check on the target is graded normally again, and anything still degraded contributes from then on.
 

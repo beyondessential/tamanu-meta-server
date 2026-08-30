@@ -960,7 +960,7 @@ struct ServerInstances {
 ///   derived rather than being pinned open with no way out. Or,
 /// - Canopy holds a migration verdict for it, which yields a `migration-test`
 ///   instance whatever declares the replica now. A failed migration is a fact
-///   about a candidate version measured against this deployment's data, not a
+///   about a candidate version measured against this group's data, not a
 ///   deadline on a declaration, and what supersedes it is a later verdict.
 ///
 /// Returns the number of checks this pass left degraded.
@@ -1399,7 +1399,7 @@ fn redaction_instance(
 
 /// The migration-test instance for one replica: what its latest verdict said,
 /// or that its candidate has gone untried past the bound. Untested and failed
-/// are both "this version is not known good against this deployment's data", so
+/// are both "this version is not known good against this group's data", so
 /// they are one instance and the more urgent of the two wins.
 ///
 /// `None` when there is neither a verdict nor a bound gone past: a replica with

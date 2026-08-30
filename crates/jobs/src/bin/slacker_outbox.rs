@@ -64,14 +64,14 @@ struct Config {
 	open: Option<String>,
 	resolve: Option<String>,
 	/// Maintenance hooks are optional independently of the incident ones: a
-	/// deployment that hasn't built the workflows still records its windows
+	/// Canopy instance that hasn't built the workflows still records its windows
 	/// and suspends on them, it just doesn't announce them.
 	maintenance_declared: Option<String>,
 	maintenance_ended: Option<String>,
 	private_url: Option<String>,
 }
 
-/// Empty reads as unset. A deployment that renders an unconfigured URL into
+/// Empty reads as unset. A Canopy instance that renders an unconfigured URL into
 /// `value: ""` sets the variable rather than omitting it, and an empty URL
 /// would have the drainer post to nowhere and retry the row forever.
 fn present(value: Option<String>) -> Option<String> {
@@ -414,7 +414,7 @@ async fn deliver(
 			debug!(id = %row.id, kind = %row.kind, "legacy self-alert row; marked delivered without posting");
 			return Ok(String::new());
 		}
-		// A deployment with no maintenance workflow records its windows
+		// A Canopy instance with no maintenance workflow records its windows
 		// without announcing them, rather than failing every row forever.
 		Ok(None) if row.kind == KIND_MAINTENANCE_DECLARED || row.kind == KIND_MAINTENANCE_ENDED => {
 			debug!(id = %row.id, kind = %row.kind, "no maintenance webhook configured; marked delivered without posting");

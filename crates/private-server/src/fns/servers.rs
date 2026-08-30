@@ -66,7 +66,7 @@ pub struct ServerDetailData {
 	/// The server's own effective `billing.*` labels
 	/// (product/deployment/stage) — the ones canopy hands the server's device,
 	/// carrying its own product and rank rather than its group's. Empty when
-	/// the server is ungrouped, there being no deployment to attribute to.
+	/// the server is ungrouped, there being no group to attribute to.
 	// spec: APP#billing-attribution
 	pub billing_labels: Vec<super::server_groups::BillingTag>,
 	/// Whether the server is known to run Munin, from the most recent source
@@ -90,8 +90,8 @@ pub struct ServerInfo {
 	pub product: Product,
 	/// The server's role within its product's topology.
 	pub kind: ServerKind,
-	/// Where this server sits in its deployment's promotion order (e.g.
-	/// production vs. staging), if applicable.
+	/// The server's environment tier within its group (e.g. production vs.
+	/// clone), if set.
 	pub rank: Option<ServerRank>,
 	/// The server's stored URL, if any. May be absent for device-only servers.
 	pub host: Option<String>,
@@ -421,7 +421,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 /// Filter and pagination parameters for listing servers.
 #[derive(Deserialize, ToSchema)]
 pub struct ServerListArgs {
-	/// Restrict results to servers of this deployment kind. Omit to
+	/// Restrict results to servers of this kind. Omit to
 	/// include all kinds.
 	pub kind: Option<ServerKind>,
 	/// Number of items to skip from the start of the result set.
@@ -631,7 +631,7 @@ pub async fn get_detail(
 		let status_lookup = Status::latest_for_server(&mut conn_status, server.id);
 
 		// A server detail page shouldn't 404 just because no versions are
-		// published yet (e.g. a fresh deployment); treat "no match" as "unknown
+		// published yet (e.g. a fresh Canopy instance); treat "no match" as "unknown
 		// latest" so `version_distance` falls back to None.
 		let latest_version_lookup = async {
 			match Version::get_latest_matching(&mut conn, "*".parse()?).await {
@@ -965,8 +965,8 @@ pub struct CreateServerArgs {
 	/// The server's role within its product's topology. Rejected when the
 	/// product does not define it.
 	pub kind: ServerKind,
-	/// Where this server sits in its deployment's promotion order (e.g.
-	/// production vs. staging), if applicable.
+	/// The server's environment tier within its group (e.g. production vs.
+	/// clone), if set.
 	pub rank: Option<ServerRank>,
 	/// Group to place the server in. Omit to create it ungrouped.
 	pub group_id: Option<Uuid>,

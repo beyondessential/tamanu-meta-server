@@ -48,7 +48,7 @@ pub struct AppState {
 	/// Kube client for reading repo-password Secrets in canopy's namespace.
 	/// `None` in tests / non-cluster runs ⇒ `GET /backup-target` returns 502.
 	pub kube: Option<BackupSecrets>,
-	/// The DNS zones Canopy may write records in, from its deployment
+	/// The DNS zones Canopy may write records in, from its instance
 	/// configuration. Empty when none are configured, in which case no name can
 	/// be acted on — read once at startup, so a change takes effect on restart.
 	// spec: CRT
@@ -121,7 +121,7 @@ impl AppState {
 
 	/// Sync constructor with `None` AWS/kube clients — used by the private
 	/// server's nested `/public/...` mount, the test harness, and any
-	/// non-AWS deployment.
+	/// non-AWS Canopy instance.
 	pub fn from_db(db: Db) -> Result<Self> {
 		Self::from_db_with_directory(db, None)
 	}

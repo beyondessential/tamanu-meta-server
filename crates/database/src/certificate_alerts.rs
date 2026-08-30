@@ -1,6 +1,6 @@
 //! Reporting what has gone wrong with a server's own names and certificates.
 //!
-//! These are facts about a deployment rather than about Canopy, so each is filed
+//! These are facts about a group rather than about Canopy, so each is filed
 //! against the server like any other check: it joins that server's group's
 //! incident and reaches the people who run it. Canopy's own inability to issue is
 //! not any one server's fault and is reported against Canopy instead — see
@@ -48,7 +48,7 @@ pub const ISSUANCE_REF: &str = "certificate-issuance";
 
 pub const ISSUANCE_DOC: &str = "## Description
 
-This server asked for a certificate and Canopy has never managed to obtain it. Told apart from a certificate about to expire on purpose: this is a deployment that never came up, not one about to go dark, and the two want different responses.
+This server asked for a certificate and Canopy has never managed to obtain it. Told apart from a certificate about to expire on purpose: this is a server that never came up, not one about to go dark, and the two want different responses.
 
 Canopy keeps retrying with a growing interval, so the order is not lost — but nothing will start serving TLS on that name until it succeeds.
 
@@ -80,7 +80,7 @@ Read the recorded error on the server's page in Canopy. Usually either the zone 
 /// File (or close) the per-server certificate-expiry check.
 ///
 /// Coalescing per server: one check lists every certificate of that server's that
-/// is running out, graded by the worst of them, because "this deployment's
+/// is running out, graded by the worst of them, because "this server's
 /// certificates need attention" is one thing to act on rather than several.
 // spec: CRT#when-issuance-fails
 pub async fn sweep_certificate_expiry(db: &mut AsyncPgConnection) -> Result<usize> {
@@ -190,7 +190,7 @@ pub async fn sweep_certificate_expiry(db: &mut AsyncPgConnection) -> Result<usiz
 /// How many failed attempts make a first issuance worth reporting rather than
 /// worth waiting out. With the doubling backoff this is a bit over half an hour
 /// of trying, which clears the transient causes — a challenge record not yet
-/// visible, an authority briefly unavailable — without leaving a deployment that
+/// visible, an authority briefly unavailable — without leaving a server that
 /// never came up unreported for a shift.
 pub const STUCK_AFTER_ATTEMPTS: i32 = 6;
 

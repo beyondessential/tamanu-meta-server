@@ -268,7 +268,7 @@ pub struct DomainHealthView {
 /// The names in use under each domain a group controls, and which of them hold a
 /// current certificate.
 ///
-/// So that whether a deployment's names are healthy is answerable from the
+/// So that whether a group's names are healthy is answerable from the
 /// group's page, without visiting each of its servers.
 // spec: CRT#presentation
 #[utoipa::path(
@@ -436,8 +436,8 @@ pub struct SetProfileArgs {
 
 /// Set the profile a server's certificates are requested under.
 ///
-/// Lifetime is a property of how a deployment is run rather than of Canopy, so it
-/// is an operator's choice per server: a cloud deployment whose issuance is
+/// Lifetime is a property of how a server is run rather than of Canopy, so it
+/// is an operator's choice per server: a cloud server whose issuance is
 /// exercised constantly can carry a short lifetime where an on-premises one that
 /// may be offline for days cannot. Takes effect on the next issuance or renewal;
 /// a certificate already held keeps the lifetime it was issued with.
@@ -497,7 +497,7 @@ pub struct PauseArgs {
 /// Pause a server: Canopy makes no new changes on its behalf.
 ///
 /// Nothing already in place is withdrawn — records published stand, certificates
-/// held stay held and collectable until they expire, and the deployment keeps
+/// held stay held and collectable until they expire, and the group keeps
 /// working exactly as it did. What stops is Canopy doing anything *new*.
 ///
 /// A second pause leaves the first in place, so the original reason and time are

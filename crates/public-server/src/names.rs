@@ -122,7 +122,7 @@ async fn authorise(
 
 	// 4. The name has to sit under a domain this server's *own* group controls.
 	// A name another group controls is refused exactly as an unclaimed one is, so
-	// the endpoint is not a directory of other deployments' names.
+	// the endpoint is not a directory of other groups' names.
 	let entitled = match server.group_id {
 		None => false,
 		Some(group) => ServerGroupDomain::list_for_group(conn, group)

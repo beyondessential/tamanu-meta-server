@@ -71,7 +71,7 @@ pub struct RedactionManifest {
 	/// substituted by the consumer with the version it reads out of the
 	/// data it restored.
 	pub url_template: &'static str,
-	/// Single-row, single-column SQL reading the deployment's own version
+	/// Single-row, single-column SQL reading the version
 	/// out of the restored database, to substitute into `url_template`.
 	pub version_query: &'static str,
 	/// Whether to retry at the `major.minor.0` base version when the

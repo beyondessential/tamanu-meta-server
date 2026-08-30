@@ -153,7 +153,7 @@ pub struct Server {
 	// spec: DOM#permission-for-a-server-to-manage-its-own-names
 	pub may_manage_dns: bool,
 	/// Whether this server may obtain TLS certificates for names under its
-	/// group's domains. Separate from `may_manage_dns`: a deployment whose
+	/// group's domains. Separate from `may_manage_dns`: a group whose
 	/// records are managed elsewhere may still want its certificates here.
 	// spec: DOM#permission-for-a-server-to-manage-its-own-names
 	pub may_manage_tls: bool,

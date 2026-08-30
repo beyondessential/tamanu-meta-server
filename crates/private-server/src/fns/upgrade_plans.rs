@@ -183,7 +183,7 @@ pub struct PastPlan {
 
 /// The plans that have closed, across the fleet.
 ///
-/// A deployment that stopped going somewhere leaves no other mark on the fleet,
+/// A group that stopped going somewhere leaves no other mark on the fleet,
 /// so a withdrawn plan is readable here or nowhere.
 // spec: UPG#the-dashboard
 #[utoipa::path(
@@ -213,7 +213,7 @@ pub async fn history(
 			.map(|group| (group.id, group.name))
 			.collect();
 	// Including drafts: a target yanked since the plan was recorded still has to
-	// render as the version the deployment was going to.
+	// render as the version the group was going to.
 	let versions: HashMap<Uuid, String> =
 		database::versions::Version::get_all_including_drafts(&mut conn)
 			.await?
@@ -248,7 +248,7 @@ pub struct PlansForGroupArgs {
 
 /// A group's plan and the plans it has had before.
 ///
-/// The history is the record of what a deployment planned, when for, and when
+/// The history is the record of what a group planned, when for, and when
 /// it landed.
 // spec: UPG#when-a-plan-is-met
 #[utoipa::path(
@@ -494,7 +494,7 @@ pub struct WithdrawArgs {
 	pub id: Uuid,
 }
 
-/// Withdraw a plan: the deployment is no longer going there.
+/// Withdraw a plan: the group is no longer going there.
 ///
 /// This does not say the upgrade happened. Canopy closes a met plan on its own
 /// once the group reports the target.

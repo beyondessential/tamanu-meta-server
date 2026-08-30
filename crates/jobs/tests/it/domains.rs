@@ -125,7 +125,7 @@ async fn a_registered_name_is_published_and_settles() {
 		assert!(row.last_error.is_none());
 
 		// And a second pass has nothing to do, rather than rewriting the zone
-		// every fifteen seconds for the life of the deployment.
+		// every fifteen seconds for the life of the process.
 		assert_eq!(
 			reconcile_addresses(&pool, &dns, &zones())
 				.await

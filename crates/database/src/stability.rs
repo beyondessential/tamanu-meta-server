@@ -185,7 +185,7 @@ pub async fn states_for_checks(
 /// entries carry no signal, and states that already have a live-recorded
 /// row are left untouched.
 ///
-/// TODO(backfill-removal): transitional. Once every deployment has run
+/// TODO(backfill-removal): transitional. Once every Canopy instance has run
 /// the backfill (its marker row is set), delete this constant,
 /// [`backfill_from_statuses`], the monitor pod's startup call, and the
 /// `check_stability_backfill` table (via a migration).

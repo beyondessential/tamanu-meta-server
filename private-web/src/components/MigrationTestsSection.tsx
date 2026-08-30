@@ -62,7 +62,7 @@ export default function MigrationTestsSection({
 			<Paper variant="outlined" sx={{ p: 2 }} data-testid="migration-tests">
 				<SectionHeading />
 				<Typography variant="body2" color="text.secondary">
-					No upgrade plan is open for this deployment, so there is nothing to
+					No upgrade plan is open for this group, so there is nothing to
 					test against.
 				</Typography>
 			</Paper>
@@ -189,7 +189,7 @@ function formatDuration(seconds: number) {
 }
 
 /// How much the migrations added. Sizes are what makes a duration comparable
-/// across deployments, and growth is what catches a heavy backfill.
+/// across groups, and growth is what catches a heavy backfill.
 function formatGrowth(before: number, after: number) {
 	const added = after - before;
 	if (added <= 0) return "none";

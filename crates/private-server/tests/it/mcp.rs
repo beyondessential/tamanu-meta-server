@@ -177,7 +177,7 @@ async fn oauth_discovery_is_404_not_spa() {
 #[tokio::test(flavor = "multi_thread")]
 async fn accepts_non_loopback_host() {
 	// Regression: rmcp's DNS-rebinding guard defaults to a loopback-only Host
-	// allowlist, which 403s the real tailnet deployment host. The endpoint is
+	// allowlist, which 403s the real tailnet instance's host. The endpoint is
 	// gated by the ingress + tagged-device guard + tailnet-user check instead,
 	// so a non-loopback Host must be accepted.
 	commons_tests::server::run(async |_conn, _public, private| {

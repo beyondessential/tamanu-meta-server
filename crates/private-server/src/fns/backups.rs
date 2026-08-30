@@ -133,7 +133,7 @@ pub struct BackupConfigView {
 	#[schema(value_type = String)]
 	pub status: BackupConfigStatus,
 	/// Where the backup bucket lives: `external` if it was provisioned in the
-	/// deployment's own cloud account, or `shared` if Canopy provisioned it
+	/// group's own cloud account, or `shared` if Canopy provisioned it
 	/// automatically in a shared account. Distinguishes the two onboarding
 	/// paths.
 	#[schema(value_type = String)]
@@ -1116,7 +1116,7 @@ pub struct CreateSharedBackupConfigArgs {
 
 /// Onboard a group onto Canopy's shared-account backups.
 ///
-/// Use this for deployments that don't have their own AWS account. Canopy
+/// Use this for groups that don't have their own AWS account. Canopy
 /// generates a bucket name automatically, generates and stores the repository
 /// passphrase, and marks the configuration as provisioning with shared
 /// placement. The bucket and its access roles are provisioned asynchronously;

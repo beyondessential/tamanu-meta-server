@@ -145,7 +145,7 @@ test.describe("server name-management permissions", () => {
 		});
 
 		// Nothing granted: the row says nothing worth a line. "Not permitted" on
-		// every server in the fleet advertises a feature a deployment without DNS
+		// every server in the fleet advertises a feature a Canopy instance without DNS
 		// zones does not have.
 		await page.goto(`/servers/${plain.id}`);
 		await expect(

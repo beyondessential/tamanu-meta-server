@@ -84,7 +84,7 @@ async fn render(conn: &mut diesel_async::AsyncPgConnection) -> Result<String> {
 		.map(|group| (group.id, group))
 		.collect();
 	// Including drafts: a target yanked since the plan was recorded still has to
-	// render as the version the deployment is going to.
+	// render as the version the group is going to.
 	let versions: HashMap<Uuid, String> = Version::get_all_including_drafts(conn)
 		.await?
 		.into_iter()
@@ -101,7 +101,7 @@ async fn render(conn: &mut diesel_async::AsyncPgConnection) -> Result<String> {
 	line(&mut out, "X-WR-CALNAME:Canopy upgrades");
 	line(
 		&mut out,
-		"X-WR-CALDESC:Where each deployment is going, and when.",
+		"X-WR-CALDESC:Where each group is going, and when.",
 	);
 	line(
 		&mut out,

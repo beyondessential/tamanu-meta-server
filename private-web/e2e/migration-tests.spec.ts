@@ -77,7 +77,7 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 		await expect(untestedRow).toContainText("not yet tested");
 	});
 
-	test("says so when the deployment has no open plan", async ({
+	test("says so when the group has no open plan", async ({
 		page,
 		sql,
 	}) => {

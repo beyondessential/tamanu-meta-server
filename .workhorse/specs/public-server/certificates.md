@@ -29,7 +29,7 @@ Every request is checked in the same order, and each check is reported distinctl
 3. The requested name lies at or beneath a domain the server's *own group* controls.
 4. A managed zone covers that domain, so Canopy can act on the name at all.
 
-A name within another group's domain is refused as if unclaimed: the refusal says the server's group does not control the name, and never that another group does, so the endpoint is not a directory of other deployments' names.
+A name within another group's domain is refused as if unclaimed: the refusal says the server's group does not control the name, and never that another group does, so the endpoint is not a directory of other groups' names.
 
 A certificate for a name is available to any server of the group that controls it, provided that server holds the certificate grant.
 Certificate issuance is deliberately not tied to which server registered the name's addresses: a standby that serves the same name on failover needs the same certificate, and Canopy holds no view of which member is live.
@@ -51,7 +51,7 @@ A server with no grants, or whose group controls no domain, is told so plainly: 
 A server can be paused, and while it is, Canopy makes no new changes on its behalf: no certificate is ordered or renewed for it, and no address record of its is changed.
 
 Pausing withdraws nothing already in place.
-The records published stand, the certificates held stay held and collectable until they expire, and the deployment keeps working exactly as it did — a pause being for looking into something, and taking a deployment off the air not being a neutral act to perform while looking.
+The records published stand, the certificates held stay held and collectable until they expire, and the group keeps working exactly as it did — a pause being for looking into something, and taking a group off the air not being a neutral act to perform while looking.
 What stops is Canopy doing anything *new* on that server's behalf.
 
 Revoking one of a server's certificates pauses that server, without being asked.
@@ -90,8 +90,8 @@ A server generates its own key pair and asks Canopy to certify it, submitting a 
 The private key never leaves the server and Canopy never asks for it: Canopy's part is to prove control of the name and return the signed chain.
 
 The signing request is honoured only for exactly the name requested.
-Canopy certifies that one name and no other: a request whose subject or alternative names carry anything beyond the requested name is refused rather than trimmed, because silently issuing something narrower than asked would leave a server serving a certificate it does not expect, and issuing something wider would let one server smuggle a second deployment's name past the authorisation check.
-Wildcards are refused: a certificate valid for every name in a deployment is not something one member should be able to mint.
+Canopy certifies that one name and no other: a request whose subject or alternative names carry anything beyond the requested name is refused rather than trimmed, because silently issuing something narrower than asked would leave a server serving a certificate it does not expect, and issuing something wider would let one server smuggle a second group's name past the authorisation check.
+Wildcards are refused: a certificate valid for every name in a group is not something one member should be able to mint.
 
 The key the request certifies must be strong enough to be worth certifying, and Canopy states what it accepts rather than deferring to whatever the authority happens to allow that year.
 
@@ -118,7 +118,7 @@ Holding the chain is what lets Canopy answer a repeat request without a fresh or
 An authority may offer certificates of more than one lifetime, named as profiles, and a server's certificates are requested under one of them.
 The profiles on offer are whatever the authority advertises, so Canopy presents that set rather than a list of its own, and a profile the authority has withdrawn is reported as unavailable instead of being requested and refused.
 
-A server's profile is an operator's choice per server, because lifetime is a property of how a deployment is run rather than of Canopy: a cloud deployment whose issuance is exercised constantly can carry a short lifetime, where an on-premises one that may be offline for days cannot.
+A server's profile is an operator's choice per server, because lifetime is a property of how a server is run rather than of Canopy: a cloud server whose issuance is exercised constantly can carry a short lifetime, where an on-premises one that may be offline for days cannot.
 Every server takes the longest profile the authority offers until an operator says otherwise, so a short lifetime is something adopted deliberately for a server rather than a default anyone inherits.
 
 ### Renewal
@@ -151,13 +151,13 @@ Everything else can be re-requested with the key the server already holds.
 Where the reason given is that the key is compromised, that key is not certified again — for any name, by any server, since a leaked key is leaked whoever asks next.
 A request naming it is refused distinguishably from every other refusal, so an agent can generate a fresh key and ask again on the strength of the refusal alone, without a human reading it and without waiting for an operator to intervene on the server.
 Recovering from a leaked key is exactly the moment when nobody has attention to spare, so it is the moment the machinery has to work unattended.
-Any other reason leaves the key usable, since a certificate superseded or a deployment retired says nothing about the key itself.
+Any other reason leaves the key usable, since a certificate superseded or a server retired says nothing about the key itself.
 
 ### When issuance fails
 
 An order that fails is retried, with the interval between attempts growing, because most failures are the authority being briefly unavailable or a record not yet visible.
 
-A certificate that is running out is a fact about the server that serves it, so it is filed against that server like any other check: it joins that server's group's incident and reaches the people who run the deployment (see [CHK](../monitoring/checks.md)).
+A certificate that is running out is a fact about the server that serves it, so it is filed against that server like any other check: it joins that server's group's incident and reaches the people who run that group (see [CHK](../monitoring/checks.md)).
 It warns while there is still room to recover and fails as the remaining life runs down, and both thresholds are fractions of the certificate's own lifetime rather than fixed durations — otherwise the same alert would fire far too late for a short-lived certificate and far too early for a long-lived one.
 A certificate that has expired outright fails regardless.
 
@@ -168,11 +168,11 @@ Its group may have released the domain it sat under, the server's grant may have
 Alerting on it would mean every deliberate withdrawal left an alert behind that no action could clear, which teaches an operator to ignore the alert that matters.
 Whether the name is still entitled is asked when the alert is evaluated rather than remembered from when renewal stopped, so a domain reclaimed by its group brings its certificates back into scope.
 
-An order that has never produced a certificate is distinguished from one extending a certificate that already exists, so an operator can tell a deployment that never came up from one about to go dark.
+An order that has never produced a certificate is distinguished from one extending a certificate that already exists, so an operator can tell a server that never came up from one about to go dark.
 
 Canopy's own inability to issue is not any one server's fault and is reported against Canopy instead (see [SELF](../private-server/self-alerts.md)): an authority that cannot be reached, an account Canopy cannot use, and the authority's rate limits being exhausted.
 Those limits are shared across every group whose domain sits in the same zone, so running them down is a fleet-wide fault rather than one group's: Canopy reports being throttled, and does not consume what remains retrying a name that has just failed.
-Reporting the two apart matters because they call for different people — a server's certificate running out is that deployment's problem to notice, and Canopy being unable to issue at all is Canopy's.
+Reporting the two apart matters because they call for different people — a server's certificate running out is that group's problem to notice, and Canopy being unable to issue at all is Canopy's.
 
 ## Presentation
 
@@ -180,6 +180,6 @@ A server presents the names it has registered — with the addresses published f
 A request that has not yet produced a certificate presents as pending, or as failed with the reason.
 An operator sets the server's profile where its other permissions are set, and pauses or unpauses it from the same place, a pause showing who set it, when, and why.
 
-A group presents, under each domain it controls, the names in use beneath it and which of them hold a current certificate, so whether a deployment's names are healthy is answerable without visiting each of its servers.
+A group presents, under each domain it controls, the names in use beneath it and which of them hold a current certificate, so whether a group's names are healthy is answerable without visiting each of its servers.
 
 The authority Canopy is configured to use is presented to operators along with the profiles it advertises and whether Canopy's account with it is usable, since that is where a misconfiguration of issuance shows up rather than on any one server.

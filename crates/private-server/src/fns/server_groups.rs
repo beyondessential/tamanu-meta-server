@@ -104,7 +104,7 @@ pub struct GroupIdArgs {
 ///
 /// Labels are computed from the group's configuration: explicit `billing.*`
 /// tags on the group are honoured verbatim; otherwise the product comes from
-/// the one its live members agree on, the deployment from the group name in
+/// the one its live members agree on, the deployment label from the group name in
 /// lower-kebab-case, and the stage from the group's highest-ranked live member
 /// (for example `prod`). A label with nothing to attribute to is omitted
 /// entirely: the stage when the group has no ranked members, and the product

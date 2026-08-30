@@ -89,7 +89,7 @@ pub async fn effective_tags_for_server(
 	// comes from the server's own rank, so a rank=clone server reports
 	// `billing.stage=clone` and never the group's `prod`; and the product comes
 	// from the server's own product, so a SENAITE server in a Tamanu group
-	// reports `billing.product=senaite`. Attribution needs a deployment to
+	// reports `billing.product=senaite`. Attribution needs a group to
 	// attribute to, so an ungrouped server carries none.
 	// spec: APP#billing-attribution
 	if let Some(group_id) = server.group_id {

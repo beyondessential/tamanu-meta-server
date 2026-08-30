@@ -45,7 +45,7 @@ async fn for_group_reports_a_verdict_per_server() {
 		assert_eq!(
 			verdicts.len(),
 			2,
-			"the plan covers the whole deployment: got {verdicts:?}"
+			"the plan covers the whole group: got {verdicts:?}"
 		);
 		for id in [CENTRAL, FACILITY] {
 			let entry = verdicts

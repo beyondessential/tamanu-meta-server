@@ -1,4 +1,4 @@
-//! Recording where a deployment is going, and what that changes: the planned
+//! Recording where a group is going, and what that changes: the planned
 //! version becomes what pre-upgrade testing holds the data against.
 
 use commons_tests::db::TestDb;
@@ -118,7 +118,7 @@ async fn a_plan_is_what_makes_a_version_the_test_target() {
 				.expect("candidate")
 				.map(|v| v.id),
 			Some(intended.id),
-			"testing aims where the deployment says it is going"
+			"testing aims where the group says it is going"
 		);
 	})
 	.await
@@ -216,7 +216,7 @@ async fn canopy_closes_a_plan_once_the_group_arrives() {
 			"still on its way"
 		);
 
-		// The deployment lands past the target: further than planned still means
+		// The group lands past the target: further than planned still means
 		// the upgrade happened.
 		sql_query("UPDATE server_groups SET effective_version = '2.62.0' WHERE id = $1")
 			.bind::<sql_types::Uuid, _>(group)

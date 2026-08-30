@@ -531,7 +531,7 @@ function GroupControl({
 /// The two name-management grants, shown only when they could mean something.
 ///
 /// A grant is exercised over names beneath a domain the server's *group*
-/// controls, so it is worth nothing on its own. Where the deployment has no zones
+/// controls, so it is worth nothing on its own. Where the Canopy instance has no zones
 /// and no group anywhere controls a domain, the feature is not in use at all and
 /// these controls stay out of the way entirely — a checkbox that cannot affect
 /// anything is worse than no checkbox. Where the feature is in use but this
@@ -570,7 +570,7 @@ function NameManagementGrants({
 
 	const held = mayManageDns || mayManageTls;
 
-	// Not in use in this deployment — unless this server somehow holds a grant
+	// Not in use in this Canopy instance — unless this server somehow holds a grant
 	// already, in which case hiding the control would strand it with no way to
 	// withdraw it.
 	if (state === "unconfigured" && !held) return null;

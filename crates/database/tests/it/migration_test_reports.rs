@@ -685,7 +685,7 @@ async fn a_failed_restore_leaves_the_version_unjudged() {
 	.await
 }
 
-/// A verdict is a fact about a candidate version measured against a deployment's
+/// A verdict is a fact about a candidate version measured against a group's
 /// data, so it surfaces on its own: the report carries no replica reference, no
 /// declaration asks for the replica it came from, and there is no overdue bound
 /// anywhere. Deriving the check from declarations alone lost this outright.

@@ -49,7 +49,7 @@ struct OpenPlan {
 	/// morning.
 	planned_end_time: Option<Time>,
 	planned_zone: Option<String>,
-	/// The planned day has passed and the deployment has not moved.
+	/// The planned day has passed and the group has not moved.
 	late: bool,
 	note: Option<String>,
 	recorded_by: Option<String>,
@@ -89,7 +89,7 @@ struct HistoricPlan {
 #[tool_router(router = upgrade_plans_router, vis = "pub(crate)")]
 impl CanopyMcp {
 	#[tool(
-		description = "Where every deployment is going: each group's open upgrade plan with the \
+		description = "Where every group is going: each group's open upgrade plan with the \
 		               version it runs now, the version it plans to move to, the planned date, and \
 		               whether that date has passed unmet. Groups with nothing recorded are \
 		               returned separately."
@@ -140,7 +140,7 @@ impl CanopyMcp {
 	#[tool(
 		description = "Every upgrade plan one group has had, newest first, with how each stands: \
 		               open, met (the group reached the target), replaced by a later plan, or \
-		               withdrawn (an operator said the deployment is no longer going there)."
+		               withdrawn (an operator said the group is no longer going there)."
 	)]
 	async fn get_upgrade_plan_history(
 		&self,
@@ -184,7 +184,7 @@ impl CanopyMcp {
 }
 
 /// Drafts included: a target yanked since the plan was recorded is still where
-/// the deployment was going.
+/// the group was going.
 async fn version_names(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 ) -> Result<HashMap<Uuid, String>, McpError> {

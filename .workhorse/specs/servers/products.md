@@ -22,7 +22,7 @@ Standalone is a single kind that several products offer, rather than a separate 
 An operator sets both when creating a server and can change either afterwards, and the kinds offered are those the chosen product defines.
 Changing a server's product to one that does not define that server's current kind moves the server to the new product's default kind along with it.
 
-Group membership carries no product constraint, so a deployment's servers stay in one group whatever application each of them runs.
+Group membership carries no product constraint, so one group holds a site's servers whatever application each of them runs (see [GRP](groups.md)).
 
 A server's product is presented wherever its kind is, so a server is classified the same way in a listing as on its own page.
 The interfaces that filter a server listing by kind or rank filter by product on the same footing (see [MCP](../private-server/mcp.md)).
@@ -68,11 +68,11 @@ A public name already set is kept when a server stops being eligible, and takes 
 ## Billing attribution
 
 Cloud cost attributes to the product that incurred it, so the product in a server's billing attribution is that server's own product.
-A server's stage comes from its own rank and its deployment from its group, so each label describing the server carries the server's own value rather than its group's.
-Attribution needs a deployment to attribute to, so an ungrouped server carries no billing attribution.
+A server's stage comes from its own rank and its deployment label from its group's name, so each label describing the server carries the server's own value rather than its group's.
+Attribution needs a group to attribute to, so an ungrouped server carries no billing attribution.
 
 A group's own attribution names a product only when its live members agree on one.
 A group whose members span products attributes no product at all, since naming one product of several would attribute the group's shared cost to the wrong place.
 
 A billing label an operator sets explicitly on a group is honoured as given, so an operator can attribute a mixed group by hand.
-The resources Canopy owns on a group's behalf are the exception: a group's backup storage attributes to Canopy's backup product whatever product label the group carries, so backup spend is never charged to a deployment's application.
+The resources Canopy owns on a group's behalf are the exception: a group's backup storage attributes to Canopy's backup product whatever product label the group carries, so backup spend is never charged to a group's application.

@@ -67,7 +67,7 @@ pub struct ServerDetailsData {
 	pub id: String,
 	/// Server display name.
 	pub name: String,
-	/// Server kind (deployment type).
+	/// Server kind.
 	pub kind: String,
 	/// Server rank (e.g. production, test, dev).
 	pub rank: String,
@@ -219,7 +219,7 @@ pub async fn group_details(
 	let servers = group.list_servers(&mut conn).await?;
 
 	// A group card shouldn't 404 just because no versions are published yet
-	// (e.g. a fresh deployment, or every version still draft); treat "no match"
+	// (e.g. a fresh Canopy instance, or every version still draft); treat "no match"
 	// as "unknown latest" so `version_distance` falls back to None. Same as
 	// `servers::get_detail` and `statuses::snapshot`.
 	let latest_version = match Version::get_latest_matching(&mut conn, "*".parse()?).await {
@@ -683,7 +683,7 @@ pub async fn snapshot(
 	// reports its own build version and would otherwise be measured against
 	// Tamanu's releases, yielding a distance that means nothing.
 	//
-	// If the deployment has no published versions yet, we just skip
+	// If the Canopy instance has no published versions yet, we just skip
 	// the distance computation rather than 404'ing the whole
 	// snapshot — the call still wants to surface everything else.
 	// spec: APP#versions
@@ -950,7 +950,7 @@ pub struct FleetServerDetailData {
 	pub group_id: Option<Uuid>,
 	/// Display name of that group, if any.
 	pub group_name: Option<String>,
-	/// Where the server sits in its deployment's promotion order, if set.
+	/// The server's environment tier within its group, if set.
 	pub rank: Option<ServerRank>,
 	/// The application the server runs. The fleet view reads it to keep the
 	/// application-version spread to servers that have one to report.

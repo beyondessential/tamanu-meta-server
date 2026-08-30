@@ -35,7 +35,7 @@ pub struct Candidate {
 ///
 /// Its group's open plan names it (see [`crate::upgrade_plans`]), and a group
 /// with no plan has no candidate: a restore costs hours, and it is only worth
-/// spending on a version a deployment has said it intends to apply.
+/// spending on a version a group has said it intends to apply.
 ///
 /// Tamanu servers only: the migrations under test are Tamanu's, so no other
 /// product's server has an upgrade path through them.
@@ -354,7 +354,7 @@ pub struct KeyVerdict {
 ///
 /// The `migration-test` check is derived from these as well as from
 /// declarations: a failed migration is a fact about a candidate version
-/// measured against a deployment's data, so it stands whether or not a
+/// measured against a group's data, so it stands whether or not a
 /// declaration still asks for the test, and what supersedes it is a later
 /// verdict (see [`crate::restore::sweep_restore_checks`]).
 pub async fn latest_verdict_by_key(
