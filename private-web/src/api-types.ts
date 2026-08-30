@@ -2042,6 +2042,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/inventory/for_group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Serve one deployment's inventory.
+         * @description Refuses a group Canopy does not have, one that has been archived, and one
+         *     with no live member to configure, saying which it was: a refusal is a
+         *     decision to respect, and a caller has to be able to tell it from Canopy
+         *     being unreachable.
+         */
+        post: operations["inventory_for_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/issues/add_note": {
         parameters: {
             query?: never;
@@ -5945,6 +5968,65 @@ export interface components {
              *     to it). Unrecognised values are stored but have no effect.
              */
             semantics?: string[];
+        };
+        /**
+         * @description Which deployment to serve the inventory for: exactly one of the group's
+         *     identifier or its name.
+         */
+        InventoryArgs: {
+            /** @description Name of the server group, matched exactly. */
+            group?: string | null;
+            /**
+             * Format: uuid
+             * @description Identifier of the server group.
+             */
+            server_group_id?: string | null;
+        };
+        /** @description One host in a deployment. */
+        InventoryHost: {
+            /**
+             * @description The address to reach the host at: its bound device's tailnet name, or
+             *     its recorded host where no device is bound. Null when Canopy holds
+             *     neither, in which case a variable has to supply it.
+             */
+            address?: string | null;
+            /**
+             * Format: uuid
+             * @description Identifier of the server.
+             */
+            id: string;
+            /** @description The server's role within its product's topology. */
+            kind: components["schemas"]["ServerKind"];
+            /**
+             * @description The server's name within its group, falling back to its host and then
+             *     its identifier, so a member always has something to be addressed as.
+             */
+            name: string;
+            /** @description The application this server runs. */
+            product: components["schemas"]["Product"];
+            rank?: null | components["schemas"]["ServerRank"];
+            /**
+             * @description The host's variables: its own tags over its group's, with the reserved
+             *     read-only tags left out.
+             */
+            vars: Record<string, never>;
+        };
+        /** @description A deployment's inventory: its hosts and the variables that configure them. */
+        InventoryView: {
+            /** @description Name of the server group. */
+            group: string;
+            /**
+             * Format: uuid
+             * @description Identifier of the server group the inventory covers.
+             */
+            group_id: string;
+            /** @description The group's live members, ordered by name. */
+            hosts: components["schemas"]["InventoryHost"][];
+            /**
+             * @description Variables belonging to the deployment rather than to any one host.
+             *     Every host carries these too, under its own overrides.
+             */
+            vars: Record<string, never>;
         };
         /** @description A note to add to an issue. */
         IssueAddNoteArgs: {
@@ -12433,6 +12515,47 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IncidentData"];
+                };
+            };
+        };
+    };
+    inventory_for_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InventoryArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventoryView"];
+                };
+            };
+            /** @description No such server group */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description Archived, empty, or ambiguously named */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
         };

@@ -16,6 +16,7 @@ mod enrollment_ticket;
 mod group_card_version;
 mod health;
 mod healthchecks;
+mod inventory;
 mod issues;
 mod mcp;
 mod migration_tests;

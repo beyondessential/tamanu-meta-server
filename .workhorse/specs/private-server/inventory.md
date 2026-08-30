@@ -61,11 +61,9 @@ The two mean opposite things: Canopy declining is a decision to be respected, wh
 
 ## Authorisation
 
-Reading an inventory is administrative, and is authorised as every other administrative read is, from the caller's authenticated identity (see [ADM](admin-access.md)).
-There is no separate credential to hold or distribute: an operator who may read a deployment in Canopy may read its inventory.
-
-Canopy records each inventory read with the caller, the group, and the time.
-A run configures hosts from what it read, so what it read, and who asked for it, is part of that deployment's history.
+An inventory is read by any operator Canopy authenticates, on the same footing as the servers, groups, and tags it is assembled from (see [ADM](admin-access.md)).
+It discloses nothing about a deployment that an operator cannot already read of it, so it is not restricted further than they are.
+There is no separate credential to hold or distribute: the identity an operator already carries is what admits them, and a run reads the inventory as the operator running it.
 
 ## Presentation
 

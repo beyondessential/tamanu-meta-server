@@ -4051,6 +4051,63 @@
         ]
       }
     },
+    "/api/inventory/for_group": {
+      "post": {
+        "tags": [
+          "inventory"
+        ],
+        "summary": "Serve one deployment's inventory.",
+        "description": "Refuses a group Canopy does not have, one that has been archived, and one\nwith no live member to configure, saying which it was: a refusal is a\ndecision to respect, and a caller has to be able to tell it from Canopy\nbeing unreachable.",
+        "operationId": "inventory_for_group",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InventoryArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InventoryView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such server group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Archived, empty, or ambiguously named",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
     "/api/issues/add_note": {
       "post": {
         "tags": [
@@ -10881,6 +10938,111 @@
           }
         }
       },
+      "InventoryArgs": {
+        "type": "object",
+        "description": "Which deployment to serve the inventory for: exactly one of the group's\nidentifier or its name.",
+        "properties": {
+          "group": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Name of the server group, matched exactly."
+          },
+          "server_group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Identifier of the server group."
+          }
+        }
+      },
+      "InventoryHost": {
+        "type": "object",
+        "description": "One host in a deployment.",
+        "required": [
+          "id",
+          "name",
+          "product",
+          "kind",
+          "vars"
+        ],
+        "properties": {
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The address to reach the host at: its bound device's tailnet name, or\nits recorded host where no device is bound. Null when Canopy holds\nneither, in which case a variable has to supply it."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifier of the server."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ServerKind",
+            "description": "The server's role within its product's topology."
+          },
+          "name": {
+            "type": "string",
+            "description": "The server's name within its group, falling back to its host and then\nits identifier, so a member always has something to be addressed as."
+          },
+          "product": {
+            "$ref": "#/components/schemas/Product",
+            "description": "The application this server runs."
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "The server's environment tier, where one is set."
+              }
+            ]
+          },
+          "vars": {
+            "type": "object",
+            "description": "The host's variables: its own tags over its group's, with the reserved\nread-only tags left out."
+          }
+        }
+      },
+      "InventoryView": {
+        "type": "object",
+        "description": "A deployment's inventory: its hosts and the variables that configure them.",
+        "required": [
+          "group_id",
+          "group",
+          "vars",
+          "hosts"
+        ],
+        "properties": {
+          "group": {
+            "type": "string",
+            "description": "Name of the server group."
+          },
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifier of the server group the inventory covers."
+          },
+          "hosts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InventoryHost"
+            },
+            "description": "The group's live members, ordered by name."
+          },
+          "vars": {
+            "type": "object",
+            "description": "Variables belonging to the deployment rather than to any one host.\nEvery host carries these too, under its own overrides."
+          }
+        }
+      },
       "IssueAddNoteArgs": {
         "type": "object",
         "description": "A note to add to an issue.",
@@ -16892,6 +17054,10 @@
     {
       "name": "incidents",
       "description": "Operational incidents (groups of issues against a server)."
+    },
+    {
+      "name": "inventory",
+      "description": "A deployment's hosts and the variables that configure them, for the tooling that configures them."
     },
     {
       "name": "issues",
