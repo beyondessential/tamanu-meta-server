@@ -4056,8 +4056,8 @@
         "tags": [
           "inventory"
         ],
-        "summary": "Serve one deployment's inventory.",
-        "description": "Refuses a group Canopy does not have, one that has been archived, and one\nwith no live member to configure, saying which it was: a refusal is a\ndecision to respect, and a caller has to be able to tell it from Canopy\nbeing unreachable.",
+        "summary": "Serve one environment's inventory.",
+        "description": "Refuses a group Canopy does not have, one that has been archived, one\nholding several environments with no rank named, and a rank with no live\nserver to configure, saying which it was: a refusal is a decision to\nrespect, and a caller has to be able to tell it from Canopy being\nunreachable.",
         "operationId": "inventory_for_group",
         "requestBody": {
           "content": {
@@ -10940,7 +10940,7 @@
       },
       "InventoryArgs": {
         "type": "object",
-        "description": "Which deployment to serve the inventory for: exactly one of the group's\nidentifier or its name.",
+        "description": "Which environment to serve the inventory for: exactly one of the group's\nidentifier or its name, and the rank where the group holds more than one\nenvironment.",
         "properties": {
           "group": {
             "type": [
@@ -10948,6 +10948,17 @@
               "null"
             ],
             "description": "Name of the server group, matched exactly."
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "Rank of the environment within the group. Required only where the\ngroup's live servers span more than one rank."
+              }
+            ]
           },
           "server_group_id": {
             "type": [
@@ -10961,7 +10972,7 @@
       },
       "InventoryHost": {
         "type": "object",
-        "description": "One host in a deployment.",
+        "description": "One server in an environment.",
         "required": [
           "id",
           "name",
@@ -11013,7 +11024,7 @@
       },
       "InventoryView": {
         "type": "object",
-        "description": "A deployment's inventory: its hosts and the variables that configure them.",
+        "description": "An environment's inventory: its servers and the variables that configure\nthem.",
         "required": [
           "group_id",
           "group",
@@ -11037,9 +11048,20 @@
             },
             "description": "The group's live members, ordered by name."
           },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "Rank of the environment served, where its servers carry one."
+              }
+            ]
+          },
           "vars": {
             "type": "object",
-            "description": "Variables belonging to the deployment rather than to any one host.\nEvery host carries these too, under its own overrides."
+            "description": "Variables belonging to the group rather than to any one server.\nEvery server carries these too, under its own overrides."
           }
         }
       },
@@ -17057,7 +17079,7 @@
     },
     {
       "name": "inventory",
-      "description": "A deployment's hosts and the variables that configure them, for the tooling that configures them."
+      "description": "An environment's servers and the variables that configure them, for the tooling that configures them."
     },
     {
       "name": "issues",

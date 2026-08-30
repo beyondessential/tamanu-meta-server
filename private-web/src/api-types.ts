@@ -2052,11 +2052,12 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Serve one deployment's inventory.
-         * @description Refuses a group Canopy does not have, one that has been archived, and one
-         *     with no live member to configure, saying which it was: a refusal is a
-         *     decision to respect, and a caller has to be able to tell it from Canopy
-         *     being unreachable.
+         * Serve one environment's inventory.
+         * @description Refuses a group Canopy does not have, one that has been archived, one
+         *     holding several environments with no rank named, and a rank with no live
+         *     server to configure, saying which it was: a refusal is a decision to
+         *     respect, and a caller has to be able to tell it from Canopy being
+         *     unreachable.
          */
         post: operations["inventory_for_group"];
         delete?: never;
@@ -5970,19 +5971,21 @@ export interface components {
             semantics?: string[];
         };
         /**
-         * @description Which deployment to serve the inventory for: exactly one of the group's
-         *     identifier or its name.
+         * @description Which environment to serve the inventory for: exactly one of the group's
+         *     identifier or its name, and the rank where the group holds more than one
+         *     environment.
          */
         InventoryArgs: {
             /** @description Name of the server group, matched exactly. */
             group?: string | null;
+            rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: uuid
              * @description Identifier of the server group.
              */
             server_group_id?: string | null;
         };
-        /** @description One host in a deployment. */
+        /** @description One server in an environment. */
         InventoryHost: {
             /**
              * @description The address to reach the host at: its bound device's tailnet name, or
@@ -6011,7 +6014,10 @@ export interface components {
              */
             vars: Record<string, never>;
         };
-        /** @description A deployment's inventory: its hosts and the variables that configure them. */
+        /**
+         * @description An environment's inventory: its servers and the variables that configure
+         *     them.
+         */
         InventoryView: {
             /** @description Name of the server group. */
             group: string;
@@ -6022,9 +6028,10 @@ export interface components {
             group_id: string;
             /** @description The group's live members, ordered by name. */
             hosts: components["schemas"]["InventoryHost"][];
+            rank?: null | components["schemas"]["ServerRank"];
             /**
-             * @description Variables belonging to the deployment rather than to any one host.
-             *     Every host carries these too, under its own overrides.
+             * @description Variables belonging to the group rather than to any one server.
+             *     Every server carries these too, under its own overrides.
              */
             vars: Record<string, never>;
         };

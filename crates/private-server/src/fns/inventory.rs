@@ -1,13 +1,13 @@
-//! Operator-facing deployment inventory: one group's live members, the
-//! address each is reached at, and the variables that configure them.
+//! Operator-facing environment inventory: a group's live servers at one rank,
+//! the address each is reached at, and the variables that configure them.
 //!
-//! Assembled from what Canopy already holds — group membership, product and
-//! kind, the bound device's tailnet name, and the server/group tag merge —
+//! Assembled from what Canopy already holds — group membership, rank, product
+//! and kind, the bound device's tailnet name, and the server/group tag merge —
 //! so configuration tooling reads the fleet from here rather than from a file
 //! kept in step by hand.
 // spec: INV
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use axum::Json;
 use axum::extract::State;
@@ -29,8 +29,9 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new().routes(routes!(for_group))
 }
 
-/// Which deployment to serve the inventory for: exactly one of the group's
-/// identifier or its name.
+/// Which environment to serve the inventory for: exactly one of the group's
+/// identifier or its name, and the rank where the group holds more than one
+/// environment.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct InventoryArgs {
 	/// Identifier of the server group.
@@ -39,9 +40,13 @@ pub struct InventoryArgs {
 	/// Name of the server group, matched exactly.
 	#[serde(default)]
 	pub group: Option<String>,
+	/// Rank of the environment within the group. Required only where the
+	/// group's live servers span more than one rank.
+	#[serde(default)]
+	pub rank: Option<ServerRank>,
 }
 
-/// One host in a deployment.
+/// One server in an environment.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct InventoryHost {
 	/// Identifier of the server.
@@ -65,15 +70,18 @@ pub struct InventoryHost {
 	pub vars: BTreeMap<String, Value>,
 }
 
-/// A deployment's inventory: its hosts and the variables that configure them.
+/// An environment's inventory: its servers and the variables that configure
+/// them.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct InventoryView {
 	/// Identifier of the server group the inventory covers.
 	pub group_id: Uuid,
 	/// Name of the server group.
 	pub group: String,
-	/// Variables belonging to the deployment rather than to any one host.
-	/// Every host carries these too, under its own overrides.
+	/// Rank of the environment served, where its servers carry one.
+	pub rank: Option<ServerRank>,
+	/// Variables belonging to the group rather than to any one server.
+	/// Every server carries these too, under its own overrides.
 	#[schema(value_type = Object)]
 	pub vars: BTreeMap<String, Value>,
 	/// The group's live members, ordered by name.
@@ -133,12 +141,13 @@ async fn resolve_group(
 	}
 }
 
-/// Serve one deployment's inventory.
+/// Serve one environment's inventory.
 ///
-/// Refuses a group Canopy does not have, one that has been archived, and one
-/// with no live member to configure, saying which it was: a refusal is a
-/// decision to respect, and a caller has to be able to tell it from Canopy
-/// being unreachable.
+/// Refuses a group Canopy does not have, one that has been archived, one
+/// holding several environments with no rank named, and a rank with no live
+/// server to configure, saying which it was: a refusal is a decision to
+/// respect, and a caller has to be able to tell it from Canopy being
+/// unreachable.
 #[utoipa::path(
 	post,
 	path = "/for_group",
@@ -158,6 +167,7 @@ pub async fn for_group(
 	Json(args): Json<InventoryArgs>,
 ) -> Result<Json<InventoryView>> {
 	let mut conn = state.db.get().await?;
+	let args_rank = args.rank;
 	let group = resolve_group(&mut conn, args).await?;
 
 	if group.deleted_at.is_some() {
@@ -167,11 +177,41 @@ pub async fn for_group(
 		)));
 	}
 
-	let servers = Server::list_live_in_group(&mut conn, group.id).await?;
-	if servers.is_empty() {
+	let members = Server::list_live_in_group(&mut conn, group.id).await?;
+	if members.is_empty() {
 		return Err(AppError::Conflict(format!(
 			"server group {:?} has no live members",
 			group.name
+		)));
+	}
+
+	let ranks: BTreeSet<Option<ServerRank>> = members.iter().map(|server| server.rank).collect();
+	let rank = match args_rank {
+		Some(rank) => Some(rank),
+		None if ranks.len() > 1 => {
+			return Err(AppError::Conflict(format!(
+				"server group {:?} holds {} environments ({}); name the rank",
+				group.name,
+				ranks.len(),
+				ranks
+					.iter()
+					.map(|rank| rank.map_or("unranked".to_string(), |rank| rank.to_string()))
+					.collect::<Vec<_>>()
+					.join(", ")
+			)));
+		}
+		None => ranks.into_iter().next().flatten(),
+	};
+
+	let servers: Vec<Server> = members
+		.into_iter()
+		.filter(|server| server.rank == rank)
+		.collect();
+	if servers.is_empty() {
+		return Err(AppError::Conflict(format!(
+			"server group {:?} has no live server at rank {}",
+			group.name,
+			rank.map_or("unranked".to_string(), |rank| rank.to_string())
 		)));
 	}
 
@@ -211,6 +251,7 @@ pub async fn for_group(
 	Ok(Json(InventoryView {
 		group_id: group.id,
 		group: group.name,
+		rank,
 		vars: vars(&group.tags),
 		hosts,
 	}))

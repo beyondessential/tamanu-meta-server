@@ -1,5 +1,5 @@
 //! Endpoint tests for `/api/inventory/for_group` — what a configuration run
-//! reads for one deployment, and the refusals it has to tell apart from
+//! reads for one environment, and the refusals it has to tell apart from
 //! Canopy being unreachable.
 //!
 //! spec: INV
@@ -26,11 +26,24 @@ async fn insert_server(
 	host: Option<&str>,
 	tags: Value,
 ) -> Uuid {
+	insert_ranked_server(conn, group, name, kind, None, host, tags).await
+}
+
+async fn insert_ranked_server(
+	conn: &mut AsyncPgConnection,
+	group: Uuid,
+	name: &str,
+	kind: &str,
+	rank: Option<&str>,
+	host: Option<&str>,
+	tags: Value,
+) -> Uuid {
 	let id = Uuid::new_v4();
 	let host = host.map_or("NULL".to_string(), |h| format!("'{h}'"));
+	let rank = rank.map_or("NULL".to_string(), |r| format!("'{r}'"));
 	conn.batch_execute(&format!(
-		"INSERT INTO servers (id, name, kind, host, group_id, tags)
-		 VALUES ('{id}', '{name}', '{kind}', {host}, '{group}', '{tags}')"
+		"INSERT INTO servers (id, name, kind, rank, host, group_id, tags)
+		 VALUES ('{id}', '{name}', '{kind}', {rank}, {host}, '{group}', '{tags}')"
 	))
 	.await
 	.expect("insert server");
@@ -49,7 +62,7 @@ async fn bind_device(conn: &mut AsyncPgConnection, server: Uuid, tailscale_name:
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn serves_a_deployments_hosts_and_variables() {
+async fn serves_an_environments_servers_and_variables() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(
 			&mut conn,
@@ -124,7 +137,63 @@ async fn serves_a_deployments_hosts_and_variables() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn serves_a_deployment_asked_for_by_identifier() {
+async fn serves_the_environment_at_the_rank_asked_for() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka", json!({})).await;
+		insert_ranked_server(
+			&mut conn,
+			group,
+			"kamaka-prod-central",
+			"central",
+			Some("production"),
+			None,
+			json!({}),
+		)
+		.await;
+		insert_ranked_server(
+			&mut conn,
+			group,
+			"kamaka-demo-central",
+			"central",
+			Some("demo"),
+			None,
+			json!({}),
+		)
+		.await;
+
+		// A group spanning two environments cannot be served as one: a run
+		// configuring the demo servers alongside the production ones is never
+		// what was meant.
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka" }))
+			.await;
+		response.assert_status_conflict();
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka", "rank": "production" }))
+			.await;
+		response.assert_status_ok();
+		let body: Value = response.json();
+		assert_eq!(body["rank"], "production");
+		let hosts = body["hosts"].as_array().expect("hosts");
+		assert_eq!(hosts.len(), 1);
+		assert_eq!(hosts[0]["name"], "kamaka-prod-central");
+
+		// A rank the group holds no live server at is refused, rather than
+		// answered with an empty inventory.
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka", "rank": "test" }))
+			.await;
+		response.assert_status_conflict();
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn serves_an_environment_asked_for_by_identifier() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "drifting-demo", json!({})).await;
 		insert_server(
@@ -203,8 +272,8 @@ async fn refuses_a_group_with_nothing_to_configure() {
 	.await
 }
 
-/// Names aren't unique, and serving one of two deployments that answer to the
-/// same name would configure the wrong fleet.
+/// Names aren't unique, and serving one of two groups that answer to the same
+/// name would configure the wrong fleet.
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_a_name_that_answers_for_two_groups() {
 	commons_tests::server::run(async move |mut conn, _public, private| {

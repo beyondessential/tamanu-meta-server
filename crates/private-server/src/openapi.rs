@@ -25,7 +25,7 @@ use utoipa::{
 		(name = "domains", description = "Managed DNS zones and the domains each group controls."),
 		(name = "healthchecks", description = "Healthcheck catalog: severities, conditional rules, and sample data."),
 		(name = "incidents", description = "Operational incidents (groups of issues against a server)."),
-		(name = "inventory", description = "A deployment's hosts and the variables that configure them, for the tooling that configures them."),
+		(name = "inventory", description = "An environment's servers and the variables that configure them, for the tooling that configures them."),
 		(name = "issues", description = "Per-server issues raised from device events."),
 		(name = "maintenance", description = "Windows declaring that a server or a group is being worked on."),
 		(name = "mcp_tokens", description = "Bearer tokens for the public MCP mount."),
