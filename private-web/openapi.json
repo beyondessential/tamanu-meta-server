@@ -504,7 +504,7 @@
           "backups"
         ],
         "summary": "Onboard a group onto Canopy's shared-account backups.",
-        "description": "Use this for deployments that don't have their own AWS account. Canopy\ngenerates a bucket name automatically, generates and stores the repository\npassphrase, and marks the configuration as provisioning with shared\nplacement. The bucket and its access roles are provisioned asynchronously;\nany failure surfaces in the `last_init_error` field rather than in this\ncall's response. Unlike the `/backups/create` and `/backups/upsert`\nendpoints (used for bring-your-own-account setups), the caller does not\nsupply a bucket or role ARNs, and no bucket probe is performed. Returns\n502 only if the server's secret storage isn't configured.",
+        "description": "Use this for groups that don't have their own AWS account. Canopy\ngenerates a bucket name automatically, generates and stores the repository\npassphrase, and marks the configuration as provisioning with shared\nplacement. The bucket and its access roles are provisioned asynchronously;\nany failure surfaces in the `last_init_error` field rather than in this\ncall's response. Unlike the `/backups/create` and `/backups/upsert`\nendpoints (used for bring-your-own-account setups), the caller does not\nsupply a bucket or role ARNs, and no bucket probe is performed. Returns\n502 only if the server's secret storage isn't configured.",
         "operationId": "backups_create_shared",
         "requestBody": {
           "content": {
@@ -1723,7 +1723,7 @@
           "certificates"
         ],
         "summary": "The names in use under each domain a group controls, and which of them hold a\ncurrent certificate.",
-        "description": "So that whether a deployment's names are healthy is answerable from the\ngroup's page, without visiting each of its servers.",
+        "description": "So that whether a group's names are healthy is answerable from the\ngroup's page, without visiting each of its servers.",
         "operationId": "certificates_for_group",
         "requestBody": {
           "content": {
@@ -1810,7 +1810,7 @@
           "certificates"
         ],
         "summary": "Pause a server: Canopy makes no new changes on its behalf.",
-        "description": "Nothing already in place is withdrawn — records published stand, certificates\nheld stay held and collectable until they expire, and the deployment keeps\nworking exactly as it did. What stops is Canopy doing anything *new*.\n\nA second pause leaves the first in place, so the original reason and time are\nnot overwritten by a later one.",
+        "description": "Nothing already in place is withdrawn — records published stand, certificates\nheld stay held and collectable until they expire, and the group keeps\nworking exactly as it did. What stops is Canopy doing anything *new*.\n\nA second pause leaves the first in place, so the original reason and time are\nnot overwritten by a later one.",
         "operationId": "certificates_pause",
         "requestBody": {
           "content": {
@@ -1950,7 +1950,7 @@
           "certificates"
         ],
         "summary": "Set the profile a server's certificates are requested under.",
-        "description": "Lifetime is a property of how a deployment is run rather than of Canopy, so it\nis an operator's choice per server: a cloud deployment whose issuance is\nexercised constantly can carry a short lifetime where an on-premises one that\nmay be offline for days cannot. Takes effect on the next issuance or renewal;\na certificate already held keeps the lifetime it was issued with.\n\nResponds 409 for a profile the authority does not advertise.",
+        "description": "Lifetime is a property of how a server is run rather than of Canopy, so it\nis an operator's choice per server: a cloud server whose issuance is\nexercised constantly can carry a short lifetime where an on-premises one that\nmay be offline for days cannot. Takes effect on the next issuance or renewal;\na certificate already held keeps the lifetime it was issued with.\n\nResponds 409 for a profile the authority does not advertise.",
         "operationId": "certificates_set_profile",
         "requestBody": {
           "content": {
@@ -2102,7 +2102,7 @@
           "commons"
         ],
         "summary": "Get the configured public API base URL.",
-        "description": "Returns the base URL of the device-facing public API for this\ndeployment, or `null` if none is configured. Used by the operator UI to\nbuild links out to device-facing resources.",
+        "description": "Returns the base URL of the device-facing public API for this Canopy\ninstance, or `null` if none is configured. Used by the operator UI to\nbuild links out to device-facing resources.",
         "operationId": "public_url",
         "responses": {
           "200": {
@@ -3034,7 +3034,7 @@
           "domains"
         ],
         "summary": "Whether granting a server name management would mean anything yet.",
-        "description": "The two grants are only ever exercised over names beneath a domain the\nserver's group controls, so offering them where no domain is controlled — or\nwhere the deployment has no zones at all — presents a control that cannot do\nanything. The rule lives here rather than in the UI so there is one answer\nto it.",
+        "description": "The two grants are only ever exercised over names beneath a domain the\nserver's group controls, so offering them where no domain is controlled — or\nwhere the Canopy instance has no zones at all — presents a control that cannot do\nanything. The rule lives here rather than in the UI so there is one answer\nto it.",
         "operationId": "domains_grant_availability",
         "requestBody": {
           "content": {
@@ -3111,7 +3111,7 @@
           "domains"
         ],
         "summary": "List the managed DNS zones Canopy is configured with.",
-        "description": "An operator claiming a domain for a group needs these to know which names\nare claimable at all: a claim has to sit at or under one of these apexes.\nAn empty list means Canopy has been given no zones, so no domain can be\nclaimed until its deployment configuration provides one.",
+        "description": "An operator claiming a domain for a group needs these to know which names\nare claimable at all: a claim has to sit at or under one of these apexes.\nAn empty list means Canopy has been given no zones, so no domain can be\nclaimed until the Canopy instance's configuration provides one.",
         "operationId": "domains_zones",
         "responses": {
           "200": {
@@ -7070,7 +7070,7 @@
           "upgrade_plans"
         ],
         "summary": "A group's plan and the plans it has had before.",
-        "description": "The history is the record of what a deployment planned, when for, and when\nit landed.",
+        "description": "The history is the record of what a group planned, when for, and when\nit landed.",
         "operationId": "upgrade_plans_for_group",
         "requestBody": {
           "content": {
@@ -7130,7 +7130,7 @@
           "upgrade_plans"
         ],
         "summary": "The plans that have closed, across the fleet.",
-        "description": "A deployment that stopped going somewhere leaves no other mark on the fleet,\nso a withdrawn plan is readable here or nowhere.",
+        "description": "A group that stopped going somewhere leaves no other mark on the fleet,\nso a withdrawn plan is readable here or nowhere.",
         "operationId": "upgrade_plans_history",
         "responses": {
           "200": {
@@ -7306,7 +7306,7 @@
         "tags": [
           "upgrade_plans"
         ],
-        "summary": "Withdraw a plan: the deployment is no longer going there.",
+        "summary": "Withdraw a plan: the group is no longer going there.",
         "description": "This does not say the upgrade happened. Canopy closes a met plan on its own\nonce the group reports the target.",
         "operationId": "upgrade_plans_withdraw",
         "requestBody": {
@@ -8166,7 +8166,7 @@
           },
           "placement": {
             "type": "string",
-            "description": "Where the backup bucket lives: `external` if it was provisioned in the\ndeployment's own cloud account, or `shared` if Canopy provisioned it\nautomatically in a shared account. Distinguishes the two onboarding\npaths."
+            "description": "Where the backup bucket lives: `external` if it was provisioned in the\ngroup's own cloud account, or `shared` if Canopy provisioned it\nautomatically in a shared account. Distinguishes the two onboarding\npaths."
           },
           "prefix": {
             "type": "string",
@@ -8512,7 +8512,7 @@
       },
       "BillingTag": {
         "type": "object",
-        "description": "One effective billing label attributed to a group's cloud resources.\n\nLabels are computed from the group's configuration: explicit `billing.*`\ntags on the group are honoured verbatim; otherwise the product comes from\nthe one its live members agree on, the deployment from the group name in\nlower-kebab-case, and the stage from the group's highest-ranked live member\n(for example `prod`). A label with nothing to attribute to is omitted\nentirely: the stage when the group has no ranked members, and the product\nwhen its members span products.",
+        "description": "One effective billing label attributed to a group's cloud resources.\n\nLabels are computed from the group's configuration: explicit `billing.*`\ntags on the group are honoured verbatim; otherwise the product comes from\nthe one its live members agree on, the deployment label from the group name in\nlower-kebab-case, and the stage from the group's highest-ranked live member\n(for example `prod`). A label with nothing to attribute to is omitted\nentirely: the stage when the group has no ranked members, and the product\nwhen its members span products.",
         "required": [
           "key",
           "value"
@@ -9352,7 +9352,7 @@
               },
               {
                 "$ref": "#/components/schemas/ServerRank",
-                "description": "Where this server sits in its deployment's promotion order (e.g.\nproduction vs. staging), if applicable."
+                "description": "The server's environment tier within its group (e.g. production vs.\nclone), if set."
               }
             ]
           },
@@ -10012,7 +10012,7 @@
               },
               {
                 "$ref": "#/components/schemas/ServerRank",
-                "description": "Where the server sits in its deployment's promotion order, if set."
+                "description": "The server's environment tier within its group, if set."
               }
             ]
           },
@@ -10124,7 +10124,7 @@
           },
           "state": {
             "type": "string",
-            "description": "What an operator can do with the two grants right now:\n\n- `unconfigured` — Canopy has no managed zones and no group anywhere\n  controls a domain, so name management is not in use in this deployment.\n  Granting it would do nothing and there is nothing an operator can do\n  about that from here; it becomes available once the infrastructure\n  provides a zone.\n- `no_group_domain` — name management is in use, but this group controls no\n  domain, so a grant would authorise the server over no name. Claim a\n  domain for the group first.\n- `available` — the group controls at least one domain, and a grant takes\n  effect over the names beneath it."
+            "description": "What an operator can do with the two grants right now:\n\n- `unconfigured` — Canopy has no managed zones and no group anywhere\n  controls a domain, so name management is not in use in this Canopy instance.\n  Granting it would do nothing and there is nothing an operator can do\n  about that from here; it becomes available once the infrastructure\n  provides a zone.\n- `no_group_domain` — name management is in use, but this group controls no\n  domain, so a grant would authorise the server over no name. Claim a\n  domain for the group first.\n- `available` — the group controls at least one domain, and a grant takes\n  effect over the names beneath it."
           }
         }
       },
@@ -11812,7 +11812,7 @@
       },
       "ManagedZoneView": {
         "type": "object",
-        "description": "A DNS zone Canopy can write records in.\n\nZones come from Canopy's deployment configuration rather than from operator\nstate: they are what the infrastructure has granted Canopy write access to,\nand they bound which domains a group can be given.",
+        "description": "A DNS zone Canopy can write records in.\n\nZones come from the Canopy instance's own configuration rather than from operator\nstate: they are what the infrastructure has granted Canopy write access to,\nand they bound which domains a group can be given.",
         "required": [
           "apex",
           "provider_zone_id"
@@ -12381,7 +12381,7 @@
                     },
                     {
                       "$ref": "#/components/schemas/ServerRank",
-                      "description": "Where this server sits in its deployment's promotion order (e.g.\nproduction vs. staging), if applicable."
+                      "description": "The server's environment tier within its group (e.g. production vs.\nclone), if set."
                     }
                   ]
                 },
@@ -13390,7 +13390,7 @@
           },
           "version_query": {
             "type": "string",
-            "description": "Single-row, single-column SQL reading the deployment's own version\nout of the restored database, to substitute into `url_template`."
+            "description": "Single-row, single-column SQL reading the version\nout of the restored database, to substitute into `url_template`."
           }
         }
       },
@@ -14658,7 +14658,7 @@
             "items": {
               "$ref": "#/components/schemas/BillingTag"
             },
-            "description": "The server's own effective `billing.*` labels\n(product/deployment/stage) — the ones canopy hands the server's device,\ncarrying its own product and rank rather than its group's. Empty when\nthe server is ungrouped, there being no deployment to attribute to."
+            "description": "The server's own effective `billing.*` labels\n(product/deployment/stage) — the ones canopy hands the server's device,\ncarrying its own product and rank rather than its group's. Empty when\nthe server is ungrouped, there being no group to attribute to."
           },
           "checks": {
             "$ref": "#/components/schemas/ConsolidatedChecks",
@@ -15140,7 +15140,7 @@
               },
               {
                 "$ref": "#/components/schemas/ServerRank",
-                "description": "Where this server sits in its deployment's promotion order (e.g.\nproduction vs. staging), if applicable."
+                "description": "The server's environment tier within its group (e.g. production vs.\nclone), if set."
               }
             ]
           },
@@ -15299,7 +15299,7 @@
               },
               {
                 "$ref": "#/components/schemas/ServerKind",
-                "description": "Restrict results to servers of this deployment kind. Omit to\ninclude all kinds."
+                "description": "Restrict results to servers of this kind. Omit to\ninclude all kinds."
               }
             ]
           },
@@ -16907,7 +16907,7 @@
     },
     {
       "name": "upgrade_plans",
-      "description": "Where each deployment is going: the version a group intends to move to, and when."
+      "description": "Where each group is going: the version it intends to move to, and when."
     },
     {
       "name": "migration_tests",
