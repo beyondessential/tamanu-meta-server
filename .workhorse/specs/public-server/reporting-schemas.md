@@ -35,6 +35,7 @@ A build requires a database at the version being built for, carrying the deploym
 Neither half stands alone: the right version without the configuration produces only the part of the schema every deployment on that version shares, and the configuration at the wrong version produces a schema for the version the deployment is leaving.
 
 The configuration a build reads is a deployment's configured surveys, the screens that compose them, and the data elements they collect.
+It is held centrally and synced down, so a schema is built from a deployment's central server whatever else its group contains.
 It is reference data, present in every copy of the deployment's database and carrying no patient content, so a source whose patient data has been de-identified is sufficient and is what Canopy asks for where one can be had.
 That holds only while the product's masking manifest leaves configuration legible: a manifest masking a survey's identifiers rather than its answers would defeat the build while appearing to succeed.
 
@@ -61,7 +62,7 @@ A change to a deployment's configuration does not reinstate a settled pair: the 
 A schema builder fetches what it is currently owed in one request, scoped to the calling builder.
 Canopy returns one entry per unsettled pair:
 
-- the **group** the schema is for, and the **server** whose configuration it is built from;
+- the **group** the schema is for, and its **central server**, whose configuration the schema is built from;
 - the **version** to build for;
 - where the source database is to be found, or what the builder must ask for to obtain one;
 - whether the source is required to be de-identified.
@@ -91,14 +92,19 @@ Reports are retained indefinitely as an audit trail.
 A reporting schema is published per version and deployment, alongside the other artefacts a version publishes.
 Canopy records where each is published rather than storing it, and corroborates a reported artefact against the published artefacts it already holds for that version.
 
+A version's artefacts are otherwise identified by their type, which cannot tell one deployment's reporting schema from another's.
+An artefact may therefore name the deployment it belongs to, and one that does is offered only for that deployment.
+Two deployments on the same version have two reporting schemas, and neither stands in for the other; a version's artefacts that name no deployment stay available to all of them.
+
 A deployment's artefact for a version supersedes any earlier one for the same pair, and the earlier ones remain addressable, since a deployment that has not applied the newest is running an older one and its currency has to be gradeable against something.
+Supersession is by publication rather than by content, since Canopy holds where an artefact is published and not what it contains.
 
 ## Currency
 
 Canopy grades a deployment's reporting schema as current, behind, or unknown.
 It is current when the schema the deployment reports running is the artefact Canopy holds for the version it reports running, behind when the two differ, and unknown when the deployment reports no schema at all.
 
-The schema a deployment is running is reported by the deployment, alongside the other facts its sources report about it (see [STA](statuses.md)).
+The schema a deployment is running is reported by the deployment as the version it was built for, alongside the other facts its sources report about it (see [STA](statuses.md)).
 Canopy does not read it out of the deployment's database, so a deployment that reports nothing is unknown rather than assumed bare.
 
 Currency is presented per group, so whether a deployment's reports are running against the right schema is answered in one place.
