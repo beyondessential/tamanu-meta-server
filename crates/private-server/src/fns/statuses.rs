@@ -617,6 +617,9 @@ pub struct StatusSnapshotData {
 	pub bestool: Option<String>,
 	/// Reported system timezone.
 	pub timezone: Option<String>,
+	/// Version the server's reporting schema was built for. Absent until a
+	/// server runs a schema that stamps one (spec: RPT#currency).
+	pub reporting_schema: Option<String>,
 	/// Additional unstructured data reported alongside the snapshot, keyed
 	/// by source (`{ [source]: { …fields } }`) so a multi-source snapshot's
 	/// raw payloads stay attributed rather than merged. Sources whose
@@ -753,6 +756,7 @@ pub async fn snapshot(
 		nodejs,
 		bestool: figures.bestool_version(),
 		timezone: figures.timezone(),
+		reporting_schema: figures.reporting_schema_version(),
 		extra: by_source_extra,
 		operators,
 		checks,

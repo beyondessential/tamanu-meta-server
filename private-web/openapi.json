@@ -16034,6 +16034,13 @@
             "$ref": "#/components/schemas/Product",
             "description": "The application the server runs. Travels with the version so a\nconsumer can tell a product with no version from one that has yet to\nreport one."
           },
+          "reporting_schema": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Version the server's reporting schema was built for. Absent until a\nserver runs a schema that stamps one (spec: RPT#currency)."
+          },
           "server_id": {
             "type": "string",
             "format": "uuid",

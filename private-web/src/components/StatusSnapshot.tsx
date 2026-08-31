@@ -148,6 +148,9 @@ function CuratedFields({ snap }: { snap: StatusSnapshotData }) {
 				</Field>
 			)}
 			{snap.postgres && <Field label="PostgreSQL" value={snap.postgres} mono />}
+			{snap.reporting_schema && (
+				<Field label="Reporting schema" value={snap.reporting_schema} mono />
+			)}
 			{snap.nodejs && <Field label="Node.js" value={snap.nodejs} mono />}
 			{snap.bestool && <Field label="bestool" value={snap.bestool} mono />}
 			{snap.min_chrome_version != null && (
