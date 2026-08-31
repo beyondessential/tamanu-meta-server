@@ -676,6 +676,57 @@ pub(crate) async fn servers_with_open_checks(
 	Ok(ids.into_iter().flatten().collect())
 }
 
+/// The machines holding an open, active `(canopy, ref)` issue for any of
+/// `checks`. The machine-grain twin of [`servers_with_open_checks`]: a check
+/// filed at machine scope leaves its issue on `issues.machine_id`, so looking
+/// for it on `application_id` would never find it and the check could never be
+/// visited to recover.
+pub(crate) async fn machines_with_open_checks(
+	db: &mut AsyncPgConnection,
+	checks: &[&str],
+) -> Result<Vec<Uuid>> {
+	use crate::schema::issues::dsl;
+	let ids: Vec<Option<Uuid>> = dsl::issues
+		.select(dsl::machine_id)
+		.distinct()
+		.filter(dsl::machine_id.is_not_null())
+		.filter(dsl::source.eq(refs::CANOPY_SOURCE))
+		.filter(dsl::ref_.eq_any(checks.to_vec()))
+		.filter(dsl::active.eq(true))
+		.filter(dsl::resolved_at.is_null())
+		.load(db)
+		.await?;
+	Ok(ids.into_iter().flatten().collect())
+}
+
+/// Whether a machine-scoped `(canopy, ref)` check is currently open + active.
+/// The machine-grain twin of [`open_server_issue_active`].
+pub(crate) async fn open_machine_issue_active(
+	db: &mut AsyncPgConnection,
+	machine_id: Uuid,
+	r#ref: &str,
+) -> Result<bool> {
+	use crate::schema::issues::dsl;
+	let n: i64 = dsl::issues
+		.filter(dsl::machine_id.eq(machine_id))
+		.filter(dsl::source.eq(refs::CANOPY_SOURCE))
+		.filter(dsl::ref_.eq(r#ref))
+		.filter(dsl::active.eq(true))
+		.filter(dsl::resolved_at.is_null())
+		.count()
+		.get_result(db)
+		.await?;
+	Ok(n > 0)
+}
+
+/// A machine's label for alert messages: its name, else its id.
+pub fn machine_label(machine: &crate::machines::Machine) -> String {
+	match &machine.name {
+		Some(n) if !n.is_empty() => n.clone(),
+		_ => machine.id.to_string(),
+	}
+}
+
 /// Whether a group-scoped `(canopy, ref)` issue is currently open + active.
 pub(crate) async fn open_group_issue_active(
 	db: &mut AsyncPgConnection,

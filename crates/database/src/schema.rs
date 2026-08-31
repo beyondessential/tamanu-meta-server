@@ -195,7 +195,7 @@ diesel::table! {
 		replica_id -> Nullable<Uuid>,
 		consumer_device_id -> Uuid,
 		group_id -> Uuid,
-		server_id -> Nullable<Uuid>,
+		machine_id -> Nullable<Uuid>,
 		#[sql_name = "type"]
 		type_ -> Text,
 		intent -> Text,
@@ -542,6 +542,7 @@ diesel::table! {
 		failed_migration -> Nullable<Text>,
 		data_bytes_before -> Int8,
 		data_bytes_after -> Int8,
+		application_id -> Nullable<Uuid>,
 	}
 }
 
@@ -578,7 +579,7 @@ diesel::table! {
 		id -> Uuid,
 		consumer_device_id -> Uuid,
 		group_id -> Uuid,
-		server_id -> Nullable<Uuid>,
+		machine_id -> Nullable<Uuid>,
 		#[sql_name = "type"]
 		type_ -> Text,
 		intent -> Text,
@@ -835,8 +836,8 @@ diesel::joinable!(backup_repo_snapshots -> applications (server_id));
 diesel::joinable!(backup_repo_snapshots -> server_groups (group_id));
 diesel::joinable!(backup_repo_stats -> server_groups (group_id));
 diesel::joinable!(backup_requests -> applications (server_id));
-diesel::joinable!(backup_restore_checks -> applications (server_id));
 diesel::joinable!(backup_restore_checks -> devices (consumer_device_id));
+diesel::joinable!(backup_restore_checks -> machines (machine_id));
 diesel::joinable!(backup_restore_checks -> restore_replicas (replica_id));
 diesel::joinable!(backup_restore_checks -> server_groups (group_id));
 diesel::joinable!(backup_run_progress -> applications (server_id));
@@ -864,12 +865,13 @@ diesel::joinable!(machines -> devices (device_id));
 diesel::joinable!(machines -> server_groups (group_id));
 diesel::joinable!(maintenance_windows -> machines (machine_id));
 diesel::joinable!(maintenance_windows -> server_groups (server_group_id));
+diesel::joinable!(migration_tests -> applications (application_id));
 diesel::joinable!(migration_tests -> backup_restore_checks (check_id));
 diesel::joinable!(migration_tests -> versions (target_version_id));
 diesel::joinable!(migration_timings -> migration_tests (check_id));
 diesel::joinable!(restore_consumer_capabilities -> devices (consumer_device_id));
-diesel::joinable!(restore_replicas -> applications (server_id));
 diesel::joinable!(restore_replicas -> devices (consumer_device_id));
+diesel::joinable!(restore_replicas -> machines (machine_id));
 diesel::joinable!(restore_replicas -> server_groups (group_id));
 diesel::joinable!(scoped_check_policies -> applications (application_id));
 diesel::joinable!(scoped_check_policies -> machines (machine_id));

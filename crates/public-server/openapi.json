@@ -2040,6 +2040,14 @@
           "timings"
         ],
         "properties": {
+          "application_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The application whose candidate version was tried, echoed from the\nworklist entry's `application_id`. Omitted by a consumer that predates\nthe entry carrying it, in which case Canopy derives it from the machine\nand the version."
+          },
           "data_bytes_after": {
             "type": "integer",
             "format": "int64",
@@ -2753,7 +2761,7 @@
         "required": [
           "replica_id",
           "group",
-          "server_id",
+          "machine_id",
           "type",
           "intent",
           "outcome",
@@ -2779,6 +2787,11 @@
           "intent": {
             "type": "string",
             "description": "The restore intent this attempt was performed under."
+          },
+          "machine_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The machine whose backup was restored, from the worklist entry's\n`machine_id`."
           },
           "migration": {
             "oneOf": [
@@ -2824,7 +2837,7 @@
           "replica_id": {
             "type": "string",
             "format": "uuid",
-            "description": "The declaration this report concerns, taken from the worklist entry's\n`replica_id`. Required: several replicas can share one group, server,\ntype, and intent, so a report that named no declaration could not be\nattributed to one of them."
+            "description": "The declaration this report concerns, taken from the worklist entry's\n`replica_id`. Required: several replicas can share one group, machine,\ntype, and intent, so a report that named no declaration could not be\nattributed to one of them."
           },
           "run_id": {
             "type": [
@@ -2865,11 +2878,6 @@
             ],
             "format": "int64",
             "description": "Bytes of raw HTTP traffic sent to S3 during the restore, including\nprotocol and signing overhead. Omit when traffic was not measured."
-          },
-          "server_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "The server whose backup was restored."
           },
           "snapshot_id": {
             "type": [
@@ -3003,7 +3011,7 @@
         "required": [
           "replica_id",
           "group_id",
-          "server_id",
+          "machine_id",
           "type",
           "intent",
           "name",
@@ -3014,6 +3022,14 @@
           "region"
         ],
         "properties": {
+          "application_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "For a `migrate` entry, the application whose candidate version is under\ntest. Absent on any other entry.\n\nA snapshot is a machine's and a candidate version is an application's, so\na migration test names both: it restores the machine's data and applies\nthat application's next version's migrations to it."
+          },
           "bucket": {
             "type": "string",
             "description": "Name of the S3 bucket holding the group's backup repository."
@@ -3026,6 +3042,11 @@
           "intent": {
             "type": "string",
             "description": "The restore intent this entry is for; one of the intents this device\nadvertised via `POST /restore-capabilities`."
+          },
+          "machine_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The machine whose backup should be restored. Echo it back in reports."
           },
           "name": {
             "type": "string",
@@ -3055,11 +3076,6 @@
             "type": "string",
             "format": "uuid",
             "description": "Identifier of the declaration this entry was expanded from. Echo it\nback in `POST /restore-verification` reports."
-          },
-          "server_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "The server whose backup should be restored."
           },
           "snapshot_at": {
             "type": [

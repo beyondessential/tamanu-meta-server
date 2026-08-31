@@ -1118,8 +1118,8 @@ export async function seedRestoreReplica(
 	opts: {
 		consumerDeviceId: string;
 		groupId: string;
-		/** Omit for a whole-group declaration. */
-		serverId?: string | null;
+		/** The machine whose snapshot is restored. Omit for a whole-group declaration. */
+		machineId?: string | null;
 		type?: string;
 		intent?: string;
 		name?: string;
@@ -1138,13 +1138,13 @@ export async function seedRestoreReplica(
 	if (overdue == null) {
 		await sql.query(
 			`INSERT INTO restore_replicas
-			 (id, consumer_device_id, group_id, server_id, type, intent, name, params, enabled, redacts)
+			 (id, consumer_device_id, group_id, machine_id, type, intent, name, params, enabled, redacts)
 			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)`,
 			[
 				id,
 				opts.consumerDeviceId,
 				opts.groupId,
-				opts.serverId ?? null,
+				opts.machineId ?? null,
 				opts.type ?? "tamanu-postgres",
 				opts.intent ?? "verify",
 				opts.name ?? randomLabel("replica"),
@@ -1156,13 +1156,13 @@ export async function seedRestoreReplica(
 	} else {
 		await sql.query(
 			`INSERT INTO restore_replicas
-			 (id, consumer_device_id, group_id, server_id, type, intent, name, overdue_after, params, enabled, redacts)
+			 (id, consumer_device_id, group_id, machine_id, type, intent, name, overdue_after, params, enabled, redacts)
 			 VALUES ($1, $2, $3, $4, $5, $6, $7, make_interval(secs => $8), $9::jsonb, $10, $11)`,
 			[
 				id,
 				opts.consumerDeviceId,
 				opts.groupId,
-				opts.serverId ?? null,
+				opts.machineId ?? null,
 				opts.type ?? "tamanu-postgres",
 				opts.intent ?? "verify",
 				opts.name ?? randomLabel("replica"),
@@ -1182,7 +1182,7 @@ export async function seedRestoreCheck(
 	opts: {
 		consumerDeviceId: string;
 		groupId: string;
-		serverId?: string | null;
+		machineId?: string | null;
 		replicaId?: string | null;
 		type?: string;
 		intent?: string;
@@ -1210,14 +1210,14 @@ export async function seedRestoreCheck(
 	const redaction = opts.redaction;
 	await sql.query(
 		`INSERT INTO backup_restore_checks
-		 (replica_id, consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome, error, replica_healthy, postgres_version, health_details, observed_at, run_id,
+		 (replica_id, consumer_device_id, group_id, machine_id, type, intent, snapshot_id, outcome, error, replica_healthy, postgres_version, health_details, observed_at, run_id,
 		  redaction_outcome, redaction_manifest_version, redaction_columns_masked, redaction_columns_skipped, redaction_error)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, COALESCE($13::timestamptz, NOW()), $14, $15, $16, $17, $18, $19)`,
 		[
 			opts.replicaId ?? null,
 			opts.consumerDeviceId,
 			opts.groupId,
-			opts.serverId ?? null,
+			opts.machineId ?? null,
 			opts.type ?? "tamanu-postgres",
 			opts.intent ?? "verify",
 			opts.snapshotId ?? null,
@@ -1245,7 +1245,10 @@ export async function seedMigrationTest(
 	opts: {
 		consumerDeviceId: string;
 		groupId: string;
-		serverId: string;
+		/** The machine whose snapshot was restored. */
+		machineId: string;
+		/** The application whose candidate version was tried. */
+		applicationId: string;
 		targetVersionId: string;
 		snapshotId?: string;
 		failedMigration?: string | null;
@@ -1257,21 +1260,22 @@ export async function seedMigrationTest(
 ): Promise<void> {
 	const rows = await sql.query<{ id: string }>(
 		`INSERT INTO backup_restore_checks
-		 (consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome,
+		 (consumer_device_id, group_id, machine_id, type, intent, snapshot_id, outcome,
 		  replica_healthy, observed_at)
 		 VALUES ($1, $2, $3, 'tamanu-postgres', 'migrate', $4, 'success', true, NOW())
 		 RETURNING id`,
-		[opts.consumerDeviceId, opts.groupId, opts.serverId, opts.snapshotId ?? "snap-1"],
+		[opts.consumerDeviceId, opts.groupId, opts.machineId, opts.snapshotId ?? "snap-1"],
 	);
 	const checkId = rows[0]!.id;
 
 	await sql.query(
 		`INSERT INTO migration_tests
-		 (check_id, target_version_id, total_elapsed, failed_migration,
+		 (check_id, application_id, target_version_id, total_elapsed, failed_migration,
 		  data_bytes_before, data_bytes_after)
-		 VALUES ($1, $2, make_interval(secs => $3), $4, $5, $6)`,
+		 VALUES ($1, $2, $3, make_interval(secs => $4), $5, $6, $7)`,
 		[
 			checkId,
+			opts.applicationId,
 			opts.targetVersionId,
 			opts.totalElapsedSecs ?? 60,
 			opts.failedMigration ?? null,

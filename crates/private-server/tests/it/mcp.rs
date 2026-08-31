@@ -588,7 +588,7 @@ const REPLICA_GAP: &str = "bbbbbbbb-0000-0000-0000-0000000000b3";
 async fn seed_backup_runs(conn: &mut impl SimpleAsyncConnection) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{RGROUP}', 'Backup Group'); \
-		 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{RSERVER}', '{RGROUP}') RETURNING id) INSERT INTO applications (id, host, name, kind, group_id, machine_id) VALUES \
+		 WITH m AS (INSERT INTO machines (id, group_id, name) VALUES ('{RSERVER}', '{RGROUP}', 'Backup Target') RETURNING id) INSERT INTO applications (id, host, name, kind, group_id, machine_id) VALUES \
 			('{RSERVER}', 'https://backup-target', 'Backup Target', 'central', '{RGROUP}', '{RSERVER}'); \
 		 INSERT INTO devices (id, role) VALUES ('{RDEVICE}', 'server'); \
 		 INSERT INTO backup_runs \
@@ -614,12 +614,12 @@ async fn seed_restore_replicas(conn: &mut impl SimpleAsyncConnection) {
 		"INSERT INTO devices (id, role) VALUES ('{CONSUMER}', 'backup-restore'); \
 		 INSERT INTO restore_consumer_capabilities (consumer_device_id, intent, semantics) VALUES \
 			('{CONSUMER}', 'verify', '[\"check\"]'::jsonb); \
-		 INSERT INTO restore_replicas (id, consumer_device_id, group_id, server_id, type, intent, name) VALUES \
+		 INSERT INTO restore_replicas (id, consumer_device_id, group_id, machine_id, type, intent, name) VALUES \
 			('{REPLICA_GROUP_WIDE}', '{CONSUMER}', '{RGROUP}', NULL, 'tamanu-postgres', 'verify', 'group-wide'), \
 			('{REPLICA_SERVER_SCOPED}', '{CONSUMER}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'verify', 'server-scoped'), \
 			('{REPLICA_GAP}', '{CONSUMER}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'analytics', 'server-scoped-gap'); \
 		 INSERT INTO backup_restore_checks \
-			(replica_id, replica_name, consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome, replica_healthy, observed_at) \
+			(replica_id, replica_name, consumer_device_id, group_id, machine_id, type, intent, snapshot_id, outcome, replica_healthy, observed_at) \
 			VALUES \
 			('{REPLICA_SERVER_SCOPED}', 'server-scoped', '{CONSUMER}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'verify', 'snap-1', 'success', true, NOW() - interval '30 minutes');"
 	))
@@ -761,7 +761,7 @@ async fn find_restore_replicas_reports_gap_and_health() {
 			.find(|r| r["id"] == REPLICA_SERVER_SCOPED)
 			.unwrap();
 		assert_eq!(server_scoped["gap"], false);
-		assert_eq!(server_scoped["server_name"], "Backup Target");
+		assert_eq!(server_scoped["machine_name"], "Backup Target");
 		assert!(!server_scoped["last_healthy_at"].is_null());
 
 		let gap = replicas.iter().find(|r| r["id"] == REPLICA_GAP).unwrap();
@@ -1029,13 +1029,13 @@ async fn get_restore_replica_checks_are_the_replicas_own_newest() {
 		// bury it under a run of newer checks from its noisy neighbour.
 		let mut rows = format!(
 			"INSERT INTO backup_restore_checks \
-			 (replica_id, consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome, replica_healthy, observed_at) \
+			 (replica_id, consumer_device_id, group_id, machine_id, type, intent, snapshot_id, outcome, replica_healthy, observed_at) \
 			 VALUES ('{REPLICA_GROUP_WIDE}', '{CONSUMER}', '{RGROUP}', NULL, 'tamanu-postgres', 'verify', 'quiet-snap', 'success', true, NOW() - interval '10 days');"
 		);
 		for i in 0..60 {
 			rows.push_str(&format!(
 				"INSERT INTO backup_restore_checks \
-				 (replica_id, consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome, replica_healthy, observed_at) \
+				 (replica_id, consumer_device_id, group_id, machine_id, type, intent, snapshot_id, outcome, replica_healthy, observed_at) \
 				 VALUES ('{REPLICA_SERVER_SCOPED}', '{CONSUMER}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'verify', 'noisy-{i}', 'success', true, NOW() - interval '{i} minutes');"
 			));
 		}

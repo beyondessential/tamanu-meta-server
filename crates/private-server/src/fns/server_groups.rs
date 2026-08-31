@@ -148,6 +148,11 @@ pub struct GroupDetail {
 	/// The group's member applications, sorted by name, with current status and
 	/// display host included.
 	pub applications: Vec<super::applications::ServerInfo>,
+	/// The group's member machines, sorted by name. A restore replica and a
+	/// maintenance window are both declared over a machine, so an operator
+	/// surface offering either needs the boxes rather than the workloads.
+	// spec: RST#declared-replicas
+	pub machines: Vec<GroupMachine>,
 	/// The group's effective `billing.*` labels (product/deployment/stage).
 	pub billing_labels: Vec<BillingTag>,
 	/// Whether a maintenance window (or its settle period) suspends the group.
@@ -155,6 +160,15 @@ pub struct GroupDetail {
 	/// Whether the suspension is only the settle period: the window has
 	/// ended and watching resumes when it elapses.
 	pub maintenance_settling: bool,
+}
+
+/// One of a group's machines, as an operator picks it out of a list.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GroupMachine {
+	/// Unique identifier of the machine.
+	pub id: Uuid,
+	/// The operator-assigned name, where it has one.
+	pub name: Option<String>,
 }
 
 /// Get a server group with its members.
@@ -213,9 +227,19 @@ pub async fn get(
 		)
 		.await?
 		.is_none();
+	let machines = database::machines::Machine::list_for_group(&mut conn, args.server_group_id)
+		.await?
+		.into_iter()
+		.map(|m| GroupMachine {
+			id: m.id,
+			name: m.name,
+		})
+		.collect();
+
 	Ok(Json(GroupDetail {
 		group,
 		applications,
+		machines,
 		maintained,
 		maintenance_settling,
 		billing_labels,

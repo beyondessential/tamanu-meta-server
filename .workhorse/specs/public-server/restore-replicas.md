@@ -267,6 +267,7 @@ A verifying intent and a migrating intent restore the same snapshot separately.
 A verifying intent restores once per snapshot, and a migrating intent's `once` is keyed to the snapshot and target version together, so it restores when a new candidate version appears rather than on every snapshot.
 
 An entry for a `migrate` intent names the target version alongside the snapshot, and the application whose candidate it is.
+A report echoes that application back, so the finding lands on the workload the version belongs to rather than being re-derived; a consumer that does not send it has it resolved from the machine and the version.
 A consumer obtains that version's migrations from its published artefacts, the same way an application being upgraded does, so naming the version is the whole reference it needs.
 
 A machine none of whose applications has a candidate version contributes no entry, whatever its declaration says.
@@ -339,11 +340,12 @@ Canopy holds, for each such product, the location of its manifests as a template
 Canopy resolves these settings into the worklist entry as it is dispatched, so a change to where a product publishes its manifests reaches every redacting replica without an operator revisiting a declaration.
 The consumer resolves the version against the data it restored — the version of the snapshot, which is not necessarily the version the application reports running now — and fetches the manifest for it.
 
-A redacting declaration contributes no worklist entry for an application whose type has no manifest, and that application surfaces as a gap on the declaration.
+A redacting declaration contributes no worklist entry for a machine none of whose applications has a type with a manifest, and each such application surfaces as a gap on the declaration.
 A replica that cannot be redacted is not restored at all: an unredacted replica standing in for a redacted one is worse than no replica.
 
 Canopy corroborates a product's manifest template against the published artefacts it already holds per version.
-A redacting declaration covering applications whose versions have no published manifest is a gap, surfaced before a restore is attempted rather than discovered when one fails.
+A redacting declaration covering an application whose version has no published manifest is a gap, surfaced before a restore is attempted rather than discovered when one fails.
+The manifest is resolved through the applications on the machine being restored, since what to mask is a property of the product in the snapshot rather than of the box that took it.
 
 ### What a redaction reports
 

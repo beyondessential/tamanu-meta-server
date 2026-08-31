@@ -101,9 +101,12 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 - [x] Adding a second application to a machine does not restart that machine's backup staleness anchor (verifies spec: BKJ)
 - [ ] Backup capability and participation follow the machine, and a two-application box is one participant (verifies spec: BAK, BKO)
 - [ ] A device request resolves identity to machine to group, without reaching the applications on it (verifies spec: BAK)
-- [ ] A restore-replica declaration names a machine, and a whole-group declaration expands over machines (verifies spec: RST)
-- [ ] `restore-verification` and `redaction` file at machine scope; `migration-test` files at application scope (verifies spec: RST)
-- [ ] A migrate worklist entry names the machine's snapshot and the application whose candidate it carries (verifies spec: RST)
+- [x] A restore-replica declaration names a machine, and a whole-group declaration expands over machines (verifies spec: RST)
+- [x] `restore-verification` and `redaction` file at machine scope; `migration-test` files at application scope (verifies spec: RST)
+- [x] A migrate worklist entry names the machine's snapshot and the application whose candidate it carries (verifies spec: RST)
+
+- [x] A box running two workloads gets one replica of its one snapshot, not one per workload (verifies spec: RST)
+- [ ] A migration report that omits the application has it resolved from the machine and the version (verifies spec: RST)
 
 ## Maintenance windows
 

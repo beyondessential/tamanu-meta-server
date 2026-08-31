@@ -25,7 +25,6 @@ use commons_types::backup::{
 use commons_types::server::product::RedactionManifest;
 use database::{
 	Db,
-	applications::Application,
 	backups::{BackupRun, NewBackupCredentialIssuance, ServerGroupBackupConfig},
 	migration_tests::{self, MigrationTest, NewMigrationTest},
 	pg_duration::PgDuration,
@@ -114,8 +113,17 @@ pub struct WorklistEntry {
 	pub replica_id: Uuid,
 	/// The server group whose backup repository holds the snapshot.
 	pub group_id: Uuid,
-	/// The server whose backup should be restored.
-	pub server_id: Uuid,
+	/// The machine whose backup should be restored. Echo it back in reports.
+	pub machine_id: Uuid,
+	/// For a `migrate` entry, the application whose candidate version is under
+	/// test. Absent on any other entry.
+	///
+	/// A snapshot is a machine's and a candidate version is an application's, so
+	/// a migration test names both: it restores the machine's data and applies
+	/// that application's next version's migrations to it.
+	// spec: RST#candidate-versions
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub application_id: Option<Uuid>,
 	/// The backup type to restore (e.g. `tamanu-postgres`).
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
@@ -205,20 +213,20 @@ async fn worklist(
 		.into_iter()
 		.filter(|d| descriptors.contains_key(&d.intent))
 		.collect::<Vec<_>>();
-	// Process server-specific declarations before group-wide ones so entries
+	// Process machine-specific declarations before group-wide ones so entries
 	// arrive in a stable order whatever the declarations' creation order.
-	declarations.sort_by_key(|d| d.server_id.is_none());
+	declarations.sort_by_key(|d| d.machine_id.is_none());
 
 	let mut out: Vec<WorklistEntry> = Vec::new();
-	// One entry per named replica per server. Several declarations may cover one
-	// (server, type, intent) — a raw one and a redacted one, a nightly one and a
+	// One entry per named replica per machine. Several declarations may cover one
+	// (machine, type, intent) — a raw one and a redacted one, a nightly one and a
 	// weekly one — and are told apart by name, so the name is what the dedup
-	// keys on. A group-wide and a server-scoped declaration with different names
-	// are two replicas of that server, and both are dispatched.
+	// keys on. A group-wide and a machine-scoped declaration with different names
+	// are two replicas of that machine, and both are dispatched.
 	let mut seen: HashSet<(Uuid, String)> = HashSet::new();
 	// Per-group caches so a group referenced by several declarations is resolved
-	// once: the latest produced snapshot per (server, type), and the latest
-	// healthy-verified snapshot per (server, type, intent) for `once` suppression.
+	// once: the latest produced snapshot per (machine, type), and the latest
+	// healthy-verified snapshot per (machine, type, intent) for `once` suppression.
 	let mut snapshot_cache: HashMap<Uuid, HashMap<(Uuid, BackupType), BackupRun>> = HashMap::new();
 	let mut verified_cache: HashMap<Uuid, HashMap<database::restore::ReplicaKey, String>> =
 		HashMap::new();
@@ -233,23 +241,26 @@ async fn worklist(
 			continue;
 		}
 
-		let applications = match d.server_id {
-			Some(sid) => {
-				let s = Application::get_by_id(&mut conn, sid).await?;
-				// Skip a declaration whose server has left the group or been
+		// A declaration covers machines: what gets restored is a snapshot, and a
+		// snapshot is what a machine backed up.
+		// spec: RST#declared-replicas
+		let machines = match d.machine_id {
+			Some(mid) => {
+				let m = database::machines::Machine::get_by_id(&mut conn, mid).await?;
+				// Skip a declaration whose machine has left the group or been
 				// archived; it lingers as a no-op until the operator retires it.
-				if s.group_id == Some(d.group_id) && s.deleted_at.is_none() {
-					vec![s]
+				if m.group_id == Some(d.group_id) && m.deleted_at.is_none() {
+					vec![m]
 				} else {
 					vec![]
 				}
 			}
-			None => Application::list_live_in_group(&mut conn, d.group_id).await?,
+			None => database::machines::Machine::list_for_group(&mut conn, d.group_id).await?,
 		};
 
 		if let std::collections::hash_map::Entry::Vacant(e) = snapshot_cache.entry(d.group_id) {
 			e.insert(
-				BackupRun::latest_success_by_server_type_for_group(&mut conn, d.group_id).await?,
+				BackupRun::latest_success_by_machine_type_for_group(&mut conn, d.group_id).await?,
 			);
 			verified_cache.insert(
 				d.group_id,
@@ -270,18 +281,32 @@ async fn worklist(
 		let params = resolve_params(&descriptor.params, &replica_values);
 
 		let region = cfg.region.clone().unwrap_or_else(deployment_default_region);
-		for server in applications {
-			let key = (server.id, d.name.clone());
+		for machine in machines {
+			let key = (machine.id, d.name.clone());
 			if !seen.insert(key) {
 				continue;
 			}
-			let latest = snapshots.get(&(server.id, d.r#type.clone()));
+			let latest = snapshots.get(&(machine.id, d.r#type.clone()));
+			let on_box = machine.applications(&mut conn).await?;
 
-			// A `migrate` intent needs a version to migrate to, so a server with
-			// no candidate contributes nothing rather than an entry naming none.
+			// A `migrate` intent needs a version to migrate to, so a machine
+			// none of whose applications has a candidate contributes nothing
+			// rather than an entry naming none. The entry names the application
+			// whose candidate it carries alongside the machine whose snapshot it
+			// restores: the one place the two grains interleave.
+			// spec: RST#dispatching-a-migration-test
 			let target = if migrates {
-				match migration_tests::candidate_for(&mut conn, &server).await? {
-					Some(version) => Some((version.id, version.as_semver())),
+				let mut found = None;
+				for application in &on_box {
+					if let Some(version) =
+						migration_tests::candidate_for(&mut conn, application).await?
+					{
+						found = Some((application.id, version.id, version.as_semver()));
+						break;
+					}
+				}
+				match found {
+					Some(t) => Some(t),
 					None => continue,
 				}
 			} else {
@@ -295,7 +320,10 @@ async fn worklist(
 			// for a redacted one is worse than no replica.
 			let params = if owns_masking {
 				let manifest = if d.redacts {
-					match server.product.caps().redaction {
+					// What to mask is a property of the product in the snapshot,
+					// so it resolves through the applications on the box.
+					// spec: RST#the-masking-manifest
+					match on_box.iter().find_map(|a| a.product.caps().redaction) {
 						Some(manifest) => Some(manifest),
 						None => continue,
 					}
@@ -313,8 +341,8 @@ async fn worklist(
 			// and a failure settles it as firmly as a pass.
 			if once {
 				let settled = match (&target, latest.and_then(|r| r.snapshot_id.as_ref())) {
-					(Some((version_id, _)), Some(snapshot)) => {
-						migration_tests::has_verdict(&mut conn, server.id, snapshot, *version_id)
+					(Some((_, version_id, _)), Some(snapshot)) => {
+						migration_tests::has_verdict(&mut conn, machine.id, snapshot, *version_id)
 							.await?
 					}
 					(Some(_), None) => false,
@@ -323,7 +351,7 @@ async fn worklist(
 						// verifies its own snapshot, so one of them settling does
 						// not take its siblings off the worklist.
 						let key = (
-							server.id,
+							machine.id,
 							d.r#type.clone(),
 							d.intent.clone(),
 							Some(d.name.clone()),
@@ -338,7 +366,8 @@ async fn worklist(
 			out.push(WorklistEntry {
 				replica_id: d.id,
 				group_id: d.group_id,
-				server_id: server.id,
+				machine_id: machine.id,
+				application_id: target.as_ref().map(|(aid, _, _)| *aid),
 				r#type: d.r#type.clone(),
 				intent: d.intent.clone(),
 				name: d.name.clone(),
@@ -350,8 +379,8 @@ async fn worklist(
 				bucket: cfg.bucket.clone(),
 				prefix: cfg.prefix.clone(),
 				region: region.clone(),
-				target_version: target.as_ref().map(|(_, version)| version.to_string()),
-				target_version_id: target.as_ref().map(|(version_id, _)| *version_id),
+				target_version: target.as_ref().map(|(_, _, version)| version.to_string()),
+				target_version_id: target.as_ref().map(|(_, version_id, _)| *version_id),
 			});
 		}
 	}
@@ -545,14 +574,15 @@ async fn credentials(
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct VerificationArgs {
 	/// The declaration this report concerns, taken from the worklist entry's
-	/// `replica_id`. Required: several replicas can share one group, server,
+	/// `replica_id`. Required: several replicas can share one group, machine,
 	/// type, and intent, so a report that named no declaration could not be
 	/// attributed to one of them.
 	pub replica_id: Uuid,
 	/// The server group whose backup was restored.
 	pub group: Uuid,
-	/// The server whose backup was restored.
-	pub server_id: Uuid,
+	/// The machine whose backup was restored, from the worklist entry's
+	/// `machine_id`.
+	pub machine_id: Uuid,
 	/// The backup type that was restored (e.g. `tamanu-postgres`).
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
@@ -667,6 +697,11 @@ pub struct MigrationArgs {
 	/// older consumers that report the identifier; omit it when `target_version`
 	/// is sent.
 	pub target_version_id: Option<Uuid>,
+	/// The application whose candidate version was tried, echoed from the
+	/// worklist entry's `application_id`. Omitted by a consumer that predates
+	/// the entry carrying it, in which case Canopy derives it from the machine
+	/// and the version.
+	pub application_id: Option<Uuid>,
 	/// Whole seconds the whole migration run took.
 	pub total_elapsed_seconds: i64,
 	/// The migration that failed, when one did.
@@ -752,7 +787,7 @@ async fn verification(
 		replica_name: None,
 		consumer_device_id,
 		group_id: args.group,
-		server_id: Some(args.server_id),
+		machine_id: Some(args.machine_id),
 		r#type: args.r#type,
 		intent: args.intent,
 		snapshot_id: args.snapshot_id,
@@ -780,7 +815,19 @@ async fn verification(
 	match args.migration {
 		Some(migration) => {
 			let target_version_id = resolve_migration_target(&mut conn, &migration).await?;
-			MigrationTest::record(&mut conn, report, migration.into_new(target_version_id)).await?;
+			let application_id = resolve_migration_application(
+				&mut conn,
+				&migration,
+				args.machine_id,
+				target_version_id,
+			)
+			.await?;
+			MigrationTest::record(
+				&mut conn,
+				report,
+				migration.into_new(target_version_id, application_id),
+			)
+			.await?;
 		}
 		None => {
 			BackupRestoreCheck::record_report(&mut conn, report).await?;
@@ -813,9 +860,47 @@ async fn resolve_migration_target(
 		.ok_or_else(|| AppError::BadRequest("migration report names no target version".into()))
 }
 
+/// Resolve the application a migration report is about.
+///
+/// The version under test is an application's candidate while the data is the
+/// machine's snapshot, so the report has to say which workload on the box it
+/// was for. A consumer echoes the `application_id` from its worklist entry; one
+/// that predates the entry carrying it gets the application derived — the one on
+/// the machine whose candidate is that version, or the sole application where a
+/// box runs only one.
+// spec: RST#candidate-versions
+async fn resolve_migration_application(
+	conn: &mut AsyncPgConnection,
+	migration: &MigrationArgs,
+	machine_id: Uuid,
+	target_version_id: Uuid,
+) -> Result<Uuid> {
+	if let Some(application_id) = migration.application_id {
+		return Ok(application_id);
+	}
+	let machine = database::machines::Machine::get_by_id(conn, machine_id).await?;
+	let on_box = machine.applications(conn).await?;
+	if let [only] = on_box.as_slice() {
+		return Ok(only.id);
+	}
+	for application in &on_box {
+		if let Some(version) = migration_tests::candidate_for(conn, application).await?
+			&& version.id == target_version_id
+		{
+			return Ok(application.id);
+		}
+	}
+	Err(AppError::BadRequest(
+		"migration report names no application, and this machine runs several with no candidate \
+		 matching the version reported"
+			.into(),
+	))
+}
+
 impl MigrationArgs {
-	fn into_new(self, target_version_id: Uuid) -> NewMigrationTest {
+	fn into_new(self, target_version_id: Uuid, application_id: Uuid) -> NewMigrationTest {
 		NewMigrationTest {
+			application_id,
 			target_version_id,
 			total_elapsed: PgDuration(SignedDuration::from_secs(self.total_elapsed_seconds)),
 			failed_migration: self.failed_migration,

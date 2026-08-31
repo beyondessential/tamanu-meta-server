@@ -291,6 +291,26 @@ impl Machine {
 			.map_err(AppError::from)
 	}
 
+	/// Bulk-fetch names for a set of machine ids, for surfaces embedding a
+	/// machine's display name beside its id.
+	pub async fn names_by_ids(
+		db: &mut AsyncPgConnection,
+		ids: &[Uuid],
+	) -> Result<std::collections::HashMap<Uuid, Option<String>>> {
+		use crate::schema::machines::dsl;
+
+		if ids.is_empty() {
+			return Ok(std::collections::HashMap::new());
+		}
+		let rows: Vec<(Uuid, Option<String>)> = dsl::machines
+			.select((dsl::id, dsl::name))
+			.filter(dsl::id.eq_any(ids))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(rows.into_iter().collect())
+	}
+
 	/// The applications running on this machine.
 	pub async fn applications(
 		&self,

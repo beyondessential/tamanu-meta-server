@@ -16,7 +16,7 @@ Each item is a section below; the section carries the detail and the traps.
 - [x] **Ingest: the detail-field split** — `server_reported_detail` splits by grain; carries the figure reads with it
 - [x] **Declared names and certificate routing** — identity to machine to application, and the plural entitlement answer
 - [x] **Maintenance windows take the machine** — arrived from main mid-split; moved onto the machine grain
-- [ ] **Restore replicas** — declarations move grain; `migration-test` stays application-scoped
+- [x] **Restore replicas** — declarations move grain; `migration-test` stays application-scoped
 - [ ] **Retiring the graded reachability states** — `short_status`'s hardcoded thresholds
 - [ ] **Fleet query interface** — MCP gains `Get machine` and `Find machines`
 - [ ] **Migration** — `{product, kind}` becomes `{type}`
@@ -27,6 +27,7 @@ Carried deferrals, each gated on a step above rather than on a vague later:
 
 - [x] Remove the `application_default_machine()` scaffolding default — done early, with the operator/enrolment surface
 - [x] Add `machine_id` to the `Application` struct — done with the operator/enrolment surface
+- [ ] **Backup tables take the machine grain** — `backup_runs`, `backup_repo_snapshots`, `server_backup_capabilities` and friends still key on the application that reported them. The rename step deferred them; nothing has claimed them since. Restore replicas now reach a machine's snapshot through a join that exists only because of this, and BAK already says a backup is a machine's
 - [ ] Carry the machine on `IssueData` — with **Fleet query interface** / **Frontend**, whichever presents machine checks first
 - [ ] Link a machine's maintenance window to its detail page — with **Frontend**, which is what creates that page. The fleet maintenance view renders a machine target as plain text until then rather than linking somewhere that 404s
 
@@ -286,6 +287,18 @@ Migration testing does not follow, and this is the one place in the card where t
 The checks land accordingly — `restore-verification` and `redaction` at machine scope, `migration-test` at application scope. Getting these the wrong way round is silent: both file successfully and both present, just against the wrong grain.
 
 Card B3 covers the related assumption that a backup type's *name* tells Canopy what it holds. Nothing here depends on that being fixed first.
+
+### Restore replicas: done
+
+Migration `2026-08-31-105219-0000_restore_replicas_take_the_machine`. `restore_replicas.server_id` and `backup_restore_checks.server_id` become `machine_id`, backfilled through `applications.machine_id`; `ReplicaKey`'s first element is now a machine. Declarations, the worklist, and the sweep all expand over machines, so a box running two workloads gets one replica of its one snapshot rather than two of the same backup.
+
+The checks landed as the section above called for: `restore-verification` and `redaction` at machine scope, `migration-test` at application scope. Three things this turned up that were not obvious from the outside:
+
+- **The recovery gate is grain-specific.** `open_server_issue_active` reads `issues.application_id`, so a machine-scoped check asking through it would never find its own open issue and would never file the recovery. Added `open_machine_issue_active` and `machines_with_open_checks`, and `file_restore_check` now picks by the scope it is filing at. Silent if missed: the check files fine and simply never clears.
+- **The interleaving needed storing, not deriving.** A migration test is a machine's snapshot plus an application's candidate version. `migration_tests` gained an `application_id` so the pair is recorded rather than re-derived; a worklist entry carries both ids and a report echoes the application back. Without it, a two-workload box with different candidates could not have a verdict attributed.
+- **Snapshot authority reaches the machine through a join.** `backup_runs` still records the application that reported a run, so `latest_success_by_machine_type_for_group` joins `applications` to key by machine. A box whose two workloads both report a backup of one type has one latest snapshot, the most recent of them. The join goes away when the backup tables take the machine grain.
+
+**Still application-grain, deliberately:** redaction gaps (a manifest is a product's), `migration_tests` itself, and `VersionKnownIssue`.
 
 ## Retiring the graded reachability states
 

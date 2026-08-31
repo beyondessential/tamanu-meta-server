@@ -5774,6 +5774,12 @@ export interface components {
             billing_labels: components["schemas"]["BillingTag"][];
             /** @description The group itself. */
             group: components["schemas"]["ServerGroup"];
+            /**
+             * @description The group's member machines, sorted by name. A restore replica and a
+             *     maintenance window are both declared over a machine, so an operator
+             *     surface offering either needs the boxes rather than the workloads.
+             */
+            machines: components["schemas"]["GroupMachine"][];
             /** @description Whether a maintenance window (or its settle period) suspends the group. */
             maintained: boolean;
             /**
@@ -5824,6 +5830,16 @@ export interface components {
              * @description Identifier of the server group.
              */
             server_group_id: string;
+        };
+        /** @description One of a group's machines, as an operator picks it out of a list. */
+        GroupMachine: {
+            /**
+             * Format: uuid
+             * @description Unique identifier of the machine.
+             */
+            id: string;
+            /** @description The operator-assigned name, where it has one. */
+            name?: string | null;
         };
         /** @description Request body identifying a server group to look up silences for. */
         GroupScopeArgs: {
@@ -8111,6 +8127,12 @@ export interface components {
              */
             key: string;
             /**
+             * Format: uuid
+             * @description The machine the restore is for, when reported. Absent for inferred rows
+             *     (the issuance is minted per group+type, not per machine).
+             */
+            machine_id?: string | null;
+            /**
              * Format: date-time
              * @description When the consumer observed the restore result (client-reported); reported
              *     checks only.
@@ -8166,12 +8188,6 @@ export interface components {
              * @description Raw bytes sent to S3 during the restore, if reported.
              */
             s3_sent_raw_bytes?: number | null;
-            /**
-             * Format: uuid
-             * @description The server the restore is for, when reported. Absent for inferred rows
-             *     (the issuance is minted per group+type, not per server).
-             */
-            server_id?: string | null;
             /** @description The snapshot that was restored, if reported. */
             snapshot_id?: string | null;
             /**
@@ -8254,6 +8270,12 @@ export interface components {
              *     identifier from the consumer's advertised intents, e.g. `verify`.
              */
             intent: string;
+            /**
+             * Format: uuid
+             * @description Specific machine within the group, or null to cover all current machines
+             *     in the group.
+             */
+            machine_id?: string | null;
             /** @description Operator-chosen display name for the declaration. */
             name: string;
             /**
@@ -8280,12 +8302,6 @@ export interface components {
             redaction_gaps: components["schemas"]["RedactionGap"][];
             /** @description Whether the replica is served de-identified. */
             redacts: boolean;
-            /**
-             * Format: uuid
-             * @description Specific server within the group, or null to cover all current applications
-             *     in the group.
-             */
-            server_id?: string | null;
             /** @description The backup type to restore, for example `tamanu-postgres`. */
             type: string;
             /** @description When the declaration was last modified. */
@@ -8314,6 +8330,12 @@ export interface components {
              */
             intent: string;
             /**
+             * Format: uuid
+             * @description Specific machine within the group; omit or null to cover all current
+             *     machines in the group.
+             */
+            machine_id?: string | null;
+            /**
              * @description Display name for the declaration, unique among the consumer's
              *     declarations.
              */
@@ -8337,12 +8359,6 @@ export interface components {
              *     to set. Defaults to false.
              */
             redacts?: boolean;
-            /**
-             * Format: uuid
-             * @description Specific server within the group; omit or null to cover all current
-             *     applications in the group.
-             */
-            server_id?: string | null;
             /** @description The backup type to restore, for example `tamanu-postgres`. */
             type: string;
         };
@@ -8387,6 +8403,12 @@ export interface components {
              */
             intent: string;
             /**
+             * Format: uuid
+             * @description Specific machine within the group; omit or null to cover all current
+             *     machines in the group.
+             */
+            machine_id?: string | null;
+            /**
              * @description New display name for the declaration, unique among the consumer's
              *     declarations.
              */
@@ -8409,12 +8431,6 @@ export interface components {
              *     intent carrying the `redact` semantic. Defaults to false.
              */
             redacts?: boolean;
-            /**
-             * Format: uuid
-             * @description Specific server within the group; omit or null to cover all current
-             *     applications in the group.
-             */
-            server_id?: string | null;
             /** @description The backup type to restore, for example `tamanu-postgres`. */
             type: string;
         };

@@ -45,7 +45,8 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 		await seedMigrationTest(sql, {
 			consumerDeviceId: consumer.id,
 			groupId: group.id,
-			serverId: failed.id,
+			machineId: failed.machineId,
+			applicationId: failed.id,
 			targetVersionId: target.id,
 			failedMigration: "backfillNoteTypeIds",
 			totalElapsedSecs: 5400,

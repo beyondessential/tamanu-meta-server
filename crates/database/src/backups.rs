@@ -1344,6 +1344,48 @@ impl BackupRun {
 			.collect())
 	}
 
+	/// Latest successful backup per `(machine, type)` within a group.
+	///
+	/// This is the snapshot authority a restore replica is pointed at: what gets
+	/// restored is a snapshot, and a snapshot is what a machine backed up (see
+	/// RST, "Snapshot authority").
+	///
+	/// `backup_runs` still records the application that reported the run rather
+	/// than the box it was taken from, so the machine comes from a join. A
+	/// machine running two workloads that both report a backup of one type has
+	/// one latest snapshot, the most recent of them — which is what the box
+	/// actually holds. The join goes away when the backup tables take the
+	/// machine grain themselves.
+	// spec: RST#snapshot-authority
+	pub async fn latest_success_by_machine_type_for_group(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+	) -> Result<HashMap<(Uuid, BackupType), Self>> {
+		use crate::schema::{applications, backup_runs};
+
+		let rows: Vec<(Uuid, Self)> = backup_runs::table
+			.inner_join(applications::table)
+			.filter(backup_runs::group_id.eq(group_id))
+			.filter(backup_runs::purpose.eq(BackupPurpose::Backup))
+			.filter(backup_runs::outcome.eq(RunOutcome::Success))
+			.filter(backup_runs::server_id.is_not_null())
+			.select((applications::machine_id, Self::as_select()))
+			.distinct_on((applications::machine_id, backup_runs::type_))
+			.order_by((
+				applications::machine_id,
+				backup_runs::type_,
+				anchor_expr().desc(),
+			))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		Ok(rows
+			.into_iter()
+			.map(|(machine_id, r)| ((machine_id, r.r#type.clone()), r))
+			.collect())
+	}
+
 	/// Latest *reported* backup per `(server, type)` within a group, regardless of
 	/// outcome (success or failure). Keyed `(server_id, type)`. Used to tell
 	/// whether a backup has been reported since credentials were last issued —

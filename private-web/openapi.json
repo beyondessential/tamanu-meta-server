@@ -10743,6 +10743,7 @@
         "required": [
           "group",
           "applications",
+          "machines",
           "billing_labels",
           "maintained",
           "maintenance_settling"
@@ -10765,6 +10766,13 @@
           "group": {
             "$ref": "#/components/schemas/ServerGroup",
             "description": "The group itself."
+          },
+          "machines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupMachine"
+            },
+            "description": "The group's member machines, sorted by name. A restore replica and a\nmaintenance window are both declared over a machine, so an operator\nsurface offering either needs the boxes rather than the workloads."
           },
           "maintained": {
             "type": "boolean",
@@ -10845,6 +10853,27 @@
             "type": "string",
             "format": "uuid",
             "description": "Identifier of the server group."
+          }
+        }
+      },
+      "GroupMachine": {
+        "type": "object",
+        "description": "One of a group's machines, as an operator picks it out of a list.",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier of the machine."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The operator-assigned name, where it has one."
           }
         }
       },
@@ -14439,6 +14468,14 @@
             "type": "string",
             "description": "Stable identity for UI keying: `check-<id>` for a reported check, or\n`issuance-<id>` for an inferred restore."
           },
+          "machine_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The machine the restore is for, when reported. Absent for inferred rows\n(the issuance is minted per group+type, not per machine)."
+          },
           "observed_at": {
             "type": [
               "string",
@@ -14544,14 +14581,6 @@
             ],
             "format": "int64",
             "description": "Raw bytes sent to S3 during the restore, if reported."
-          },
-          "server_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The server the restore is for, when reported. Absent for inferred rows\n(the issuance is minted per group+type, not per server)."
           },
           "snapshot_id": {
             "type": [
@@ -14676,6 +14705,14 @@
             "type": "string",
             "description": "How the replica is handled, as defined by the consumer: an arbitrary\nidentifier from the consumer's advertised intents, e.g. `verify`."
           },
+          "machine_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Specific machine within the group, or null to cover all current machines\nin the group."
+          },
           "name": {
             "type": "string",
             "description": "Operator-chosen display name for the declaration."
@@ -14701,14 +14738,6 @@
           "redacts": {
             "type": "boolean",
             "description": "Whether the replica is served de-identified."
-          },
-          "server_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "Specific server within the group, or null to cover all current applications\nin the group."
           },
           "type": {
             "type": "string",
@@ -14745,6 +14774,14 @@
             "type": "string",
             "description": "How the replica is handled, as defined by the consumer: an arbitrary\nidentifier from the consumer's advertised intents, e.g. `verify`."
           },
+          "machine_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Specific machine within the group; omit or null to cover all current\nmachines in the group."
+          },
           "name": {
             "type": "string",
             "description": "Display name for the declaration, unique among the consumer's\ndeclarations."
@@ -14763,14 +14800,6 @@
           "redacts": {
             "type": "boolean",
             "description": "Whether the replica is served de-identified. Accepted only for an\nintent carrying the `redact` semantic; Canopy resolves the masking\nmanifest itself from the server's product, so there is nothing else\nto set. Defaults to false."
-          },
-          "server_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "Specific server within the group; omit or null to cover all current\napplications in the group."
           },
           "type": {
             "type": "string",
@@ -14828,6 +14857,14 @@
             "type": "string",
             "description": "How the replica is handled, as defined by the consumer: an arbitrary\nidentifier from the consumer's advertised intents, e.g. `verify`."
           },
+          "machine_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Specific machine within the group; omit or null to cover all current\nmachines in the group."
+          },
           "name": {
             "type": "string",
             "description": "New display name for the declaration, unique among the consumer's\ndeclarations."
@@ -14846,14 +14883,6 @@
           "redacts": {
             "type": "boolean",
             "description": "Whether the replica is served de-identified. Accepted only for an\nintent carrying the `redact` semantic. Defaults to false."
-          },
-          "server_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "Specific server within the group; omit or null to cover all current\napplications in the group."
           },
           "type": {
             "type": "string",

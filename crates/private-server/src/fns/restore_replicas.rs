@@ -66,9 +66,9 @@ pub struct RestoreReplicaView {
 	pub consumer_name: Option<String>,
 	/// Identifier of the server group whose backups the declaration covers.
 	pub group_id: Uuid,
-	/// Specific server within the group, or null to cover all current applications
+	/// Specific machine within the group, or null to cover all current machines
 	/// in the group.
-	pub server_id: Option<Uuid>,
+	pub machine_id: Option<Uuid>,
 	/// The backup type to restore, for example `tamanu-postgres`.
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
@@ -163,9 +163,9 @@ pub struct RestoreReplicasCreateArgs {
 	pub consumer_device_id: Uuid,
 	/// Identifier of the server group whose backups to restore.
 	pub group_id: Uuid,
-	/// Specific server within the group; omit or null to cover all current
-	/// applications in the group.
-	pub server_id: Option<Uuid>,
+	/// Specific machine within the group; omit or null to cover all current
+	/// machines in the group.
+	pub machine_id: Option<Uuid>,
 	/// The backup type to restore, for example `tamanu-postgres`.
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
@@ -209,9 +209,9 @@ pub struct RestoreReplicasUpdateArgs {
 	pub consumer_device_id: Uuid,
 	/// Identifier of the server group whose backups to restore.
 	pub group_id: Uuid,
-	/// Specific server within the group; omit or null to cover all current
-	/// applications in the group.
-	pub server_id: Option<Uuid>,
+	/// Specific machine within the group; omit or null to cover all current
+	/// machines in the group.
+	pub machine_id: Option<Uuid>,
 	/// The backup type to restore, for example `tamanu-postgres`.
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
@@ -313,14 +313,20 @@ async fn redaction_gaps_for(
 	conn: &mut AsyncPgConnection,
 	replica: &RestoreReplica,
 ) -> Result<Vec<RedactionGap>> {
-	let applications = match replica.server_id {
-		Some(sid) => Application::get_by_id(conn, sid)
+	// The declaration covers machines; a gap is a property of the product in the
+	// snapshot, so it is reported per application on those machines.
+	let machines = match replica.machine_id {
+		Some(mid) => database::machines::Machine::get_by_id(conn, mid)
 			.await
 			.ok()
 			.into_iter()
 			.collect(),
-		None => Application::list_live_in_group(conn, replica.group_id).await?,
+		None => database::machines::Machine::list_for_group(conn, replica.group_id).await?,
 	};
+	let mut applications = Vec::new();
+	for machine in machines {
+		applications.extend(machine.applications(conn).await?);
+	}
 
 	let mut gaps = Vec::new();
 	for server in applications {
@@ -398,7 +404,7 @@ async fn to_views(
 				id: r.id,
 				consumer_device_id: r.consumer_device_id,
 				group_id: r.group_id,
-				server_id: r.server_id,
+				machine_id: r.machine_id,
 				r#type: r.r#type,
 				intent: r.intent,
 				name: r.name,
@@ -494,9 +500,9 @@ pub struct RestoreActivity {
 	pub key: String,
 	/// Reported, in-flight, or an unreported terminated restore.
 	pub status: RunStatus,
-	/// The server the restore is for, when reported. Absent for inferred rows
-	/// (the issuance is minted per group+type, not per server).
-	pub server_id: Option<Uuid>,
+	/// The machine the restore is for, when reported. Absent for inferred rows
+	/// (the issuance is minted per group+type, not per machine).
+	pub machine_id: Option<Uuid>,
 	/// The backup type restored.
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
@@ -627,7 +633,7 @@ pub async fn checks(
 			RestoreActivity {
 				key: format!("check-{}", c.id),
 				status: RunStatus::Reported,
-				server_id: c.server_id,
+				machine_id: c.machine_id,
 				r#type: c.r#type,
 				intent: Some(c.intent),
 				outcome: Some(c.outcome),
@@ -660,7 +666,7 @@ pub async fn checks(
 		rows.push(RestoreActivity {
 			key: format!("issuance-{}", first.id),
 			status,
-			server_id: None,
+			machine_id: None,
 			r#type: first.r#type,
 			intent: None,
 			outcome: None,
@@ -738,7 +744,7 @@ pub async fn create(
 		NewRestoreReplica {
 			consumer_device_id: args.consumer_device_id,
 			group_id: args.group_id,
-			server_id: args.server_id,
+			machine_id: args.machine_id,
 			r#type: args.r#type,
 			intent: args.intent,
 			name: args.name,
@@ -805,7 +811,7 @@ pub async fn update(
 		RestoreReplicaUpdate {
 			consumer_device_id: args.consumer_device_id,
 			group_id: args.group_id,
-			server_id: args.server_id,
+			machine_id: args.machine_id,
 			r#type: args.r#type,
 			intent: args.intent,
 			name: args.name,

@@ -7,7 +7,6 @@ use commons_types::{
 	backup::{IntentDescriptor, RestoreIntent, RunOutcome},
 };
 use database::{
-	applications::Application,
 	devices::Device,
 	diesel_async::AsyncPgConnection,
 	restore::{BackupRestoreCheck, RestoreConsumerCapability, RestoreReplica},
@@ -49,9 +48,9 @@ struct RestoreReplicaOut {
 	consumer_name: Option<String>,
 	group_id: Uuid,
 	group_name: Option<String>,
-	/// `None` = declared against every current server in the group.
-	server_id: Option<Uuid>,
-	server_name: Option<String>,
+	/// `None` = declared against every current machine in the group.
+	machine_id: Option<Uuid>,
+	machine_name: Option<String>,
 	r#type: String,
 	intent: String,
 	name: String,
@@ -62,10 +61,10 @@ struct RestoreReplicaOut {
 	/// shows for the same reason (see `restore_replicas::to_views`).
 	gap: bool,
 	/// Timestamp of the latest healthy restore-verification report for this
-	/// exact `(server, type, intent)`. Only populated for server-scoped
-	/// declarations; a group-wide declaration (`server_id: null`) covers many
-	/// applications so has no single answer here — use `get_restore_replica` or
-	/// `find_backup_problems` for a specific server.
+	/// exact `(machine, type, intent)`. Only populated for machine-scoped
+	/// declarations; a group-wide declaration (`machine_id: null`) covers many
+	/// machines so has no single answer here — use `get_restore_replica` or
+	/// `find_backup_problems` for a specific machine.
 	last_healthy_at: Option<Timestamp>,
 	created_at: Timestamp,
 	updated_at: Timestamp,
@@ -80,8 +79,8 @@ struct RestoreReplicaList {
 #[derive(Serialize)]
 struct RestoreCheckOut {
 	id: i64,
-	server_id: Option<Uuid>,
-	server_name: Option<String>,
+	machine_id: Option<Uuid>,
+	machine_name: Option<String>,
 	snapshot_id: Option<String>,
 	outcome: RunOutcome,
 	replica_healthy: bool,
@@ -167,9 +166,9 @@ impl CanopyMcp {
 			BackupRestoreCheck::list_recent_for_replica(&mut conn, replica.id, 50)
 				.await
 				.map_err(mcp_err)?;
-		let check_server_names = Application::names_by_ids(
+		let check_machine_names = database::machines::Machine::names_by_ids(
 			&mut conn,
-			&unique(relevant.iter().filter_map(|c| c.server_id)),
+			&unique(relevant.iter().filter_map(|c| c.machine_id)),
 		)
 		.await
 		.map_err(mcp_err)?;
@@ -177,11 +176,12 @@ impl CanopyMcp {
 			.into_iter()
 			.map(|c| RestoreCheckOut {
 				id: c.id,
-				server_id: c.server_id,
-				server_name: c
-					.server_id
-					.and_then(|s| check_server_names.get(&s))
-					.and_then(|(n, _)| n.clone()),
+				machine_id: c.machine_id,
+				machine_name: c
+					.machine_id
+					.and_then(|m| check_machine_names.get(&m))
+					.cloned()
+					.flatten(),
 				snapshot_id: c.snapshot_id,
 				outcome: c.outcome,
 				replica_healthy: c.replica_healthy,
@@ -229,10 +229,12 @@ impl CanopyMcp {
 			.map_err(mcp_err)?;
 		let group_ids = unique(replicas.iter().map(|r| r.group_id));
 		let g_names = group_names(conn, &group_ids).await?;
-		let application_names =
-			Application::names_by_ids(conn, &unique(replicas.iter().filter_map(|r| r.server_id)))
-				.await
-				.map_err(mcp_err)?;
+		let machine_names = database::machines::Machine::names_by_ids(
+			conn,
+			&unique(replicas.iter().filter_map(|r| r.machine_id)),
+		)
+		.await
+		.map_err(mcp_err)?;
 
 		let mut caps: HashMap<Uuid, std::collections::HashSet<RestoreIntent>> = HashMap::new();
 		for id in &consumer_ids {
@@ -260,12 +262,12 @@ impl CanopyMcp {
 				let gap = !caps
 					.get(&r.consumer_device_id)
 					.is_some_and(|s| s.contains(&r.intent));
-				let last_healthy_at = r.server_id.and_then(|sid| {
+				let last_healthy_at = r.machine_id.and_then(|mid| {
 					healthy_by_group
 						.get(&r.group_id)
 						.and_then(|m| {
 							m.get(&(
-								sid,
+								mid,
 								r.r#type.clone(),
 								r.intent.clone(),
 								Some(r.name.clone()),
@@ -279,11 +281,12 @@ impl CanopyMcp {
 					consumer_name: consumer_names.get(&r.consumer_device_id).cloned(),
 					group_id: r.group_id,
 					group_name: g_names.get(&r.group_id).cloned(),
-					server_id: r.server_id,
-					server_name: r
-						.server_id
-						.and_then(|s| application_names.get(&s))
-						.and_then(|(n, _)| n.clone()),
+					machine_id: r.machine_id,
+					machine_name: r
+						.machine_id
+						.and_then(|m| machine_names.get(&m))
+						.cloned()
+						.flatten(),
 					r#type: r.r#type.to_string(),
 					intent: r.intent.to_string(),
 					name: r.name,
