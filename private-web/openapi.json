@@ -4080,6 +4080,16 @@
               }
             }
           },
+          "400": {
+            "description": "Neither or both of the group arguments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
           "404": {
             "description": "No such server group",
             "content": {
@@ -4091,7 +4101,7 @@
             }
           },
           "409": {
-            "description": "Archived, empty, or ambiguously named",
+            "description": "Archived, empty, ambiguously named, or spanning environments",
             "content": {
               "application/json": {
                 "schema": {
@@ -10978,7 +10988,8 @@
           "name",
           "product",
           "kind",
-          "vars"
+          "vars",
+          "own_vars"
         ],
         "properties": {
           "address": {
@@ -10986,7 +10997,7 @@
               "string",
               "null"
             ],
-            "description": "The address to reach the host at: its bound device's tailnet name, or\nits recorded host where no device is bound. Null when Canopy holds\nneither, in which case a variable has to supply it."
+            "description": "The address to reach the server at: its bound device's tailnet name, or\nits recorded host where no device is bound. Null when Canopy holds\nneither, in which case a variable has to supply it."
           },
           "id": {
             "type": "string",
@@ -11001,24 +11012,17 @@
             "type": "string",
             "description": "The server's name within its group, falling back to its host and then\nits identifier, so a member always has something to be addressed as."
           },
+          "own_vars": {
+            "$ref": "#/components/schemas/VarMap",
+            "description": "The variables the server sets itself, so a value inherited from the\ngroup can be told from one set here even where the two agree."
+          },
           "product": {
             "$ref": "#/components/schemas/Product",
             "description": "The application this server runs."
           },
-          "rank": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ServerRank",
-                "description": "The server's environment tier, where one is set."
-              }
-            ]
-          },
           "vars": {
-            "type": "object",
-            "description": "The host's variables: its own tags over its group's, with the reserved\nread-only tags left out."
+            "$ref": "#/components/schemas/VarMap",
+            "description": "The server's effective variables: its own tags over its group's, with\nthe reserved read-only tags left out. This is what a run acts on."
           }
         }
       },
@@ -11028,6 +11032,7 @@
         "required": [
           "group_id",
           "group",
+          "rank",
           "vars",
           "hosts"
         ],
@@ -11046,21 +11051,14 @@
             "items": {
               "$ref": "#/components/schemas/InventoryHost"
             },
-            "description": "The group's live members, ordered by name."
+            "description": "The environment's servers, ordered by name."
           },
           "rank": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ServerRank",
-                "description": "Rank of the environment served, where its servers carry one."
-              }
-            ]
+            "$ref": "#/components/schemas/ServerRank",
+            "description": "Rank of the environment served."
           },
           "vars": {
-            "type": "object",
+            "$ref": "#/components/schemas/VarMap",
             "description": "Variables belonging to the group rather than to any one server.\nEvery server carries these too, under its own overrides."
           }
         }
@@ -16820,6 +16818,11 @@
         }
       },
       "Value": {},
+      "VarMap": {
+        "type": "object",
+        "description": "Variables as a JSON object.",
+        "additionalProperties": true
+      },
       "Verdict": {
         "type": "string",
         "description": "Where a (server, version) pair stands.",

@@ -16,10 +16,11 @@ The file is also where a site's identity lives, so held in Canopy that identity 
 ## What an inventory is
 
 An inventory covers one environment: a group's live servers at one rank (see [GRP](../servers/groups.md)).
+A server carrying no rank is at the default rank, so every live server belongs to exactly one of its group's environments and none is unreachable for want of one.
 An archived server is not in it, and a server belonging to no group is in no inventory.
 A group holding more than one environment is refused unless the rank is named, since configuring a site's demo servers alongside its production ones is never what was meant.
 
-Each member carries what Canopy holds for it: its name, its product and kind, its rank, the address it is reached at, and its variables.
+Each member carries what Canopy holds for it: its name, its product and kind, the address it is reached at, and its variables.
 
 ## Variables
 

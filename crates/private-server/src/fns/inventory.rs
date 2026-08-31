@@ -58,16 +58,16 @@ pub struct InventoryHost {
 	pub product: Product,
 	/// The server's role within its product's topology.
 	pub kind: ServerKind,
-	/// The server's environment tier, where one is set.
-	pub rank: Option<ServerRank>,
-	/// The address to reach the host at: its bound device's tailnet name, or
+	/// The address to reach the server at: its bound device's tailnet name, or
 	/// its recorded host where no device is bound. Null when Canopy holds
 	/// neither, in which case a variable has to supply it.
 	pub address: Option<String>,
-	/// The host's variables: its own tags over its group's, with the reserved
-	/// read-only tags left out.
-	#[schema(value_type = Object)]
-	pub vars: BTreeMap<String, Value>,
+	/// The server's effective variables: its own tags over its group's, with
+	/// the reserved read-only tags left out. This is what a run acts on.
+	pub vars: VarMap,
+	/// The variables the server sets itself, so a value inherited from the
+	/// group can be told from one set here even where the two agree.
+	pub own_vars: VarMap,
 }
 
 /// An environment's inventory: its servers and the variables that configure
@@ -78,15 +78,33 @@ pub struct InventoryView {
 	pub group_id: Uuid,
 	/// Name of the server group.
 	pub group: String,
-	/// Rank of the environment served, where its servers carry one.
-	pub rank: Option<ServerRank>,
+	/// Rank of the environment served.
+	pub rank: ServerRank,
 	/// Variables belonging to the group rather than to any one server.
 	/// Every server carries these too, under its own overrides.
-	#[schema(value_type = Object)]
-	pub vars: BTreeMap<String, Value>,
-	/// The group's live members, ordered by name.
+	pub vars: VarMap,
+	/// The environment's servers, ordered by name.
 	pub hosts: Vec<InventoryHost>,
 }
+
+/// Variables as a JSON object, whose values are whatever the stored tags
+/// decoded to.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(transparent)]
+pub struct VarMap(pub BTreeMap<String, Value>);
+
+impl utoipa::PartialSchema for VarMap {
+	fn schema() -> utoipa::openapi::RefOr<utoipa::openapi::schema::Schema> {
+		use utoipa::openapi::schema::{AdditionalProperties, Object, SchemaType, Type};
+
+		let mut object = Object::with_type(SchemaType::Type(Type::Object));
+		object.description = Some("Variables as a JSON object.".to_string());
+		object.additional_properties = Some(Box::new(AdditionalProperties::FreeForm(true)));
+		utoipa::openapi::RefOr::T(utoipa::openapi::schema::Schema::Object(object))
+	}
+}
+
+impl utoipa::ToSchema for VarMap {}
 
 /// A stored tag value as a variable.
 ///
@@ -105,12 +123,14 @@ fn decode(value: &str) -> Value {
 	}
 }
 
-fn vars(tags: &TagMap) -> BTreeMap<String, Value> {
-	tags.0
-		.iter()
-		.filter(|(key, _)| !key.starts_with(RESERVED_TAG_PREFIX))
-		.map(|(key, value)| (key.clone(), decode(value)))
-		.collect()
+fn vars(tags: &TagMap) -> VarMap {
+	VarMap(
+		tags.0
+			.iter()
+			.filter(|(key, _)| !key.starts_with(RESERVED_TAG_PREFIX))
+			.map(|(key, value)| (key.clone(), decode(value)))
+			.collect(),
+	)
 }
 
 async fn resolve_group(
@@ -157,8 +177,9 @@ async fn resolve_group(
 	request_body = InventoryArgs,
 	responses(
 		(status = 200, body = InventoryView),
+		(status = 400, description = "Neither or both of the group arguments", body = ProblemDetailsSchema),
 		(status = 404, description = "No such server group", body = ProblemDetailsSchema),
-		(status = 409, description = "Archived, empty, or ambiguously named", body = ProblemDetailsSchema),
+		(status = 409, description = "Archived, empty, ambiguously named, or spanning environments", body = ProblemDetailsSchema),
 	),
 )]
 pub async fn for_group(
@@ -185,9 +206,14 @@ pub async fn for_group(
 		)));
 	}
 
-	let ranks: BTreeSet<Option<ServerRank>> = members.iter().map(|server| server.rank).collect();
+	// A server carrying no rank is at ServerRank's own default, so every live
+	// server belongs to exactly one of its group's environments.
+	let ranks: BTreeSet<ServerRank> = members
+		.iter()
+		.map(|server| server.rank.unwrap_or_default())
+		.collect();
 	let rank = match args_rank {
-		Some(rank) => Some(rank),
+		Some(rank) => rank,
 		None if ranks.len() > 1 => {
 			return Err(AppError::Conflict(format!(
 				"server group {:?} holds {} environments ({}); name the rank",
@@ -195,23 +221,22 @@ pub async fn for_group(
 				ranks.len(),
 				ranks
 					.iter()
-					.map(|rank| rank.map_or("unranked".to_string(), |rank| rank.to_string()))
+					.map(ServerRank::to_string)
 					.collect::<Vec<_>>()
 					.join(", ")
 			)));
 		}
-		None => ranks.into_iter().next().flatten(),
+		None => ranks.into_iter().next().unwrap_or_default(),
 	};
 
 	let servers: Vec<Server> = members
 		.into_iter()
-		.filter(|server| server.rank == rank)
+		.filter(|server| server.rank.unwrap_or_default() == rank)
 		.collect();
 	if servers.is_empty() {
 		return Err(AppError::Conflict(format!(
-			"server group {:?} has no live server at rank {}",
-			group.name,
-			rank.map_or("unranked".to_string(), |rank| rank.to_string())
+			"server group {:?} has no live server at rank {rank}",
+			group.name
 		)));
 	}
 
@@ -221,7 +246,8 @@ pub async fn for_group(
 		.collect();
 	let tailnet = Device::tailscale_names_by_ids(&mut conn, &device_ids).await?;
 
-	let hosts = servers
+	let group_vars = vars(&group.tags);
+	let mut hosts: Vec<InventoryHost> = servers
 		.into_iter()
 		.map(|server| {
 			let host = server
@@ -232,27 +258,31 @@ pub async fn for_group(
 				.device_id
 				.and_then(|device| tailnet.get(&device).cloned())
 				.or_else(|| host.clone());
+			let own_vars = vars(&server.tags);
+			let mut effective = group_vars.0.clone();
+			effective.extend(own_vars.0.iter().map(|(k, v)| (k.clone(), v.clone())));
 			InventoryHost {
 				name: server
 					.name
 					.clone()
 					.or(host)
 					.unwrap_or_else(|| server.id.to_string()),
-				vars: vars(&server.tags.merged_with(&group.tags)),
+				vars: VarMap(effective),
+				own_vars,
 				id: server.id,
 				product: server.product,
 				kind: server.kind,
-				rank: server.rank,
 				address,
 			}
 		})
 		.collect();
+	hosts.sort_by(|a, b| a.name.cmp(&b.name));
 
 	Ok(Json(InventoryView {
 		group_id: group.id,
 		group: group.name,
 		rank,
-		vars: vars(&group.tags),
+		vars: group_vars,
 		hosts,
 	}))
 }

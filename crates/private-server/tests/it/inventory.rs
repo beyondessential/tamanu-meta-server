@@ -107,6 +107,9 @@ async fn serves_an_environments_servers_and_variables() {
 		let body: Value = response.json();
 
 		assert_eq!(body["group"], "kamaka-prod");
+		// Nothing here carries a rank, so the whole group is one environment at
+		// the default rank.
+		assert_eq!(body["rank"], "dev");
 		assert_eq!(body["vars"]["timezone"], "Pacific/Auckland");
 		assert_eq!(body["vars"]["elastic_agent_enabled"], json!(false));
 
@@ -126,6 +129,11 @@ async fn serves_an_environments_servers_and_variables() {
 			json!(["sync.kamaka.example"])
 		);
 		assert_eq!(hosts[0]["vars"]["ansible_port"], "2222");
+
+		// What the server sets itself is served apart from what it inherits, so
+		// a value can be traced to where it is set.
+		assert_eq!(hosts[0]["own_vars"]["elastic_agent_enabled"], json!(true));
+		assert!(hosts[0]["own_vars"].get("timezone").is_none());
 
 		// No device, so the address is the recorded host as a bare name, and a
 		// stored tag in the reserved namespace is not served as a variable.
@@ -218,6 +226,83 @@ async fn serves_an_environment_asked_for_by_identifier() {
 	.await
 }
 
+/// The address falls back to the recorded host when the bound device has no
+/// tailnet name of its own.
+#[tokio::test(flavor = "multi_thread")]
+async fn falls_back_to_the_recorded_host_for_a_nameless_device() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-nameless", json!({})).await;
+		let server = insert_server(
+			&mut conn,
+			group,
+			"kamaka-nameless-central",
+			"central",
+			Some("https://central.kamaka.example/"),
+			json!({}),
+		)
+		.await;
+		let device = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO devices (id, role) VALUES ('{device}', 'server');
+			 UPDATE servers SET device_id = '{device}' WHERE id = '{server}'"
+		))
+		.await
+		.expect("bind device");
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka-nameless" }))
+			.await;
+		response.assert_status_ok();
+		let body: Value = response.json();
+		assert_eq!(body["hosts"][0]["address"], "central.kamaka.example");
+	})
+	.await
+}
+
+/// An archived server is not something to configure, so it leaves the
+/// inventory without the group leaving it.
+#[tokio::test(flavor = "multi_thread")]
+async fn leaves_out_an_archived_server() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-archived", json!({})).await;
+		insert_server(
+			&mut conn,
+			group,
+			"kamaka-archived-central",
+			"central",
+			None,
+			json!({}),
+		)
+		.await;
+		let gone = insert_server(
+			&mut conn,
+			group,
+			"kamaka-archived-facility",
+			"facility",
+			None,
+			json!({}),
+		)
+		.await;
+		conn.batch_execute(&format!(
+			"UPDATE servers SET deleted_at = now() WHERE id = '{gone}'"
+		))
+		.await
+		.expect("archive server");
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka-archived" }))
+			.await;
+		response.assert_status_ok();
+		let body: Value = response.json();
+		let hosts = body["hosts"].as_array().expect("hosts");
+		assert_eq!(hosts.len(), 1);
+		assert_eq!(hosts[0]["name"], "kamaka-archived-central");
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_a_group_canopy_does_not_have() {
 	commons_tests::server::run(async move |_conn, _public, private| {
@@ -305,6 +390,30 @@ async fn refuses_a_request_naming_neither_a_group_nor_an_identifier() {
 		let response = private
 			.post("/api/inventory/for_group")
 			.json(&json!({}))
+			.await;
+		response.assert_status_bad_request();
+	})
+	.await
+}
+
+/// Both together are as ambiguous as neither: canopy picks nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_a_request_naming_both_a_group_and_an_identifier() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-both", json!({})).await;
+		insert_server(
+			&mut conn,
+			group,
+			"kamaka-both-central",
+			"central",
+			None,
+			json!({}),
+		)
+		.await;
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka-both", "server_group_id": group }))
 			.await;
 		response.assert_status_bad_request();
 	})

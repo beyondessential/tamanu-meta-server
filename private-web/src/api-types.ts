@@ -5988,7 +5988,7 @@ export interface components {
         /** @description One server in an environment. */
         InventoryHost: {
             /**
-             * @description The address to reach the host at: its bound device's tailnet name, or
+             * @description The address to reach the server at: its bound device's tailnet name, or
              *     its recorded host where no device is bound. Null when Canopy holds
              *     neither, in which case a variable has to supply it.
              */
@@ -6005,14 +6005,18 @@ export interface components {
              *     its identifier, so a member always has something to be addressed as.
              */
             name: string;
+            /**
+             * @description The variables the server sets itself, so a value inherited from the
+             *     group can be told from one set here even where the two agree.
+             */
+            own_vars: components["schemas"]["VarMap"];
             /** @description The application this server runs. */
             product: components["schemas"]["Product"];
-            rank?: null | components["schemas"]["ServerRank"];
             /**
-             * @description The host's variables: its own tags over its group's, with the reserved
-             *     read-only tags left out.
+             * @description The server's effective variables: its own tags over its group's, with
+             *     the reserved read-only tags left out. This is what a run acts on.
              */
-            vars: Record<string, never>;
+            vars: components["schemas"]["VarMap"];
         };
         /**
          * @description An environment's inventory: its servers and the variables that configure
@@ -6026,14 +6030,15 @@ export interface components {
              * @description Identifier of the server group the inventory covers.
              */
             group_id: string;
-            /** @description The group's live members, ordered by name. */
+            /** @description The environment's servers, ordered by name. */
             hosts: components["schemas"]["InventoryHost"][];
-            rank?: null | components["schemas"]["ServerRank"];
+            /** @description Rank of the environment served. */
+            rank: components["schemas"]["ServerRank"];
             /**
              * @description Variables belonging to the group rather than to any one server.
              *     Every server carries these too, under its own overrides.
              */
-            vars: Record<string, never>;
+            vars: components["schemas"]["VarMap"];
         };
         /** @description A note to add to an issue. */
         IssueAddNoteArgs: {
@@ -9616,6 +9621,10 @@ export interface components {
             target_role_arn: string;
         };
         Value: unknown;
+        /** @description Variables as a JSON object. */
+        VarMap: {
+            [key: string]: unknown;
+        };
         /**
          * @description Where a (server, version) pair stands.
          * @enum {string}
@@ -12547,6 +12556,15 @@ export interface operations {
                     "application/json": components["schemas"]["InventoryView"];
                 };
             };
+            /** @description Neither or both of the group arguments */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
             /** @description No such server group */
             404: {
                 headers: {
@@ -12556,7 +12574,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
-            /** @description Archived, empty, or ambiguously named */
+            /** @description Archived, empty, ambiguously named, or spanning environments */
             409: {
                 headers: {
                     [name: string]: unknown;
