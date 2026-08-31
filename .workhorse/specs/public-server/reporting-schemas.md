@@ -82,9 +82,6 @@ A report carries:
 - **how much of the configuration was covered**: the number of configured surveys the schema addresses, and the number it could not;
 - when the build was observed.
 
-Coverage is a primary result rather than diagnostic detail.
-A build that silently skips half a group's surveys still succeeds and still publishes, and the count is what makes that visible without reading the schema.
-
 Reports are retained indefinitely as an audit trail.
 
 ## The artefact
