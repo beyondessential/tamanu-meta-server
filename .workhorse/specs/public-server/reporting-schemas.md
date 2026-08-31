@@ -39,14 +39,25 @@ It is held centrally and synced down, so a schema is built from a central server
 It is reference data, present in every copy of the database and carrying no patient content, so a source whose patient data has been de-identified is sufficient and is what Canopy asks for where one can be had.
 That holds only while the product's masking manifest leaves configuration legible: a manifest masking a survey's identifiers rather than its answers would defeat the build while appearing to succeed.
 
-Canopy holds the requirement rather than the database, and the means to have a conforming one produced: a managed restore replica of the group, restored from a recent snapshot, migrated to the version being built for, and de-identified.
+Canopy holds the requirement rather than the database, and already has the means to satisfy it: a managed restore replica, restored from a recent snapshot and migrated to the version being built for, is a database that meets both halves (see [RST](restore-replicas.md)).
+
+A restore that carries a build is its own intent rather than a second purpose bolted onto the one that tests migrations.
+The two restore the same snapshot separately, as a verifying intent and a migrating one already do, because their outcomes are independent: a version whose migrations fail against a group's data has no schema to build, and a build that fails says nothing about whether the version is safe to take.
+Restoring twice is affordable precisely because neither replica is kept: each exists for one run and is torn down.
+
+Such a replica is held up for the length of the build rather than discarded as soon as it is healthy, since the build reads it after the migrations land.
+It is not offered to operators while it stands, being a database at a version its group is not yet running.
 
 ## What is owed
 
 Canopy derives what is owed rather than an operator naming each pair of central server and version.
 
-A central server owes a reporting schema for the version it runs and for the version its group's open plan moves it to.
+A central server owes a reporting schema for the version its group's open plan moves it to.
 A schema that does not exist by the time an upgrade lands is an outage of every report the group has.
+The plan is also what makes the build possible, since it is what has a replica restored and migrated to that version at all, so what is owed and what can be produced arrive together.
+
+Nothing is owed for the version a group already runs, because that version was a candidate once and its schema was built then.
+The steady state therefore needs no trigger of its own; a group whose current version predates the pipeline has none on file until its next upgrade produces one.
 
 Only a published version is buildable, for the same reason it is testable: a version's schema reaches a builder as its published artefacts, and an unpublished version has none to fetch.
 
