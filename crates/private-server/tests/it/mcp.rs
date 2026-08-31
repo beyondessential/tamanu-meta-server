@@ -446,7 +446,10 @@ async fn incidents_window_status_and_detail() {
 		assert_eq!(issues[0]["issue_id"], ISSUE1);
 		assert_eq!(issues[0]["effective_result"], "failed");
 		assert_eq!(issues[0]["ref"], "r1");
-		assert_eq!(issues[0]["server_name"], "Inc Application");
+		// The scope says whose failure it is, and names it.
+		// spec: MCP#incidents-and-issues
+		assert_eq!(issues[0]["scope"]["grain"], "application");
+		assert_eq!(issues[0]["scope"]["name"], "Inc Application");
 	})
 	.await
 }
@@ -1111,6 +1114,203 @@ async fn upgrade_plans_list_the_open_ones_and_keep_the_withdrawn_in_history() {
 		assert_eq!(withdrawn["withdrawn_by"], "someone@example.com");
 		assert!(!withdrawn["ended_at"].is_null());
 		assert!(plans.iter().any(|p| p["outcome"] == "open"));
+	})
+	.await
+}
+
+const MGROUP: &str = "dddddddd-0000-0000-0000-000000000001";
+const MACHINE: &str = "dddddddd-0000-0000-0000-000000000002";
+const MAPP_A: &str = "dddddddd-0000-0000-0000-00000000000a";
+const MAPP_B: &str = "dddddddd-0000-0000-0000-00000000000b";
+
+/// One box carrying two workloads, with figures split by grain: the machine
+/// reports platform and hardware, the applications report versions.
+async fn seed_two_workload_box(conn: &mut impl SimpleAsyncConnection) {
+	conn.batch_execute(&format!(
+		"INSERT INTO server_groups (id, name) VALUES ('{MGROUP}', 'Split Group'); \
+		 INSERT INTO machines (id, group_id, name, cloud) VALUES \
+			('{MACHINE}', '{MGROUP}', 'box-one', false); \
+		 INSERT INTO applications (id, host, name, kind, group_id, machine_id) VALUES \
+			('{MAPP_A}', 'https://front', 'Front', 'central', '{MGROUP}', '{MACHINE}'), \
+			('{MAPP_B}', 'https://worker', 'Worker', 'central', '{MGROUP}', '{MACHINE}'); \
+		 INSERT INTO machine_reported_detail (machine_id, source, extra, reported_at) VALUES \
+			('{MACHINE}', 'alertd', \
+			 '{{\"osName\":\"Debian\",\"osVersion\":\"12\",\"hostname\":\"box-one.internal\",\
+			   \"cpuCores\":8,\"totalMemoryBytes\":16000000000,\"uptimeSecs\":86400}}'::jsonb, NOW()); \
+		 INSERT INTO application_reported_detail (application_id, source, extra, reported_at) VALUES \
+			('{MAPP_A}', 'alertd', '{{\"tamanuVersion\":\"2.62.0\",\"pgVersion\":\"PostgreSQL 16.2\"}}'::jsonb, NOW());"
+	))
+	.await
+	.expect("seed two-workload box");
+}
+
+/// The grains carry different figures, and each names the other side.
+// spec: MCP#detail
+#[tokio::test(flavor = "multi_thread")]
+async fn get_machine_carries_hardware_and_get_server_carries_version() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		seed_two_workload_box(&mut conn).await;
+
+		let machine = call_tool!(
+			private,
+			"get_machine",
+			serde_json::json!({ "machine_id": MACHINE })
+		);
+		assert_eq!(machine["name"], "box-one");
+		let figures = &machine["figures"];
+		assert_eq!(figures["platform"], "Debian 12");
+		assert_eq!(figures["hostname"], "box-one.internal");
+		assert_eq!(figures["cpu_cores"], 8);
+		assert_eq!(figures["total_memory_bytes"], 16000000000u64);
+		assert_eq!(figures["uptime_seconds"], 86400);
+		assert!(
+			figures.get("postgres_version").is_none(),
+			"a database engine is the software's, not the box's: {figures}"
+		);
+
+		// The box names the workloads on it.
+		let on_box = machine["applications"].as_array().expect("applications");
+		assert_eq!(on_box.len(), 2, "both workloads: {on_box:?}");
+
+		let application = call_tool!(
+			private,
+			"get_server",
+			serde_json::json!({ "server_id": MAPP_A })
+		);
+		assert_eq!(
+			application["machine_id"], MACHINE,
+			"and the workload names its box, so a client can cross over"
+		);
+		assert_eq!(application["figures"]["postgres_version"], "16.2");
+	})
+	.await
+}
+
+/// A box hosting two workloads is one machine with a count of two, which is
+/// the case the grain exists for.
+// spec: MCP#discovery
+#[tokio::test(flavor = "multi_thread")]
+async fn find_machines_reports_how_many_applications_each_carries() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		seed_two_workload_box(&mut conn).await;
+
+		let all = call_tool!(private, "find_machines", serde_json::json!({}));
+		let machines = all["machines"].as_array().expect("machines");
+		let found = machines
+			.iter()
+			.find(|m| m["id"] == MACHINE)
+			.expect("the seeded box");
+		assert_eq!(found["application_count"], 2);
+		assert_eq!(found["platform"], "Debian 12");
+		assert_eq!(found["group_name"], "Split Group");
+
+		// The reported hostname is searchable, not just the operator's name.
+		let by_hostname = call_tool!(
+			private,
+			"find_machines",
+			serde_json::json!({ "query": "box-one.internal" })
+		);
+		assert_eq!(by_hostname["machines"].as_array().unwrap().len(), 1);
+
+		let by_platform = call_tool!(
+			private,
+			"find_machines",
+			serde_json::json!({ "platform": "debian" })
+		);
+		assert!(
+			by_platform["machines"]
+				.as_array()
+				.unwrap()
+				.iter()
+				.any(|m| m["id"] == MACHINE)
+		);
+	})
+	.await
+}
+
+/// A box's disk filling is the application's problem too, so asking about an
+/// application returns its machine's issues among its own. Asking about the
+/// machine returns only the machine's.
+// spec: MCP#incidents-and-issues
+#[tokio::test(flavor = "multi_thread")]
+async fn find_issues_by_application_includes_its_machines_issues() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		seed_two_workload_box(&mut conn).await;
+		conn.batch_execute(&format!(
+			"INSERT INTO check_policies (source, check_name) VALUES \
+				('alertd', 'disk_free'), ('alertd', 'tamanu_version'); \
+			 INSERT INTO issues \
+				(machine_id, source, ref, check_name, observed_result, effective_result, \
+				 message, active, first_seen, last_seen, degraded_since, last_degraded_at) \
+				VALUES ('{MACHINE}', 'alertd', 'disk', 'disk_free', 'failed', 'failed', \
+				 'disk full', true, NOW(), NOW(), NOW(), NOW()); \
+			 INSERT INTO issues \
+				(application_id, source, ref, check_name, observed_result, effective_result, \
+				 message, active, first_seen, last_seen, degraded_since, last_degraded_at) \
+				VALUES ('{MAPP_A}', 'alertd', 'ver', 'tamanu_version', 'warning', 'warning', \
+				 'behind', true, NOW(), NOW(), NOW(), NOW());"
+		))
+		.await
+		.expect("seed issues");
+
+		let for_app = call_tool!(
+			private,
+			"find_issues",
+			serde_json::json!({ "application_id": MAPP_A })
+		);
+		let refs: Vec<&str> = for_app["issues"]
+			.as_array()
+			.expect("issues")
+			.iter()
+			.map(|i| i["ref"].as_str().unwrap())
+			.collect();
+		assert!(
+			refs.contains(&"disk") && refs.contains(&"ver"),
+			"the box's disk and the software's version both: {refs:?}"
+		);
+
+		// And each says whose failure it is.
+		let disk = for_app["issues"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|i| i["ref"] == "disk")
+			.expect("the disk issue");
+		assert_eq!(disk["scope"]["grain"], "machine");
+		assert_eq!(disk["scope"]["name"], "box-one");
+
+		// The machine's own view is the box's checks only.
+		let for_machine = call_tool!(
+			private,
+			"find_issues",
+			serde_json::json!({ "machine_id": MACHINE })
+		);
+		let machine_refs: Vec<&str> = for_machine["issues"]
+			.as_array()
+			.expect("issues")
+			.iter()
+			.map(|i| i["ref"].as_str().unwrap())
+			.collect();
+		assert_eq!(
+			machine_refs,
+			vec!["disk"],
+			"asking what is wrong with the box does not answer about its software"
+		);
+
+		// The other workload on the same box sees the disk too: it is that
+		// box's failure, and both workloads run on it.
+		let for_sibling = call_tool!(
+			private,
+			"find_issues",
+			serde_json::json!({ "application_id": MAPP_B })
+		);
+		assert!(
+			for_sibling["issues"]
+				.as_array()
+				.unwrap()
+				.iter()
+				.any(|i| i["ref"] == "disk")
+		);
 	})
 	.await
 }

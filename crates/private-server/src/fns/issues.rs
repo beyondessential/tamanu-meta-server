@@ -26,9 +26,17 @@ const DEFAULT_LIMIT: i64 = 100;
 pub struct IssueData {
 	/// Unique identifier for this issue.
 	pub id: Uuid,
-	/// The server this issue was raised against. Absent for issues that
-	/// apply to a whole group of applications rather than a single one.
+	/// The application this issue was raised against. Absent for an issue
+	/// filed at any other grain — a machine's, a group's, or Canopy's own.
 	pub application_id: Option<Uuid>,
+	/// The machine this issue was raised against, for one filed at machine
+	/// scope. Exactly one of this and `application_id` is set on a
+	/// target-scoped issue; both are absent on a group or Canopy-wide one.
+	// spec: MCP#incidents-and-issues
+	pub machine_id: Option<Uuid>,
+	/// Display name of the affected machine, when one is set and the issue is
+	/// the machine's.
+	pub machine_name: Option<String>,
 	/// Display name of the affected server, when one is set. Falls back to
 	/// `server_host` when absent.
 	pub server_name: Option<String>,
@@ -126,6 +134,7 @@ impl From<IssueIncidentRef> for IssueIncidentLink {
 struct IssueEnrichment<'a> {
 	server_name: Option<String>,
 	server_host: String,
+	machine_name: Option<String>,
 	server_group_id: Option<Uuid>,
 	server_group_name: Option<String>,
 	users: &'a std::collections::HashMap<String, CachedTailscaleUser>,
@@ -138,6 +147,8 @@ impl IssueData {
 		Self {
 			id: i.id,
 			application_id: i.application_id,
+			machine_id: i.machine_id,
+			machine_name: e.machine_name,
 			server_name: e.server_name,
 			server_host: e.server_host,
 			server_group_id: e.server_group_id,
@@ -191,16 +202,25 @@ fn collect_user_logins(issues: &[Issue]) -> Vec<&str> {
 	s.into_iter().collect()
 }
 
-/// Enrich a list of issues with their server names/hosts, acker/resolver
-/// display info, and the incidents each issue is attached to. Three extra
-/// batch queries (applications, users, incidents).
+/// Enrich a list of issues with their target's name and group, acker/resolver
+/// display info, and the incidents each issue is attached to.
+///
+/// Both target grains are resolved: a machine-scoped issue names its machine
+/// and that machine's group, as an application-scoped one names its
+/// application's. Reading only `application_id` left every machine check —
+/// maintenance, restore verification, redaction, and the machine-subject
+/// checks — displaying with no name, host, or deployment against it.
+// spec: MCP#incidents-and-issues
 pub(crate) async fn enrich_issues(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	issues: Vec<Issue>,
 ) -> Result<Vec<IssueData>> {
 	let server_ids: Vec<Uuid> = issues.iter().filter_map(|i| i.application_id).collect();
+	let machine_ids: Vec<Uuid> = issues.iter().filter_map(|i| i.machine_id).collect();
 	let names = Application::names_by_ids(conn, &server_ids).await?;
 	let group_refs = Application::group_refs_by_server_ids(conn, &server_ids).await?;
+	let machine_names = database::machines::Machine::names_by_ids(conn, &machine_ids).await?;
+	let machine_groups = database::machines::Machine::group_refs_by_ids(conn, &machine_ids).await?;
 	let user_logins = collect_user_logins(&issues);
 	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
 	let issue_ids: Vec<Uuid> = issues.iter().map(|i| i.id).collect();
@@ -212,10 +232,17 @@ pub(crate) async fn enrich_issues(
 				.application_id
 				.and_then(|sid| names.get(&sid).cloned())
 				.unwrap_or((None, None));
-			let (group_id, group_name) = i
-				.application_id
-				.and_then(|sid| group_refs.get(&sid).cloned())
-				.unwrap_or((None, None));
+			// A machine's issue answers to its machine's group, so the
+			// deployment is named either way.
+			let (group_id, group_name) = match (i.application_id, i.machine_id) {
+				(Some(sid), _) => group_refs.get(&sid).cloned().unwrap_or((None, None)),
+				(None, Some(mid)) => machine_groups.get(&mid).cloned().unwrap_or((None, None)),
+				(None, None) => (None, None),
+			};
+			let machine_name = i
+				.machine_id
+				.and_then(|mid| machine_names.get(&mid).cloned())
+				.flatten();
 			let links = incidents
 				.remove(&i.id)
 				.unwrap_or_default()
@@ -227,6 +254,7 @@ pub(crate) async fn enrich_issues(
 				IssueEnrichment {
 					server_name: name,
 					server_host: host.unwrap_or_default(),
+					machine_name,
 					server_group_id: group_id,
 					server_group_name: group_name,
 					users: &users,
@@ -237,42 +265,19 @@ pub(crate) async fn enrich_issues(
 		.collect())
 }
 
-/// Same as `enrich_issues` but for a single issue.
+/// Same as [`enrich_issues`] but for a single issue.
+///
+/// Delegates rather than repeating the resolution: the two paths drifted apart
+/// once already, which is how a machine-scoped issue could come back enriched
+/// from one entry point and bare from the other.
 pub(crate) async fn enrich_issue(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	issue: Issue,
 ) -> Result<IssueData> {
-	let server_ids: Vec<Uuid> = issue.application_id.into_iter().collect();
-	let mut names = Application::names_by_ids(conn, &server_ids).await?;
-	let (name, host) = issue
-		.application_id
-		.and_then(|sid| names.remove(&sid))
-		.unwrap_or((None, None));
-	let mut group_refs = Application::group_refs_by_server_ids(conn, &server_ids).await?;
-	let (group_id, group_name) = issue
-		.application_id
-		.and_then(|sid| group_refs.remove(&sid))
-		.unwrap_or((None, None));
-	let user_logins = collect_user_logins(std::slice::from_ref(&issue));
-	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
-	let mut incidents = Incident::for_issues(conn, &[issue.id]).await?;
-	let links = incidents
-		.remove(&issue.id)
-		.unwrap_or_default()
-		.into_iter()
-		.map(IssueIncidentLink::from)
-		.collect();
-	Ok(IssueData::from_with(
-		issue,
-		IssueEnrichment {
-			server_name: name,
-			server_host: host.unwrap_or_default(),
-			server_group_id: group_id,
-			server_group_name: group_name,
-			users: &users,
-			incidents: links,
-		},
-	))
+	enrich_issues(conn, vec![issue])
+		.await?
+		.pop()
+		.ok_or_else(|| AppError::NotFound("issue".into()))
 }
 
 pub fn routes() -> OpenApiRouter<AppState> {
@@ -347,6 +352,7 @@ pub async fn list(
 			results: args.results,
 			server_group_id: args.server_group_id,
 			application_id: None,
+			machine_id: None,
 			since: None,
 		},
 		args.limit.unwrap_or(DEFAULT_LIMIT),

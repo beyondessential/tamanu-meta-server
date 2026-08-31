@@ -263,10 +263,14 @@ pub struct IssueListFilters {
 	pub active_only: bool,
 	/// Restrict to issues whose latest effective result is one of these.
 	pub results: Option<Vec<CheckResult>>,
-	/// Restrict to issues whose server belongs to this group.
+	/// Restrict to issues whose target belongs to this group.
 	pub server_group_id: Option<Uuid>,
-	/// Restrict to issues raised against this server.
+	/// Restrict to issues raised against this application, together with those
+	/// of the machine it runs on: a box's disk filling is the application's
+	/// problem too, and is presented against it (see CHK, "Health rollup").
 	pub application_id: Option<Uuid>,
+	/// Restrict to issues raised against this machine, its own only.
+	pub machine_id: Option<Uuid>,
 	/// When `Some`, restrict to issues last seen at or after this time.
 	pub since: Option<Timestamp>,
 }
@@ -1539,6 +1543,107 @@ pub async fn health_from_check_state(
 	Ok(contributing
 		.into_iter()
 		.map(|(application_id, results)| (application_id, HealthState::from_results(results)))
+		.collect())
+}
+
+/// The same rollup for machines, from the checks filed at machine scope.
+///
+/// A sibling of [`health_from_check_state`] rather than a generalisation of it:
+/// the query differs only in which column names the target, and both end at
+/// `HealthState::from_results`, so the two grains classify identically. A
+/// machine's own health is its own checks; what an application makes of its
+/// machine's checks is the application's rollup (see CHK, "Health rollup").
+// spec: CHK#health-rollup
+pub async fn machine_health_from_check_state(
+	conn: &mut AsyncPgConnection,
+	machines: &[(Uuid, Option<Uuid>)],
+) -> Result<std::collections::HashMap<Uuid, commons_types::status::HealthState>> {
+	use crate::schema::{issues, scoped_check_policies};
+	use commons_types::status::HealthState;
+	use std::collections::{HashMap, HashSet};
+
+	if machines.is_empty() {
+		return Ok(HashMap::new());
+	}
+	let machine_ids: Vec<Uuid> = machines.iter().map(|(id, _)| *id).collect();
+	let group_of: HashMap<Uuid, Option<Uuid>> = machines.iter().copied().collect();
+
+	let rows: Vec<HealthCheckRow> = issues::table
+		.select((
+			issues::machine_id,
+			issues::source,
+			issues::check_name,
+			issues::effective_result,
+		))
+		.filter(issues::machine_id.eq_any(&machine_ids))
+		.filter(issues::check_name.is_not_null())
+		.filter(issues::effective_result.is_not_null())
+		.filter(issues::active.eq(true))
+		.filter(issues::resolved_at.is_null())
+		.load(conn)
+		.await?;
+
+	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_pairs(conn).await?;
+
+	let group_ids: Vec<Uuid> = group_of.values().filter_map(|g| *g).collect();
+	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
+		scoped_check_policies::table
+			.select((
+				scoped_check_policies::machine_id,
+				scoped_check_policies::server_group_id,
+				scoped_check_policies::source,
+				scoped_check_policies::check_name,
+			))
+			.filter(scoped_check_policies::ceiling.eq("skipped"))
+			.filter(
+				scoped_check_policies::machine_id
+					.eq_any(&machine_ids)
+					.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
+			)
+			.load(conn)
+			.await?;
+	let mut machine_silences: HashSet<(Uuid, String, String)> = HashSet::new();
+	let mut group_silences: HashSet<(Uuid, String, String)> = HashSet::new();
+	for (machine_id, group_id, source, check) in silence_rows {
+		if let Some(mid) = machine_id {
+			machine_silences.insert((mid, source, check));
+		} else if let Some(gid) = group_id {
+			group_silences.insert((gid, source, check));
+		}
+	}
+
+	let mut contributing: HashMap<Uuid, Vec<CheckResult>> = HashMap::new();
+	for (machine_id, source, check_name, effective) in rows {
+		let Some(machine_id) = machine_id else {
+			continue;
+		};
+		let Some(check_name) = check_name else {
+			continue;
+		};
+		let key = (machine_id, source, check_name);
+		if !cataloged.contains(&(key.1.clone(), key.2.clone())) {
+			continue;
+		}
+		if machine_silences.contains(&key) {
+			continue;
+		}
+		if let Some(Some(gid)) = group_of.get(&machine_id)
+			&& group_silences.contains(&(*gid, key.1.clone(), key.2.clone()))
+		{
+			continue;
+		}
+		let Some(result) = effective
+			.as_deref()
+			.and_then(|e| e.parse::<CheckResult>().ok())
+		else {
+			continue;
+		};
+		contributing.entry(machine_id).or_default().push(result);
+	}
+
+	Ok(contributing
+		.into_iter()
+		.map(|(machine_id, results)| (machine_id, HealthState::from_results(results)))
 		.collect())
 }
 
@@ -3255,12 +3360,14 @@ impl Issue {
 
 		let mut q = dsl::issues
 			.select(Self::as_select())
-			// Canopy-wide issues (self-alerts: neither server- nor
-			// group-scoped) have their own surface (`crate::self_alerts`);
-			// they are not fleet issues.
+			// Canopy-wide issues (self-alerts: scoped to no target at all)
+			// have their own surface (`crate::self_alerts`); they are not
+			// fleet issues. A machine-scoped issue is one, and reading only
+			// the application and group columns hid every machine check.
 			.filter(
 				dsl::application_id
 					.is_not_null()
+					.or(dsl::machine_id.is_not_null())
 					.or(dsl::server_group_id.is_not_null()),
 			)
 			// Healthy check state (rows that never degraded) isn't an
@@ -3277,15 +3384,44 @@ impl Issue {
 			q = q.filter(dsl::effective_result.eq_any(strs));
 		}
 		if let Some(gid) = filters.server_group_id {
+			// A group's issues are its applications', its machines', and its
+			// own. Collecting only applications dropped every machine check
+			// from a group's view.
 			let server_ids: Vec<Uuid> = applications::table
 				.select(applications::id)
 				.filter(applications::group_id.eq(gid))
 				.load(db)
 				.await?;
-			q = q.filter(dsl::application_id.eq_any(server_ids));
+			let machine_ids: Vec<Uuid> = crate::schema::machines::table
+				.select(crate::schema::machines::id)
+				.filter(crate::schema::machines::group_id.eq(gid))
+				.load(db)
+				.await?;
+			q = q.filter(
+				dsl::application_id
+					.eq_any(server_ids)
+					.or(dsl::machine_id.eq_any(machine_ids))
+					.or(dsl::server_group_id.eq(gid)),
+			);
 		}
 		if let Some(sid) = filters.application_id {
-			q = q.filter(dsl::application_id.eq(sid));
+			// The machine's issues come with the application's, which is what
+			// the application's own detail page presents.
+			// spec: MCP#incidents-and-issues
+			let machine_id: Option<Uuid> = applications::table
+				.select(applications::machine_id)
+				.filter(applications::id.eq(sid))
+				.first(db)
+				.await
+				.optional()?;
+			q = q.filter(
+				dsl::application_id.eq(sid).or(dsl::machine_id
+					.is_not_distinct_from(machine_id)
+					.and(dsl::machine_id.is_not_null())),
+			);
+		}
+		if let Some(mid) = filters.machine_id {
+			q = q.filter(dsl::machine_id.eq(mid));
 		}
 		if let Some(since) = filters.since {
 			q = q.filter(dsl::last_seen.ge(jiff_diesel::Timestamp::from(since)));

@@ -122,6 +122,11 @@ struct ServerDetail {
 	id: Uuid,
 	name: Option<String>,
 	host: Option<String>,
+	/// The box this application runs on. Ask `get_machine` about it for the
+	/// platform, hardware, addresses, and backup capability, which are the
+	/// machine's rather than this application's.
+	// spec: MCP#detail
+	machine_id: Uuid,
 	/// The application the server runs.
 	product: Product,
 	kind: ServerKind,
@@ -333,6 +338,7 @@ impl CanopyMcp {
 			id: server.id,
 			name: server.name.clone(),
 			host: server.host.as_ref().map(|h| h.0.to_string()),
+			machine_id: server.machine_id,
 			product: server.product,
 			kind: server.kind,
 			rank: server.rank,

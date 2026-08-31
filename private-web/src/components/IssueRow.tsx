@@ -167,8 +167,20 @@ function Header({
 						}
 					/>
 				</MuiLink>
+			) : issue.machine_id != null ? (
+				// A machine's issue: the box's own, so it names the box rather
+				// than reading as group-wide. No link yet — the machine detail
+				// page arrives with the frontend step.
+				// spec: CHK#reachability
+				<Box sx={{ fontWeight: 500, flexShrink: 0 }}>
+					<ServerNameWithGroup
+						groupName={issue.server_group_name}
+						groupId={issue.server_group_id ?? undefined}
+						serverName={issue.machine_name?.trim() || "(machine)"}
+					/>
+				</Box>
 			) : (
-				// Group-scoped issue (no server): link the group instead of a
+				// Group-scoped issue (no target): link the group instead of a
 				// bogus `/servers/null`. Falls back to a plain label when the
 				// issue carries no group name.
 				<Box sx={{ fontWeight: 500, flexShrink: 0 }}>

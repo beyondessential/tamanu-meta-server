@@ -6309,8 +6309,8 @@ export interface components {
             active: boolean;
             /**
              * Format: uuid
-             * @description The server this issue was raised against. Absent for issues that
-             *     apply to a whole group of applications rather than a single one.
+             * @description The application this issue was raised against. Absent for an issue
+             *     filed at any other grain — a machine's, a group's, or Canopy's own.
              */
             application_id?: string | null;
             /**
@@ -6363,6 +6363,18 @@ export interface components {
              * @description When the most recent event for this issue was recorded.
              */
             last_seen: string;
+            /**
+             * Format: uuid
+             * @description The machine this issue was raised against, for one filed at machine
+             *     scope. Exactly one of this and `application_id` is set on a
+             *     target-scoped issue; both are absent on a group or Canopy-wide one.
+             */
+            machine_id?: string | null;
+            /**
+             * @description Display name of the affected machine, when one is set and the issue is
+             *     the machine's.
+             */
+            machine_name?: string | null;
             /** @description Latest human-readable message describing the issue's state. */
             message: string;
             /** @description The result the source reported on the latest filing, before policy. */

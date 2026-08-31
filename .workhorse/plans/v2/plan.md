@@ -18,7 +18,7 @@ Each item is a section below; the section carries the detail and the traps.
 - [x] **Maintenance windows take the machine** — arrived from main mid-split; moved onto the machine grain
 - [x] **Restore replicas** — declarations move grain; `migration-test` stays application-scoped
 - [x] **Retiring the graded reachability states** — `short_status`'s hardcoded thresholds
-- [ ] **Fleet query interface** — MCP gains `Get machine` and `Find machines`
+- [x] **Fleet query interface** — MCP gains `Get machine` and `Find machines`
 - [ ] **Migration** — `{product, kind}` becomes `{type}`
 - [ ] **Frontend** — two detail pages, the group tree, the status-page bands
 - [ ] **Routes** — deprecation aliases for every renamed path
@@ -29,7 +29,7 @@ Carried deferrals, each gated on a step above rather than on a vague later:
 - [x] Add `machine_id` to the `Application` struct — done with the operator/enrolment surface
 - [ ] **Backup tables take the machine grain** — `backup_runs`, `backup_repo_snapshots`, `server_backup_capabilities` and friends still key on the application that reported them. The rename step deferred them; nothing has claimed them since. Restore replicas now reach a machine's snapshot through a join that exists only because of this, and BAK already says a backup is a machine's
 - [ ] Separate "never reported" from "reported long ago" — `Status::latest_for_servers` looks back seven days for performance, so a target silent longer returns no row and reads as never reported (grey) rather than unreachable (red). Pre-existing, and sharper now the states are three: the fix is a cheap "has this ever reported" fact rather than widening the scan
-- [ ] Carry the machine on `IssueData` — with **Fleet query interface** / **Frontend**, whichever presents machine checks first
+- [x] Carry the machine on `IssueData` — done with the fleet query interface, which is what presented machine checks first
 - [ ] Link a machine's maintenance window to its detail page — with **Frontend**, which is what creates that page. The fleet maintenance view renders a machine target as plain text until then rather than linking somewhere that 404s
 
 ## Sequencing
@@ -278,6 +278,22 @@ The MCP surface gains a grain rather than being renamed through (see [MCP](../..
 - `Get incident` reports each issue's scope, so a client can tell a box's failure from its software's.
 
 These regenerate into `private-web/openapi.json` and `src/api-types.ts` via `just gen-openapi` like any other handler change.
+
+### Fleet query interface: done
+
+`find_machines` and `get_machine` are new, with the figures split along the same axis as the reported detail: platform, hostname, processor count, memory, uptime, filesystems and addresses to the machine; version and database engine to the application. Each side names the other, and the client-visible instructions now open by saying machines and applications are different things and which to ask about what.
+
+An issue's target became one tagged `scope` rather than a row of nullable ids, which is what the spec asks for ("the scope it is filed at and what that scope names"). A client cannot read a machine's failure as unattributed because `application_id` was null.
+
+**Three bugs, not one refactor.** Machine checks had been filing since the ingest step, and nothing read them:
+
+- `Issue::list` excluded them from the fleet issue list outright. Its "not canopy-wide" guard was `application_id IS NOT NULL OR server_group_id IS NOT NULL`, and a machine issue has both null — so every maintenance, restore-verification, redaction and machine-subject finding was invisible.
+- The group filter collected only a group's applications, so a group's view dropped its machines' issues too.
+- `enrich_issues` resolved names from `application_id` alone, so a machine issue rendered with no name, host, or deployment. `enrich_issue` had its own copy of that logic and now delegates, since the two had already drifted.
+
+`IssueRow` renders a machine's issue by its machine instead of falling through to "(group-wide)". No link yet: the machine detail page arrives with the frontend step.
+
+`machine_health_from_check_state` is a sibling of the application rollup rather than a generalisation — the queries differ only in which column names the target, and both end at `HealthState::from_results`, so the grains cannot classify differently.
 
 ## Restore replicas
 

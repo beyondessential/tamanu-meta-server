@@ -26,6 +26,7 @@ mod backups;
 mod fleet;
 mod groups;
 mod incidents;
+mod machines;
 mod restore;
 mod upgrade_plans;
 mod util;
@@ -53,6 +54,7 @@ impl CanopyMcp {
 		Self {
 			db,
 			tool_router: Self::applications_router()
+				+ Self::machines_router()
 				+ Self::groups_router()
 				+ Self::versions_router()
 				+ Self::fleet_router()
@@ -73,10 +75,18 @@ impl ServerHandler for CanopyMcp {
 	fn get_info(&self) -> ServerInfo {
 		let mut info = ServerInfo::default();
 		info.instructions = Some(
-			"Read-only access to the Canopy fleet: applications, groups, health/status, Tamanu \
-			 versions, planned upgrades, backups, and incidents/issues. All data is live. Use \
-			 find_* to locate entities and get_* for detail; fleet_summary and \
+			"Read-only access to the Canopy fleet: machines, applications, groups, health/status, \
+			 Tamanu versions, planned upgrades, backups, and incidents/issues. All data is live. \
+			 Use find_* to locate entities and get_* for detail; fleet_summary and \
 			 find_backup_problems for triage.\n\n\
+			 Machines and applications are different things and both are queryable. A machine is \
+			 the box; an application is the software running on it, and a box can carry more than \
+			 one. Ask about a machine (find_machines, get_machine) for platform, disks, memory, \
+			 clock, addresses, and backups, which belong to the box. Ask about an application \
+			 (find_servers, get_server) for its version, database engine, and product role. Each \
+			 result names the other side, so you can move between them without searching. An \
+			 issue carries a `scope` saying which of the two it is about, and a machine's checks \
+			 also count toward the health of every application on it.\n\n\
 			 Upgrade plans: a plan is a group's recorded intention to move to a version. A \
 			 planned date is a plan rather than a deadline, so one that has passed (`late`) is \
 			 normal operational reality rather than an incident. list_upgrade_plans gives what \

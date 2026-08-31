@@ -130,10 +130,11 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 
 ## Fleet query interface
 
-- [ ] `Get machine` returns platform and hardware figures; `Get application` returns version and database engine (verifies spec: MCP)
-- [ ] `Find machines` returns machines with their application counts (verifies spec: MCP)
-- [ ] `Find issues` filtered by application returns the machine's issues among the application's own (verifies spec: MCP)
-- [ ] `Get incident` reports each issue's scope (verifies spec: MCP)
+- [x] `Get machine` returns platform and hardware figures; `Get application` returns version and database engine (verifies spec: MCP)
+- [x] `Find machines` returns machines with their application counts (verifies spec: MCP)
+- [x] `Find issues` filtered by application returns the machine's issues among the application's own (verifies spec: MCP)
+- [x] `Get incident` reports each issue's scope (verifies spec: MCP)
+- [x] A machine's issue names its machine rather than reading as group-wide (verifies spec: MCP)
 - [ ] MCP health classifications match what the operator UI presents for the same machine or application (verifies spec: MCP)
 
 ## Migration

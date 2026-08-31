@@ -11566,7 +11566,7 @@
               "null"
             ],
             "format": "uuid",
-            "description": "The server this issue was raised against. Absent for issues that\napply to a whole group of applications rather than a single one."
+            "description": "The application this issue was raised against. Absent for an issue\nfiled at any other grain — a machine's, a group's, or Canopy's own."
           },
           "check_name": {
             "type": [
@@ -11630,6 +11630,21 @@
             "type": "string",
             "format": "date-time",
             "description": "When the most recent event for this issue was recorded."
+          },
+          "machine_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The machine this issue was raised against, for one filed at machine\nscope. Exactly one of this and `application_id` is set on a\ntarget-scoped issue; both are absent on a group or Canopy-wide one."
+          },
+          "machine_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name of the affected machine, when one is set and the issue is\nthe machine's."
           },
           "message": {
             "type": "string",

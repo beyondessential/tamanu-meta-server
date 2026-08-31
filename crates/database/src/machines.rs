@@ -311,6 +311,36 @@ impl Machine {
 		Ok(rows.into_iter().collect())
 	}
 
+	/// Bulk-fetch `(group_id, group_name)` for a set of machine ids, so a
+	/// surface listing machine-scoped rows can name the deployment each belongs
+	/// to without a query per row.
+	pub async fn group_refs_by_ids(
+		db: &mut AsyncPgConnection,
+		ids: &[Uuid],
+	) -> Result<std::collections::HashMap<Uuid, (Option<Uuid>, Option<String>)>> {
+		use crate::schema::{machines, server_groups};
+		use std::collections::HashMap;
+
+		if ids.is_empty() {
+			return Ok(HashMap::new());
+		}
+		let rows: Vec<(Uuid, Option<Uuid>, Option<String>)> = machines::table
+			.left_join(server_groups::table.on(server_groups::id.nullable().eq(machines::group_id)))
+			.select((
+				machines::id,
+				machines::group_id,
+				server_groups::name.nullable(),
+			))
+			.filter(machines::id.eq_any(ids))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(rows
+			.into_iter()
+			.map(|(id, gid, gn)| (id, (gid, gn)))
+			.collect())
+	}
+
 	/// The applications running on this machine.
 	pub async fn applications(
 		&self,
