@@ -209,7 +209,18 @@ async fn a_name_is_a_tag_or_a_secret_and_never_both() {
 			.await
 			.assert_status_ok();
 
-		// And the other way round: the tag write is the one refused.
+		// A group tag collides at any rank under it, the group's tags reaching
+		// every environment in it.
+		private
+			.post("/api/server_groups/update")
+			.json(&json!({
+				"server_group_id": group,
+				"data": { "tags": { "salt": "in-the-clear" } },
+			}))
+			.await
+			.assert_status_bad_request();
+
+		// And the other way round: the server tag write is refused too.
 		private
 			.post("/api/servers/update")
 			.json(&json!({

@@ -274,12 +274,13 @@ function Secrets({
 	if (items.length === 0) return null;
 
 	return (
-		<Stack
-			direction="row"
-			spacing={0.5}
-			useFlexGap
-			sx={{ flexWrap: "wrap", mt: 0.5 }}
-		>
+		<>
+			<Stack
+				direction="row"
+				spacing={0.5}
+				useFlexGap
+				sx={{ flexWrap: "wrap", mt: 0.5 }}
+			>
 			{items.map((variable) => (
 				<Tooltip
 					key={variable.id}
@@ -300,7 +301,9 @@ function Secrets({
 										remove
 											.call({ ...scope, name: variable.name })
 											.then(onRemove)
-											.catch(() => {});
+											.catch(() => {
+												// Surfaced by the alert below.
+											});
 									}
 								: undefined
 						}
@@ -313,7 +316,13 @@ function Secrets({
 					/>
 				</Tooltip>
 			))}
-		</Stack>
+			</Stack>
+			{remove.error && (
+				<Alert severity="warning" sx={{ mt: 1 }}>
+					{remove.error.message}
+				</Alert>
+			)}
+		</>
 	);
 }
 
