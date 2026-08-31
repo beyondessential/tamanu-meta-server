@@ -1,5 +1,5 @@
 ---
-status: draft
+status: complete
 ---
 
 # Split the core model: machines, application servers, and identities
@@ -565,7 +565,7 @@ A group with several applications of one type shows that name repeated, distingu
 The tree does that for free by nesting them; a flat listing would not, and is a reason to name them.
 
 Removing kind reaches one rule that leaned on it.
-A group's headline version came from its canonical member, chosen as the highest-ranked live member with kind breaking a tie in the order central, then facility, then standalone (see [APP](../../specs/servers/products.md)).
+A group's headline version came from its canonical member, chosen as the highest-ranked live member with kind breaking a tie in the order central, then facility, then standalone (see [APP](../../specs/servers/application-types.md)).
 
 The replacement names the thing directly rather than ranking types against each other: a group's version is the application version of the `tamanu-central` on its highest-ranked machine.
 A deployment's version is its central's version, and saying so is clearer than a precedence order that happens to put centrals first.

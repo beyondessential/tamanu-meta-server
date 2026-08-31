@@ -244,7 +244,7 @@ Where a chain does break, the failing migration named in the report identifies t
 Only a published version is a candidate, because a version's migrations reach a consumer as its published artefacts, and an unpublished version has none to fetch.
 Publication is what makes a version testable and what makes it reachable by a server, so the two arrive together.
 
-Only a server running Tamanu has candidates, because the migrations under test are Tamanu's and no other product's server has an upgrade path through them.
+Only an application running Tamanu has candidates, because the migrations under test are Tamanu's and no other type has an upgrade path through them.
 A server with no successful backup of a restorable type has no candidates either, because there is nothing to restore and migrate.
 
 Testing therefore sits between a version being available and a deployment being told to take it.
@@ -256,7 +256,7 @@ That window is where the answer is still cheap: the fleet is not moving yet, and
 It carries `check` alongside, so a single restore reports the replica's health and the migrations' outcome as two signals from one report.
 
 An intent carrying `migrate` is withheld from a server with no candidate version.
-An intent that verifies backups therefore does not also migrate: it would go undispatched for every server without a candidate, leaving the backups of any non-Tamanu product, and of every deployment with no plan open, unverified.
+An intent that verifies backups therefore does not also migrate: it would go undispatched for every server without a candidate, leaving the backups of any non-Tamanu application, and of every deployment with no plan open, unverified.
 An intent that keeps a replica queryable does not migrate either: a migrated replica sits at a version its deployment is not running, so a declaration promoted to it would give an operator a schema that does not match production.
 
 A verifying intent and a migrating intent restore the same snapshot separately.
@@ -328,14 +328,14 @@ Whether a replica redacts is therefore answered by its declaration alone, which 
 
 ### The masking manifest
 
-What to mask is a property of the product being restored (see [APP](../servers/products.md)) rather than a choice the operator makes per replica.
+What to mask is a property of the product being restored (see [APP](../servers/application-types.md)) rather than a choice the operator makes per replica.
 A *masking manifest* names the columns to mask and how each is masked, and a product Canopy can redact publishes one per version.
 
 Canopy holds, for each such product, the location of its manifests as a template naming the version, together with the query that reads a deployment's own version out of the restored data.
 Canopy resolves these settings into the worklist entry as it is dispatched, so a change to where a product publishes its manifests reaches every redacting replica without an operator revisiting a declaration.
 The consumer resolves the version against the data it restored — the version of the snapshot, which is not necessarily the version the server reports running now — and fetches the manifest for it.
 
-A redacting declaration contributes no worklist entry for a server whose product has no manifest, and that server surfaces as a gap on the declaration.
+A redacting declaration contributes no worklist entry for an application whose type has no manifest, and that application surfaces as a gap on the declaration.
 A replica that cannot be redacted is not restored at all: an unredacted replica standing in for a redacted one is worse than no replica.
 
 Canopy corroborates a product's manifest template against the published artefacts it already holds per version.

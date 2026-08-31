@@ -52,9 +52,9 @@ Results carry resolved human-readable labels (such as group and server names) al
 
 ### Discovery
 
-**Find servers** takes an optional free-text term (matched against name, host, or identifier) and optional filters for product, kind, rank, and group, plus a flag to include archived servers.
-It returns a bounded list of matching servers in compact form — identifier, name, host, product, kind, rank, owning group, when each was last seen, its last known version, and its current health.
-A server whose product has no application version carries no version here (see [APP](../servers/products.md)).
+**Find applications** takes an optional free-text term (matched against name, URL, or identifier) and optional filters for type, rank, and group, plus a flag to include archived applications.
+It returns a bounded list of matching applications in compact form — identifier, name, URL, type, rank, owning group, the machine it runs on, when each was last seen, its last known version, and its current health.
+A server whose product has no application version carries no version here (see [APP](../servers/application-types.md)).
 When the result is truncated to its bound, the result says so, so the client does not mistake a partial list for the whole.
 
 **Find groups** takes an optional free-text term and returns the matching groups, each with its live member count, its effective version, the highest rank among its members, its backup configuration state, and when it last backed up.
@@ -80,7 +80,7 @@ A plan carries the operator who recorded it, who last amended it, and who withdr
 
 ### Fleet triage
 
-**Fleet summary** takes no input and returns a fleet-wide overview: server counts by product, kind and rank, the distribution of deployed versions, a rollup of server health, the number of groups, and a rollup of backup health.
+**Fleet summary** takes no input and returns a fleet-wide overview: application counts by type and rank, machine counts, the distribution of deployed versions, a rollup of application health, the number of groups, and a rollup of backup health.
 
 **Find backup problems** optionally narrows to one group, otherwise scans the whole fleet, and returns the current backup problems graded by urgency: server-and-type pairs whose last successful backup is overdue against its schedule, types that have never reported a backup, groups whose backup repository is in an error state, recent failed backup runs, and maintenance runs that appear stuck.
 

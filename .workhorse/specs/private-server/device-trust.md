@@ -4,7 +4,9 @@ id: DTR
 
 # Device trust model
 
-Every device Canopy records holds a role that grants access: administrator, server, releaser, or backup-restore.
+Every identity Canopy records holds a role that grants access: administrator, machine, releaser, backup-restore, or relay.
+The role names what the identity authenticates, so a machine role belongs to a box rather than to the software on it (see [FLT](../servers/overview.md), "Identities").
+Enrolment inputs accept `server` as an alias for the machine role, so an agent deployed before the rename keeps working.
 There is no untrusted or pending state.
 A device exists only because a deliberate act created it, and that act records the device at its role from the outset.
 
