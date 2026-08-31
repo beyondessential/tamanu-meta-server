@@ -4184,6 +4184,7 @@
           "inventory"
         ],
         "summary": "Forget a secret variable, value and all.",
+        "description": "The declaration goes first, so a value the secret store will not let go of\nleaves nothing behind that would refuse every later read of the inventory.",
         "operationId": "inventory_secrets_remove",
         "requestBody": {
           "content": {
@@ -11232,7 +11233,8 @@
         "properties": {
           "created_at": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "When the name was first set here."
           },
           "id": {
             "type": "string",
@@ -11279,7 +11281,8 @@
           },
           "updated_at": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "When its value was last replaced."
           }
         }
       },

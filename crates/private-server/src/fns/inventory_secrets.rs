@@ -169,6 +169,9 @@ pub async fn set(
 }
 
 /// Forget a secret variable, value and all.
+///
+/// The declaration goes first, so a value the secret store will not let go of
+/// leaves nothing behind that would refuse every later read of the inventory.
 #[utoipa::path(
 	post,
 	path = "/remove",

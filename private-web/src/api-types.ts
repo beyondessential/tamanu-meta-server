@@ -2099,7 +2099,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Forget a secret variable, value and all. */
+        /**
+         * Forget a secret variable, value and all.
+         * @description The declaration goes first, so a value the secret store will not let go of
+         *     leaves nothing behind that would refuse every later read of the inventory.
+         */
         post: operations["inventory_secrets_remove"];
         delete?: never;
         options?: never;
@@ -6090,7 +6094,10 @@ export interface components {
          *     set it.
          */
         InventorySecretVariable: {
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When the name was first set here.
+             */
             created_at: string;
             /**
              * Format: uuid
@@ -6112,7 +6119,10 @@ export interface components {
             server_id?: string | null;
             /** @description The login that last set the value. */
             set_by?: string | null;
-            /** Format: date-time */
+            /**
+             * Format: date-time
+             * @description When its value was last replaced.
+             */
             updated_at: string;
         };
         /**

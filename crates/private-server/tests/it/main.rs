@@ -17,6 +17,7 @@ mod group_card_version;
 mod health;
 mod healthchecks;
 mod inventory;
+mod inventory_secrets;
 mod issues;
 mod mcp;
 mod migration_tests;

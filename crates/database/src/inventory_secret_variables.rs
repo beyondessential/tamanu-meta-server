@@ -31,8 +31,10 @@ pub struct InventorySecretVariable {
 	pub name: String,
 	/// The login that last set the value.
 	pub set_by: Option<String>,
+	/// When the name was first set here.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp)]
 	pub created_at: Timestamp,
+	/// When its value was last replaced.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp)]
 	pub updated_at: Timestamp,
 }

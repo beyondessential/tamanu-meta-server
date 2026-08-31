@@ -8,7 +8,7 @@ use commons_tests::diesel_async::{AsyncPgConnection, SimpleAsyncConnection};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-async fn insert_group(conn: &mut AsyncPgConnection, name: &str, tags: Value) -> Uuid {
+pub(crate) async fn insert_group(conn: &mut AsyncPgConnection, name: &str, tags: Value) -> Uuid {
 	let id = Uuid::new_v4();
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name, tags) VALUES ('{id}', '{name}', '{tags}')"
@@ -18,7 +18,7 @@ async fn insert_group(conn: &mut AsyncPgConnection, name: &str, tags: Value) -> 
 	id
 }
 
-async fn insert_server(
+pub(crate) async fn insert_server(
 	conn: &mut AsyncPgConnection,
 	group: Uuid,
 	name: &str,
@@ -29,7 +29,7 @@ async fn insert_server(
 	insert_ranked_server(conn, group, name, kind, None, host, tags).await
 }
 
-async fn insert_ranked_server(
+pub(crate) async fn insert_ranked_server(
 	conn: &mut AsyncPgConnection,
 	group: Uuid,
 	name: &str,
@@ -50,7 +50,7 @@ async fn insert_ranked_server(
 	id
 }
 
-async fn bind_device(conn: &mut AsyncPgConnection, server: Uuid, tailscale_name: &str) {
+pub(crate) async fn bind_device(conn: &mut AsyncPgConnection, server: Uuid, tailscale_name: &str) {
 	let device = Uuid::new_v4();
 	conn.batch_execute(&format!(
 		"INSERT INTO devices (id, role, tailscale_node_name)
