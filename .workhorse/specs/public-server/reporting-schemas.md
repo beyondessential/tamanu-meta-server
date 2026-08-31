@@ -89,18 +89,10 @@ Reports are retained indefinitely as an audit trail.
 
 ## The artefact
 
-A reporting schema is published per version and group, alongside the other artefacts a version publishes.
-Canopy records where each is published rather than storing it, and corroborates a reported artefact against the published artefacts it already holds for that version.
-
-A version's artefacts are otherwise identified by their type, which cannot tell one group's reporting schema from another's.
-An artefact is therefore identified by its version, its type, and, where it has one, the group it belongs to.
-
-Belonging to a group is what a reporting schema adds rather than something every artefact takes on.
-An artefact that belongs to no group is identified by version and type as it is now, and stays available to every group: a version's server binaries, its migrations, and its masking manifest are properties of the version and of nothing narrower.
+A reporting schema is published as an artefact of the version it was built for, scoped to the group it was built from (see [ART](../platform/artifacts.md)).
 A reporting schema always names a group, so two groups on the same version have two of them and neither stands in for the other.
 
-A group's artefact for a version supersedes any earlier one for the same pair, and the earlier ones remain addressable, since a group that has not applied the newest is running an older one and its currency has to be gradeable against something.
-Supersession is by publication rather than by content, since Canopy holds where an artefact is published and not what it contains.
+A group's schema for a version supersedes any earlier one for the same pair, and the earlier ones remain addressable, since a group that has not applied the newest is running an older one and its currency has to be gradeable against something.
 
 ## Currency
 
