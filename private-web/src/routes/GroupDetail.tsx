@@ -17,6 +17,7 @@ import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
 import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import GroupDomainsSection from "../components/GroupDomainsSection";
+import GroupInventorySection from "../components/GroupInventorySection";
 import MigrationTestsSection from "../components/MigrationTestsSection";
 import { OperatorAvatar, connectedFor } from "../components/OperatorAvatars";
 import ServerShorty from "../components/ServerShorty";
@@ -261,6 +262,8 @@ export default function GroupDetail() {
 			<BackupsCard groupId={group.id} isAdmin={admin} />
 
 			<MigrationTestsSection groupId={group.id} servers={servers} />
+
+			<GroupInventorySection groupId={group.id} servers={servers} />
 
 			<GroupDomainsSection groupId={group.id} />
 

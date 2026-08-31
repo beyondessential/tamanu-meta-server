@@ -303,6 +303,110 @@ async fn leaves_out_an_archived_server() {
 	.await
 }
 
+/// A server in no group is in no inventory: it has no group whose tags would
+/// configure it and no environment to belong to.
+#[tokio::test(flavor = "multi_thread")]
+async fn leaves_out_a_server_belonging_to_no_group() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-lonely", json!({})).await;
+		insert_server(
+			&mut conn,
+			group,
+			"kamaka-lonely-central",
+			"central",
+			None,
+			json!({}),
+		)
+		.await;
+		let loose = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO servers (id, name, kind) VALUES ('{loose}', 'kamaka-loose', 'central')"
+		))
+		.await
+		.expect("insert ungrouped server");
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka-lonely" }))
+			.await;
+		response.assert_status_ok();
+		let hosts = response.json::<Value>()["hosts"]
+			.as_array()
+			.expect("hosts")
+			.clone();
+		assert_eq!(hosts.len(), 1);
+		assert_eq!(hosts[0]["name"], "kamaka-lonely-central");
+	})
+	.await
+}
+
+/// Canopy's own placeholder server is not something to configure, and its
+/// recorded host is a loopback address a run would take literally.
+#[tokio::test(flavor = "multi_thread")]
+async fn leaves_out_the_meta_server() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-meta", json!({})).await;
+		insert_server(
+			&mut conn,
+			group,
+			"kamaka-meta-central",
+			"central",
+			None,
+			json!({}),
+		)
+		.await;
+		conn.batch_execute(&format!(
+			"UPDATE servers SET group_id = '{group}' WHERE id = '{}'",
+			Uuid::nil()
+		))
+		.await
+		.expect("group the meta server");
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka-meta" }))
+			.await;
+		response.assert_status_ok();
+		let hosts = response.json::<Value>()["hosts"]
+			.as_array()
+			.expect("hosts")
+			.clone();
+		assert_eq!(hosts.len(), 1);
+		assert_eq!(hosts[0]["name"], "kamaka-meta-central");
+	})
+	.await
+}
+
+/// A tag that opens like JSON and isn't stays the text it was stored as,
+/// rather than becoming an error or a half-parsed value.
+#[tokio::test(flavor = "multi_thread")]
+async fn serves_a_malformed_json_tag_as_text() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-malformed", json!({})).await;
+		insert_server(
+			&mut conn,
+			group,
+			"kamaka-malformed-central",
+			"central",
+			None,
+			json!({ "tamanu_caddy_extra_hostnames": "[\"sync.kamaka.example\"" }),
+		)
+		.await;
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka-malformed" }))
+			.await;
+		response.assert_status_ok();
+		let body: Value = response.json();
+		assert_eq!(
+			body["hosts"][0]["vars"]["tamanu_caddy_extra_hostnames"],
+			"[\"sync.kamaka.example\""
+		);
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn refuses_a_group_canopy_does_not_have() {
 	commons_tests::server::run(async move |_conn, _public, private| {
