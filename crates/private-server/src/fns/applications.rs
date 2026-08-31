@@ -353,7 +353,10 @@ pub(super) async fn decorate_with_status(
 		database::maintenance_windows::MaintenanceWindow::suspended_targets(conn).await?;
 	for info in infos.iter_mut() {
 		let st = by_server.get(&info.id).copied();
-		info.up = Some(st.map(|s| s.short_status()).unwrap_or_default());
+		// Each application's own threshold, carried on the info we are filling.
+		// spec: CHK#reachability
+		let down_after = jiff::SignedDuration::from_secs(info.alert_when_down_for);
+		info.up = Some(st.map(|s| s.short_status(down_after)).unwrap_or_default());
 		info.health = Some(health.get(&info.id).copied().unwrap_or_default());
 		info.maintained = Some(
 			maintained_servers.contains(&info.id)
@@ -653,10 +656,7 @@ pub async fn get_detail(
 	server_details.group_name = group.as_ref().map(|g| g.name.clone());
 	fill_display_hosts(&mut conn, std::slice::from_mut(&mut server_details)).await?;
 
-	let up = status
-		.as_ref()
-		.map(|s| s.short_status())
-		.unwrap_or_default();
+	let up = server.reachability(status.as_ref());
 	// One consolidated read drives both the headline health chip and the
 	// checks table, so they can't disagree: the rollup and the list come
 	// from the same graded state across every source.

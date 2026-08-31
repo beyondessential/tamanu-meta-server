@@ -1,11 +1,13 @@
 import { Box, Tooltip } from "@mui/material";
 import type { HealthState, ShortStatus } from "../types";
 
+// Three states and nothing between them: a target is reachable, unreachable,
+// or has never reported. How long it has been quiet is measured against its own
+// configured threshold, so there is no band of time for a fourth colour to mean.
+// spec: CHK#reachability
 const STATUS_COLOR: Record<ShortStatus, string> = {
 	up: "success.main",
 	down: "error.main",
-	away: "warning.main",
-	blip: "secondary.main",
 	gone: "text.disabled",
 };
 
@@ -18,7 +20,7 @@ const HEALTH_OUTLINE: Record<HealthState, string | null> = {
 	unhealthy: "success.main",
 };
 
-const REACHABLE: ReadonlySet<ShortStatus> = new Set(["up", "blip"]);
+const REACHABLE: ReadonlySet<ShortStatus> = new Set(["up"]);
 
 // Diagonal cut for unmonitored servers. A mask punches the band out of the
 // dot rather than painting over it, so the surface behind shows through

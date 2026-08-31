@@ -308,7 +308,7 @@ impl CanopyMcp {
 			version: version.clone(),
 			health,
 			healthy: s.healthy,
-			reachability: s.short_status(),
+			reachability: server.reachability(Some(s)),
 			checks: s.health.clone(),
 		});
 
@@ -344,9 +344,7 @@ impl CanopyMcp {
 			group_id: server.group_id,
 			group_name: group.as_ref().map(|g| g.name.clone()),
 			sibling_count,
-			reachability: latest
-				.as_ref()
-				.map_or(ShortStatus::Gone, |s| s.short_status()),
+			reachability: server.reachability(latest.as_ref()),
 			health,
 			figures,
 			latest_status,
@@ -403,7 +401,7 @@ pub(crate) fn summarize(
 			.and_then(|st| st.version.clone())
 			.or(retained.version)
 			.filter(|_| s.product.has_versions()),
-		reachability: st.map_or(ShortStatus::Gone, |s| s.short_status()),
+		reachability: s.reachability(st),
 		health,
 	}
 }

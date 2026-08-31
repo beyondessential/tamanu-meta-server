@@ -123,7 +123,7 @@ This is the raw material for analysing whether a check's noise is a flap, a load
 
 ## Result semantics
 
-A machine's or an application's reported status reflects reports received within the recent-activity window; one silent beyond that window reads as not recently seen rather than as a stale "up".
+A machine's or an application's reported status reflects reports received within that target's own down threshold; one silent beyond it reads as unreachable rather than as a stale "up" (see [CHK](../monitoring/checks.md), "Reachability").
 An application's last known version is retained without that window, so a long-offline application still reports the last version it ran.
 
 The health classifications this interface reports — a healthy / warning / unhealthy / unreachable state, and a backup's overdue, never-reported, failed, or stuck classifications — are the same classifications the operator web UI presents for the same data.

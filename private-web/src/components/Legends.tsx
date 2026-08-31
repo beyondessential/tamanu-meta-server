@@ -4,12 +4,14 @@ import type { HealthState, ShortStatus } from "../types";
 import StatusDot from "./StatusDot";
 import VersionSquare from "./VersionSquare";
 
+// No durations here: each target is judged against its own threshold, so a
+// fixed one in the legend would be wrong for most of the fleet. The old labels
+// named fixed bands and had already drifted from the code.
+// spec: CHK#reachability
 const STATUS_ENTRIES: Array<{ up: ShortStatus; label: string }> = [
-	{ up: "up", label: "Up (seen a minute ago)" },
-	{ up: "blip", label: "Blip (missed 2 checks)" },
-	{ up: "away", label: "Away (last seen 2-10m ago)" },
-	{ up: "down", label: "Down (last seen 10m-7d ago)" },
-	{ up: "gone", label: "Gone (never or more than 7d ago)" },
+	{ up: "up", label: "Up (reporting)" },
+	{ up: "down", label: "Down (silent past its threshold)" },
+	{ up: "gone", label: "Gone (never reported)" },
 ];
 
 const HEALTH_ENTRIES: Array<{ health: HealthState; label: string }> = [

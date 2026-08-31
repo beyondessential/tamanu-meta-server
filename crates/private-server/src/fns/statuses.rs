@@ -255,15 +255,13 @@ pub async fn group_details(
 		.into_iter()
 		.map(|s| {
 			let st = status_map.get(&s.id);
-			let up = st.map(|s| s.short_status()).unwrap_or_default();
-			// Active presence only: a server that's stopped reporting may
-			// well still have those sessions, but we can't assert "in the
-			// server right now" from a stale push.
+			let up = s.reachability(st);
+			// Active presence only: an application that has stopped reporting
+			// may well still have those sessions, but we cannot assert "in the
+			// server right now" from a report that is past its own threshold.
 			let operators = match up {
-				ShortStatus::Up | ShortStatus::Blip => {
-					st.map(|s| s.operators()).unwrap_or_default()
-				}
-				_ => Vec::new(),
+				ShortStatus::Up => st.map(|s| s.operators()).unwrap_or_default(),
+				ShortStatus::Down | ShortStatus::Gone => Vec::new(),
 			};
 			FacilityServerStatus {
 				id: s.id,

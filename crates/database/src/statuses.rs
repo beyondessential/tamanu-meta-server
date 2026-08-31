@@ -552,14 +552,23 @@ impl Status {
 		commons_types::status::operators_from_health(&self.health)
 	}
 
-	pub fn short_status(&self) -> ShortStatus {
+	/// Whether this report leaves its target reachable, against the target's own
+	/// down threshold.
+	///
+	/// The same threshold the `reachability` check is graded on, so the
+	/// indicator and the check can no longer disagree. They previously did:
+	/// this read fixed 2/10/30-minute bands while the check read
+	/// `alert_when_down_for`, so a target configured to five minutes showed a
+	/// healthy dot while its own reachability check had already failed.
+	///
+	/// There are no degrees between reachable and unreachable — a target is one
+	/// or the other, and never reported is the third state, which is the absence
+	/// of a report rather than anything this can return.
+	// spec: CHK#reachability
+	pub fn short_status(&self, down_after: SignedDuration) -> ShortStatus {
 		let since = self.created_at.duration_since(Timestamp::now()).abs();
-		if since > SignedDuration::from_mins(30) {
+		if since >= down_after {
 			ShortStatus::Down
-		} else if since > SignedDuration::from_mins(10) {
-			ShortStatus::Away
-		} else if since > SignedDuration::from_mins(2) {
-			ShortStatus::Blip
 		} else {
 			ShortStatus::Up
 		}

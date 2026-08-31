@@ -41,21 +41,25 @@ impl Display for CheckSeverity {
 	}
 }
 
-/// Reachability of a server, based on how recently it last reported a status update.
+/// Reachability of a target, from how recently it last reported.
+///
+/// Three states and no degrees between them: a target is reachable,
+/// unreachable, or has never reported. How long it has been quiet is measured
+/// against that target's own configured threshold rather than any fixed one, so
+/// a deployment that reports every few minutes and one that reports hourly are
+/// each judged on what is normal for them.
+// spec: CHK#reachability
 #[derive(
 	Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum ShortStatus {
-	/// The server reported within the last two minutes; it is online and reachable.
+	/// Something is currently reporting about the target: its last report is
+	/// within its own down threshold.
 	Up,
-	/// The server has not reported in over thirty minutes; treated as unreachable.
+	/// Nothing is reporting about the target any more — it is unreachable.
 	Down,
-	/// The server last reported between ten and thirty minutes ago.
-	Away,
-	/// The server last reported between two and ten minutes ago — a brief gap that may not indicate a real problem.
-	Blip,
-	/// No status has ever been reported for this server.
+	/// No status has ever been reported for this target.
 	#[default]
 	Gone,
 }
@@ -65,8 +69,6 @@ impl Display for ShortStatus {
 		match self {
 			ShortStatus::Up => write!(f, "up"),
 			ShortStatus::Down => write!(f, "down"),
-			ShortStatus::Away => write!(f, "away"),
-			ShortStatus::Blip => write!(f, "blip"),
 			ShortStatus::Gone => write!(f, "gone"),
 		}
 	}

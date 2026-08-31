@@ -887,8 +887,8 @@ async fn seed_enrollment_tokens(
 /// Insert status rows. Recent (NOW-relative) so they land in the live weekly
 /// partition and drive status dots / version distance / health states. The
 /// "down" facility gets NO recent status (absence = down). Uses a direct
-/// insert of the full `Status` row so we can backdate `created_at` for the
-/// "away"/"blip" short-status cases (still within the current week's partition).
+/// insert of the full `Status` row so we can backdate `created_at` past a
+/// target's own down threshold (still within the current week's partition).
 async fn seed_statuses(
 	conn: &mut AsyncPgConnection,
 	applications: &SeededServers,
@@ -1009,7 +1009,8 @@ async fn seed_statuses(
 	)
 	.await?;
 
-	// Ungrouped server — last reported ~20 minutes ago → "Away" short status.
+	// Ungrouped server — last reported ~20 minutes ago, so past the default
+	// ten-minute threshold and unreachable.
 	insert_status(
 		conn,
 		applications.ungrouped,

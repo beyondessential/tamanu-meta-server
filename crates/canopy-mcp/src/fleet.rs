@@ -135,9 +135,9 @@ impl CanopyMcp {
 				*counts.by_rank.entry(r.to_string()).or_default() += 1;
 			}
 			let st = st_by.get(&s.id).copied();
-			match st.map_or(ShortStatus::Gone, |s| s.short_status()) {
+			match s.reachability(st) {
 				ShortStatus::Down | ShortStatus::Gone => health.unreachable += 1,
-				_ => match state_health.get(&s.id).copied().unwrap_or_default() {
+				ShortStatus::Up => match state_health.get(&s.id).copied().unwrap_or_default() {
 					HealthState::Healthy => health.healthy += 1,
 					HealthState::Warning => health.warning += 1,
 					HealthState::Unhealthy => health.unhealthy += 1,

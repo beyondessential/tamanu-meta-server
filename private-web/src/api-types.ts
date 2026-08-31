@@ -9380,10 +9380,16 @@ export interface components {
             type: string;
         };
         /**
-         * @description Reachability of a server, based on how recently it last reported a status update.
+         * @description Reachability of a target, from how recently it last reported.
+         *
+         *     Three states and no degrees between them: a target is reachable,
+         *     unreachable, or has never reported. How long it has been quiet is measured
+         *     against that target's own configured threshold rather than any fixed one, so
+         *     a deployment that reports every few minutes and one that reports hourly are
+         *     each judged on what is normal for them.
          * @enum {string}
          */
-        ShortStatus: "up" | "down" | "away" | "blip" | "gone";
+        ShortStatus: "up" | "down" | "gone";
         /**
          * @description Request body identifying an issue to silence (or unsilence) across a
          *     whole server group.

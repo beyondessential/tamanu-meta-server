@@ -2,6 +2,7 @@ use commons_errors::{AppError, Result};
 use commons_types::{
 	geo::GeoPoint,
 	server::{RESERVED_TAG_PREFIX, TagMap, kind::ServerKind, product::Product, rank::ServerRank},
+	status::ShortStatus,
 };
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -466,6 +467,19 @@ impl Application {
 	/// Pausing an already-paused server leaves the original pause standing, so the
 	/// recorded reason and age stay those of the pause that first stopped the
 	/// work — which is the one an operator is investigating.
+	/// This application's reachability, from its latest report and its own down
+	/// threshold.
+	///
+	/// The threshold lives here rather than at each call site so the indicator
+	/// and the `reachability` check cannot be graded on different clocks, which
+	/// is exactly how they came to disagree.
+	// spec: CHK#reachability
+	pub fn reachability(&self, latest: Option<&crate::statuses::Status>) -> ShortStatus {
+		latest.map_or(ShortStatus::Gone, |status| {
+			status.short_status(self.alert_when_down_for.0)
+		})
+	}
+
 	// spec: CRT#pausing-a-server
 	/// Whether Canopy is currently making no new changes on this server's behalf.
 	pub fn name_management_paused(&self) -> bool {

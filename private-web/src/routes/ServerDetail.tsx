@@ -900,7 +900,7 @@ function HealthIndicator({
 	maintenanceSettling: boolean;
 	operators: OperatorPresence[];
 }) {
-	const reporting = up === "up" || up === "blip";
+	const reporting = up === "up";
 	return (
 		<Stack
 			direction="row"

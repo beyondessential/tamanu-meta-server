@@ -190,6 +190,9 @@ A target's checks as they stood at a past time carry reachability only where it 
 
 Reachability has no intermediate degrees.
 A target is reachable, unreachable, or has never reported, and how long it has been quiet is measured against its own configured threshold rather than any fixed one.
+The check's three results grade how much of what should be reporting still is, which is a different question from whether the target is reachable: only the failed result presents it as unreachable, and a warning is a target still reachable with one of its reporters quiet.
+Every surface presenting reachability presents those three states and grades them on the target's own threshold, so an indicator and the check behind it are measuring the same thing against the same clock.
+A target that has reported at some point presents as unreachable however long ago that was; never reported is for one that has never been heard from at all.
 
 ## Liveness and decommissioning
 

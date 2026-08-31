@@ -17,7 +17,7 @@ Each item is a section below; the section carries the detail and the traps.
 - [x] **Declared names and certificate routing** — identity to machine to application, and the plural entitlement answer
 - [x] **Maintenance windows take the machine** — arrived from main mid-split; moved onto the machine grain
 - [x] **Restore replicas** — declarations move grain; `migration-test` stays application-scoped
-- [ ] **Retiring the graded reachability states** — `short_status`'s hardcoded thresholds
+- [x] **Retiring the graded reachability states** — `short_status`'s hardcoded thresholds
 - [ ] **Fleet query interface** — MCP gains `Get machine` and `Find machines`
 - [ ] **Migration** — `{product, kind}` becomes `{type}`
 - [ ] **Frontend** — two detail pages, the group tree, the status-page bands
@@ -28,6 +28,7 @@ Carried deferrals, each gated on a step above rather than on a vague later:
 - [x] Remove the `application_default_machine()` scaffolding default — done early, with the operator/enrolment surface
 - [x] Add `machine_id` to the `Application` struct — done with the operator/enrolment surface
 - [ ] **Backup tables take the machine grain** — `backup_runs`, `backup_repo_snapshots`, `server_backup_capabilities` and friends still key on the application that reported them. The rename step deferred them; nothing has claimed them since. Restore replicas now reach a machine's snapshot through a join that exists only because of this, and BAK already says a backup is a machine's
+- [ ] Separate "never reported" from "reported long ago" — `Status::latest_for_servers` looks back seven days for performance, so a target silent longer returns no row and reads as never reported (grey) rather than unreachable (red). Pre-existing, and sharper now the states are three: the fix is a cheap "has this ever reported" fact rather than widening the scan
 - [ ] Carry the machine on `IssueData` — with **Fleet query interface** / **Frontend**, whichever presents machine checks first
 - [ ] Link a machine's maintenance window to its detail page — with **Frontend**, which is what creates that page. The fleet maintenance view renders a machine target as plain text until then rather than linking somewhere that 404s
 
@@ -303,6 +304,19 @@ The checks landed as the section above called for: `restore-verification` and `r
 ## Retiring the graded reachability states
 
 `short_status` (`crates/database/src/statuses.rs:646`) grades quiet on hardcoded 2/10/30 minute thresholds, independent of the per-target `alert_when_down_for` the reachability check uses — two definitions that never agreed, with the unconfigurable one driving the dots. The graded intermediate states go; what survives is reachable, unreachable, and never-reported, on the configurable threshold.
+
+### Retiring the graded reachability states: done
+
+`ShortStatus` loses `Away` and `Blip`; `Up`, `Down` and `Gone` survive as reachable, unreachable and never reported, with the wire values unchanged. `short_status` now takes the target's own down threshold instead of the fixed 2/10/30-minute bands, so the indicator and the `reachability` check are graded on the same clock. They could previously disagree outright: a target configured to five minutes showed a healthy dot while its own reachability check had already failed.
+
+`Application::reachability` holds the threshold lookup so the six call sites cannot drift apart on it, which is how the two definitions came to diverge in the first place.
+
+Two things found on the way:
+
+- **The status legend was already wrong.** It claimed `blip` was "missed 2 checks" and `away` "last seen 2-10m ago", where the code made blip 2-10m and away 10-30m. The labels now name the three states with no durations at all, since each target is judged against its own.
+- **`away` and `down` never carried a health signal.** `StatusDot`'s reachable set was `{up, blip}`, so a target in either graded state showed no health outline. Collapsing to `{up}` makes that rule legible rather than incidental.
+
+Specs: CHK gained a line separating the check's three results (how much of what should be reporting still is) from the target's reachability (whether anything is), which reads as a contradiction otherwise. MCP's "recent-activity window" and "not recently seen" were a second, undefined vocabulary for the same idea and now point at the target's own threshold.
 
 ## Routes
 

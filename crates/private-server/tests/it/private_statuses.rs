@@ -233,10 +233,13 @@ async fn status_json_server_with_recent_status() {
 	.await
 }
 
+/// Reachability is measured against each target's own configured threshold,
+/// never a fixed one. Two applications with the same report age and different
+/// thresholds land on opposite sides.
+// spec: CHK#reachability
 #[tokio::test(flavor = "multi_thread")]
-async fn status_json_server_status_ages() {
+async fn reachability_uses_each_targets_own_threshold() {
 	commons_tests::server::run(async |mut conn, _, private| {
-		// Add a version to satisfy server_details requirement
 		conn.batch_execute(
 			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
 			('00000000-0000-0000-0000-000000000001', 1, 0, 0, 'published', 'Test version', NOW())"
@@ -244,34 +247,34 @@ async fn status_json_server_status_ages() {
 		.await
 		.unwrap();
 
+		// Same age of report; a patient five-minute threshold and a tolerant
+		// hour-long one.
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
-			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Down cluster'),
-			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Away cluster');
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Impatient cluster'),
+			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Tolerant cluster');
 			INSERT INTO machines (id, group_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
 			('22222222-2222-2222-2222-222222222222', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
-			INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Down Application', 'https://down.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111'),
-			('22222222-2222-2222-2222-222222222222', 'Away Application', 'https://away.example.com', 'production', 'central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '22222222-2222-2222-2222-222222222222');
+			INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id, alert_when_down_for) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Impatient Application', 'https://impatient.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111', INTERVAL '5 minutes'),
+			('22222222-2222-2222-2222-222222222222', 'Tolerant Application', 'https://tolerant.example.com', 'production', 'central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '22222222-2222-2222-2222-222222222222', INTERVAL '1 hour');
 
 			INSERT INTO statuses (server_id, version, created_at) VALUES
-			('11111111-1111-1111-1111-111111111111', '1.0.0', NOW() - INTERVAL '45 minutes'),
+			('11111111-1111-1111-1111-111111111111', '1.0.0', NOW() - INTERVAL '15 minutes'),
 			('22222222-2222-2222-2222-222222222222', '1.0.0', NOW() - INTERVAL '15 minutes')"
 		)
 		.await
 		.unwrap();
 
-		// Get server IDs
 		let server_ids_response = private.post("/api/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
 		server_ids_response.assert_status_ok();
 		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
 		let server_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
 		assert_eq!(server_ids.len(), 2);
 
-		// Each group has one server; check its status via the group card.
-		let mut down_status: Option<String> = None;
-		let mut away_status: Option<String> = None;
+		let mut impatient: Option<String> = None;
+		let mut tolerant: Option<String> = None;
 
 		for server_id in &server_ids {
 			let details_response = private
@@ -283,14 +286,22 @@ async fn status_json_server_status_ages() {
 			assert_eq!(details.members.len(), 1);
 
 			match details.members[0].name.as_str() {
-				"Down Application" => down_status = Some(details.members[0].up.clone()),
-				"Away Application" => away_status = Some(details.members[0].up.clone()),
+				"Impatient Application" => impatient = Some(details.members[0].up.clone()),
+				"Tolerant Application" => tolerant = Some(details.members[0].up.clone()),
 				_ => {}
 			}
 		}
 
-		assert_eq!(down_status.unwrap(), "down"); // 45 minutes ago
-		assert_eq!(away_status.unwrap(), "away"); // 15 minutes ago
+		assert_eq!(
+			impatient.unwrap(),
+			"down",
+			"fifteen minutes is past a five-minute threshold"
+		);
+		assert_eq!(
+			tolerant.unwrap(),
+			"up",
+			"and well within an hour-long one, from the very same report"
+		);
 	})
 	.await
 }
@@ -464,7 +475,7 @@ async fn status_json_unnamed_servers_excluded() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn status_json_blip_status() {
+async fn a_gap_inside_the_threshold_is_simply_reachable() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
 			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
@@ -475,11 +486,11 @@ async fn status_json_blip_status() {
 
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
-			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Blip cluster');
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Brief gap cluster');
 			INSERT INTO machines (id, group_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 			INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Blip Application', 'https://blip.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111');
+			('11111111-1111-1111-1111-111111111111', 'Brief Gap Application', 'https://gap.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111');
 			INSERT INTO statuses (server_id, version, created_at) VALUES
 			('11111111-1111-1111-1111-111111111111', '1.0.0', NOW() - INTERVAL '4 minutes')",
 		)
@@ -504,8 +515,11 @@ async fn status_json_blip_status() {
 		let details: ServerGroupCardResponse = details_response.json();
 
 		assert_eq!(details.members.len(), 1);
-		assert_eq!(details.members[0].name, "Blip Application");
-		assert_eq!(details.members[0].up, "blip"); // 4 minutes ago should be "blip"
+		assert_eq!(details.members[0].name, "Brief Gap Application");
+		// Four minutes into a ten-minute threshold. There is no state between
+		// reachable and unreachable for it to land in, so it is reachable.
+		// spec: CHK#reachability
+		assert_eq!(details.members[0].up, "up");
 	})
 	.await
 }

@@ -13,7 +13,7 @@ use commons_types::{
 	status::ShortStatus,
 	version::VersionStr,
 };
-use database::{statuses::Status, versions::Version};
+use database::{pg_duration::PgDuration, statuses::Status, versions::Version};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use futures::future::join_all;
@@ -158,14 +158,17 @@ async fn server_versions_page(
 		use database::schema::applications::dsl::*;
 
 		applications
-			.select((id, name, host))
+			// The down threshold comes along: reachability is measured against
+			// each application's own, never a fixed one.
+			// spec: CHK#reachability
+			.select((id, name, host, alert_when_down_for))
 			.filter(
 				rank.eq(ServerRank::Production)
 					.and(kind.eq(ServerKind::Central))
 					.and(host.is_not_null()),
 			)
 			.order(name.asc())
-			.load::<(Uuid, Option<String>, Option<String>)>(&mut conn)
+			.load::<(Uuid, Option<String>, Option<String>, PgDuration)>(&mut conn)
 			.await?
 	};
 
@@ -174,7 +177,7 @@ async fn server_versions_page(
 		.ok()
 		.map(|v| v.as_semver());
 
-	let server_ids: Vec<Uuid> = applications.iter().map(|(id, _, _)| *id).collect();
+	let server_ids: Vec<Uuid> = applications.iter().map(|(id, _, _, _)| *id).collect();
 	let statuses = if !server_ids.is_empty() {
 		Status::latest_for_servers(&mut conn, &server_ids).await?
 	} else {
@@ -182,12 +185,14 @@ async fn server_versions_page(
 	};
 
 	let mut server_infos: Vec<ServerVersionInfo> = Vec::new();
-	for (id, name, host) in applications {
+	for (id, name, host, down_after) in applications {
 		let host = host.unwrap_or_default(); // filtered to non-null above
 		let status = statuses.iter().find(|s| s.server_id == id);
 
 		let version = status.and_then(|s| s.version.clone());
-		let up = status.map(|s| s.short_status()).unwrap_or_default();
+		let up = status
+			.map(|s| s.short_status(down_after.0))
+			.unwrap_or_default();
 
 		let version_distance = if let (Some(_), Some(latest)) = (&version, &latest_version) {
 			status.and_then(|s| s.distance_from_version(latest))

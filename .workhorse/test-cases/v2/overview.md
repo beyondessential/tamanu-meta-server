@@ -41,7 +41,8 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 - [ ] An unreachable target keeps its last observed check results and is presented as unreachable (verifies spec: CHK)
 - [ ] An application's reachability check can be silenced independently of its machine's (verifies spec: CHK)
 - [ ] A machine's reachability silence is reachable from an application on that machine (verifies spec: CHK)
-- [ ] Reachability is measured against the target's own threshold, not a fixed one (verifies spec: CHK)
+- [x] Reachability is measured against the target's own threshold, not a fixed one (verifies spec: CHK)
+- [x] A gap inside the threshold is simply reachable, with no intermediate state (verifies spec: CHK)
 - [ ] A dead application on a live machine is unhealthy rather than unreachable (verifies spec: CHK)
 
 ## Checks

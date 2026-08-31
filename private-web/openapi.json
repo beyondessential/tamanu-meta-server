@@ -16456,12 +16456,10 @@
       },
       "ShortStatus": {
         "type": "string",
-        "description": "Reachability of a server, based on how recently it last reported a status update.",
+        "description": "Reachability of a target, from how recently it last reported.\n\nThree states and no degrees between them: a target is reachable,\nunreachable, or has never reported. How long it has been quiet is measured\nagainst that target's own configured threshold rather than any fixed one, so\na deployment that reports every few minutes and one that reports hourly are\neach judged on what is normal for them.",
         "enum": [
           "up",
           "down",
-          "away",
-          "blip",
           "gone"
         ]
       },
