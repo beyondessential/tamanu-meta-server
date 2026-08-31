@@ -10,7 +10,7 @@ const UNMONITORED_TOOLTIP =
 	"This server is unmonitored — its checks are recorded and shown, but nothing alerts on them.";
 
 const MAINTAINED_TOOLTIP =
-	"A maintenance window is being worked on here — its checks are recorded and shown, and raise nothing until the window ends.";
+	"Someone is working on this server. Checks are still recorded and shown, and raise nothing until the maintenance window ends.";
 
 const LABEL: Record<HealthState, string> = {
 	healthy: "Healthy",

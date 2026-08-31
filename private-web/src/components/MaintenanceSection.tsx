@@ -156,7 +156,7 @@ export default function MaintenanceSection({
 					<Typography variant="body2">
 						Under maintenance, ending <TimeAgo timestamp={open.expected_end} />.
 
-						Checks are recorded and shown; nothing on this{" "}
+						Checks are still recorded and shown. Nothing on this{" "}
 						{scope === "server" ? "server" : "group"} alerts.
 					</Typography>
 					{open.note && (
