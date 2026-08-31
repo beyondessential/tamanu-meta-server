@@ -865,7 +865,7 @@ pub async fn is_key_compromised(db: &mut AsyncPgConnection, key_fingerprint: &st
 /// deliberate act as a fault. What was already issued stays issued and
 /// collectable until it expires.
 // spec: CRT#declared-names
-fn still_declared() -> diesel::dsl::exists<
+type StillDeclared = diesel::dsl::exists<
 	diesel::helper_types::Filter<
 		diesel::helper_types::Filter<
 			crate::schema::application_names::table,
@@ -879,7 +879,9 @@ fn still_declared() -> diesel::dsl::exists<
 			crate::schema::application_certificates::name,
 		>,
 	>,
-> {
+>;
+
+fn still_declared() -> StillDeclared {
 	use crate::schema::{application_certificates, application_names};
 	diesel::dsl::exists(
 		application_names::table
