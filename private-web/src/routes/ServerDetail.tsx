@@ -233,9 +233,9 @@ export default function ServerDetail() {
 				/>
 			)}
 			<MaintenanceSection
-				scope="server"
+				scope="machine"
 				anchor="maintenance"
-				id={data.server.id}
+				id={data.server.machine_id}
 				targetLabel={data.server.name ?? data.server.display_host}
 				groupId={data.group?.id ?? null}
 				groupName={data.group?.name ?? null}

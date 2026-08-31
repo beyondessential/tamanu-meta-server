@@ -1154,7 +1154,7 @@ pub async fn file_check_instances(
 	filing: InstancedCheckFiling<'_>,
 	message: &(dyn Fn(&[GradedInstance]) -> String + Sync),
 ) -> Result<Issue> {
-	use crate::check_policies::{CheckPolicy, EvaluationContext, ScopedCheckPolicy};
+	use crate::check_policies::{CheckPolicy, EvaluationContext, FilingScope, ScopedCheckPolicy};
 
 	let source = filing.source;
 	debug_assert!(
@@ -1177,11 +1177,9 @@ pub async fn file_check_instances(
 	.await?;
 
 	let status_extra = serde_json::Map::new();
-	let (tags, scope_server, scope_machine, scope_group): (
+	let (tags, scope): (
 		std::collections::HashMap<String, serde_json::Value>,
-		Option<Uuid>,
-		Option<Uuid>,
-		Option<Uuid>,
+		FilingScope,
 	) = match filing.scope {
 		Scope::Application(application_id) => {
 			let server = Application::get_by_id(conn, application_id).await?;
@@ -1193,7 +1191,16 @@ pub async fn file_check_instances(
 				.into_iter()
 				.map(|(k, v)| (k, serde_json::Value::String(v)))
 				.collect();
-			(tags, Some(application_id), None, group_id)
+			(
+				tags,
+				FilingScope {
+					application_id: Some(application_id),
+					group_id,
+					// An application is covered by the window over its box.
+					covering_machine: Some(server.machine_id),
+					..Default::default()
+				},
+			)
 		}
 		// Graded against the machine's own tags, not against any application
 		// that happens to run on it.
@@ -1207,25 +1214,31 @@ pub async fn file_check_instances(
 				.into_iter()
 				.map(|(k, v)| (k, serde_json::Value::String(v)))
 				.collect();
-			(tags, None, Some(machine_id), group_id)
+			(
+				tags,
+				FilingScope {
+					machine_id: Some(machine_id),
+					group_id,
+					covering_machine: Some(machine_id),
+					..Default::default()
+				},
+			)
 		}
-		Scope::Group(group_id) => (Default::default(), None, None, Some(group_id)),
-		Scope::Global => (Default::default(), None, None, None),
+		Scope::Group(group_id) => (
+			Default::default(),
+			FilingScope {
+				group_id: Some(group_id),
+				..Default::default()
+			},
+		),
+		Scope::Global => (Default::default(), FilingScope::default()),
 	};
 
 	// The catalog entry and the scoped chain are properties of the check, not
 	// of any one instance: read them once and grade purely from there, so a
 	// server with a dozen backup types still costs two queries.
 	let fleet = CheckPolicy::fleet_grading(conn, source, filing.check).await?;
-	let chain = ScopedCheckPolicy::chain_for(
-		conn,
-		source,
-		filing.check,
-		scope_server,
-		scope_machine,
-		scope_group,
-	)
-	.await?;
+	let chain = ScopedCheckPolicy::chain_for(conn, source, filing.check, scope).await?;
 
 	let mut graded_instances: Vec<GradedInstance> = Vec::with_capacity(filing.instances.len());
 	let mut escalates = false;
@@ -1927,10 +1940,17 @@ async fn re_evaluate_incident_membership(
 	)
 	.await?;
 	// A maintenance window over the target suspends everything on it, so its
-	// issues leave exactly as a silenced one does.
+	// issues leave exactly as a silenced one does. A window is over a machine,
+	// and an application's issues are covered by the window over the box it
+	// runs on, so an application-scoped issue resolves through to its machine.
+	let cover_machine = match (issue.machine_id, issue.application_id) {
+		(Some(mid), _) => Some(mid),
+		(None, Some(aid)) => Some(Application::get_by_id(conn, aid).await?.machine_id),
+		(None, None) => None,
+	};
 	let maintained = crate::maintenance_windows::MaintenanceWindow::suspends(
 		conn,
-		issue.server_id,
+		cover_machine,
 		target.group_id(),
 	)
 	.await?;
@@ -2476,23 +2496,44 @@ pub async fn reevaluate_open_issues_for_scope(
 	scope: Scope,
 	by: Option<&str>,
 ) -> Result<()> {
-	use crate::schema::{issues, servers};
+	use crate::schema::{applications, issues};
 
-	let (gid, server_ids, include_group_scoped) = match scope {
-		Scope::Server(sid) => {
-			let server = Server::get_by_id(db, sid).await?;
-			let Some(gid) = server.group_id else {
+	// The applications whose issues are re-evaluated, and the group they answer
+	// to. A machine's window covers the workloads on it, so re-evaluating a
+	// machine means re-evaluating every application it hosts, not just its own
+	// machine-scoped issues.
+	let (gid, application_ids, machine_ids, include_group_scoped) = match scope {
+		Scope::Application(aid) => {
+			let application = Application::get_by_id(db, aid).await?;
+			let Some(gid) = application.group_id else {
 				return Ok(());
 			};
-			(gid, vec![sid], false)
+			(gid, vec![aid], Vec::new(), false)
 		}
-		Scope::Group(gid) => {
-			let ids: Vec<Uuid> = servers::table
-				.select(servers::id)
-				.filter(servers::group_id.eq(gid))
+		Scope::Machine(mid) => {
+			let machine = crate::machines::Machine::get_by_id(db, mid).await?;
+			let Some(gid) = machine.group_id else {
+				return Ok(());
+			};
+			let ids: Vec<Uuid> = applications::table
+				.select(applications::id)
+				.filter(applications::machine_id.eq(mid))
 				.load(db)
 				.await?;
-			(gid, ids, true)
+			(gid, ids, vec![mid], false)
+		}
+		Scope::Group(gid) => {
+			let ids: Vec<Uuid> = applications::table
+				.select(applications::id)
+				.filter(applications::group_id.eq(gid))
+				.load(db)
+				.await?;
+			let machines: Vec<Uuid> = crate::schema::machines::table
+				.select(crate::schema::machines::id)
+				.filter(crate::schema::machines::group_id.eq(gid))
+				.load(db)
+				.await?;
+			(gid, ids, machines, true)
 		}
 		Scope::Global => return Ok(()),
 	};
@@ -2502,30 +2543,33 @@ pub async fn reevaluate_open_issues_for_scope(
 		.filter(issues::active.eq(true))
 		.filter(issues::resolved_at.is_null())
 		.into_boxed();
+	let on_target = issues::application_id
+		.eq_any(application_ids.clone())
+		.or(issues::machine_id.eq_any(machine_ids.clone()));
 	query = if include_group_scoped {
-		query.filter(
-			issues::server_id
-				.eq_any(server_ids.clone())
-				.or(issues::server_group_id.eq(gid)),
-		)
+		query.filter(on_target.or(issues::server_group_id.eq(gid)))
 	} else {
-		query.filter(issues::server_id.eq_any(server_ids.clone()))
+		query.filter(on_target)
 	};
 	let open_issues: Vec<Issue> = query.load(db).await?;
 
-	let mut monitored_by_server: std::collections::HashMap<Uuid, bool> =
-		std::collections::HashMap::new();
-	for sid in &server_ids {
-		let server = Server::get_by_id(db, *sid).await?;
-		monitored_by_server.insert(*sid, server.is_monitored);
+	let mut monitored: std::collections::HashMap<Uuid, bool> = std::collections::HashMap::new();
+	for aid in &application_ids {
+		let application = Application::get_by_id(db, *aid).await?;
+		monitored.insert(*aid, application.is_monitored);
+	}
+	for mid in &machine_ids {
+		let machine = crate::machines::Machine::get_by_id(db, *mid).await?;
+		monitored.insert(*mid, machine.is_monitored);
 	}
 
 	let now = Timestamp::now();
 	for issue in open_issues {
-		// A group-scoped issue answers to no server's monitoring gate.
-		let monitored = match issue.server_id {
-			Some(sid) => monitored_by_server.get(&sid).copied().unwrap_or(true),
-			None => true,
+		// A group-scoped issue answers to no target's monitoring gate.
+		let monitored = match (issue.application_id, issue.machine_id) {
+			(Some(aid), _) => monitored.get(&aid).copied().unwrap_or(true),
+			(None, Some(mid)) => monitored.get(&mid).copied().unwrap_or(true),
+			(None, None) => true,
 		};
 		re_evaluate_incident_membership(db, &issue, IncidentTarget::Group(gid), monitored, now, by)
 			.await?;

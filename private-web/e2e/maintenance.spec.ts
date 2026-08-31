@@ -36,7 +36,7 @@ test.describe("maintenance windows", () => {
 		});
 		await seedStatus(sql, { serverId: server.id, healthy: true });
 		await seedMaintenanceWindow(sql, {
-			serverId: server.id,
+			machineId: server.machineId,
 			note: "Upgrading to 2.62",
 			declaredBy: "daniel@bes.au",
 		});
@@ -76,7 +76,7 @@ test.describe("maintenance windows", () => {
 		const group = await seedServerGroup(sql, { name: "back-already" });
 		const server = await seedServer(sql, { name: "done", groupId: group.id });
 		await seedStatus(sql, { serverId: server.id, healthy: true });
-		await seedMaintenanceWindow(sql, { serverId: server.id, note: "Rebooting" });
+		await seedMaintenanceWindow(sql, { machineId: server.machineId, note: "Rebooting" });
 
 		await page.goto(`/servers/${server.id}`);
 		await page.getByRole("button", { name: "Lift" }).click();
@@ -128,7 +128,7 @@ test.describe("maintenance windows", () => {
 		});
 		await seedStatus(sql, { serverId: server.id, healthy: true });
 		await seedMaintenanceWindow(sql, {
-			serverId: server.id,
+			machineId: server.machineId,
 			endedMinutesAgo: 2,
 			note: "Rebooted",
 		});
@@ -179,7 +179,7 @@ test.describe("maintenance windows", () => {
 		});
 		await seedStatus(sql, { serverId: server.id, healthy: true });
 		await seedMaintenanceWindow(sql, {
-			serverId: server.id,
+			machineId: server.machineId,
 			note: "Rebooting",
 		});
 
@@ -198,8 +198,8 @@ test.describe("maintenance windows", () => {
 		).toContainText("Rebooting, running long");
 		const rows = await sql.query<{ n: string; amended: string | null }>(
 			"SELECT COUNT(*) AS n, MAX(amended_at::text) AS amended \
-			 FROM maintenance_windows WHERE server_id = $1 AND ended_at IS NULL",
-			[server.id],
+			 FROM maintenance_windows WHERE machine_id = $1 AND ended_at IS NULL",
+			[server.machineId],
 		);
 		expect(Number(rows[0]!.n)).toBe(1);
 		expect(rows[0]!.amended).not.toBeNull();
@@ -319,11 +319,11 @@ test.describe("maintenance windows", () => {
 		// What ingestion records under a window: the reported result stands,
 		// the grade the window forces is what the fleet acts on.
 		await sql.query(
-			"UPDATE issues SET effective_result = 'skipped' WHERE server_id = $1",
+			"UPDATE issues SET effective_result = 'skipped' WHERE application_id = $1",
 			[server.id],
 		);
 		await seedMaintenanceWindow(sql, {
-			serverId: server.id,
+			machineId: server.machineId,
 			note: "Cutting over the database",
 		});
 

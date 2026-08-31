@@ -694,7 +694,7 @@
         "tags": [
           "backups"
         ],
-        "summary": "List the effective schedule and retention for every backup type a group's\nservers have declared support for (not just the ones currently enabled).",
+        "summary": "List the effective schedule and retention for every backup type a group's\napplications have declared support for (not just the ones currently enabled).",
         "description": "A type with no scheduled interval still appears, with a null\n`effective_interval`, since a manually run backup of that type is still\nretained under its own policy.",
         "operationId": "backups_group_schedules",
         "requestBody": {
@@ -1717,13 +1717,70 @@
         ]
       }
     },
+    "/api/certificates/declare": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "Declare that an application serves a name.",
+        "description": "A declaration is what an address registration or a certificate request from\nthe machine is resolved against, so it is how a box running several workloads\ngets its requests routed to the right one. It carries no addresses; the\napplication registers those itself.\n\nDeclaring a name the same application already holds changes nothing. A name\nanother application holds is refused, and the refusal names the holder so an\noperator can see what to release first.",
+        "operationId": "certificates_declare",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeclarationArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NameView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another application already declares this name.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/certificates/for_group": {
       "post": {
         "tags": [
           "certificates"
         ],
         "summary": "The names in use under each domain a group controls, and which of them hold a\ncurrent certificate.",
-        "description": "So that whether a deployment's names are healthy is answerable from the\ngroup's page, without visiting each of its servers.",
+        "description": "So that whether a deployment's names are healthy is answerable from the\ngroup's page, without visiting each of its applications.",
         "operationId": "certificates_for_group",
         "requestBody": {
           "content": {
@@ -1781,7 +1838,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ServerNamesView"
+                  "$ref": "#/components/schemas/ApplicationNamesView"
                 }
               }
             }
@@ -1817,6 +1874,46 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/PauseArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/certificates/release": {
+      "post": {
+        "tags": [
+          "certificates"
+        ],
+        "summary": "End an application's hold on a name.",
+        "description": "What is already in place stands, as revoking a grant leaves it: the records\npublished stay published and the certificates held stay held until they\nexpire. What ends is Canopy treating the name as this application's, which\nfrees it to be declared elsewhere.",
+        "operationId": "certificates_release",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeclarationArgs"
               }
             }
           },
@@ -2141,7 +2238,7 @@
         "operationId": "server_versions_url",
         "responses": {
           "200": {
-            "description": "Server-versions URL with embedded auth secret, if configured.",
+            "description": "Application-versions URL with embedded auth secret, if configured.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2523,53 +2620,13 @@
         ]
       }
     },
-    "/api/devices/get_past_server_associations": {
-      "post": {
-        "tags": [
-          "devices"
-        ],
-        "summary": "List servers a device was previously associated with, but no longer is.",
-        "description": "Useful for tracing a device's history when it has since been reassigned\nor replaced on a different server.",
-        "operationId": "get_past_server_associations",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DeviceIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ServerInfo"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
     "/api/devices/get_servers_for_device": {
       "post": {
         "tags": [
           "devices"
         ],
-        "summary": "List the servers a device is currently associated with.",
-        "description": "Returns the servers this device is currently bound to (usually zero or\none), including reachability status and a best-effort display address\nfor each.",
+        "summary": "List the applications a device is currently associated with.",
+        "description": "Returns the applications this device is currently bound to (usually zero or\none), including reachability status and a best-effort display address\nfor each.",
         "operationId": "get_servers_for_device",
         "requestBody": {
           "content": {
@@ -3358,7 +3415,7 @@
           "healthchecks"
         ],
         "summary": "Set a source's reachability mode.",
-        "description": "Governs how the source's silence bears on its servers' reachability:\n`on` warns, `quiet` never warns but still counts toward unreachable,\n`off` is excluded. The reserved `canopy`/`manual` names are rejected.",
+        "description": "Governs how the source's silence bears on its applications' reachability:\n`on` warns, `quiet` never warns but still counts toward unreachable,\n`off` is excluded. The reserved `canopy`/`manual` names are rejected.",
         "operationId": "healthcheck_set_source_reachability",
         "requestBody": {
           "content": {
@@ -4133,7 +4190,7 @@
         "tags": [
           "issues"
         ],
-        "summary": "List issues across all servers, with optional filtering.",
+        "summary": "List issues across all applications, with optional filtering.",
         "description": "Returns the most relevant issues fleet-wide, matching the given filters.\nBy default only currently active issues are returned; pass\n`activeOnly: false` to also see resolved and inactive ones.",
         "operationId": "issue_list",
         "requestBody": {
@@ -4479,6 +4536,275 @@
         "security": [
           {
             "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/machines/archive": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Archive a machine, and with it the applications on it.",
+        "description": "A box going away takes its workloads with it. Archival is not deletion:\nthe records and their history remain.",
+        "operationId": "machines_archive",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "default": null
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/machines/create": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Add a machine to the fleet.",
+        "description": "The machine starts with no applications and no identity; enrolment binds an\nidentity, and the applications on it arrive by report.",
+        "operationId": "machines_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineCreateArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/machines/get": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Get one machine and the applications running on it.",
+        "description": "Returns the machine's own facts — its group, where it is, how long it may\nbe silent — together with the applications it hosts. Returns 404 if the\nmachine doesn't exist.",
+        "operationId": "machines_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/machines/list": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "List the live fleet's machines.",
+        "description": "Every machine that has not been archived, ordered by name. A machine with\nno applications on it is included: one created but not yet reporting is\nawaiting check-in, not an error. The request body is ignored; send an empty\nJSON object.",
+        "operationId": "machines_list",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Machine"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/machines/update": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Edit a machine.",
+        "description": "Moving a machine to another group moves the applications on it: an\napplication's group is never set independently of its machine's.",
+        "operationId": "machines_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineUpdateArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Machine"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
           }
         ]
       }
@@ -4847,7 +5173,7 @@
         "tags": [
           "migration_tests"
         ],
-        "summary": "Where each of a group's servers stands against the version it would take\nnext.",
+        "summary": "Where each of a group's applications stands against the version it would take\nnext.",
         "description": "One entry per server that has a candidate version, which is the version its\ngroup's open plan names. A group with no plan, and a server running another\nproduct, have nothing to be tested against and are absent.",
         "operationId": "migration_tests_for_group",
         "requestBody": {
@@ -5349,7 +5675,7 @@
           "server_groups"
         ],
         "summary": "Archive a server group.",
-        "description": "Soft-deletes the group: it disappears from live listings but is kept and\ncan be restored later. Requires the caller to be on the admin allow-list.\nResponds 409 if the group still has live member servers; move or archive\nthose first.",
+        "description": "Soft-deletes the group: it disappears from live listings but is kept and\ncan be restored later. Requires the caller to be on the admin allow-list.\nResponds 409 if the group still has live member applications; move or archive\nthose first.",
         "operationId": "server_groups_delete",
         "requestBody": {
           "content": {
@@ -5389,7 +5715,7 @@
           "server_groups"
         ],
         "summary": "Get a server group with its members.",
-        "description": "Returns the group, its member servers (sorted by name, with current status\nand display host), and the group's effective billing labels. Responds 404\nif no group exists with the given identifier.",
+        "description": "Returns the group, its member applications (sorted by name, with current status\nand display host), and the group's effective billing labels. Responds 404\nif no group exists with the given identifier.",
         "operationId": "server_groups_get",
         "requestBody": {
           "content": {
@@ -5591,7 +5917,7 @@
         "tags": [
           "server_groups"
         ],
-        "summary": "Count live servers per group.",
+        "summary": "Count live applications per group.",
         "description": "Returns one entry per server group that has at least one live\n(non-archived) member server. Groups with no live members are omitted, so\ntreat a missing entry as a count of zero. The request body is ignored;\nsend an empty JSON object.",
         "operationId": "server_groups_server_counts",
         "requestBody": {
@@ -5684,7 +6010,7 @@
     "/api/servers/attach_tailscale_device": {
       "post": {
         "tags": [
-          "servers"
+          "applications"
         ],
         "summary": "Attach a device to a server via a Tailscale identifier.",
         "description": "Resolves the identifier to a tailnet node, finds the device already\nattached to that node or creates a new one for it, and binds that device\nto the server. Useful when a server has no device yet (e.g. an\noperator-imported server that hasn't reported in) and should be bound to\na tailnet node directly. Returns 409 if the resolved device is already\nattached to another live server — detach it there first.",
@@ -5752,7 +6078,7 @@
     "/api/servers/create": {
       "post": {
         "tags": [
-          "servers"
+          "applications"
         ],
         "summary": "Create a new server.",
         "description": "Creates the server record, optionally pre-bound to a Tailscale device\nvia `tailscale_identifier`, either ungrouped or in the given group.",
@@ -5810,10 +6136,10 @@
     "/api/servers/delete": {
       "post": {
         "tags": [
-          "servers"
+          "applications"
         ],
         "summary": "Archive (soft-delete) a server.",
-        "description": "Releases and demotes its device. Archived servers no longer appear in\nregular listings but can be restored later.",
+        "description": "Releases and demotes its device. Archived applications no longer appear in\nregular listings but can be restored later.",
         "operationId": "delete",
         "requestBody": {
           "content": {
@@ -5850,7 +6176,7 @@
     "/api/servers/enrollment_status": {
       "post": {
         "tags": [
-          "servers"
+          "applications"
         ],
         "summary": "Get the enrollment state of a server.",
         "description": "Reports whether the server has completed enrollment, and whether an\nenrollment token is currently outstanding (issue and expiry times only —\nthe token itself is never revealed).",
@@ -5897,10 +6223,10 @@
     "/api/servers/get_detail": {
       "post": {
         "tags": [
-          "servers"
+          "applications"
         ],
         "summary": "Get full detail for a server.",
-        "description": "Returns the server's record, its bound device (if any), its most recent\nstatus report, current reachability/health, its group (if any) together\nwith sibling servers in the same group, and the group's billing labels.\nReturns 404 if no server exists with that id.",
+        "description": "Returns the server's record, its bound device (if any), its most recent\nstatus report, current reachability/health, its group (if any) together\nwith sibling applications in the same group, and the group's billing labels.\nReturns 404 if no server exists with that id.",
         "operationId": "get_detail",
         "requestBody": {
           "content": {
@@ -5939,7 +6265,7 @@
     "/api/servers/get_info": {
       "post": {
         "tags": [
-          "servers"
+          "applications"
         ],
         "summary": "Get a server's basic record.",
         "description": "Returns identity, classification, and configuration for a single server,\nincluding its group name where applicable. Does not include current\nreachability/health or device/group detail — use the detail endpoint for\nthat. Returns 404 if no server exists with that id.",
@@ -5981,7 +6307,7 @@
     "/api/servers/get_name": {
       "post": {
         "tags": [
-          "servers"
+          "applications"
         ],
         "summary": "Get a server's display name.",
         "description": "Returns the server's name if set, else its stored host, else its id —\nalways a non-empty string suitable for display. Returns 404 if no server\nexists with that id.",
@@ -6023,10 +6349,10 @@
     "/api/servers/list_archived": {
       "post": {
         "tags": [
-          "servers"
+          "applications"
         ],
-        "summary": "List archived (soft-deleted) servers.",
-        "description": "Each entry has `archived: true` and includes current reachability/health.\nArchived servers can be brought back with the restore endpoint.",
+        "summary": "List archived (soft-deleted) applications.",
+        "description": "Each entry has `archived: true` and includes current reachability/health.\nArchived applications can be brought back with the restore endpoint.",
         "operationId": "list_archived",
         "requestBody": {
           "content": {
@@ -6061,10 +6387,10 @@
     "/api/servers/list_some": {
       "post": {
         "tags": [
-          "servers"
+          "applications"
         ],
-        "summary": "List servers, optionally filtered by kind, paginated.",
-        "description": "Returns a page of servers plus the total matching count. Entries include\ntheir group name where applicable, but not current reachability/health —\nuse the detail endpoint for that.",
+        "summary": "List applications, optionally filtered by kind, paginated.",
+        "description": "Returns a page of applications plus the total matching count. Entries include\ntheir group name where applicable, but not current reachability/health —\nuse the detail endpoint for that.",
         "operationId": "list_some",
         "requestBody": {
           "content": {
@@ -6093,10 +6419,10 @@
     "/api/servers/list_ungrouped": {
       "post": {
         "tags": [
-          "servers"
+          "applications"
         ],
-        "summary": "List servers that don't belong to any group.",
-        "description": "Returns a page of ungrouped servers, each with current\nreachability/health, plus the total count of ungrouped servers.",
+        "summary": "List applications that don't belong to any group.",
+        "description": "Returns a page of ungrouped applications, each with current\nreachability/health, plus the total count of ungrouped applications.",
         "operationId": "list_ungrouped",
         "requestBody": {
           "content": {
@@ -6128,7 +6454,7 @@
     "/api/servers/mint_enrollment": {
       "post": {
         "tags": [
-          "servers"
+          "applications"
         ],
         "summary": "Mint (or reissue) an enrollment ticket for a server.",
         "description": "Creates a fresh enrollment token and returns it wrapped in a\npassphrase-encrypted ticket the operator runs through bestool on the\nenrolling machine, plus the 4-word passphrase that decrypts it. The\nplaintext token lives only inside the encrypted ticket; reissuing\ninvalidates any prior token. Fails if the server is archived.",
@@ -6175,7 +6501,7 @@
     "/api/servers/restore": {
       "post": {
         "tags": [
-          "servers"
+          "applications"
         ],
         "summary": "Un-archive a server.",
         "description": "Restores a previously archived server to regular listings. Its machine\nmust re-enroll afterwards to rebind a device. Restoring a server that\nisn't archived has no effect.",
@@ -6215,7 +6541,7 @@
     "/api/servers/revoke_enrollment": {
       "post": {
         "tags": [
-          "servers"
+          "applications"
         ],
         "summary": "Revoke any outstanding enrollment ticket for a server.",
         "description": "Use this when a ticket was issued by mistake or is no longer needed.\nAfterwards, the enrollment status endpoint reports no outstanding token,\nand the revoked ticket can no longer be used to enroll.",
@@ -6255,7 +6581,7 @@
     "/api/servers/update": {
       "post": {
         "tags": [
-          "servers"
+          "applications"
         ],
         "summary": "Update a server's fields.",
         "description": "Applies a partial update — only the fields present in `data` are\nchanged. Moving a previously-ungrouped server into a group, or toggling\n`is_monitored`, re-evaluates the server's open issues so incidents catch\nup with the new state. Returns 400 if the update is rejected (e.g. an\ninvalid host value, or a role the target product doesn't define).",
@@ -6682,8 +7008,8 @@
         "tags": [
           "statuses"
         ],
-        "summary": "List the servers whose check state reports one (source, check).",
-        "description": "Everything the per-healthcheck page needs: the catalog's configured\npolicy for the (source, check) (if any) plus every live server's\ncurrent state for it — the real-time picture, with each degraded row\ncarrying `failing_since` (the start of its current degradation\nstreak). This is the data behind the `/healthchecks/:source/:check`\n\"who's affected\" page, which doubles as an operator TODO list and as\na way to correlate servers sharing the same issue during a\nfleet-wide incident.",
+        "summary": "List the applications whose check state reports one (source, check).",
+        "description": "Everything the per-healthcheck page needs: the catalog's configured\npolicy for the (source, check) (if any) plus every live server's\ncurrent state for it — the real-time picture, with each degraded row\ncarrying `failing_since` (the start of its current degradation\nstreak). This is the data behind the `/healthchecks/:source/:check`\n\"who's affected\" page, which doubles as an operator TODO list and as\na way to correlate applications sharing the same issue during a\nfleet-wide incident.",
         "operationId": "status_check_detail",
         "requestBody": {
           "content": {
@@ -6697,7 +7023,7 @@
         },
         "responses": {
           "200": {
-            "description": "The check's catalog policy and the servers currently reporting it.",
+            "description": "The check's catalog policy and the applications currently reporting it.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6725,7 +7051,7 @@
           "statuses"
         ],
         "summary": "Get every live server's currently reported detail.",
-        "description": "One row per server, carrying the derived figures, the full resolved\npayload its sources report, and its current healthcheck state. This is\nthe data behind the fleet view, which groups it to show how each figure —\nor any field a source reports, whether server-wide or on one check — is\nspread across the fleet, and can cross two fields against each other.\n\nReads each source's current report rather than status history, so it\ncovers servers that have been quiet for any length of time. Archived\nservers and canopy's own row are excluded; a live server that has never\nreported appears with everything absent.",
+        "description": "One row per server, carrying the derived figures, the full resolved\npayload its sources report, and its current healthcheck state. This is\nthe data behind the fleet view, which groups it to show how each figure —\nor any field a source reports, whether server-wide or on one check — is\nspread across the fleet, and can cross two fields against each other.\n\nReads each source's current report rather than status history, so it\ncovers applications that have been quiet for any length of time. Archived\napplications and canopy's own row are excluded; a live server that has never\nreported appears with everything absent.",
         "operationId": "status_fleet_detail",
         "responses": {
           "200": {
@@ -6817,11 +7143,11 @@
           "statuses"
         ],
         "summary": "List server group ids, bucketed by rank.",
-        "description": "Each group is bucketed under the highest rank held by any of its member\nservers (production outranks clone, which outranks demo, then test,\nthen dev). Groups whose members are all unranked are omitted entirely.\nWithin each rank bucket, groups are ordered alphabetically by name.",
+        "description": "Each group is bucketed under the highest rank held by any of its member\napplications (production outranks clone, which outranks demo, then test,\nthen dev). Groups whose members are all unranked are omitted entirely.\nWithin each rank bucket, groups are ordered alphabetically by name.",
         "operationId": "server_grouped_ids",
         "responses": {
           "200": {
-            "description": "Server group IDs grouped by highest-ranked member's rank.",
+            "description": "Application group IDs grouped by highest-ranked member's rank.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7904,6 +8230,270 @@
           }
         }
       },
+      "Application": {
+        "type": "object",
+        "description": "A single server in the fleet: the unit that reports status, files\nissues, and is monitored for reachability. A server may belong to a\nserver group, and may or may not have a device enrolled against it yet.",
+        "required": [
+          "id",
+          "product",
+          "kind",
+          "machine_id",
+          "is_monitored",
+          "alert_when_down_for",
+          "may_manage_dns",
+          "may_manage_tls"
+        ],
+        "properties": {
+          "alert_when_down_for": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How long, in seconds, a server's status may go without an update\nbefore it's considered unreachable and an issue is filed. Increase\nit for applications with flaky connectivity; decrease it for critical\napplications that should alert promptly. Only enforced while\n`is_monitored` is `true`. Must be a positive number of seconds;\ndefaults to 600 (10 minutes) for newly-created applications."
+          },
+          "certificate_profile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The certificate profile — the authority's name for a lifetime — this\nserver's certificates are requested under. `None` means the longest the\nauthority offers, which is every server until an operator says otherwise:\na short lifetime is adopted deliberately rather than inherited."
+          },
+          "cloud": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether this server is hosted in the cloud, if known."
+          },
+          "deleted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When set, the server is archived: hidden from live listings and\nmonitoring, with its device unenrolled, but its history is retained."
+          },
+          "device_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The device enrolled against this server, if any."
+          },
+          "geolocation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GeoPoint",
+                "description": "The server's physical location, if known."
+              }
+            ]
+          },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The server group this server belongs to, if any.\n\nA denormalisation of the machine's group: an operator sets the group on\nthe machine and the applications on it take it. Carried here so a group\nquery reads one column rather than joining through the machine."
+          },
+          "host": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UrlField",
+                "description": "The server's URL. Optional: a server may be identified solely by its\nenrolled device (e.g. a Tailscale node) rather than a URL. Not\nrequired to be unique. Responses that need a value to display even\nwhen this is unset fall back to another identifying field."
+              }
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for this server."
+          },
+          "is_monitored": {
+            "type": "boolean",
+            "description": "Whether this server is actively monitored. When `false`, reachability\nchecks skip it entirely and its issues no longer contribute to\nincidents — useful for test environments and ad-hoc demos. The\n`alert_when_down_for` threshold is preserved while unmonitored, so\nturning monitoring back on doesn't lose the configured value."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ServerKind",
+            "description": "The server's role within its product's topology, for example central\nor facility. Which roles are available depends on the product."
+          },
+          "machine_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The machine this application runs on. An application runs on exactly\none; a machine hosts any number."
+          },
+          "may_manage_dns": {
+            "type": "boolean",
+            "description": "Whether this server may manage its own DNS records for names under its\ngroup's domains. Withheld by default: a server without it is\nauthenticated and refused. Unlike the restore window this is a standing\ngrant, records needing maintenance for as long as the server lives."
+          },
+          "may_manage_tls": {
+            "type": "boolean",
+            "description": "Whether this server may obtain TLS certificates for names under its\ngroup's domains. Separate from `may_manage_dns`: a deployment whose\nrecords are managed elsewhere may still want its certificates here."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The server's display name, scoped within its group. May not be\nglobally unique or meaningful outside the group."
+          },
+          "name_management_pause_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it was paused."
+          },
+          "name_management_paused_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this server's name management was paused. While set, Canopy makes no\nnew changes on its behalf — nothing ordered, renewed, or republished —\nthough nothing already in place is withdrawn.\n\nSet automatically when one of the server's certificates is revoked, so\nrevocation and re-issuance don't chase each other. Only an operator lifts\nit."
+          },
+          "name_management_paused_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who paused it. `None` when Canopy paused it itself on a revocation."
+          },
+          "notes": {
+            "type": "string",
+            "description": "Free-form operator notes about this server."
+          },
+          "product": {
+            "$ref": "#/components/schemas/Product",
+            "description": "The application this server runs, for example tamanu or senaite.\nDecides which of canopy's per-server features apply to it at all."
+          },
+          "public_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "If set, the server is listed publicly under this name (used by\nend-user-facing clients). `None` means it is not listed publicly.\nSeparate from `name` because that field is only meaningful within\nthe server's group."
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "The server's environment tier, for example production, test, or dev."
+              }
+            ]
+          },
+          "registered_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When a device successfully completed enrollment for this server.\nWhile `None`, the server is awaiting its first check-in and the UI\nshows setup instructions."
+          },
+          "restore_allowed_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who opened the current restore window (Tailscale login), if any."
+          },
+          "restore_allowed_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Until when this server is allowed to mint restore credentials for\nitself (ad-hoc `bestool canopy restore`). An operator opens this\nwindow and it auto-expires; `None` (or a past instant) means restores\nare not currently allowed. Restores read the group's backup repo, so\nthey're gated behind this deliberate, time-boxed opt-in rather than\nalways available."
+          },
+          "tags": {
+            "$ref": "#/components/schemas/TagMap",
+            "description": "Key/value tags for this server."
+          }
+        }
+      },
+      "ApplicationNamesView": {
+        "type": "object",
+        "description": "What a server's page shows about its names and certificates.",
+        "required": [
+          "may_manage_dns",
+          "may_manage_tls",
+          "paused",
+          "domains",
+          "names",
+          "certificates"
+        ],
+        "properties": {
+          "certificate_profile": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The profile this server's certificates are requested under. Null means\nthe authority's own default, which is its longest-lived."
+          },
+          "certificates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CertificateView"
+            },
+            "description": "Every certificate Canopy holds or has an order in flight for, newest\nfirst. A name may appear more than once — a key rotation leaves the\nprevious certificate behind until it expires."
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The domains this server's group controls, so the UI can say which names\nare available to it at all."
+          },
+          "may_manage_dns": {
+            "type": "boolean",
+            "description": "Whether an operator has allowed this server to manage its own DNS."
+          },
+          "may_manage_tls": {
+            "type": "boolean",
+            "description": "Whether an operator has allowed this server to obtain its own\ncertificates."
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameView"
+            },
+            "description": "The public names this server has registered, by name."
+          },
+          "pause_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it was set."
+          },
+          "paused": {
+            "type": "boolean",
+            "description": "Whether Canopy has been told to stop doing anything new for this server."
+          },
+          "paused_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When the pause was set."
+          },
+          "paused_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who set it."
+          }
+        }
+      },
       "ArtifactData": {
         "type": "object",
         "description": "A downloadable artifact (for example an installer) associated with a\nversion, either tied to that exact version or matched via a version\nrange pattern.",
@@ -8335,7 +8925,7 @@
               "null"
             ],
             "format": "int32",
-            "description": "Number of distinct backup sources (servers/types) currently in the\nrepository, if known."
+            "description": "Number of distinct backup sources (applications/types) currently in the\nrepository, if known."
           }
         }
       },
@@ -8357,7 +8947,7 @@
             "items": {
               "$ref": "#/components/schemas/ServerBackupCapabilityView"
             },
-            "description": "Backup types each member server has advertised it can run (with their\nenabled state), so the \"back up now\" panel can offer the right types per\nserver and grey out servers that have declared none."
+            "description": "Backup types each member server has advertised it can run (with their\nenabled state), so the \"back up now\" panel can offer the right types per\nserver and grey out applications that have declared none."
           },
           "pending_requests": {
             "type": "array",
@@ -8378,14 +8968,14 @@
             "items": {
               "$ref": "#/components/schemas/RecentRun"
             },
-            "description": "The most recent backup and restore runs across the group's member servers,\nincluding runs still in flight or inferred from credential issuances that\nwere never reported."
+            "description": "The most recent backup and restore runs across the group's member applications,\nincluding runs still in flight or inferred from credential issuances that\nwere never reported."
           },
           "restore_windows": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/RestoreWindowRow"
             },
-            "description": "Member servers whose restore window is currently open, so the panel can\nshow which servers may restore right now and until when. Servers with no\nopen window are omitted."
+            "description": "Member applications whose restore window is currently open, so the panel can\nshow which applications may restore right now and until when. Servers with no\nopen window are omitted."
           },
           "s3_month_received_bytes": {
             "type": "integer",
@@ -8750,10 +9340,17 @@
           "source",
           "check",
           "escalates",
-          "servers",
+          "applications",
           "groups"
         ],
         "properties": {
+          "applications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CheckDetailServerData"
+            },
+            "description": "Every live server whose latest state from this source reports\nthis check, at any result, ordered as a TODO list: failed,\nwarning, broken, passed, skipped (most urgent first), then by\ngroup name then server name. The client filters out the\npassed/skipped tail unless the \"show healthy\" toggle is on."
+          },
           "canopy": {
             "oneOf": [
               {
@@ -8793,13 +9390,6 @@
               "$ref": "#/components/schemas/CheckDetailGroupData"
             },
             "description": "Group-scoped states of this check, ordered by group name. The\nclient files each under its group in the list."
-          },
-          "servers": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CheckDetailServerData"
-            },
-            "description": "Every live server whose latest state from this source reports\nthis check, at any result, ordered as a TODO list: failed,\nwarning, broken, passed, skipped (most urgent first), then by\ngroup name then server name. The client filters out the\npassed/skipped tail unless the \"show healthy\" toggle is on."
           },
           "source": {
             "type": "string",
@@ -8892,7 +9482,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "When the check's current degradation streak began. `None` for\nservers currently reporting the check healthy."
+            "description": "When the check's current degradation streak began. `None` for\napplications currently reporting the check healthy."
           },
           "group_id": {
             "type": [
@@ -8926,12 +9516,12 @@
           },
           "result": {
             "$ref": "#/components/schemas/CheckResult",
-            "description": "The check's observed result on its latest report. The UI shows\nwarning/failed/broken servers by default and puts passed/skipped\nones behind a \"show healthy\" toggle."
+            "description": "The check's observed result on its latest report. The UI shows\nwarning/failed/broken applications by default and puts passed/skipped\nones behind a \"show healthy\" toggle."
           },
           "server_id": {
             "type": "string",
             "format": "uuid",
-            "description": "The server's id — the UI links to `/servers/{server_id}`."
+            "description": "The server's id — the UI links to `/applications/{server_id}`."
           },
           "server_name": {
             "type": "string",
@@ -8975,7 +9565,7 @@
           },
           "check_name": {
             "type": "string",
-            "description": "The healthcheck's name, exactly as reported by monitored servers."
+            "description": "The healthcheck's name, exactly as reported by monitored applications."
           },
           "decommissioned_at": {
             "type": [
@@ -9397,6 +9987,25 @@
           }
         }
       },
+      "DeclarationArgs": {
+        "type": "object",
+        "description": "An application and the name being declared for it, or released from it.",
+        "required": [
+          "application_id",
+          "name"
+        ],
+        "properties": {
+          "application_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The application that serves the name."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name, in any case and with or without a trailing dot."
+          }
+        }
+      },
       "DeclareArgs": {
         "type": "object",
         "description": "Declare a window over a target, or amend the one it already has.",
@@ -9408,6 +10017,14 @@
             "type": "string",
             "format": "date-time",
             "description": "When the work is expected to finish. The window ends itself then."
+          },
+          "machine_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The machine, for a window over one box. Covers every application on it."
           },
           "note": {
             "type": [
@@ -9423,14 +10040,6 @@
             ],
             "format": "uuid",
             "description": "The group, for a window over a whole group."
-          },
-          "server_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The server, for a window over one server."
           }
         }
       },
@@ -10003,7 +10612,7 @@
           },
           "product": {
             "$ref": "#/components/schemas/Product",
-            "description": "The application the server runs. The fleet view reads it to keep the\napplication-version spread to servers that have one to report."
+            "description": "The application the server runs. The fleet view reads it to keep the\napplication-version spread to applications that have one to report."
           },
           "rank": {
             "oneOf": [
@@ -10109,7 +10718,7 @@
       },
       "GrantAvailabilityView": {
         "type": "object",
-        "description": "Where a group stands with respect to granting its servers name management.",
+        "description": "Where a group stands with respect to granting its applications name management.",
         "required": [
           "state",
           "group_domains"
@@ -10130,15 +10739,22 @@
       },
       "GroupDetail": {
         "type": "object",
-        "description": "A server group together with its member servers and billing labels.",
+        "description": "A server group together with its member applications and billing labels.",
         "required": [
           "group",
-          "servers",
+          "applications",
           "billing_labels",
           "maintained",
           "maintenance_settling"
         ],
         "properties": {
+          "applications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServerInfo"
+            },
+            "description": "The group's member applications, sorted by name, with current status and\ndisplay host included."
+          },
           "billing_labels": {
             "type": "array",
             "items": {
@@ -10157,13 +10773,6 @@
           "maintenance_settling": {
             "type": "boolean",
             "description": "Whether the suspension is only the settle period: the window has\nended and watching resumes when it elapses."
-          },
-          "servers": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ServerInfo"
-            },
-            "description": "The group's member servers, sorted by name, with current status and\ndisplay host included."
           }
         }
       },
@@ -10255,7 +10864,7 @@
       },
       "GroupServerCount": {
         "type": "object",
-        "description": "The number of live servers in one server group.",
+        "description": "The number of live applications in one server group.",
         "required": [
           "server_group_id",
           "server_count"
@@ -10264,7 +10873,7 @@
           "server_count": {
             "type": "integer",
             "format": "int64",
-            "description": "Number of live (non-archived) servers currently in the group."
+            "description": "Number of live (non-archived) applications currently in the group."
           },
           "server_group_id": {
             "type": "string",
@@ -10319,7 +10928,7 @@
       },
       "GroupVerdict": {
         "type": "object",
-        "description": "Where one of a group's servers stands against the version it would take\nnext.",
+        "description": "Where one of a group's applications stands against the version it would take\nnext.",
         "required": [
           "server_id",
           "target_version_id",
@@ -10369,7 +10978,7 @@
       },
       "HealthcheckSample": {
         "type": "object",
-        "description": "A real-world sample of the data a conditional rule can reference for a\ngiven healthcheck, taken from the most recent status report (across\nall servers) from the check's own source that included it.",
+        "description": "A real-world sample of the data a conditional rule can reference for a\ngiven healthcheck, taken from the most recent status report (across\nall applications) from the check's own source that included it.",
         "required": [
           "status_extra",
           "check_extra",
@@ -10902,7 +11511,7 @@
       },
       "IssueData": {
         "type": "object",
-        "description": "A problem raised against a server (or a group of servers), tracking its\ncurrent severity, whether it's still ongoing, and how it's been handled\nby an operator.",
+        "description": "A problem raised against a server (or a group of applications), tracking its\ncurrent severity, whether it's still ongoing, and how it's been handled\nby an operator.",
         "required": [
           "id",
           "server_host",
@@ -10921,6 +11530,14 @@
           "active": {
             "type": "boolean",
             "description": "Whether the underlying condition is still ongoing. `false` once the\ncondition has stopped recurring."
+          },
+          "application_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The server this issue was raised against. Absent for issues that\napply to a whole group of applications rather than a single one."
           },
           "check_name": {
             "type": [
@@ -11055,14 +11672,6 @@
             "type": "string",
             "description": "Hostname or address of the affected server."
           },
-          "server_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The server this issue was raised against. Absent for issues that\napply to a whole group of servers rather than a single one."
-          },
           "server_name": {
             "type": [
               "string",
@@ -11147,7 +11756,7 @@
       },
       "IssueListArgs": {
         "type": "object",
-        "description": "Filters for listing issues across all servers.",
+        "description": "Filters for listing issues across all applications.",
         "properties": {
           "activeOnly": {
             "type": [
@@ -11188,7 +11797,7 @@
         "type": "object",
         "description": "Filters for listing the issues raised against one server.",
         "required": [
-          "server_id"
+          "application_id"
         ],
         "properties": {
           "active_only": {
@@ -11198,6 +11807,11 @@
             ],
             "description": "When `false`, include resolved and inactive issues as well as active\nones. Defaults to `true` (active issues only) when omitted."
           },
+          "application_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id of the server whose issues to list."
+          },
           "limit": {
             "type": [
               "integer",
@@ -11205,11 +11819,6 @@
             ],
             "format": "int64",
             "description": "Maximum number of issues to return. Defaults to 100 when omitted."
-          },
-          "server_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Id of the server whose issues to list."
           }
         }
       },
@@ -11696,6 +12305,252 @@
           }
         }
       },
+      "Machine": {
+        "type": "object",
+        "description": "A host in the fleet: a box, physical or virtual, that canopy monitors.\n\nDistinct from the application server running on it. A machine carries the\nfacts that belong to the box — where it is, what identity speaks for it,\nhow long it may be silent — so a host running two workloads reports its\nplatform, memory and filesystems once rather than once per workload.\n\nA machine hosts any number of applications, including none: one created but\nnot yet reporting presents as awaiting check-in rather than as an error.",
+        "required": [
+          "id",
+          "alert_when_down_for",
+          "is_monitored"
+        ],
+        "properties": {
+          "alert_when_down_for": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How long this machine may go without reporting before it is considered\nunreachable. Only enforced while `is_monitored`; the value is kept\nwhile unmonitored so turning monitoring back on does not lose it."
+          },
+          "cloud": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether this machine is hosted in the cloud, if known."
+          },
+          "deleted_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When set, the machine is archived: out of the live fleet, with its\nrecord and history retained. Archiving a machine archives the\napplications on it."
+          },
+          "device_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The identity that authenticates this machine, if one is enrolled. A\nmachine has at most one, and an identity belongs to at most one\nmachine, so resolving either from the other is unambiguous."
+          },
+          "geolocation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GeoPoint",
+                "description": "Where this machine is, if known."
+              }
+            ]
+          },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The group this machine belongs to. The one thing an operator supplies\nwhen creating a machine: which deployment a box belongs to is the one\nfact the box has no way of knowing. The applications on it take it."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for this machine."
+          },
+          "is_monitored": {
+            "type": "boolean",
+            "description": "Whether this machine is actively monitored. Switching it off quiets\nthe machine's own checks and does not touch the applications on it —\na box excused from monitoring says nothing about its workloads."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name its operator gave it. Distinct from the hostname the\noperating system reports, which is a reported figure rather than a\nfield an operator sets."
+          },
+          "notes": {
+            "type": "string",
+            "description": "Free-form operator notes about this machine."
+          },
+          "registered_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When an identity completed enrolment for this machine. While `None`,\nthe machine is awaiting its first check-in.\n\nAlso the anchor a backup deadline counts from, which is why it belongs\nto the machine: anchoring on an application's registration would\nrestart a box's backup clock every time a workload was added to it."
+          },
+          "tags": {
+            "$ref": "#/components/schemas/TagMap",
+            "description": "Key/value tags for this machine. A check filed against a machine is\ngraded by policy against these rather than against any application's.\nAn application's type is not among them, not being a property of a box."
+          }
+        }
+      },
+      "MachineCreateArgs": {
+        "type": "object",
+        "description": "What an operator supplies when adding a machine.\n\nThe group is the only field that matters to get right up front: which\ndeployment a box belongs to is the one thing the box has no way of knowing.",
+        "properties": {
+          "cloud": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the box is cloud-hosted, if known."
+          },
+          "geolocation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GeoPoint",
+                "description": "Where the box is, if known."
+              }
+            ]
+          },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The group this machine belongs to. The applications on it take it."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What to call the box. Distinct from the hostname its operating system\nreports, which arrives as a reported figure."
+          }
+        }
+      },
+      "MachineDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Machine"
+          },
+          {
+            "type": "object",
+            "required": [
+              "applications"
+            ],
+            "properties": {
+              "applications": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/Application"
+                },
+                "description": "The applications on this machine. Empty for a machine that has been\ncreated but has not yet reported: that is awaiting check-in, not an\nerror."
+              }
+            }
+          }
+        ],
+        "description": "A machine together with the applications running on it."
+      },
+      "MachineIdArgs": {
+        "type": "object",
+        "description": "Identifies one machine.",
+        "required": [
+          "machine_id"
+        ],
+        "properties": {
+          "machine_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The machine to operate on."
+          }
+        }
+      },
+      "MachineUpdateArgs": {
+        "type": "object",
+        "description": "Fields to change on a machine. Omitted fields are left alone; for the\nnullable ones an explicit `null` clears the value.",
+        "required": [
+          "machine_id"
+        ],
+        "properties": {
+          "alert_when_down_for": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How long the machine may be silent before it is unreachable, in seconds."
+          },
+          "cloud": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "New value for whether the box is cloud-hosted, or `null` to clear it."
+          },
+          "geolocation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/GeoPoint",
+                "description": "New location for the box, or `null` to clear it."
+              }
+            ]
+          },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "New group, or `null` to remove it from its current one. The\napplications on this machine move with it."
+          },
+          "is_monitored": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "New monitored state. Switching it off quiets the machine's own checks\nand leaves the applications on it alone."
+          },
+          "machine_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The machine to edit."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New name for the box, or `null` to clear it."
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "New free-form operator notes for the box."
+          },
+          "tags": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TagMap",
+                "description": "New set of key/value tags. Replaces the whole set."
+              }
+            ]
+          }
+        }
+      },
       "MaintenanceKind": {
         "type": "string",
         "description": "Which maintenance cycle a reported backup-repository maintenance run\nperformed.",
@@ -11706,7 +12561,7 @@
       },
       "MaintenanceWindow": {
         "type": "object",
-        "description": "A declaration that a server or a group is being worked on.",
+        "description": "A declaration that a machine or a group is being worked on.",
         "required": [
           "id",
           "expected_end",
@@ -11772,6 +12627,14 @@
             "format": "uuid",
             "description": "Unique identifier of this window."
           },
+          "machine_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Set for a window over one machine, covering the machine's own checks\nand those of every application running on it."
+          },
           "note": {
             "type": [
               "string",
@@ -11785,15 +12648,7 @@
               "null"
             ],
             "format": "uuid",
-            "description": "Set for a window over a group, covering the group's own checks and\nthose of every server in it."
-          },
-          "server_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "Set for a window over one server."
+            "description": "Set for a window over a group, covering the group's own checks and\nthose of every machine in it."
           },
           "settled_at": {
             "type": [
@@ -12240,6 +13095,7 @@
               "description": "A server in the fleet inventory: its identity, classification, network\naddress, monitoring configuration, and (when requested by the endpoint)\ncurrent reachability/health.",
               "required": [
                 "id",
+                "machine_id",
                 "product",
                 "kind",
                 "display_host",
@@ -12322,7 +13178,7 @@
                     "string",
                     "null"
                   ],
-                  "description": "The server's stored URL, if any. May be absent for device-only servers."
+                  "description": "The server's stored URL, if any. May be absent for device-only applications."
                 },
                 "id": {
                   "type": "string",
@@ -12336,6 +13192,11 @@
                 "kind": {
                   "$ref": "#/components/schemas/ServerKind",
                   "description": "The server's role within its product's topology."
+                },
+                "machine_id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "The machine this application runs on. Maintenance is declared over the\nmachine, so a surface offering to declare one needs it (see MNT)."
                 },
                 "maintained": {
                   "type": [
@@ -12751,7 +13612,7 @@
               "string",
               "null"
             ],
-            "description": "Where the group's data stands against the planned version, rolled up from\nits servers: any failure makes the group a failure, since one server\nwhose data breaks is enough to stop the upgrade. `null` without a plan."
+            "description": "Where the group's data stands against the planned version, rolled up from\nits applications: any failure makes the group a failure, since one server\nwhose data breaks is enough to stop the upgrade. `null` without a plan."
           }
         }
       },
@@ -12887,7 +13748,7 @@
       },
       "ProductInfo": {
         "type": "object",
-        "description": "One product canopy monitors, with what canopy does for its servers and the\nroles it defines.",
+        "description": "One product canopy monitors, with what canopy does for its applications and the\nroles it defines.",
         "required": [
           "product",
           "caps",
@@ -12897,7 +13758,7 @@
         "properties": {
           "caps": {
             "$ref": "#/components/schemas/Caps",
-            "description": "What canopy does for this product's servers."
+            "description": "What canopy does for this product's applications."
           },
           "default_kind": {
             "$ref": "#/components/schemas/ServerKind",
@@ -13847,7 +14708,7 @@
               "null"
             ],
             "format": "uuid",
-            "description": "Specific server within the group, or null to cover all current servers\nin the group."
+            "description": "Specific server within the group, or null to cover all current applications\nin the group."
           },
           "type": {
             "type": "string",
@@ -13909,7 +14770,7 @@
               "null"
             ],
             "format": "uuid",
-            "description": "Specific server within the group; omit or null to cover all current\nservers in the group."
+            "description": "Specific server within the group; omit or null to cover all current\napplications in the group."
           },
           "type": {
             "type": "string",
@@ -13992,7 +14853,7 @@
               "null"
             ],
             "format": "uuid",
-            "description": "Specific server within the group; omit or null to cover all current\nservers in the group."
+            "description": "Specific server within the group; omit or null to cover all current\napplications in the group."
           },
           "type": {
             "type": "string",
@@ -14315,7 +15176,7 @@
       },
       "SelfAlertView": {
         "type": "object",
-        "description": "A self-alert: a problem with canopy's own operation, such as an\nexpiring credential or a failed notification delivery — distinct from\nissues raised against monitored servers.",
+        "description": "A self-alert: a problem with canopy's own operation, such as an\nexpiring credential or a failed notification delivery — distinct from\nissues raised against monitored applications.",
         "required": [
           "id",
           "ref",
@@ -14722,7 +15583,7 @@
             "items": {
               "$ref": "#/components/schemas/ServerInfo"
             },
-            "description": "Other servers in the same group (excluding `server`). Empty when the\nserver is ungrouped or alone in its group. Each entry carries its\nown `up` / `health` so the UI can render a status dot per sibling."
+            "description": "Other applications in the same group (excluding `server`). Empty when the\nserver is ungrouped or alone in its group. Each entry carries its\nown `up` / `health` so the UI can render a status dot per sibling."
           },
           "up": {
             "$ref": "#/components/schemas/ShortStatus",
@@ -14732,7 +15593,7 @@
       },
       "ServerGroup": {
         "type": "object",
-        "description": "A group of servers managed together: incidents roll up across the group,\nmembers share tags, and the group carries its own notes and\nnotification settings.",
+        "description": "A group of applications managed together: incidents roll up across the group,\nmembers share tags, and the group carries its own notes and\nnotification settings.",
         "required": [
           "id",
           "created_at",
@@ -14798,7 +15659,7 @@
             "format": "date-time",
             "description": "When this group was last modified."
           },
-          "version_server_id": {
+          "version_application_id": {
             "type": [
               "string",
               "null"
@@ -14999,6 +15860,7 @@
         "description": "A server in the fleet inventory: its identity, classification, network\naddress, monitoring configuration, and (when requested by the endpoint)\ncurrent reachability/health.",
         "required": [
           "id",
+          "machine_id",
           "product",
           "kind",
           "display_host",
@@ -15081,7 +15943,7 @@
               "string",
               "null"
             ],
-            "description": "The server's stored URL, if any. May be absent for device-only servers."
+            "description": "The server's stored URL, if any. May be absent for device-only applications."
           },
           "id": {
             "type": "string",
@@ -15095,6 +15957,11 @@
           "kind": {
             "$ref": "#/components/schemas/ServerKind",
             "description": "The server's role within its product's topology."
+          },
+          "machine_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The machine this application runs on. Maintenance is declared over the\nmachine, so a surface offering to declare one needs it (see MNT)."
           },
           "maintained": {
             "type": [
@@ -15287,7 +16154,7 @@
       },
       "ServerListArgs": {
         "type": "object",
-        "description": "Filter and pagination parameters for listing servers.",
+        "description": "Filter and pagination parameters for listing applications.",
         "required": [
           "offset"
         ],
@@ -15299,7 +16166,7 @@
               },
               {
                 "$ref": "#/components/schemas/ServerKind",
-                "description": "Restrict results to servers of this deployment kind. Omit to\ninclude all kinds."
+                "description": "Restrict results to applications of this deployment kind. Omit to\ninclude all kinds."
               }
             ]
           },
@@ -15317,81 +16184,6 @@
             "format": "int64",
             "description": "Number of items to skip from the start of the result set.",
             "minimum": 0
-          }
-        }
-      },
-      "ServerNamesView": {
-        "type": "object",
-        "description": "What a server's page shows about its names and certificates.",
-        "required": [
-          "may_manage_dns",
-          "may_manage_tls",
-          "paused",
-          "domains",
-          "names",
-          "certificates"
-        ],
-        "properties": {
-          "certificate_profile": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The profile this server's certificates are requested under. Null means\nthe authority's own default, which is its longest-lived."
-          },
-          "certificates": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/CertificateView"
-            },
-            "description": "Every certificate Canopy holds or has an order in flight for, newest\nfirst. A name may appear more than once — a key rotation leaves the\nprevious certificate behind until it expires."
-          },
-          "domains": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "The domains this server's group controls, so the UI can say which names\nare available to it at all."
-          },
-          "may_manage_dns": {
-            "type": "boolean",
-            "description": "Whether an operator has allowed this server to manage its own DNS."
-          },
-          "may_manage_tls": {
-            "type": "boolean",
-            "description": "Whether an operator has allowed this server to obtain its own\ncertificates."
-          },
-          "names": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/NameView"
-            },
-            "description": "The public names this server has registered, by name."
-          },
-          "pause_reason": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Why it was set."
-          },
-          "paused": {
-            "type": "boolean",
-            "description": "Whether Canopy has been told to stop doing anything new for this server."
-          },
-          "paused_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "When the pause was set."
-          },
-          "paused_by": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Who set it."
           }
         }
       },
@@ -15424,12 +16216,17 @@
         "type": "object",
         "description": "A silenced issue reference scoped to a single server: issues matching\nthis `(source, ref)` on this server are still recorded, but are excluded\nfrom incidents and notifications.",
         "required": [
-          "server_id",
+          "application_id",
           "source",
           "ref",
           "created_at"
         ],
         "properties": {
+          "application_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The server this silence applies to."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -15445,11 +16242,6 @@
           "ref": {
             "type": "string",
             "description": "The issue reference this silence matches."
-          },
-          "server_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "The server this silence applies to."
           },
           "source": {
             "type": "string",
@@ -15757,7 +16549,7 @@
           },
           "reachability": {
             "$ref": "#/components/schemas/ReachabilityMode",
-            "description": "How this source's silence bears on its servers' reachability: `on`\n(a stale source warns, all-stale is unreachable), `quiet` (never\nwarns, still counts toward unreachable), or `off` (excluded)."
+            "description": "How this source's silence bears on its applications' reachability: `on`\n(a stale source warns, all-stale is unreachable), `quiet` (never\nwarns, still counts toward unreachable), or `off` (excluded)."
           },
           "source": {
             "type": "string",
@@ -16079,7 +16871,7 @@
         "type": "object",
         "description": "A manually raised condition to record against a server.",
         "required": [
-          "serverId",
+          "applicationId",
           "ref",
           "message"
         ],
@@ -16090,6 +16882,11 @@
               "null"
             ],
             "description": "Whether the underlying condition is currently active. Defaults to\n`true` when omitted; `false` records it as cleared regardless of\n`result`."
+          },
+          "applicationId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Id of the server the condition applies to."
           },
           "description": {
             "type": [
@@ -16123,11 +16920,6 @@
                 "description": "The condition's result: `failed` (can open an incident) or\n`warning` (context only). Defaults to `failed`. `passed` records\nthe condition as cleared, same as `active: false`."
               }
             ]
-          },
-          "serverId": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Id of the server the condition applies to."
           }
         }
       },
@@ -16236,6 +17028,14 @@
         "type": "object",
         "description": "The target a window covers: exactly one of the two is set.",
         "properties": {
+          "machine_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The machine, for a window over one box. Covers every application on it."
+          },
           "server_group_id": {
             "type": [
               "string",
@@ -16243,14 +17043,6 @@
             ],
             "format": "uuid",
             "description": "The group, for a window over a whole group."
-          },
-          "server_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The server, for a window over one server."
           }
         }
       },
@@ -16642,6 +17434,11 @@
           }
         }
       },
+      "UrlField": {
+        "type": "string",
+        "format": "uri",
+        "description": "A URL, given as a plain string. Any trailing slash is stripped when the\nvalue is returned."
+      },
       "Value": {},
       "Verdict": {
         "type": "string",
@@ -16905,6 +17702,10 @@
       "description": "Per-server issues raised from device events."
     },
     {
+      "name": "machines",
+      "description": "The hosts applications run on: their group, location, and monitoring."
+    },
+    {
       "name": "maintenance",
       "description": "Windows declaring that a server or a group is being worked on."
     },
@@ -16930,11 +17731,11 @@
     },
     {
       "name": "server_groups",
-      "description": "Server group management and group-level configuration."
+      "description": "Application group management and group-level configuration."
     },
     {
-      "name": "servers",
-      "description": "Server inventory, hierarchy, and metadata."
+      "name": "applications",
+      "description": "Application inventory, hierarchy, and metadata."
     },
     {
       "name": "silenced_refs",

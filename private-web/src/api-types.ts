@@ -332,7 +332,7 @@ export interface paths {
         put?: never;
         /**
          * List the effective schedule and retention for every backup type a group's
-         *     servers have declared support for (not just the ones currently enabled).
+         *     applications have declared support for (not just the ones currently enabled).
          * @description A type with no scheduled interval still appears, with a null
          *     `effective_interval`, since a manually run backup of that type is still
          *     retained under its own policy.
@@ -842,6 +842,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/certificates/declare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Declare that an application serves a name.
+         * @description A declaration is what an address registration or a certificate request from
+         *     the machine is resolved against, so it is how a box running several workloads
+         *     gets its requests routed to the right one. It carries no addresses; the
+         *     application registers those itself.
+         *
+         *     Declaring a name the same application already holds changes nothing. A name
+         *     another application holds is refused, and the refusal names the holder so an
+         *     operator can see what to release first.
+         */
+        post: operations["certificates_declare"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/certificates/for_group": {
         parameters: {
             query?: never;
@@ -855,7 +882,7 @@ export interface paths {
          * The names in use under each domain a group controls, and which of them hold a
          *     current certificate.
          * @description So that whether a deployment's names are healthy is answerable from the
-         *     group's page, without visiting each of its servers.
+         *     group's page, without visiting each of its applications.
          */
         post: operations["certificates_for_group"];
         delete?: never;
@@ -905,6 +932,29 @@ export interface paths {
          *     not overwritten by a later one.
          */
         post: operations["certificates_pause"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/certificates/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End an application's hold on a name.
+         * @description What is already in place stands, as revoking a grant leaves it: the records
+         *     published stay published and the certificates held stay held until they
+         *     expire. What ends is Canopy treating the name as this application's, which
+         *     frees it to be declared elsewhere.
+         */
+        post: operations["certificates_release"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1283,27 +1333,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/devices/get_past_server_associations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * List servers a device was previously associated with, but no longer is.
-         * @description Useful for tracing a device's history when it has since been reassigned
-         *     or replaced on a different server.
-         */
-        post: operations["get_past_server_associations"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/devices/get_servers_for_device": {
         parameters: {
             query?: never;
@@ -1314,8 +1343,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List the servers a device is currently associated with.
-         * @description Returns the servers this device is currently bound to (usually zero or
+         * List the applications a device is currently associated with.
+         * @description Returns the applications this device is currently bound to (usually zero or
          *     one), including reachability status and a best-effort display address
          *     for each.
          */
@@ -1721,7 +1750,7 @@ export interface paths {
         put?: never;
         /**
          * Set a source's reachability mode.
-         * @description Governs how the source's silence bears on its servers' reachability:
+         * @description Governs how the source's silence bears on its applications' reachability:
          *     `on` warns, `quiet` never warns but still counts toward unreachable,
          *     `off` is excluded. The reserved `canopy`/`manual` names are rejected.
          */
@@ -2094,7 +2123,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List issues across all servers, with optional filtering.
+         * List issues across all applications, with optional filtering.
          * @description Returns the most relevant issues fleet-wide, matching the given filters.
          *     By default only currently active issues are returned; pass
          *     `activeOnly: false` to also see resolved and inactive ones.
@@ -2278,6 +2307,114 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/machines/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive a machine, and with it the applications on it.
+         * @description A box going away takes its workloads with it. Archival is not deletion:
+         *     the records and their history remain.
+         */
+        post: operations["machines_archive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/machines/create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a machine to the fleet.
+         * @description The machine starts with no applications and no identity; enrolment binds an
+         *     identity, and the applications on it arrive by report.
+         */
+        post: operations["machines_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/machines/get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get one machine and the applications running on it.
+         * @description Returns the machine's own facts — its group, where it is, how long it may
+         *     be silent — together with the applications it hosts. Returns 404 if the
+         *     machine doesn't exist.
+         */
+        post: operations["machines_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/machines/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List the live fleet's machines.
+         * @description Every machine that has not been archived, ordered by name. A machine with
+         *     no applications on it is included: one created but not yet reporting is
+         *     awaiting check-in, not an error. The request body is ignored; send an empty
+         *     JSON object.
+         */
+        post: operations["machines_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/machines/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Edit a machine.
+         * @description Moving a machine to another group moves the applications on it: an
+         *     application's group is never set independently of its machine's.
+         */
+        post: operations["machines_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/maintenance/declare": {
         parameters: {
             query?: never;
@@ -2447,7 +2584,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Where each of a group's servers stands against the version it would take
+         * Where each of a group's applications stands against the version it would take
          *     next.
          * @description One entry per server that has a candidate version, which is the version its
          *     group's open plan names. A group with no plan, and a server running another
@@ -2729,7 +2866,7 @@ export interface paths {
          * Archive a server group.
          * @description Soft-deletes the group: it disappears from live listings but is kept and
          *     can be restored later. Requires the caller to be on the admin allow-list.
-         *     Responds 409 if the group still has live member servers; move or archive
+         *     Responds 409 if the group still has live member applications; move or archive
          *     those first.
          */
         post: operations["server_groups_delete"];
@@ -2750,7 +2887,7 @@ export interface paths {
         put?: never;
         /**
          * Get a server group with its members.
-         * @description Returns the group, its member servers (sorted by name, with current status
+         * @description Returns the group, its member applications (sorted by name, with current status
          *     and display host), and the group's effective billing labels. Responds 404
          *     if no group exists with the given identifier.
          */
@@ -2856,7 +2993,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Count live servers per group.
+         * Count live applications per group.
          * @description Returns one entry per server group that has at least one live
          *     (non-archived) member server. Groups with no live members are omitted, so
          *     treat a missing entry as a count of zero. The request body is ignored;
@@ -2949,7 +3086,7 @@ export interface paths {
         put?: never;
         /**
          * Archive (soft-delete) a server.
-         * @description Releases and demotes its device. Archived servers no longer appear in
+         * @description Releases and demotes its device. Archived applications no longer appear in
          *     regular listings but can be restored later.
          */
         post: operations["delete"];
@@ -2994,7 +3131,7 @@ export interface paths {
          * Get full detail for a server.
          * @description Returns the server's record, its bound device (if any), its most recent
          *     status report, current reachability/health, its group (if any) together
-         *     with sibling servers in the same group, and the group's billing labels.
+         *     with sibling applications in the same group, and the group's billing labels.
          *     Returns 404 if no server exists with that id.
          */
         post: operations["get_detail"];
@@ -3059,9 +3196,9 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List archived (soft-deleted) servers.
+         * List archived (soft-deleted) applications.
          * @description Each entry has `archived: true` and includes current reachability/health.
-         *     Archived servers can be brought back with the restore endpoint.
+         *     Archived applications can be brought back with the restore endpoint.
          */
         post: operations["list_archived"];
         delete?: never;
@@ -3080,8 +3217,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List servers, optionally filtered by kind, paginated.
-         * @description Returns a page of servers plus the total matching count. Entries include
+         * List applications, optionally filtered by kind, paginated.
+         * @description Returns a page of applications plus the total matching count. Entries include
          *     their group name where applicable, but not current reachability/health —
          *     use the detail endpoint for that.
          */
@@ -3102,9 +3239,9 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List servers that don't belong to any group.
-         * @description Returns a page of ungrouped servers, each with current
-         *     reachability/health, plus the total count of ungrouped servers.
+         * List applications that don't belong to any group.
+         * @description Returns a page of ungrouped applications, each with current
+         *     reachability/health, plus the total count of ungrouped applications.
          */
         post: operations["list_ungrouped"];
         delete?: never;
@@ -3448,14 +3585,14 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List the servers whose check state reports one (source, check).
+         * List the applications whose check state reports one (source, check).
          * @description Everything the per-healthcheck page needs: the catalog's configured
          *     policy for the (source, check) (if any) plus every live server's
          *     current state for it — the real-time picture, with each degraded row
          *     carrying `failing_since` (the start of its current degradation
          *     streak). This is the data behind the `/healthchecks/:source/:check`
          *     "who's affected" page, which doubles as an operator TODO list and as
-         *     a way to correlate servers sharing the same issue during a
+         *     a way to correlate applications sharing the same issue during a
          *     fleet-wide incident.
          */
         post: operations["status_check_detail"];
@@ -3483,8 +3620,8 @@ export interface paths {
          *     spread across the fleet, and can cross two fields against each other.
          *
          *     Reads each source's current report rather than status history, so it
-         *     covers servers that have been quiet for any length of time. Archived
-         *     servers and canopy's own row are excluded; a live server that has never
+         *     covers applications that have been quiet for any length of time. Archived
+         *     applications and canopy's own row are excluded; a live server that has never
          *     reported appears with everything absent.
          */
         post: operations["status_fleet_detail"];
@@ -3529,7 +3666,7 @@ export interface paths {
         /**
          * List server group ids, bucketed by rank.
          * @description Each group is bucketed under the highest rank held by any of its member
-         *     servers (production outranks clone, which outranks demo, then test,
+         *     applications (production outranks clone, which outranks demo, then test,
          *     then dev). Groups whose members are all unranked are omitted entirely.
          *     Within each rank bucket, groups are ordered alphabetically by name.
          */
@@ -4041,6 +4178,183 @@ export interface components {
             planned_zone?: string | null;
         };
         /**
+         * @description A single server in the fleet: the unit that reports status, files
+         *     issues, and is monitored for reachability. A server may belong to a
+         *     server group, and may or may not have a device enrolled against it yet.
+         */
+        Application: {
+            /**
+             * Format: int64
+             * @description How long, in seconds, a server's status may go without an update
+             *     before it's considered unreachable and an issue is filed. Increase
+             *     it for applications with flaky connectivity; decrease it for critical
+             *     applications that should alert promptly. Only enforced while
+             *     `is_monitored` is `true`. Must be a positive number of seconds;
+             *     defaults to 600 (10 minutes) for newly-created applications.
+             */
+            alert_when_down_for: number;
+            /**
+             * @description The certificate profile — the authority's name for a lifetime — this
+             *     server's certificates are requested under. `None` means the longest the
+             *     authority offers, which is every server until an operator says otherwise:
+             *     a short lifetime is adopted deliberately rather than inherited.
+             */
+            certificate_profile?: string | null;
+            /** @description Whether this server is hosted in the cloud, if known. */
+            cloud?: boolean | null;
+            /**
+             * Format: date-time
+             * @description When set, the server is archived: hidden from live listings and
+             *     monitoring, with its device unenrolled, but its history is retained.
+             */
+            deleted_at?: string | null;
+            /**
+             * Format: uuid
+             * @description The device enrolled against this server, if any.
+             */
+            device_id?: string | null;
+            geolocation?: null | components["schemas"]["GeoPoint"];
+            /**
+             * Format: uuid
+             * @description The server group this server belongs to, if any.
+             *
+             *     A denormalisation of the machine's group: an operator sets the group on
+             *     the machine and the applications on it take it. Carried here so a group
+             *     query reads one column rather than joining through the machine.
+             */
+            group_id?: string | null;
+            host?: null | components["schemas"]["UrlField"];
+            /**
+             * Format: uuid
+             * @description Unique identifier for this server.
+             */
+            id: string;
+            /**
+             * @description Whether this server is actively monitored. When `false`, reachability
+             *     checks skip it entirely and its issues no longer contribute to
+             *     incidents — useful for test environments and ad-hoc demos. The
+             *     `alert_when_down_for` threshold is preserved while unmonitored, so
+             *     turning monitoring back on doesn't lose the configured value.
+             */
+            is_monitored: boolean;
+            /**
+             * @description The server's role within its product's topology, for example central
+             *     or facility. Which roles are available depends on the product.
+             */
+            kind: components["schemas"]["ServerKind"];
+            /**
+             * Format: uuid
+             * @description The machine this application runs on. An application runs on exactly
+             *     one; a machine hosts any number.
+             */
+            machine_id: string;
+            /**
+             * @description Whether this server may manage its own DNS records for names under its
+             *     group's domains. Withheld by default: a server without it is
+             *     authenticated and refused. Unlike the restore window this is a standing
+             *     grant, records needing maintenance for as long as the server lives.
+             */
+            may_manage_dns: boolean;
+            /**
+             * @description Whether this server may obtain TLS certificates for names under its
+             *     group's domains. Separate from `may_manage_dns`: a deployment whose
+             *     records are managed elsewhere may still want its certificates here.
+             */
+            may_manage_tls: boolean;
+            /**
+             * @description The server's display name, scoped within its group. May not be
+             *     globally unique or meaningful outside the group.
+             */
+            name?: string | null;
+            /** @description Why it was paused. */
+            name_management_pause_reason?: string | null;
+            /**
+             * Format: date-time
+             * @description When this server's name management was paused. While set, Canopy makes no
+             *     new changes on its behalf — nothing ordered, renewed, or republished —
+             *     though nothing already in place is withdrawn.
+             *
+             *     Set automatically when one of the server's certificates is revoked, so
+             *     revocation and re-issuance don't chase each other. Only an operator lifts
+             *     it.
+             */
+            name_management_paused_at?: string | null;
+            /** @description Who paused it. `None` when Canopy paused it itself on a revocation. */
+            name_management_paused_by?: string | null;
+            /** @description Free-form operator notes about this server. */
+            notes?: string;
+            /**
+             * @description The application this server runs, for example tamanu or senaite.
+             *     Decides which of canopy's per-server features apply to it at all.
+             */
+            product: components["schemas"]["Product"];
+            /**
+             * @description If set, the server is listed publicly under this name (used by
+             *     end-user-facing clients). `None` means it is not listed publicly.
+             *     Separate from `name` because that field is only meaningful within
+             *     the server's group.
+             */
+            public_name?: string | null;
+            rank?: null | components["schemas"]["ServerRank"];
+            /**
+             * Format: date-time
+             * @description When a device successfully completed enrollment for this server.
+             *     While `None`, the server is awaiting its first check-in and the UI
+             *     shows setup instructions.
+             */
+            registered_at?: string | null;
+            /** @description Who opened the current restore window (Tailscale login), if any. */
+            restore_allowed_by?: string | null;
+            /**
+             * Format: date-time
+             * @description Until when this server is allowed to mint restore credentials for
+             *     itself (ad-hoc `bestool canopy restore`). An operator opens this
+             *     window and it auto-expires; `None` (or a past instant) means restores
+             *     are not currently allowed. Restores read the group's backup repo, so
+             *     they're gated behind this deliberate, time-boxed opt-in rather than
+             *     always available.
+             */
+            restore_allowed_until?: string | null;
+            /** @description Key/value tags for this server. */
+            tags?: components["schemas"]["TagMap"];
+        };
+        /** @description What a server's page shows about its names and certificates. */
+        ApplicationNamesView: {
+            /**
+             * @description The profile this server's certificates are requested under. Null means
+             *     the authority's own default, which is its longest-lived.
+             */
+            certificate_profile?: string | null;
+            /**
+             * @description Every certificate Canopy holds or has an order in flight for, newest
+             *     first. A name may appear more than once — a key rotation leaves the
+             *     previous certificate behind until it expires.
+             */
+            certificates: components["schemas"]["CertificateView"][];
+            /**
+             * @description The domains this server's group controls, so the UI can say which names
+             *     are available to it at all.
+             */
+            domains: string[];
+            /** @description Whether an operator has allowed this server to manage its own DNS. */
+            may_manage_dns: boolean;
+            /**
+             * @description Whether an operator has allowed this server to obtain its own
+             *     certificates.
+             */
+            may_manage_tls: boolean;
+            /** @description The public names this server has registered, by name. */
+            names: components["schemas"]["NameView"][];
+            /** @description Why it was set. */
+            pause_reason?: string | null;
+            /** @description Whether Canopy has been told to stop doing anything new for this server. */
+            paused: boolean;
+            /** @description When the pause was set. */
+            paused_at?: string | null;
+            /** @description Who set it. */
+            paused_by?: string | null;
+        };
+        /**
          * @description A downloadable artifact (for example an installer) associated with a
          *     version, either tied to that exact version or matched via a version
          *     range pattern.
@@ -4353,7 +4667,7 @@ export interface components {
             snapshot_count?: number | null;
             /**
              * Format: int32
-             * @description Number of distinct backup sources (servers/types) currently in the
+             * @description Number of distinct backup sources (applications/types) currently in the
              *     repository, if known.
              */
             source_count?: number | null;
@@ -4363,7 +4677,7 @@ export interface components {
             /**
              * @description Backup types each member server has advertised it can run (with their
              *     enabled state), so the "back up now" panel can offer the right types per
-             *     server and grey out servers that have declared none.
+             *     server and grey out applications that have declared none.
              */
             capabilities: components["schemas"]["ServerBackupCapabilityView"][];
             /** @description One-off backup/restore requests awaiting pickup. */
@@ -4371,14 +4685,14 @@ export interface components {
             /** @description The most recent maintenance runs for the group's backup repository. */
             recent_maintenance: components["schemas"]["BackupMaintenanceRun"][];
             /**
-             * @description The most recent backup and restore runs across the group's member servers,
+             * @description The most recent backup and restore runs across the group's member applications,
              *     including runs still in flight or inferred from credential issuances that
              *     were never reported.
              */
             recent_runs: components["schemas"]["RecentRun"][];
             /**
-             * @description Member servers whose restore window is currently open, so the panel can
-             *     show which servers may restore right now and until when. Servers with no
+             * @description Member applications whose restore window is currently open, so the panel can
+             *     show which applications may restore right now and until when. Servers with no
              *     open window are omitted.
              */
             restore_windows: components["schemas"]["RestoreWindowRow"][];
@@ -4597,6 +4911,14 @@ export interface components {
          *     it, failing or healthy.
          */
         CheckDetailData: {
+            /**
+             * @description Every live server whose latest state from this source reports
+             *     this check, at any result, ordered as a TODO list: failed,
+             *     warning, broken, passed, skipped (most urgent first), then by
+             *     group name then server name. The client filters out the
+             *     passed/skipped tail unless the "show healthy" toggle is on.
+             */
+            applications: components["schemas"]["CheckDetailServerData"][];
             canopy?: null | components["schemas"]["CheckDetailCanopyData"];
             /**
              * @description The configured policy ceiling for this (source, check), or `None`
@@ -4617,14 +4939,6 @@ export interface components {
              *     client files each under its group in the list.
              */
             groups: components["schemas"]["CheckDetailGroupData"][];
-            /**
-             * @description Every live server whose latest state from this source reports
-             *     this check, at any result, ordered as a TODO list: failed,
-             *     warning, broken, passed, skipped (most urgent first), then by
-             *     group name then server name. The client filters out the
-             *     passed/skipped tail unless the "show healthy" toggle is on.
-             */
-            servers: components["schemas"]["CheckDetailServerData"][];
             /**
              * @description The source that was queried, echoed back with `check` so the page
              *     can render its heading without re-decoding the request.
@@ -4674,7 +4988,7 @@ export interface components {
             /**
              * Format: date-time
              * @description When the check's current degradation streak began. `None` for
-             *     servers currently reporting the check healthy.
+             *     applications currently reporting the check healthy.
              */
             failing_since?: string | null;
             /**
@@ -4690,13 +5004,13 @@ export interface components {
             rank?: null | components["schemas"]["ServerRank"];
             /**
              * @description The check's observed result on its latest report. The UI shows
-             *     warning/failed/broken servers by default and puts passed/skipped
+             *     warning/failed/broken applications by default and puts passed/skipped
              *     ones behind a "show healthy" toggle.
              */
             result: components["schemas"]["CheckResult"];
             /**
              * Format: uuid
-             * @description The server's id — the UI links to `/servers/{server_id}`.
+             * @description The server's id — the UI links to `/applications/{server_id}`.
              */
             server_id: string;
             /** @description The server's display name; empty string when the server has none. */
@@ -4722,7 +5036,7 @@ export interface components {
              *     it may stop running the check).
              */
             ceiling: string;
-            /** @description The healthcheck's name, exactly as reported by monitored servers. */
+            /** @description The healthcheck's name, exactly as reported by monitored applications. */
             check_name: string;
             /**
              * Format: date-time
@@ -5010,6 +5324,16 @@ export interface components {
              */
             server_group_id: string;
         };
+        /** @description An application and the name being declared for it, or released from it. */
+        DeclarationArgs: {
+            /**
+             * Format: uuid
+             * @description The application that serves the name.
+             */
+            application_id: string;
+            /** @description The name, in any case and with or without a trailing dot. */
+            name: string;
+        };
         /** @description Declare a window over a target, or amend the one it already has. */
         DeclareArgs: {
             /**
@@ -5017,6 +5341,11 @@ export interface components {
              * @description When the work is expected to finish. The window ends itself then.
              */
             expected_end: string;
+            /**
+             * Format: uuid
+             * @description The machine, for a window over one box. Covers every application on it.
+             */
+            machine_id?: string | null;
             /** @description What is being done. */
             note?: string | null;
             /**
@@ -5024,11 +5353,6 @@ export interface components {
              * @description The group, for a window over a whole group.
              */
             server_group_id?: string | null;
-            /**
-             * Format: uuid
-             * @description The server, for a window over one server.
-             */
-            server_id?: string | null;
         };
         /** @description Request body for decommissioning a check. */
         DecommissionArgs: {
@@ -5363,7 +5687,7 @@ export interface components {
             postgres?: string | null;
             /**
              * @description The application the server runs. The fleet view reads it to keep the
-             *     application-version spread to servers that have one to report.
+             *     application-version spread to applications that have one to report.
              */
             product: components["schemas"]["Product"];
             rank?: null | components["schemas"]["ServerRank"];
@@ -5416,7 +5740,7 @@ export interface components {
              */
             incident_id: string;
         };
-        /** @description Where a group stands with respect to granting its servers name management. */
+        /** @description Where a group stands with respect to granting its applications name management. */
         GrantAvailabilityView: {
             /**
              * @description The domains this group controls, so the UI can name what a grant would
@@ -5439,8 +5763,13 @@ export interface components {
              */
             state: string;
         };
-        /** @description A server group together with its member servers and billing labels. */
+        /** @description A server group together with its member applications and billing labels. */
         GroupDetail: {
+            /**
+             * @description The group's member applications, sorted by name, with current status and
+             *     display host included.
+             */
+            applications: components["schemas"]["ServerInfo"][];
             /** @description The group's effective `billing.*` labels (product/deployment/stage). */
             billing_labels: components["schemas"]["BillingTag"][];
             /** @description The group itself. */
@@ -5452,11 +5781,6 @@ export interface components {
              *     ended and watching resumes when it elapses.
              */
             maintenance_settling: boolean;
-            /**
-             * @description The group's member servers, sorted by name, with current status and
-             *     display host included.
-             */
-            servers: components["schemas"]["ServerInfo"][];
         };
         /** @description Identifies the server group whose status details to fetch. */
         GroupDetailsArgs: {
@@ -5509,11 +5833,11 @@ export interface components {
              */
             server_group_id: string;
         };
-        /** @description The number of live servers in one server group. */
+        /** @description The number of live applications in one server group. */
         GroupServerCount: {
             /**
              * Format: int64
-             * @description Number of live (non-archived) servers currently in the group.
+             * @description Number of live (non-archived) applications currently in the group.
              */
             server_count: number;
             /**
@@ -5559,7 +5883,7 @@ export interface components {
             type: string;
         };
         /**
-         * @description Where one of a group's servers stands against the version it would take
+         * @description Where one of a group's applications stands against the version it would take
          *     next.
          */
         GroupVerdict: {
@@ -5592,7 +5916,7 @@ export interface components {
         /**
          * @description A real-world sample of the data a conditional rule can reference for a
          *     given healthcheck, taken from the most recent status report (across
-         *     all servers) from the check's own source that included it.
+         *     all applications) from the check's own source that included it.
          */
         HealthcheckSample: {
             /**
@@ -5957,7 +6281,7 @@ export interface components {
             issue_id: string;
         };
         /**
-         * @description A problem raised against a server (or a group of servers), tracking its
+         * @description A problem raised against a server (or a group of applications), tracking its
          *     current severity, whether it's still ongoing, and how it's been handled
          *     by an operator.
          */
@@ -5967,6 +6291,12 @@ export interface components {
              *     condition has stopped recurring.
              */
             active: boolean;
+            /**
+             * Format: uuid
+             * @description The server this issue was raised against. Absent for issues that
+             *     apply to a whole group of applications rather than a single one.
+             */
+            application_id?: string | null;
             /**
              * @description The check this issue tracks, when it is check state (health-check
              *     issues). Absent for issues that aren't check results yet.
@@ -6061,12 +6391,6 @@ export interface components {
             /** @description Hostname or address of the affected server. */
             server_host: string;
             /**
-             * Format: uuid
-             * @description The server this issue was raised against. Absent for issues that
-             *     apply to a whole group of servers rather than a single one.
-             */
-            server_id?: string | null;
-            /**
              * @description Display name of the affected server, when one is set. Falls back to
              *     `server_host` when absent.
              */
@@ -6125,7 +6449,7 @@ export interface components {
              */
             opened_at: string;
         };
-        /** @description Filters for listing issues across all servers. */
+        /** @description Filters for listing issues across all applications. */
         IssueListArgs: {
             /**
              * @description When `false`, include resolved and inactive issues as well as active
@@ -6156,15 +6480,15 @@ export interface components {
              */
             active_only?: boolean | null;
             /**
+             * Format: uuid
+             * @description Id of the server whose issues to list.
+             */
+            application_id: string;
+            /**
              * Format: int64
              * @description Maximum number of issues to return. Defaults to 100 when omitted.
              */
             limit?: number | null;
-            /**
-             * Format: uuid
-             * @description Id of the server whose issues to list.
-             */
-            server_id: string;
         };
         /** @description Identifies the issue whose notes to list. */
         IssueListNotesArgs: {
@@ -6476,12 +6800,164 @@ export interface components {
             min: components["schemas"]["VersionStr"];
         };
         /**
+         * @description A host in the fleet: a box, physical or virtual, that canopy monitors.
+         *
+         *     Distinct from the application server running on it. A machine carries the
+         *     facts that belong to the box — where it is, what identity speaks for it,
+         *     how long it may be silent — so a host running two workloads reports its
+         *     platform, memory and filesystems once rather than once per workload.
+         *
+         *     A machine hosts any number of applications, including none: one created but
+         *     not yet reporting presents as awaiting check-in rather than as an error.
+         */
+        Machine: {
+            /**
+             * Format: int64
+             * @description How long this machine may go without reporting before it is considered
+             *     unreachable. Only enforced while `is_monitored`; the value is kept
+             *     while unmonitored so turning monitoring back on does not lose it.
+             */
+            alert_when_down_for: number;
+            /** @description Whether this machine is hosted in the cloud, if known. */
+            cloud?: boolean | null;
+            /**
+             * Format: date-time
+             * @description When set, the machine is archived: out of the live fleet, with its
+             *     record and history retained. Archiving a machine archives the
+             *     applications on it.
+             */
+            deleted_at?: string | null;
+            /**
+             * Format: uuid
+             * @description The identity that authenticates this machine, if one is enrolled. A
+             *     machine has at most one, and an identity belongs to at most one
+             *     machine, so resolving either from the other is unambiguous.
+             */
+            device_id?: string | null;
+            geolocation?: null | components["schemas"]["GeoPoint"];
+            /**
+             * Format: uuid
+             * @description The group this machine belongs to. The one thing an operator supplies
+             *     when creating a machine: which deployment a box belongs to is the one
+             *     fact the box has no way of knowing. The applications on it take it.
+             */
+            group_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Unique identifier for this machine.
+             */
+            id: string;
+            /**
+             * @description Whether this machine is actively monitored. Switching it off quiets
+             *     the machine's own checks and does not touch the applications on it —
+             *     a box excused from monitoring says nothing about its workloads.
+             */
+            is_monitored: boolean;
+            /**
+             * @description The name its operator gave it. Distinct from the hostname the
+             *     operating system reports, which is a reported figure rather than a
+             *     field an operator sets.
+             */
+            name?: string | null;
+            /** @description Free-form operator notes about this machine. */
+            notes?: string;
+            /**
+             * Format: date-time
+             * @description When an identity completed enrolment for this machine. While `None`,
+             *     the machine is awaiting its first check-in.
+             *
+             *     Also the anchor a backup deadline counts from, which is why it belongs
+             *     to the machine: anchoring on an application's registration would
+             *     restart a box's backup clock every time a workload was added to it.
+             */
+            registered_at?: string | null;
+            /**
+             * @description Key/value tags for this machine. A check filed against a machine is
+             *     graded by policy against these rather than against any application's.
+             *     An application's type is not among them, not being a property of a box.
+             */
+            tags?: components["schemas"]["TagMap"];
+        };
+        /**
+         * @description What an operator supplies when adding a machine.
+         *
+         *     The group is the only field that matters to get right up front: which
+         *     deployment a box belongs to is the one thing the box has no way of knowing.
+         */
+        MachineCreateArgs: {
+            /** @description Whether the box is cloud-hosted, if known. */
+            cloud?: boolean | null;
+            geolocation?: null | components["schemas"]["GeoPoint"];
+            /**
+             * Format: uuid
+             * @description The group this machine belongs to. The applications on it take it.
+             */
+            group_id?: string | null;
+            /**
+             * @description What to call the box. Distinct from the hostname its operating system
+             *     reports, which arrives as a reported figure.
+             */
+            name?: string | null;
+        };
+        /** @description A machine together with the applications running on it. */
+        MachineDetail: components["schemas"]["Machine"] & {
+            /**
+             * @description The applications on this machine. Empty for a machine that has been
+             *     created but has not yet reported: that is awaiting check-in, not an
+             *     error.
+             */
+            applications: components["schemas"]["Application"][];
+        };
+        /** @description Identifies one machine. */
+        MachineIdArgs: {
+            /**
+             * Format: uuid
+             * @description The machine to operate on.
+             */
+            machine_id: string;
+        };
+        /**
+         * @description Fields to change on a machine. Omitted fields are left alone; for the
+         *     nullable ones an explicit `null` clears the value.
+         */
+        MachineUpdateArgs: {
+            /**
+             * Format: int64
+             * @description How long the machine may be silent before it is unreachable, in seconds.
+             */
+            alert_when_down_for?: number | null;
+            /** @description New value for whether the box is cloud-hosted, or `null` to clear it. */
+            cloud?: boolean | null;
+            geolocation?: null | components["schemas"]["GeoPoint"];
+            /**
+             * Format: uuid
+             * @description New group, or `null` to remove it from its current one. The
+             *     applications on this machine move with it.
+             */
+            group_id?: string | null;
+            /**
+             * @description New monitored state. Switching it off quiets the machine's own checks
+             *     and leaves the applications on it alone.
+             */
+            is_monitored?: boolean | null;
+            /**
+             * Format: uuid
+             * @description The machine to edit.
+             */
+            machine_id: string;
+            /** @description New name for the box, or `null` to clear it. */
+            name?: string | null;
+            /** @description New free-form operator notes for the box. */
+            notes?: string | null;
+            tags?: null | components["schemas"]["TagMap"];
+        };
+        /**
          * @description Which maintenance cycle a reported backup-repository maintenance run
          *     performed.
          * @enum {string}
          */
         MaintenanceKind: "quick" | "full";
-        /** @description A declaration that a server or a group is being worked on. */
+        /** @description A declaration that a machine or a group is being worked on. */
         MaintenanceWindow: {
             /**
              * Format: date-time
@@ -6523,19 +6999,20 @@ export interface components {
              * @description Unique identifier of this window.
              */
             id: string;
+            /**
+             * Format: uuid
+             * @description Set for a window over one machine, covering the machine's own checks
+             *     and those of every application running on it.
+             */
+            machine_id?: string | null;
             /** @description What is being done, where the operator said. */
             note?: string | null;
             /**
              * Format: uuid
              * @description Set for a window over a group, covering the group's own checks and
-             *     those of every server in it.
+             *     those of every machine in it.
              */
             server_group_id?: string | null;
-            /**
-             * Format: uuid
-             * @description Set for a window over one server.
-             */
-            server_id?: string | null;
             /**
              * Format: date-time
              * @description Stamped once the settle period has elapsed and the target's issues
@@ -6830,7 +7307,7 @@ export interface components {
                  */
                 group_name?: string | null;
                 health?: null | components["schemas"]["HealthState"];
-                /** @description The server's stored URL, if any. May be absent for device-only servers. */
+                /** @description The server's stored URL, if any. May be absent for device-only applications. */
                 host?: string | null;
                 /**
                  * Format: uuid
@@ -6845,6 +7322,12 @@ export interface components {
                 is_monitored: boolean;
                 /** @description The server's role within its product's topology. */
                 kind: components["schemas"]["ServerKind"];
+                /**
+                 * Format: uuid
+                 * @description The machine this application runs on. Maintenance is declared over the
+                 *     machine, so a surface offering to declare one needs it (see MNT).
+                 */
+                machine_id: string;
                 /**
                  * @description Whether a maintenance window suspends this server, its own or its
                  *     group's. Set alongside `up` and `health` by the endpoints that
@@ -7066,7 +7549,7 @@ export interface components {
             testable?: boolean | null;
             /**
              * @description Where the group's data stands against the planned version, rolled up from
-             *     its servers: any failure makes the group a failure, since one server
+             *     its applications: any failure makes the group a failure, since one server
              *     whose data breaks is enough to stop the upgrade. `null` without a plan.
              */
             verdict?: string | null;
@@ -7172,11 +7655,11 @@ export interface components {
          */
         Product: "tamanu" | "senaite" | "canopy";
         /**
-         * @description One product canopy monitors, with what canopy does for its servers and the
+         * @description One product canopy monitors, with what canopy does for its applications and the
          *     roles it defines.
          */
         ProductInfo: {
-            /** @description What canopy does for this product's servers. */
+            /** @description What canopy does for this product's applications. */
             caps: components["schemas"]["Caps"];
             /** @description The role a server of this product takes when none is chosen. */
             default_kind: components["schemas"]["ServerKind"];
@@ -7799,7 +8282,7 @@ export interface components {
             redacts: boolean;
             /**
              * Format: uuid
-             * @description Specific server within the group, or null to cover all current servers
+             * @description Specific server within the group, or null to cover all current applications
              *     in the group.
              */
             server_id?: string | null;
@@ -7857,7 +8340,7 @@ export interface components {
             /**
              * Format: uuid
              * @description Specific server within the group; omit or null to cover all current
-             *     servers in the group.
+             *     applications in the group.
              */
             server_id?: string | null;
             /** @description The backup type to restore, for example `tamanu-postgres`. */
@@ -7929,7 +8412,7 @@ export interface components {
             /**
              * Format: uuid
              * @description Specific server within the group; omit or null to cover all current
-             *     servers in the group.
+             *     applications in the group.
              */
             server_id?: string | null;
             /** @description The backup type to restore, for example `tamanu-postgres`. */
@@ -8144,7 +8627,7 @@ export interface components {
         /**
          * @description A self-alert: a problem with canopy's own operation, such as an
          *     expiring credential or a failed notification delivery — distinct from
-         *     issues raised against monitored servers.
+         *     issues raised against monitored applications.
          */
         SelfAlertView: {
             /**
@@ -8373,7 +8856,7 @@ export interface components {
             /** @description The server's own record. */
             server: components["schemas"]["ServerInfo"];
             /**
-             * @description Other servers in the same group (excluding `server`). Empty when the
+             * @description Other applications in the same group (excluding `server`). Empty when the
              *     server is ungrouped or alone in its group. Each entry carries its
              *     own `up` / `health` so the UI can render a status dot per sibling.
              */
@@ -8382,7 +8865,7 @@ export interface components {
             up: components["schemas"]["ShortStatus"];
         };
         /**
-         * @description A group of servers managed together: incidents roll up across the group,
+         * @description A group of applications managed together: incidents roll up across the group,
          *     members share tags, and the group carries its own notes and
          *     notification settings.
          */
@@ -8440,7 +8923,7 @@ export interface components {
              *     is reflected in `effective_version`), chosen by highest rank then
              *     highest kind. `None` when the group has no members.
              */
-            version_server_id?: string | null;
+            version_application_id?: string | null;
         };
         /**
          * @description A status-dashboard card summarising one group of equivalent servers, with
@@ -8593,7 +9076,7 @@ export interface components {
              */
             group_name?: string | null;
             health?: null | components["schemas"]["HealthState"];
-            /** @description The server's stored URL, if any. May be absent for device-only servers. */
+            /** @description The server's stored URL, if any. May be absent for device-only applications. */
             host?: string | null;
             /**
              * Format: uuid
@@ -8608,6 +9091,12 @@ export interface components {
             is_monitored: boolean;
             /** @description The server's role within its product's topology. */
             kind: components["schemas"]["ServerKind"];
+            /**
+             * Format: uuid
+             * @description The machine this application runs on. Maintenance is declared over the
+             *     machine, so a surface offering to declare one needs it (see MNT).
+             */
+            machine_id: string;
             /**
              * @description Whether a maintenance window suspends this server, its own or its
              *     group's. Set alongside `up` and `health` by the endpoints that
@@ -8715,7 +9204,7 @@ export interface components {
              */
             version_distance?: number | null;
         };
-        /** @description Filter and pagination parameters for listing servers. */
+        /** @description Filter and pagination parameters for listing applications. */
         ServerListArgs: {
             kind?: null | components["schemas"]["ServerKind"];
             /**
@@ -8728,42 +9217,6 @@ export interface components {
              * @description Number of items to skip from the start of the result set.
              */
             offset: number;
-        };
-        /** @description What a server's page shows about its names and certificates. */
-        ServerNamesView: {
-            /**
-             * @description The profile this server's certificates are requested under. Null means
-             *     the authority's own default, which is its longest-lived.
-             */
-            certificate_profile?: string | null;
-            /**
-             * @description Every certificate Canopy holds or has an order in flight for, newest
-             *     first. A name may appear more than once — a key rotation leaves the
-             *     previous certificate behind until it expires.
-             */
-            certificates: components["schemas"]["CertificateView"][];
-            /**
-             * @description The domains this server's group controls, so the UI can say which names
-             *     are available to it at all.
-             */
-            domains: string[];
-            /** @description Whether an operator has allowed this server to manage its own DNS. */
-            may_manage_dns: boolean;
-            /**
-             * @description Whether an operator has allowed this server to obtain its own
-             *     certificates.
-             */
-            may_manage_tls: boolean;
-            /** @description The public names this server has registered, by name. */
-            names: components["schemas"]["NameView"][];
-            /** @description Why it was set. */
-            pause_reason?: string | null;
-            /** @description Whether Canopy has been told to stop doing anything new for this server. */
-            paused: boolean;
-            /** @description When the pause was set. */
-            paused_at?: string | null;
-            /** @description Who set it. */
-            paused_by?: string | null;
         };
         /**
          * @description The environment tier of a server, from `production` down to `dev`.
@@ -8785,6 +9238,11 @@ export interface components {
          */
         ServerSilencedRef: {
             /**
+             * Format: uuid
+             * @description The server this silence applies to.
+             */
+            application_id: string;
+            /**
              * Format: date-time
              * @description When this silence was created.
              */
@@ -8793,11 +9251,6 @@ export interface components {
             created_by?: string | null;
             /** @description The issue reference this silence matches. */
             ref: string;
-            /**
-             * Format: uuid
-             * @description The server this silence applies to.
-             */
-            server_id: string;
             /** @description The issue source this silence matches. */
             source: string;
         };
@@ -8997,7 +9450,7 @@ export interface components {
              */
             last_seen?: string | null;
             /**
-             * @description How this source's silence bears on its servers' reachability: `on`
+             * @description How this source's silence bears on its applications' reachability: `on`
              *     (a stale source warns, all-stale is unreachable), `quiet` (never
              *     warns, still counts toward unreachable), or `off` (excluded).
              */
@@ -9222,6 +9675,11 @@ export interface components {
              */
             active?: boolean | null;
             /**
+             * Format: uuid
+             * @description Id of the server the condition applies to.
+             */
+            applicationId: string;
+            /**
              * @description Short, single-line headline for the condition. Must not contain
              *     newlines — use `message` for multi-line detail.
              */
@@ -9243,11 +9701,6 @@ export interface components {
              */
             ref: string;
             result?: null | components["schemas"]["CheckResult"];
-            /**
-             * Format: uuid
-             * @description Id of the server the condition applies to.
-             */
-            serverId: string;
         };
         /** @description Fleet-wide summary of software versions currently running in production. */
         SummaryData: {
@@ -9307,14 +9760,14 @@ export interface components {
         TargetArgs: {
             /**
              * Format: uuid
+             * @description The machine, for a window over one box. Covers every application on it.
+             */
+            machine_id?: string | null;
+            /**
+             * Format: uuid
              * @description The group, for a window over a whole group.
              */
             server_group_id?: string | null;
-            /**
-             * Format: uuid
-             * @description The server, for a window over one server.
-             */
-            server_id?: string | null;
         };
         /**
          * @description One healthy↔degraded transition: the state became (or was first
@@ -9531,6 +9984,12 @@ export interface components {
              */
             target_role_arn: string;
         };
+        /**
+         * Format: uri
+         * @description A URL, given as a plain string. Any trailing slash is stripped when the
+         *     value is returned.
+         */
+        UrlField: string;
         Value: unknown;
         /**
          * @description Where a (server, version) pair stands.
@@ -10838,6 +11297,46 @@ export interface operations {
             };
         };
     };
+    certificates_declare: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeclarationArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NameView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description Another application already declares this name. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     certificates_for_group: {
         parameters: {
             query?: never;
@@ -10879,7 +11378,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ServerNamesView"];
+                    "application/json": components["schemas"]["ApplicationNamesView"];
                 };
             };
             404: {
@@ -10902,6 +11401,35 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["PauseArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    certificates_release: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeclarationArgs"];
             };
         };
         responses: {
@@ -11157,7 +11685,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Server-versions URL with embedded auth secret, if configured. */
+            /** @description Application-versions URL with embedded auth secret, if configured. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11411,29 +11939,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    get_past_server_associations: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DeviceIdArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ServerInfo"][];
                 };
             };
         };
@@ -12705,6 +13210,189 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["IssueData"];
+                };
+            };
+        };
+    };
+    machines_archive: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    machines_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineCreateArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    machines_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineDetail"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    machines_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Machine"][];
+                };
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    machines_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineUpdateArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Machine"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
         };
@@ -14218,7 +14906,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The check's catalog policy and the servers currently reporting it. */
+            /** @description The check's catalog policy and the applications currently reporting it. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -14313,7 +15001,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Server group IDs grouped by highest-ranked member's rank. */
+            /** @description Application group IDs grouped by highest-ranked member's rank. */
             200: {
                 headers: {
                     [name: string]: unknown;

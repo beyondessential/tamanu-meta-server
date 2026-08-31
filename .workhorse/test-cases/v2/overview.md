@@ -105,6 +105,16 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 - [ ] `restore-verification` and `redaction` file at machine scope; `migration-test` files at application scope (verifies spec: RST)
 - [ ] A migrate worklist entry names the machine's snapshot and the application whose candidate it carries (verifies spec: RST)
 
+## Maintenance windows
+
+- [x] A window over a machine grades every check on every application on that box to skipped (verifies spec: MNT)
+- [x] A window covers the box it names and no other (verifies spec: MNT)
+- [x] An application's detail page reports it as under maintenance when its machine's window holds (verifies spec: MNT)
+- [x] Declaring from an application's page opens the window over its machine (verifies spec: MNT)
+- [x] Windows predating the split are backfilled onto the machine their application ran on, leaving group windows alone (verifies spec: MNT)
+- [ ] A machine-scoped silence still applies only to the machine's own checks, not to the applications on it (verifies spec: CHK)
+- [ ] The fleet maintenance view links a machine target to its detail page (verifies spec: MNT)
+
 ## Names and certificates
 
 - [x] Declaring a name another application already holds is refused, and the refusal names the holder (verifies spec: CRT)

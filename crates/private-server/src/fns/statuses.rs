@@ -861,8 +861,16 @@ async fn consolidated_checks_at(
 	// Reconstructs an application's own checks from its status history, so
 	// only the application and group chains bear on it. Amalgamating its
 	// machine's checks into this view is the detail-page step's job.
-	let chains =
-		ScopedCheckPolicy::chains_for_scope(conn, Some(server.id), None, server.group_id).await?;
+	let chains = ScopedCheckPolicy::chains_for_scope(
+		conn,
+		database::check_policies::FilingScope {
+			application_id: Some(server.id),
+			group_id: server.group_id,
+			covering_machine: Some(server.machine_id),
+			..Default::default()
+		},
+	)
+	.await?;
 
 	let mut checks: Vec<ConsolidatedCheck> = Vec::new();
 	for status in &statuses {

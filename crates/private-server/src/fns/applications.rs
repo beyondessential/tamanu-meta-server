@@ -82,6 +82,9 @@ pub struct ServerDetailData {
 pub struct ServerInfo {
 	/// Unique identifier for the server.
 	pub id: Uuid,
+	/// The machine this application runs on. Maintenance is declared over the
+	/// machine, so a surface offering to declare one needs it (see MNT).
+	pub machine_id: Uuid,
 	/// Operator-assigned name for the server, if any.
 	pub name: Option<String>,
 	/// The application this server runs. Decides which of canopy's
@@ -297,6 +300,7 @@ where
 pub(super) fn server_to_info(s: Application) -> ServerInfo {
 	ServerInfo {
 		id: s.id,
+		machine_id: s.machine_id,
 		name: s.name,
 		product: s.product,
 		kind: s.kind,
@@ -776,16 +780,18 @@ pub async fn get_detail(
 	// spec: SVC#munin-link
 	let munin = figures.munin().unwrap_or(false);
 
+	// An application is under maintenance when the box it runs on is: work on
+	// the machine stops the workload whether or not anyone named it.
 	let maintained = database::maintenance_windows::MaintenanceWindow::suspends(
 		&mut conn,
-		Some(args.server_id),
+		Some(server.machine_id),
 		server.group_id,
 	)
 	.await?;
 	let maintenance_settling = maintained && {
 		use database::issues::Scope;
 		use database::maintenance_windows::MaintenanceWindow;
-		let mut open = MaintenanceWindow::open_for(&mut conn, Scope::Server(args.server_id))
+		let mut open = MaintenanceWindow::open_for(&mut conn, Scope::Machine(server.machine_id))
 			.await?
 			.is_some();
 		if !open && let Some(gid) = server.group_id {

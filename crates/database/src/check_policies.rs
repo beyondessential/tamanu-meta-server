@@ -533,20 +533,10 @@ impl CheckPolicy {
 		check_name: &str,
 		observed: CheckResult,
 		ctx: &EvaluationContext<'_>,
-		application_id: Option<Uuid>,
-		machine_id: Option<Uuid>,
-		group_id: Option<Uuid>,
+		scope: FilingScope,
 	) -> Result<GradedResult> {
 		let fleet = Self::apply(db, source, check_name, observed, ctx).await?;
-		let scoped = ScopedCheckPolicy::chain_for(
-			db,
-			source,
-			check_name,
-			application_id,
-			machine_id,
-			group_id,
-		)
-		.await?;
+		let scoped = ScopedCheckPolicy::chain_for(db, source, check_name, scope).await?;
 		Ok(Self::chain_scoped(fleet, &scoped, ctx))
 	}
 
@@ -749,6 +739,27 @@ pub struct ScopedCheckPolicy {
 	pub created_by: Option<String>,
 }
 
+/// Which scopes a filing sits in, for reading the transforms that apply to it.
+///
+/// Four bare `Option<Uuid>` in a row is a transposition waiting to happen, and
+/// two of them mean subtly different things, so they travel named.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FilingScope {
+	/// Set for a filing about one application.
+	pub application_id: Option<Uuid>,
+	/// Set for a filing about one machine. Scopes machine-written *silences*,
+	/// and is not what a maintenance window is matched on.
+	pub machine_id: Option<Uuid>,
+	/// The group the filing's target belongs to, where it has one.
+	pub group_id: Option<Uuid>,
+	/// The machine whose maintenance window covers this filing: for a
+	/// machine's own check, itself; for an application's, the box it runs on,
+	/// since taking that down stops the workload. Kept apart from `machine_id`
+	/// so a window over a box does not widen which silences reach its
+	/// workloads.
+	pub covering_machine: Option<Uuid>,
+}
+
 impl ScopedCheckPolicy {
 	/// The transform at exactly this (scope, source, check), if any.
 	pub async fn get(
@@ -879,21 +890,26 @@ impl ScopedCheckPolicy {
 	/// The scoped transforms that apply to a filing, in application
 	/// order. A server filing chains group then server; a group filing
 	/// its group row; a canopy-wide filing the global row.
+	///
+	/// `covering_machine` is the machine whose maintenance window would cover
+	/// this filing, which is not the same as `machine_id`: an application's
+	/// checks are covered by the window over the box it runs on, while
+	/// `machine_id` scopes only to machine-scoped *silences*. Keeping them
+	/// apart is what stops a window over a box from silently widening which
+	/// operator-written silences apply to its workloads.
 	pub async fn chain_for(
 		db: &mut AsyncPgConnection,
 		source: &str,
 		check_name: &str,
-		application_id: Option<Uuid>,
-		machine_id: Option<Uuid>,
-		group_id: Option<Uuid>,
+		scope: FilingScope,
 	) -> Result<Vec<Self>> {
 		use crate::schema::scoped_check_policies::dsl;
-		let query = Self::scoped_to(application_id, machine_id, group_id)
+		let query = Self::scoped_to(scope.application_id, scope.machine_id, scope.group_id)
 			.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name)));
 		let mut rows: Vec<Self> = query.load(db).await.map_err(AppError::from)?;
 		Self::order_chain(&mut rows);
-		if MaintenanceWindow::suspends(db, server_id, group_id).await? {
-			rows.push(Self::maintenance(server_id, group_id));
+		if MaintenanceWindow::suspends(db, scope.covering_machine, scope.group_id).await? {
+			rows.push(Self::maintenance(scope.covering_machine, scope.group_id));
 		}
 		Ok(rows)
 	}
@@ -904,14 +920,13 @@ impl ScopedCheckPolicy {
 	/// report's checks. One query for the lot instead of one per check.
 	pub async fn chains_for_scope(
 		db: &mut AsyncPgConnection,
-		application_id: Option<Uuid>,
-		machine_id: Option<Uuid>,
-		group_id: Option<Uuid>,
+		scope: FilingScope,
 	) -> Result<HashMap<(String, String), Vec<Self>>> {
-		let rows: Vec<Self> = Self::scoped_to(application_id, machine_id, group_id)
-			.load(db)
-			.await
-			.map_err(AppError::from)?;
+		let rows: Vec<Self> =
+			Self::scoped_to(scope.application_id, scope.machine_id, scope.group_id)
+				.load(db)
+				.await
+				.map_err(AppError::from)?;
 		let mut chains: HashMap<(String, String), Vec<Self>> = HashMap::new();
 		for row in rows {
 			chains
@@ -922,9 +937,9 @@ impl ScopedCheckPolicy {
 		for chain in chains.values_mut() {
 			Self::order_chain(chain);
 		}
-		if MaintenanceWindow::suspends(db, server_id, group_id).await? {
+		if MaintenanceWindow::suspends(db, scope.covering_machine, scope.group_id).await? {
 			for chain in chains.values_mut() {
-				chain.push(Self::maintenance(server_id, group_id));
+				chain.push(Self::maintenance(scope.covering_machine, scope.group_id));
 			}
 		}
 		Ok(chains)
@@ -981,7 +996,7 @@ impl ScopedCheckPolicy {
 	/// `scoped_check_policies` holds operator-owned transforms on one
 	/// (source, check). A ceiling only narrows, so where it sits in the
 	/// chain makes no difference.
-	fn maintenance(application_id: Option<Uuid>, group_id: Option<Uuid>) -> Self {
+	fn maintenance(machine_id: Option<Uuid>, group_id: Option<Uuid>) -> Self {
 		let now = Timestamp::now();
 		Self {
 			id: Uuid::nil(),
@@ -989,8 +1004,8 @@ impl ScopedCheckPolicy {
 			updated_at: now,
 			source: String::new(),
 			check_name: String::new(),
-			application_id,
-			machine_id: None,
+			application_id: None,
+			machine_id,
 			server_group_id: group_id,
 			ceiling: Some(CheckResult::Skipped.to_string()),
 			rules: None,

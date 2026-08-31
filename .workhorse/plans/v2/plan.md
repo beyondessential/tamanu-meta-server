@@ -15,6 +15,7 @@ Each item is a section below; the section carries the detail and the traps.
 - [x] **Ingest: the machine-subject check rule** — what first files at machine scope
 - [x] **Ingest: the detail-field split** — `server_reported_detail` splits by grain; carries the figure reads with it
 - [x] **Declared names and certificate routing** — identity to machine to application, and the plural entitlement answer
+- [x] **Maintenance windows take the machine** — arrived from main mid-split; moved onto the machine grain
 - [ ] **Restore replicas** — declarations move grain; `migration-test` stays application-scoped
 - [ ] **Retiring the graded reachability states** — `short_status`'s hardcoded thresholds
 - [ ] **Fleet query interface** — MCP gains `Get machine` and `Find machines`
@@ -27,6 +28,7 @@ Carried deferrals, each gated on a step above rather than on a vague later:
 - [x] Remove the `application_default_machine()` scaffolding default — done early, with the operator/enrolment surface
 - [x] Add `machine_id` to the `Application` struct — done with the operator/enrolment surface
 - [ ] Carry the machine on `IssueData` — with **Fleet query interface** / **Frontend**, whichever presents machine checks first
+- [ ] Link a machine's maintenance window to its detail page — with **Frontend**, which is what creates that page. The fleet maintenance view renders a machine target as plain text until then rather than linking somewhere that 404s
 
 ## Sequencing
 
@@ -251,6 +253,18 @@ Two things the step turned up that the section above did not anticipate:
 - **A certificate order left no declaration behind.** Registering an address happened to create the row; ordering a certificate did not, so a single-application machine could hold a certificate for a name nothing declared. `request` now declares the name it orders for, which makes "an order exists only for a declared name" an invariant of the model rather than of one call path.
 
 That invariant is what lets renewal and the expiry alert both filter on `still_declared()`: releasing a name stops Canopy renewing its certificates and stops raising them as running out, since renewing past a release would order for a name another application now serves. What was already issued stays issued and collectable.
+
+## Maintenance windows take the machine
+
+Maintenance windows landed on main (card unrelated to this one) while the split was in flight, written against `servers` before the rename. Rebasing carried them in; this step moved them onto the grain the split creates.
+
+**The window is over the machine.** Taking a box down to patch it stops everything running on it, so a window naming one application left the others on the same host monitored and alerting through work that was always going to stop them. Naming the machine makes that one declaration with N consequences — the same argument the card makes for reachability.
+
+Migration `2026-08-31-091748-0000_maintenance_windows_take_the_machine` renames `server_id` to `machine_id` and repoints the key, backfilling through `applications.machine_id`. Every pre-split window was over a server that is now an application on exactly one machine, so the backfill is that join.
+
+**Trap, and the reason for `FilingScope`.** A filing now carries two different machine ids, and conflating them silently widens what a window does. `machine_id` scopes machine-written *silences*; `covering_machine` is the box whose window covers the filing, which for an application is the host it runs on. Passing the covering machine to `scoped_to` would have made every machine-scoped silence apply to the workloads on that machine — a real change to silence semantics, arriving as a side effect of a maintenance change. They travel as named fields on `check_policies::FilingScope` rather than as four positional `Option<Uuid>`, which is what the near-miss was.
+
+`Scope::Application` is deliberately not a window target: an application is covered through its machine rather than named, so `fleet_columns` maps it to `None` alongside `Global`.
 
 ## Fleet query interface
 

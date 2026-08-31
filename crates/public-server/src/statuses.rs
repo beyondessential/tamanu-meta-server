@@ -21,7 +21,7 @@ use commons_types::{
 use database::{
 	Db,
 	applications::Application,
-	check_policies::{CheckPolicy, EvaluationContext, GradedResult},
+	check_policies::{CheckPolicy, EvaluationContext, FilingScope, GradedResult},
 	devices::Device,
 	diesel_async::{AsyncConnection, AsyncPgConnection},
 	issues::{CheckStateStamp, Issue, NewEvent},
@@ -550,13 +550,19 @@ async fn file_health_events(
 			check,
 			*result,
 			&ctx,
-			// A unified push carries both grains' checks. Grade each at the
-			// grain its subject belongs to, so a machine check is graded
-			// against the box's tags and silenced by the box's policy.
-			// spec: STA
-			(!subject.is_machine()).then_some(server_id),
-			subject.is_machine().then_some(machine_id),
-			group_id,
+			FilingScope {
+				// A unified push carries both grains' checks. Grade each at
+				// the grain its subject belongs to, so a machine check is
+				// graded against the box's tags and silenced by the box's
+				// policy.
+				// spec: STA
+				application_id: (!subject.is_machine()).then_some(server_id),
+				machine_id: subject.is_machine().then_some(machine_id),
+				group_id,
+				// Both grains are covered by the window over the box: taking
+				// it down stops its machine checks and its workloads alike.
+				covering_machine: Some(machine_id),
+			},
 		)
 		.await?;
 		effective.insert(check, graded);

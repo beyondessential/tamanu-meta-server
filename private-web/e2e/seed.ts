@@ -132,6 +132,8 @@ export interface SeededServer {
 	product: Product;
 	kind: ServerKind;
 	rank: ServerRank | null;
+	/** The box this workload runs on. Maintenance is declared over it. */
+	machineId: string;
 }
 
 export async function seedServer(
@@ -197,7 +199,7 @@ export async function seedServer(
 			machineId,
 		],
 	);
-	return { id, name, host, product, kind, rank };
+	return { id, name, host, product, kind, rank, machineId };
 }
 
 export interface SeededDevice {
@@ -1293,12 +1295,12 @@ export interface SeededMaintenanceWindow {
 	id: string;
 }
 
-/** A maintenance window over a server or a group. `endsInHours` places the
+/** A maintenance window over a machine or a group. `endsInHours` places the
  * expected end, so a negative value seeds one the sweep will end. */
 export async function seedMaintenanceWindow(
 	sql: Sql,
 	opts: {
-		serverId?: string;
+		machineId?: string;
 		serverGroupId?: string;
 		endsInHours?: number;
 		/** Seed the window already ended this many minutes ago (still inside
@@ -1310,13 +1312,13 @@ export async function seedMaintenanceWindow(
 ): Promise<SeededMaintenanceWindow> {
 	const rows = await sql.query<{ id: string }>(
 		`INSERT INTO maintenance_windows
-		   (server_id, server_group_id, expected_end, ended_at, note, declared_by)
+		   (machine_id, server_group_id, expected_end, ended_at, note, declared_by)
 		 VALUES ($1, $2, NOW() + make_interval(mins => $3),
 		         CASE WHEN $4::int IS NULL THEN NULL ELSE NOW() - make_interval(mins => $4::int) END,
 		         $5, $6)
 		 RETURNING id`,
 		[
-			opts.serverId ?? null,
+			opts.machineId ?? null,
 			opts.serverGroupId ?? null,
 			opts.endedMinutesAgo != null
 				? -opts.endedMinutesAgo

@@ -499,9 +499,13 @@ diesel::table! {
 		tags -> Jsonb,
 		deleted_at -> Nullable<Timestamptz>,
 		registered_at -> Nullable<Timestamptz>,
+	}
+}
+
+diesel::table! {
 	maintenance_windows (id) {
 		id -> Uuid,
-		server_id -> Nullable<Uuid>,
+		machine_id -> Nullable<Uuid>,
 		server_group_id -> Nullable<Uuid>,
 		expected_end -> Timestamptz,
 		note -> Nullable<Text>,
@@ -858,6 +862,8 @@ diesel::joinable!(issues -> server_groups (server_group_id));
 diesel::joinable!(machine_reported_detail -> machines (machine_id));
 diesel::joinable!(machines -> devices (device_id));
 diesel::joinable!(machines -> server_groups (group_id));
+diesel::joinable!(maintenance_windows -> machines (machine_id));
+diesel::joinable!(maintenance_windows -> server_groups (server_group_id));
 diesel::joinable!(migration_tests -> backup_restore_checks (check_id));
 diesel::joinable!(migration_tests -> versions (target_version_id));
 diesel::joinable!(migration_timings -> migration_tests (check_id));
@@ -867,8 +873,6 @@ diesel::joinable!(restore_replicas -> devices (consumer_device_id));
 diesel::joinable!(restore_replicas -> server_groups (group_id));
 diesel::joinable!(scoped_check_policies -> applications (application_id));
 diesel::joinable!(scoped_check_policies -> machines (machine_id));
-diesel::joinable!(maintenance_windows -> server_groups (server_group_id));
-diesel::joinable!(maintenance_windows -> applications (server_id));
 diesel::joinable!(scoped_check_policies -> server_groups (server_group_id));
 diesel::joinable!(server_backup_capabilities -> applications (server_id));
 diesel::joinable!(server_enrollment_challenges -> applications (server_id));

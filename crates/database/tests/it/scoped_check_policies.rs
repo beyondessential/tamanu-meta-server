@@ -5,7 +5,7 @@
 
 use commons_types::status::CheckResult;
 use database::{
-	check_policies::{CheckPolicy, EvaluationContext, ScopedCheckPolicy},
+	check_policies::{CheckPolicy, EvaluationContext, FilingScope, ScopedCheckPolicy},
 	issues::{CheckFiling, Issue, Scope, file_check},
 	silenced_refs::ServerSilencedRef,
 	statuses::CANOPY_SOURCE,
@@ -175,9 +175,10 @@ async fn server_scoped_rule_can_upgrade_past_the_fleet_ceiling() {
 			"tiered",
 			CheckResult::Failed,
 			&ctx,
-			Some(server_id),
-			None,
-			None,
+			FilingScope {
+				application_id: Some(server_id),
+				..Default::default()
+			},
 		)
 		.await
 		.expect("apply");
@@ -195,9 +196,10 @@ async fn server_scoped_rule_can_upgrade_past_the_fleet_ceiling() {
 			"tiered",
 			CheckResult::Failed,
 			&ctx,
-			Some(other),
-			None,
-			None,
+			FilingScope {
+				application_id: Some(other),
+				..Default::default()
+			},
 		)
 		.await
 		.expect("apply other");
