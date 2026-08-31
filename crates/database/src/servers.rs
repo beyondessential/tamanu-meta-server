@@ -315,6 +315,16 @@ impl Server {
 		use crate::schema::servers;
 
 		crate::tags::reject_reserved_keys(&server.tags)?;
+		crate::inventory_secret_variables::reject_secret_names(
+			db,
+			crate::inventory_secret_variables::TagScope::Server {
+				server_id: server.id,
+				group_id: server.group_id,
+				rank: server.rank.unwrap_or_default(),
+			},
+			&server.tags,
+		)
+		.await?;
 
 		let created = diesel::insert_into(servers::table)
 			.values(server)
@@ -794,19 +804,37 @@ impl Server {
 	) -> Result<Self> {
 		use crate::schema::servers::dsl;
 
-		if let Some(tags) = &updates.tags {
-			crate::tags::reject_reserved_keys(tags)?;
-		}
-
-		// Capture the old group before the update: rank/kind/group_id may all
+		// Capture the old server before the update: rank/kind/group_id may all
 		// change, so both the old and new group's canonical member can shift.
 		// Non-fatal: a missing server (or read error) just means "no old group
 		// to recompute" and leaves the update's own error handling — e.g. the
 		// empty-changeset path — to set the response, unchanged by us.
-		let old_group_id = Self::get_by_id(db, server_id)
-			.await
-			.ok()
-			.and_then(|s| s.group_id);
+		let old = Self::get_by_id(db, server_id).await.ok();
+
+		if let Some(tags) = &updates.tags {
+			crate::tags::reject_reserved_keys(tags)?;
+			// The scope the tags land in, which the same update may be moving.
+			let group_id = match updates.group_id {
+				Some(group_id) => group_id,
+				None => old.as_ref().and_then(|server| server.group_id),
+			};
+			let rank = updates
+				.rank
+				.or_else(|| old.as_ref().and_then(|server| server.rank))
+				.unwrap_or_default();
+			crate::inventory_secret_variables::reject_secret_names(
+				db,
+				crate::inventory_secret_variables::TagScope::Server {
+					server_id,
+					group_id,
+					rank,
+				},
+				tags,
+			)
+			.await?;
+		}
+
+		let old_group_id = old.and_then(|server| server.group_id);
 
 		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
 			.set(updates)

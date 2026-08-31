@@ -2054,12 +2054,74 @@ export interface paths {
         /**
          * Serve one environment's inventory.
          * @description Refuses a group Canopy does not have, one that has been archived, one
-         *     holding several environments with no rank named, and a rank with no live
-         *     server to configure, saying which it was: a refusal is a decision to
-         *     respect, and a caller has to be able to tell it from Canopy being
-         *     unreachable.
+         *     holding several environments with no rank named, a rank with no live
+         *     server to configure, and a secret variable whose value cannot be read,
+         *     saying which it was: a refusal is a decision to respect, and a caller has to
+         *     be able to tell it from Canopy being unreachable.
+         *
+         *     Requires admin access, the inventory carrying the secret variables' values.
          */
         post: operations["inventory_for_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory/secrets/for_group": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * The names a group carries, at every scope under it.
+         * @description Names only: a value is served solely as part of an inventory, and only to an
+         *     administrator. Available to any operator, so the group page can show which
+         *     variables are set without one.
+         */
+        post: operations["inventory_secrets_for_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory/secrets/remove": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Forget a secret variable, value and all. */
+        post: operations["inventory_secrets_remove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/inventory/secrets/set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set or replace a secret variable.
+         * @description Refuses a name already set as a tag in the same scope, and a name the secret
+         *     store cannot key a value under.
+         */
+        post: operations["inventory_secrets_set"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6013,10 +6075,45 @@ export interface components {
             /** @description The application this server runs. */
             product: components["schemas"]["Product"];
             /**
+             * @description Which of `vars` are secret, so a caller can keep them out of anything it
+             *     writes down.
+             */
+            secret_vars: string[];
+            /**
              * @description The server's effective variables: its own tags over its group's, with
              *     the reserved read-only tags left out. This is what a run acts on.
              */
             vars: components["schemas"]["VarMap"];
+        };
+        /**
+         * @description A declared secret variable: its name, the scope it is set at, and who last
+         *     set it.
+         */
+        InventorySecretVariable: {
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description Unique identifier of this declaration.
+             */
+            id: string;
+            /** @description The variable's name, and the key its value is stored under. */
+            name: string;
+            rank?: null | components["schemas"]["ServerRank"];
+            /**
+             * Format: uuid
+             * @description Set with `rank` for a variable belonging to one environment.
+             */
+            server_group_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Set for a variable belonging to one server.
+             */
+            server_id?: string | null;
+            /** @description The login that last set the value. */
+            set_by?: string | null;
+            /** Format: date-time */
+            updated_at: string;
         };
         /**
          * @description An environment's inventory: its servers and the variables that configure
@@ -6034,8 +6131,10 @@ export interface components {
             hosts: components["schemas"]["InventoryHost"][];
             /** @description Rank of the environment served. */
             rank: components["schemas"]["ServerRank"];
+            /** @description Which of `vars` are secret. */
+            secret_vars: string[];
             /**
-             * @description Variables belonging to the group rather than to any one server.
+             * @description Variables belonging to the environment rather than to any one server.
              *     Every server carries these too, under its own overrides.
              */
             vars: components["schemas"]["VarMap"];
@@ -7620,6 +7719,11 @@ export interface components {
              */
             patch: number;
         };
+        /** @description Name one secret variable to forget. */
+        RemoveArgs: components["schemas"]["ScopeArgs"] & {
+            /** @description The variable's name. */
+            name: string;
+        };
         /** @description Identifies a one-off backup or restore request for a server. */
         RequestArgs: {
             /**
@@ -8234,6 +8338,29 @@ export interface components {
             retention?: null | components["schemas"]["RetentionPolicy"];
             /** @description Backup type this override applies to. */
             type: string;
+        };
+        /** @description Which scope a request addresses: an environment, or one server. */
+        ScopeArgs: {
+            rank?: null | components["schemas"]["ServerRank"];
+            /**
+             * Format: uuid
+             * @description Identifier of the server group, with `rank`, for an environment-scoped
+             *     variable.
+             */
+            server_group_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Identifier of the server, for a server-scoped variable.
+             */
+            server_id?: string | null;
+        };
+        /** @description Which group's declarations to list. */
+        SecretsForGroupArgs: {
+            /**
+             * Format: uuid
+             * @description Identifier of the server group.
+             */
+            server_group_id: string;
         };
         /**
          * @description A self-alert: a problem with canopy's own operation, such as an
@@ -8904,6 +9031,16 @@ export interface components {
              * @description The server to update.
              */
             server_id: string;
+        };
+        /** @description Set or replace one secret variable's value. */
+        SetArgs: components["schemas"]["ScopeArgs"] & {
+            /** @description The variable's name. */
+            name: string;
+            /**
+             * @description The value. Decoded on the way out the same way a tag is, so `true`,
+             *     `false`, and a JSON array or object arrive as themselves.
+             */
+            value: string;
         };
         /** @description Request to enable or disable a server's backup capability for one type. */
         SetCapabilityArgs: {
@@ -12576,6 +12713,146 @@ export interface operations {
             };
             /** @description Archived, empty, ambiguously named, or spanning environments */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description A secret variable could not be read */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    inventory_secrets_for_group: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecretsForGroupArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventorySecretVariable"][];
+                };
+            };
+            /** @description No such server group */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    inventory_secrets_remove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemoveArgs"];
+            };
+        };
+        responses: {
+            /** @description Removed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad scope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description No variable of that name in that scope */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The secret store is unavailable */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    inventory_secrets_set: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InventorySecretVariable"];
+                };
+            };
+            /** @description Bad scope, bad name, or a tag of that name */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description No such server group or server */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The secret store is unavailable */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };

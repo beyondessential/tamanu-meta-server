@@ -371,6 +371,19 @@ diesel::table! {
 }
 
 diesel::table! {
+	inventory_secret_variables (id) {
+		id -> Uuid,
+		server_group_id -> Nullable<Uuid>,
+		rank -> Nullable<Text>,
+		server_id -> Nullable<Uuid>,
+		name -> Text,
+		set_by -> Nullable<Text>,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	issues (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -839,6 +852,8 @@ diesel::joinable!(restore_consumer_capabilities -> devices (consumer_device_id))
 diesel::joinable!(restore_replicas -> devices (consumer_device_id));
 diesel::joinable!(restore_replicas -> server_groups (group_id));
 diesel::joinable!(restore_replicas -> servers (server_id));
+diesel::joinable!(inventory_secret_variables -> server_groups (server_group_id));
+diesel::joinable!(inventory_secret_variables -> servers (server_id));
 diesel::joinable!(maintenance_windows -> server_groups (server_group_id));
 diesel::joinable!(maintenance_windows -> servers (server_id));
 diesel::joinable!(scoped_check_policies -> server_groups (server_group_id));

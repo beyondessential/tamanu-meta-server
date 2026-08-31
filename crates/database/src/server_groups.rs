@@ -235,6 +235,12 @@ impl ServerGroup {
 		use crate::schema::server_groups::dsl;
 		if let Some(tags) = &changes.tags {
 			crate::tags::reject_reserved_keys(tags)?;
+			crate::inventory_secret_variables::reject_secret_names(
+				db,
+				crate::inventory_secret_variables::TagScope::Group { group_id },
+				tags,
+			)
+			.await?;
 		}
 		diesel::update(dsl::server_groups.filter(dsl::id.eq(group_id)))
 			.set(changes)
