@@ -114,15 +114,12 @@ Currency is presented per group, so whether a group's reports are running agains
 
 ## Alerting
 
-A central server whose schema is behind raises a reporting-schema check on itself (see [CHK](../monitoring/checks.md)).
-A server with an owed build that has not been produced degrades the same check, since owed-and-unbuilt and built-but-unapplied both leave its reports mismatched to the version it runs.
-There is no separate time bound on either: a build is owed from the moment its version becomes a candidate, and the plan that made it one already carries the date it is wanted by.
+A central server whose schema is behind, or which owes a build nothing has produced, raises a reporting-schema check on itself (see [CHK](../monitoring/checks.md)).
+Both leave its reports mismatched to the version it runs, and neither carries a time bound of its own: the plan that made a version a candidate already carries the date it is wanted by.
 
-The check is a warning rather than a failure, and does not escalate.
-The servers are up and their reports are returning rows; the fault is that some of those rows are computed by a schema written for a different version, and that belongs to whoever maintains the reports rather than whoever is on call for outages.
+The check is a warning rather than a failure, and does not escalate: the servers are up and their reports return rows, and a schema written for the wrong version is for whoever maintains the reports rather than whoever is on call.
 
-A failed build raises the same check, carrying the failure description.
-A build failing against a fixed version and a fixed configuration fails the same way every time, so a failure settles the pair rather than leaving it to retry, and a new version or a rebuild is what clears it.
+A failed build raises the same check with its failure description, and settles the pair rather than retrying, since a build against a fixed version and configuration fails the same way every time.
 
 ## Out of scope
 
