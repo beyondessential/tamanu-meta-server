@@ -20,7 +20,7 @@ Centralising issuance also puts the authority's rate limits, the record of every
 
 ## Declared names
 
-An operator declares the names an application serves.
+An operator declares the names an application serves, and an application's own first registration of a name declares it where that is unambiguous (see "Identity and authorisation").
 A declared name is what ties a name to the software that answers on it, and it is what an address registration or a certificate request is resolved against.
 
 A name is declared by at most one application across the whole fleet.
@@ -29,6 +29,8 @@ Exclusivity is what makes a name resolve to one application without Canopy havin
 
 An application may declare several names, each held exclusively.
 Releasing a name ends the application's hold on it and leaves the records and certificates already in place, as revoking a grant does.
+What was published stays published and what was issued stays held and collectable until it expires.
+What stops is Canopy acting on that name for that application: its certificates are no longer renewed and no longer raised as running out, since renewing past a release would order for a name another application may now serve, and reporting a deliberate release as a fault is noise.
 
 ## Identity and authorisation
 
@@ -39,10 +41,14 @@ Because a name is held by one application, that resolution is unambiguous howeve
 Every request is checked in the same order, and each check is reported distinctly so a misconfiguration is diagnosable from the refusal alone:
 
 1. The caller authenticates as an identity belonging to a live machine.
-2. An application on that machine declares the requested name.
+2. An application on that machine declares the requested name, or the machine hosts exactly one application.
 3. That application has the grant the request needs — DNS management for addresses, certificate issuance for certificates.
 4. The requested name lies at or beneath a domain the application's *own group* controls.
 5. A managed zone covers that domain, so Canopy can act on the name at all.
+
+A machine hosting exactly one application resolves to it even for a name nothing declares yet, and registering the name declares it.
+There is nothing to disambiguate on such a machine, and an agent's own registration is how most names come to be declared.
+On a machine hosting several, an undeclared name is genuinely ambiguous, so it is refused rather than guessed at and an operator declares it first.
 
 A machine asking about a name none of its applications declares is refused the same way whether the name is held by an application elsewhere or by nobody, so the endpoint is not a directory of what other machines serve.
 

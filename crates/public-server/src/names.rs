@@ -88,14 +88,42 @@ async fn authorise(
 ) -> Result<Authorised> {
 	let name = normalize_domain(name)?;
 
-	// 1. A device attached to a live server.
-	let server = Application::live_by_device_id(conn, device_id)
+	// 1. An identity belonging to a live machine. An identity is the box's, not
+	// the software's, so the credential says which machine is asking and
+	// nothing about which workload the request concerns.
+	let machine = database::machines::Machine::get_by_device_id(conn, device_id)
 		.await?
-		.into_iter()
-		.next()
+		.filter(|m| m.deleted_at.is_none())
 		.ok_or(AppError::DeviceHasNoServer)?;
+	let on_machine = machine.applications(conn).await?;
 
-	// 2. Paused before grants: a paused server is being looked into, and telling
+	// 2. The application on that machine declaring the requested name. Which
+	// application a request concerns is resolved from the name, not from the
+	// credential, and a name is held by one application fleet-wide, so this is
+	// unambiguous however many workloads the box hosts.
+	//
+	// A machine hosting exactly one application resolves to it even for a name
+	// nothing declares yet, because there is nothing to disambiguate and the
+	// agent's own registration is still how a name first gets declared. The
+	// moment a box hosts two, an undeclared name is genuinely ambiguous and is
+	// refused rather than guessed at.
+	//
+	// TRAP: this refusal must not distinguish "declared by an application
+	// elsewhere" from "declared by nobody". The fleet-wide unique index makes
+	// the former cheap to detect, which is exactly the temptation; reporting it
+	// would turn this endpoint into a directory of what other machines serve.
+	// spec: CRT#identity-and-authorisation
+	let declared = ApplicationName::for_name(conn, &name).await?;
+	let server = match declared {
+		Some(row) => on_machine.into_iter().find(|a| a.id == row.application_id),
+		None if on_machine.len() == 1 => on_machine.into_iter().next(),
+		None => None,
+	}
+	.ok_or_else(|| {
+		AppError::NameNotEntitled(format!("no application on this machine declares {name}"))
+	})?;
+
+	// 3. Paused before grants: a paused server is being looked into, and telling
 	// it about a missing grant would send an operator chasing the wrong thing.
 	if server.name_management_paused() {
 		return Err(AppError::NameManagementPaused(format!(
@@ -112,7 +140,7 @@ async fn authorise(
 		)));
 	}
 
-	// 3. The grant this request needs.
+	// 4. The grant this request needs.
 	if !grant.held_by(&server) {
 		return Err(AppError::AuthInsufficientPermissions {
 			required: format!(
@@ -122,7 +150,7 @@ async fn authorise(
 		});
 	}
 
-	// 4. The name has to sit under a domain this server's *own* group controls.
+	// 5. The name has to sit under a domain this application's *own* group controls.
 	// A name another group controls is refused exactly as an unclaimed one is, so
 	// the endpoint is not a directory of other deployments' names.
 	let entitled = match server.group_id {
@@ -138,7 +166,7 @@ async fn authorise(
 		)));
 	}
 
-	// 5. And Canopy has to be able to act on it at all.
+	// 6. And Canopy has to be able to act on it at all.
 	if match_zone(&name, zones).is_none() {
 		return Err(AppError::Conflict(format!(
 			"no DNS zone Canopy manages covers {name}, so it can publish nothing there; this is a \
@@ -168,6 +196,35 @@ pub struct Entitlements {
 	/// The names this server has registered addresses for.
 	pub registered_names: Vec<String>,
 	/// The certificates Canopy holds for this server.
+	pub certificates: Vec<HeldCertificate>,
+	/// One entry per application on the asking machine.
+	///
+	/// An identity belongs to a machine, so an agent asks on behalf of the box
+	/// and gets an answer for every workload on it. The flat fields above
+	/// describe a single-application machine, which is every machine today;
+	/// on a machine hosting several they are left at their defaults and this
+	/// list is the answer.
+	// spec: CRT#what-an-application-may-act-on
+	#[serde(default)]
+	pub applications: Vec<ApplicationEntitlements>,
+}
+
+/// What one application on the asking machine may act on.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ApplicationEntitlements {
+	/// The application these entitlements belong to.
+	pub application_id: Uuid,
+	/// Whether this application may manage its own DNS records.
+	pub may_manage_dns: bool,
+	/// Whether this application may obtain its own TLS certificates.
+	pub may_manage_tls: bool,
+	/// Whether Canopy is currently making no new changes on its behalf.
+	pub paused: bool,
+	/// The domains its group controls.
+	pub domains: Vec<String>,
+	/// The names it has registered addresses for.
+	pub registered_names: Vec<String>,
+	/// The certificates Canopy holds for it.
 	pub certificates: Vec<HeldCertificate>,
 }
 
@@ -245,14 +302,55 @@ pub async fn entitlements(
 	))
 }
 
-/// Build a server's entitlements. Shared with the status-push response, so an
-/// agent that already reports status learns of a new domain without asking.
-// spec: CRT#what-a-server-may-act-on
+/// Build the entitlements answer for the machine `server` sits on.
+///
+/// Shared with the status-push response, so an agent that already reports
+/// status learns of a new domain without asking. The answer carries an entry
+/// per application on the box; the flat fields describe `server` itself, which
+/// on a single-application machine is the whole answer.
+// spec: CRT#what-an-application-may-act-on
 pub async fn entitlements_for(
 	conn: &mut AsyncPgConnection,
 	server: &Application,
 	zones: &[ManagedZone],
 ) -> Result<Entitlements> {
+	let machine = database::machines::Machine::get_by_id(conn, server.machine_id).await?;
+	let mut applications = Vec::new();
+	for application in machine.applications(conn).await? {
+		applications.push(one_applications_entitlements(conn, &application, zones).await?);
+	}
+	let flat = if let [only] = applications.as_slice() {
+		only.clone()
+	} else {
+		// Several workloads on one box: no single set of flat fields is the
+		// answer, so the list is.
+		ApplicationEntitlements {
+			application_id: server.id,
+			may_manage_dns: false,
+			may_manage_tls: false,
+			paused: false,
+			domains: Vec::new(),
+			registered_names: Vec::new(),
+			certificates: Vec::new(),
+		}
+	};
+	Ok(Entitlements {
+		may_manage_dns: flat.may_manage_dns,
+		may_manage_tls: flat.may_manage_tls,
+		paused: flat.paused,
+		domains: flat.domains,
+		registered_names: flat.registered_names,
+		certificates: flat.certificates,
+		applications,
+	})
+}
+
+/// One application's own entitlements.
+async fn one_applications_entitlements(
+	conn: &mut AsyncPgConnection,
+	server: &Application,
+	zones: &[ManagedZone],
+) -> Result<ApplicationEntitlements> {
 	// Only domains Canopy can actually act in are offered: naming one whose zone
 	// has gone would have an agent request a name that cannot be fulfilled.
 	let domains: Vec<String> = match server.group_id {
@@ -277,7 +375,8 @@ pub async fn entitlements_for(
 		.map(held)
 		.collect();
 
-	Ok(Entitlements {
+	Ok(ApplicationEntitlements {
+		application_id: server.id,
 		may_manage_dns: server.may_manage_dns,
 		may_manage_tls: server.may_manage_tls,
 		paused: server.name_management_paused(),

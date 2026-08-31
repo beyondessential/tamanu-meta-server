@@ -247,7 +247,9 @@ async fn submit_status() {
 			// `names` is present but empty throughout: this server holds neither
 			// grant and its group controls no domain, so it is entitled to nothing
 			// — which is a fact worth stating on every push rather than an absence
-			// the server has to infer.
+			// the server has to infer. `applications` carries the same answer per
+			// workload on the box: one entry here, since one application runs on
+			// it.
 			let body: serde_json::Value = response.json();
 			assert_eq!(
 				body,
@@ -261,6 +263,15 @@ async fn submit_status() {
 						"domains": [],
 						"registered_names": [],
 						"certificates": [],
+						"applications": [{
+							"application_id": server_id,
+							"may_manage_dns": false,
+							"may_manage_tls": false,
+							"paused": false,
+							"domains": [],
+							"registered_names": [],
+							"certificates": [],
+						}],
 					},
 					"tags": {"canopy:product": "tamanu", "canopy:kind": "facility"},
 				}),

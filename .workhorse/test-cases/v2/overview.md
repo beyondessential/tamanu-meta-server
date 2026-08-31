@@ -107,12 +107,12 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 
 ## Names and certificates
 
-- [ ] Declaring a name another application already holds is refused, and the refusal names the holder (verifies spec: CRT)
-- [ ] A certificate request from a two-application machine resolves to the application declaring the requested name (verifies spec: CRT)
-- [ ] A request for a name none of the machine's applications declares is refused identically whether another application holds it or nobody does (verifies spec: CRT)
-- [ ] The entitlement answer carries one entry per application on the machine (verifies spec: CRT)
+- [x] Declaring a name another application already holds is refused, and the refusal names the holder (verifies spec: CRT)
+- [x] A certificate request from a two-application machine resolves to the application declaring the requested name (verifies spec: CRT)
+- [x] A request for a name none of the machine's applications declares is refused identically whether another application holds it or nobody does (verifies spec: CRT)
+- [x] The entitlement answer carries one entry per application on the machine (verifies spec: CRT)
 - [ ] The entitlement answer on a status-push response matches the standalone one (verifies spec: CRT, STA)
-- [ ] Releasing a name stops renewal and leaves existing records and certificates in place (verifies spec: CRT)
+- [x] Releasing a name stops renewal and leaves existing records and certificates in place (verifies spec: CRT)
 
 ## Fleet query interface
 

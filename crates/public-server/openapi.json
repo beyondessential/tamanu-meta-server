@@ -1439,6 +1439,59 @@
   },
   "components": {
     "schemas": {
+      "ApplicationEntitlements": {
+        "type": "object",
+        "description": "What one application on the asking machine may act on.",
+        "required": [
+          "application_id",
+          "may_manage_dns",
+          "may_manage_tls",
+          "paused",
+          "domains",
+          "registered_names",
+          "certificates"
+        ],
+        "properties": {
+          "application_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The application these entitlements belong to."
+          },
+          "certificates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HeldCertificate"
+            },
+            "description": "The certificates Canopy holds for it."
+          },
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The domains its group controls."
+          },
+          "may_manage_dns": {
+            "type": "boolean",
+            "description": "Whether this application may manage its own DNS records."
+          },
+          "may_manage_tls": {
+            "type": "boolean",
+            "description": "Whether this application may obtain its own TLS certificates."
+          },
+          "paused": {
+            "type": "boolean",
+            "description": "Whether Canopy is currently making no new changes on its behalf."
+          },
+          "registered_names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The names it has registered addresses for."
+          }
+        }
+      },
       "Artifact": {
         "type": "object",
         "description": "A downloadable artifact belonging to a release version: an installer,\npackage, or other file published for a given type and platform.",
@@ -1818,6 +1871,13 @@
           "certificates"
         ],
         "properties": {
+          "applications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApplicationEntitlements"
+            },
+            "description": "One entry per application on the asking machine.\n\nAn identity belongs to a machine, so an agent asks on behalf of the box\nand gets an answer for every workload on it. The flat fields above\ndescribe a single-application machine, which is every machine today;\non a machine hosting several they are left at their defaults and this\nlist is the answer."
+          },
           "certificates": {
             "type": "array",
             "items": {

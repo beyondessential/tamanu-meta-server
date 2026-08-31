@@ -14,7 +14,7 @@ Each item is a section below; the section carries the detail and the traps.
 - [x] **Dropping `device_server_associations`** — rehome the backup-staleness anchor first
 - [x] **Ingest: the machine-subject check rule** — what first files at machine scope
 - [x] **Ingest: the detail-field split** — `server_reported_detail` splits by grain; carries the figure reads with it
-- [ ] **Declared names and certificate routing** — identity to machine to application, and the plural entitlement answer
+- [x] **Declared names and certificate routing** — identity to machine to application, and the plural entitlement answer
 - [ ] **Restore replicas** — declarations move grain; `migration-test` stays application-scoped
 - [ ] **Retiring the graded reachability states** — `short_status`'s hardcoded thresholds
 - [ ] **Fleet query interface** — MCP gains `Get machine` and `Find machines`
@@ -240,6 +240,17 @@ The routing is what actually moves. Today a certificate or address request resol
 **Trap.** The refusal for "no application on this machine declares that name" must be indistinguishable from "no application anywhere declares it". The unique index makes the second case cheap to detect, which is exactly why it is tempting to report it, and reporting it turns the endpoint into a directory of what other machines serve.
 
 The entitlement answer becomes plural. `What an application may act on` is asked by an agent holding a machine identity, so its response carries one entry per application on the machine instead of a single application's grants. That is a breaking shape change on both the standalone endpoint and the status-push response, so it needs the same treatment as the other renamed routes: the old path keeps answering with a single entry for a single-application machine, and the new shape is what a two-application machine gets.
+
+### Declared names and certificate routing: done
+
+Routing moved as planned: `authorise` resolves identity → live machine → the application on that machine declaring the name, and the entitlement answer gained an `applications` array with one entry per workload, the flat fields still answering for the single-application machine every machine is today.
+
+Two things the step turned up that the section above did not anticipate:
+
+- **The operator declaration surface did not exist.** Names were only ever declared as a side effect of an agent registering addresses, so there was nowhere for an operator to say which workload serves what — the thing the whole routing now reads. Added `certificates/declare` and `certificates/release`, with `ApplicationName::declare`/`release` behind them. The operator refusal names the holder; the device-facing one never does, and `ApplicationCertificate::request` maps the former to the latter for exactly that reason.
+- **A certificate order left no declaration behind.** Registering an address happened to create the row; ordering a certificate did not, so a single-application machine could hold a certificate for a name nothing declared. `request` now declares the name it orders for, which makes "an order exists only for a declared name" an invariant of the model rather than of one call path.
+
+That invariant is what lets renewal and the expiry alert both filter on `still_declared()`: releasing a name stops Canopy renewing its certificates and stops raising them as running out, since renewing past a release would order for a name another application now serves. What was already issued stays issued and collectable.
 
 ## Fleet query interface
 

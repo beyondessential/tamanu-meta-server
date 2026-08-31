@@ -8,7 +8,7 @@ use database::application_certificates::{OrderState, RevocationReason, Risk, def
 use database::diesel_async::AsyncPgConnection;
 use database::{ApplicationCertificate, ApplicationName, ServerGroupDomain};
 use diesel::{sql_query, sql_types};
-use diesel_async::RunQueryDsl;
+use diesel_async::{RunQueryDsl, SimpleAsyncConnection};
 use jiff::{SignedDuration, Timestamp};
 use std::net::IpAddr;
 use uuid::Uuid;
@@ -156,8 +156,15 @@ async fn a_name_belongs_to_one_server_at_a_time() {
 		let err = ApplicationName::register(&mut conn, two, "a.tamanu.app", &[addr("192.0.2.2")])
 			.await
 			.expect_err("the other server may not take it");
+		// Word for word what a name nobody declares is refused with, so the
+		// refusal is not a directory of what other machines serve. The routing
+		// resolves declarations ahead of this, so only a race reaches it.
 		assert!(
-			matches!(err, commons_errors::AppError::Conflict(_)),
+			matches!(
+				&err,
+				commons_errors::AppError::NameNotEntitled(m)
+					if m == "no application on this machine declares a.tamanu.app"
+			),
 			"got {err:?}"
 		);
 
@@ -1259,4 +1266,233 @@ async fn a_renewal_in_flight_does_not_stop_the_old_chain_being_collectable() {
 		);
 	})
 	.await;
+}
+
+/// An operator ties a name to the software answering on it, so a box running
+/// several workloads has its later requests routed to the right one.
+// spec: CRT#declared-names
+#[tokio::test(flavor = "multi_thread")]
+async fn declaring_a_name_ties_it_to_one_application() {
+	TestDb::run(|mut conn, _url| async move {
+		let app = insert_server(&mut conn, "declare-1").await;
+
+		let row = ApplicationName::declare(&mut conn, app, "Front.Fiji.Tamanu.App.")
+			.await
+			.expect("declare");
+		assert_eq!(
+			row.name, "front.fiji.tamanu.app",
+			"normalised on the way in"
+		);
+		assert!(
+			row.wanted().is_empty(),
+			"a declaration carries no addresses; the application registers those itself"
+		);
+
+		let again = ApplicationName::declare(&mut conn, app, "front.fiji.tamanu.app")
+			.await
+			.expect("declaring the same name again changes nothing");
+		assert_eq!(again.id, row.id);
+	})
+	.await
+}
+
+/// Safe to name the holder here, and only here: an operator already sees the
+/// whole fleet, and needs to know what to release first.
+// spec: CRT#declared-names
+#[tokio::test(flavor = "multi_thread")]
+async fn declaring_a_name_another_application_holds_names_the_holder() {
+	TestDb::run(|mut conn, _url| async move {
+		let holder = insert_server(&mut conn, "the-holder").await;
+		let other = insert_server(&mut conn, "the-other").await;
+
+		ApplicationName::declare(&mut conn, holder, "shared.fiji.tamanu.app")
+			.await
+			.expect("first declaration");
+
+		let refusal = ApplicationName::declare(&mut conn, other, "shared.fiji.tamanu.app")
+			.await
+			.expect_err("the second is refused");
+		let message = refusal.to_string();
+		assert!(
+			message.contains("the-holder") && message.contains(&holder.to_string()),
+			"the refusal names the holder so an operator can see what to release \
+			 first, but said: {message}"
+		);
+	})
+	.await
+}
+
+/// Releasing withdraws nothing already in place, exactly as revoking a grant
+/// leaves it. What ends is Canopy treating the name as this application's.
+// spec: CRT#declared-names
+#[tokio::test(flavor = "multi_thread")]
+async fn releasing_a_name_leaves_its_certificates_in_place_and_frees_it() {
+	TestDb::run(|mut conn, _url| async move {
+		let first = insert_server(&mut conn, "release-1").await;
+		let second = insert_server(&mut conn, "release-2").await;
+
+		ApplicationName::register(
+			&mut conn,
+			first,
+			"moving.fiji.tamanu.app",
+			&[addr("192.0.2.9")],
+		)
+		.await
+		.expect("register");
+		let cert = ApplicationCertificate::request(
+			&mut conn,
+			first,
+			"moving.fiji.tamanu.app",
+			"a-certified-key",
+			b"a-csr",
+		)
+		.await
+		.expect("request a certificate");
+
+		// Issued, granted, and overdue for renewal, so it is genuinely picked up
+		// while the declaration stands and the release is what stops it.
+		conn.batch_execute(&format!(
+			"UPDATE applications SET may_manage_tls = true WHERE id = '{first}'"
+		))
+		.await
+		.expect("grant TLS");
+		let expiring = Timestamp::now() + SignedDuration::from_hours(24);
+		ApplicationCertificate::record_issued(
+			&mut conn,
+			cert.id,
+			"a-chain",
+			expiring,
+			None,
+			Some(Timestamp::now() - SignedDuration::from_hours(1)),
+		)
+		.await
+		.expect("record issued");
+
+		assert!(
+			ApplicationCertificate::start_renewals(&mut conn)
+				.await
+				.expect("renewals")
+				.iter()
+				.any(|c| c.id == cert.id),
+			"it is due for renewal while the declaration stands"
+		);
+		// start_renewals marks what it returns pending, so put it back to issued
+		// and overdue for the check after the release.
+		ApplicationCertificate::record_issued(
+			&mut conn,
+			cert.id,
+			"a-chain",
+			expiring,
+			None,
+			Some(Timestamp::now() - SignedDuration::from_hours(1)),
+		)
+		.await
+		.expect("still issued and overdue");
+
+		ApplicationName::release(&mut conn, first, "moving.fiji.tamanu.app")
+			.await
+			.expect("release");
+
+		assert!(
+			ApplicationCertificate::get(&mut conn, cert.id)
+				.await
+				.is_ok(),
+			"the certificate held stays held"
+		);
+		assert!(
+			ApplicationName::for_name(&mut conn, "moving.fiji.tamanu.app")
+				.await
+				.expect("look up")
+				.is_none(),
+			"and the name is free"
+		);
+
+		ApplicationName::declare(&mut conn, second, "moving.fiji.tamanu.app")
+			.await
+			.expect("free to be declared elsewhere");
+
+		let missing = ApplicationName::release(&mut conn, first, "moving.fiji.tamanu.app")
+			.await
+			.expect_err("releasing what this application does not hold");
+		assert!(
+			missing
+				.to_string()
+				.contains("not declared by this application")
+		);
+
+		// Renewing past a release would order for a name the other application
+		// now serves, so it stops.
+		let due = ApplicationCertificate::start_renewals(&mut conn)
+			.await
+			.expect("renewals");
+		assert!(
+			!due.iter().any(|c| c.id == cert.id),
+			"a released name's certificate is not renewed"
+		);
+
+		// And a deliberate release is not reported as a fault.
+		let at_risk = ApplicationCertificate::at_risk(&mut conn)
+			.await
+			.expect("at risk");
+		assert!(
+			!at_risk.iter().any(|(c, _)| c.id == cert.id),
+			"nor raised as running out"
+		);
+		assert!(
+			ApplicationCertificate::get(&mut conn, cert.id)
+				.await
+				.expect("still there")
+				.chain
+				.is_some(),
+			"and what was issued stays collectable until it expires"
+		);
+	})
+	.await
+}
+
+/// The certificate path declares the name it orders for, and does so without
+/// telling a device who else holds it — the same refusal a name nobody declares
+/// gets, so the endpoint is not a directory of what other machines serve.
+// spec: CRT#declared-names
+#[tokio::test(flavor = "multi_thread")]
+async fn ordering_declares_the_name_without_naming_another_holder() {
+	TestDb::run(|mut conn, _url| async move {
+		let mine = insert_server(&mut conn, "orders").await;
+		let theirs = insert_server(&mut conn, "the-holder").await;
+
+		ApplicationCertificate::request(&mut conn, mine, "own.fiji.tamanu.app", "key-a", b"csr")
+			.await
+			.expect("order");
+		let declared = ApplicationName::for_name(&mut conn, "own.fiji.tamanu.app")
+			.await
+			.expect("look up")
+			.expect("ordering declared the name");
+		assert_eq!(declared.application_id, mine);
+
+		ApplicationName::declare(&mut conn, theirs, "elsewhere.fiji.tamanu.app")
+			.await
+			.expect("declare");
+		let refusal = ApplicationCertificate::request(
+			&mut conn,
+			mine,
+			"elsewhere.fiji.tamanu.app",
+			"key-b",
+			b"csr",
+		)
+		.await
+		.expect_err("ordering for a name held elsewhere");
+		assert!(
+			matches!(
+				&refusal,
+				commons_errors::AppError::NameNotEntitled(m)
+					if m == "no application on this machine declares elsewhere.fiji.tamanu.app"
+			),
+			"got {refusal:?}"
+		);
+		assert!(
+			!refusal.to_string().contains("the-holder"),
+			"and never names the holder"
+		);
+	})
+	.await
 }

@@ -317,6 +317,27 @@ impl ApplicationCertificate {
 
 		let name = normalize_domain(name)?;
 
+		// An order exists only for a name the application declares, so Canopy
+		// always knows which workload a certificate is for and knows to stop
+		// renewing it once the declaration ends. Registering an address happens
+		// to declare the name; requesting a certificate has to do it explicitly,
+		// since an application may want a certificate before it is reachable.
+		//
+		// This path is device-facing, so a name another application holds is
+		// refused word for word as a name nobody declares. `declare` itself
+		// names the holder, which is right for an operator who sees the whole
+		// fleet and wrong here, where it would make the endpoint a directory of
+		// what other machines serve.
+		// spec: CRT#declared-names
+		crate::application_names::ApplicationName::declare(db, application_id, &name)
+			.await
+			.map_err(|err| match err {
+				AppError::Conflict(_) => AppError::NameNotEntitled(format!(
+					"no application on this machine declares {name}"
+				)),
+				other => other,
+			})?;
+
 		// A key revoked for compromise is never certified again, whatever asks
 		// for it: the server has to generate a new one. Its own error type, not a
 		// generic refusal, so an agent can rotate the key on the problem type
@@ -535,6 +556,7 @@ impl ApplicationCertificate {
 				)
 				.filter(applications::deleted_at.is_null())
 				.filter(applications::name_management_paused_at.is_null())
+				.filter(still_declared())
 				.select(application_certificates::id)
 				.load(db)
 				.await
@@ -587,6 +609,7 @@ impl ApplicationCertificate {
 			// consequence. The pause is what gets reported instead.
 			// spec: CRT#pausing-a-server
 			.filter(applications::name_management_paused_at.is_null())
+			.filter(still_declared())
 			.select((
 				Self::as_select(),
 				applications::group_id,
@@ -830,6 +853,39 @@ pub async fn is_key_compromised(db: &mut AsyncPgConnection, key_fingerprint: &st
 		.optional()
 		.map_err(AppError::from)?;
 	Ok(found.is_some())
+}
+
+/// Certificates whose name the application still declares.
+///
+/// Canopy acts on a name for the application that declares it, so once a
+/// declaration ends — released to another workload on the box, or forgotten
+/// after the name was withdrawn — it stops renewing that name's certificates
+/// and stops raising them as running out. Renewing past a release would order
+/// for a name another application now serves, and alerting on it would report a
+/// deliberate act as a fault. What was already issued stays issued and
+/// collectable until it expires.
+// spec: CRT#declared-names
+fn still_declared() -> diesel::dsl::exists<
+	diesel::helper_types::Filter<
+		diesel::helper_types::Filter<
+			crate::schema::application_names::table,
+			diesel::dsl::Eq<
+				crate::schema::application_names::application_id,
+				crate::schema::application_certificates::application_id,
+			>,
+		>,
+		diesel::dsl::Eq<
+			crate::schema::application_names::name,
+			crate::schema::application_certificates::name,
+		>,
+	>,
+> {
+	use crate::schema::{application_certificates, application_names};
+	diesel::dsl::exists(
+		application_names::table
+			.filter(application_names::application_id.eq(application_certificates::application_id))
+			.filter(application_names::name.eq(application_certificates::name)),
+	)
 }
 
 /// When to renew a certificate whose authority publishes no renewal information

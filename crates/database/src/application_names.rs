@@ -81,6 +81,101 @@ impl ApplicationName {
 		self.addresses.is_empty()
 	}
 
+	/// Declare that `application_id` serves `name`, as an operator.
+	///
+	/// A declaration ties a name to the software answering on it, with no
+	/// addresses yet: it is what a later address registration or certificate
+	/// request from the machine is resolved against, which is how a box running
+	/// several workloads gets its requests routed to the right one.
+	///
+	/// Declaring is idempotent for the application already holding the name.
+	/// A name another application holds is refused, and the refusal *names* the
+	/// holder — safe here, and not on the device-facing path, because an
+	/// operator already sees the whole fleet and needs to know what to release
+	/// first.
+	// spec: CRT#declared-names
+	pub async fn declare(
+		db: &mut AsyncPgConnection,
+		application_id: Uuid,
+		name: &str,
+	) -> Result<Self> {
+		use crate::schema::application_names::dsl;
+
+		let name = normalize_domain(name)?;
+		if let Some(existing) = Self::for_name(db, &name).await? {
+			if existing.application_id != application_id {
+				return Err(Self::held_elsewhere(db, &name, existing.application_id).await);
+			}
+			return Ok(existing);
+		}
+
+		match diesel::insert_into(dsl::application_names)
+			.values((
+				dsl::application_id.eq(application_id),
+				dsl::name.eq(&name),
+				dsl::addresses.eq(Vec::<Option<IpNet>>::new()),
+			))
+			.returning(Self::as_select())
+			.get_result(db)
+			.await
+		{
+			Ok(row) => Ok(row),
+			// Declared from elsewhere between the read and the insert.
+			Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => {
+				let holder = Self::for_name(db, &name).await?.map(|r| r.application_id);
+				Err(match holder {
+					Some(id) => Self::held_elsewhere(db, &name, id).await,
+					None => AppError::Conflict(format!("{name} was declared elsewhere just now")),
+				})
+			}
+			Err(e) => Err(AppError::from(e)),
+		}
+	}
+
+	/// End an application's hold on a name, as an operator.
+	///
+	/// What is already in place stands, exactly as revoking a grant leaves it:
+	/// the records published stay published and the certificates held stay
+	/// held. What ends is Canopy treating the name as this application's, which
+	/// frees it to be declared by another.
+	// spec: CRT#declared-names
+	pub async fn release(
+		db: &mut AsyncPgConnection,
+		application_id: Uuid,
+		name: &str,
+	) -> Result<()> {
+		use crate::schema::application_names::dsl;
+
+		let name = normalize_domain(name)?;
+		let deleted = diesel::delete(
+			dsl::application_names
+				.filter(dsl::application_id.eq(application_id))
+				.filter(dsl::name.eq(&name)),
+		)
+		.execute(db)
+		.await?;
+		if deleted == 0 {
+			return Err(AppError::NotFound(format!(
+				"{name} is not declared by this application"
+			)));
+		}
+		Ok(())
+	}
+
+	/// The operator-facing refusal for a name another application holds.
+	async fn held_elsewhere(db: &mut AsyncPgConnection, name: &str, holder: Uuid) -> AppError {
+		let described = match crate::applications::Application::get_by_id(db, holder).await {
+			Ok(app) => match app.name {
+				Some(name) => format!("{name} ({holder})"),
+				None => holder.to_string(),
+			},
+			Err(_) => holder.to_string(),
+		};
+		AppError::Conflict(format!(
+			"{name} is already declared by {described}; release it there before declaring it here"
+		))
+	}
+
 	/// Register `name` for a server with the addresses it is reachable at,
 	/// replacing whatever addresses were registered before.
 	///
@@ -100,9 +195,8 @@ impl ApplicationName {
 
 		if let Some(existing) = Self::for_name(db, &name).await? {
 			if existing.application_id != application_id {
-				return Err(AppError::Conflict(format!(
-					"{name} is registered by another server in this group; a name's addresses are \
-					 one server's to set at a time"
+				return Err(AppError::NameNotEntitled(format!(
+					"no application on this machine declares {name}"
 				)));
 			}
 			return diesel::update(dsl::application_names.filter(dsl::id.eq(existing.id)))
@@ -132,9 +226,8 @@ impl ApplicationName {
 			// Another server registered the same name between the read and the
 			// insert.
 			Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, _)) => {
-				Err(AppError::Conflict(format!(
-					"{name} is registered by another server in this group; a name's addresses are \
-					 one server's to set at a time"
+				Err(AppError::NameNotEntitled(format!(
+					"no application on this machine declares {name}"
 				)))
 			}
 			Err(e) => Err(AppError::from(e)),

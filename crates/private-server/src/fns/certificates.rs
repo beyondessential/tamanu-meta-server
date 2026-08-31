@@ -37,6 +37,8 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(pause))
 		.routes(routes!(resume))
 		.routes(routes!(revoke))
+		.routes(routes!(declare))
+		.routes(routes!(release))
 }
 
 /// A name a server has registered, and how far Canopy has got with it.
@@ -627,5 +629,74 @@ pub async fn revoke(
 
 	ApplicationCertificate::record_revoked(&mut conn, args.id, args.reason, Some(&admin.login))
 		.await?;
+	Ok(Json(()))
+}
+
+/// An application and the name being declared for it, or released from it.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct DeclarationArgs {
+	/// The application that serves the name.
+	pub application_id: Uuid,
+	/// The name, in any case and with or without a trailing dot.
+	pub name: String,
+}
+
+/// Declare that an application serves a name.
+///
+/// A declaration is what an address registration or a certificate request from
+/// the machine is resolved against, so it is how a box running several workloads
+/// gets its requests routed to the right one. It carries no addresses; the
+/// application registers those itself.
+///
+/// Declaring a name the same application already holds changes nothing. A name
+/// another application holds is refused, and the refusal names the holder so an
+/// operator can see what to release first.
+// spec: CRT#declared-names
+#[utoipa::path(
+	post,
+	path = "/declare",
+	operation_id = "certificates_declare",
+	tag = "certificates",
+	security(("tailscale-admin" = [])),
+	request_body = DeclarationArgs,
+	responses(
+		(status = 200, body = NameView),
+		(status = 404, body = ProblemDetailsSchema),
+		(status = 409, description = "Another application already declares this name.", body = ProblemDetailsSchema),
+	),
+)]
+pub async fn declare(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<DeclarationArgs>,
+) -> Result<Json<NameView>> {
+	let mut conn = state.db.get().await?;
+	let row = ApplicationName::declare(&mut conn, args.application_id, &args.name).await?;
+	Ok(Json(name_view(row, &state.dns_zones)))
+}
+
+/// End an application's hold on a name.
+///
+/// What is already in place stands, as revoking a grant leaves it: the records
+/// published stay published and the certificates held stay held until they
+/// expire. What ends is Canopy treating the name as this application's, which
+/// frees it to be declared elsewhere.
+// spec: CRT#declared-names
+#[utoipa::path(
+	post,
+	path = "/release",
+	operation_id = "certificates_release",
+	tag = "certificates",
+	security(("tailscale-admin" = [])),
+	request_body = DeclarationArgs,
+	responses((status = 200), (status = 404, body = ProblemDetailsSchema)),
+)]
+pub async fn release(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<DeclarationArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	ApplicationName::release(&mut conn, args.application_id, &args.name).await?;
 	Ok(Json(()))
 }
