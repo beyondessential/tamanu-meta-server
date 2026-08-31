@@ -93,8 +93,11 @@ A reporting schema is published per version and group, alongside the other artef
 Canopy records where each is published rather than storing it, and corroborates a reported artefact against the published artefacts it already holds for that version.
 
 A version's artefacts are otherwise identified by their type, which cannot tell one group's reporting schema from another's.
-An artefact may therefore name the group it belongs to, and one that does is offered only for that group.
-Two groups on the same version have two reporting schemas, and neither stands in for the other; a version's artefacts that name no group stay available to all of them.
+An artefact is therefore identified by its version, its type, and, where it has one, the group it belongs to.
+
+Belonging to a group is what a reporting schema adds rather than something every artefact takes on.
+An artefact that belongs to no group is identified by version and type as it is now, and stays available to every group: a version's server binaries, its migrations, and its masking manifest are properties of the version and of nothing narrower.
+A reporting schema always names a group, so two groups on the same version have two of them and neither stands in for the other.
 
 A group's artefact for a version supersedes any earlier one for the same pair, and the earlier ones remain addressable, since a group that has not applied the newest is running an older one and its currency has to be gradeable against something.
 Supersession is by publication rather than by content, since Canopy holds where an artefact is published and not what it contains.
@@ -112,7 +115,8 @@ Currency is presented per group, so whether a group's reports are running agains
 ## Alerting
 
 A central server whose schema is behind raises a reporting-schema check on itself (see [CHK](../monitoring/checks.md)).
-A server that owes a build not produced within its bound degrades the same check, since owed-and-unbuilt and built-but-unapplied both leave its reports mismatched to the version it runs.
+A server with an owed build that has not been produced degrades the same check, since owed-and-unbuilt and built-but-unapplied both leave its reports mismatched to the version it runs.
+There is no separate time bound on either: a build is owed from the moment its version becomes a candidate, and the plan that made it one already carries the date it is wanted by.
 
 The check is a warning rather than a failure, and does not escalate.
 The servers are up and their reports are returning rows; the fault is that some of those rows are computed by a schema written for a different version, and that belongs to whoever maintains the reports rather than whoever is on call for outages.
