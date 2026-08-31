@@ -31,7 +31,7 @@ export default function GroupInventorySection({
 	);
 
 	return (
-		<Box>
+		<Box data-testid="group-inventory">
 			<Typography variant="h6" gutterBottom>
 				Inventory
 			</Typography>
@@ -67,7 +67,7 @@ function EnvironmentInventory({
 	);
 
 	return (
-		<Paper variant="outlined" sx={{ p: 2 }}>
+		<Paper variant="outlined" sx={{ p: 2 }} data-testid={`environment-${rank}`}>
 			<Typography
 				variant="overline"
 				color="text.secondary"
@@ -96,7 +96,7 @@ function EnvironmentInventory({
 					</Box>
 
 					{inventory.data.hosts.map((host) => (
-						<Box key={host.id}>
+						<Box key={host.id} data-testid="inventory-server">
 							<Stack
 								direction="row"
 								spacing={1}
@@ -160,6 +160,7 @@ function Vars({
 						size="small"
 						variant={overriding ? "filled" : "outlined"}
 						label={`${key} = ${format(vars[key])}`}
+						data-testid={overriding ? "overriding-var" : "var"}
 						sx={{ fontFamily: "monospace", maxWidth: "100%" }}
 					/>
 				);

@@ -37,29 +37,31 @@ test.describe("group inventory", () => {
 
 		await page.goto(`/groups/${group.id}`);
 
-		const inventory = page
-			.locator("div")
-			.filter({ has: page.getByRole("heading", { name: "Inventory" }) })
-			.last();
-		await expect(inventory.getByText("production")).toBeVisible();
-		await expect(inventory.getByText("demo")).toBeVisible();
+		const inventory = page.getByTestId("group-inventory");
+		const production = inventory.getByTestId("environment-production");
+		const demo = inventory.getByTestId("environment-demo");
+		await expect(production).toBeVisible();
+		await expect(demo).toBeVisible();
 
 		// The group's values are shown once per environment rather than repeated
 		// under every server.
 		await expect(
-			inventory.getByText("timezone = Pacific/Auckland").first(),
+			production.getByText("timezone = Pacific/Auckland").first(),
 		).toBeVisible();
-		await expect(
-			inventory.getByText("ansible_user = ubuntu"),
-		).toBeVisible();
+		await expect(production.getByText("ansible_user = ubuntu")).toBeVisible();
 
-		// Address falls back to the recorded host where no device is bound.
-		await expect(inventory.getByText("central.kamaka.e2e.invalid")).toBeVisible();
+		// Each environment carries only its own servers, and the address falls
+		// back to the recorded host where no device is bound.
+		await expect(production.getByTestId("inventory-server")).toHaveCount(1);
 		await expect(
-			inventory.getByText("kamaka-prod-central", { exact: true }),
+			production.getByText("kamaka-prod-central", { exact: true }),
 		).toBeVisible();
 		await expect(
-			inventory.getByText("kamaka-demo-central", { exact: true }),
+			production.getByText("central.kamaka.e2e.invalid", { exact: true }),
+		).toBeVisible();
+		await expect(demo.getByTestId("inventory-server")).toHaveCount(1);
+		await expect(
+			demo.getByText("kamaka-demo-central", { exact: true }),
 		).toBeVisible();
 	});
 
@@ -85,18 +87,21 @@ test.describe("group inventory", () => {
 
 		await page.goto(`/groups/${group.id}`);
 
-		// The group's value and the server's override are both present, and the
-		// override carries the tooltip saying which it is.
+		const production = page
+			.getByTestId("group-inventory")
+			.getByTestId("environment-production");
+
+		// The group's value and the server's override are both shown, and only
+		// the override is marked as one.
 		await expect(
-			page.getByText("elastic_agent_enabled = false"),
+			production.getByText("elastic_agent_enabled = false"),
 		).toBeVisible();
-		const override = page.getByText("elastic_agent_enabled = true");
-		await expect(override).toBeVisible();
-		await override.hover();
-		await expect(page.getByText("Overrides the group's value")).toBeVisible();
+		await expect(production.getByTestId("overriding-var")).toHaveText(
+			"elastic_agent_enabled = true",
+		);
 
 		// A server setting nothing of its own says so, rather than showing the
 		// group's values again as if it set them.
-		await expect(page.getByText("Sets nothing of its own")).toBeVisible();
+		await expect(production.getByText("Sets nothing of its own")).toBeVisible();
 	});
 });
