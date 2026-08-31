@@ -4128,7 +4128,7 @@
         ]
       }
     },
-    "/api/inventory/secrets/for_group": {
+    "/api/inventory_secrets/for_group": {
       "post": {
         "tags": [
           "inventory"
@@ -4178,7 +4178,7 @@
         ]
       }
     },
-    "/api/inventory/secrets/remove": {
+    "/api/inventory_secrets/remove": {
       "post": {
         "tags": [
           "inventory"
@@ -4198,7 +4198,14 @@
         },
         "responses": {
           "200": {
-            "description": "Removed"
+            "description": "Removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "default": null
+                }
+              }
+            }
           },
           "400": {
             "description": "Bad scope",
@@ -4238,7 +4245,7 @@
         ]
       }
     },
-    "/api/inventory/secrets/set": {
+    "/api/inventory_secrets/set": {
       "post": {
         "tags": [
           "inventory"

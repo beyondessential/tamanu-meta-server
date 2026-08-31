@@ -104,4 +104,42 @@ test.describe("group inventory", () => {
 		// group's values again as if it set them.
 		await expect(production.getByText("Sets nothing of its own")).toBeVisible();
 	});
+
+	test("shows a secret variable by name and never by value", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
+		await seedServer(sql, {
+			name: "kamaka-prod-central",
+			kind: "central",
+			rank: "production",
+			groupId: group.id,
+			tags: {},
+		});
+
+		await page.goto(`/groups/${group.id}`);
+		const production = page
+			.getByTestId("group-inventory")
+			.getByTestId("environment-production");
+
+		const form = production.getByTestId("set-secret");
+		await form.getByLabel("Name").fill("salt");
+		await form.getByLabel("Value").fill("pepper");
+		await form.getByRole("button", { name: "Set" }).click();
+
+		await expect(production.getByTestId("secret-var")).toContainText(
+			"salt = secret",
+		);
+		await expect(page.getByText("pepper")).toHaveCount(0);
+
+		// And it is a variable, not a tag: the tag of that name is refused.
+		await form.getByLabel("Name").fill("salt");
+		await form.getByLabel("Value").fill("again");
+		await form.getByRole("button", { name: "Set" }).click();
+		await expect(production.getByTestId("secret-var")).toHaveCount(1);
+
+		await production.getByTestId("remove-salt").click();
+		await expect(production.getByTestId("secret-var")).toHaveCount(0);
+	});
 });

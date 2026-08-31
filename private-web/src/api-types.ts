@@ -2068,7 +2068,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/inventory/secrets/for_group": {
+    "/api/inventory_secrets/for_group": {
         parameters: {
             query?: never;
             header?: never;
@@ -2090,7 +2090,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/inventory/secrets/remove": {
+    "/api/inventory_secrets/remove": {
         parameters: {
             query?: never;
             header?: never;
@@ -2111,7 +2111,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/inventory/secrets/set": {
+    "/api/inventory_secrets/set": {
         parameters: {
             query?: never;
             header?: never;
@@ -12791,7 +12791,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": unknown;
+                };
             };
             /** @description Bad scope */
             400: {

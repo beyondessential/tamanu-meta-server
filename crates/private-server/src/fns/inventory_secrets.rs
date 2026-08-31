@@ -180,7 +180,7 @@ pub async fn set(
 	security(("tailscale-admin" = [])),
 	request_body = RemoveArgs,
 	responses(
-		(status = 200, description = "Removed"),
+		(status = 200, description = "Removed", body = ()),
 		(status = 400, description = "Bad scope", body = ProblemDetailsSchema),
 		(status = 404, description = "No variable of that name in that scope", body = ProblemDetailsSchema),
 		(status = 502, description = "The secret store is unavailable", body = ProblemDetailsSchema),
@@ -190,7 +190,7 @@ pub async fn remove(
 	State(state): State<AppState>,
 	_admin: TailscaleAdmin,
 	Json(args): Json<RemoveArgs>,
-) -> Result<()> {
+) -> Result<Json<()>> {
 	let scope = args.scope.scope()?;
 	let mut conn = state.db.get().await?;
 
@@ -211,7 +211,7 @@ pub async fn remove(
 			kube.put_keys(&name, &keys).await?;
 		}
 	}
-	Ok(())
+	Ok(Json(()))
 }
 
 fn secret_store(state: &AppState) -> Result<&BackupSecrets> {

@@ -52,7 +52,7 @@ async fn an_environment_secret_reaches_every_host() {
 		.await;
 
 		private
-			.post("/api/inventory/secrets/set")
+			.post("/api/inventory_secrets/set")
 			.json(&json!({
 				"server_group_id": group,
 				"rank": "production",
@@ -113,7 +113,7 @@ async fn a_servers_secret_overlays_the_environments() {
 			json!({ "server_id": central, "name": "salt", "value": "its-own" }),
 		] {
 			private
-				.post("/api/inventory/secrets/set")
+				.post("/api/inventory_secrets/set")
 				.json(&args)
 				.await
 				.assert_status_ok();
@@ -188,7 +188,7 @@ async fn a_name_is_a_tag_or_a_secret_and_never_both() {
 		.await;
 
 		private
-			.post("/api/inventory/secrets/set")
+			.post("/api/inventory_secrets/set")
 			.json(&json!({
 				"server_group_id": group,
 				"rank": "production",
@@ -199,7 +199,7 @@ async fn a_name_is_a_tag_or_a_secret_and_never_both() {
 			.assert_status_bad_request();
 
 		private
-			.post("/api/inventory/secrets/set")
+			.post("/api/inventory_secrets/set")
 			.json(&json!({
 				"server_group_id": group,
 				"rank": "production",
@@ -237,7 +237,7 @@ async fn the_names_are_listed_without_their_values() {
 		)
 		.await;
 		private
-			.post("/api/inventory/secrets/set")
+			.post("/api/inventory_secrets/set")
 			.json(&json!({
 				"server_group_id": group,
 				"rank": "production",
@@ -248,7 +248,7 @@ async fn the_names_are_listed_without_their_values() {
 			.assert_status_ok();
 
 		let response = private
-			.post("/api/inventory/secrets/for_group")
+			.post("/api/inventory_secrets/for_group")
 			.json(&json!({ "server_group_id": group }))
 			.await;
 		response.assert_status_ok();
@@ -285,7 +285,7 @@ async fn removing_forgets_the_value() {
 		let scope = json!({ "server_group_id": group, "rank": "production" });
 
 		private
-			.post("/api/inventory/secrets/set")
+			.post("/api/inventory_secrets/set")
 			.json(&json!({
 				"server_group_id": group,
 				"rank": "production",
@@ -295,7 +295,7 @@ async fn removing_forgets_the_value() {
 			.await
 			.assert_status_ok();
 		private
-			.post("/api/inventory/secrets/remove")
+			.post("/api/inventory_secrets/remove")
 			.json(&json!({ "server_group_id": group, "rank": "production", "name": "salt" }))
 			.await
 			.assert_status_ok();
@@ -309,7 +309,7 @@ async fn removing_forgets_the_value() {
 		assert!(body["vars"].get("salt").is_none());
 
 		private
-			.post("/api/inventory/secrets/remove")
+			.post("/api/inventory_secrets/remove")
 			.json(&json!({ "server_group_id": group, "rank": "production", "name": "salt" }))
 			.await
 			.assert_status_not_found();
