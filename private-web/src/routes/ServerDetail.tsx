@@ -838,7 +838,7 @@ function InfoSection({
 			<ChecksTable
 				checks={checks}
 				operators={status?.operators ?? []}
-				serverId={server.id}
+				target={{ kind: "application", id: server.id }}
 				groupId={server.group_id}
 				maintained={maintained}
 				refreshTick={refreshTick}

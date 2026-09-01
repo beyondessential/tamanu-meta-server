@@ -559,9 +559,12 @@ export async function seedIssue(
 		/** Server-scoped issue. Mutually exclusive with `serverGroupId` — the
 		 * `issues` scope CHECK allows at most one set. */
 		serverId?: string | null;
+		/** Machine-scoped issue: a fact about the box rather than a workload on
+		 * it. Mutually exclusive with the other two. */
+		machineId?: string | null;
 		/** Group-scoped issue (e.g. a backup issue spanning the group). When set,
 		 * leave `serverId` unset so the row satisfies the scope constraint.
-		 * Leaving both unset seeds a canopy-wide issue (a self-alert). */
+		 * Leaving all unset seeds a canopy-wide issue (a self-alert). */
 		serverGroupId?: string | null;
 		source?: string;
 		ref?: string;
@@ -599,7 +602,7 @@ export async function seedIssue(
 	// A server-scoped check-state only presents/counts if a live catalog row
 	// backs it (mirrors ingestion's upsert_default); never clobbers an
 	// explicit seedCheckPolicy for the same (source, check).
-	if (opts.serverId) {
+	if (opts.serverId || opts.machineId) {
 		await sql.query(
 			`INSERT INTO check_policies (source, check_name) VALUES ($1, $2)
 			 ON CONFLICT (source, check_name) DO NOTHING`,
@@ -610,11 +613,12 @@ export async function seedIssue(
 	// an issue rather than healthy check state, which the listings exclude.
 	await sql.query(
 		`INSERT INTO issues
-		 (id, application_id, server_group_id, device_id, source, ref, check_name, observed_result, effective_result, escalates, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason, degraded_since, last_degraded_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, COALESCE($13::timestamptz, NOW()), NOW(), $14, $15, $16, $17, NOW())`,
+		 (id, application_id, machine_id, server_group_id, device_id, source, ref, check_name, observed_result, effective_result, escalates, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason, degraded_since, last_degraded_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11, $12, $13, COALESCE($14::timestamptz, NOW()), NOW(), $15, $16, $17, $18, NOW())`,
 		[
 			id,
 			opts.serverId ?? null,
+			opts.machineId ?? null,
 			opts.serverGroupId ?? null,
 			opts.deviceId ?? null,
 			opts.source ?? "alertd",

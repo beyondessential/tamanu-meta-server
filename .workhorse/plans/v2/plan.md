@@ -410,7 +410,17 @@ Done: the type replaces the pair throughout the UI. One `ApplicationTypeChip` re
 
 **The create form became the machine form.** Same form minus five fields: no URL, no product, no kind, no rank, no public name. What is left is a box — name, group, location, tailnet identity, monitoring, notes, tags — and `MachineCreateArgs` widened to match `MachineUpdate` so creating and editing cannot disagree about what a field means. Binding a tailnet node at create time sets `device_id` without setting `registered_at`: naming a box is not the box arriving, and a backup deadline counts from arrival.
 
-**One thing is deliberately outstanding, not dropped.** The reachability switch is not on the machine form. It wrote a server-scoped silence through `silenced_refs.silence_server`, and there is no machine-scoped equivalent: silences are application-scoped, while `scoped_check_policies.machine_id` is the separate policy path. A machine's unreachability is exactly the fact this card makes single, so the switch belongs there — it needs `silence_machine` first. The two create-time e2e tests that covered it are removed with the reason recorded; the edit-form ones still cover the application grain. The same gap is why a machine's checks table presents without a silence control, which its `serverId: null` says explicitly rather than by omission.
+**The create form has no reachability switch yet.** It wrote a silence, and at the time there was no machine-scoped one to write. There is now (see below), so this is a UI job rather than a modelling one: the switch goes back on the form once creating a machine and silencing its reachability can be one action. The two create-time e2e tests that covered it stay removed until then; the edit-form ones cover the application grain.
+
+### Silences follow the event
+
+The gap was not the one first recorded. `ScopedCheckPolicy::silence` takes a `Scope` and has always written `machine_id`; `silenced_health_checks_for_server` already read machine silences, and so did the consolidated view once it went grain-generic. What was missing was an operator surface — and, underneath it, a live defect.
+
+**The defect.** `re_evaluate_incident_membership` resolved a silence by passing `issue.application_id.unwrap_or(Uuid::nil())`, so a machine-scoped issue consulted only its group. A machine silence therefore quieted the check in the consolidated view and in what the agent was told to run, while the same check still opened an incident. Three readers, two answers. `is_silenced` now takes the issue's own `Scope`, so the grain it was filed at is the grain it is silenced at.
+
+**The invariant is now in the spec** (CHK, "Silences follow the event"): a check that can be filed at a scope can be silenced at that scope; the scopes are the ones it applies at, its own target and that target's group; every reader of a silence must agree; and silencing everywhere is the catalog ceiling rather than a silence, so no scope above the group is offered.
+
+`MachineSilencedRef` mirrors its two siblings, `silence_machine` / `unsilence_machine` / `list_for_machine` sit beside theirs, and `ChecksTable` takes a `CheckTarget` discriminated by grain instead of a nullable `serverId` — so the pair of scopes it offers follows from what it is presenting rather than from a special case.
 
 ### The machine's own page, and the group tree
 

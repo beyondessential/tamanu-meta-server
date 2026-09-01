@@ -6657,6 +6657,46 @@
         ]
       }
     },
+    "/api/silenced_refs/list_for_machine": {
+      "post": {
+        "tags": [
+          "silenced_refs"
+        ],
+        "summary": "List machine-scoped silences for a machine.",
+        "description": "Returns every (source, ref) pair currently silenced specifically for this\nbox, most recently created first. Doesn't include silences applied at the\nmachine's group level, nor those on the applications running on it: an\napplication's checks are silenced against the application.",
+        "operationId": "list_for_machine",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineScopeArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MachineSilencedRef"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
     "/api/silenced_refs/list_for_server": {
       "post": {
         "tags": [
@@ -6722,6 +6762,53 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ServerGroupSilencedRef"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/silenced_refs/silence_machine": {
+      "post": {
+        "tags": [
+          "silenced_refs"
+        ],
+        "summary": "Silence an issue on a machine.",
+        "description": "Suppresses alerting for the given (source, ref) pair on this box: matching\nissues keep being recorded, but stop counting toward opening or extending\nan incident. Idempotent. Requires admin access.",
+        "operationId": "silence_machine",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SilenceMachineArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineSilencedRef"
                 }
               }
             }
@@ -6812,6 +6899,46 @@
         "responses": {
           "200": {
             "description": ""
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/silenced_refs/unsilence_machine": {
+      "post": {
+        "tags": [
+          "silenced_refs"
+        ],
+        "summary": "Unsilence an issue on a machine.",
+        "description": "Removes a machine-scoped silence for the given (source, ref) pair, if one\nexists. Removing a silence that isn't there is not an error. Requires admin\naccess.",
+        "operationId": "unsilence_machine",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SilenceMachineArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Silence removed, or there was none."
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -12546,6 +12673,57 @@
           }
         }
       },
+      "MachineScopeArgs": {
+        "type": "object",
+        "description": "Request body identifying a machine to look up silences for.",
+        "required": [
+          "machine_id"
+        ],
+        "properties": {
+          "machine_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The machine to look up silences for."
+          }
+        }
+      },
+      "MachineSilencedRef": {
+        "type": "object",
+        "description": "A silenced issue reference scoped to a single machine: issues matching this\n`(source, ref)` on this box are still recorded, but are excluded from\nincidents and notifications.\n\nA box's own checks are the subject here — a full disk, a drifting clock —\nnot those of the applications running on it, which are silenced against\neach application.",
+        "required": [
+          "machine_id",
+          "source",
+          "ref",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this silence was created."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The operator who created this silence. `None` if not recorded."
+          },
+          "machine_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The machine this silence applies to."
+          },
+          "ref": {
+            "type": "string",
+            "description": "The issue reference this silence matches."
+          },
+          "source": {
+            "type": "string",
+            "description": "The issue source this silence matches."
+          }
+        }
+      },
       "MachineUpdateArgs": {
         "type": "object",
         "description": "Fields to change on a machine. Omitted fields are left alone; for the\nnullable ones an explicit `null` clears the value.",
@@ -16449,6 +16627,30 @@
           "source": {
             "type": "string",
             "description": "Identifies what raises the issue being silenced — for example a\nspecific healthcheck or backup pipeline."
+          }
+        }
+      },
+      "SilenceMachineArgs": {
+        "type": "object",
+        "description": "Request body identifying an issue to silence (or unsilence) on a single\nmachine.",
+        "required": [
+          "machine_id",
+          "source",
+          "ref"
+        ],
+        "properties": {
+          "machine_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The machine to silence the issue on."
+          },
+          "ref": {
+            "type": "string",
+            "description": "The specific issue identifier within `source` to silence."
+          },
+          "source": {
+            "type": "string",
+            "description": "Identifies what raises the issue being silenced — for example a\nspecific healthcheck."
           }
         }
       },

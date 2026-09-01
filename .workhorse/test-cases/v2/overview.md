@@ -180,7 +180,11 @@ cover the runtime half of that, which the spec diff cannot see.
 - [x] A machine with nothing on it reads as awaiting check-in, on its page and in its group
 - [x] An application links to its machine, and the machine back to the application
 - [x] A maintenance window over a machine suspends the applications on that machine (verifies spec: MNT)
-- [x] A machine's checks are presented on its page, without a silence control
+- [x] A machine's check can be silenced against the machine, from the machine's page (verifies spec: CHK)
+- [x] The scopes a machine's check offers are the machine and its group, and nothing above (verifies spec: CHK)
+- [x] One machine silence reads the same in the consolidated view, in what the agent is told, and in what an incident counts (verifies spec: CHK)
+- [x] A machine silence does not reach the applications on that machine (verifies spec: CHK)
+- [x] A group silence covers a machine in that group (verifies spec: CHK)
 - [ ] Neither detail page shows a status dot beside its title
 - [ ] A group card's operator count counts people once across machines
 - [ ] The operator tooltip names each person and the machines they are on

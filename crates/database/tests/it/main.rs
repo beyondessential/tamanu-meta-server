@@ -30,6 +30,7 @@ mod incident_result_semantics;
 mod incident_stats;
 mod incident_stranded_membership;
 mod issue_list_filters;
+mod machine_silences;
 mod machines;
 mod maintenance_window_machine_migration;
 mod maintenance_windows;

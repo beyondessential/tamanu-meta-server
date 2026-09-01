@@ -24,7 +24,7 @@ use uuid::Uuid;
 use crate::check_policies::ScopedCheckPolicy;
 use crate::issues::{
 	MANUAL_SOURCE, Scope, reevaluate_open_issues_for_group_ref,
-	reevaluate_open_issues_for_server_ref,
+	reevaluate_open_issues_for_machine_ref, reevaluate_open_issues_for_server_ref,
 };
 use crate::statuses::CANOPY_SOURCE;
 
@@ -86,13 +86,40 @@ pub struct ServerGroupSilencedRef {
 	pub created_by: Option<String>,
 }
 
-/// Is a silence in force for `(source, ref)` on this server, at either
-/// server or group scope? `group_id` is the server's current group; pass
-/// `None` if the server is ungrouped (and so can't be silenced at group
-/// scope).
+/// A silenced issue reference scoped to a single machine: issues matching this
+/// `(source, ref)` on this box are still recorded, but are excluded from
+/// incidents and notifications.
+///
+/// A box's own checks are the subject here — a full disk, a drifting clock —
+/// not those of the applications running on it, which are silenced against
+/// each application.
+// spec: CHK#silences-follow-the-event
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct MachineSilencedRef {
+	/// The machine this silence applies to.
+	pub machine_id: Uuid,
+	/// The issue source this silence matches.
+	pub source: String,
+	/// The issue reference this silence matches.
+	#[serde(rename = "ref")]
+	pub r#ref: String,
+	/// When this silence was created.
+	pub created_at: Timestamp,
+	/// The operator who created this silence. `None` if not recorded.
+	pub created_by: Option<String>,
+}
+
+/// Is a silence in force for `(source, ref)` on an event at this scope?
+///
+/// An event can be silenced at its own scope and at its group's. Which "its
+/// own" is follows the event: a machine's checks are silenced against the
+/// machine, an application's against the application. Silencing a check
+/// everywhere is not a silence at all but the check's own ceiling, so no scope
+/// above the group is consulted here.
+// spec: CHK#silences-follow-the-event
 pub async fn is_silenced(
 	db: &mut AsyncPgConnection,
-	application_id: Uuid,
+	scope: Scope,
 	group_id: Option<Uuid>,
 	source: &str,
 	r#ref: &str,
@@ -100,9 +127,10 @@ pub async fn is_silenced(
 	let check = ref_to_check(r#ref);
 	let is_silence =
 		|p: Option<ScopedCheckPolicy>| p.is_some_and(|p| p.ceiling.as_deref() == Some("skipped"));
-	if is_silence(
-		ScopedCheckPolicy::get(db, Scope::Application(application_id), source, check).await?,
-	) {
+	// The event's own scope, when it has one below the group.
+	if matches!(scope, Scope::Application(_) | Scope::Machine(_))
+		&& is_silence(ScopedCheckPolicy::get(db, scope, source, check).await?)
+	{
 		return Ok(true);
 	}
 	let Some(gid) = group_id else {
@@ -272,6 +300,66 @@ impl ServerGroupSilencedRef {
 	) -> Result<Vec<Self>> {
 		Ok(
 			ScopedCheckPolicy::list_silences(db, Scope::Group(server_group_id))
+				.await?
+				.into_iter()
+				.filter_map(Self::from_policy)
+				.collect(),
+		)
+	}
+}
+
+impl MachineSilencedRef {
+	fn from_policy(p: ScopedCheckPolicy) -> Option<Self> {
+		Some(Self {
+			machine_id: p.machine_id?,
+			r#ref: check_to_ref(&p.source, &p.check_name),
+			source: p.source,
+			created_at: p.created_at,
+			created_by: p.created_by,
+		})
+	}
+
+	/// Add a machine-scoped silence and re-evaluate any currently-open matching
+	/// issues so they leave their incident. Idempotent.
+	pub async fn add(
+		db: &mut AsyncPgConnection,
+		machine_id: Uuid,
+		source: &str,
+		r#ref: &str,
+		created_by: Option<&str>,
+	) -> Result<Self> {
+		let policy = ScopedCheckPolicy::silence(
+			db,
+			Scope::Machine(machine_id),
+			source,
+			ref_to_check(r#ref),
+			created_by,
+		)
+		.await?;
+		reevaluate_open_issues_for_machine_ref(db, machine_id, source, r#ref).await?;
+		Ok(Self::from_policy(policy).expect("machine-scoped silence has a machine_id"))
+	}
+
+	/// Remove a machine-scoped silence and re-evaluate any currently-open
+	/// matching issues so they (re)join an incident if eligible.
+	pub async fn remove(
+		db: &mut AsyncPgConnection,
+		machine_id: Uuid,
+		source: &str,
+		r#ref: &str,
+	) -> Result<()> {
+		ScopedCheckPolicy::unsilence(db, Scope::Machine(machine_id), source, ref_to_check(r#ref))
+			.await?;
+		reevaluate_open_issues_for_machine_ref(db, machine_id, source, r#ref).await?;
+		Ok(())
+	}
+
+	pub async fn list_for_machine(
+		db: &mut AsyncPgConnection,
+		machine_id: Uuid,
+	) -> Result<Vec<Self>> {
+		Ok(
+			ScopedCheckPolicy::list_silences(db, Scope::Machine(machine_id))
 				.await?
 				.into_iter()
 				.filter_map(Self::from_policy)

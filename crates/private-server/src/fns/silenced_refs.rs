@@ -4,7 +4,7 @@ use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::Uuid;
-use database::silenced_refs::{ServerGroupSilencedRef, ServerSilencedRef};
+use database::silenced_refs::{MachineSilencedRef, ServerGroupSilencedRef, ServerSilencedRef};
 use serde::Deserialize;
 use utoipa::ToSchema;
 
@@ -13,9 +13,12 @@ use crate::state::AppState;
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(list_for_server))
+		.routes(routes!(list_for_machine))
 		.routes(routes!(list_for_group))
 		.routes(routes!(silence_server))
 		.routes(routes!(unsilence_server))
+		.routes(routes!(silence_machine))
+		.routes(routes!(unsilence_machine))
 		.routes(routes!(silence_group))
 		.routes(routes!(unsilence_group))
 }
@@ -25,6 +28,27 @@ pub fn routes() -> OpenApiRouter<AppState> {
 pub struct ServerScopeArgs {
 	/// The server to look up silences for.
 	pub server_id: Uuid,
+}
+
+/// Request body identifying a machine to look up silences for.
+#[derive(Deserialize, ToSchema)]
+pub struct MachineScopeArgs {
+	/// The machine to look up silences for.
+	pub machine_id: Uuid,
+}
+
+/// Request body identifying an issue to silence (or unsilence) on a single
+/// machine.
+#[derive(Deserialize, ToSchema)]
+pub struct SilenceMachineArgs {
+	/// The machine to silence the issue on.
+	pub machine_id: Uuid,
+	/// Identifies what raises the issue being silenced — for example a
+	/// specific healthcheck.
+	pub source: String,
+	/// The specific issue identifier within `source` to silence.
+	#[serde(rename = "ref")]
+	pub r#ref: String,
 }
 
 /// Request body identifying a server group to look up silences for.
@@ -234,4 +258,89 @@ pub async fn unsilence_group(
 	ServerGroupSilencedRef::remove(&mut conn, args.server_group_id, &args.source, &args.r#ref)
 		.await?;
 	Ok(Json(()))
+}
+
+/// List machine-scoped silences for a machine.
+///
+/// Returns every (source, ref) pair currently silenced specifically for this
+/// box, most recently created first. Doesn't include silences applied at the
+/// machine's group level, nor those on the applications running on it: an
+/// application's checks are silenced against the application.
+#[utoipa::path(
+	post,
+	path = "/list_for_machine",
+	tag = "silenced_refs",
+	security(("tailscale-user" = [])),
+	request_body = MachineScopeArgs,
+	responses(
+		(status = 200, body = Vec<MachineSilencedRef>),
+	),
+)]
+pub async fn list_for_machine(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+	Json(args): Json<MachineScopeArgs>,
+) -> Result<Json<Vec<MachineSilencedRef>>> {
+	let mut conn = state.db.get().await?;
+	let rows = MachineSilencedRef::list_for_machine(&mut conn, args.machine_id).await?;
+	Ok(Json(rows))
+}
+
+/// Silence an issue on a machine.
+///
+/// Suppresses alerting for the given (source, ref) pair on this box: matching
+/// issues keep being recorded, but stop counting toward opening or extending
+/// an incident. Idempotent. Requires admin access.
+#[utoipa::path(
+	post,
+	path = "/silence_machine",
+	tag = "silenced_refs",
+	security(("tailscale-admin" = [])),
+	request_body = SilenceMachineArgs,
+	responses(
+		(status = 200, body = MachineSilencedRef),
+		(status = 400, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn silence_machine(
+	State(state): State<AppState>,
+	admin: TailscaleAdmin,
+	Json(args): Json<SilenceMachineArgs>,
+) -> Result<Json<MachineSilencedRef>> {
+	let mut conn = state.db.get().await?;
+	let row = MachineSilencedRef::add(
+		&mut conn,
+		args.machine_id,
+		&args.source,
+		&args.r#ref,
+		Some(&admin.0.login),
+	)
+	.await?;
+	Ok(Json(row))
+}
+
+/// Unsilence an issue on a machine.
+///
+/// Removes a machine-scoped silence for the given (source, ref) pair, if one
+/// exists. Removing a silence that isn't there is not an error. Requires admin
+/// access.
+#[utoipa::path(
+	post,
+	path = "/unsilence_machine",
+	tag = "silenced_refs",
+	security(("tailscale-admin" = [])),
+	request_body = SilenceMachineArgs,
+	responses(
+		(status = 204, description = "Silence removed, or there was none."),
+		(status = 400, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn unsilence_machine(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<SilenceMachineArgs>,
+) -> Result<axum::http::StatusCode> {
+	let mut conn = state.db.get().await?;
+	MachineSilencedRef::remove(&mut conn, args.machine_id, &args.source, &args.r#ref).await?;
+	Ok(axum::http::StatusCode::NO_CONTENT)
 }

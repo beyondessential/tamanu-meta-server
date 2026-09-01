@@ -2085,12 +2085,18 @@ async fn re_evaluate_incident_membership(
 
 	let was_in = is_issue_in_open_incident(conn, issue.id).await?;
 	let snoozed = issue.snoozed_until.is_some_and(|t| t > Timestamp::now());
-	// A group-scoped issue (application_id = None) can only be silenced at the
-	// group level; pass the nil server so only the group list is consulted.
-	// Canopy-wide issues have no silence scope (yet).
+	// An event is silenced at its own scope or at its group's, and its own
+	// scope is whichever grain it was filed against. Reading the application
+	// id alone left a machine's checks silenceable in the consolidated view and
+	// in what the agent is told, but still able to open an incident.
+	// spec: CHK#silences-follow-the-event
 	let silenced = crate::silenced_refs::is_silenced(
 		conn,
-		issue.application_id.unwrap_or(Uuid::nil()),
+		Scope::from_columns(
+			issue.application_id,
+			issue.machine_id,
+			issue.server_group_id,
+		),
 		target.group_id(),
 		&issue.source,
 		&issue.r#ref,
@@ -2558,6 +2564,52 @@ pub async fn reevaluate_open_issues_for_server_ref(
 	let open_issues: Vec<Issue> = dsl::issues
 		.select(Issue::as_select())
 		.filter(dsl::application_id.eq(application_id))
+		.filter(dsl::source.eq(source))
+		.filter(dsl::ref_.eq(r#ref))
+		.filter(dsl::active.eq(true))
+		.filter(dsl::resolved_at.is_null())
+		.load(db)
+		.await?;
+
+	let now = Timestamp::now();
+	for issue in open_issues {
+		re_evaluate_incident_membership(
+			db,
+			&issue,
+			IncidentTarget::Group(gid),
+			monitored,
+			now,
+			None,
+		)
+		.await?;
+	}
+	Ok(())
+}
+
+/// Re-evaluate every currently-open issue filed against this machine with the
+/// given `(source, ref)`. Used after a machine-scoped silence is added or
+/// removed.
+///
+/// Only the box's own issues: the applications on it are silenced against
+/// themselves, so a silence here does not reach them.
+// spec: CHK#silences-follow-the-event
+pub async fn reevaluate_open_issues_for_machine_ref(
+	db: &mut AsyncPgConnection,
+	machine_id: Uuid,
+	source: &str,
+	r#ref: &str,
+) -> Result<()> {
+	use crate::schema::issues::dsl;
+
+	let machine = crate::machines::Machine::get_by_id(db, machine_id).await?;
+	let Some(gid) = machine.group_id else {
+		return Ok(());
+	};
+	let monitored = machine.is_monitored;
+
+	let open_issues: Vec<Issue> = dsl::issues
+		.select(Issue::as_select())
+		.filter(dsl::machine_id.eq(machine_id))
 		.filter(dsl::source.eq(source))
 		.filter(dsl::ref_.eq(r#ref))
 		.filter(dsl::active.eq(true))

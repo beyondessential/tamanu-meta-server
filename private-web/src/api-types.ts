@@ -3366,6 +3366,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/silenced_refs/list_for_machine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List machine-scoped silences for a machine.
+         * @description Returns every (source, ref) pair currently silenced specifically for this
+         *     box, most recently created first. Doesn't include silences applied at the
+         *     machine's group level, nor those on the applications running on it: an
+         *     application's checks are silenced against the application.
+         */
+        post: operations["list_for_machine"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/silenced_refs/list_for_server": {
         parameters: {
             query?: never;
@@ -3414,6 +3437,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/silenced_refs/silence_machine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Silence an issue on a machine.
+         * @description Suppresses alerting for the given (source, ref) pair on this box: matching
+         *     issues keep being recorded, but stop counting toward opening or extending
+         *     an incident. Idempotent. Requires admin access.
+         */
+        post: operations["silence_machine"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/silenced_refs/silence_server": {
         parameters: {
             query?: never;
@@ -3455,6 +3500,28 @@ export interface paths {
          *     Requires admin access.
          */
         post: operations["unsilence_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/silenced_refs/unsilence_machine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unsilence an issue on a machine.
+         * @description Removes a machine-scoped silence for the given (source, ref) pair, if one
+         *     exists. Removing a silence that isn't there is not an error. Requires admin
+         *     access.
+         */
+        post: operations["unsilence_machine"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6983,6 +7050,41 @@ export interface components {
              */
             machine_id: string;
         };
+        /** @description Request body identifying a machine to look up silences for. */
+        MachineScopeArgs: {
+            /**
+             * Format: uuid
+             * @description The machine to look up silences for.
+             */
+            machine_id: string;
+        };
+        /**
+         * @description A silenced issue reference scoped to a single machine: issues matching this
+         *     `(source, ref)` on this box are still recorded, but are excluded from
+         *     incidents and notifications.
+         *
+         *     A box's own checks are the subject here — a full disk, a drifting clock —
+         *     not those of the applications running on it, which are silenced against
+         *     each application.
+         */
+        MachineSilencedRef: {
+            /**
+             * Format: date-time
+             * @description When this silence was created.
+             */
+            created_at: string;
+            /** @description The operator who created this silence. `None` if not recorded. */
+            created_by?: string | null;
+            /**
+             * Format: uuid
+             * @description The machine this silence applies to.
+             */
+            machine_id: string;
+            /** @description The issue reference this silence matches. */
+            ref: string;
+            /** @description The issue source this silence matches. */
+            source: string;
+        };
         /**
          * @description Fields to change on a machine. Omitted fields are left alone; for the
          *     nullable ones an explicit `null` clears the value.
@@ -9413,6 +9515,24 @@ export interface components {
             /**
              * @description Identifies what raises the issue being silenced — for example a
              *     specific healthcheck or backup pipeline.
+             */
+            source: string;
+        };
+        /**
+         * @description Request body identifying an issue to silence (or unsilence) on a single
+         *     machine.
+         */
+        SilenceMachineArgs: {
+            /**
+             * Format: uuid
+             * @description The machine to silence the issue on.
+             */
+            machine_id: string;
+            /** @description The specific issue identifier within `source` to silence. */
+            ref: string;
+            /**
+             * @description Identifies what raises the issue being silenced — for example a
+             *     specific healthcheck.
              */
             source: string;
         };
@@ -14685,6 +14805,29 @@ export interface operations {
             };
         };
     };
+    list_for_machine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineScopeArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineSilencedRef"][];
+                };
+            };
+        };
+    };
     list_for_server: {
         parameters: {
             query?: never;
@@ -14727,6 +14870,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ServerGroupSilencedRef"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    silence_machine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SilenceMachineArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineSilencedRef"];
                 };
             };
             400: {
@@ -14788,6 +14962,36 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    unsilence_machine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SilenceMachineArgs"];
+            };
+        };
+        responses: {
+            /** @description Silence removed, or there was none. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
             };
         };
     };

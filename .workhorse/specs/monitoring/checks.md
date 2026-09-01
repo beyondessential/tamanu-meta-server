@@ -118,6 +118,18 @@ A silenced check keeps recording its observed results; its effective result is s
 The **maintenance window** is the same ceiling applied to every check on a target for a bounded time, so that work an operator is doing raises nothing while it runs (see [MNT](maintenance.md)).
 The model admits arbitrary scoped transforms; surfaces beyond these two are deliberately not offered yet.
 
+#### Silences follow the event
+
+A check that can be filed at a scope can be silenced at that scope.
+The scopes a check can be silenced at are the ones it applies at: its own target, and that target's group.
+So a machine's checks are silenced against the machine, an application's against the application, and either against the group they belong to.
+
+This holds at every point a silence is read, and those points must agree: what the consolidated view presents as skipped, what the reporting source is told not to run, and what an incident counts are one answer.
+A silence that quiets a check in one of those and not the others is a defect rather than a degree of silencing.
+
+Silencing a check everywhere is not a silence but the check's own ceiling in the fleet catalog, so no scope above the group is offered as one.
+A silence is per target and records who set it; a fleet-wide decision is a policy the catalog holds.
+
 ## Documentation
 
 Each catalogued (source, check) can carry operator-authored documentation: a single markdown document.

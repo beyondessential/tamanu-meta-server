@@ -16,6 +16,7 @@ import { ChecksTable, HealthIndicator } from "../components/ChecksTable";
 import { HealthLegend, StatusLegend } from "../components/Legends";
 import MaintenanceSection from "../components/MaintenanceSection";
 import ServerRankChip from "../components/ServerRankChip";
+import SilencedRefsSection from "../components/SilencedRefsSection";
 import StatusDot from "../components/StatusDot";
 import TimeAgo from "../components/TimeAgo";
 import TimezoneTooltip from "../components/TimezoneTooltip";
@@ -117,12 +118,10 @@ export default function MachineDetail() {
 						value={humanSeconds(data.machine.alert_when_down_for)}
 					/>
 				</Stack>
-				{/* A silence names an application, so a machine's checks are
-				    presented without the control until one can name a machine. */}
 				<ChecksTable
 					checks={data.checks}
 					operators={[]}
-					serverId={null}
+					target={{ kind: "machine", id: data.machine.id }}
 					groupId={data.group?.id ?? null}
 					maintained={data.maintained}
 					refreshTick={refreshTick}
@@ -170,6 +169,13 @@ export default function MachineDetail() {
 					))}
 				</Paper>
 			)}
+
+			<SilencedRefsSection
+				scope="machine"
+				id={data.machine.id}
+				refreshKey={refreshTick}
+				onChanged={bumpRefresh}
+			/>
 
 			<MaintenanceSection
 				scope="machine"

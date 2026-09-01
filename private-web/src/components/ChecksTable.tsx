@@ -48,7 +48,6 @@ import {
 	type HealthState,
 	type OperatorPresence,
 	type ServerGroupSilencedRef,
-	type ServerSilencedRef,
 	type ShortStatus,
 } from "../types";
 
@@ -108,26 +107,42 @@ export function HealthIndicator({
  * Splits into a grouped/ungrouped variant only to keep the group-scope
  * silenced-refs fetch off ungrouped servers — `useApi` is unconditional,
  * so a single component can't gate the hook on `groupId`. */
+/** What these checks are filed against. A check is silenced at its own target
+ * and at that target's group, so the table needs to know which grain it is
+ * presenting to offer the right pair.
+ * spec: CHK#silences-follow-the-event */
+export type CheckTarget =
+	| { kind: "application"; id: string }
+	| { kind: "machine"; id: string };
+
+/** A silence as this table reads one, whichever scope it came from. */
+type Silence = { source: string; ref: string; created_at: string; created_by: string | null };
+
 export function ChecksTable(props: {
 	checks: ConsolidatedChecks;
 	operators: OperatorPresence[];
-	/** The application these checks are filed against, or `null` when they are
-	 * a machine's. A silence names an application, so a machine's checks are
-	 * presented without the control until one can name a machine. */
-	serverId: string | null;
+	target: CheckTarget;
 	groupId: string | null;
 	maintained: boolean;
 	refreshTick: number;
 	onSilenced: () => void;
 }) {
-	const serverApi = useApi(
+	// Both hooks always run — hooks cannot be called conditionally — and the
+	// one that is not this table's grain is asked for nothing.
+	const applicationApi = useApi(
 		"silenced_refs",
 		"list_for_server",
-		{ server_id: props.serverId ?? "" },
-		[props.serverId, props.refreshTick],
+		{ server_id: props.target.kind === "application" ? props.target.id : "" },
+		[props.target.kind, props.target.id, props.refreshTick],
 	);
-	const serverSilences =
-		props.serverId && serverApi.status === "ok" ? serverApi.data : [];
+	const machineApi = useApi(
+		"silenced_refs",
+		"list_for_machine",
+		{ machine_id: props.target.kind === "machine" ? props.target.id : "" },
+		[props.target.kind, props.target.id, props.refreshTick],
+	);
+	const ownApi = props.target.kind === "application" ? applicationApi : machineApi;
+	const serverSilences: Silence[] = ownApi.status === "ok" ? ownApi.data : [];
 	if (props.groupId) {
 		return (
 			<ChecksTableGrouped
@@ -149,12 +164,12 @@ export function ChecksTable(props: {
 function ChecksTableGrouped(props: {
 	checks: ConsolidatedChecks;
 	operators: OperatorPresence[];
-	serverId: string | null;
+	target: CheckTarget;
 	groupId: string;
 	maintained: boolean;
 	refreshTick: number;
 	onSilenced: () => void;
-	serverSilences: ServerSilencedRef[];
+	serverSilences: Silence[];
 }) {
 	const groupApi = useApi(
 		"silenced_refs",
@@ -169,7 +184,7 @@ function ChecksTableGrouped(props: {
 function ChecksTableBody({
 	checks,
 	operators,
-	serverId,
+	target,
 	groupId,
 	maintained,
 	onSilenced,
@@ -178,11 +193,11 @@ function ChecksTableBody({
 }: {
 	checks: ConsolidatedChecks;
 	operators: OperatorPresence[];
-	serverId: string | null;
+	target: CheckTarget;
 	groupId: string | null;
 	maintained: boolean;
 	onSilenced: () => void;
-	serverSilences: ServerSilencedRef[];
+	serverSilences: Silence[];
 	groupSilences: ServerGroupSilencedRef[];
 }) {
 	const entries = checks.checks;
@@ -216,7 +231,7 @@ function ChecksTableBody({
 							key={`${entry.source}:${entry.check}`}
 							entry={entry}
 							operators={operators}
-							serverId={serverId}
+							target={target}
 							groupId={groupId}
 							maintained={maintained}
 							onSilenced={onSilenced}
@@ -251,7 +266,7 @@ function ChecksTableBody({
 function CheckRow({
 	entry,
 	operators,
-	serverId,
+	target,
 	groupId,
 	maintained,
 	onSilenced,
@@ -260,11 +275,11 @@ function CheckRow({
 }: {
 	entry: ConsolidatedCheck;
 	operators: OperatorPresence[];
-	serverId: string | null;
+	target: CheckTarget;
 	groupId: string | null;
 	maintained: boolean;
 	onSilenced: () => void;
-	serverSilence: ServerSilencedRef | null;
+	serverSilence: Silence | null;
 	groupSilence: ServerGroupSilencedRef | null;
 }) {
 	const isAdmin = useIsAdmin() === true;
@@ -335,10 +350,10 @@ function CheckRow({
 				)}
 				<CheckExtrasList extras={extras} />
 			</Box>
-			{isAdmin && serverId && (
+			{isAdmin && (
 				<SilenceCheckButton
 					check={entry.check}
-					serverId={serverId}
+					target={target}
 					groupId={groupId}
 					source={entry.source}
 					onSilenced={onSilenced}
@@ -444,7 +459,7 @@ function SilencedChip({
 	serverSilence,
 	groupSilence,
 }: {
-	serverSilence: ServerSilencedRef | null;
+	serverSilence: Silence | null;
 	groupSilence: ServerGroupSilencedRef | null;
 }) {
 	if (!serverSilence && !groupSilence) return null;
@@ -487,7 +502,7 @@ function SilencedChip({
  * and the page's `SilencedRefsSection` refetch in lockstep. */
 function SilenceCheckButton({
 	check,
-	serverId,
+	target,
 	groupId,
 	source,
 	onSilenced,
@@ -495,22 +510,26 @@ function SilenceCheckButton({
 	groupSilence,
 }: {
 	check: string;
-	serverId: string;
+	target: CheckTarget;
 	groupId: string | null;
 	source: string;
 	onSilenced: () => void;
-	serverSilence: ServerSilencedRef | null;
+	serverSilence: Silence | null;
 	groupSilence: ServerGroupSilencedRef | null;
 }) {
 	const silenceServer = useApiAction("silenced_refs", "silence_server");
+	const silenceMachine = useApiAction("silenced_refs", "silence_machine");
 	const silenceGroup = useApiAction("silenced_refs", "silence_group");
 	const unsilenceServer = useApiAction("silenced_refs", "unsilence_server");
+	const unsilenceMachine = useApiAction("silenced_refs", "unsilence_machine");
 	const unsilenceGroup = useApiAction("silenced_refs", "unsilence_group");
 	const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
 	const error =
 		silenceServer.error ??
+		silenceMachine.error ??
 		silenceGroup.error ??
 		unsilenceServer.error ??
+		unsilenceMachine.error ??
 		unsilenceGroup.error;
 	const refName = silenceRef(source, check);
 	const silenced = !!serverSilence || !!groupSilence;
@@ -562,24 +581,38 @@ function SilenceCheckButton({
 					</Typography>
 					<Stack spacing={0.75}>
 						<SilenceScopeRow
-							scopeLabel="this server"
+							scopeLabel={
+								target.kind === "machine" ? "this machine" : "this server"
+							}
 							silence={serverSilence}
 							onSilence={() =>
 								handle(() =>
-									silenceServer.call({
-										server_id: serverId,
-										source,
-										ref: refName,
-									}),
+									target.kind === "machine"
+										? silenceMachine.call({
+												machine_id: target.id,
+												source,
+												ref: refName,
+											})
+										: silenceServer.call({
+												server_id: target.id,
+												source,
+												ref: refName,
+											}),
 								)
 							}
 							onUnsilence={() =>
 								handle(() =>
-									unsilenceServer.call({
-										server_id: serverId,
-										source,
-										ref: refName,
-									}),
+									target.kind === "machine"
+										? unsilenceMachine.call({
+												machine_id: target.id,
+												source,
+												ref: refName,
+											})
+										: unsilenceServer.call({
+												server_id: target.id,
+												source,
+												ref: refName,
+											}),
 								)
 							}
 						/>

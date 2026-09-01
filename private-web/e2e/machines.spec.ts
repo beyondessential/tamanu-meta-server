@@ -1,6 +1,7 @@
 import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
+	seedIssue,
 	seedMachine,
 	seedMachineReport,
 	seedServer,
@@ -153,6 +154,56 @@ test.describe("machine detail", () => {
 		await expect(page).toHaveURL(/\/machines\/[0-9a-f-]{36}$/);
 		await expect(
 			page.getByRole("heading", { level: 1, name: /landed-box/ }),
+		).toBeVisible();
+	});
+
+	/// A check filed against a box is silenced against that box. The scopes
+	/// offered are the ones the check applies at — the machine and its group —
+	/// and never one above, silencing everywhere being the check's own ceiling.
+	///
+	/// spec: CHK#silences-follow-the-event
+	test("a machine's check can be silenced from the machine", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "silence-group" });
+		const machine = await seedMachine(sql, {
+			name: "noisy-box",
+			groupId: group.id,
+		});
+		await seedIssue(sql, {
+			machineId: machine.id,
+			source: "alertd",
+			ref: "health/disk_free",
+			message: "Disk nearly full",
+		});
+
+		await page.goto(`/machines/${machine.id}`);
+
+		// The check is here, and the scopes offered are the box and its group —
+		// the ones this check applies at, and nothing above them.
+		await page.getByRole("button", { name: "Silence disk_free" }).click();
+		await expect(
+			page.getByRole("button", { name: "For this machine" }),
+		).toBeVisible();
+		await expect(
+			page.getByRole("button", { name: "For this group" }),
+		).toBeVisible();
+		await expect(
+			page.getByRole("button", { name: /everywhere|fleet/i }),
+		).toHaveCount(0);
+
+		await page.getByRole("button", { name: "For this machine" }).click();
+
+		// It reads as silenced against the box, and the machine's own silences
+		// section appears — it renders only when the box has one.
+		await expect(page.getByText("Silenced for this machine")).toBeVisible();
+		await page.keyboard.press("Escape");
+		await expect(
+			page.getByRole("heading", { name: /Silenced refs/ }),
+		).toBeVisible();
+		await expect(
+			page.getByText("issues with these refs on this machine"),
 		).toBeVisible();
 	});
 });
