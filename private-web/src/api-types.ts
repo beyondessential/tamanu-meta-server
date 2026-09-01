@@ -9193,6 +9193,11 @@ export interface components {
              */
             product: components["schemas"]["Product"];
             /**
+             * @description Version the server's reporting schema was built for. Absent until a
+             *     server runs a schema that stamps one (spec: RPT#currency).
+             */
+            reporting_schema?: string | null;
+            /**
              * Format: uuid
              * @description Id of the server this status was reported by.
              */

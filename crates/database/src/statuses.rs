@@ -535,6 +535,13 @@ impl Status {
 		self.detail().node_version()
 	}
 
+	/// Version the server's reporting schema was built for, as the server
+	/// reported it (`reportingSchemaVersion` extra). Absent until a server
+	/// runs a schema that stamps one.
+	pub fn reporting_schema_version(&self) -> Option<String> {
+		self.detail().reporting_schema_version()
+	}
+
 	/// Identified operators connected to the server as of this status
 	/// row, from the `external_users` check. Display fields are unfilled;
 	/// see [`commons_types::status::operators_from_health`].
@@ -665,6 +672,10 @@ impl MergedDetail {
 
 	pub fn node_version(&self) -> Option<String> {
 		self.string("nodeVersion")
+	}
+
+	pub fn reporting_schema_version(&self) -> Option<String> {
+		self.string("reportingSchemaVersion")
 	}
 
 	pub fn timezone(&self) -> Option<String> {
