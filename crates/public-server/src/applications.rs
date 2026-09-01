@@ -122,6 +122,10 @@ pub struct SelfResponse {
 
 /// Report the calling device's own identity.
 ///
+/// Deprecated in favour of `GET /machines/self`. This asks which *application*
+/// the caller is, which a box running more than one cannot answer; the machine
+/// endpoint asks which box it is and answers for any of them.
+///
 /// Resolves the caller from its device certificate and returns the server
 /// it is enrolled as together with its own device ID — the same pair
 /// returned when the device completed enrollment. A device authenticates
@@ -502,7 +506,7 @@ pub async fn register_complete(
 				None => bind_fresh_device(conn, args.server_id, &spki).await?,
 			};
 
-			Device::trust(conn, device_id, commons_types::device::DeviceRole::Server).await?;
+			Device::trust(conn, device_id, commons_types::device::DeviceRole::Machine).await?;
 			ServerEnrollmentToken::consume(conn, args.server_id, &challenge.token_hash).await?;
 			Application::mark_registered(conn, args.server_id).await?;
 			// Enrolment admits a box, so the identity and the registration

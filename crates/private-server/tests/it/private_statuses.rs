@@ -798,7 +798,9 @@ async fn get_detail_with_device() {
 
 		let device_info = detail.device_info.unwrap();
 		assert_eq!(device_info.device.id, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
-		assert_eq!(device_info.device.role, "server");
+		// What Canopy presents is the machine role, whichever name the row was
+		// written under.
+		assert_eq!(device_info.device.role, "machine");
 		assert!(device_info.latest_connection.is_some());
 
 		let connection = device_info.latest_connection.unwrap();

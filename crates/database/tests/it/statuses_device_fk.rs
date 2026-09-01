@@ -25,7 +25,7 @@ async fn deleting_device_nulls_status_device_id() {
 		let device_row: RowId = sql_query(
 			r#"
 				INSERT INTO devices (role)
-				VALUES ('server')
+				VALUES ('machine')
 				RETURNING id
 			"#,
 		)

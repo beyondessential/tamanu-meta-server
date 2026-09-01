@@ -528,7 +528,7 @@ async fn backup_problems_finds_a_failure_behind_many_later_successes() {
 			"INSERT INTO server_groups (id, name) VALUES ('{group}', 'Chatty'); \
 			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server}', '{group}') RETURNING id) INSERT INTO applications (id, host, name, type, group_id, machine_id) VALUES \
 				('{server}', 'https://chatty', 'Chatty', 'tamanu-central', '{group}', '{server}'); \
-			 INSERT INTO devices (id, role) VALUES ('{device}', 'server'); \
+			 INSERT INTO devices (id, role) VALUES ('{device}', 'machine'); \
 			 INSERT INTO server_group_backup_config \
 				(group_id, bucket, prefix, target_role_arn, maintenance_role_arn, \
 				 repo_password_ref, status, mode, placement) \
@@ -593,7 +593,7 @@ async fn seed_backup_runs(conn: &mut impl SimpleAsyncConnection) {
 		"INSERT INTO server_groups (id, name) VALUES ('{RGROUP}', 'Backup Group'); \
 		 WITH m AS (INSERT INTO machines (id, group_id, name) VALUES ('{RSERVER}', '{RGROUP}', 'Backup Target') RETURNING id) INSERT INTO applications (id, host, name, type, group_id, machine_id) VALUES \
 			('{RSERVER}', 'https://backup-target', 'Backup Target', 'tamanu-central', '{RGROUP}', '{RSERVER}'); \
-		 INSERT INTO devices (id, role) VALUES ('{RDEVICE}', 'server'); \
+		 INSERT INTO devices (id, role) VALUES ('{RDEVICE}', 'machine'); \
 		 INSERT INTO backup_runs \
 			(id, device_id, group_id, server_id, type, purpose, outcome, snapshot_id, bytes_uploaded, s3_sent_raw_bytes, snapshot_logical_bytes, reported_at) \
 			VALUES \

@@ -70,7 +70,7 @@ async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid, is_monitore
 }
 
 async fn insert_device(conn: &mut AsyncPgConnection) -> Uuid {
-	sql_query("INSERT INTO devices (role) VALUES ('server') RETURNING id")
+	sql_query("INSERT INTO devices (role) VALUES ('machine') RETURNING id")
 		.get_result::<RowId>(conn)
 		.await
 		.expect("insert device")

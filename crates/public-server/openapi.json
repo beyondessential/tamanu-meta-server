@@ -507,6 +507,53 @@
         ]
       }
     },
+    "/machines/self": {
+      "get": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Report the calling machine's own identity.",
+        "description": "Resolves the caller from its certificate and returns the box it is enrolled\nas, together with the applications Canopy holds for that box. A machine\nauthenticates entirely from its certificate, so it never needs these ids to\nmake calls; this endpoint lets one that has lost track of them recover them.\n\nAn identity belongs to at most one machine, so the answer is never\nambiguous — unlike `GET /servers/self`, which asks which *application* the\ncaller is and cannot answer for a box running more than one.\n\n- **401**: no client certificate, or one that matches no known identity.\n- **412**: the identity is registered but is not enrolled as a machine.",
+        "operationId": "machine_self",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineSelfResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "server-device": []
+          }
+        ]
+      }
+    },
     "/names/entitlements": {
       "get": {
         "tags": [
@@ -913,7 +960,7 @@
           "applications"
         ],
         "summary": "Report the calling device's own identity.",
-        "description": "Resolves the caller from its device certificate and returns the server\nit is enrolled as together with its own device ID — the same pair\nreturned when the device completed enrollment. A device authenticates\nentirely from its certificate, so it never needs these IDs to make\ncalls; this endpoint lets one that has lost track of them recover them.\n\n- **401**: the request has no client certificate, or the certificate\n  doesn't match a known device.\n- **409**: the calling device is attached to more than one server, which\n  should not normally happen; contact support if you see this.\n- **412**: the device is registered but has not yet been attached to a\n  server.",
+        "description": "Deprecated in favour of `GET /machines/self`. This asks which *application*\nthe caller is, which a box running more than one cannot answer; the machine\nendpoint asks which box it is and answers for any of them.\n\nResolves the caller from its device certificate and returns the server\nit is enrolled as together with its own device ID — the same pair\nreturned when the device completed enrollment. A device authenticates\nentirely from its certificate, so it never needs these IDs to make\ncalls; this endpoint lets one that has lost track of them recover them.\n\n- **401**: the request has no client certificate, or the certificate\n  doesn't match a known device.\n- **409**: the calling device is attached to more than one server, which\n  should not normally happen; contact support if you see this.\n- **412**: the device is registered but has not yet been attached to a\n  server.",
         "operationId": "server_self",
         "responses": {
           "200": {
@@ -2027,6 +2074,35 @@
               "type": "string"
             },
             "description": "Behaviours this intent opts into. Recognised values are `check` (a\nhealth report is expected for each replica), `once` (a given snapshot\nis only ever dispatched to a replica once, rather than repeatedly\nuntil overdue), and `url` (a replica's health report includes a link\nto it). Unrecognised values are stored but have no effect."
+          }
+        }
+      },
+      "MachineSelfResponse": {
+        "type": "object",
+        "description": "The calling identity, the box it is enrolled as, and what runs on that box.",
+        "required": [
+          "device_id",
+          "machine_id",
+          "applications"
+        ],
+        "properties": {
+          "applications": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The applications Canopy currently holds for that machine. Empty for a\nbox that has enrolled but not yet reported what runs on it, which is\nawaiting a report rather than an error."
+          },
+          "device_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The calling identity's own identifier."
+          },
+          "machine_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The machine this identity is enrolled as."
           }
         }
       },
@@ -3174,6 +3250,10 @@
     {
       "name": "names",
       "description": "Public names a server may act on: what it is entitled to, and the addresses to publish for them."
+    },
+    {
+      "name": "machines",
+      "description": "The boxes applications run on: a machine asking which box it is enrolled as, and what Canopy holds running on it."
     },
     {
       "name": "restore",

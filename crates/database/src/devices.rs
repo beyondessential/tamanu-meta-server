@@ -117,7 +117,7 @@ impl Device {
 
 		// Create the device first
 		let device: Self = diesel::insert_into(devices::table)
-			.values(devices::role.eq(DeviceRole::Server))
+			.values(devices::role.eq(DeviceRole::Machine))
 			.returning(Self::as_select())
 			.get_result(db)
 			.await

@@ -21,7 +21,7 @@ async fn stats_for_dedupes_repeat_join_rows() {
 		let incident_note = Uuid::new_v4();
 
 		conn.batch_execute(&format!(
-			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'server'); \
+			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'machine'); \
 			 INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
 			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, device_id, group_id, machine_id) VALUES \
 				('{server_id}', 'https://example.com', 'tamanu-central', '{device_id}', '{group_id}', '{server_id}'); \

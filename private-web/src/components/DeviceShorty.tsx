@@ -3,7 +3,7 @@ import { Link as RouterLink } from "react-router-dom";
 import type { DeviceInfo, DeviceRole } from "../types";
 
 const ROLE_COLORS: Record<DeviceRole, "primary" | "warning" | "info"> = {
-	server: "primary",
+	machine: "primary",
 	releaser: "warning",
 	admin: "info",
 	"backup-restore": "primary",

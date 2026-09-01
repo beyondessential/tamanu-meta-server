@@ -10309,7 +10309,7 @@
         "enum": [
           "admin",
           "releaser",
-          "server",
+          "machine",
           "backup-restore"
         ]
       },

@@ -86,9 +86,9 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 
 - [ ] A machine-gated route resolves the machine from the authenticated identity (verifies spec: FLT)
 - [ ] An admin-gated route resolves no machine (verifies spec: FLT)
-- [ ] `GET /machines/self` returns the identity, its machine, and the applications on it (verifies spec: DID)
-- [ ] `GET /servers/self` reaches the same answer and is marked deprecated (verifies spec: DID)
-- [ ] Enrolment accepts `server` as an alias for the machine role (verifies spec: DTR)
+- [x] `GET /machines/self` returns the identity, its machine, and the applications on it (verifies spec: DID)
+- [x] `GET /servers/self` keeps the shape it has always had, for callers that predate the split (verifies spec: API, DID)
+- [x] Enrolment accepts `server` as an alias for the machine role, and Canopy stores and presents `machine` (verifies spec: DTR)
 
 ## Billing
 
@@ -158,7 +158,6 @@ cover the runtime half of that, which the spec diff cannot see.
 - [ ] `alert_when_down_for`, the group and the identity link land on the machine (verifies spec: FLT)
 - [ ] A migrated application's type is corrected by the first report that disagrees with it (verifies spec: APP)
 - [ ] Existing silences, incidents and check states survive the rename intact
-- [ ] `/servers/{id}` redirects to the application that server became
 
 ## Interface
 

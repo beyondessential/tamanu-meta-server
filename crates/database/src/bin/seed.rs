@@ -412,14 +412,14 @@ async fn seed_devices(conn: &mut AsyncPgConnection) -> Result<SeededDevices> {
 	let mut mtls_server = Vec::new();
 	for i in 0..3u8 {
 		let dev = Device::create(conn, fake_key(0x10 + i)).await?;
-		Device::trust(conn, dev.id, DeviceRole::Server).await?;
+		Device::trust(conn, dev.id, DeviceRole::Machine).await?;
 		mtls_server.push(dev.id);
 	}
 
 	// A server device with both an mTLS key AND a Tailscale identity.
 	let tailscale_server = {
 		let dev = Device::create(conn, fake_key(0x20)).await?;
-		Device::trust(conn, dev.id, DeviceRole::Server).await?;
+		Device::trust(conn, dev.id, DeviceRole::Machine).await?;
 		Device::attach_tailscale(
 			conn,
 			dev.id,

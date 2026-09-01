@@ -7,7 +7,7 @@ async fn list_issues_for_device_and_server() {
 		let device_id = Uuid::new_v4();
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'server');
+			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'machine');
 			 INSERT INTO device_keys (device_id, key_data, name, is_active) VALUES \
 				('{device_id}', '\\x6b6579'::bytea, 'k', true);
 			 WITH m AS (INSERT INTO machines (id) VALUES ('{server_id}') RETURNING id) INSERT INTO applications (id, host, type, device_id, machine_id) VALUES \
@@ -88,7 +88,7 @@ async fn incident_groups_at_server_group() {
 		let server_b_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'cluster');
-			 INSERT INTO devices (id, role) VALUES ('{device_id}', 'server');
+			 INSERT INTO devices (id, role) VALUES ('{device_id}', 'machine');
 			 INSERT INTO device_keys (device_id, key_data, name, is_active) VALUES \
 				('{device_id}', '\\x6b6579'::bytea, 'k', true);
 			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_a_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \

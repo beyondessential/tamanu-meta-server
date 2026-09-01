@@ -27,7 +27,7 @@ async fn test_list_trusted_pagination() {
 		// Create 15 devices and trust them all
 		for i in 0..15 {
 			let device = Device::create(&mut conn, vec![i as u8]).await.unwrap();
-			Device::trust(&mut conn, device.id, DeviceRole::Server)
+			Device::trust(&mut conn, device.id, DeviceRole::Machine)
 				.await
 				.unwrap();
 		}
@@ -71,7 +71,7 @@ async fn test_get_device_by_id() {
 
 		// Verify device info
 		assert_eq!(device_info.device.id, device.id);
-		assert_eq!(device_info.device.role, DeviceRole::Server);
+		assert_eq!(device_info.device.role, DeviceRole::Machine);
 		assert_eq!(device_info.keys.len(), 1);
 		assert_eq!(device_info.keys[0].key_data, key_data);
 		assert!(device_info.latest_connection.is_none());
@@ -101,7 +101,7 @@ async fn test_create_device_is_server() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		let key_data = b"test-device-key-data";
 		let device = Device::create(&mut conn, key_data.to_vec()).await.unwrap();
-		assert_eq!(device.role, DeviceRole::Server);
+		assert_eq!(device.role, DeviceRole::Machine);
 
 		let devices = Device::list_trusted_with_info(&mut conn).await.unwrap();
 		assert_eq!(devices.len(), 1);
@@ -125,7 +125,7 @@ async fn test_list_trusted_devices() {
 		Device::trust(&mut conn, device1.id, DeviceRole::Admin)
 			.await
 			.unwrap();
-		Device::trust(&mut conn, device2.id, DeviceRole::Server)
+		Device::trust(&mut conn, device2.id, DeviceRole::Machine)
 			.await
 			.unwrap();
 
@@ -142,7 +142,7 @@ async fn test_list_trusted_devices() {
 			if device.device.id == device1.id {
 				assert_eq!(device.device.role, DeviceRole::Admin);
 			} else if device.device.id == device2.id {
-				assert_eq!(device.device.role, DeviceRole::Server);
+				assert_eq!(device.device.role, DeviceRole::Machine);
 			}
 		}
 	})
@@ -180,7 +180,7 @@ async fn test_revoke_device() {
 			info.device.tailscale_node_id.is_none(),
 			"tailnet identity detached",
 		);
-		assert_eq!(info.device.role, DeviceRole::Server, "role kept");
+		assert_eq!(info.device.role, DeviceRole::Machine, "role kept");
 	})
 	.await;
 }
@@ -191,7 +191,7 @@ async fn test_update_device_role() {
 		// Create and trust a device as server
 		let key_data = b"test-device-key-data";
 		let device = Device::create(&mut conn, key_data.to_vec()).await.unwrap();
-		Device::trust(&mut conn, device.id, DeviceRole::Server)
+		Device::trust(&mut conn, device.id, DeviceRole::Machine)
 			.await
 			.unwrap();
 
@@ -351,7 +351,7 @@ async fn test_server_function_list_trusted() {
 		Device::trust(&mut conn, device1.id, DeviceRole::Admin)
 			.await
 			.unwrap();
-		Device::trust(&mut conn, device2.id, DeviceRole::Server)
+		Device::trust(&mut conn, device2.id, DeviceRole::Machine)
 			.await
 			.unwrap();
 
@@ -933,7 +933,7 @@ async fn test_update_key_name() {
 		let device = Device::create(&mut conn, key_data.to_vec()).await.unwrap();
 
 		// Trust the device so we can access it
-		Device::trust(&mut conn, device.id, DeviceRole::Server)
+		Device::trust(&mut conn, device.id, DeviceRole::Machine)
 			.await
 			.unwrap();
 

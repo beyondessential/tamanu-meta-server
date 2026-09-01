@@ -52,7 +52,7 @@ async fn soft_delete_releases_and_deactivates_device_and_hides_row() {
 		Device::trust(
 			&mut conn,
 			device.id,
-			commons_types::device::DeviceRole::Server,
+			commons_types::device::DeviceRole::Machine,
 		)
 		.await
 		.unwrap();

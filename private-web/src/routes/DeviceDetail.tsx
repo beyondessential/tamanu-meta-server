@@ -35,7 +35,7 @@ import {
 } from "../types";
 
 const TRUSTABLE_ROLES: DeviceRole[] = [
-	"server",
+	"machine",
 	"releaser",
 	"admin",
 	"backup-restore",

@@ -65,7 +65,7 @@ async fn private_with_directory(url: &str, directory: TailnetDirectory) -> TestS
 async fn insert_device(conn: &mut commons_tests::diesel_async::AsyncPgConnection) -> Uuid {
 	let id = Uuid::new_v4();
 	conn.batch_execute(&format!(
-		"INSERT INTO devices (id, role) VALUES ('{id}', 'server');"
+		"INSERT INTO devices (id, role) VALUES ('{id}', 'machine');"
 	))
 	.await
 	.expect("insert device");
@@ -157,7 +157,7 @@ async fn attach_tailscale_conflict_when_node_id_already_claimed() {
 		// Pre-attach the node id to one device.
 		let claimer = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO devices (id, role, tailscale_node_id) VALUES ('{claimer}', 'server', '{node_id}');"
+			"INSERT INTO devices (id, role, tailscale_node_id) VALUES ('{claimer}', 'machine', '{node_id}');"
 		))
 		.await
 		.expect("seed claimer");
@@ -250,7 +250,7 @@ async fn merge_into_reparents_keys_and_deletes_source() {
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role, tailscale_node_id) \
 			   VALUES ('{source}', 'server', 'nodekey:fromauto'); \
-			 INSERT INTO devices (id, role) VALUES ('{target}', 'server'); \
+			 INSERT INTO devices (id, role) VALUES ('{target}', 'machine'); \
 			 INSERT INTO device_keys (device_id, key_data, name, is_active) \
 			   VALUES ('{target}', '\\x010203', 'mtls', true);"
 		))

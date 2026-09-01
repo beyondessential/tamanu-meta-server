@@ -5518,7 +5518,7 @@ export interface components {
          * @description The role a device is trusted with, which determines what it may do.
          * @enum {string}
          */
-        DeviceRole: "admin" | "releaser" | "server" | "backup-restore";
+        DeviceRole: "admin" | "releaser" | "machine" | "backup-restore";
         /** @description Free-text search query for devices. */
         DeviceSearchArgs: {
             /**

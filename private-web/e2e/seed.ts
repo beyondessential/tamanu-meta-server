@@ -238,7 +238,7 @@ export async function seedDevice(
 	opts: { role?: string; tailscaleNodeName?: string } = {},
 ): Promise<SeededDevice> {
 	const id = randomUUID();
-	const role = opts.role ?? "server";
+	const role = opts.role ?? "machine";
 	await sql.query(
 		`INSERT INTO devices (id, role, tailscale_node_name) VALUES ($1, $2, $3)`,
 		[id, role, opts.tailscaleNodeName ?? null],

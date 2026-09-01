@@ -581,7 +581,7 @@ async fn checks_reports_duration_and_surfaces_unreported_restores() {
 		let inflight_run = Uuid::new_v4();
 		let member_run = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO devices (id, role) VALUES ('{member_device}', 'server');
+			"INSERT INTO devices (id, role) VALUES ('{member_device}', 'machine');
 			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server}', '{group}') RETURNING id) INSERT INTO applications (id, host, type, group_id, device_id, machine_id) VALUES
 				('{server}', 'https://s.test', 'tamanu-central', '{group}', '{member_device}', '{server}');
 			 -- A reported check plus the issuance that started it 5 minutes before

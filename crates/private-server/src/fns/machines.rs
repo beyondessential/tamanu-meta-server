@@ -374,7 +374,7 @@ pub async fn create(
 							node_name: Some(entry.node_name.clone()),
 							tailnet: Some(entry.tailnet.clone()),
 						},
-						DeviceRole::Server,
+						DeviceRole::Machine,
 					)
 					.await?
 				}

@@ -1202,7 +1202,7 @@ pub async fn attach_tailscale_device(
 					node_name: Some(entry.node_name.clone()),
 					tailnet: Some(entry.tailnet.clone()),
 				},
-				DeviceRole::Server,
+				DeviceRole::Machine,
 			)
 			.await?
 		};

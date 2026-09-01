@@ -21,7 +21,7 @@ Each item is a section below; the section carries the detail and the traps.
 - [x] **Fleet query interface** — MCP gains `Get machine` and `Find machines`
 - [x] **Migration** — `{product, kind}` becomes `{type}`
 - [x] **Frontend** — two detail pages, the group tree, the status-page bands
-- [ ] **Routes** — deprecation aliases for every renamed path
+- [x] **Routes** — deprecation aliases for every renamed path
 
 Carried deferrals, each gated on a step above rather than on a vague later:
 
@@ -362,9 +362,13 @@ Specs: CHK gained a line separating the check's three results (how much of what 
 
 ## Routes
 
-No route is deleted; fielded clients call the names that exist today. A renamed route keeps its old path, marked deprecated, and routes internally to the new name, so there is one implementation and two ways in. `/servers/{id}` redirects to the application it became, and `/servers/self` keeps answering alongside `/machines/self` (see [DID](../../specs/public-server/machine-identity.md)).
+No route is deleted, and the step turned out to be pure addition: nothing on the public wire had actually been renamed, so there was no old path to alias. The whole diff against the base spec is one added path.
 
-The `server` role name gets the same treatment: enrolment inputs accept it as an alias for the machine role, so an agent deployed before the rename keeps enrolling (see [DTR](../../specs/private-server/device-trust.md)). The alias is on the input only — what Canopy stores and presents is the machine role, so the two do not both need carrying through the code.
+**`/machines/self` is new; `/servers/self` is untouched.** The two answer different questions rather than the same one under two names, which is why they are two handlers rather than one with an alias. `/servers/self` asks which *application* the caller is and 409s on a box running two — the case the machine endpoint exists for. Its response keeps the shape it has always had, so a fielded agent is unaffected; the deprecation is in its description. DID said the two "reach the same answer", which was not true once written, and now says what they each do.
+
+That `server_id` had to keep meaning an application settled it: `POST /status/{server_id}` resolves an application, so an agent that read its id from `/servers/self` and pushes to it would break if the id changed meaning.
+
+**The `server` role is renamed rather than aliased through the code.** `DeviceRole` is not on the public wire at all, so the variant became `Machine` outright, a migration rewrites the stored rows, and `FromStr`/serde accept `server` on input. The alias is on the input only, as planned. Two properties are pinned: a row still written as `server` reads as the machine role and authenticates — every device in the fleet was written that way, so that read is what stops the rename locking them out — and what Canopy stores and presents is `machine`.
 
 ## Ingest
 

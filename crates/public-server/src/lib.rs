@@ -9,6 +9,7 @@ pub mod artifacts;
 pub mod backup;
 pub mod bestool;
 pub mod calendar;
+pub mod machines;
 pub mod mcp;
 pub mod names;
 pub mod openapi;
@@ -34,6 +35,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.nest("/bestool", bestool::routes())
 		.nest("/certificates", names::certificate_routes())
 		.nest("/names", names::routes())
+		.nest("/machines", machines::routes())
 		.nest("/servers", applications::routes())
 		.nest("/status", statuses::routes())
 		.nest("/tags", tags::routes())
