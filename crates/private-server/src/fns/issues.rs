@@ -209,7 +209,7 @@ fn collect_user_logins(issues: &[Issue]) -> Vec<&str> {
 /// and that machine's group, as an application-scoped one names its
 /// application's. Reading only `application_id` left every machine check —
 /// maintenance, restore verification, redaction, and the machine-subject
-/// checks — displaying with no name, host, or deployment against it.
+/// checks — displaying with no name, host, or group against it.
 // spec: MCP#incidents-and-issues
 pub(crate) async fn enrich_issues(
 	conn: &mut database::diesel_async::AsyncPgConnection,
@@ -233,7 +233,7 @@ pub(crate) async fn enrich_issues(
 				.and_then(|sid| names.get(&sid).cloned())
 				.unwrap_or((None, None));
 			// A machine's issue answers to its machine's group, so the
-			// deployment is named either way.
+			// group is named either way.
 			let (group_id, group_name) = match (i.application_id, i.machine_id) {
 				(Some(sid), _) => group_refs.get(&sid).cloned().unwrap_or((None, None)),
 				(None, Some(mid)) => machine_groups.get(&mid).cloned().unwrap_or((None, None)),

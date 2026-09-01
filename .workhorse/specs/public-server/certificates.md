@@ -52,7 +52,7 @@ On a machine hosting several, an undeclared name is genuinely ambiguous, so it i
 
 A machine asking about a name none of its applications declares is refused the same way whether the name is held by an application elsewhere or by nobody, so the endpoint is not a directory of what other machines serve.
 
-A name within another group's domain is refused as if unclaimed: the refusal says the application's group does not control the name, and never that another group does, so the endpoint is not a directory of other deployments' names.
+A name within another group's domain is refused as if unclaimed: the refusal says the application's group does not control the name, and never that another group does, so the endpoint is not a directory of other groups' names.
 
 ## What an application may act on
 
@@ -112,7 +112,7 @@ An application generates its own key pair and asks Canopy to certify it, submitt
 The private key never leaves the application and Canopy never asks for it: Canopy's part is to prove control of the name and return the signed chain.
 
 The signing request is honoured only for exactly the name requested.
-Canopy certifies that one name and no other: a request whose subject or alternative names carry anything beyond the requested name is refused rather than trimmed, because silently issuing something narrower than asked would leave an application serving a certificate it does not expect, and issuing something wider would let one application smuggle a second deployment's name past the authorisation check.
+Canopy certifies that one name and no other: a request whose subject or alternative names carry anything beyond the requested name is refused rather than trimmed, because silently issuing something narrower than asked would leave an application serving a certificate it does not expect, and issuing something wider would let one application smuggle another group's name past the authorisation check.
 Wildcards are refused: a certificate valid for every name in a deployment is not something one member should be able to mint.
 
 The key the request certifies must be strong enough to be worth certifying, and Canopy states what it accepts rather than deferring to whatever the authority happens to allow that year.
@@ -140,7 +140,7 @@ Holding the chain is what lets Canopy answer a repeat request without a fresh or
 An authority may offer certificates of more than one lifetime, named as profiles, and an application's certificates are requested under one of them.
 The profiles on offer are whatever the authority advertises, so Canopy presents that set rather than a list of its own, and a profile the authority has withdrawn is reported as unavailable instead of being requested and refused.
 
-An application's profile is an operator's choice per application, because lifetime is a property of how a deployment is run rather than of Canopy: a cloud deployment whose issuance is exercised constantly can carry a short lifetime, where an on-premises one that may be offline for days cannot.
+An application's profile is an operator's choice per application, because lifetime is a property of how an application is run rather than of Canopy: a cloud-hosted one whose issuance is exercised constantly can carry a short lifetime, where an on-premises one that may be offline for days cannot.
 Every application takes the longest profile the authority offers until an operator says otherwise, so a short lifetime is something adopted deliberately for an application rather than a default anyone inherits.
 
 ### Renewal
@@ -179,7 +179,7 @@ Any other reason leaves the key usable, since a certificate superseded or a depl
 
 An order that fails is retried, with the interval between attempts growing, because most failures are the authority being briefly unavailable or a record not yet visible.
 
-A certificate that is running out is a fact about the application that serves it, so it is filed against that application like any other check: it joins that application's group's incident and reaches the people who run the deployment (see [CHK](../monitoring/checks.md)).
+A certificate that is running out is a fact about the application that serves it, so it is filed against that application like any other check: it joins that application's group's incident and reaches the people who run that group (see [CHK](../monitoring/checks.md)).
 It warns while there is still room to recover and fails as the remaining life runs down, and both thresholds are fractions of the certificate's own lifetime rather than fixed durations — otherwise the same alert would fire far too late for a short-lived certificate and far too early for a long-lived one.
 A certificate that has expired outright fails regardless.
 
@@ -194,7 +194,7 @@ An order that has never produced a certificate is distinguished from one extendi
 
 Canopy's own inability to issue is not any one application's fault and is reported against Canopy instead (see [SELF](../private-server/self-alerts.md)): an authority that cannot be reached, an account Canopy cannot use, and the authority's rate limits being exhausted.
 Those limits are shared across every group whose domain sits in the same zone, so running them down is a fleet-wide fault rather than one group's: Canopy reports being throttled, and does not consume what remains retrying a name that has just failed.
-Reporting the two apart matters because they call for different people — an application's certificate running out is that deployment's problem to notice, and Canopy being unable to issue at all is Canopy's.
+Reporting the two apart matters because they call for different people — an application's certificate running out is that group's problem to notice, and Canopy being unable to issue at all is Canopy's.
 
 ## Presentation
 
@@ -203,6 +203,6 @@ An operator declares and releases an application's names from the same place.
 A request that has not yet produced a certificate presents as pending, or as failed with the reason.
 An operator sets the application's profile where its other permissions are set, and pauses or unpauses it from the same place, a pause showing who set it, when, and why.
 
-A group presents, under each domain it controls, the names in use beneath it and which of them hold a current certificate, so whether a deployment's names are healthy is answerable without visiting each of its applications.
+A group presents, under each domain it controls, the names in use beneath it and which of them hold a current certificate, so whether a group's names are healthy is answerable without visiting each of its applications.
 
 The authority Canopy is configured to use is presented to operators along with the profiles it advertises and whether Canopy's account with it is usable, since that is where a misconfiguration of issuance shows up rather than on any one application.

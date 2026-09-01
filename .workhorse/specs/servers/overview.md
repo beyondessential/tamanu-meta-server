@@ -6,7 +6,7 @@ id: FLT
 
 Canopy's fleet is made of three things.
 A **machine** is a host: a box, physical or virtual, that Canopy monitors.
-An **application** is a piece of software running somewhere, and is what an operator reasons about when they think about a deployment.
+An **application** is a piece of software running somewhere, and is what an operator reasons about when they think about what a site is running.
 An **identity** is a set of keys, with an optional tailnet identity, that authenticates something to Canopy.
 
 Machine-level facts belong to the machine and application-level facts to the application, so a host running two workloads reports its platform, memory and filesystems once rather than once per workload.
@@ -27,7 +27,7 @@ An operator creates a machine and places it in a group.
 Canopy issues an enrolment ticket, the agent on the box presents it, and the machine is enrolled.
 
 The group is the only thing an operator supplies, because it is the only thing that exists nowhere else.
-Which deployment a box belongs to is an organisational fact the machine has no way of knowing; what is installed on the box is not.
+Which group a box belongs to is an organisational fact the machine has no way of knowing; what is installed on the box is not.
 
 A machine that has been created but has not yet reported has no applications, and presents as one that has not checked in rather than as an error.
 
@@ -69,6 +69,14 @@ An operator sets the group on the machine, and the applications on that machine 
 
 An application's group is never set independently of its machine's, so the two cannot disagree.
 Moving a machine to another group moves the applications on it, and there is no separate move for an application that runs on a machine.
+
+### Environments
+
+Rank is an application's, not a machine's, so a group's environment — its members at one rank — is a set of applications.
+A box is not in an environment: what is production or test about a site is the software serving that role, and the same box can carry a production workload and a test one.
+
+A machine's stage is therefore derived rather than held: it is the highest rank among the applications on it, so a box shared by a production and a test workload bills and presents as production (see [APP](application-types.md), "Billing attribution").
+That derivation is what lets a machine belong to a group without belonging to one of its environments, and it is why moving a machine between groups moves whole applications rather than reassigning a rank.
 
 ## What each carries
 

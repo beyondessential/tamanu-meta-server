@@ -5,7 +5,7 @@ id: MCP
 # Fleet query interface
 
 A read-only query interface to the Canopy fleet, exposed for AI agents and other automated clients that operators run.
-It lets such a client discover machines, applications and groups, read their status and health, learn what Tamanu versions exist and which are deployed, see where each deployment plans to move next, and inspect backup state and problems — without granting any ability to change the fleet.
+It lets such a client discover machines, applications and groups, read their status and health, learn what Tamanu versions exist and which are deployed, see where each group plans to move next, and inspect backup state and problems — without granting any ability to change the fleet.
 
 ## Why it exists
 
@@ -108,7 +108,7 @@ Each incident therefore carries a **published** flag — true when it actually n
 A summary or ranking of incidents should count published incidents rather than raw rows unless raw activity is explicitly wanted.
 
 **Get incident** takes an incident identifier and returns the incident with the issues attached to it: each issue's effective result, source, check name, message, the scope it is filed at and what that scope names, active state, and when it joined and (if applicable) left the incident.
-So an issue about a box reads as the machine's and an issue about software as the application's, and a client can tell which of a deployment's grains a failure belongs to.
+So an issue about a box reads as the machine's and an issue about software as the application's, and a client can tell which of a group's grains a failure belongs to.
 
 **Find issues** returns issues across the fleet, filtered by active state, by effective result, by group, by machine, by application, and by recency (issues last seen within a look-back window).
 Filtering by application returns the machine's issues among the application's own, matching what that application presents.

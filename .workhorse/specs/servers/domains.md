@@ -6,7 +6,7 @@ id: DOM
 
 Canopy manages DNS names on its fleet's behalf.
 A *managed zone* is a DNS zone Canopy can create and change records in; a *group domain* is a name inside such a zone that a server group controls.
-Together they answer which names Canopy will act on for which deployment — the association an application's own DNS records and TLS certificates are authorised against.
+Together they answer which names Canopy will act on for which group — the association an application's own DNS records and TLS certificates are authorised against.
 
 ## Managed zones
 
@@ -93,7 +93,7 @@ An application that has not been granted the permission it needs is refused, and
 An application whose group controls no domain is likewise refused, but for want of a domain rather than for want of permission, so the two misconfigurations are told apart.
 
 Revoking a grant takes effect on the application's next request.
-It stops the application making further changes and leaves the records and certificates already in place, since withdrawing a live deployment's address records on a change of permission would take that deployment off the air.
+It stops the application making further changes and leaves the records and certificates already in place, since withdrawing a live application's address records on a change of permission would take it off the air.
 
 ## What an application may reach
 

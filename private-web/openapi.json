@@ -8333,7 +8333,7 @@
           },
           "may_manage_tls": {
             "type": "boolean",
-            "description": "Whether this server may obtain TLS certificates for names under its\ngroup's domains. Separate from `may_manage_dns`: a deployment whose\nrecords are managed elsewhere may still want its certificates here."
+            "description": "Whether this server may obtain TLS certificates for names under its\ngroup's domains. Separate from `may_manage_dns`: an application whose\nrecords are managed elsewhere may still want its certificates here."
           },
           "name": {
             "type": [
@@ -12403,7 +12403,7 @@
               "null"
             ],
             "format": "uuid",
-            "description": "The group this machine belongs to. The one thing an operator supplies\nwhen creating a machine: which deployment a box belongs to is the one\nfact the box has no way of knowing. The applications on it take it."
+            "description": "The group this machine belongs to. The one thing an operator supplies\nwhen creating a machine: which group a box belongs to is the one\nfact the box has no way of knowing. The applications on it take it."
           },
           "id": {
             "type": "string",
@@ -12441,7 +12441,7 @@
       },
       "MachineCreateArgs": {
         "type": "object",
-        "description": "What an operator supplies when adding a machine.\n\nThe group is the only field that matters to get right up front: which\ndeployment a box belongs to is the one thing the box has no way of knowing.",
+        "description": "What an operator supplies when adding a machine.\n\nThe group is the only field that matters to get right up front: which\ngroup a box belongs to is the one thing the box has no way of knowing.",
         "properties": {
           "cloud": {
             "type": [
@@ -16210,7 +16210,7 @@
               },
               {
                 "$ref": "#/components/schemas/ServerKind",
-                "description": "Restrict results to applications of this deployment kind. Omit to\ninclude all kinds."
+                "description": "Restrict results to applications of this kind. Omit to\ninclude all kinds."
               }
             ]
           },
@@ -16471,7 +16471,7 @@
       },
       "ShortStatus": {
         "type": "string",
-        "description": "Reachability of a target, from how recently it last reported.\n\nThree states and no degrees between them: a target is reachable,\nunreachable, or has never reported. How long it has been quiet is measured\nagainst that target's own configured threshold rather than any fixed one, so\na deployment that reports every few minutes and one that reports hourly are\neach judged on what is normal for them.",
+        "description": "Reachability of a target, from how recently it last reported.\n\nThree states and no degrees between them: a target is reachable,\nunreachable, or has never reported. How long it has been quiet is measured\nagainst that target's own configured threshold rather than any fixed one, so\na target that reports every few minutes and one that reports hourly are\neach judged on what is normal for them.",
         "enum": [
           "up",
           "down",

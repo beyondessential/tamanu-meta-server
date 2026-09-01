@@ -46,7 +46,7 @@ impl Display for CheckSeverity {
 /// Three states and no degrees between them: a target is reachable,
 /// unreachable, or has never reported. How long it has been quiet is measured
 /// against that target's own configured threshold rather than any fixed one, so
-/// a deployment that reports every few minutes and one that reports hourly are
+/// a target that reports every few minutes and one that reports hourly are
 /// each judged on what is normal for them.
 // spec: CHK#reachability
 #[derive(

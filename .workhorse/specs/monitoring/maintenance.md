@@ -9,7 +9,7 @@ A window is bounded in time, ends itself, and records who declared it and what f
 
 ## Why it exists
 
-An upgrade looks exactly like a deployment falling over: the machine stops reporting, its checks go stale, and the group opens an incident someone has to read before recognising it as work already under way.
+An upgrade looks exactly like a site falling over: the machine stops reporting, its checks go stale, and the group opens an incident someone has to read before recognising it as work already under way.
 Alerting through planned work costs an operator the trust they place in the next alert.
 
 Neither existing control covers it.
@@ -58,7 +58,7 @@ Ended windows are retained as the target's maintenance history, so what was bein
 
 Suspension persists for a settle period after the window ends, unchanged in every respect from the window itself.
 
-A machine is back before the sources on it have reported again, and a machine whose every source is stale is unreachable (see [CHK](checks.md), "Reachability"), so ending suspension the instant the work finishes would report a deployment that has just come back as failed for as long as the work took.
+A machine is back before the sources on it have reported again, and a machine whose every source is stale is unreachable (see [CHK](checks.md), "Reachability"), so ending suspension the instant the work finishes would report a machine that has just come back as failed for as long as the work took.
 The settle period is the same for every window.
 When it elapses, every check on the target is graded normally again, and anything still degraded contributes from then on.
 

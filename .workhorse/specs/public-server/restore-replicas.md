@@ -238,7 +238,7 @@ An application's candidate is the version its group's open plan moves it to (see
 A group with no open plan has no candidate, so none of its applications are tested.
 
 Recording a plan is what asks for the testing.
-A run costs hours of a consumer's capacity per replica, and which minor a deployment moves to is not something Canopy can derive, so aiming at whatever is newest would spend that capacity on versions nobody has decided to take.
+A run costs hours of a consumer's capacity per replica, and which minor a group moves to is not something Canopy can derive, so aiming at whatever is newest would spend that capacity on versions nobody has decided to take.
 A deployment that wants its data tested says where it is going, and gets an answer about the version it will actually apply.
 
 One candidate, not one per version along the path.
@@ -260,7 +260,7 @@ That window is where the answer is still cheap: the fleet is not moving yet, and
 It carries `check` alongside, so a single restore reports the replica's health and the migrations' outcome as two signals from one report.
 
 An intent carrying `migrate` is withheld where no application has a candidate version.
-An intent that verifies backups therefore does not also migrate: it would go undispatched for every machine without a candidate, leaving the backups of any non-Tamanu application, and of every deployment with no plan open, unverified.
+An intent that verifies backups therefore does not also migrate: it would go undispatched for every machine without a candidate, leaving the backups of any non-Tamanu application, and of every group with no plan open, unverified.
 An intent that keeps a replica queryable does not migrate either: a migrated replica sits at a version its deployment is not running, so a declaration promoted to it would give an operator a schema that does not match production.
 
 A verifying intent and a migrating intent restore the same snapshot separately.
@@ -301,7 +301,7 @@ Growth is also a second reason a window overruns, since the write volume that pr
 ### Verdicts
 
 Canopy derives a verdict for each candidate pair of application and version: not yet tested, passed, or failed.
-Verdicts are presented per group, as the set of versions tested against that group's applications, so whether a version is safe for a deployment is answered in one place instead of by assembling reports.
+Verdicts are presented per group, as the set of versions tested against that group's applications, so whether a version is safe for a group is answered in one place instead of by assembling reports.
 
 A verdict names the snapshot it was reached against and when that was, because a pass against a month-old snapshot is a weaker statement than one against last night's.
 A newer test of the same pair supersedes the previous verdict, and the superseded reports remain.
@@ -315,7 +315,7 @@ Folding the attempt into the verdict would overwrite the answer with the activit
 
 ### Version readiness
 
-A failed migration test marks its target version as carrying a known issue, which removes that version from those considered ready to roll out, and records the application and the failing migration so whoever picks it up knows which deployment's data provoked it.
+A failed migration test marks its target version as carrying a known issue, which removes that version from those considered ready to roll out, and records the application and the failing migration so whoever picks it up knows whose data provoked it.
 This is the gate an operator-filed known issue uses, so a failure found automatically and one found by hand have the same effect on a rollout.
 Clearing the issue is an operator action, and a later passing test does not clear it, because whether the resolution is a change to the migration, a change to the data, or an accepted limitation is a judgement.
 

@@ -32,7 +32,7 @@ pub struct Machine {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub name: Option<String>,
 	/// The group this machine belongs to. The one thing an operator supplies
-	/// when creating a machine: which deployment a box belongs to is the one
+	/// when creating a machine: which group a box belongs to is the one
 	/// fact the box has no way of knowing. The applications on it take it.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub group_id: Option<Uuid>,
@@ -312,7 +312,7 @@ impl Machine {
 	}
 
 	/// Bulk-fetch `(group_id, group_name)` for a set of machine ids, so a
-	/// surface listing machine-scoped rows can name the deployment each belongs
+	/// surface listing machine-scoped rows can name the group each belongs
 	/// to without a query per row.
 	pub async fn group_refs_by_ids(
 		db: &mut AsyncPgConnection,

@@ -67,7 +67,7 @@ pub struct ServerDetailsData {
 	pub id: String,
 	/// Application display name.
 	pub name: String,
-	/// Application kind (deployment type).
+	/// The application's role within its type.
 	pub kind: String,
 	/// Application rank (e.g. production, test, dev).
 	pub rank: String,

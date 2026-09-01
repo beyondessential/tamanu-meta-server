@@ -32,6 +32,16 @@ Carried deferrals, each gated on a step above rather than on a vague later:
 - [x] Carry the machine on `IssueData` — done with the fleet query interface, which is what presented machine checks first
 - [ ] Link a machine's maintenance window to its detail page — with **Frontend**, which is what creates that page. The fleet maintenance view renders a machine target as plain text until then rather than linking somewhere that 404s
 
+## Terminology: W1's group / environment / instance
+
+W1 (PR #524, open) retires the word "deployment" and settles three terms: a **group** is what Canopy attaches shared state to, an **environment** is a group's members at one rank, and **the Canopy instance** is an installation of Canopy itself. `billing.deployment` keeps its spelling, being read by cloud cost allocation and by every device reading its effective tags. It adds an `AGENTS.md` rule with a `grep -rin deployment` expectation.
+
+This branch has been swept to that vocabulary — the ~24 uses it introduced, not main's ~322, which are W1's to remove. Sweeping ours keeps the branch clean under the new rule without duplicating W1's work or multiplying the conflict between two open PRs.
+
+**We settled the ambiguity W1 could not see.** GRP defines an environment as "a group's servers at one rank", which stops meaning one thing once servers split into machines and applications: `rank` lives only on applications, while `group_id` lives on both. So an environment is a set of *applications*, a machine belongs to a group without belonging to any of its environments, and a machine's stage is derived as the highest rank among the applications on it — which is what `APP` already says about billing. Written into `FLT` under "Groups", since we are the ones introducing the distinction. The cross-reference to GRP goes in when W1 lands; linking a file that does not exist on this branch would dangle.
+
+**Merge order matters.** 57 files are touched by both, three of which this branch renamed (`database/src/servers.rs`, `database/src/server_certificates.rs`, `private-server/src/fns/servers.rs`), plus `specs/servers/products.md` → `application-types.md`. W1 also renames `deployment_default_region()` → `instance_default_region()`, which this branch calls from the restore worklist. V2 landing first is much the cheaper order: replaying a vocabulary sweep over a rename is mechanical, where replaying a rename over a sweep means resolving 57 files of wholesale rewrites and hand-applying four renames.
+
 ## Sequencing
 
 **Rename first, then split.** The `servers` → `applications` rename lands before the machine grain, so the machine work is written against names that already read correctly and the affected tables are touched once rather than twice.

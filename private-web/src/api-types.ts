@@ -4257,7 +4257,7 @@ export interface components {
             may_manage_dns: boolean;
             /**
              * @description Whether this server may obtain TLS certificates for names under its
-             *     group's domains. Separate from `may_manage_dns`: a deployment whose
+             *     group's domains. Separate from `may_manage_dns`: an application whose
              *     records are managed elsewhere may still want its certificates here.
              */
             may_manage_tls: boolean;
@@ -6866,7 +6866,7 @@ export interface components {
             /**
              * Format: uuid
              * @description The group this machine belongs to. The one thing an operator supplies
-             *     when creating a machine: which deployment a box belongs to is the one
+             *     when creating a machine: which group a box belongs to is the one
              *     fact the box has no way of knowing. The applications on it take it.
              */
             group_id?: string | null;
@@ -6910,7 +6910,7 @@ export interface components {
          * @description What an operator supplies when adding a machine.
          *
          *     The group is the only field that matters to get right up front: which
-         *     deployment a box belongs to is the one thing the box has no way of knowing.
+         *     group a box belongs to is the one thing the box has no way of knowing.
          */
         MachineCreateArgs: {
             /** @description Whether the box is cloud-hosted, if known. */
@@ -9397,7 +9397,7 @@ export interface components {
          *     Three states and no degrees between them: a target is reachable,
          *     unreachable, or has never reported. How long it has been quiet is measured
          *     against that target's own configured threshold rather than any fixed one, so
-         *     a deployment that reports every few minutes and one that reports hourly are
+         *     a target that reports every few minutes and one that reports hourly are
          *     each judged on what is normal for them.
          * @enum {string}
          */

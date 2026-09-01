@@ -104,7 +104,7 @@ pub async fn get(
 /// What an operator supplies when adding a machine.
 ///
 /// The group is the only field that matters to get right up front: which
-/// deployment a box belongs to is the one thing the box has no way of knowing.
+/// group a box belongs to is the one thing the box has no way of knowing.
 #[derive(Deserialize, ToSchema)]
 pub struct MachineCreateArgs {
 	/// What to call the box. Distinct from the hostname its operating system

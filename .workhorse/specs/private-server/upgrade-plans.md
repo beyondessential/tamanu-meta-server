@@ -12,7 +12,7 @@ A plan makes the fleet's intended upgrades visible in one place, and it tells th
 This spec covers what a plan records, who sets it, when Canopy considers it met, and what reads it.
 
 It does not cover performing an upgrade.
-Canopy serves versions to applications and records what they report running; the act of upgrading is the deployment's own, and a plan is a statement of intent rather than an instruction to anything.
+Canopy serves versions to applications and records what they report running; the act of upgrading is the group's own, and a plan is a statement of intent rather than an instruction to anything.
 
 ## Why it exists
 

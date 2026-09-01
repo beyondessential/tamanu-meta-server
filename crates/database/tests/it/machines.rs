@@ -196,12 +196,12 @@ async fn an_identity_resolves_to_at_most_one_machine() {
 }
 
 /// A machine's group is what the applications on it take, so a group's
-/// machines are the unit a deployment is built from.
+/// machines are the unit a group is built from.
 // spec: FLT#groups
 #[tokio::test(flavor = "multi_thread")]
 async fn machines_are_listed_by_group_and_exclude_archived() {
 	TestDb::run(async |mut conn, _url| {
-		let group = insert_group(&mut conn, "deployment").await;
+		let group = insert_group(&mut conn, "a-group").await;
 		let other = insert_group(&mut conn, "elsewhere").await;
 
 		let kept = Machine::create(

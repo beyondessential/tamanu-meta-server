@@ -43,7 +43,7 @@ Reachability and health monitoring apply to every application whatever its type,
 Backups apply to every machine whatever its applications: a machine backs up the types its agent advertises, and which types those are is a property of the agent (see [BAK](../public-server/backup.md)).
 Managed restore replicas are eligible by intent and backup type rather than by application type, so a group-scoped declaration expands over the group's members whatever each member runs (see [RST](../public-server/restore-replicas.md)).
 
-Group membership carries no type constraint, so a deployment's applications stay in one group whatever each of them runs.
+Group membership carries no type constraint, so a group's applications stay in one group whatever each of them runs.
 
 An application's type is presented wherever the application is, so it is classified the same way in a listing as on its own page.
 The interfaces that filter a listing by rank filter by type on the same footing (see [MCP](../private-server/mcp.md)).
@@ -61,10 +61,10 @@ An application whose type has a tracked release train but which has not reported
 An application whose type has no version presents nothing rather than an unknown, because there is nothing to learn.
 
 A group's headline version is the version of the `tamanu-central` application running on the group's highest-ranked machine bearing that application.
-A deployment's version is its central's version.
+A group's version is its central's version.
 A group with no such application has no headline version.
 
-That headline is what an upgrade plan measures a deployment's current version from, as well as what a group presents (see [UPG](../private-server/upgrade-plans.md)).
+That headline is what an upgrade plan measures a group's current version from, as well as what a group presents (see [UPG](../private-server/upgrade-plans.md)).
 
 The fleet's active-version summary, and the fleet spread and crossings of the application version, cover only applications whose type has a tracked release train.
 
@@ -78,16 +78,17 @@ A public name already set is kept when an application stops being eligible, and 
 
 Each grain's billing labels carry what that grain knows, and nothing inferred from what sits inside it.
 
-An application's labels name its type, its stage from its own rank, and its deployment from its group.
+An application's labels name its type, its stage from its own rank, and `billing.deployment` from its group's name.
+That label keeps its spelling because cloud cost allocation reads it, and every device reads its own effective tags (see [GRP](groups.md), "Naming").
 
-A machine's labels name a stage and a deployment and no type, a box not being a piece of software.
+A machine's labels carry a stage and a group and no type, a box not being a piece of software.
 Its stage is the highest rank among the applications on it, so a box shared by a production and a test workload bills as production.
-Its deployment is its group.
+Its group is its own.
 
-A group's labels name a stage and a deployment and no type, a deployment not being a piece of software either.
+A group's labels carry a stage and its own name and no type, a group not being a piece of software either.
 
 A billing label an operator sets explicitly is honoured as given.
-The resources Canopy owns on a group's behalf are the exception: a group's backup storage attributes to Canopy's own backup product whatever labels the group carries, so backup spend is never charged to a deployment's application.
+The resources Canopy owns on a group's behalf are the exception: a group's backup storage attributes to Canopy's own backup product whatever labels the group carries, so backup spend is never charged to an application of that group.
 
 Recombining the grains is the agent's work rather than the data model's.
 The agent's billing-tags check reads the labels of the machine and of every application on it, and derives from both what the underlying instance should be tagged as.

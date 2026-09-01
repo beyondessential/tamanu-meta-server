@@ -13,7 +13,7 @@ An issue is scoped to what its check asserts something about — an application,
 
 Machine-scoped and application-scoped issues belong to the target of the group the machine or application is in; an issue on something belonging to no group belongs to no target and cannot contribute to incidents.
 Group-scoped issues belong to that group's target; Canopy-wide issues belong to the Canopy target.
-So a deployment's trouble is one incident whether it began on a box or in the software on it, and a machine's failure is not split across the applications it hosts.
+So a group's trouble is one incident whether it began on a box or in the software on it, and a machine's failure is not split across the applications it hosts.
 
 ## Membership
 

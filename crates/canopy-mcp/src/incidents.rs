@@ -223,7 +223,7 @@ enum IssueScopeOut {
 	Application { id: Uuid, name: Option<String> },
 	/// The box: its disks, its memory, its clock, its reachability.
 	Machine { id: Uuid, name: Option<String> },
-	/// The deployment as a whole, rather than any one of its parts.
+	/// The group as a whole, rather than any one of its parts.
 	Group { id: Uuid, name: Option<String> },
 	/// Canopy watching itself.
 	Canopy,
@@ -273,7 +273,7 @@ struct IncidentIssueOut {
 	description: Option<String>,
 	message: String,
 	active: bool,
-	/// Whose failure this is: the box, the software on it, the deployment, or
+	/// Whose failure this is: the box, the software on it, the group, or
 	/// Canopy itself.
 	scope: IssueScopeOut,
 	first_seen: Timestamp,
@@ -308,7 +308,7 @@ struct IncidentDetail {
 #[derive(Serialize)]
 struct IssueSummary {
 	id: Uuid,
-	/// Whose failure this is: the box, the software on it, the deployment, or
+	/// Whose failure this is: the box, the software on it, the group, or
 	/// Canopy itself.
 	scope: IssueScopeOut,
 	source: String,

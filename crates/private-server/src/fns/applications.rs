@@ -428,7 +428,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 /// Filter and pagination parameters for listing applications.
 #[derive(Deserialize, ToSchema)]
 pub struct ServerListArgs {
-	/// Restrict results to applications of this deployment kind. Omit to
+	/// Restrict results to applications of this kind. Omit to
 	/// include all kinds.
 	pub kind: Option<ServerKind>,
 	/// Number of items to skip from the start of the result set.
