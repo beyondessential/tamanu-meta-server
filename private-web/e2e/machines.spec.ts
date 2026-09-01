@@ -195,15 +195,17 @@ test.describe("machine detail", () => {
 
 		await page.getByRole("button", { name: "For this machine" }).click();
 
-		// It reads as silenced against the box, and the machine's own silences
-		// section appears — it renders only when the box has one.
-		await expect(page.getByText("Silenced for this machine")).toBeVisible();
-		await page.keyboard.press("Escape");
+		// Wait on the section first: it renders only once the write has landed
+		// and the page refetched, so it is the signal that the silence exists.
+		// The popover's own text re-renders off the same fetch, and asserting on
+		// it first raced that round trip under load.
 		await expect(
 			page.getByRole("heading", { name: /Silenced refs/ }),
 		).toBeVisible();
 		await expect(
 			page.getByText("issues with these refs on this machine"),
 		).toBeVisible();
+		// And the popover now offers to lift it rather than to set it.
+		await expect(page.getByText("Silenced for this machine")).toBeVisible();
 	});
 });

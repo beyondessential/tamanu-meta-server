@@ -8,23 +8,24 @@ import type { HealthState, ShortStatus } from "../types";
 // only its contents do. A box hosting two workloads is one pill with two dots,
 // which is the whole point of the grain.
 //
+// The pill is drawn as an outline with a wash rather than a solid fill, so the
+// dots inside stay the loudest thing in it. A machine's state is context for
+// its applications', not a competitor to it.
+//
 // Orange is the enclosure's alone, so each hue means one thing: light green a
 // degraded application, orange a degraded machine, red down. A red pill is the
 // box, and everything on it is unreachable with it.
 // spec: CHK#presentation
-const NEUTRAL = "action.hover";
-const DEGRADED = "warning.light";
-const DOWN = "error.light";
-const NEVER = "action.disabledBackground";
+const STATES = {
+	fine: { border: "rgba(0, 0, 0, 0.18)", fill: "transparent" },
+	degraded: { border: "warning.main", fill: "rgba(237, 108, 2, 0.10)" },
+	down: { border: "error.main", fill: "rgba(211, 47, 47, 0.12)" },
+	// A box that has never reported: outlined like any other, washed out rather
+	// than coloured, since there is nothing yet to say about it.
+	never: { border: "rgba(0, 0, 0, 0.12)", fill: "action.disabledBackground" },
+} as const;
 
-function enclosureColor(up: ShortStatus, health: HealthState): string {
-	if (up === "gone") return NEVER;
-	if (up === "down") return DOWN;
-	if (health === "unhealthy" || health === "warning") return DEGRADED;
-	return NEUTRAL;
-}
-
-// A window hatches the pill's fill rather than cutting through it the way a
+// A window hatches the pill's wash rather than cutting through it the way a
 // dot's does. A mask on the enclosure would clip the dots inside it as well,
 // which would say something about the applications — and a window is the box's.
 // The hatch runs the same way as the dot's maintenance cut, so the two read as
@@ -32,6 +33,13 @@ function enclosureColor(up: ShortStatus, health: HealthState): string {
 // spec: MNT#presentation
 const MAINTAINED_HATCH =
 	"repeating-linear-gradient(45deg, transparent 0 4px, rgba(0, 0, 0, 0.16) 4px 8px)";
+
+function enclosureState(up: ShortStatus, health: HealthState) {
+	if (up === "gone") return STATES.never;
+	if (up === "down") return STATES.down;
+	if (health === "unhealthy" || health === "warning") return STATES.degraded;
+	return STATES.fine;
+}
 
 function enclosureTitle(up: ShortStatus, health: HealthState): string {
 	if (up === "gone") return "Machine has never reported";
@@ -61,6 +69,7 @@ export default function MachineEnclosure({
 	/** The dots for the applications on this machine. */
 	children: ReactNode;
 }) {
+	const state = enclosureState(up, health);
 	const title = [
 		name,
 		enclosureTitle(up, health),
@@ -75,14 +84,17 @@ export default function MachineEnclosure({
 				sx={{
 					display: "inline-flex",
 					alignItems: "center",
-					bgcolor: enclosureColor(up, health),
-					borderRadius: "999px",
+					gap: "0.35em",
+					border: 1,
+					borderColor: state.border,
+					bgcolor: state.fill,
 					backgroundImage: maintained ? MAINTAINED_HATCH : undefined,
-					px: 0.5,
-					py: 0.25,
-					// The dots carry their own right margin; trim the last one so
-					// the pill closes evenly around whatever it holds.
-					"& > *:last-child": { marginRight: 0 },
+					borderRadius: "999px",
+					px: "4px",
+					py: "3px",
+					// The dots carry their own right margin, which the pill's own
+					// gap replaces.
+					"& span": { marginRight: 0 },
 				}}
 			>
 				{children}

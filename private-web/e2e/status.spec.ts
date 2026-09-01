@@ -2,6 +2,7 @@ import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
 	seedDevice,
+	seedIncident,
 	seedMachine,
 	seedMaintenanceWindow,
 	seedServer,
@@ -279,6 +280,49 @@ test.describe("status page", () => {
 			);
 		expect(fills).toHaveLength(2);
 		expect(fills.every((f) => f !== "none")).toBe(true);
+	});
+
+	/// A quiet card is two bands. The third says what is happening to the
+	/// group, so a card only grows one when something is.
+	///
+	/// spec: CHK#presentation
+	test("the status band appears only when there is something to put in it", async ({
+		page,
+		sql,
+	}) => {
+		const quiet = await seedServerGroup(sql, { name: "quiet-group" });
+		await seedServer(sql, {
+			name: "quiet-one",
+			rank: "production",
+			groupId: quiet.id,
+		});
+		const noisy = await seedServerGroup(sql, { name: "noisy-group" });
+		await seedServer(sql, {
+			name: "noisy-one",
+			rank: "production",
+			groupId: noisy.id,
+		});
+		await seedIncident(sql, { serverGroupId: noisy.id });
+
+		await page.goto("/status");
+
+		// The quiet card has no incident mark at all.
+		const quietCard = page.locator(`a[href="/groups/${quiet.id}"]`).first();
+		await expect(quietCard.getByText("incident", { exact: false })).toHaveCount(
+			0,
+		);
+
+		// The noisy one carries its incident in a band of its own.
+		const noisyCard = page.locator(`a[href="/groups/${noisy.id}"]`).first();
+		await expect(
+			noisyCard.getByText("incident", { exact: false }).first(),
+		).toBeVisible();
+
+		// The rank is spelled out behind the row rather than marked by a
+		// separator between runs of dots.
+		await expect(
+			quietCard.locator("[data-testid='rank-row'][data-rank='production']"),
+		).toHaveCount(1);
 	});
 
 	// spec: FIG#active-versions

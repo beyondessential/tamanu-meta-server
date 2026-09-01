@@ -264,6 +264,9 @@ function GroupCardLoader({
 			<Card
 				variant="outlined"
 				sx={{
+					// The bands run edge to edge, so the card clips them to its
+					// own rounded corners.
+					overflow: "hidden",
 					transition: "background-color 150ms",
 					bgcolor: occupied ? "action.hover" : undefined,
 					"&:hover": {
@@ -275,26 +278,35 @@ function GroupCardLoader({
 					}),
 				}}
 			>
-				<CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
-					{result.status === "loading" || result.status === "idle" ? (
+				{result.status === "loading" || result.status === "idle" ? (
+					<CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
 						<Typography variant="body2" color="text.secondary">
 							Thinking…
 						</Typography>
-					) : result.status === "error" ? (
+					</CardContent>
+				) : result.status === "error" ? (
+					<CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
 						<Alert severity="error">{result.error.message}</Alert>
-					) : (
-						<GroupCard
-							group={result.data}
-							operators={operators}
-							openIncident={openIncident}
-						/>
-					)}
-				</CardContent>
+					</CardContent>
+				) : (
+					<GroupCard
+						group={result.data}
+						operators={operators}
+						openIncident={openIncident}
+					/>
+				)}
 			</Card>
 		</MuiLink>
 	);
 }
 
+/// A group card, in three bands: what it is, what is in it, and what is
+/// happening to it.
+///
+/// The status band is omitted when there is neither an operator nor an
+/// incident, so a quiet card is two bands and the eye is drawn to the ones
+/// that have a third.
+/// spec: CHK#presentation
 function GroupCard({
 	group,
 	operators,
@@ -311,12 +323,20 @@ function GroupCard({
 	const tracking = useVersionTrackingAcross(
 		useMemo(() => group.members.map((m) => m.type), [group.members]),
 	);
+	const hasStatusBand = operators.length > 0 || openIncident !== null;
 	return (
-		<Stack spacing={1}>
-			<Stack
-				direction="row"
-				spacing={1}
-				sx={{ alignItems: "baseline", justifyContent: "space-between" }}
+		<Box>
+			<Box
+				sx={{
+					display: "flex",
+					alignItems: "baseline",
+					justifyContent: "space-between",
+					gap: 1,
+					px: "10px",
+					py: "8px",
+					borderBottom: 1,
+					borderColor: "divider",
+				}}
 			>
 				<Typography
 					variant="subtitle1"
@@ -338,37 +358,80 @@ function GroupCard({
 						addLink={false}
 					/>
 				</Box>
-			</Stack>
-			<Stack
-				direction="row"
-				spacing={1}
-				sx={{ alignItems: "center", justifyContent: "space-between" }}
-			>
-				<RankedDotStrip members={group.members} />
-				<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
+			</Box>
+
+			<RankedDotStrip members={group.members} />
+
+			{hasStatusBand && (
+				<Box
+					sx={{
+						display: "flex",
+						alignItems: "stretch",
+						borderTop: 1,
+						borderColor: "divider",
+						fontSize: "0.6875rem",
+					}}
+				>
 					{operators.length > 0 && (
-						<OperatorCountChip operators={operators} />
+						<Box
+							sx={{
+								display: "flex",
+								alignItems: "center",
+								gap: 0.5,
+								px: 1,
+								py: 0.5,
+								bgcolor: "action.hover",
+								color: "text.secondary",
+								// Only when something sits beside it; the segment
+								// squares off the card's bottom edge otherwise.
+								...(openIncident !== null
+									? { borderRight: 1, borderColor: "divider" }
+									: { flex: 1 }),
+							}}
+						>
+							<OperatorCountChip operators={operators} />
+						</Box>
 					)}
-					{openIncident === "loud" && (
-						<Chip label="incident" color="error" size="small" />
+					{openIncident !== null && (
+						<Box
+							sx={{
+								flex: 1,
+								display: "flex",
+								alignItems: "center",
+								justifyContent: "flex-end",
+								px: 1,
+								py: 0.5,
+								bgcolor: "action.hover",
+								color: "text.secondary",
+							}}
+						>
+							<IncidentMark loudness={openIncident} />
+						</Box>
 					)}
-					{openIncident === "held" && (
-						<Tooltip title="Open incident; Slack notice is still inside the per-group cooldown window">
-							<Chip label="incident (held)" color="warning" size="small" />
-						</Tooltip>
-					)}
-					{openIncident === "lingering" && (
-						<Tooltip title="Open incident whose failures have all recovered; it closes if they stay quiet through the linger window">
-							<Chip
-								label="incident (recovering)"
-								color="info"
-								size="small"
-							/>
-						</Tooltip>
-					)}
-				</Stack>
-			</Stack>
-		</Stack>
+				</Box>
+			)}
+		</Box>
+	);
+}
+
+/// What an open incident on this group reads as, which is not the same as how
+/// loud it is: a held one is not yet in Slack, and a recovering one has had its
+/// failures clear and is waiting out the linger window.
+function IncidentMark({ loudness }: { loudness: IncidentLoudness }) {
+	if (loudness === "loud") {
+		return <Chip label="incident" color="error" size="small" />;
+	}
+	if (loudness === "held") {
+		return (
+			<Tooltip title="Open incident; Slack notice is still inside the per-group cooldown window">
+				<Chip label="incident (held)" color="warning" size="small" />
+			</Tooltip>
+		);
+	}
+	return (
+		<Tooltip title="Open incident whose failures have all recovered; it closes if they stay quiet through the linger window">
+			<Chip label="incident (recovering)" color="info" size="small" />
+		</Tooltip>
 	);
 }
 
@@ -454,16 +517,38 @@ export function RankedDotStrip({ members }: { members: FacilityServerStatus[] })
 				<Box
 					key={rank ?? "_unranked"}
 					data-testid="rank-row"
+					data-rank={rank ?? "unranked"}
 					sx={{
+						position: "relative",
 						display: "flex",
 						flexWrap: "wrap",
 						alignItems: "center",
-						gap: 0.5,
+						gap: "0.4em",
+						px: "10px",
+						py: "7px",
 						// A rule lighter than the card's own borders, so the rank
 						// break reads as subordinate to the card structure.
 						...(index > 0
-							? { borderTop: 1, borderColor: "divider", pt: 0.5 }
+							? { borderTop: 1, borderColor: "divider" }
 							: {}),
+						// The rank spelled out behind its own row, faint enough to
+						// read only when looked for. It replaces the triangle that
+						// used to mark the break without naming it, and needs no
+						// space of its own.
+						"&::after": {
+							content: "attr(data-rank)",
+							position: "absolute",
+							right: "8px",
+							top: "50%",
+							transform: "translateY(-50%)",
+							fontSize: "0.9375rem",
+							fontWeight: 500,
+							letterSpacing: "0.06em",
+							textTransform: "uppercase",
+							color: "rgba(0, 0, 0, 0.09)",
+							pointerEvents: "none",
+							zIndex: 0,
+						},
 					}}
 				>
 					{boxes.map((box) => (
