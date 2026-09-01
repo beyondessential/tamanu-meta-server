@@ -36,7 +36,7 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import { useReloadInterval } from "../hooks/useReloadInterval";
 import {
 	SERVER_RANK_ORDER,
-	compareServersByRankThenKind,
+	compareServersByRankThenType,
 	healthcheckSettingsPath,
 	type CheckDetailData,
 	type CheckDetailGroupData,
@@ -351,7 +351,7 @@ function AttentionList({
 										/>
 									)}
 									{[...section.servers]
-										.sort(compareServersByRankThenKind_)
+										.sort(compareServersByRankThenType_)
 										.map((server) => (
 											<StateRow
 												key={server.server_id}
@@ -398,15 +398,15 @@ function AttentionList({
 	);
 }
 
-/// The servers within a section share a rank bucket; ordering reduces to
-/// the standard kind-then-name comparison.
-function compareServersByRankThenKind_(
+/// The applications within a section share a rank bucket; ordering reduces to
+/// the standard type-then-name comparison.
+function compareServersByRankThenType_(
 	a: CheckDetailServerData,
 	b: CheckDetailServerData,
 ): number {
-	return compareServersByRankThenKind(
-		{ rank: a.rank, kind: a.kind, name: a.server_name },
-		{ rank: b.rank, kind: b.kind, name: b.server_name },
+	return compareServersByRankThenType(
+		{ rank: a.rank, type: a.type, name: a.server_name },
+		{ rank: b.rank, type: b.type, name: b.server_name },
 	);
 }
 

@@ -16,17 +16,12 @@ import { useNavigate, useParams } from "react-router-dom";
 import { callApi, useApi, useApiAction } from "../api";
 import TagsEditor from "../components/TagsEditor";
 import { usePageTitle } from "../hooks/usePageTitle";
-import {
-	useProductCaps,
-	useProductKinds,
-	useProducts,
-} from "../hooks/useProducts";
-import { PRODUCT_LABELS, REACHABILITY_CHECK } from "../types";
+import ApplicationTypeChip from "../components/ApplicationTypeChip";
+import { useApplicationTypeCaps } from "../hooks/useApplicationTypes";
+import { REACHABILITY_CHECK } from "../types";
 import type {
-	Product,
 	ServerGroup,
 	ServerInfo,
-	ServerKind,
 	ServerRank,
 	TagMap,
 } from "../types";
@@ -96,12 +91,10 @@ function EditForm({
 
 	const [name, setName] = useState(info.name ?? "");
 	const [host, setHost] = useState(info.host ?? "");
-	const [product, setProduct] = useState<Product>(info.product);
-	const [kind, setKind] = useState<ServerKind>(info.kind);
-	const products = useProducts();
-	const kinds = useProductKinds(product);
-	const caps = useProductCaps(product);
-	const canListPublicly = caps?.public_listing === true && kind === "central";
+	// The type is reported rather than entered, so it is shown and not offered.
+	// spec: APP#where-a-type-comes-from
+	const caps = useApplicationTypeCaps(info.type);
+	const canListPublicly = caps?.public_listing === true;
 	const [rank, setRank] = useState<ServerRank | "">(info.rank ?? "");
 	const [publicName, setPublicName] = useState<string>(info.public_name ?? "");
 	// `is_monitored` carries the on/off toggle; `alert_when_down_for` is the
@@ -141,8 +134,6 @@ function EditForm({
 			name: name.trim(),
 			// Empty string clears the URL (server identified by its device only).
 			host: host.trim(),
-			product,
-			kind,
 			rank: rank === "" ? null : rank,
 			// Sent whether or not the field is currently offered: a public name
 			// already set survives the server losing eligibility, and takes effect
@@ -204,48 +195,12 @@ function EditForm({
 					onChange={(e) => setHost(e.target.value)}
 					disabled={pending}
 				/>
-				<TextField
-					select
-					label="Product"
-					value={product}
-					onChange={(e) => {
-						const next = e.target.value as Product;
-						setProduct(next);
-						// A role its new product doesn't define would leave the
-						// server misclassified, so follow the product. The
-						// endpoint applies the same rule if we don't.
-						// spec: APP#product-and-kind
-						const info = products.find((p) => p.product === next);
-						if (info && !info.kinds.includes(kind)) {
-							setKind(info.default_kind);
-						}
-					}}
-					disabled={pending}
-				>
-					{products.map((p) => (
-						<MenuItem key={p.product} value={p.product}>
-							{PRODUCT_LABELS[p.product]}
-						</MenuItem>
-					))}
-				</TextField>
-				<TextField
-					select
-					label="Kind"
-					value={kind}
-					onChange={(e) => setKind(e.target.value as ServerKind)}
-					disabled={pending || kinds.length < 2}
-					helperText={
-						kinds.length < 2
-							? `${PRODUCT_LABELS[product]} servers have one role`
-							: undefined
-					}
-				>
-					{kinds.map((k) => (
-						<MenuItem key={k} value={k}>
-							{k}
-						</MenuItem>
-					))}
-				</TextField>
+				<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+					<Typography variant="body2" color="text.secondary">
+						Type
+					</Typography>
+					<ApplicationTypeChip type={info.type} />
+				</Stack>
 				<TextField
 					select
 					label="Rank"

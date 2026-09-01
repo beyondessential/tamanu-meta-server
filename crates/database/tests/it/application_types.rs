@@ -504,3 +504,44 @@ async fn public_search_excludes_types_that_are_not_listed() {
 	})
 	.await
 }
+
+/// A group's shared cost can only be attributed to one product when its
+/// members agree on one. They agree on software rather than on type: a central
+/// and a facility of one deployment are both Tamanu.
+#[tokio::test(flavor = "multi_thread")]
+async fn sole_member_software_is_absent_for_a_group_spanning_two() {
+	commons_tests::db::TestDb::run(|mut conn, _url| async move {
+		let tamanu = group(&mut conn, "tamanu-only").await;
+		let mixed = group(&mut conn, "mixed").await;
+
+		for (g, r#type) in [
+			(tamanu.id, ApplicationType::TamanuCentral),
+			// The pair that used to be one product in two roles still is.
+			(tamanu.id, ApplicationType::TamanuFacility),
+			(mixed.id, ApplicationType::TamanuCentral),
+			(mixed.id, ApplicationType::Senaite),
+		] {
+			let m = machine(&mut conn, Some(g)).await;
+			Application::create(
+				&mut conn,
+				Application {
+					group_id: Some(g),
+					..server(r#type, None, m)
+				},
+			)
+			.await
+			.unwrap();
+		}
+
+		let sole = ServerGroup::sole_member_software(&mut conn, &[tamanu.id, mixed.id])
+			.await
+			.unwrap();
+		assert_eq!(
+			sole.get(&tamanu.id).map(String::as_str),
+			Some("tamanu"),
+			"a central and a facility are one software"
+		);
+		assert_eq!(sole.get(&mixed.id), None, "members span two software");
+	})
+	.await
+}

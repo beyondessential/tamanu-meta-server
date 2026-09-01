@@ -15,58 +15,26 @@ import { useNavigate, useParams } from "react-router-dom";
 import { callApi, useApi, useApiAction } from "../api";
 import TagsEditor from "../components/TagsEditor";
 import { usePageTitle } from "../hooks/usePageTitle";
-import {
-	useProductCaps,
-	useProductKinds,
-	useProducts,
-} from "../hooks/useProducts";
-import { PRODUCT_LABELS, REACHABILITY_CHECK } from "../types";
-import type {
-	Product,
-	ServerGroup,
-	ServerKind,
-	ServerRank,
-	TagMap,
-	TailnetLiveInfo,
-} from "../types";
+import type { ServerGroup, TagMap, TailnetLiveInfo } from "../types";
 
-const RANK_OPTIONS: Array<{ value: ServerRank | ""; label: string }> = [
-	{ value: "", label: "unranked" },
-	{ value: "production", label: "production" },
-	{ value: "clone", label: "clone" },
-	{ value: "demo", label: "demo" },
-	{ value: "test", label: "test" },
-	{ value: "dev", label: "dev" },
-];
-
-/// Operator-first server creation, reachable at `/groups/:id/servers/new` with
-/// the group preselected. A group is required — servers are always grouped.
-export default function ServerCreate() {
-	usePageTitle("Add server");
+/// Operator-first machine creation, reachable at `/groups/:id/machines/new`
+/// with the group preselected. A group is required — machines are always
+/// grouped.
+///
+/// A machine is what an operator adds; the applications on it arrive by report
+/// and take its group. So there is nothing here about an application's type,
+/// rank, URL or public name.
+/// spec: APP#where-a-type-comes-from
+export default function MachineCreate() {
+	usePageTitle("Add machine");
 	const navigate = useNavigate();
-	// When mounted under `/groups/:id/servers/new`, the route param is the
+	// When mounted under `/groups/:id/machines/new`, the route param is the
 	// group to default-select.
 	const { id: presetGroupId } = useParams<{ id?: string }>();
-	const action = useApiAction("servers", "create");
-	const silence = useApiAction("silenced_refs", "silence_server");
+	const action = useApiAction("machines", "create");
 
 	const [name, setName] = useState("");
-	const [host, setHost] = useState("");
-	const [product, setProduct] = useState<Product>("tamanu");
-	const [kind, setKind] = useState<ServerKind>("facility");
-	const products = useProducts();
-	const kinds = useProductKinds(product);
-	const caps = useProductCaps(product);
-	const canListPublicly = caps?.public_listing === true && kind === "central";
-	const [rank, setRank] = useState<ServerRank | "">("");
-	const [publicName, setPublicName] = useState("");
 	const [isMonitored, setIsMonitored] = useState(true);
-	// Off means "alert on everything else, just not this server going away".
-	// Written as the server-scoped silence on canopy's reachability check,
-	// the same one the check itself offers — so it can only be applied once
-	// the server exists.
-	// spec: CHK#operator-controls
-	const [alertWhenUnreachable, setAlertWhenUnreachable] = useState(true);
 	const [alertWhenDownMinutes, setAlertWhenDownMinutes] = useState("10");
 	const [groupId, setGroupId] = useState<string | null>(presetGroupId ?? null);
 	const [tailscaleIdentifier, setTailscaleIdentifier] = useState("");
@@ -76,23 +44,14 @@ export default function ServerCreate() {
 	const [notes, setNotes] = useState("");
 	const [tags, setTags] = useState<TagMap>({});
 
-	const pending = action.pending || silence.pending;
-	const error = action.error ?? silence.error;
+	const pending = action.pending;
+	const error = action.error;
 
 	const onSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
 		if (!groupId || !name.trim()) return; // name and group are required
 		const data: Record<string, unknown> = {
 			name: name.trim(),
-			host: host.trim(),
-			product,
-			kind,
-			rank: rank === "" ? null : rank,
-			// Only a product/kind combination that can be listed carries a
-			// public name; the field isn't offered otherwise.
-			// spec: APP#public-listing
-			public_name:
-				canListPublicly && publicName.trim() !== "" ? publicName.trim() : null,
 			group_id: groupId,
 			tailscale_identifier:
 				tailscaleIdentifier.trim() === "" ? null : tailscaleIdentifier.trim(),
@@ -108,15 +67,10 @@ export default function ServerCreate() {
 			tags,
 		};
 		try {
-			const serverId = await action.call(data);
-			if (!alertWhenUnreachable) {
-				await silence.call({
-					server_id: serverId,
-					source: REACHABILITY_CHECK.source,
-					ref: REACHABILITY_CHECK.ref,
-				});
-			}
-			navigate(`/servers/${serverId}`);
+			await action.call(data);
+			// Back to the group: a machine's own page is not built yet, and the
+			// group is where the box now appears.
+			navigate(`/groups/${groupId}`);
 		} catch {
 			/* surfaced via the actions' errors */
 		}
@@ -126,7 +80,7 @@ export default function ServerCreate() {
 		<Paper variant="outlined" sx={{ p: 3 }} component="form" onSubmit={onSubmit}>
 			<Stack spacing={2}>
 				<Typography variant="h5" component="h1">
-					Add server
+					Add machine
 				</Typography>
 
 				<TextField
@@ -136,67 +90,6 @@ export default function ServerCreate() {
 					disabled={pending}
 					required
 				/>
-				<TextField
-					label="URL"
-					value={host}
-					onChange={(e) => setHost(e.target.value)}
-					disabled={pending}
-				/>
-				<TextField
-					select
-					label="Product"
-					value={product}
-					onChange={(e) => {
-						const next = e.target.value as Product;
-						setProduct(next);
-						// A role its new product doesn't define would leave the
-						// server misclassified, so follow the product.
-						// spec: APP#product-and-kind
-						const info = products.find((p) => p.product === next);
-						if (info && !info.kinds.includes(kind)) {
-							setKind(info.default_kind);
-						}
-					}}
-					disabled={pending}
-				>
-					{products.map((p) => (
-						<MenuItem key={p.product} value={p.product}>
-							{PRODUCT_LABELS[p.product]}
-						</MenuItem>
-					))}
-				</TextField>
-				<TextField
-					select
-					label="Kind"
-					value={kind}
-					onChange={(e) => setKind(e.target.value as ServerKind)}
-					disabled={pending || kinds.length < 2}
-					helperText={
-						kinds.length < 2
-							? `${PRODUCT_LABELS[product]} servers have one role`
-							: undefined
-					}
-				>
-					{kinds.map((k) => (
-						<MenuItem key={k} value={k}>
-							{k}
-						</MenuItem>
-					))}
-				</TextField>
-				<TextField
-					select
-					label="Rank"
-					value={rank}
-					onChange={(e) => setRank(e.target.value as ServerRank | "")}
-					disabled={pending}
-				>
-					{RANK_OPTIONS.map((o) => (
-						<MenuItem key={o.value} value={o.value}>
-							{o.label}
-						</MenuItem>
-					))}
-				</TextField>
-
 				<TailscaleIdentityField
 					value={tailscaleIdentifier}
 					onChange={setTailscaleIdentifier}
@@ -239,16 +132,6 @@ export default function ServerCreate() {
 					/>
 				</Stack>
 
-				{canListPublicly && (
-					<TextField
-						label="Name in Tamanu Mobile app"
-						value={publicName}
-						onChange={(e) => setPublicName(e.target.value)}
-						disabled={pending}
-						helperText="Leave empty to hide this server from the public mobile-app list."
-					/>
-				)}
-
 				<FormControlLabel
 					control={
 						<Checkbox
@@ -257,31 +140,14 @@ export default function ServerCreate() {
 							disabled={pending}
 						/>
 					}
-					label="Monitor this server"
+					label="Monitor this machine"
 				/>
 				<Typography variant="caption" color="text.secondary">
-					When off, no check on this server alerts: its checks are still
+					When off, no check on this machine alerts: its checks are still
 					determined and shown, and its health and reachability are marked
 					as unmonitored wherever they appear, but nothing triggers or joins
-					an incident. Use this for test environments and ad-hoc demos that
-					are expected to be down.
-				</Typography>
-
-				<FormControlLabel
-					control={
-						<Checkbox
-							checked={alertWhenUnreachable}
-							onChange={(e) => setAlertWhenUnreachable(e.target.checked)}
-							disabled={pending}
-						/>
-					}
-					label="Alert when this server is unreachable"
-				/>
-				<Typography variant="caption" color="text.secondary">
-					When off, every other check alerts as normal and only the server
-					going away is quiet. This is the same as silencing the
-					reachability check on this server, and either place reflects the
-					other.
+					an incident. The applications on it are unaffected. Use this for
+					test environments and ad-hoc demos that are expected to be down.
 				</Typography>
 
 				<Stack
@@ -290,14 +156,14 @@ export default function ServerCreate() {
 					sx={{ alignItems: { md: "center" } }}
 				>
 					<Typography variant="body2">
-						File an issue when this server is unreachable for
+						File an issue when this machine is unreachable for
 					</Typography>
 					<TextField
 						label="minutes"
 						type="number"
 						value={alertWhenDownMinutes}
 						onChange={(e) => setAlertWhenDownMinutes(e.target.value)}
-						disabled={pending || !isMonitored || !alertWhenUnreachable}
+						disabled={pending || !isMonitored}
 						slotProps={{ htmlInput: { min: 1, step: 1 } }}
 						sx={{ width: 140 }}
 					/>
@@ -310,7 +176,7 @@ export default function ServerCreate() {
 					value={notes}
 					onChange={(e) => setNotes(e.target.value)}
 					disabled={pending}
-					helperText="Operator notes shown on the server's detail page. Plain text."
+					helperText="Operator notes shown on the machine's page. Plain text."
 				/>
 
 				<Stack spacing={1}>
@@ -326,7 +192,7 @@ export default function ServerCreate() {
 						variant="contained"
 						disabled={pending || !groupId || !name.trim()}
 					>
-						{pending ? "Creating…" : "Create server"}
+						{pending ? "Creating…" : "Create machine"}
 					</Button>
 					<Button
 						type="button"
@@ -345,7 +211,7 @@ export default function ServerCreate() {
 
 /// Optional Tailscale identity field with a debounced live preview from
 /// `devices.resolve_tailnet_identifier`. The raw value is passed to
-/// `servers.create` as `tailscale_identifier`.
+/// `machines.create` as `tailscale_identifier`.
 function TailscaleIdentityField({
 	value,
 	onChange,
@@ -508,8 +374,8 @@ function GroupControl({
 						placeholder="Search by name, or pick from the list"
 						helperText={
 							missing
-								? "Required — every server belongs to a group."
-								: "The group this server belongs to."
+								? "Required — every machine belongs to a group."
+								: "The group this machine belongs to."
 						}
 					/>
 				);

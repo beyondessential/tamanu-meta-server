@@ -2,7 +2,7 @@ import { Alert, LinearProgress, Stack } from "@mui/material";
 import ServerShorty from "../components/ServerShorty";
 import { useApi } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
-import { compareServersByRankThenKind } from "../types";
+import { compareServersByRankThenType } from "../types";
 
 export default function UngroupedServersList() {
 	usePageTitle("Ungrouped servers");
@@ -21,7 +21,7 @@ export default function UngroupedServersList() {
 			</Alert>
 		);
 	}
-	const sorted = [...result.data.items].sort(compareServersByRankThenKind);
+	const sorted = [...result.data.items].sort(compareServersByRankThenType);
 	return (
 		<Stack spacing={1}>
 			{sorted.map((s) => (

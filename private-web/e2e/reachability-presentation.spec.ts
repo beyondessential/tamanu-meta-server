@@ -116,14 +116,14 @@ test.describe("unmonitored servers are marked", () => {
 		const group = await seedServerGroup(sql, { name: "mixed-monitoring" });
 		const watched = await seedServer(sql, {
 			name: "watched",
-			kind: "central",
+			type: "tamanu-central",
 			rank: "production",
 			groupId: group.id,
 			isMonitored: true,
 		});
 		const ignored = await seedServer(sql, {
 			name: "ignored",
-			kind: "facility",
+			type: "tamanu-facility",
 			rank: "production",
 			groupId: group.id,
 			isMonitored: false,

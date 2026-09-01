@@ -27,7 +27,7 @@ import TimeAgo from "../components/TimeAgo";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { humanDuration } from "../lib/humanDuration";
 import {
-	compareServersByRankThenKind,
+	compareServersByRankThenType,
 	type DeviceConnectionData,
 	type DeviceInfo,
 	type DeviceKeyInfo,
@@ -456,7 +456,7 @@ function ServersListSection({
 }) {
 	const items =
 		result.status === "ok" && sort
-			? [...result.data].sort(compareServersByRankThenKind)
+			? [...result.data].sort(compareServersByRankThenType)
 			: result.status === "ok"
 				? result.data
 				: [];

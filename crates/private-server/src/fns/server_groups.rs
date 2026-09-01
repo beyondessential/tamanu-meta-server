@@ -127,12 +127,15 @@ pub(crate) async fn group_billing_labels(
 		.await?
 		.get(&group.id)
 		.copied();
-	// A group's own resources carry no product: a group is not a piece of
-	// software, and naming one of its members' would attribute shared cost to
-	// whichever happened to be picked.
+	// A group names a product only when its members agree on one; naming one
+	// of several would attribute shared cost to whichever happened to be
+	// picked. A central and a facility are both Tamanu, so the pair agrees.
 	// spec: APP#billing-attribution
+	let software = ServerGroup::sole_member_software(conn, &[group.id])
+		.await?
+		.remove(&group.id);
 	Ok(
-		BillingLabels::from_group(&group.tags, &group.name, None, highest_rank)
+		BillingLabels::from_group(&group.tags, &group.name, software, highest_rank)
 			.into_tags()
 			.into_iter()
 			.map(|(key, value)| BillingTag { key, value })

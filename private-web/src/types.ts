@@ -73,11 +73,10 @@ export type Solidify<T> = T extends readonly unknown[]
 
 export type ShortStatus = Solidify<Schemas["ShortStatus"]>;
 export type HealthState = Solidify<Schemas["HealthState"]>;
-export type ServerKind = Solidify<Schemas["ServerKind"]>;
-export type Product = Solidify<Schemas["Product"]>;
+export type ApplicationType = Solidify<Schemas["ApplicationType"]>;
 export type VersionTracking = Solidify<Schemas["VersionTracking"]>;
 export type Caps = Solidify<Schemas["Caps"]>;
-export type ProductInfo = Solidify<Schemas["ProductInfo"]>;
+export type ApplicationTypeInfo = Solidify<Schemas["ApplicationTypeInfo"]>;
 export type ServerRank = Solidify<Schemas["ServerRank"]>;
 export type VersionStatus = Solidify<Schemas["VersionStatus"]>;
 export type DeviceRole = Solidify<Schemas["DeviceRole"]>;
@@ -243,40 +242,38 @@ export const SERVER_RANK_ORDER: ServerRank[] = [
 	"dev",
 ];
 
-/// Human-readable product names. The wire values are lowercase identifiers;
-/// these are how a product is written in the UI.
-export const PRODUCT_LABELS: Record<Product, string> = {
-	tamanu: "Tamanu",
-	senaite: "SENAITE",
-	canopy: "Canopy",
-};
-
-/// Display order for server kinds — centrals first, then facilities,
-/// then standalone. Used as a tiebreak within a single rank in
-/// status-dot lists / group detail views.
-export const SERVER_KIND_ORDER: ServerKind[] = [
-	"central",
-	"facility",
-	"standalone",
+/// Display order for application types — centrals first, then facilities,
+/// then the types that hold no role relative to each other. Used as a
+/// tiebreak within a single rank in status-dot lists and group detail views.
+export const APPLICATION_TYPE_ORDER: ApplicationType[] = [
+	"tamanu-central",
+	"tamanu-facility",
+	"senaite",
+	"canopy",
 ];
 
 /// Sort key combining rank index (with `null` ranks pushed last) and
-/// kind index. Stable per-rank ordering matches what the UI grouping
+/// type index. Stable per-rank ordering matches what the UI grouping
 /// expects.
 export function serverSortKey(s: {
 	rank?: ServerRank | null;
-	kind: ServerKind;
+	type: ApplicationType;
 }): [number, number] {
 	const rankIndex =
 		s.rank == null ? Infinity : SERVER_RANK_ORDER.indexOf(s.rank);
 	const rankKey = rankIndex === -1 ? SERVER_RANK_ORDER.length : rankIndex;
-	const kindIndex = SERVER_KIND_ORDER.indexOf(s.kind);
-	const kindKey = kindIndex === -1 ? SERVER_KIND_ORDER.length : kindIndex;
-	return [rankKey, kindKey];
+	const typeIndex = APPLICATION_TYPE_ORDER.indexOf(s.type);
+	const typeKey =
+		typeIndex === -1 ? APPLICATION_TYPE_ORDER.length : typeIndex;
+	return [rankKey, typeKey];
 }
 
-export function compareServersByRankThenKind<
-	T extends { rank?: ServerRank | null; kind: ServerKind; name?: string | null },
+export function compareServersByRankThenType<
+	T extends {
+		rank?: ServerRank | null;
+		type: ApplicationType;
+		name?: string | null;
+	},
 >(a: T, b: T): number {
 	const [ar, ak] = serverSortKey(a);
 	const [br, bk] = serverSortKey(b);
@@ -287,11 +284,15 @@ export function compareServersByRankThenKind<
 	return an.localeCompare(bn);
 }
 
-/// Group a flat server list into rank buckets in display order, with
-/// each bucket internally sorted by kind (centrals first) then name.
-/// Servers without a rank land in a trailing `null` bucket.
+/// Group a flat application list into rank buckets in display order, with
+/// each bucket internally sorted by type (centrals first) then name.
+/// Applications without a rank land in a trailing `null` bucket.
 export function groupServersByRank<
-	T extends { rank?: ServerRank | null; kind: ServerKind; name?: string | null },
+	T extends {
+		rank?: ServerRank | null;
+		type: ApplicationType;
+		name?: string | null;
+	},
 >(servers: readonly T[]): Array<[ServerRank | null, T[]]> {
 	const buckets = new Map<ServerRank | null, T[]>();
 	for (const s of servers) {
@@ -305,7 +306,7 @@ export function groupServersByRank<
 	for (const rank of order) {
 		const list = buckets.get(rank);
 		if (list && list.length > 0) {
-			list.sort(compareServersByRankThenKind);
+			list.sort(compareServersByRankThenType);
 			result.push([rank, list]);
 		}
 	}

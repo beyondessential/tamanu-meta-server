@@ -29,9 +29,9 @@ import { Link as RouterLink } from "react-router-dom";
 import { useApi } from "../api";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { useReloadInterval } from "../hooks/useReloadInterval";
-import { useIsVersionTracked } from "../hooks/useProducts";
+import { useIsVersionTracked } from "../hooks/useApplicationTypes";
 import { valueComparator } from "../lib/valueOrder";
-import type { FleetServerDetailData, Product } from "../types";
+import type { ApplicationType, FleetServerDetailData } from "../types";
 
 /// How many distinct values a distribution card shows before collapsing the
 /// rest. A field like `uptimeSecs` is near-unique across the fleet, and a
@@ -107,10 +107,10 @@ const VERSION_TRACKED_FIELDS = new Set(["release", "version"]);
 function coveredBy(
 	field: string,
 	servers: FleetServerDetailData[],
-	isVersionTracked: (product: Product) => boolean,
+	isVersionTracked: (type: ApplicationType) => boolean,
 ): FleetServerDetailData[] {
 	if (!VERSION_TRACKED_FIELDS.has(field)) return servers;
-	return servers.filter((s) => isVersionTracked(s.product));
+	return servers.filter((s) => isVersionTracked(s.type));
 }
 
 /// The name to present a field under: a figure's own label, or the field

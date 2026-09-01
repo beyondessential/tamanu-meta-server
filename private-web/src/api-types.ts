@@ -6858,6 +6858,12 @@ export interface components {
          *     group a box belongs to is the one thing the box has no way of knowing.
          */
         MachineCreateArgs: {
+            /**
+             * Format: int64
+             * @description How long the box may be silent before it is unreachable, in seconds.
+             *     Defaults to the column's own default.
+             */
+            alert_when_down_for?: number | null;
             /** @description Whether the box is cloud-hosted, if known. */
             cloud?: boolean | null;
             geolocation?: null | components["schemas"]["GeoPoint"];
@@ -6866,11 +6872,26 @@ export interface components {
              * @description The group this machine belongs to. The applications on it take it.
              */
             group_id?: string | null;
+            /** @description Whether the machine's own checks alert. Defaults to on. */
+            is_monitored?: boolean | null;
             /**
              * @description What to call the box. Distinct from the hostname its operating system
              *     reports, which arrives as a reported figure.
              */
             name?: string | null;
+            /** @description Operator notes shown on the machine's page. */
+            notes?: string | null;
+            tags?: null | components["schemas"]["TagMap"];
+            /**
+             * @description A tailnet node to bind this machine to up front, by address, node key,
+             *     or DNS name. Omit to enrol the machine later.
+             *
+             *     The operator is describing a box they can already see on the tailnet,
+             *     so binding it here saves an enrolment round trip. The identity is a
+             *     machine's, not an application's: the applications on the box are
+             *     reported and carry no identity of their own.
+             */
+            tailscale_identifier?: string | null;
         };
         /** @description A machine together with the applications running on it. */
         MachineDetail: components["schemas"]["Machine"] & {

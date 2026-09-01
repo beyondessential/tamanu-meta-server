@@ -239,8 +239,7 @@ test.describe("restore replicas", () => {
 		await seedServer(sql, {
 			groupId,
 			name: "lims-srv",
-			product: "senaite",
-			kind: "standalone",
+			type: "senaite",
 		});
 		await seedRestoreReplica(sql, {
 			consumerDeviceId: consumer,

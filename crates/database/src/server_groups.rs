@@ -364,6 +364,52 @@ impl ServerGroup {
 			.map_err(AppError::from)
 	}
 
+	/// For each group id, the software its live members all run, when they
+	/// agree on one. A group whose members span two is absent from the map.
+	///
+	/// Attribution is by software rather than by type: a central and a facility
+	/// of one deployment are both Tamanu, so a group holding the pair still has
+	/// one product to attribute its shared cost to.
+	// spec: APP#billing-attribution
+	pub async fn sole_member_software(
+		db: &mut AsyncPgConnection,
+		group_ids: &[Uuid],
+	) -> Result<std::collections::HashMap<Uuid, String>> {
+		use crate::schema::applications::dsl;
+		use std::collections::HashMap;
+
+		if group_ids.is_empty() {
+			return Ok(HashMap::new());
+		}
+		let rows: Vec<(Uuid, String)> = dsl::applications
+			.select((dsl::group_id.assume_not_null(), dsl::type_))
+			.filter(dsl::group_id.eq_any(group_ids))
+			.filter(dsl::deleted_at.is_null())
+			.load(db)
+			.await?;
+
+		// Two passes rather than one: a group has to be *removed* once a
+		// second software shows up, which a running "first wins" insert can't
+		// express.
+		let mut seen: HashMap<Uuid, Vec<&'static str>> = HashMap::new();
+		for (gid, r#type) in rows {
+			let Ok(r#type) = r#type.parse::<ApplicationType>() else {
+				continue;
+			};
+			let software = seen.entry(gid).or_default();
+			if !software.contains(&r#type.software()) {
+				software.push(r#type.software());
+			}
+		}
+		Ok(seen
+			.into_iter()
+			.filter_map(|(gid, software)| match software.as_slice() {
+				[sole] => Some((gid, (*sole).to_owned())),
+				_ => None,
+			})
+			.collect())
+	}
+
 	/// For each group id, the rank of its highest-ranked member. Used by the
 	/// Status page to bucket groups by rank (Production beats Clone, Demo,
 	/// Test, Dev). Groups without ranked members are absent from the map.

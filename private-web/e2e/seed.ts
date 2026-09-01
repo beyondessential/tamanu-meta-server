@@ -49,18 +49,15 @@ export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
 		"TRUNCATE statuses, application_reported_detail, machine_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, upgrade_plans, maintenance_windows, version_known_issues, recovery_vault_writes, application_names, application_certificates, compromised_keys RESTART IDENTITY CASCADE",
 	);
-	// The truncate takes the migration-seeded nil "Canopy" server with it;
-	// self-alerts attach to that row, so put it back. `kind = 'canopy'` is the
-	// legacy value the product migration deliberately left in place, so this
-	// also keeps the read alias exercised; `product` has to be set explicitly
-	// since that migration's backfill has already run by now.
+	// The truncate takes the migration-seeded nil "Canopy" application with
+	// it; self-alerts attach to that row, so put it back.
 	// The machine goes back with it: an application runs on exactly one, and
 	// the split's backfill gave this row a machine sharing its id.
 	await sql.query(
 		"INSERT INTO machines (id, name) VALUES ('00000000-0000-0000-0000-000000000000', 'Canopy')",
 	);
 	await sql.query(
-		"INSERT INTO applications (id, product, kind, name, host, machine_id) VALUES ('00000000-0000-0000-0000-000000000000', 'canopy', 'canopy', 'Canopy', 'http://localhost', '00000000-0000-0000-0000-000000000000')",
+		"INSERT INTO applications (id, type, name, host, machine_id) VALUES ('00000000-0000-0000-0000-000000000000', 'canopy', 'Canopy', 'http://localhost', '00000000-0000-0000-0000-000000000000')",
 	);
 	// Same for the migration's one seeded source policy: tamanu reports on
 	// its own schedule, so its silence is not a reachability signal.
@@ -122,15 +119,17 @@ export async function seedServerGroup(
 }
 
 export type ServerRank = "production" | "clone" | "demo" | "test" | "dev";
-export type Product = "tamanu" | "senaite" | "canopy";
-export type ServerKind = "central" | "facility" | "standalone";
+export type ApplicationType =
+	| "tamanu-central"
+	| "tamanu-facility"
+	| "senaite"
+	| "canopy";
 
 export interface SeededServer {
 	id: string;
 	name: string;
 	host: string;
-	product: Product;
-	kind: ServerKind;
+	type: ApplicationType;
 	rank: ServerRank | null;
 	/** The box this workload runs on. Maintenance is declared over it. */
 	machineId: string;
@@ -141,9 +140,8 @@ export async function seedServer(
 	opts: {
 		name?: string;
 		host?: string;
-		/** Which application the server runs. Defaults to tamanu. */
-		product?: Product;
-		kind?: ServerKind;
+		/** What the application is. Defaults to a Tamanu central. */
+		type?: ApplicationType;
 		rank?: ServerRank | null;
 		groupId?: string | null;
 		deviceId?: string;
@@ -164,10 +162,7 @@ export async function seedServer(
 	const id = randomUUID();
 	const name = opts.name ?? randomLabel("srv");
 	const host = opts.host ?? `https://${randomLabel("host")}.e2e.invalid`;
-	const product = opts.product ?? "tamanu";
-	// Default the role to one the chosen product actually defines, so a seed
-	// that only names a product doesn't produce a misclassified server.
-	const kind = opts.kind ?? (product === "tamanu" ? "central" : "standalone");
+	const type = opts.type ?? "tamanu-central";
 	const rank = opts.rank ?? "production";
 	const isMonitored = opts.isMonitored ?? false;
 	const alertWhenDownFor = opts.alertWhenDownFor ?? 600;
@@ -179,14 +174,13 @@ export async function seedServer(
 		[machineId, name, opts.groupId ?? null],
 	);
 	await sql.query(
-		`INSERT INTO applications (id, name, host, product, kind, rank, group_id, device_id, is_monitored, alert_when_down_for, notes, tags, may_manage_dns, may_manage_tls, machine_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14, $15)`,
+		`INSERT INTO applications (id, name, host, type, rank, group_id, device_id, is_monitored, alert_when_down_for, notes, tags, may_manage_dns, may_manage_tls, machine_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13, $14)`,
 		[
 			id,
 			name,
 			host,
-			product,
-			kind,
+			type,
 			rank,
 			opts.groupId ?? null,
 			opts.deviceId ?? null,
@@ -199,7 +193,7 @@ export async function seedServer(
 			machineId,
 		],
 	);
-	return { id, name, host, product, kind, rank, machineId };
+	return { id, name, host, type, rank, machineId };
 }
 
 export interface SeededDevice {

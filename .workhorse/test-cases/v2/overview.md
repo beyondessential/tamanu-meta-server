@@ -162,6 +162,14 @@ cover the runtime half of that, which the spec diff cannot see.
 
 ## Interface
 
+- [x] The machine form asks nothing about what runs on the box: no product, kind, rank, URL or public name
+- [x] One type chip replaces the product and kind chips wherever an application is listed
+- [x] The edit form shows an application's type rather than offering it
+- [x] The public-name field is offered only for a type eligible for public listing
+- [x] A group names a billing product only when its applications all run one software
+- [ ] Creating a machine lands on that machine's own page
+- [ ] A machine's reachability can be silenced from the machine form, as a server's could
+
 - [ ] The group page lists rank, then machine, then applications
 - [ ] Both detail pages end with the group's tree, with the current page highlighted
 - [ ] The application page presents its own and its machine's checks in one list

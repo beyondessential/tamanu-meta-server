@@ -64,7 +64,7 @@ test.describe("reported server figures", () => {
 	}) => {
 		const server = await seedServer(sql, {
 			name: "snapshot-bestool",
-			kind: "central",
+			type: "tamanu-central",
 		});
 		await seedStatus(sql, {
 			serverId: server.id,

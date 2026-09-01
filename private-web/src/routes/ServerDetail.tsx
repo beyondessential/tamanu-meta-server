@@ -68,11 +68,12 @@ import { BackupProcessingChip } from "../components/BackupProcessingChip";
 import { BackupLiveProgress } from "../components/BackupLiveProgress";
 import TimezoneTooltip from "../components/TimezoneTooltip";
 import VersionIndicator from "../components/VersionIndicator";
-import ServerProductChip from "../components/ServerProductChip";
-import { useProductCaps } from "../hooks/useProducts";
-import { PRODUCT_LABELS } from "../types";
+import ApplicationTypeChip from "../components/ApplicationTypeChip";
+import {
+	useApplicationTypeCaps,
+	useApplicationTypeLabel,
+} from "../hooks/useApplicationTypes";
 import { HealthLegend, StatusLegend, VersionLegend } from "../components/Legends";
-import ServerKindChip from "../components/ServerKindChip";
 import ServerRankChip from "../components/ServerRankChip";
 import ServerSetupInstructions from "../components/ServerSetupInstructions";
 import { callApi, useApi, useApiAction } from "../api";
@@ -82,7 +83,7 @@ import { useReloadInterval } from "../hooks/useReloadInterval";
 import { humanSeconds } from "../lib/humanDuration";
 import ServerNameWithGroup from "../components/ServerNameWithGroup";
 import {
-	compareServersByRankThenKind,
+	compareServersByRankThenType,
 	groupServersByRank,
 	healthcheckPath,
 	silenceRef,
@@ -296,8 +297,7 @@ function Header({
 				useFlexGap
 			>
 				{data.server.rank && <ServerRankChip rank={data.server.rank} />}
-				<ServerProductChip product={data.server.product} />
-				<ServerKindChip kind={data.server.kind} />
+				<ApplicationTypeChip type={data.server.type} />
 				<Typography variant="h4" component="h1" sx={{ ml: 1 }}>
 					<SiblingDotStrip
 						focused={data.server}
@@ -792,6 +792,9 @@ function InfoSection({
 	maintenanceSettling: boolean;
 	refreshTick: number;
 }) {
+	// Only a publicly-listable type carries a mobile-list entry.
+	// spec: APP#public-listing
+	const caps = useApplicationTypeCaps(server.type);
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
 			{status && (
@@ -811,7 +814,7 @@ function InfoSection({
 				sx={{ flexWrap: "wrap" }}
 			>
 				{status && <StatusInfoFields status={status} />}
-				{server.kind === "central" && (
+				{caps?.public_listing === true && (
 					<InfoItem
 						label="Mobile list"
 						value={server.public_name ?? "Not listed"}
@@ -1505,7 +1508,9 @@ function SilenceScopeRow({
 }
 
 function StatusInfoFields({ status }: { status: ServerLastStatusData }) {
-	const tracking = useProductCaps(status.product)?.version_tracking;
+	const caps = useApplicationTypeCaps(status.type);
+	const tracking = caps?.version_tracking;
+	const label = useApplicationTypeLabel(status.type);
 	return (
 		<>
 			<Stack spacing={0.25}>
@@ -1526,14 +1531,14 @@ function StatusInfoFields({ status }: { status: ServerLastStatusData }) {
 					</Typography>
 				</InfoItem>
 			)}
-			{/* A product with no application version shows no version block at
+			{/* A type with no application version shows no version block at
 			    all — the caption included, since an empty one reads as a
 			    reporting failure rather than an absence.
 			    spec: APP#versions */}
 			{tracking !== undefined && tracking !== "absent" && (
 				<Stack spacing={0.25}>
 					<Typography variant="caption" color="text.secondary">
-						{PRODUCT_LABELS[status.product]}
+						{label}
 					</Typography>
 					<VersionIndicator
 						version={status.version}
@@ -1685,7 +1690,7 @@ function SiblingServers({
 										{sib.name ?? "Unnamed"}
 									</MuiLink>
 									{sib.rank && <ServerRankChip rank={sib.rank} />}
-									<ServerKindChip kind={sib.kind} />
+									<ApplicationTypeChip type={sib.type} />
 									{!sib.is_monitored && (
 										<Tooltip title="Status alerts are off for this server — canopy isn't watching it.">
 											<Chip
@@ -2138,7 +2143,7 @@ function SiblingDotStrip({
 		},
 		...siblings.map((sib) => ({ entry: sib, focused: false })),
 	];
-	combined.sort((a, b) => compareServersByRankThenKind(a.entry, b.entry));
+	combined.sort((a, b) => compareServersByRankThenType(a.entry, b.entry));
 
 	const chunks: Array<{
 		rank: string;

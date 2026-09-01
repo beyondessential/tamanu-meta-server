@@ -212,8 +212,15 @@ impl ApplicationType {
 
 	/// How the type reads when nothing has named the application: the type in
 	/// sentence case, so a `tamanu-central` presents as "Tamanu central".
+	///
+	/// Software that styles its own name takes that styling, since a product
+	/// is written the way its makers write it rather than the way an
+	/// identifier happens to be spelled.
 	// spec: FLT#naming
 	pub fn label(self) -> String {
+		if let Self::Senaite = self {
+			return "SENAITE".to_owned();
+		}
 		let raw = self.to_string().replace('-', " ");
 		let mut chars = raw.chars();
 		match chars.next() {
@@ -350,6 +357,6 @@ mod tests {
 	#[test]
 	fn a_type_reads_as_sentence_case_when_nothing_names_it() {
 		assert_eq!(ApplicationType::TamanuCentral.label(), "Tamanu central");
-		assert_eq!(ApplicationType::Senaite.label(), "Senaite");
+		assert_eq!(ApplicationType::Senaite.label(), "SENAITE");
 	}
 }

@@ -1,14 +1,12 @@
 import { Box, Chip, Link as MuiLink, Stack, Tooltip, Typography } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
 import type {
+	ApplicationType,
 	HealthState,
-	Product,
-	ServerKind,
 	ServerRank,
 	ShortStatus,
 } from "../types";
-import ServerKindChip from "./ServerKindChip";
-import ServerProductChip from "./ServerProductChip";
+import ApplicationTypeChip from "./ApplicationTypeChip";
 import ServerNameWithGroup from "./ServerNameWithGroup";
 import ServerRankChip from "./ServerRankChip";
 import StatusDot from "./StatusDot";
@@ -18,8 +16,7 @@ export interface ServerInfo {
 	name: string | null;
 	host?: string | null;
 	display_host: string;
-	product: Product;
-	kind: ServerKind;
+	type: ApplicationType;
 	rank: ServerRank | null;
 	group_name?: string | null;
 	is_monitored?: boolean;
@@ -62,8 +59,7 @@ export default function ServerShorty({ server }: { server: ServerInfo }) {
 				/>
 			</MuiLink>
 			{server.rank && <ServerRankChip rank={server.rank} />}
-			<ServerProductChip product={server.product} />
-			<ServerKindChip kind={server.kind} />
+			<ApplicationTypeChip type={server.type} />
 			{unmonitored && (
 				<Tooltip title="Status alerts are off for this server — canopy isn't watching it.">
 					<Chip size="small" variant="outlined" label="unmonitored" />

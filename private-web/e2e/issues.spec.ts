@@ -53,7 +53,7 @@ test.describe("issue status snapshot", () => {
 	}) => {
 		const server = await seedServer(sql, {
 			name: "snapshot-issue-server",
-			kind: "central",
+			type: "tamanu-central",
 		});
 		// Two sources reported around the issue's time, each with its own
 		// check and its own raw payload. Inserted directly (not via
@@ -172,7 +172,7 @@ test.describe("manual conditions", () => {
 		const group = await seedServerGroup(sql, { name: "ManualGroup" });
 		const server = await seedServer(sql, {
 			name: "manual-target",
-			kind: "central",
+			type: "tamanu-central",
 			groupId: group.id,
 		});
 

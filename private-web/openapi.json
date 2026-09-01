@@ -12288,6 +12288,14 @@
         "type": "object",
         "description": "What an operator supplies when adding a machine.\n\nThe group is the only field that matters to get right up front: which\ngroup a box belongs to is the one thing the box has no way of knowing.",
         "properties": {
+          "alert_when_down_for": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How long the box may be silent before it is unreachable, in seconds.\nDefaults to the column's own default."
+          },
           "cloud": {
             "type": [
               "boolean",
@@ -12314,12 +12322,44 @@
             "format": "uuid",
             "description": "The group this machine belongs to. The applications on it take it."
           },
+          "is_monitored": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether the machine's own checks alert. Defaults to on."
+          },
           "name": {
             "type": [
               "string",
               "null"
             ],
             "description": "What to call the box. Distinct from the hostname its operating system\nreports, which arrives as a reported figure."
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Operator notes shown on the machine's page."
+          },
+          "tags": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TagMap",
+                "description": "Operator-set tags. Reserved names are refused, as they are on an edit."
+              }
+            ]
+          },
+          "tailscale_identifier": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A tailnet node to bind this machine to up front, by address, node key,\nor DNS name. Omit to enrol the machine later.\n\nThe operator is describing a box they can already see on the tailnet,\nso binding it here saves an enrolment round trip. The identity is a\nmachine's, not an application's: the applications on the box are\nreported and carry no identity of their own."
           }
         }
       },

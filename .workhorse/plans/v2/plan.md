@@ -19,7 +19,7 @@ Each item is a section below; the section carries the detail and the traps.
 - [x] **Restore replicas** — declarations move grain; `migration-test` stays application-scoped
 - [x] **Retiring the graded reachability states** — `short_status`'s hardcoded thresholds
 - [x] **Fleet query interface** — MCP gains `Get machine` and `Find machines`
-- [ ] **Migration** — `{product, kind}` becomes `{type}`
+- [x] **Migration** — `{product, kind}` becomes `{type}`
 - [ ] **Frontend** — two detail pages, the group tree, the status-page bands
 - [ ] **Routes** — deprecation aliases for every renamed path
 
@@ -403,6 +403,18 @@ Two detail pages replace one, and the group tree (rank → machine → applicati
 `ServerKindChip` goes. `ServerProductChip` becomes an application-type chip. `StatusDot` loses its two-level encoding: fill carries the application's health alone, and the machine enclosure carries the machine's state.
 
 Playwright coverage goes in with each UI change, per the repo's frontend rules.
+
+### The type axis landed; two detail pages have not
+
+Done: the type replaces the pair throughout the UI. One `ApplicationTypeChip` replaces `ServerProductChip` and `ServerKindChip`, since one type carries what two chips carried. `useProducts` becomes `useApplicationTypes`, keyed by type and reading the same catalogue endpoint. The sort helper orders by rank then type, a central still beating a facility on a tie. The edit form shows the type rather than offering it, a type being reported and never entered, and gates the public-name field on the type's own capability.
+
+**The create form became the machine form.** Same form minus five fields: no URL, no product, no kind, no rank, no public name. What is left is a box — name, group, location, tailnet identity, monitoring, notes, tags — and `MachineCreateArgs` widened to match `MachineUpdate` so creating and editing cannot disagree about what a field means. Binding a tailnet node at create time sets `device_id` without setting `registered_at`: naming a box is not the box arriving, and a backup deadline counts from arrival.
+
+**Two things are deliberately outstanding, not dropped.**
+
+- **The reachability switch is not on the machine form.** It wrote a server-scoped silence through `silenced_refs.silence_server`, and there is no machine-scoped equivalent: silences are application-scoped, while `scoped_check_policies.machine_id` is the separate policy path. A machine's unreachability is exactly the fact this card makes single, so the switch belongs there — it needs `silence_machine` first. The two create-time e2e tests that covered it are removed with the reason recorded; the edit-form ones still cover the application grain.
+- **The form lands on the group page, not the machine's own.** There is no `/machines/:id` route yet; the machine detail page is this step's remaining work.
+
 
 ## Mockups
 

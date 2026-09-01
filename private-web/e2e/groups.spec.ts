@@ -53,7 +53,7 @@ test.describe("group detail page", () => {
 		await expect(
 			page.getByRole("heading", { name: group.name, level: 1 }),
 		).toBeVisible();
-		await expect(page.getByText(/no servers in this group/i)).toBeVisible();
+		await expect(page.getByText(/nothing in this group yet/i)).toBeVisible();
 	});
 });
 

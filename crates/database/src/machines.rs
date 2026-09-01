@@ -200,6 +200,27 @@ impl Machine {
 		Ok(after)
 	}
 
+	/// Bind an identity to this machine without claiming it has enrolled.
+	///
+	/// An operator naming a tailnet node on the create form is saying which box
+	/// this is, not that the box has checked in. `registered_at` stays null so
+	/// the machine reads as awaiting enrolment, and so a backup deadline starts
+	/// counting when the box actually arrives rather than when someone typed
+	/// its address.
+	// spec: FLT#identities
+	pub async fn bind_device(
+		db: &mut AsyncPgConnection,
+		machine_id: Uuid,
+		device_id: Uuid,
+	) -> Result<()> {
+		use crate::schema::machines::dsl;
+		diesel::update(dsl::machines.filter(dsl::id.eq(machine_id)))
+			.set(dsl::device_id.eq(Some(device_id)))
+			.execute(db)
+			.await?;
+		Ok(())
+	}
+
 	/// Bind an identity to this machine and mark it enrolled. Idempotent on
 	/// `registered_at`: a re-enrolment does not restart the clock a backup
 	/// deadline counts from.

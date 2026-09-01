@@ -30,43 +30,10 @@ test.describe("reachability alerting switch on the server form", () => {
 		await resetSeededTables(sql);
 	});
 
-	test("creating with the switch off silences the new server's reachability", async ({
-		page,
-		sql,
-	}) => {
-		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
-		const group = await seedServerGroup(sql, { name: "comes-and-goes" });
-
-		await page.goto(`/groups/${group.id}/servers/new`);
-		await page.getByLabel(/^Name(\s*\*)?$/i).fill("expected-to-vanish");
-		// On by default: a new server alerts when it goes away unless told not to.
-		await expect(page.getByLabel(SWITCH)).toBeChecked();
-		await page.getByLabel(SWITCH).uncheck();
-		await page.getByRole("button", { name: "Create server" }).click();
-
-		await expect(page).toHaveURL(/\/servers\/[0-9a-f-]{36}$/);
-		const id = page.url().split("/").pop()!;
-		expect(await reachabilitySilences(sql, id)).toBe(1);
-	});
-
-	test("creating with the switch on leaves reachability alerting", async ({
-		page,
-		sql,
-	}) => {
-		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
-		const group = await seedServerGroup(sql, { name: "should-stay-up" });
-
-		await page.goto(`/groups/${group.id}/servers/new`);
-		await page.getByLabel(/^Name(\s*\*)?$/i).fill("expected-to-stay");
-		// The switch settling is what says the form is live; clicking before
-		// that lands on markup with no handler attached yet.
-		await expect(page.getByLabel(SWITCH)).toBeChecked();
-		await page.getByRole("button", { name: "Create server" }).click();
-
-		await expect(page).toHaveURL(/\/servers\/[0-9a-f-]{36}$/);
-		const id = page.url().split("/").pop()!;
-		expect(await reachabilitySilences(sql, id)).toBe(0);
-	});
+	// A machine-create form carries no reachability switch: a machine's
+	// reachability silence would have to be machine-scoped, and silences are
+	// still application-scoped. Creating a box and quieting it is two steps
+	// until that exists.
 
 	test("the edit form reflects an existing silence and clearing it re-enables alerting", async ({
 		page,

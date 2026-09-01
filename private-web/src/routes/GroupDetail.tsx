@@ -135,11 +135,11 @@ export default function GroupDetail() {
 					<Stack direction="row" spacing={1}>
 						<Button
 							component={RouterLink}
-							to={`/groups/${group.id}/servers/new`}
+							to={`/groups/${group.id}/machines/new`}
 							variant="contained"
 							startIcon={<AddIcon />}
 						>
-							Add server
+							Add machine
 						</Button>
 						<Button
 							component={RouterLink}
@@ -231,8 +231,8 @@ export default function GroupDetail() {
 				</Typography>
 				{applications.length === 0 ? (
 					<Alert severity="info">
-						No servers in this group yet. Use “Add server” above to enroll
-						one into this group.
+						Nothing in this group yet. Add a machine; the applications on it
+						arrive by report.
 					</Alert>
 				) : (
 					<Stack spacing={2}>

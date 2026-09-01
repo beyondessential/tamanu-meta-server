@@ -269,7 +269,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			groupId: group.id,
 			name: "aaa-prod-facility",
 			rank: "production",
-			kind: "facility",
+			type: "tamanu-facility",
 		});
 		await seedServer(sql, {
 			groupId: group.id,
@@ -280,7 +280,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			groupId: group.id,
 			name: "zzz-prod-central",
 			rank: "production",
-			kind: "central",
+			type: "tamanu-central",
 		});
 		await seedServerGroupBackupConfig(sql, {
 			groupId: group.id,

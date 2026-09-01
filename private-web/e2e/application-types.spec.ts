@@ -7,11 +7,11 @@ import {
 	seedVersion,
 } from "./seed";
 
-/// Coverage for the product axis: how a product is presented, and how its
-/// version is presented given what the product actually has.
+/// Coverage for the type axis: how an application's type is presented, and how
+/// its version is presented given what the type actually has.
 ///
 /// spec: APP
-test.describe("server products", () => {
+test.describe("application types", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
 	});
@@ -23,8 +23,7 @@ test.describe("server products", () => {
 		await seedVersion(sql, { major: 2, minor: 34, patch: 1, status: "published" });
 		const server = await seedServer(sql, {
 			name: "central-graded",
-			product: "tamanu",
-			kind: "central",
+			type: "tamanu-central",
 		});
 		await seedStatus(sql, { serverId: server.id, version: "2.34.1" });
 
@@ -41,7 +40,7 @@ test.describe("server products", () => {
 		await seedVersion(sql, { major: 2, minor: 34, patch: 1, status: "published" });
 		const server = await seedServer(sql, {
 			name: "lims-box",
-			product: "senaite",
+			type: "senaite",
 		});
 		// A SENAITE agent reports health and figures but no application version.
 		await seedStatus(sql, {
@@ -52,10 +51,11 @@ test.describe("server products", () => {
 
 		await page.goto(`/servers/${server.id}`);
 
-		// The product chip identifies it, and its role is the standalone one
-		// SENAITE defines.
+		// One chip carries what it is. There is no separate role chip: SENAITE
+		// instances hold no role relative to each other, so the software alone
+		// names the type.
 		await expect(page.getByText("SENAITE", { exact: true })).toBeVisible();
-		await expect(page.getByText("standalone", { exact: true })).toBeVisible();
+		await expect(page.getByText("standalone", { exact: true })).toHaveCount(0);
 		// There is no version affordance at all — not even "unknown". There is no
 		// version to learn, so an unknown would read as a reporting failure.
 		await expect(page.getByText("unknown")).toHaveCount(0);
@@ -71,8 +71,7 @@ test.describe("server products", () => {
 		await seedVersion(sql, { major: 2, minor: 34, patch: 1, status: "published" });
 		const server = await seedServer(sql, {
 			name: "silent-central",
-			product: "tamanu",
-			kind: "central",
+			type: "tamanu-central",
 		});
 		// Reported, but carrying no version — the agent couldn't read it.
 		await seedStatus(sql, { serverId: server.id, version: null });
@@ -91,13 +90,12 @@ test.describe("server products", () => {
 		const group = await seedServerGroup(sql, { name: "pacific-mixed" });
 		const central = await seedServer(sql, {
 			name: "pacific-central",
-			product: "tamanu",
-			kind: "central",
+			type: "tamanu-central",
 			groupId: group.id,
 		});
 		await seedServer(sql, {
 			name: "pacific-lims",
-			product: "senaite",
+			type: "senaite",
 			groupId: group.id,
 			rank: "production",
 		});
@@ -111,50 +109,52 @@ test.describe("server products", () => {
 		await expect(page.getByText("2.34.1")).toBeVisible();
 	});
 
-	test("the create form offers a product and narrows the roles to match", async ({
+	test("the machine form asks nothing about what runs on the box", async ({
 		page,
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "target-group" });
 
-		await page.goto(`/groups/${group.id}/servers/new`);
+		await page.goto(`/groups/${group.id}/machines/new`);
 
-		// Tamanu is the default product, and offers both of its roles.
-		const kindField = page.getByRole("combobox", { name: "Kind" });
-		await expect(kindField).toHaveText("facility");
-		await kindField.click();
-		await expect(page.getByRole("option", { name: "central" })).toBeVisible();
-		await expect(page.getByRole("option", { name: "facility" })).toBeVisible();
-		await expect(page.getByRole("option", { name: "standalone" })).toHaveCount(
-			0,
-		);
-		await page.keyboard.press("Escape");
+		// A type is reported, never entered, so none of what used to be asked
+		// here is offered: no product, no role, no rank, no URL.
+		await expect(page.getByRole("combobox", { name: "Product" })).toHaveCount(0);
+		await expect(page.getByRole("combobox", { name: "Kind" })).toHaveCount(0);
+		await expect(page.getByRole("combobox", { name: "Rank" })).toHaveCount(0);
+		await expect(page.getByLabel("URL")).toHaveCount(0);
+		await expect(page.getByLabel("Name in Tamanu Mobile app")).toHaveCount(0);
 
-		// Choosing SENAITE moves the role to the one it defines, since it has no
-		// central.
-		await page.getByRole("combobox", { name: "Product" }).click();
-		await page.getByRole("option", { name: "SENAITE" }).click();
-		await expect(kindField).toHaveText("standalone");
+		// What the box is, where it is, and how it is watched: that is a
+		// machine's form.
+		await expect(page.getByRole("combobox", { name: "Location" })).toBeVisible();
+		await expect(page.getByLabel("Tailscale identity")).toBeVisible();
+		await expect(page.getByLabel("Monitor this machine")).toBeVisible();
 	});
 
-	test("the public-name field is only offered for a publicly-listable product", async ({
+	test("the public-name field follows the application's type", async ({
 		page,
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "listing-group" });
+		const central = await seedServer(sql, {
+			name: "listing-central",
+			type: "tamanu-central",
+			groupId: group.id,
+		});
+		const facility = await seedServer(sql, {
+			name: "listing-facility",
+			type: "tamanu-facility",
+			groupId: group.id,
+		});
 
-		await page.goto(`/groups/${group.id}/servers/new`);
-
-		// The form opens on facility, which is not listed either; a central is.
-		await expect(page.getByLabel("Name in Tamanu Mobile app")).toHaveCount(0);
-		await page.getByRole("combobox", { name: "Kind" }).click();
-		await page.getByRole("option", { name: "central" }).click();
+		// A central is what the mobile app lists, so its edit form offers the
+		// public name.
+		await page.goto(`/servers/${central.id}/edit`);
 		await expect(page.getByLabel("Name in Tamanu Mobile app")).toBeVisible();
 
-		// SENAITE cannot be listed at all, so choosing it takes the field away
-		// even though the role moves to standalone rather than staying central.
-		await page.getByRole("combobox", { name: "Product" }).click();
-		await page.getByRole("option", { name: "SENAITE" }).click();
+		// A facility sits behind someone else's NAT and is nobody's to look up.
+		await page.goto(`/servers/${facility.id}/edit`);
 		await expect(page.getByLabel("Name in Tamanu Mobile app")).toHaveCount(0);
 	});
 
@@ -165,12 +165,11 @@ test.describe("server products", () => {
 		await seedVersion(sql, { major: 2, minor: 34, patch: 1, status: "published" });
 		const central = await seedServer(sql, {
 			name: "fleet-central",
-			product: "tamanu",
-			kind: "central",
+			type: "tamanu-central",
 		});
 		const lims = await seedServer(sql, {
 			name: "fleet-lims",
-			product: "senaite",
+			type: "senaite",
 		});
 		await seedStatus(sql, { serverId: central.id, version: "2.34.1" });
 		await seedStatus(sql, {
@@ -203,7 +202,7 @@ test.describe("server products", () => {
 		await seedVersion(sql, { major: 2, minor: 34, patch: 1, status: "published" });
 		const server = await seedServer(sql, {
 			name: "canopy-self",
-			product: "canopy",
+			type: "canopy",
 		});
 		// A canopy instance reports its own build version, which is nowhere near
 		// Tamanu's release numbering.
@@ -228,12 +227,11 @@ test.describe("server products", () => {
 		await seedVersion(sql, { major: 2, minor: 34, patch: 1, status: "published" });
 		const central = await seedServer(sql, {
 			name: "cross-central",
-			product: "tamanu",
-			kind: "central",
+			type: "tamanu-central",
 		});
 		const lims = await seedServer(sql, {
 			name: "cross-lims",
-			product: "senaite",
+			type: "senaite",
 		});
 		await seedStatus(sql, {
 			serverId: central.id,

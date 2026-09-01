@@ -12,7 +12,7 @@ import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { useApi } from "./api";
 import AdminProbeBanner from "./components/AdminProbeBanner";
 import { AdminProvider } from "./hooks/useIsAdmin";
-import { ProductsProvider } from "./hooks/useProducts";
+import { ApplicationTypesProvider } from "./hooks/useApplicationTypes";
 import { useReloadInterval } from "./hooks/useReloadInterval";
 import Admins from "./routes/Admins";
 import BackupConfig from "./routes/BackupConfig";
@@ -42,7 +42,7 @@ import IncidentDetail from "./routes/IncidentDetail";
 import Incidents from "./routes/Incidents";
 import Maintenance from "./routes/Maintenance";
 import Status from "./routes/Status";
-import ServerCreate from "./routes/ServerCreate";
+import MachineCreate from "./routes/MachineCreate";
 import ServerDetail from "./routes/ServerDetail";
 import ServerEdit from "./routes/ServerEdit";
 import ArchivedList from "./routes/ArchivedList";
@@ -106,7 +106,7 @@ export default function App() {
 
 	return (
 		<AdminProvider>
-		<ProductsProvider>
+		<ApplicationTypesProvider>
 		<Box>
 			<AppBar position="static" color="default" elevation={1}>
 				<Toolbar variant="dense" sx={{ gap: 2 }}>
@@ -208,8 +208,8 @@ export default function App() {
 						<Route path="figures" element={<FleetFigures />} />
 					</Route>
 					<Route
-						path="/groups/:id/servers/new"
-						element={<ServerCreate />}
+						path="/groups/:id/machines/new"
+						element={<MachineCreate />}
 					/>
 					<Route path="/servers/:id" element={<ServerDetail />} />
 					<Route path="/servers/:id/edit" element={<ServerEdit />} />
@@ -268,7 +268,7 @@ export default function App() {
 				</Routes>
 			</Container>
 		</Box>
-		</ProductsProvider>
+		</ApplicationTypesProvider>
 		</AdminProvider>
 	);
 }

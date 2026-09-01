@@ -17,7 +17,7 @@ import { useMemo } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import StatusDot from "../components/StatusDot";
 import VersionIndicator from "../components/VersionIndicator";
-import { useVersionTrackingAcross } from "../hooks/useProducts";
+import { useVersionTrackingAcross } from "../hooks/useApplicationTypes";
 import {
 	HealthLegend,
 	OperatorLegend,
@@ -33,7 +33,7 @@ import {
 	type ServerGroupCard,
 	SERVER_RANK_ORDER,
 	aggregateOperators,
-	compareServersByRankThenKind,
+	compareServersByRankThenType,
 	isIncidentLingering,
 } from "../types";
 
@@ -303,11 +303,11 @@ function GroupCard({
 	openIncident: IncidentLoudness | null;
 }) {
 	// The headline version comes from whichever member speaks for the group, so
-	// how to present it follows from the products its members actually have: a
+	// how to present it follows from the types its members actually have: a
 	// group with no versioned member shows no version rather than an "unknown".
 	// spec: APP#versions
 	const tracking = useVersionTrackingAcross(
-		useMemo(() => group.members.map((m) => m.product), [group.members]),
+		useMemo(() => group.members.map((m) => m.type), [group.members]),
 	);
 	return (
 		<Stack spacing={1}>
@@ -418,7 +418,7 @@ const dotCellSx = {
 } as const;
 
 export function RankedDotStrip({ members }: { members: FacilityServerStatus[] }) {
-	const sorted = [...members].sort(compareServersByRankThenKind);
+	const sorted = [...members].sort(compareServersByRankThenType);
 	const cells: React.ReactNode[] = [];
 	let prevRank: string | null = null;
 	for (const m of sorted) {
@@ -456,7 +456,7 @@ export function RankedDotStrip({ members }: { members: FacilityServerStatus[] })
 				key={m.id}
 				title={`${m.name || "(unnamed)"}${
 					m.rank ? ` · ${m.rank}` : ""
-				} · ${m.kind}`}
+				} · ${m.type}`}
 			>
 				<Box component="span" sx={dotCellSx}>
 					<StatusDot

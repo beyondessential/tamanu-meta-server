@@ -77,14 +77,17 @@ A public name already set is kept when an application stops being eligible, and 
 
 Each grain's billing labels carry what that grain knows, and nothing inferred from what sits inside it.
 
-An application's labels name its type, its stage from its own rank, and `billing.deployment` from its group's name.
+An application's labels name the software its type is an instance of, its stage from its own rank, and `billing.deployment` from its group's name.
+Cost allocation groups by software rather than by software-in-a-role, so a central and a facility of one deployment attribute to the same product.
 That label keeps its spelling because cloud cost allocation reads it, and every device reads its own effective tags (see [GRP](groups.md), "Naming").
 
 A machine's labels carry a stage and a group and no type, a box not being a piece of software.
 Its stage is the highest rank among the applications on it, so a box shared by a production and a test workload bills as production.
 Its group is its own.
 
-A group's labels carry a stage and its own name and no type, a group not being a piece of software either.
+A group's labels carry a stage, its own name, and a product only when its live applications all run one software.
+A group whose applications span two attributes no product at all, since naming one of several would attribute the group's shared cost to the wrong place.
+A group holding a central and a facility names Tamanu, the pair being one software in two roles.
 
 A billing label an operator sets explicitly is honoured as given.
 The resources Canopy owns on a group's behalf are the exception: a group's backup storage attributes to Canopy's own backup product whatever labels the group carries, so backup spend is never charged to an application of that group.

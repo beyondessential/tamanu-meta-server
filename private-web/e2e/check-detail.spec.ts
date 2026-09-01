@@ -209,7 +209,7 @@ test.describe("check detail page", () => {
 		const group = await seedServerGroup(sql, { name: "Backup Coast" });
 		await seedServer(sql, {
 			name: "Anchor Central",
-			kind: "central",
+			type: "tamanu-central",
 			rank: "production",
 			groupId: group.id,
 		});

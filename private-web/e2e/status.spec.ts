@@ -39,13 +39,13 @@ test.describe("status page", () => {
 		const demoGroup = await seedServerGroup(sql, { name: "demo-cluster" });
 		await seedServer(sql, {
 			name: "prod-alpha",
-			kind: "central",
+			type: "tamanu-central",
 			rank: "production",
 			groupId: prodGroup.id,
 		});
 		await seedServer(sql, {
 			name: "demo-beta",
-			kind: "central",
+			type: "tamanu-central",
 			rank: "demo",
 			groupId: demoGroup.id,
 		});

@@ -56,7 +56,7 @@ function CreateForm() {
 		e.preventDefault();
 		try {
 			const group = await create.call({ name, notes, tags });
-			navigate(`/groups/${group.id}/servers/new`);
+			navigate(`/groups/${group.id}/machines/new`);
 		} catch {
 			/* surfaced via create.error */
 		}

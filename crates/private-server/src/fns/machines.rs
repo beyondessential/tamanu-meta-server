@@ -11,11 +11,13 @@
 use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
-use commons_errors::{ProblemDetailsSchema, Result};
+use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
-use commons_types::{Uuid, geo::GeoPoint, server::TagMap};
+use commons_types::{Uuid, device::DeviceRole, geo::GeoPoint, server::TagMap};
 use database::applications::Application;
+use database::devices::{Device, TailscaleIdentity};
 use database::machines::{Machine, MachineUpdate, NewMachine};
+use database::pg_duration::PgDuration;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -116,6 +118,23 @@ pub struct MachineCreateArgs {
 	pub cloud: Option<bool>,
 	/// Where the box is, if known.
 	pub geolocation: Option<GeoPoint>,
+	/// Whether the machine's own checks alert. Defaults to on.
+	pub is_monitored: Option<bool>,
+	/// How long the box may be silent before it is unreachable, in seconds.
+	/// Defaults to the column's own default.
+	pub alert_when_down_for: Option<i64>,
+	/// Operator notes shown on the machine's page.
+	pub notes: Option<String>,
+	/// Operator-set tags. Reserved names are refused, as they are on an edit.
+	pub tags: Option<TagMap>,
+	/// A tailnet node to bind this machine to up front, by address, node key,
+	/// or DNS name. Omit to enrol the machine later.
+	///
+	/// The operator is describing a box they can already see on the tailnet,
+	/// so binding it here saves an enrolment round trip. The identity is a
+	/// machine's, not an application's: the applications on the box are
+	/// reported and carry no identity of their own.
+	pub tailscale_identifier: Option<String>,
 }
 
 /// Add a machine to the fleet.
@@ -140,6 +159,42 @@ pub async fn create(
 	Json(args): Json<MachineCreateArgs>,
 ) -> Result<Json<Uuid>> {
 	let mut conn = state.db.get().await?;
+
+	// Bind the tailnet node first: a machine created and then failed to bind
+	// would leave a record the operator did not ask for.
+	let device_id = match args.tailscale_identifier.as_deref() {
+		None => None,
+		Some(identifier) => {
+			let directory = state
+				.tailnet_directory
+				.as_ref()
+				.ok_or(AppError::AuthTailnetDirectoryUnavailable)?;
+			let entry = directory
+				.resolve_identifier(identifier)
+				.await
+				.map_err(|_| AppError::AuthTailnetDirectoryUnavailable)?
+				.ok_or_else(|| {
+					AppError::NotFound("no tailnet device matches that identifier".into())
+				})?;
+			let device = match Device::from_tailscale_node_id(&mut conn, &entry.node_id).await? {
+				Some(existing) => existing,
+				None => {
+					Device::create_with_tailscale(
+						&mut conn,
+						TailscaleIdentity {
+							node_id: entry.node_id.clone(),
+							node_name: Some(entry.node_name.clone()),
+							tailnet: Some(entry.tailnet.clone()),
+						},
+						DeviceRole::Server,
+					)
+					.await?
+				}
+			};
+			Some(device.id)
+		}
+	};
+
 	let machine = Machine::create(
 		&mut conn,
 		NewMachine {
@@ -150,6 +205,28 @@ pub async fn create(
 		},
 	)
 	.await?;
+
+	// The rest of the form is an edit applied to the machine just made, so
+	// creating and editing cannot disagree about what a field means.
+	Machine::update(
+		&mut conn,
+		machine.id,
+		MachineUpdate {
+			is_monitored: args.is_monitored,
+			alert_when_down_for: args
+				.alert_when_down_for
+				.map(|s| PgDuration(jiff::SignedDuration::from_secs(s))),
+			notes: args.notes,
+			tags: args.tags,
+			..Default::default()
+		},
+	)
+	.await?;
+
+	if let Some(device_id) = device_id {
+		Machine::bind_device(&mut conn, machine.id, device_id).await?;
+	}
+
 	Ok(Json(machine.id))
 }
 

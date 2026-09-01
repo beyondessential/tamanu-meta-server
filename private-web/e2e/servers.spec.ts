@@ -13,7 +13,7 @@ test.describe("servers list page", () => {
 		const group = await seedServerGroup(sql, { name: "cluster-uno" });
 		await seedServer(sql, {
 			name: "in-group",
-			kind: "central",
+			type: "tamanu-central",
 			groupId: group.id,
 		});
 
@@ -69,7 +69,7 @@ test.describe("server detail page", () => {
 		const group = await seedServerGroup(sql, { name: "host-group" });
 		const server = await seedServer(sql, {
 			name: "detail-target",
-			kind: "central",
+			type: "tamanu-central",
 			groupId: group.id,
 		});
 
@@ -110,7 +110,7 @@ test.describe("server edit page", () => {
 	}) => {
 		const server = await seedServer(sql, {
 			name: "edit-target",
-			kind: "central",
+			type: "tamanu-central",
 		});
 
 		await page.goto(`/servers/${server.id}/edit`);
@@ -159,7 +159,7 @@ test.describe("archived view", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "arch-group" });
-		const server = await seedServer(sql, { name: "arch-server", kind: "central" });
+		const server = await seedServer(sql, { name: "arch-server", type: "tamanu-central" });
 		// Archive both directly (the UI paths are covered elsewhere).
 		await sql.query("UPDATE server_groups SET deleted_at = now() WHERE id = $1", [
 			group.id,
@@ -204,8 +204,8 @@ test.describe("archived view", () => {
 	}) => {
 		const group = await seedServerGroup(sql, { name: "gone-grp" });
 		// No statuses seeded → both servers are "gone".
-		await seedServer(sql, { name: "gone-1", kind: "central", groupId: group.id });
-		await seedServer(sql, { name: "gone-2", kind: "facility", groupId: group.id });
+		await seedServer(sql, { name: "gone-1", type: "tamanu-central", groupId: group.id });
+		await seedServer(sql, { name: "gone-2", type: "tamanu-facility", groupId: group.id });
 		page.on("dialog", (d) => d.accept());
 
 		await page.goto(`/groups/${group.id}`);
@@ -235,15 +235,23 @@ test.describe("server create → setup → archive flow", () => {
 		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
 		const group = await seedServerGroup(sql, { name: "flow-group" });
 
-		// Create — the in-group route pre-selects the group, so we only set the
-		// (required) name. Default kind is facility, so there's a single "Name"
-		// field (no "Name in Tamanu Mobile app").
-		await page.goto(`/groups/${group.id}/servers/new`);
-		await page.getByLabel(/^Name(\s*\*)?$/i).fill("flow-server");
-		await page.getByRole("button", { name: "Create server" }).click();
+		// Create the box — the in-group route pre-selects the group, so we only
+		// set the (required) name. Nothing here names an application: what runs
+		// on the box arrives by report.
+		await page.goto(`/groups/${group.id}/machines/new`);
+		await page.getByLabel(/^Name(\s*\*)?$/i).fill("flow-machine");
+		await page.getByRole("button", { name: "Create machine" }).click();
 
-		// Lands on the new server's detail page.
-		await expect(page).toHaveURL(/\/servers\/[0-9a-f-]{36}$/);
+		// Lands back on the group, where the new box now appears.
+		await expect(page).toHaveURL(new RegExp(`/groups/${group.id}$`));
+
+		// The workload on it is reported, not entered, so seed one and carry on
+		// through its lifecycle.
+		const server = await seedServer(sql, {
+			name: "flow-server",
+			groupId: group.id,
+		});
+		await page.goto(`/servers/${server.id}`);
 		await expect(
 			page.getByRole("heading", { level: 1, name: /flow-server/ }),
 		).toBeVisible();
