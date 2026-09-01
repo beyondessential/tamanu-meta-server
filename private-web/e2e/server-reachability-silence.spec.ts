@@ -9,6 +9,23 @@ import {
 	type Sql,
 } from "./seed";
 
+/** The machine-scoped silences on a box's reachability check — what the
+ * machine form's switch writes. */
+async function machineReachabilitySilences(
+	sql: Sql,
+	machineId: string,
+): Promise<number> {
+	const rows = await sql.query<{ n: string }>(
+		"SELECT COUNT(*) AS n FROM scoped_check_policies \
+		 WHERE machine_id = $1 AND source = 'canopy' AND check_name = 'reachability' \
+		 AND ceiling = 'skipped'",
+		[machineId],
+	);
+	return Number(rows[0]!.n);
+}
+
+const MACHINE_SWITCH = "Alert when this machine is unreachable";
+
 /** The server-scoped silences on a server's reachability check — what the
  * form's "alert when this server is unreachable" switch writes, and what
  * the check's own silence button writes. */
@@ -25,15 +42,48 @@ async function reachabilitySilences(sql: Sql, serverId: string): Promise<number>
 const SWITCH = "Alert when this server is unreachable";
 
 // spec: CHK#operator-controls
-test.describe("reachability alerting switch on the server form", () => {
+test.describe("the reachability alerting switch, on both forms", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
 	});
 
-	// A machine-create form carries no reachability switch: a machine's
-	// reachability silence would have to be machine-scoped, and silences are
-	// still application-scoped. Creating a box and quieting it is two steps
-	// until that exists.
+	test("creating a machine with the switch off silences its reachability", async ({
+		page,
+		sql,
+	}) => {
+		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
+		const group = await seedServerGroup(sql, { name: "comes-and-goes" });
+
+		await page.goto(`/groups/${group.id}/machines/new`);
+		await page.getByLabel(/^Name(\s*\*)?$/i).fill("expected-to-vanish");
+		// On by default: a new box alerts when it goes away unless told not to.
+		await expect(page.getByLabel(MACHINE_SWITCH)).toBeChecked();
+		await page.getByLabel(MACHINE_SWITCH).uncheck();
+		await page.getByRole("button", { name: "Create machine" }).click();
+
+		await expect(page).toHaveURL(/\/machines\/[0-9a-f-]{36}$/);
+		const id = page.url().split("/").pop()!;
+		expect(await machineReachabilitySilences(sql, id)).toBe(1);
+	});
+
+	test("creating a machine with the switch on leaves reachability alerting", async ({
+		page,
+		sql,
+	}) => {
+		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
+		const group = await seedServerGroup(sql, { name: "should-stay-up" });
+
+		await page.goto(`/groups/${group.id}/machines/new`);
+		await page.getByLabel(/^Name(\s*\*)?$/i).fill("expected-to-stay");
+		// The switch settling is what says the form is live; clicking before
+		// that lands on markup with no handler attached yet.
+		await expect(page.getByLabel(MACHINE_SWITCH)).toBeChecked();
+		await page.getByRole("button", { name: "Create machine" }).click();
+
+		await expect(page).toHaveURL(/\/machines\/[0-9a-f-]{36}$/);
+		const id = page.url().split("/").pop()!;
+		expect(await machineReachabilitySilences(sql, id)).toBe(0);
+	});
 
 	test("the edit form reflects an existing silence and clearing it re-enables alerting", async ({
 		page,

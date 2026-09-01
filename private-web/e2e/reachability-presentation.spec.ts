@@ -141,19 +141,24 @@ test.describe("unmonitored servers are marked", () => {
 
 		// The cut is a mask on the dot itself, so assert on computed style
 		// rather than a marker element: at a single dot's size there's no room
-		// for anything else to carry the distinction. Both servers are
+		// for anything else to carry the distinction. Each server was seeded on
+		// its own box, so each dot sits in a cell in its own enclosure; both are
 		// production, and centrals sort first within a rank, so the watched
 		// central is dot 0 and the ignored facility is dot 1.
 		const masks = await strip
-			.locator("> span > span")
+			.locator("[data-testid='rank-row'] > span > span > span")
 			.evaluateAll((els) => els.map((el) => getComputedStyle(el).maskImage));
 		expect(masks).toHaveLength(2);
 		expect(masks[0]).toBe("none");
 		expect(masks[1]).not.toBe("none");
 
-		// And the dot says why, for anyone who hovers it. The cell carries its
-		// own tooltip alongside the dot's, so match on the one we mean.
-		await strip.locator("> span").nth(1).hover();
+		// And the dot says why, for anyone who hovers it. The cell and the
+		// enclosure carry their own tooltips alongside the dot's, so match on
+		// the one we mean.
+		await strip
+			.locator("[data-testid='rank-row'] > span > span > span")
+			.nth(1)
+			.hover();
 		await expect(
 			page.getByRole("tooltip", { name: /unmonitored/ }),
 		).toBeVisible();

@@ -5669,6 +5669,23 @@ export interface components {
              *     showing a failure that nobody is being paged about.
              */
             is_monitored: boolean;
+            /** @description The box's own health, from the checks filed against it. */
+            machine_health: components["schemas"]["HealthState"];
+            /**
+             * Format: uuid
+             * @description The box this application runs on. Members sharing one are presented
+             *     together, since a box carrying two workloads is the case the machine
+             *     grain exists for.
+             */
+            machine_id: string;
+            /** @description The box's name, where an operator gave it one. */
+            machine_name?: string | null;
+            /**
+             * @description The box's own reachability, which is not this application's: a machine
+             *     that has gone quiet takes everything on it with it, and one that is fine
+             *     says nothing about whether the software on it is.
+             */
+            machine_up: components["schemas"]["ShortStatus"];
             /** @description Name of the server. */
             name: string;
             /**

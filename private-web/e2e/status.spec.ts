@@ -2,6 +2,7 @@ import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
 	seedDevice,
+	seedMachine,
 	seedServer,
 	seedServerGroup,
 	seedStatus,
@@ -105,7 +106,7 @@ test.describe("status page", () => {
 			for (const [i, rank] of ranks.entries()) {
 				const server = await seedServer(sql, {
 					name: `f${n}-${i}`,
-					kind: i === 0 ? "central" : "facility",
+					type: i === 0 ? "tamanu-central" : "tamanu-facility",
 					rank,
 					groupId: group.id,
 				});
@@ -133,11 +134,63 @@ test.describe("status page", () => {
 			const card = page.locator(`a[href="/groups/${id}"]`).first();
 			const strip = card.getByTestId("dot-strip");
 			await expect(strip).toBeVisible();
-			// Two rank boundaries (production→clone, clone→dev).
-			await expect(strip.getByTestId("rank-separator")).toHaveCount(2);
-			// Every child cell is a dot or a separator.
-			await expect(strip.locator("> *")).toHaveCount(size + 2);
+			// Three rank rows (production, clone, dev), each a row of machine
+			// enclosures rather than a run of dots with a separator between.
+			await expect(strip.getByTestId("rank-row")).toHaveCount(3);
+			// Every application still has its dot; `seedServer` gives each its
+			// own box, so there is one enclosure per dot here.
+			await expect(strip.locator("[data-testid='rank-row'] > span")).toHaveCount(
+				size,
+			);
 		}
+	});
+
+	/// Two dots in one pill is the whole point: a box carrying two workloads
+	/// is one enclosure, and a box carrying one is still an enclosure, so the
+	/// presence of a pill never means anything on its own.
+	///
+	/// spec: FLT
+	test("a box carrying two workloads is one enclosure", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "shared-box-status" });
+		const shared = await seedMachine(sql, {
+			name: "shared",
+			groupId: group.id,
+		});
+		await sql.query(
+			`INSERT INTO applications (id, name, host, type, rank, group_id, machine_id)
+			 VALUES (gen_random_uuid(), 'pair-central', 'https://pc.e2e.invalid',
+			         'tamanu-central', 'production', $1, $2),
+			        (gen_random_uuid(), 'pair-facility', 'https://pf.e2e.invalid',
+			         'tamanu-facility', 'production', $1, $2)`,
+			[group.id, shared.id],
+		);
+		// A third workload, on a box of its own and at another rank.
+		await seedServer(sql, {
+			name: "solo",
+			rank: "dev",
+			groupId: group.id,
+		});
+
+		await page.goto("/status");
+
+		const strip = page
+			.locator(`a[href="/groups/${group.id}"]`)
+			.first()
+			.getByTestId("dot-strip");
+		await expect(strip).toBeVisible();
+
+		// Two rank rows: the shared production box, then the dev box.
+		const rows = strip.getByTestId("rank-row");
+		await expect(rows).toHaveCount(2);
+		// The production row is one enclosure holding two dots.
+		await expect(rows.first().locator("> span")).toHaveCount(1);
+		await expect(rows.first().locator("> span > span")).toHaveCount(2);
+		// The dev row is one enclosure holding one — still an enclosure.
+		await expect(rows.nth(1).locator("> span")).toHaveCount(1);
+		await expect(rows.nth(1).locator("> span > span")).toHaveCount(1);
 	});
 
 	// spec: FIG#active-versions

@@ -38,6 +38,19 @@ pub struct FacilityServerStatus {
 	/// The application the server runs, presented alongside its role.
 	// spec: APP
 	pub r#type: ApplicationType,
+	/// The box this application runs on. Members sharing one are presented
+	/// together, since a box carrying two workloads is the case the machine
+	/// grain exists for.
+	// spec: FLT
+	pub machine_id: Uuid,
+	/// The box's name, where an operator gave it one.
+	pub machine_name: Option<String>,
+	/// The box's own reachability, which is not this application's: a machine
+	/// that has gone quiet takes everything on it with it, and one that is fine
+	/// says nothing about whether the software on it is.
+	pub machine_up: ShortStatus,
+	/// The box's own health, from the checks filed against it.
+	pub machine_health: HealthState,
 }
 
 /// A status-dashboard card summarising one group of equivalent servers, with

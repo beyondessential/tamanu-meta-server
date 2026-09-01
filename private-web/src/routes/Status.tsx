@@ -15,6 +15,7 @@ import BarChartIcon from "@mui/icons-material/BarChart";
 import PersonIcon from "@mui/icons-material/Person";
 import { useMemo } from "react";
 import { Link as RouterLink } from "react-router-dom";
+import MachineEnclosure from "../components/MachineEnclosure";
 import StatusDot from "../components/StatusDot";
 import VersionIndicator from "../components/VersionIndicator";
 import { useVersionTrackingAcross } from "../hooks/useApplicationTypes";
@@ -34,6 +35,7 @@ import {
 	SERVER_RANK_ORDER,
 	aggregateOperators,
 	compareServersByRankThenType,
+	groupServersByRank,
 	isIncidentLingering,
 } from "../types";
 
@@ -399,14 +401,18 @@ function OperatorCountChip({
 	);
 }
 
-/// Strip of StatusDots for a group's members, sorted by rank then kind
-/// (centrals first within a rank). A hollow right-pointing triangle
-/// separates adjacent ranks, so operators can see at a glance how the
-/// group breaks down without naming each dot.
-// Every child of the strip — dot or rank separator — sits in an identical
-// fixed-size cell, so wrapped rows always align to the same column grid no
-// matter where the line breaks fall. Spacing comes from the container's
-// `gap`, not per-dot margins (StatusDot's inline right-margin is neutralised).
+/// A group's members as rank rows of machine enclosures.
+///
+/// Rank is the outer break, highest first, since that is how an operator reads
+/// a group. Within a rank every machine is a pill holding the dots for the
+/// applications on it: a one-application box is one dot in a pill, so the
+/// presence of an enclosure never means anything on its own — only its
+/// contents do. Two dots in one pill is the case the machine grain exists for.
+/// spec: FLT
+// Every dot sits in an identical fixed-size cell, so wrapped rows align to the
+// same column grid wherever the line breaks fall. Spacing comes from the
+// container's `gap`, not per-dot margins (StatusDot's inline right-margin is
+// neutralised).
 const dotCellSx = {
 	display: "inline-flex",
 	width: "1em",
@@ -417,68 +423,72 @@ const dotCellSx = {
 	"& > span": { marginRight: 0 },
 } as const;
 
-export function RankedDotStrip({ members }: { members: FacilityServerStatus[] }) {
-	const sorted = [...members].sort(compareServersByRankThenType);
-	const cells: React.ReactNode[] = [];
-	let prevRank: string | null = null;
-	for (const m of sorted) {
-		const rank = m.rank ?? "_unranked";
-		if (prevRank != null && rank !== prevRank) {
-			cells.push(
-				<Box
-					key={`sep-${rank}`}
-					component="span"
-					aria-hidden
-					data-testid="rank-separator"
-					sx={{ ...dotCellSx, color: "text.primary" }}
-				>
-					{/* Hollow play-button triangle, dot-sized; MUI's
-					    PlayArrowOutlined renders too small in a 1em cell and
-					    has sharp corners, hence the inline SVG. */}
-					<svg
-						width="1em"
-						height="1em"
-						viewBox="0 0 16 16"
-						fill="none"
-						stroke="currentColor"
-						strokeWidth={2}
-						strokeLinejoin="round"
-						strokeLinecap="round"
-					>
-						<path d="M4.5 3.2 12.8 8 4.5 12.8Z" />
-					</svg>
-				</Box>,
-			);
-		}
-		prevRank = rank;
-		cells.push(
-			<Tooltip
-				key={m.id}
-				title={`${m.name || "(unnamed)"}${
-					m.rank ? ` · ${m.rank}` : ""
-				} · ${m.type}`}
-			>
-				<Box component="span" sx={dotCellSx}>
-					<StatusDot
-						up={m.up}
-						health={m.health}
-						monitored={m.is_monitored}
-						title={`${m.name}: ${m.up}${
-							m.health !== "healthy" ? ` (${m.health})` : ""
-						}`}
-					/>
-				</Box>
-			</Tooltip>,
-		);
+/// The machines of one group, each with the applications on it, bucketed by
+/// the rank of the highest-ranked application it carries.
+function machineRows(members: FacilityServerStatus[]) {
+	const byMachine = new Map<string, FacilityServerStatus[]>();
+	for (const m of members) {
+		const on = byMachine.get(m.machine_id);
+		if (on) on.push(m);
+		else byMachine.set(m.machine_id, [m]);
 	}
+	const boxes = [...byMachine.values()].map((on) => {
+		const sorted = [...on].sort(compareServersByRankThenType);
+		return { applications: sorted, lead: sorted[0]! };
+	});
+	return groupServersByRank(
+		boxes.map((b) => ({
+			...b,
+			rank: b.lead.rank,
+			type: b.lead.type,
+			name: b.lead.machine_name ?? b.lead.name,
+		})),
+	);
+}
+
+export function RankedDotStrip({ members }: { members: FacilityServerStatus[] }) {
+	const rows = machineRows(members);
 	return (
-		<Stack
-			direction="row"
-			spacing={0}
-			data-testid="dot-strip"
-			sx={{ flexWrap: "wrap", alignItems: "center", gap: "0.5em" }}
-		>
-			{cells}
+		<Stack data-testid="dot-strip" spacing={0.5} sx={{ minWidth: 0 }}>
+			{rows.map(([rank, boxes], index) => (
+				<Box
+					key={rank ?? "_unranked"}
+					data-testid="rank-row"
+					sx={{
+						display: "flex",
+						flexWrap: "wrap",
+						alignItems: "center",
+						gap: 0.5,
+						// A rule lighter than the card's own borders, so the rank
+						// break reads as subordinate to the card structure.
+						...(index > 0
+							? { borderTop: 1, borderColor: "divider", pt: 0.5 }
+							: {}),
+					}}
+				>
+					{boxes.map((box) => (
+						<MachineEnclosure
+							key={box.lead.machine_id}
+							up={box.lead.machine_up}
+							health={box.lead.machine_health}
+							name={box.lead.machine_name}
+						>
+							{box.applications.map((m) => (
+								<Box key={m.id} component="span" sx={dotCellSx}>
+									<StatusDot
+										up={m.up}
+										health={m.health}
+										monitored={m.is_monitored}
+										title={`${m.name || "(unnamed)"}${
+											m.rank ? ` · ${m.rank}` : ""
+										} · ${m.type}`}
+									/>
+								</Box>
+							))}
+						</MachineEnclosure>
+					))}
+				</Box>
+			))}
 		</Stack>
 	);
 }

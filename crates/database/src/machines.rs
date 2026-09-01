@@ -380,6 +380,21 @@ impl Machine {
 		})
 	}
 
+	/// Several machines at once, for a view that has a page of them and would
+	/// otherwise ask one query per box.
+	pub async fn get_many(db: &mut AsyncPgConnection, ids: &[Uuid]) -> Result<Vec<Self>> {
+		use crate::schema::machines::dsl;
+		if ids.is_empty() {
+			return Ok(Vec::new());
+		}
+		dsl::machines
+			.select(Self::as_select())
+			.filter(dsl::id.eq_any(ids))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// The applications running on this machine.
 	pub async fn applications(
 		&self,

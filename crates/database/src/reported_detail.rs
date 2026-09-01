@@ -382,6 +382,40 @@ impl MachineReportedDetail {
 		Ok(())
 	}
 
+	/// When each of these machines last reported anything, across every source.
+	///
+	/// A machine's reachability is judged from this, so a view showing many
+	/// boxes asks once rather than once per box.
+	// spec: CHK#reachability
+	pub async fn latest_for_machines(
+		db: &mut AsyncPgConnection,
+		ids: &[Uuid],
+	) -> Result<std::collections::HashMap<Uuid, Timestamp>> {
+		use crate::schema::machine_reported_detail::dsl;
+		use std::collections::HashMap;
+		if ids.is_empty() {
+			return Ok(HashMap::new());
+		}
+		let rows: Vec<(Uuid, jiff_diesel::Timestamp)> = dsl::machine_reported_detail
+			.select((dsl::machine_id, dsl::reported_at))
+			.filter(dsl::machine_id.eq_any(ids))
+			.load(db)
+			.await?;
+		let mut latest: HashMap<Uuid, Timestamp> = HashMap::new();
+		for (id, at) in rows {
+			let at = Timestamp::from(at);
+			latest
+				.entry(id)
+				.and_modify(|held| {
+					if at > *held {
+						*held = at;
+					}
+				})
+				.or_insert(at);
+		}
+		Ok(latest)
+	}
+
 	pub async fn for_machine(db: &mut AsyncPgConnection, machine: Uuid) -> Result<Vec<Self>> {
 		use crate::schema::machine_reported_detail::dsl;
 		dsl::machine_reported_detail

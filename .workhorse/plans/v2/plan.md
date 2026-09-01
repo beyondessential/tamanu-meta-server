@@ -20,7 +20,7 @@ Each item is a section below; the section carries the detail and the traps.
 - [x] **Retiring the graded reachability states** — `short_status`'s hardcoded thresholds
 - [x] **Fleet query interface** — MCP gains `Get machine` and `Find machines`
 - [x] **Migration** — `{product, kind}` becomes `{type}`
-- [ ] **Frontend** — two detail pages, the group tree, the status-page bands
+- [x] **Frontend** — two detail pages, the group tree, the status-page bands
 - [ ] **Routes** — deprecation aliases for every renamed path
 
 Carried deferrals, each gated on a step above rather than on a vague later:
@@ -410,7 +410,7 @@ Done: the type replaces the pair throughout the UI. One `ApplicationTypeChip` re
 
 **The create form became the machine form.** Same form minus five fields: no URL, no product, no kind, no rank, no public name. What is left is a box — name, group, location, tailnet identity, monitoring, notes, tags — and `MachineCreateArgs` widened to match `MachineUpdate` so creating and editing cannot disagree about what a field means. Binding a tailnet node at create time sets `device_id` without setting `registered_at`: naming a box is not the box arriving, and a backup deadline counts from arrival.
 
-**The create form has no reachability switch yet.** It wrote a silence, and at the time there was no machine-scoped one to write. There is now (see below), so this is a UI job rather than a modelling one: the switch goes back on the form once creating a machine and silencing its reachability can be one action. The two create-time e2e tests that covered it stay removed until then; the edit-form ones cover the application grain.
+**The create form's reachability switch is back**, writing a machine-scoped silence rather than the server-scoped one it used to. The two create-time e2e tests return with it, now asserting on `scoped_check_policies.machine_id`.
 
 ### Silences follow the event
 
@@ -434,6 +434,18 @@ The gap was not the one first recorded. `ScopedCheckPolicy::silence` takes a `Sc
 
 **A bug found on the way.** `suspended_targets` returns machine ids since maintenance took the machine grain, but the fleet listing still tested them against the *application* id. Every machine that predates the split took its application's id, so the wrong read agreed with the right one on all existing data and only parted company for a machine created since. Fixed, with a test that seeds deliberately unequal ids and fails on the old code.
 
+
+### The status page, and the dot's second subject
+
+`StatusDot` had two encodings because a server was two things: a fill for reachability and a ring for health. With the machine owning reachability the dot has one subject, so it spends its whole colourway on the application — healthy, warning, failing, never reported — and the ring goes. The unhealthy case stops being a fill-and-ring inversion and becomes a colour.
+
+`MachineEnclosure` is the machine: a pill around that box's dots, neutral, orange when the box's own checks are degraded, red when the box is down. Red on both grains is deliberate — red means down, and which element carries it says what went down. Orange is the enclosure's alone and light green the dot's, so each hue means one thing.
+
+A group card's dots become rank rows of enclosures rather than one flat strip with a triangle at the rank break. The triangle goes: the break is a rule, and the enclosures say which dots share a box, which is what the strip could never say.
+
+`FacilityServerStatus` gained the machine — id, name, its own reachability and health — since the card had no way to group by box. Two batch reads came with it (`Machine::get_many`, `MachineReportedDetail::latest_for_machines`) so a page of cards does not ask per box.
+
+CHK gained "One subject per mark": a mark says one thing about one subject, an enclosure means nothing on its own, and a mark carries no second encoding for a second subject.
 
 ## Mockups
 

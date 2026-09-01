@@ -235,6 +235,20 @@ The detail a source attached to a check is presented with it, attributed to its 
 A past state is reconstructed from the status history.
 No surface presents one source's checks in isolation, and none exposes a source's report other than as classified check state.
 
+### One subject per mark
+
+A status mark says one thing about one subject, and which element carries it says what the subject is.
+
+An application's mark carries that application's state alone: healthy, warning where a check is failing but it is overall serving, failing, or never reported.
+A machine's mark encloses the marks of the applications on it and carries the box's own state.
+So a box carrying two applications is one enclosure holding two marks, and a box carrying one is still an enclosure — an enclosure means nothing on its own, only its contents do.
+
+A mark carries no second encoding for a second subject.
+Reachability was once carried alongside health on the application's mark, from when an application and the box it runs on were one record; it is the machine's, and it is on the machine's enclosure.
+
+Severity reads from colour and subject from shape, so a colour means the same thing wherever it appears.
+A degraded machine is distinguished from a degraded application, since one affects everything on the box and the other affects one workload.
+
 ## Operator controls
 
 **Silences** are the scoped policy described above.

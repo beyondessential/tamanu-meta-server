@@ -240,6 +240,30 @@ pub async fn group_details(
 	let member_health =
 		database::issues::health_from_check_state(&mut conn, &member_groups).await?;
 
+	// The boxes the members run on: their own reachability and health, which a
+	// card presents on the enclosure around each machine's dots.
+	// spec: FLT
+	let machine_ids: Vec<Uuid> = applications.iter().map(|s| s.machine_id).collect();
+	let machines: HashMap<Uuid, database::machines::Machine> =
+		database::machines::Machine::get_many(&mut conn, &machine_ids)
+			.await?
+			.into_iter()
+			.map(|m| (m.id, m))
+			.collect();
+	let machine_health = database::issues::machine_health_from_check_state(
+		&mut conn,
+		&applications
+			.iter()
+			.map(|s| (s.machine_id, s.group_id))
+			.collect::<Vec<_>>(),
+	)
+	.await?;
+	let machine_reports = database::reported_detail::MachineReportedDetail::latest_for_machines(
+		&mut conn,
+		&machine_ids,
+	)
+	.await?;
+
 	// The card's headline version is the cached last reported version of the
 	// group's canonical member (highest rank, then highest kind), maintained by
 	// the `statuses` trigger and `ServerGroup::recompute_version`. The distance
@@ -271,6 +295,15 @@ pub async fn group_details(
 				operators,
 				rank: s.rank,
 				r#type: s.r#type,
+				machine_id: s.machine_id,
+				machine_name: machines.get(&s.machine_id).and_then(|m| m.name.clone()),
+				machine_up: machines.get(&s.machine_id).map_or(ShortStatus::Gone, |m| {
+					m.reachability(machine_reports.get(&s.machine_id).copied())
+				}),
+				machine_health: machine_health
+					.get(&s.machine_id)
+					.copied()
+					.unwrap_or_default(),
 			}
 		})
 		.collect();

@@ -168,7 +168,7 @@ cover the runtime half of that, which the spec diff cannot see.
 - [x] The public-name field is offered only for a type eligible for public listing
 - [x] A group names a billing product only when its applications all run one software
 - [x] Creating a machine lands on that machine's own page
-- [ ] A machine's reachability can be silenced from the machine form, as a server's could
+- [x] A machine's reachability can be silenced from the machine form, as a server's could (verifies spec: CHK)
 
 - [x] The group page lists rank, then machine, then applications
 - [ ] Both detail pages end with the group's tree, with the current page highlighted
@@ -188,7 +188,7 @@ cover the runtime half of that, which the spec diff cannot see.
 - [ ] Neither detail page shows a status dot beside its title
 - [ ] A group card's operator count counts people once across machines
 - [ ] The operator tooltip names each person and the machines they are on
-- [ ] The status card encloses every machine, including one hosting a single application
-- [ ] A machine enclosure carries the machine's state; the indicator inside carries the application's
-- [ ] Rank rows carry the rank spelled out behind their applications
+- [x] The status card encloses every machine, including one hosting a single application (verifies spec: CHK)
+- [x] A machine enclosure carries the machine's state; the indicator inside carries the application's (verifies spec: CHK)
+- [x] A group card's dots are rank rows of machine enclosures rather than one flat strip
 - [ ] The fleet listing has no ungrouped tab

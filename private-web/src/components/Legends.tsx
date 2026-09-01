@@ -1,23 +1,42 @@
 import { Chip, Stack, Typography } from "@mui/material";
 import PersonIcon from "@mui/icons-material/Person";
 import type { HealthState, ShortStatus } from "../types";
+import MachineEnclosure from "./MachineEnclosure";
 import StatusDot from "./StatusDot";
 import VersionSquare from "./VersionSquare";
 
-// No durations here: each target is judged against its own threshold, so a
-// fixed one in the legend would be wrong for most of the fleet. The old labels
-// named fixed bands and had already drifted from the code.
+// One colourway, so one legend: the dot's colour is the application's state,
+// and the pill around it is the box's. No durations here — each target is
+// judged against its own threshold, so a fixed one would be wrong for most of
+// the fleet.
 // spec: CHK#reachability
-const STATUS_ENTRIES: Array<{ up: ShortStatus; label: string }> = [
-	{ up: "up", label: "Up (reporting)" },
-	{ up: "down", label: "Down (silent past its threshold)" },
-	{ up: "gone", label: "Gone (never reported)" },
+const DOT_ENTRIES: Array<{
+	up: ShortStatus;
+	health: HealthState;
+	label: string;
+}> = [
+	{ up: "up", health: "healthy", label: "Healthy (application reports OK)" },
+	{
+		up: "up",
+		health: "warning",
+		label: "Warning (some check failing, overall OK)",
+	},
+	{ up: "up", health: "unhealthy", label: "Failing (application reports problems)" },
+	{ up: "down", health: "healthy", label: "Down (silent past its threshold)" },
+	{ up: "gone", health: "healthy", label: "Never reported" },
 ];
 
-const HEALTH_ENTRIES: Array<{ health: HealthState; label: string }> = [
-	{ health: "healthy", label: "Healthy (server reports OK)" },
-	{ health: "warning", label: "Warning (some check failing, overall OK)" },
-	{ health: "unhealthy", label: "Unhealthy (server reports problems)" },
+// The enclosure's own states. Orange is the pill's alone, so each hue means
+// one thing: light green a degraded application, orange a degraded machine,
+// red down.
+const MACHINE_ENTRIES: Array<{
+	up: ShortStatus;
+	health: HealthState;
+	label: string;
+}> = [
+	{ up: "up", health: "healthy", label: "Machine fine" },
+	{ up: "up", health: "warning", label: "Machine's own checks degraded" },
+	{ up: "down", health: "healthy", label: "Machine down (everything on it with it)" },
 ];
 
 const VERSION_ENTRIES: Array<{ distance: number | null; label: string }> = [
@@ -46,9 +65,14 @@ export function VersionLegend() {
 export function StatusLegend() {
 	return (
 		<Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap" }}>
-			{STATUS_ENTRIES.map(({ up, label }) => (
-				<Stack key={up} direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
-					<StatusDot up={up} />
+			{DOT_ENTRIES.map(({ up, health, label }) => (
+				<Stack
+					key={label}
+					direction="row"
+					spacing={0.5}
+					sx={{ alignItems: "center" }}
+				>
+					<StatusDot up={up} health={health} />
 					<Typography variant="body2" color="text.secondary">
 						{label}
 					</Typography>
@@ -81,17 +105,21 @@ export function OperatorLegend() {
 	);
 }
 
+/// The pill around a group card's dots: the box, whose state is not the state
+/// of the software on it.
 export function HealthLegend() {
 	return (
 		<Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap" }}>
-			{HEALTH_ENTRIES.map(({ health, label }) => (
+			{MACHINE_ENTRIES.map(({ up, health, label }) => (
 				<Stack
-					key={health}
+					key={label}
 					direction="row"
 					spacing={0.5}
 					sx={{ alignItems: "center" }}
 				>
-					<StatusDot up="up" health={health} />
+					<MachineEnclosure up={up} health={health}>
+						<StatusDot up="up" health="healthy" />
+					</MachineEnclosure>
 					<Typography variant="body2" color="text.secondary">
 						{label}
 					</Typography>

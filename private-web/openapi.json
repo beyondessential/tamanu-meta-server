@@ -10529,7 +10529,10 @@
           "health",
           "is_monitored",
           "operators",
-          "type"
+          "type",
+          "machine_id",
+          "machine_up",
+          "machine_health"
         ],
         "properties": {
           "health": {
@@ -10544,6 +10547,26 @@
           "is_monitored": {
             "type": "boolean",
             "description": "Whether canopy alerts on this server's checks. An unmonitored\nserver's reachability and health are determined and presented as\nnormal, but raise nothing — so consumers mark it, rather than\nshowing a failure that nobody is being paged about."
+          },
+          "machine_health": {
+            "$ref": "#/components/schemas/HealthState",
+            "description": "The box's own health, from the checks filed against it."
+          },
+          "machine_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The box this application runs on. Members sharing one are presented\ntogether, since a box carrying two workloads is the case the machine\ngrain exists for."
+          },
+          "machine_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The box's name, where an operator gave it one."
+          },
+          "machine_up": {
+            "$ref": "#/components/schemas/ShortStatus",
+            "description": "The box's own reachability, which is not this application's: a machine\nthat has gone quiet takes everything on it with it, and one that is fine\nsays nothing about whether the software on it is."
           },
           "name": {
             "type": "string",

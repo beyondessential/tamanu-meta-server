@@ -15,6 +15,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { callApi, useApi, useApiAction } from "../api";
 import TagsEditor from "../components/TagsEditor";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { REACHABILITY_CHECK } from "../types";
 import type { ServerGroup, TagMap, TailnetLiveInfo } from "../types";
 
 /// Operator-first machine creation, reachable at `/groups/:id/machines/new`
@@ -32,9 +33,15 @@ export default function MachineCreate() {
 	// group to default-select.
 	const { id: presetGroupId } = useParams<{ id?: string }>();
 	const action = useApiAction("machines", "create");
+	const silence = useApiAction("silenced_refs", "silence_machine");
 
 	const [name, setName] = useState("");
 	const [isMonitored, setIsMonitored] = useState(true);
+	// Off means "alert on everything else, just not this box going away".
+	// Written as the machine-scoped silence on canopy's reachability check —
+	// the same one the check itself offers, so either place reflects the other.
+	// spec: CHK#silences-follow-the-event
+	const [alertWhenUnreachable, setAlertWhenUnreachable] = useState(true);
 	const [alertWhenDownMinutes, setAlertWhenDownMinutes] = useState("10");
 	const [groupId, setGroupId] = useState<string | null>(presetGroupId ?? null);
 	const [tailscaleIdentifier, setTailscaleIdentifier] = useState("");
@@ -44,8 +51,8 @@ export default function MachineCreate() {
 	const [notes, setNotes] = useState("");
 	const [tags, setTags] = useState<TagMap>({});
 
-	const pending = action.pending;
-	const error = action.error;
+	const pending = action.pending || silence.pending;
+	const error = action.error ?? silence.error;
 
 	const onSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -68,6 +75,13 @@ export default function MachineCreate() {
 		};
 		try {
 			const machineId = await action.call(data);
+			if (!alertWhenUnreachable) {
+				await silence.call({
+					machine_id: machineId,
+					source: REACHABILITY_CHECK.source,
+					ref: REACHABILITY_CHECK.ref,
+				});
+			}
 			navigate(`/machines/${machineId}`);
 		} catch {
 			/* surfaced via the actions' errors */
@@ -148,6 +162,23 @@ export default function MachineCreate() {
 					test environments and ad-hoc demos that are expected to be down.
 				</Typography>
 
+				<FormControlLabel
+					control={
+						<Checkbox
+							checked={alertWhenUnreachable}
+							onChange={(e) => setAlertWhenUnreachable(e.target.checked)}
+							disabled={pending}
+						/>
+					}
+					label="Alert when this machine is unreachable"
+				/>
+				<Typography variant="caption" color="text.secondary">
+					When off, every other check on this box alerts as normal and only the
+					box going away is quiet. This is the same as silencing the
+					reachability check on this machine, and either place reflects the
+					other.
+				</Typography>
+
 				<Stack
 					direction={{ xs: "column", md: "row" }}
 					spacing={2}
@@ -161,7 +192,7 @@ export default function MachineCreate() {
 						type="number"
 						value={alertWhenDownMinutes}
 						onChange={(e) => setAlertWhenDownMinutes(e.target.value)}
-						disabled={pending || !isMonitored}
+						disabled={pending || !isMonitored || !alertWhenUnreachable}
 						slotProps={{ htmlInput: { min: 1, step: 1 } }}
 						sx={{ width: 140 }}
 					/>
