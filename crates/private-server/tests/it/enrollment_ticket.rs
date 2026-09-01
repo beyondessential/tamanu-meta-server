@@ -7,8 +7,24 @@ use algae_cli::{
 	streams::decrypt_stream,
 };
 use base64::Engine;
+use commons_tests::diesel_async::{AsyncPgConnection, SimpleAsyncConnection};
 use database::server_enrollment_tokens::ServerEnrollmentToken;
 use serde_json::{Value, json};
+use uuid::Uuid;
+
+/// An application to enrol. Seeded rather than created through the API: an
+/// application's type is reported, so there is no operator flow that makes one.
+async fn seed_application(conn: &mut AsyncPgConnection) -> String {
+	let id = Uuid::new_v4();
+	conn.batch_execute(&format!(
+		"WITH m AS (INSERT INTO machines (id) VALUES ('{id}') RETURNING id) \
+		 INSERT INTO applications (id, type, machine_id) \
+		 VALUES ('{id}', 'tamanu-central', '{id}')"
+	))
+	.await
+	.expect("seed application");
+	id.to_string()
+}
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mint_enrollment_ticket_round_trips_to_active_token() {
@@ -16,13 +32,8 @@ async fn mint_enrollment_ticket_round_trips_to_active_token() {
 		// PUBLIC_URL is read by the handler to build the payload.
 		unsafe { std::env::set_var("PUBLIC_URL", "https://api.example.test") };
 
-		// Create a server to enrol.
-		let response = private
-			.post("/api/servers/create")
-			.json(&json!({ "kind": "central" }))
-			.await;
-		response.assert_status_ok();
-		let server_id: String = response.json();
+		// An application to enrol.
+		let server_id = seed_application(&mut conn).await;
 
 		// Mint an encrypted enrollment ticket.
 		let response = private
@@ -76,15 +87,10 @@ async fn mint_enrollment_ticket_round_trips_to_active_token() {
 /// ticket — it must never appear in the clear in any response or error body.
 #[tokio::test(flavor = "multi_thread")]
 async fn enrollment_token_never_leaks_in_the_clear() {
-	commons_tests::server::run(async |_conn, public, private| {
+	commons_tests::server::run(async |mut conn, public, private| {
 		unsafe { std::env::set_var("PUBLIC_URL", "https://api.example.test") };
 
-		let response = private
-			.post("/api/servers/create")
-			.json(&json!({ "kind": "central" }))
-			.await;
-		response.assert_status_ok();
-		let server_id: String = response.json();
+		let server_id = seed_application(&mut conn).await;
 
 		let mint = private
 			.post("/api/servers/mint_enrollment")

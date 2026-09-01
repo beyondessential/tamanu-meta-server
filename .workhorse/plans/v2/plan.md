@@ -44,6 +44,20 @@ The first draft overreached, asserting that a box is not in an environment. It i
 
 **Merge order matters.** 57 files are touched by both, three of which this branch renamed (`database/src/servers.rs`, `database/src/server_certificates.rs`, `private-server/src/fns/servers.rs`), plus `specs/servers/products.md` → `application-types.md`. W1 also renames `deployment_default_region()` → `instance_default_region()`, which this branch calls from the restore worklist. V2 landing first is much the cheaper order: replaying a vocabulary sweep over a rename is mechanical, where replaying a rename over a sweep means resolving 57 files of wholesale rewrites and hand-applying four renames.
 
+## The wire may not break under it
+
+**The bar, stated mechanically:** the `bestool-canopy` crate, generated from the OpenAPI spec before and after this branch, must not be a semver-breaking change under `cargo-semver-checks`. That turns "keep the wire compatible" from a judgement into something checkable — a removed field, a removed endpoint, a dropped enum variant, or a newly required request field each shows up as a break.
+
+**The bar reaches the public spec.** That is what the agent-facing crate is generated from. The private API is the admin SPA's, versioned with the bundle it ships in, so it is not held to this — a distinction worth stating, since `product` and `kind` live there and nowhere on the public wire.
+
+**`product` and `kind` never appeared on the public wire at all.** `PublicServer` and `WorklistEntry` carry neither, and no schema named `Product` or `ServerKind` is emitted. So merging the pair into one type, which felt like the risky change, costs the agent-facing wire nothing. The one agent-facing surface that does carry them is the reserved tags, which are map keys rather than schema, so an agent or an operator rule reading `canopy:product` or `canopy:kind` would have broken *silently*. Both stay emitted, derived from the type, alongside the new `canopy:type`.
+
+**Two real breaks, both the same rename.** Comparing the generated spec across the branch, `server_id` → `machine_id` on `VerificationArgs` (a request) and on `WorklistEntry` (a response). Everything else the branch does to the public spec is additive.
+
+Both are fixed by keeping the old name beside the new one. The backfill makes this exact rather than approximate: `INSERT INTO machines … SELECT a.id` gave every pre-split machine its application's id, so for every machine that predates the split the two values are equal. On the response the old name is emitted alongside the new. On the request both are optional and the handler requires exactly one — naming both is refused rather than resolved by preference, since a reporter that disagrees with itself about what it restored has not been understood.
+
+**One residue, deliberate.** `VerificationArgs.server_id` widens from required to optional, which reads as a field type change in the generated crate. It is the only way to let a new client send `machine_id` without also sending a legacy field forever; the alternative is a permanently required `server_id`. Runtime compatibility — the actual goal — is unaffected in either direction.
+
 ## Sequencing
 
 **Rename first, then split.** The `servers` → `applications` rename lands before the machine grain, so the machine work is written against names that already read correctly and the affected tables are touched once rather than twice.

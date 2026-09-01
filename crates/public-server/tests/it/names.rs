@@ -55,8 +55,8 @@ async fn entitled(
 
 	let server = Uuid::new_v4();
 	conn.batch_execute(&format!(
-		"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ('{server}', '{group}', '{device_id}') RETURNING id) INSERT INTO applications (id, name, host, kind, group_id, device_id, may_manage_dns, may_manage_tls, machine_id) \
-		 VALUES ('{server}', 'crt', 'https://{server}.example.invalid', 'central', '{group}', \
+		"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ('{server}', '{group}', '{device_id}') RETURNING id) INSERT INTO applications (id, name, host, type, group_id, device_id, may_manage_dns, may_manage_tls, machine_id) \
+		 VALUES ('{server}', 'crt', 'https://{server}.example.invalid', 'tamanu-central', '{group}', \
 		 '{device_id}', {dns}, {tls}, '{server}')"
 	))
 	.await
@@ -451,8 +451,8 @@ async fn a_name_resolves_to_the_application_declaring_it() {
 			let second = Uuid::new_v4();
 			conn.batch_execute(&format!(
 				"INSERT INTO applications \
-				   (id, name, host, kind, group_id, may_manage_dns, may_manage_tls, machine_id) \
-				 SELECT '{second}', 'crt-2', 'https://{second}.example.invalid', 'central', \
+				   (id, name, host, type, group_id, may_manage_dns, may_manage_tls, machine_id) \
+				 SELECT '{second}', 'crt-2', 'https://{second}.example.invalid', 'tamanu-central', \
 				        group_id, true, true, machine_id \
 				 FROM applications WHERE id = '{first}'"
 			))
@@ -536,8 +536,8 @@ async fn a_name_held_elsewhere_is_refused_exactly_as_an_unheld_one() {
 			let sibling = Uuid::new_v4();
 			conn.batch_execute(&format!(
 				"INSERT INTO applications \
-				   (id, name, host, kind, group_id, may_manage_dns, may_manage_tls, machine_id) \
-				 SELECT '{sibling}', 'crt-2', 'https://{sibling}.example.invalid', 'central', \
+				   (id, name, host, type, group_id, may_manage_dns, may_manage_tls, machine_id) \
+				 SELECT '{sibling}', 'crt-2', 'https://{sibling}.example.invalid', 'tamanu-central', \
 				        group_id, true, true, machine_id \
 				 FROM applications WHERE id = '{mine}'"
 			))
@@ -548,9 +548,8 @@ async fn a_name_held_elsewhere_is_refused_exactly_as_an_unheld_one() {
 			let elsewhere = Uuid::new_v4();
 			conn.batch_execute(&format!(
 				"INSERT INTO machines (id) VALUES ('{elsewhere}'); \
-				 INSERT INTO applications (id, name, host, kind, machine_id) \
-				 VALUES ('{elsewhere}', 'theirs', 'https://{elsewhere}.example.invalid', \
-				         'central', '{elsewhere}'); \
+				 INSERT INTO applications (id, name, host, type, machine_id) \
+				 VALUES ('{elsewhere}', 'theirs', 'https://{elsewhere}.example.invalid', 'tamanu-central', '{elsewhere}'); \
 				 INSERT INTO application_names (application_id, name, addresses, \
 				   published_addresses) \
 				 VALUES ('{elsewhere}', 'theirs.fiji.tamanu.app', '{{}}', '{{}}')"
@@ -632,8 +631,8 @@ async fn entitlements_carry_one_entry_per_application_on_the_machine() {
 			let second = Uuid::new_v4();
 			conn.batch_execute(&format!(
 				"INSERT INTO applications \
-				   (id, name, host, kind, group_id, may_manage_dns, may_manage_tls, machine_id) \
-				 SELECT '{second}', 'ent-2', 'https://{second}.example.invalid', 'central', \
+				   (id, name, host, type, group_id, may_manage_dns, may_manage_tls, machine_id) \
+				 SELECT '{second}', 'ent-2', 'https://{second}.example.invalid', 'tamanu-central', \
 				        group_id, false, false, machine_id \
 				 FROM applications WHERE id = '{first}'"
 			))

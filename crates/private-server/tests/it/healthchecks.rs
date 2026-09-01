@@ -321,8 +321,8 @@ async fn sample_materialises_latest_push_for_this_check() {
 			"INSERT INTO server_groups (id, name, tags) VALUES \
 				('11111111-1111-1111-1111-111111111111', 'prod', '{\"env\": \"prod\"}'::jsonb); \
 			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('22222222-2222-2222-2222-222222222222', \
-				 '11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, host, name, kind, group_id, tags, machine_id) VALUES \
-				('22222222-2222-2222-2222-222222222222', 'https://prod-host', 'Prod Central', 'central', \
+				 '11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, host, name, type, group_id, tags, machine_id) VALUES \
+				('22222222-2222-2222-2222-222222222222', 'https://prod-host', 'Prod Central', 'tamanu-central', \
 				 '11111111-1111-1111-1111-111111111111', '{\"region\": \"au\"}'::jsonb, '22222222-2222-2222-2222-222222222222'); \
 			 INSERT INTO statuses (server_id, healthy, health, extra, created_at) VALUES \
 				('22222222-2222-2222-2222-222222222222', false, \
@@ -376,8 +376,8 @@ async fn sample_materialises_latest_push_for_this_check() {
 async fn sample_normalises_result_form_entries() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('55555555-5555-5555-5555-555555555555') RETURNING id) INSERT INTO applications (id, host, kind, machine_id) VALUES \
-				('55555555-5555-5555-5555-555555555555', 'https://result-host', 'central', '55555555-5555-5555-5555-555555555555'); \
+			"WITH m AS (INSERT INTO machines (id) VALUES ('55555555-5555-5555-5555-555555555555') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
+				('55555555-5555-5555-5555-555555555555', 'https://result-host', 'tamanu-central', '55555555-5555-5555-5555-555555555555'); \
 			 INSERT INTO statuses (server_id, healthy, health, extra) VALUES \
 				('55555555-5555-5555-5555-555555555555', true, \
 				 '[{\"check\": \"queue_depth\", \"result\": \"warning\", \"depth\": 120}]'::jsonb, \
@@ -406,9 +406,9 @@ async fn sample_picks_the_most_recent_push_across_servers() {
 			"WITH m AS (INSERT INTO machines (id) VALUES \
 				('33333333-3333-3333-3333-333333333333'), \
 				('44444444-4444-4444-4444-444444444444') RETURNING id) \
-			 INSERT INTO applications (id, host, kind, machine_id) VALUES \
-				('33333333-3333-3333-3333-333333333333', 'https://older-host', 'central', '33333333-3333-3333-3333-333333333333'), \
-				('44444444-4444-4444-4444-444444444444', 'https://newer-host', 'central', '44444444-4444-4444-4444-444444444444'); \
+			 INSERT INTO applications (id, host, type, machine_id) VALUES \
+				('33333333-3333-3333-3333-333333333333', 'https://older-host', 'tamanu-central', '33333333-3333-3333-3333-333333333333'), \
+				('44444444-4444-4444-4444-444444444444', 'https://newer-host', 'tamanu-central', '44444444-4444-4444-4444-444444444444'); \
 			 INSERT INTO statuses (server_id, healthy, health, extra, created_at) VALUES \
 				('33333333-3333-3333-3333-333333333333', false, \
 				 '[{\"check\": \"cert_expiry\", \"healthy\": false, \"days_remaining\": 30}]'::jsonb, \

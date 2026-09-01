@@ -147,7 +147,7 @@ impl ReportedDetail {
 				MachineReportedDetail::for_machine(db, machine_id)
 					.await?
 					.into_iter()
-					.map(|m| m.as_application_detail(server)),
+					.map(|m| m.into_application_detail(server)),
 			);
 		}
 		Ok(rows)
@@ -180,7 +180,7 @@ impl ReportedDetail {
 				detail
 					.iter()
 					.filter(|m| m.machine_id == machine_id)
-					.map(|m| m.clone().as_application_detail(application_id)),
+					.map(|m| m.clone().into_application_detail(application_id)),
 			);
 		}
 		Ok(rows)
@@ -404,7 +404,7 @@ impl MachineReportedDetail {
 	/// Present this machine's detail as one of `application`'s, so the merged
 	/// figure view can treat both grains alike. Carries no version: a version
 	/// is the workload's.
-	fn as_application_detail(self, application: Uuid) -> ReportedDetail {
+	fn into_application_detail(self, application: Uuid) -> ReportedDetail {
 		ReportedDetail {
 			application_id: application,
 			source: self.source,

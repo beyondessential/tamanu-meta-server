@@ -15,8 +15,8 @@ async fn two_workloads_on_a_box(conn: &mut AsyncPgConnection) -> (Uuid, Uuid) {
 	for name in ["front", "worker"] {
 		let id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO applications (id, name, host, kind, machine_id) \
-			 VALUES ('{id}', '{name}', 'https://{id}.example.invalid', 'central', '{machine}')"
+			"INSERT INTO applications (id, name, host, type, machine_id) \
+			 VALUES ('{id}', '{name}', 'https://{id}.example.invalid', 'tamanu-central', '{machine}')"
 		))
 		.await
 		.expect("insert application");

@@ -293,8 +293,8 @@ async fn key_deactivation_works() {
 				.expect("insert machine");
 			sql_query(
 				r#"
-				INSERT INTO applications (id, host, kind, device_id, machine_id)
-				VALUES ($1, 'https://test.example.com', 'facility', $2, $1)
+				INSERT INTO applications (id, host, type, device_id, machine_id)
+				VALUES ($1, 'https://test.example.com', 'tamanu-facility', $2, $1)
 			"#,
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -402,8 +402,8 @@ async fn key_rotation_scenario() {
 			let server_id = uuid::Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
 			sql_query(
 				r#"
-				WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, kind, device_id, machine_id)
-				VALUES ($1, 'https://rotation-test.com', 'facility', $2, $1)
+				WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, type, device_id, machine_id)
+				VALUES ($1, 'https://rotation-test.com', 'tamanu-facility', $2, $1)
 			"#,
 			)
 			.bind::<sql_types::Uuid, _>(server_id)

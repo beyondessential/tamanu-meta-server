@@ -223,8 +223,8 @@ async fn submit_status() {
 			let server_id = Uuid::new_v4();
 			sql_query(
 				r#"
-				WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, kind, device_id, machine_id)
-				VALUES ($1, 'https://test.example.com', 'facility', $2, $1)
+				WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, type, device_id, machine_id)
+				VALUES ($1, 'https://test.example.com', 'tamanu-facility', $2, $1)
 			"#,
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -243,7 +243,8 @@ async fn submit_status() {
 
 			// The response carries only the return-path fields; the stored
 			// status record is not echoed back. Tags for this bare ungrouped
-			// server are just the synthetic `canopy:product` and `canopy:kind`.
+			// server are just the synthetic `canopy:type` and the two names it
+			// replaced, which stay emitted for anything reading the earlier pair.
 			// `names` is present but empty throughout: this server holds neither
 			// grant and its group controls no domain, so it is entitled to nothing
 			// — which is a fact worth stating on every push rather than an absence
@@ -273,7 +274,11 @@ async fn submit_status() {
 							"certificates": [],
 						}],
 					},
-					"tags": {"canopy:product": "tamanu", "canopy:kind": "facility"},
+					"tags": {
+						"canopy:type": "tamanu-facility",
+						"canopy:product": "tamanu",
+						"canopy:kind": "facility",
+					},
 				}),
 			);
 
@@ -322,8 +327,8 @@ async fn submit_status_returns_effective_tags_matching_tags_endpoint() {
 			.await
 			.expect("insert group");
 			sql_query(
-				"WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, kind, device_id, group_id, rank, tags, machine_id) \
-				 VALUES ($1, 'https://tagged.example.com', 'central', $2, $3, 'production', \
+				"WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, type, device_id, group_id, rank, tags, machine_id) \
+				 VALUES ($1, 'https://tagged.example.com', 'tamanu-central', $2, $3, 'production', \
 				 '{\"env\": \"server\"}'::jsonb, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -376,8 +381,8 @@ async fn submit_status_with_geolocation() {
 			let server_id = Uuid::new_v4();
 			sql_query(
 				r#"
-				WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, kind, device_id, geolocation, machine_id)
-				VALUES ($1, 'https://test.example.com', 'facility', $2, ARRAY[-41.2865, 174.7762], $1)
+				WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, type, device_id, geolocation, machine_id)
+				VALUES ($1, 'https://test.example.com', 'tamanu-facility', $2, ARRAY[-41.2865, 174.7762], $1)
 			"#,
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -456,8 +461,8 @@ async fn submit_status_with_cloud() {
 			let server_id = Uuid::new_v4();
 			sql_query(
 				r#"
-				WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, kind, device_id, cloud, machine_id)
-				VALUES ($1, 'https://cloud.example.com', 'central', $2, true, $1)
+				WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, type, device_id, cloud, machine_id)
+				VALUES ($1, 'https://cloud.example.com', 'tamanu-central', $2, true, $1)
 			"#,
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -537,8 +542,8 @@ async fn submit_status_with_geolocation_and_cloud() {
 			let server_id = Uuid::new_v4();
 			sql_query(
 				r#"
-				WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, kind, device_id, geolocation, cloud, machine_id)
-				VALUES ($1, 'https://full.example.com', 'central', $2, ARRAY[40.7128, -74.0060], false, $1)
+				WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, type, device_id, geolocation, cloud, machine_id)
+				VALUES ($1, 'https://full.example.com', 'tamanu-central', $2, ARRAY[40.7128, -74.0060], false, $1)
 			"#,
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -650,8 +655,8 @@ async fn insert_health_test_server(
 	let server_id = Uuid::new_v4();
 	sql_query(
 		r#"
-		WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, kind, device_id, group_id, machine_id)
-		VALUES ($1, 'https://health.example.com', 'central', $2, $3, $1)
+		WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, type, device_id, group_id, machine_id)
+		VALUES ($1, 'https://health.example.com', 'tamanu-central', $2, $3, $1)
 	"#,
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
@@ -2557,8 +2562,8 @@ async fn seed_server_in_group(
 		.expect("insert group");
 	let server_id = Uuid::new_v4();
 	sql_query(
-		"WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, kind, device_id, group_id, machine_id) \
-		 VALUES ($1, 'https://srv.example.com', 'central', $2, $3, $1)",
+		"WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, type, device_id, group_id, machine_id) \
+		 VALUES ($1, 'https://srv.example.com', 'tamanu-central', $2, $3, $1)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(device_id))
@@ -3115,8 +3120,8 @@ async fn push_records_the_source_s_current_detail() {
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = Uuid::new_v4();
 			sql_query(
-				"WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, kind, device_id, machine_id) \
-				 VALUES ($1, 'https://detail.example.com', 'central', $2, $1)",
+				"WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, type, device_id, machine_id) \
+				 VALUES ($1, 'https://detail.example.com', 'tamanu-central', $2, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
 			.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(device_id))

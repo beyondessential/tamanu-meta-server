@@ -34,7 +34,7 @@ const DEFAULT_SERVER_LIMIT: u64 = 200;
 pub struct FindServersArgs {
 	/// Free-text term matched against name, host, or id (case-insensitive).
 	pub query: Option<String>,
-	/// Filter by kind: `central`, `facility`, or `canopy`.
+	/// Filter by type: `tamanu-central`, `tamanu-facility`, `senaite`, or `canopy`.
 	pub r#type: Option<String>,
 	/// Filter by rank: `production`, `clone`, `demo`, `test`, or `dev`.
 	pub rank: Option<String>,
@@ -67,7 +67,7 @@ pub(crate) struct ServerSummary {
 	/// When the most recent status was received, if any.
 	last_seen: Option<Timestamp>,
 	/// Last known application version, retained even when long offline.
-	/// Absent for a product that has no application version.
+	/// Absent for a type that has no application version.
 	// spec: APP#versions
 	version: Option<VersionStr>,
 	reachability: ShortStatus,
@@ -394,7 +394,7 @@ pub(crate) fn summarize(
 		is_monitored: s.is_monitored,
 		archived: s.deleted_at.is_some(),
 		last_seen: st.map(|s| s.created_at),
-		// A product with no application version carries none rather than a
+		// A type with no application version carries none rather than a
 		// stale value from a status that predates its classification.
 		// spec: APP#versions
 		version: st

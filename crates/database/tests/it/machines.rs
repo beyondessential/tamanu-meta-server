@@ -47,7 +47,7 @@ async fn insert_device(conn: &mut AsyncPgConnection, role: &str) -> Uuid {
 async fn insert_application_on(conn: &mut AsyncPgConnection, machine: Uuid) -> Uuid {
 	let host = format!("https://{}.example.invalid", Uuid::new_v4());
 	sql_query(
-		"INSERT INTO applications (host, kind, machine_id) VALUES ($1, 'central', $2) RETURNING id",
+		"INSERT INTO applications (host, type, machine_id) VALUES ($1, 'tamanu-central', $2) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>(host)
 	.bind::<sql_types::Uuid, _>(machine)
@@ -260,7 +260,7 @@ async fn every_application_has_exactly_one_machine() {
 		// The legacy path: an application inserted with no machine stated.
 		let host = format!("https://{}.example.invalid", Uuid::new_v4());
 		let legacy =
-			sql_query("WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (host, kind, machine_id) SELECT $1, 'central', m.id FROM m RETURNING id")
+			sql_query("WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (host, type, machine_id) SELECT $1, 'tamanu-central', m.id FROM m RETURNING id")
 				.bind::<sql_types::Text, _>(host)
 				.get_result::<RowId>(&mut conn)
 				.await
@@ -279,7 +279,7 @@ async fn every_application_has_exactly_one_machine() {
 		// which is the 1:1 the backfill produced.
 		let host2 = format!("https://{}.example.invalid", Uuid::new_v4());
 		let second =
-			sql_query("WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (host, kind, machine_id) SELECT $1, 'central', m.id FROM m RETURNING id")
+			sql_query("WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (host, type, machine_id) SELECT $1, 'tamanu-central', m.id FROM m RETURNING id")
 				.bind::<sql_types::Text, _>(host2)
 				.get_result::<RowId>(&mut conn)
 				.await

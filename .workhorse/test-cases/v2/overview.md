@@ -23,13 +23,14 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 
 ## Application types
 
-- [ ] A server with product `tamanu` and kind `central` migrates to an application of type `tamanu-central` (verifies spec: APP)
+- [x] A server with product `tamanu` and kind `central` migrates to an application of type `tamanu-central` (verifies spec: APP)
 - [ ] A reported type is adopted without an operator step (verifies spec: APP)
 - [ ] A reporter sending a different type under an unchanged key produces an unreachable application and a new one beside it (verifies spec: APP, STA)
-- [ ] A type appears among an application's reserved read-only tags and on no machine (verifies spec: APP, FLT)
-- [ ] A `tamanu-central` is eligible for public listing; other types are not (verifies spec: APP)
-- [ ] A group's headline version comes from the `tamanu-central` on its highest-ranked machine (verifies spec: APP)
-- [ ] A group with no `tamanu-central` has no headline version (verifies spec: APP)
+- [x] A type appears among an application's reserved read-only tags and on no machine (verifies spec: APP, FLT)
+- [x] A `tamanu-central` is eligible for public listing; other types are not (verifies spec: APP)
+- [x] A group's headline version comes from its highest-ranked version-tracked application (verifies spec: APP)
+- [x] A group whose applications are all of untracked types has no headline version (verifies spec: APP)
+- [x] A group of facilities still has a headline version; a central only wins a rank tie (verifies spec: APP)
 - [ ] An upgrade plan measures from the same headline version a group presents (verifies spec: APP)
 
 ## Reachability
@@ -136,6 +137,20 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 - [x] `Get incident` reports each issue's scope (verifies spec: MCP)
 - [x] A machine's issue names its machine rather than reading as group-wide (verifies spec: MCP)
 - [ ] MCP health classifications match what the operator UI presents for the same machine or application (verifies spec: MCP)
+
+## Wire compatibility
+
+The bar is mechanical: `bestool-canopy` generated from the public OpenAPI spec
+before and after this branch must not be a semver-breaking change. These cases
+cover the runtime half of that, which the spec diff cannot see.
+
+- [x] The public spec loses no path, no schema, no field and no enum variant across the branch
+- [x] A restore worklist entry names the restored box as both `machine_id` and `server_id` (verifies spec: RST)
+- [x] A verification report naming only `server_id` settles its replica exactly as one naming `machine_id` (verifies spec: RST)
+- [x] A verification report naming both, or neither, is refused rather than resolved by preference (verifies spec: RST)
+- [x] An application's device tags carry `canopy:type` and both halves of the pair it replaced (verifies spec: APP)
+- [x] A Tamanu facility's `canopy:product` reads `tamanu`, so both Tamanu types still bill as one (verifies spec: APP)
+- [ ] A fielded bestool pushing the earlier server-scoped status shape still files its checks (verifies spec: STA)
 
 ## Migration
 

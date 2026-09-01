@@ -180,6 +180,23 @@ impl ApplicationType {
 		}
 	}
 
+	/// The role this type plays within its software, as the retired `kind`
+	/// field spelled it.
+	///
+	/// Emitted alongside the type wherever the pair used to appear, so a
+	/// client or rule reading the old shape keeps working across the
+	/// transition. Nothing in Canopy decides anything on it.
+	// spec: APP#where-a-type-comes-from
+	pub const fn role(self) -> &'static str {
+		match self {
+			Self::TamanuCentral => "central",
+			Self::TamanuFacility => "facility",
+			// Software whose instances hold no role relative to each other:
+			// standalone was only ever the absence of a kind.
+			Self::Senaite | Self::Canopy => "standalone",
+		}
+	}
+
 	/// Whether a version is graded against a release train Canopy holds. False
 	/// both for a type with no version and for one whose version is untracked.
 	pub const fn tracks_versions(self) -> bool {

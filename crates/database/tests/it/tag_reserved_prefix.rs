@@ -27,8 +27,7 @@ fn new_server(host: &str, machine_id: Uuid) -> Application {
 		id: Uuid::new_v4(),
 		name: Some("t".into()),
 		host: Some(UrlField(host.parse().unwrap())),
-		product: ApplicationType::TamanuCentral,
-		kind: ApplicationType::TamanuCentral,
+		r#type: ApplicationType::TamanuCentral,
 		rank: None,
 		device_id: None,
 		machine_id,
@@ -86,8 +85,6 @@ async fn server_update_rejects_reserved_tag_keys() {
 		let updates = PartialServer {
 			id: server.id,
 			name: None,
-			product: None,
-			kind: None,
 			rank: None,
 			host: None,
 			device_id: None,

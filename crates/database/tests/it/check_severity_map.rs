@@ -34,8 +34,8 @@ async fn insert_server(conn: &mut diesel_async::AsyncPgConnection, group_id: Opt
 		.await
 		.expect("insert machine");
 	sql_query(
-		"INSERT INTO applications (id, host, kind, group_id, machine_id) \
-		 VALUES ($1, 'https://severity-map.example.com', 'facility', $2, $3)",
+		"INSERT INTO applications (id, host, type, group_id, machine_id) \
+		 VALUES ($1, 'https://severity-map.example.com', 'tamanu-facility', $2, $3)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group_id)

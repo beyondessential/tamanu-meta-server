@@ -44,8 +44,8 @@ async fn the_backfill_moves_a_window_onto_its_applications_machine() {
 			.await
 			.expect("machine");
 		let application: RowId = diesel::sql_query(
-			"INSERT INTO applications (host, kind, machine_id) \
-			 VALUES ('http://mig.invalid/', 'central', $1) RETURNING id",
+			"INSERT INTO applications (host, type, machine_id) \
+			 VALUES ('http://mig.invalid/', 'tamanu-central', $1) RETURNING id",
 		)
 		.bind::<sql_types::Uuid, _>(machine.id)
 		.get_result(&mut conn)

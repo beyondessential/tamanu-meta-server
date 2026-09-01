@@ -2761,7 +2761,6 @@
         "required": [
           "replica_id",
           "group",
-          "machine_id",
           "type",
           "intent",
           "outcome",
@@ -2789,9 +2788,12 @@
             "description": "The restore intent this attempt was performed under."
           },
           "machine_id": {
-            "type": "string",
+            "type": [
+              "string",
+              "null"
+            ],
             "format": "uuid",
-            "description": "The machine whose backup was restored, from the worklist entry's\n`machine_id`."
+            "description": "The machine whose backup was restored, from the worklist entry's\n`machine_id`.\n\nOptional only so a reporter built against the earlier shape, which knew\nthis as `server_id`, is still accepted; one of the two must be present."
           },
           "migration": {
             "oneOf": [
@@ -2878,6 +2880,15 @@
             ],
             "format": "int64",
             "description": "Bytes of raw HTTP traffic sent to S3 during the restore, including\nprotocol and signing overhead. Omit when traffic was not measured."
+          },
+          "server_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The same machine under the name this field carried when a server was a\nbox and the software on it at once.\n\nDeprecated in favour of `machine_id`. A report naming only this is\naccepted and read as the machine, since a machine that predates the\nsplit took its application's id. Naming both is an error rather than a\nsilent preference, because a reporter that disagrees with itself about\nwhat it restored has not been understood.",
+            "deprecated": true
           },
           "snapshot_id": {
             "type": [
@@ -3012,6 +3023,7 @@
           "replica_id",
           "group_id",
           "machine_id",
+          "server_id",
           "type",
           "intent",
           "name",
@@ -3076,6 +3088,12 @@
             "type": "string",
             "format": "uuid",
             "description": "Identifier of the declaration this entry was expanded from. Echo it\nback in `POST /restore-verification` reports."
+          },
+          "server_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The same machine under the name this field carried when a server was a\nbox and the software on it at once.\n\nDeprecated in favour of `machine_id`, and emitted so a consumer built\nagainst the earlier shape keeps working across the transition. Every\nmachine that predates the split took its application's id, so for those\nthe two values are equal; a machine created since has no server to be.",
+            "deprecated": true
           },
           "snapshot_at": {
             "type": [

@@ -27,8 +27,8 @@ async fn insert_server(conn: &mut AsyncPgConnection, name: &str) -> Uuid {
 		.expect("insert machine")
 		.id;
 	sql_query(
-		"INSERT INTO applications (name, host, kind, machine_id) \
-		 VALUES ($1, $2, 'central', $3) RETURNING id",
+		"INSERT INTO applications (name, host, type, machine_id) \
+		 VALUES ($1, $2, 'tamanu-central', $3) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>(name)
 	.bind::<sql_types::Text, _>(host)
@@ -472,8 +472,8 @@ async fn entitled_server(conn: &mut AsyncPgConnection, domain: &str) -> Uuid {
 
 	let host = format!("https://{}.example.invalid", Uuid::new_v4());
 	sql_query(
-		"INSERT INTO applications (name, host, kind, group_id, may_manage_tls, machine_id) \
-		 VALUES ($1, $2, 'central', $3, true, $4) RETURNING id",
+		"INSERT INTO applications (name, host, type, group_id, may_manage_tls, machine_id) \
+		 VALUES ($1, $2, 'tamanu-central', $3, true, $4) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>("entitled")
 	.bind::<sql_types::Text, _>(host)

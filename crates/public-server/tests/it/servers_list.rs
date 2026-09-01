@@ -25,7 +25,7 @@ async fn get_empty_list() {
 async fn get_with_central_server() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (name, host, kind, rank, public_name, machine_id) SELECT 'Test Application', 'https://test.com', 'central', 'production', 'Test Application', m.id FROM m",
+			"WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (name, host, type, rank, public_name, machine_id) SELECT 'Test Application', 'https://test.com', 'tamanu-central', 'production', 'Test Application', m.id FROM m",
 		)
 		.await
 		.unwrap();
@@ -45,7 +45,7 @@ async fn get_with_central_server() {
 async fn get_without_public_name() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (name, host, kind, rank, machine_id) SELECT 'Internal Application', 'https://test.com', 'central', 'production', m.id FROM m",
+			"WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (name, host, type, rank, machine_id) SELECT 'Internal Application', 'https://test.com', 'tamanu-central', 'production', m.id FROM m",
 		)
 		.await
 		.unwrap();
@@ -62,11 +62,11 @@ async fn get_filters_facility_servers() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
 			"WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id)
-			INSERT INTO applications (name, host, kind, rank, public_name, machine_id)
-			SELECT 'Central Application', 'https://central.com', 'central', 'production', 'Central Application', m.id FROM m;
+			INSERT INTO applications (name, host, type, rank, public_name, machine_id)
+			SELECT 'Central Application', 'https://central.com', 'tamanu-central', 'production', 'Central Application', m.id FROM m;
 			WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id)
-			INSERT INTO applications (name, host, kind, rank, public_name, machine_id)
-			SELECT 'Facility Application', 'https://facility.com', 'facility', 'production', NULL, m.id FROM m;",
+			INSERT INTO applications (name, host, type, rank, public_name, machine_id)
+			SELECT 'Facility Application', 'https://facility.com', 'tamanu-facility', 'production', NULL, m.id FROM m;",
 		)
 		.await
 		.unwrap();
@@ -87,11 +87,11 @@ async fn get_multiple_central_servers() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		conn.batch_execute(
 			"WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id)
-			INSERT INTO applications (name, host, kind, rank, public_name, machine_id)
-			SELECT 'Application A', 'https://a.com', 'central', 'production', 'Application A', m.id FROM m;
+			INSERT INTO applications (name, host, type, rank, public_name, machine_id)
+			SELECT 'Application A', 'https://a.com', 'tamanu-central', 'production', 'Application A', m.id FROM m;
 			WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id)
-			INSERT INTO applications (name, host, kind, rank, public_name, machine_id)
-			SELECT 'Application B', 'https://b.com', 'central', 'staging', 'Application B', m.id FROM m;",
+			INSERT INTO applications (name, host, type, rank, public_name, machine_id)
+			SELECT 'Application B', 'https://b.com', 'tamanu-central', 'staging', 'Application B', m.id FROM m;",
 		)
 		.await
 		.unwrap();

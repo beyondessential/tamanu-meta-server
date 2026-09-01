@@ -383,8 +383,8 @@ async fn request_now_upserts_and_cancel_deletes() {
 		let group_id = seed_group(&mut conn).await;
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, kind, group_id, machine_id) VALUES \
-				('{server_id}', 'https://e.test', 'central', '{group_id}', '{server_id}');"
+			"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{server_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{server_id}');"
 		))
 		.await
 		.expect("seed server");
@@ -444,8 +444,8 @@ async fn allow_disallow_restore_window_round_trip() {
 		let group_id = seed_group(&mut conn).await;
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, kind, group_id, machine_id) VALUES \
-				('{server_id}', 'https://e.test', 'central', '{group_id}', '{server_id}');"
+			"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{server_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{server_id}');"
 		))
 		.await
 		.expect("seed server");
@@ -605,8 +605,8 @@ async fn stats_includes_runs_and_pending_requests() {
 		let run_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'server');
-			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, kind, group_id, device_id, machine_id) VALUES \
-				('{server_id}', 'https://e.test', 'central', '{group_id}', '{device_id}', '{server_id}');
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, device_id, machine_id) VALUES \
+				('{server_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{device_id}', '{server_id}');
 			 INSERT INTO backup_repo_stats (group_id, snapshot_count, source_count, logical_bytes, physical_bytes, bucket_bytes, bucket_bytes_observed_at) \
 				VALUES ('{group_id}', 12, 3, 1000, 800, 2000, now() - interval '1 day');
 			 INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, bytes_uploaded) \
@@ -697,8 +697,8 @@ async fn stats_restore_run_resolves_snapshot_size_from_the_producing_backup() {
 		// producing backup immediately, not wait for the backfill.
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'server');
-			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, kind, group_id, device_id, machine_id) VALUES \
-				('{server_id}', 'https://e.test', 'central', '{group_id}', '{device_id}', '{server_id}');
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, device_id, machine_id) VALUES \
+				('{server_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{device_id}', '{server_id}');
 			 INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, \
 				bytes_uploaded, snapshot_id, reported_at) \
 				VALUES ('{backup_run_id}', '{device_id}', '{group_id}', '{server_id}', 'tamanu-postgres', \
@@ -746,8 +746,8 @@ async fn group_schedules_reports_next_run_from_last_success_plus_interval() {
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'server');
-			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, kind, group_id, device_id, machine_id) VALUES \
-				('{server_id}', 'https://e.test', 'central', '{group_id}', '{device_id}', '{server_id}');
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, device_id, machine_id) VALUES \
+				('{server_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{device_id}', '{server_id}');
 			 INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES \
 				('{server_id}', 'tamanu-postgres', true);
 			 -- A 1h scheduled interval and a successful backup at a known time.
@@ -783,8 +783,8 @@ async fn group_schedules_reports_manual_only_override_as_no_schedule() {
 		// An override row with a NULL interval is manual-only, even though
 		// `tamanu-postgres` has a canopy-wide 6h default to inherit from.
 		conn.batch_execute(&format!(
-			"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, kind, group_id, machine_id) VALUES \
-				('{server_id}', 'https://e.test', 'central', '{group_id}', '{server_id}');
+			"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{server_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{server_id}');
 			 INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES \
 				('{server_id}', 'tamanu-postgres', true);
 			 INSERT INTO server_group_backup_schedule (group_id, type, expected_interval) VALUES \
@@ -822,8 +822,8 @@ async fn group_schedules_includes_disabled_declared_types() {
 		// A *declared but disabled* type (manual-only): retention still applies, so
 		// it must surface in schedule/retention as a manual-only entry.
 		conn.batch_execute(&format!(
-			"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, kind, group_id, machine_id) VALUES \
-				('{server_id}', 'https://e.test', 'central', '{group_id}', '{server_id}');
+			"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{server_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{server_id}');
 			 INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES \
 				('{server_id}', 'files', false);"
 		))

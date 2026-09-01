@@ -876,8 +876,9 @@ impl Application {
 	/// [`RESERVED_TAG_PREFIX`] namespace:
 	///
 	/// - `canopy:type` — the application's [`ApplicationType`] (always present).
-	/// - `canopy:product` — its software without the role, so a rule written
-	///   against the old classification keeps matching (always present).
+	/// - `canopy:product` / `canopy:kind` — the type split back into the pair
+	///   these carried before, so a rule written against either keeps
+	///   matching. Deprecated in favour of `canopy:type`.
 	/// - `canopy:rank` — the server's [`ServerRank`], only when one is set.
 	/// - `canopy:group-id` / `canopy:group-name` — only when grouped.
 	///
@@ -901,13 +902,19 @@ impl Application {
 			format!("{RESERVED_TAG_PREFIX}type"),
 			self.r#type.to_string(),
 		);
-		// The software without its role stays available under its old name.
-		// An operator rule matching `canopy:product == tamanu` keeps matching
-		// a central and a facility alike, as it did when product was a field;
-		// dropping it would break such a rule silently rather than loudly.
+		// Both halves of the old pair stay emitted, derived from the type. An
+		// agent or an operator rule reading `canopy:product` or `canopy:kind`
+		// keeps working across the transition; dropping either would break it
+		// silently rather than loudly. Deprecated: `canopy:type` is the one to
+		// read.
+		// spec: APP#where-a-type-comes-from
 		tags.0.insert(
 			format!("{RESERVED_TAG_PREFIX}product"),
 			self.r#type.software().to_string(),
+		);
+		tags.0.insert(
+			format!("{RESERVED_TAG_PREFIX}kind"),
+			self.r#type.role().to_string(),
 		);
 		if let Some(rank) = self.rank {
 			tags.0
@@ -974,8 +981,7 @@ fn test_server_serialization() {
   "id": "00000000-0000-0000-0000-000000000000",
   "name": "Test Application",
   "host": "https://example.com",
-  "product": "tamanu",
-  "kind": "central",
+  "type": "tamanu-central",
   "rank": "production",
   "device_id": "00000000-0000-0000-0000-000000000000",
   "machine_id": "00000000-0000-0000-0000-000000000000",

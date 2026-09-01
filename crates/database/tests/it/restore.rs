@@ -127,7 +127,7 @@ async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> (Uuid, U
 		.expect("insert machine")
 		.id;
 	let application = sql_query(
-		"INSERT INTO applications (host, kind, group_id, machine_id) VALUES ($1, 'central', $2, $3) RETURNING id",
+		"INSERT INTO applications (host, type, group_id, machine_id) VALUES ($1, 'tamanu-central', $2, $3) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>(host)
 	.bind::<sql_types::Uuid, _>(group_id)

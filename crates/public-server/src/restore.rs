@@ -115,6 +115,16 @@ pub struct WorklistEntry {
 	pub group_id: Uuid,
 	/// The machine whose backup should be restored. Echo it back in reports.
 	pub machine_id: Uuid,
+	/// The same machine under the name this field carried when a server was a
+	/// box and the software on it at once.
+	///
+	/// Deprecated in favour of `machine_id`, and emitted so a consumer built
+	/// against the earlier shape keeps working across the transition. Every
+	/// machine that predates the split took its application's id, so for those
+	/// the two values are equal; a machine created since has no server to be.
+	#[deprecated(note = "use `machine_id`")]
+	#[schema(deprecated)]
+	pub server_id: Uuid,
 	/// For a `migrate` entry, the application whose candidate version is under
 	/// test. Absent on any other entry.
 	///
@@ -363,10 +373,12 @@ async fn worklist(
 					continue;
 				}
 			}
+			#[expect(deprecated, reason = "emitted for consumers on the earlier shape")]
 			out.push(WorklistEntry {
 				replica_id: d.id,
 				group_id: d.group_id,
 				machine_id: machine.id,
+				server_id: machine.id,
 				application_id: target.as_ref().map(|(aid, _, _)| *aid),
 				r#type: d.r#type.clone(),
 				intent: d.intent.clone(),
@@ -582,7 +594,21 @@ pub struct VerificationArgs {
 	pub group: Uuid,
 	/// The machine whose backup was restored, from the worklist entry's
 	/// `machine_id`.
-	pub machine_id: Uuid,
+	///
+	/// Optional only so a reporter built against the earlier shape, which knew
+	/// this as `server_id`, is still accepted; one of the two must be present.
+	pub machine_id: Option<Uuid>,
+	/// The same machine under the name this field carried when a server was a
+	/// box and the software on it at once.
+	///
+	/// Deprecated in favour of `machine_id`. A report naming only this is
+	/// accepted and read as the machine, since a machine that predates the
+	/// split took its application's id. Naming both is an error rather than a
+	/// silent preference, because a reporter that disagrees with itself about
+	/// what it restored has not been understood.
+	#[deprecated(note = "use `machine_id`")]
+	#[schema(deprecated)]
+	pub server_id: Option<Uuid>,
 	/// The backup type that was restored (e.g. `tamanu-postgres`).
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
@@ -760,6 +786,26 @@ async fn verification(
 	let mut conn = db.get().await?;
 	let consumer_device_id = device.0.0.id;
 
+	// `server_id` is what this was called before a machine and the software on
+	// it were separate records. A reporter still on that shape is understood;
+	// one naming both fields is not, since the two disagreeing about what was
+	// restored leaves nothing to prefer.
+	#[expect(deprecated, reason = "accepted from reporters on the earlier shape")]
+	let machine_id = match (args.machine_id, args.server_id) {
+		(Some(machine), None) | (None, Some(machine)) => machine,
+		(Some(_), Some(_)) => {
+			return Err(AppError::BadRequest(
+				"name the restored machine once: `machine_id`, or `server_id` on the earlier shape"
+					.into(),
+			));
+		}
+		(None, None) => {
+			return Err(AppError::BadRequest(
+				"the restored machine is required: send `machine_id`".into(),
+			));
+		}
+	};
+
 	// Same authorization as credentials: a consumer may report only on the
 	// (group, type) pairs its enabled declarations cover.
 	if !RestoreReplica::authorizes(&mut conn, consumer_device_id, args.group, &args.r#type).await? {
@@ -787,7 +833,7 @@ async fn verification(
 		replica_name: None,
 		consumer_device_id,
 		group_id: args.group,
-		machine_id: Some(args.machine_id),
+		machine_id: Some(machine_id),
 		r#type: args.r#type,
 		intent: args.intent,
 		snapshot_id: args.snapshot_id,
@@ -815,13 +861,9 @@ async fn verification(
 	match args.migration {
 		Some(migration) => {
 			let target_version_id = resolve_migration_target(&mut conn, &migration).await?;
-			let application_id = resolve_migration_application(
-				&mut conn,
-				&migration,
-				args.machine_id,
-				target_version_id,
-			)
-			.await?;
+			let application_id =
+				resolve_migration_application(&mut conn, &migration, machine_id, target_version_id)
+					.await?;
 			MigrationTest::record(
 				&mut conn,
 				report,

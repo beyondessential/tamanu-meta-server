@@ -7,8 +7,8 @@ use serde_json::json;
 async fn update_server_basic_fields() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('22222222-2222-2222-2222-222222222222') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, machine_id) VALUES
-			('22222222-2222-2222-2222-222222222222', 'Original Application', 'https://original.example.com', 'test', 'central', '22222222-2222-2222-2222-222222222222')"
+			"WITH m AS (INSERT INTO machines (id) VALUES ('22222222-2222-2222-2222-222222222222') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
+			('22222222-2222-2222-2222-222222222222', 'Original Application', 'https://original.example.com', 'test', 'tamanu-central', '22222222-2222-2222-2222-222222222222')"
 		)
 		.await
 		.unwrap();
@@ -38,8 +38,8 @@ async fn update_server_basic_fields() {
 async fn update_server_partial_update() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('33333333-3333-3333-3333-333333333333') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, machine_id) VALUES
-			('33333333-3333-3333-3333-333333333333', 'Partial Application', 'https://partial.example.com', 'demo', 'central', '33333333-3333-3333-3333-333333333333')"
+			"WITH m AS (INSERT INTO machines (id) VALUES ('33333333-3333-3333-3333-333333333333') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
+			('33333333-3333-3333-3333-333333333333', 'Partial Application', 'https://partial.example.com', 'demo', 'tamanu-central', '33333333-3333-3333-3333-333333333333')"
 		)
 		.await
 		.unwrap();
@@ -74,8 +74,8 @@ async fn update_server_device_id() {
 		.unwrap();
 
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('55555555-5555-5555-5555-555555555555') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, machine_id) VALUES
-			('55555555-5555-5555-5555-555555555555', 'Device Application', 'https://device.example.com', 'production', 'central', '55555555-5555-5555-5555-555555555555')"
+			"WITH m AS (INSERT INTO machines (id) VALUES ('55555555-5555-5555-5555-555555555555') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
+			('55555555-5555-5555-5555-555555555555', 'Device Application', 'https://device.example.com', 'production', 'tamanu-central', '55555555-5555-5555-5555-555555555555')"
 		)
 		.await
 		.unwrap();
@@ -103,8 +103,8 @@ async fn update_server_device_id() {
 async fn update_server_invalid_rank() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('66666666-6666-6666-6666-666666666666') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, machine_id) VALUES
-			('66666666-6666-6666-6666-666666666666', 'Rank Application', 'https://rank.example.com', 'test', 'central', '66666666-6666-6666-6666-666666666666')"
+			"WITH m AS (INSERT INTO machines (id) VALUES ('66666666-6666-6666-6666-666666666666') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
+			('66666666-6666-6666-6666-666666666666', 'Rank Application', 'https://rank.example.com', 'test', 'tamanu-central', '66666666-6666-6666-6666-666666666666')"
 		)
 		.await
 		.unwrap();
@@ -156,8 +156,8 @@ async fn update_server_group_id() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('88888888-8888-8888-8888-888888888888', 'Group A');
-			WITH m AS (INSERT INTO machines (id) VALUES ('99999999-9999-9999-9999-999999999999') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, machine_id) VALUES
-			('99999999-9999-9999-9999-999999999999', 'Member', 'https://member.example.com', 'production', 'facility', '99999999-9999-9999-9999-999999999999');
+			WITH m AS (INSERT INTO machines (id) VALUES ('99999999-9999-9999-9999-999999999999') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
+			('99999999-9999-9999-9999-999999999999', 'Member', 'https://member.example.com', 'production', 'tamanu-facility', '99999999-9999-9999-9999-999999999999');
 			INSERT INTO admins (email) VALUES ('admin@example.com')",
 		)
 		.await
@@ -193,8 +193,8 @@ async fn update_server_clear_group_id() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Group');
-			WITH m AS (INSERT INTO machines (id, group_id) VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, group_id, machine_id) VALUES
-			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Member', 'https://m2.example.com', 'production', 'facility', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
+			WITH m AS (INSERT INTO machines (id, group_id) VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') RETURNING id) INSERT INTO applications (id, name, host, rank, type, group_id, machine_id) VALUES
+			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Member', 'https://m2.example.com', 'production', 'tamanu-facility', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
 			INSERT INTO admins (email) VALUES ('admin@example.com')",
 		)
 		.await
@@ -225,8 +225,8 @@ async fn update_server_clear_group_id() {
 async fn update_server_notes_and_tags() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('cccccccc-cccc-cccc-cccc-cccccccccccc') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, machine_id) VALUES
-			('cccccccc-cccc-cccc-cccc-cccccccccccc', 'Tagged Application', 'https://tagged.example.com', 'production', 'central', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
+			"WITH m AS (INSERT INTO machines (id) VALUES ('cccccccc-cccc-cccc-cccc-cccccccccccc') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
+			('cccccccc-cccc-cccc-cccc-cccccccccccc', 'Tagged Application', 'https://tagged.example.com', 'production', 'tamanu-central', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
 			INSERT INTO admins (email) VALUES ('admin@example.com')",
 		)
 		.await
@@ -267,8 +267,8 @@ async fn update_server_preserves_device_id_when_not_provided() {
 		.unwrap();
 
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, device_id, machine_id) VALUES
-			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Device Application', 'https://device.example.com', 'production', 'central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb')"
+			"WITH m AS (INSERT INTO machines (id) VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb') RETURNING id) INSERT INTO applications (id, name, host, rank, type, device_id, machine_id) VALUES
+			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Device Application', 'https://device.example.com', 'production', 'tamanu-central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb')"
 		)
 		.await
 		.unwrap();
@@ -318,8 +318,8 @@ async fn update_server_clears_device_id_with_null() {
 		.unwrap();
 
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('dddddddd-dddd-dddd-dddd-dddddddddddd') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, device_id, machine_id) VALUES
-			('dddddddd-dddd-dddd-dddd-dddddddddddd', 'Application With Device', 'https://withdevice.example.com', 'production', 'central', 'cccccccc-cccc-cccc-cccc-cccccccccccc', 'dddddddd-dddd-dddd-dddd-dddddddddddd')"
+			"WITH m AS (INSERT INTO machines (id) VALUES ('dddddddd-dddd-dddd-dddd-dddddddddddd') RETURNING id) INSERT INTO applications (id, name, host, rank, type, device_id, machine_id) VALUES
+			('dddddddd-dddd-dddd-dddd-dddddddddddd', 'Application With Device', 'https://withdevice.example.com', 'production', 'tamanu-central', 'cccccccc-cccc-cccc-cccc-cccccccccccc', 'dddddddd-dddd-dddd-dddd-dddddddddddd')"
 		)
 		.await
 		.unwrap();
@@ -367,8 +367,8 @@ async fn update_server_sets_new_device_id() {
 
 		// Create a server with the first device
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, device_id, machine_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Original Application', 'https://original.example.com', 'production', 'central', 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', '11111111-1111-1111-1111-111111111111')"
+			"WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, name, host, rank, type, device_id, machine_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Original Application', 'https://original.example.com', 'production', 'tamanu-central', 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', '11111111-1111-1111-1111-111111111111')"
 		)
 		.await
 		.unwrap();
@@ -409,8 +409,8 @@ async fn update_server_name_management_grants() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		let id = "44444444-4444-4444-4444-444444444444";
 		conn.batch_execute(&format!(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('{id}') RETURNING id) INSERT INTO applications (id, name, host, rank, kind, machine_id) VALUES
-			('{id}', 'DNS Application', 'https://dns.example.com', 'production', 'central', '{id}')"
+			"WITH m AS (INSERT INTO machines (id) VALUES ('{id}') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
+			('{id}', 'DNS Application', 'https://dns.example.com', 'production', 'tamanu-central', '{id}')"
 		))
 		.await
 		.unwrap();

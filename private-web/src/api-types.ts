@@ -1101,11 +1101,12 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Describe every product canopy monitors.
-         * @description The operator UI reads this to decide what to present for a server — which
-         *     roles to offer, whether a version applies and whether it can be graded,
-         *     whether the public-name field is meaningful — rather than restating the
-         *     mapping client-side, where it would drift as products are added.
+         * Describe every application type Canopy monitors.
+         * @description The operator UI reads this to decide what to present for an application —
+         *     whether a version applies and whether it can be graded, whether the
+         *     public-name field is meaningful — rather than restating the mapping
+         *     client-side, where it would drift as types are added. It offers no roles to
+         *     choose from: a type is reported, never entered.
          */
         post: operations["products"];
         delete?: never;
@@ -3054,27 +3055,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/servers/create": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Create a new server.
-         * @description Creates the server record, optionally pre-bound to a Tailscale device
-         *     via `tailscale_identifier`, either ungrouped or in the given group.
-         */
-        post: operations["create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/servers/delete": {
         parameters: {
             query?: never;
@@ -4238,11 +4218,6 @@ export interface components {
              */
             is_monitored: boolean;
             /**
-             * @description The server's role within its product's topology, for example central
-             *     or facility. Which roles are available depends on the product.
-             */
-            kind: components["schemas"]["ServerKind"];
-            /**
              * Format: uuid
              * @description The machine this application runs on. An application runs on exactly
              *     one; a machine hosts any number.
@@ -4284,11 +4259,6 @@ export interface components {
             /** @description Free-form operator notes about this server. */
             notes?: string;
             /**
-             * @description The application this server runs, for example tamanu or senaite.
-             *     Decides which of canopy's per-server features apply to it at all.
-             */
-            product: components["schemas"]["Product"];
-            /**
              * @description If set, the server is listed publicly under this name (used by
              *     end-user-facing clients). `None` means it is not listed publicly.
              *     Separate from `name` because that field is only meaningful within
@@ -4317,6 +4287,12 @@ export interface components {
             restore_allowed_until?: string | null;
             /** @description Key/value tags for this server. */
             tags?: components["schemas"]["TagMap"];
+            /**
+             * @description What this application is: the software and the role it plays together,
+             *     for example `tamanu-central`. Decides which of Canopy's per-application
+             *     features apply to it at all.
+             */
+            type: components["schemas"]["ApplicationType"];
         };
         /** @description What a server's page shows about its names and certificates. */
         ApplicationNamesView: {
@@ -4353,6 +4329,31 @@ export interface components {
             paused_at?: string | null;
             /** @description Who set it. */
             paused_by?: string | null;
+        };
+        /**
+         * @description What an application is: the software and the role it plays, together.
+         *
+         *     A Tamanu central and a Tamanu facility are two types rather than one type
+         *     in two configurations. They behave differently — a large set of checks
+         *     exists only on centrals and another only on facilities — which is not how
+         *     two instances of one thing behave.
+         *
+         *     The set is closed and defined here rather than configured, because each
+         *     type's handling is built in. See [`ApplicationType::caps`].
+         * @enum {string}
+         */
+        ApplicationType: "tamanu-central" | "tamanu-facility" | "senaite" | "canopy";
+        /**
+         * @description One product canopy monitors, with what canopy does for its applications and the
+         *     roles it defines.
+         */
+        ApplicationTypeInfo: {
+            /** @description What Canopy does for applications of this type. */
+            caps: components["schemas"]["Caps"];
+            /** @description How the type reads when nothing has named the application. */
+            label: string;
+            /** @description The type itself. */
+            type: components["schemas"]["ApplicationType"];
         };
         /**
          * @description A downloadable artifact (for example an installer) associated with a
@@ -4786,20 +4787,20 @@ export interface components {
             value: string;
         };
         /**
-         * @description What canopy does for a product's servers.
+         * @description What Canopy does for an application of a given type.
          *
-         *     Reachability, health checks and backups are deliberately absent: checks
-         *     are graded by the source that reports them, and backup types are
-         *     advertised per-server by the agent, so both already work for any product.
+         *     Reachability, health checks and backups are deliberately absent: checks are
+         *     graded by the source that reports them, and backup types are advertised per
+         *     machine by the agent, so both already work for any type.
          */
         Caps: {
             /**
-             * @description Whether this product's servers can be listed for end-user-facing
+             * @description Whether applications of this type can be listed for end-user-facing
              *     clients.
              */
             public_listing: boolean;
             redaction?: null | components["schemas"]["RedactionManifest"];
-            /** @description How this product's application version is treated. */
+            /** @description How this type's application version is treated. */
             version_tracking: components["schemas"]["VersionTracking"];
         };
         /** @description Which certificate to revoke, and why. */
@@ -4999,8 +5000,6 @@ export interface components {
             group_id?: string | null;
             /** @description The server's group name, if it belongs to one. */
             group_name?: string | null;
-            /** @description The server's kind, for the standard within-rank ordering. */
-            kind: components["schemas"]["ServerKind"];
             rank?: null | components["schemas"]["ServerRank"];
             /**
              * @description The check's observed result on its latest report. The UI shows
@@ -5021,6 +5020,8 @@ export interface components {
              * @description When the check state last updated (the check's latest report).
              */
             status_created_at: string;
+            /** @description The application's type, for the standard within-rank ordering. */
+            type: components["schemas"]["ApplicationType"];
         };
         /**
          * @description One (source, check)'s policy: the ceiling capping its effective
@@ -5258,55 +5259,6 @@ export interface components {
              *     grant delete permission.
              */
             target_role_arn: string;
-        };
-        /** @description Request to create a new server. */
-        CreateServerArgs: {
-            /**
-             * Format: int64
-             * @description Downtime threshold in seconds before the server is considered
-             *     down. Defaults to 600 (10 minutes).
-             */
-            alert_when_down_for?: number | null;
-            /** @description Whether the server runs in a cloud environment, if known. */
-            cloud?: boolean | null;
-            geolocation?: null | components["schemas"]["GeoPoint"];
-            /**
-             * Format: uuid
-             * @description Group to place the server in. Omit to create it ungrouped.
-             */
-            group_id?: string | null;
-            /** @description URL for the server, if known. Can be added or changed later. */
-            host?: string | null;
-            /**
-             * @description Whether canopy should actively monitor this server. Defaults to
-             *     true.
-             */
-            is_monitored?: boolean | null;
-            /**
-             * @description The server's role within its product's topology. Rejected when the
-             *     product does not define it.
-             */
-            kind: components["schemas"]["ServerKind"];
-            /** @description Name for the server, if any. */
-            name?: string | null;
-            /** @description Free-text operator notes about the server. */
-            notes?: string | null;
-            /** @description The application this server runs. Defaults to tamanu. */
-            product?: components["schemas"]["Product"];
-            /**
-             * @description Name to list the server under in the public mobile-app server list.
-             *     Omit to keep it unlisted.
-             */
-            public_name?: string | null;
-            rank?: null | components["schemas"]["ServerRank"];
-            tags?: null | components["schemas"]["TagMap"];
-            /**
-             * @description Optional Tailscale identity to pre-bind a device to (an IP, node id,
-             *     or DNS name). When given, a device is created for that identity
-             *     immediately, and the key the machine presents when it later
-             *     registers is added to that same device.
-             */
-            tailscale_identifier?: string | null;
         };
         /**
          * @description Request to onboard a group onto Canopy's shared-account backups. Canopy
@@ -5628,11 +5580,6 @@ export interface components {
              *     showing a failure that nobody is being paged about.
              */
             is_monitored: boolean;
-            /**
-             * @description The server's role within its product's topology (for Tamanu, central
-             *     or facility; standalone for a product with no internal roles).
-             */
-            kind: components["schemas"]["ServerKind"];
             /** @description Name of the server. */
             name: string;
             /**
@@ -5642,9 +5589,9 @@ export interface components {
              *     connected right now.
              */
             operators: components["schemas"]["OperatorPresence"][];
-            /** @description The application the server runs, presented alongside its role. */
-            product: components["schemas"]["Product"];
             rank?: null | components["schemas"]["ServerRank"];
+            /** @description The application the server runs, presented alongside its role. */
+            type: components["schemas"]["ApplicationType"];
             /**
              * @description Reachability of the server, based on how recently it last reported a
              *     status update.
@@ -5677,19 +5624,12 @@ export interface components {
             group_id?: string | null;
             /** @description Display name of that group, if any. */
             group_name?: string | null;
-            /** @description The server's role within its product's topology. */
-            kind: components["schemas"]["ServerKind"];
             /** @description Reported runtime version. */
             nodejs?: string | null;
             /** @description Operating system family, derived from the reported database engine. */
             platform?: string | null;
             /** @description Reported database engine version. */
             postgres?: string | null;
-            /**
-             * @description The application the server runs. The fleet view reads it to keep the
-             *     application-version spread to applications that have one to report.
-             */
-            product: components["schemas"]["Product"];
             rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: uuid
@@ -5700,6 +5640,11 @@ export interface components {
             server_name: string;
             /** @description Reported system timezone. */
             timezone?: string | null;
+            /**
+             * @description The application the server runs. The fleet view reads it to keep the
+             *     application-version spread to applications that have one to report.
+             */
+            type: components["schemas"]["ApplicationType"];
             version?: null | components["schemas"]["VersionStr"];
         };
         /** @description Request body for reading a group's migration-test verdicts. */
@@ -7348,8 +7293,6 @@ export interface components {
                  *     incidents.
                  */
                 is_monitored: boolean;
-                /** @description The server's role within its product's topology. */
-                kind: components["schemas"]["ServerKind"];
                 /**
                  * Format: uuid
                  * @description The machine this application runs on. Maintenance is declared over the
@@ -7377,11 +7320,6 @@ export interface components {
                 /** @description Free-text operator notes about the server. */
                 notes: string;
                 /**
-                 * @description The application this server runs. Decides which of canopy's
-                 *     per-server features apply to it.
-                 */
-                product: components["schemas"]["Product"];
-                /**
                  * @description Name this server appears under in the public mobile-app server list.
                  *     `None` means the server is not listed publicly.
                  */
@@ -7395,6 +7333,11 @@ export interface components {
                 registered_at?: string | null;
                 /** @description Arbitrary operator-defined key/value labels attached to the server. */
                 tags: components["schemas"]["TagMap"];
+                /**
+                 * @description What this application is: the software and the role it plays together.
+                 *     Decides which of Canopy's per-application features apply to it.
+                 */
+                type: components["schemas"]["ApplicationType"];
                 up?: null | components["schemas"]["ShortStatus"];
             }[];
             /**
@@ -7672,32 +7615,6 @@ export interface components {
              * @example /errors/resource-not-found
              */
             type: string;
-        };
-        /**
-         * @description Which application a server runs.
-         *
-         *     The set is closed and defined here rather than configured, because each
-         *     product's handling — what canopy tracks for it, what it presents — is
-         *     built in. See [`Product::caps`].
-         * @enum {string}
-         */
-        Product: "tamanu" | "senaite" | "canopy";
-        /**
-         * @description One product canopy monitors, with what canopy does for its applications and the
-         *     roles it defines.
-         */
-        ProductInfo: {
-            /** @description What canopy does for this product's applications. */
-            caps: components["schemas"]["Caps"];
-            /** @description The role a server of this product takes when none is chosen. */
-            default_kind: components["schemas"]["ServerKind"];
-            /**
-             * @description The roles this product defines, in the order they rank when choosing a
-             *     group's canonical member.
-             */
-            kinds: components["schemas"]["ServerKind"][];
-            /** @description The product itself. */
-            product: components["schemas"]["Product"];
         };
         /** @description Request to mint a new device credential. */
         ProvisionArgs: {
@@ -7982,35 +7899,33 @@ export interface components {
          */
         RedactionGapReason: "product_has_no_manifest" | "version_has_no_manifest";
         /**
-         * @description Where a product publishes the masking manifests that say how to
-         *     de-identify a restored copy of one of its databases.
+         * @description Where a type publishes the masking manifests that say how to de-identify a
+         *     restored copy of one of its databases.
          *
-         *     Canopy holds this rather than the operator: what to mask is a property
-         *     of the product, so an operator declaring a redacting replica says only
-         *     that it redacts, never where its masking comes from.
+         *     Canopy holds this rather than the operator: what to mask is a property of
+         *     the software, so an operator declaring a redacting replica says only that it
+         *     redacts, never where its masking comes from.
          */
         RedactionManifest: {
             /**
              * @description The artefact type under which a version's manifest is registered, so
-             *     canopy can tell whether the URL it would hand out has actually been
+             *     Canopy can tell whether the URL it would hand out has actually been
              *     published for that version.
              */
             artifact_type: string;
             /**
-             * @description Whether to retry at the `major.minor.0` base version when the
-             *     versioned URL 404s, for a product publishing per minor rather than
-             *     per patch.
+             * @description Whether to retry at the `major.minor.0` base version when the versioned
+             *     URL 404s, for software publishing per minor rather than per patch.
              */
             fallback_to_base: boolean;
             /**
-             * @description Where the manifest for a given version lives. `{version}` is
-             *     substituted by the consumer with the version it reads out of the
-             *     data it restored.
+             * @description Where the manifest for a given version lives. `{version}` is substituted
+             *     by the consumer with the version it reads out of the data it restored.
              */
             url_template: string;
             /**
-             * @description Single-row, single-column SQL reading the deployment's own version
-             *     out of the restored database, to substitute into `url_template`.
+             * @description Single-row, single-column SQL reading the group's own version out of the
+             *     restored database, to substitute into `url_template`.
              */
             version_query: string;
         };
@@ -8820,7 +8735,6 @@ export interface components {
              *     unchanged.
              */
             is_monitored?: boolean | null;
-            kind?: null | components["schemas"]["ServerKind"];
             /**
              * @description Whether this server may manage its own DNS records for names under its
              *     group's domains. Omit to leave unchanged.
@@ -8835,7 +8749,6 @@ export interface components {
             name?: string | null;
             /** @description New free-text notes for the server. Omit to leave unchanged. */
             notes?: string | null;
-            product?: null | components["schemas"]["Product"];
             /**
              * @description New public-facing name for the server, or `null` to unlist it. Omit
              *     to leave unchanged.
@@ -9117,8 +9030,6 @@ export interface components {
              *     incidents.
              */
             is_monitored: boolean;
-            /** @description The server's role within its product's topology. */
-            kind: components["schemas"]["ServerKind"];
             /**
              * Format: uuid
              * @description The machine this application runs on. Maintenance is declared over the
@@ -9146,11 +9057,6 @@ export interface components {
             /** @description Free-text operator notes about the server. */
             notes: string;
             /**
-             * @description The application this server runs. Decides which of canopy's
-             *     per-server features apply to it.
-             */
-            product: components["schemas"]["Product"];
-            /**
              * @description Name this server appears under in the public mobile-app server list.
              *     `None` means the server is not listed publicly.
              */
@@ -9164,16 +9070,13 @@ export interface components {
             registered_at?: string | null;
             /** @description Arbitrary operator-defined key/value labels attached to the server. */
             tags: components["schemas"]["TagMap"];
+            /**
+             * @description What this application is: the software and the role it plays together.
+             *     Decides which of Canopy's per-application features apply to it.
+             */
+            type: components["schemas"]["ApplicationType"];
             up?: null | components["schemas"]["ShortStatus"];
         };
-        /**
-         * @description A server's role relative to the other servers of its product.
-         *
-         *     Which kinds are available depends on the server's product; see
-         *     [`Product::kinds`](super::product::Product::kinds).
-         * @enum {string}
-         */
-        ServerKind: "central" | "facility" | "standalone";
         /**
          * @description The server's most recently reported status push: version/host info plus
          *     health.
@@ -9214,16 +9117,15 @@ export interface components {
             platform?: string | null;
             /** @description PostgreSQL version the server reported, if any. */
             postgres?: string | null;
-            /**
-             * @description The application the server runs. Travels with the version so a
-             *     consumer can tell a product with no version from one that has yet to
-             *     report one.
-             */
-            product: components["schemas"]["Product"];
             /** @description The source that pushed this status (e.g. `alertd`). */
             source: string;
             /** @description Timezone the server reported, if any. */
             timezone?: string | null;
+            /**
+             * @description What the application is. Travels with the version so a consumer can
+             *     tell a type with no version from one that has yet to report one.
+             */
+            type: components["schemas"]["ApplicationType"];
             version?: null | components["schemas"]["VersionStr"];
             /**
              * Format: int64
@@ -9234,7 +9136,6 @@ export interface components {
         };
         /** @description Filter and pagination parameters for listing applications. */
         ServerListArgs: {
-            kind?: null | components["schemas"]["ServerKind"];
             /**
              * Format: int64
              * @description Maximum number of items to return.
@@ -9245,6 +9146,7 @@ export interface components {
              * @description Number of items to skip from the start of the result set.
              */
             offset: number;
+            type?: null | components["schemas"]["ApplicationType"];
         };
         /**
          * @description The environment tier of a server, from `production` down to `dev`.
@@ -9674,12 +9576,6 @@ export interface components {
             /** @description Reported database engine version. */
             postgres?: string | null;
             /**
-             * @description The application the server runs. Travels with the version so a
-             *     consumer can tell a product with no version from one that has yet to
-             *     report one.
-             */
-            product: components["schemas"]["Product"];
-            /**
              * @description Version the server's reporting schema was built for. Absent until a
              *     server runs a schema that stamps one (spec: RPT#currency).
              */
@@ -9691,6 +9587,12 @@ export interface components {
             server_id: string;
             /** @description Reported system timezone. */
             timezone?: string | null;
+            /**
+             * @description The application the server runs. Travels with the version so a
+             *     consumer can tell a product with no version from one that has yet to
+             *     report one.
+             */
+            type: components["schemas"]["ApplicationType"];
             version?: null | components["schemas"]["VersionStr"];
             /**
              * Format: int64
@@ -10144,7 +10046,7 @@ export interface components {
             version: string;
         };
         /**
-         * @description How canopy treats a product's application version.
+         * @description How Canopy treats an application's version.
          * @enum {string}
          */
         VersionTracking: "tracked" | "reported" | "absent";
@@ -11663,13 +11565,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Every product, its capabilities, and the roles it defines. */
+            /** @description Every application type and its capabilities. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProductInfo"][];
+                    "application/json": components["schemas"]["ApplicationTypeInfo"][];
                 };
             };
             500: {
@@ -14278,46 +14180,6 @@ export interface operations {
             };
             /** @description Tailnet directory not configured or unreachable. */
             503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateServerArgs"];
-            };
-        };
-        responses: {
-            /** @description New server id. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": string;
-                };
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-            409: {
                 headers: {
                     [name: string]: unknown;
                 };

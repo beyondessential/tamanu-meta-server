@@ -31,8 +31,8 @@ async fn seed(conn: &mut AsyncPgConnection) -> (Uuid, Version) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{GROUP}', 'kamaka'); \
 		 INSERT INTO machines (id, group_id) VALUES ('{SERVER}', '{GROUP}'); \
-		 INSERT INTO applications (id, host, kind, group_id, machine_id) VALUES \
-			('{SERVER}', 'https://central.kamaka.example', 'central', '{GROUP}', '{SERVER}');"
+		 INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+			('{SERVER}', 'https://central.kamaka.example', 'tamanu-central', '{GROUP}', '{SERVER}');"
 	))
 	.await
 	.expect("seed");

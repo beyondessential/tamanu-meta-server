@@ -1,6 +1,6 @@
-//! Model-level tests for the product axis: what the migration backfilled, what
-//! a mixed-product group's figures resolve to, and which applications a
-//! version-bearing query covers.
+//! Model-level tests for the type axis: what the column stores, what a mixed
+//! group's figures resolve to, which applications a version-bearing query
+//! covers, and what an agent is told its application is.
 //!
 //! spec: APP
 
@@ -20,22 +20,16 @@ use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::SignedDuration;
 use uuid::Uuid;
 
-fn server(
-	product: Product,
-	kind: ServerKind,
-	rank: Option<ServerRank>,
-	machine_id: Uuid,
-) -> Application {
+fn server(r#type: ApplicationType, rank: Option<ServerRank>, machine_id: Uuid) -> Application {
 	Application {
 		id: Uuid::new_v4(),
-		name: Some(format!("{product}-{kind}")),
+		name: Some(r#type.to_string()),
 		host: Some(UrlField(
-			format!("https://{product}-{}.example/", Uuid::new_v4())
+			format!("https://{type}-{}.example/", Uuid::new_v4())
 				.parse()
 				.unwrap(),
 		)),
-		product,
-		kind,
+		r#type,
 		rank,
 		device_id: None,
 		machine_id,
@@ -89,16 +83,17 @@ async fn group(conn: &mut AsyncPgConnection, name: &str) -> ServerGroup {
 	.unwrap()
 }
 
-/// A server's product defaults to Tamanu, so every row that predates the
-/// column reads as one.
+/// An application's type defaults to a Tamanu central, so a row inserted
+/// without one reads as the type the fleet is overwhelmingly made of rather
+/// than failing to parse.
 #[tokio::test(flavor = "multi_thread")]
-async fn product_defaults_to_tamanu() {
+async fn type_defaults_to_a_tamanu_central() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		use database::schema::applications;
 
 		let id = Uuid::new_v4();
 		diesel::sql_query(
-			"WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, kind, machine_id) VALUES ($1, 'https://legacy.example', 'central', $1)",
+			"WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, machine_id) VALUES ($1, 'https://legacy.example', $1)",
 		)
 		.bind::<diesel::sql_types::Uuid, _>(id)
 		.execute(&mut conn)
@@ -106,39 +101,36 @@ async fn product_defaults_to_tamanu() {
 		.unwrap();
 
 		let stored: String = applications::table
-			.select(applications::product)
+			.select(applications::type_)
 			.filter(applications::id.eq(id))
 			.first(&mut conn)
 			.await
 			.unwrap();
-		assert_eq!(stored, "tamanu");
+		assert_eq!(stored, "tamanu-central");
 		assert_eq!(
-			Application::get_by_id(&mut conn, id).await.unwrap().product,
+			Application::get_by_id(&mut conn, id).await.unwrap().r#type,
 			ApplicationType::TamanuCentral
 		);
 	})
 	.await
 }
 
-/// The migration lifted canopy instances onto `product` and deliberately left
-/// `kind` alone, so a row still carrying the old kind value has to read as
-/// standalone rather than fail to parse.
+/// Every type round-trips through the column, so none of them is a value the
+/// model can write but not read back.
 #[tokio::test(flavor = "multi_thread")]
-async fn legacy_canopy_kind_still_reads() {
+async fn every_type_round_trips_through_the_column() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
-		let id = Uuid::new_v4();
-		diesel::sql_query(
-			"WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, kind, product, machine_id) \
-			 VALUES ($1, 'https://canopy.example', 'canopy', 'canopy', $1)",
-		)
-		.bind::<diesel::sql_types::Uuid, _>(id)
-		.execute(&mut conn)
-		.await
-		.unwrap();
-
-		let loaded = Application::get_by_id(&mut conn, id).await.unwrap();
-		assert_eq!(loaded.product, ApplicationType::Canopy);
-		assert_eq!(loaded.kind, ApplicationType::Senaite);
+		for want in ApplicationType::ALL {
+			let m = machine(&mut conn, None).await;
+			let made = Application::create(&mut conn, server(*want, None, m))
+				.await
+				.unwrap();
+			let loaded = Application::get_by_id(&mut conn, made.id).await.unwrap();
+			assert_eq!(
+				loaded.r#type, *want,
+				"{want} did not survive the round trip"
+			);
+		}
 	})
 	.await
 }
@@ -151,17 +143,14 @@ async fn mixed_group_headline_version_comes_from_the_tamanu_member() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		let g = group(&mut conn, "pacific").await;
 
-		// The SENAITE server outranks nothing, but it sorts first by kind
-		// priority among equals if product isn't considered — standalone would
-		// still lose to central, so give it the higher rank to make the test
-		// bite on product rather than on the ordering.
+		// The SENAITE server gets the higher rank, so the test bites on which
+		// member bears a version rather than on the ordering among equals.
 		let lims_machine = machine(&mut conn, Some(g.id)).await;
 		let lims = Application::create(
 			&mut conn,
 			Application {
 				group_id: Some(g.id),
 				..server(
-					ApplicationType::Senaite,
 					ApplicationType::Senaite,
 					Some(ServerRank::Production),
 					lims_machine,
@@ -176,7 +165,6 @@ async fn mixed_group_headline_version_comes_from_the_tamanu_member() {
 			Application {
 				group_id: Some(g.id),
 				..server(
-					ApplicationType::TamanuCentral,
 					ApplicationType::TamanuCentral,
 					Some(ServerRank::Test),
 					central_machine,
@@ -215,7 +203,7 @@ async fn mixed_group_headline_version_comes_from_the_tamanu_member() {
 	.await
 }
 
-/// A group of nothing but products canopy holds no release train for has no
+/// A group of nothing but types canopy holds no release train for has no
 /// headline version at all, rather than one borrowed from a member that has
 /// none to give.
 #[tokio::test(flavor = "multi_thread")]
@@ -227,12 +215,7 @@ async fn group_without_a_versioned_member_has_no_headline_version() {
 			&mut conn,
 			Application {
 				group_id: Some(g.id),
-				..server(
-					ApplicationType::Senaite,
-					ApplicationType::Senaite,
-					Some(ServerRank::Production),
-					m,
-				)
+				..server(ApplicationType::Senaite, Some(ServerRank::Production), m)
 			},
 		)
 		.await
@@ -249,16 +232,118 @@ async fn group_without_a_versioned_member_has_no_headline_version() {
 	.await
 }
 
-/// The production-version summary answers what the fleet is running, so it
-/// counts only the applications whose product canopy holds a release train for.
+/// A group of facilities still has a headline version. A facility's version is
+/// graded against the same release train a central's is, so there is a version
+/// to present; a central is only preferred when both are there.
 #[tokio::test(flavor = "multi_thread")]
-async fn production_versions_skip_untracked_products() {
+async fn a_group_of_facilities_still_has_a_headline_version() {
+	commons_tests::db::TestDb::run(|mut conn, _url| async move {
+		let g = group(&mut conn, "facilities-only").await;
+		let m = machine(&mut conn, Some(g.id)).await;
+		let facility = Application::create(
+			&mut conn,
+			Application {
+				group_id: Some(g.id),
+				..server(
+					ApplicationType::TamanuFacility,
+					Some(ServerRank::Production),
+					m,
+				)
+			},
+		)
+		.await
+		.unwrap();
+
+		ReportedDetail::record(
+			&mut conn,
+			facility.id,
+			facility.machine_id,
+			"alertd",
+			&serde_json::json!({}),
+			Some(&"2.31.0".parse().unwrap()),
+		)
+		.await
+		.unwrap();
+		ServerGroup::recompute_version(&mut conn, g.id)
+			.await
+			.unwrap();
+
+		let after = ServerGroup::get_by_id(&mut conn, g.id).await.unwrap();
+		assert_eq!(after.version_application_id, Some(facility.id));
+		assert_eq!(
+			after.effective_version.map(|v| v.to_string()),
+			Some("2.31.0".to_string())
+		);
+	})
+	.await
+}
+
+/// A central and a facility at one rank is the tie the type ordering exists
+/// for: the central speaks for the group.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_central_outranks_a_facility_on_a_tie() {
+	commons_tests::db::TestDb::run(|mut conn, _url| async move {
+		let g = group(&mut conn, "both").await;
+		let fm = machine(&mut conn, Some(g.id)).await;
+		let facility = Application::create(
+			&mut conn,
+			Application {
+				group_id: Some(g.id),
+				..server(
+					ApplicationType::TamanuFacility,
+					Some(ServerRank::Production),
+					fm,
+				)
+			},
+		)
+		.await
+		.unwrap();
+		let cm = machine(&mut conn, Some(g.id)).await;
+		let central = Application::create(
+			&mut conn,
+			Application {
+				group_id: Some(g.id),
+				..server(
+					ApplicationType::TamanuCentral,
+					Some(ServerRank::Production),
+					cm,
+				)
+			},
+		)
+		.await
+		.unwrap();
+
+		for (app, version) in [(&facility, "2.30.0"), (&central, "2.34.1")] {
+			ReportedDetail::record(
+				&mut conn,
+				app.id,
+				app.machine_id,
+				"alertd",
+				&serde_json::json!({}),
+				Some(&version.parse().unwrap()),
+			)
+			.await
+			.unwrap();
+		}
+		ServerGroup::recompute_version(&mut conn, g.id)
+			.await
+			.unwrap();
+
+		let after = ServerGroup::get_by_id(&mut conn, g.id).await.unwrap();
+		assert_eq!(after.version_application_id, Some(central.id));
+	})
+	.await
+}
+
+/// The production-version summary answers what the fleet is running, so it
+/// counts only the applications whose type canopy holds a release train for.
+#[tokio::test(flavor = "multi_thread")]
+async fn production_versions_skip_untracked_types() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		let tamanu_machine = machine(&mut conn, None).await;
 		let tamanu = Application::create(
 			&mut conn,
 			server(
-				ApplicationType::TamanuCentral,
 				ApplicationType::TamanuCentral,
 				Some(ServerRank::Production),
 				tamanu_machine,
@@ -271,7 +356,6 @@ async fn production_versions_skip_untracked_products() {
 			&mut conn,
 			server(
 				ApplicationType::Canopy,
-				ApplicationType::Senaite,
 				Some(ServerRank::Production),
 				canopy_machine,
 			),
@@ -313,20 +397,23 @@ async fn production_versions_skip_untracked_products() {
 	.await
 }
 
-/// The device gets its server's product alongside its kind, so an agent can
-/// read the classification canopy holds for it.
+/// The device is told its application's type, and both halves of the pair the
+/// type replaced. An agent or an operator rule written against the earlier
+/// names keeps matching, so the split does not silently change what a rule
+/// selects.
 #[tokio::test(flavor = "multi_thread")]
-async fn device_tags_carry_the_product() {
+async fn device_tags_carry_the_type_and_both_halves_of_the_pair() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		let m = machine(&mut conn, None).await;
-		let s = Application::create(
-			&mut conn,
-			server(ApplicationType::Senaite, ApplicationType::Senaite, None, m),
-		)
-		.await
-		.unwrap();
+		let s = Application::create(&mut conn, server(ApplicationType::Senaite, None, m))
+			.await
+			.unwrap();
 
 		let tags = s.tags_for_device(&mut conn).await.unwrap();
+		assert_eq!(
+			tags.0.get(&format!("{RESERVED_TAG_PREFIX}type")),
+			Some(&"senaite".to_string())
+		);
 		assert_eq!(
 			tags.0.get(&format!("{RESERVED_TAG_PREFIX}product")),
 			Some(&"senaite".to_string())
@@ -339,20 +426,60 @@ async fn device_tags_carry_the_product() {
 	.await
 }
 
-/// The public mobile-app listing covers only a product canopy lists publicly,
-/// stated rather than left to fall out of the kind filter.
+/// A Tamanu facility reports the software it is an instance of, not its type,
+/// under the earlier name — so the two Tamanu types still bill and match as
+/// one product, as they did when product was a field of its own.
 #[tokio::test(flavor = "multi_thread")]
-async fn public_search_excludes_products_that_are_not_listed() {
+async fn a_facilitys_tags_still_name_tamanu_as_the_product() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
-		// Deliberately give the SENAITE server the central kind and a public
-		// name, so only the product filter can keep it out.
+		let m = machine(&mut conn, None).await;
+		let s = Application::create(&mut conn, server(ApplicationType::TamanuFacility, None, m))
+			.await
+			.unwrap();
+
+		let tags = s.tags_for_device(&mut conn).await.unwrap();
+		assert_eq!(
+			tags.0.get(&format!("{RESERVED_TAG_PREFIX}type")),
+			Some(&"tamanu-facility".to_string())
+		);
+		assert_eq!(
+			tags.0.get(&format!("{RESERVED_TAG_PREFIX}product")),
+			Some(&"tamanu".to_string())
+		);
+		assert_eq!(
+			tags.0.get(&format!("{RESERVED_TAG_PREFIX}kind")),
+			Some(&"facility".to_string())
+		);
+	})
+	.await
+}
+
+/// The public mobile-app listing covers only a type canopy lists publicly. A
+/// SENAITE instance is behind someone else's door and is nobody's to look up,
+/// so a public name does not put it on the list.
+#[tokio::test(flavor = "multi_thread")]
+async fn public_search_excludes_types_that_are_not_listed() {
+	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		let portal_machine = machine(&mut conn, None).await;
 		Application::create(
 			&mut conn,
 			Application {
 				name: Some("Lab Portal".into()),
 				public_name: Some("Lab Portal".into()),
-				..server(ApplicationType::Senaite, ApplicationType::TamanuCentral, None, portal_machine)
+				..server(ApplicationType::Senaite, None, portal_machine)
+			},
+		)
+		.await
+		.unwrap();
+		// A facility is Tamanu too, and still not listable: it sits behind
+		// someone else's NAT.
+		let facility_machine = machine(&mut conn, None).await;
+		Application::create(
+			&mut conn,
+			Application {
+				name: Some("Lab Facility".into()),
+				public_name: Some("Lab Facility".into()),
+				..server(ApplicationType::TamanuFacility, None, facility_machine)
 			},
 		)
 		.await
@@ -374,41 +501,6 @@ async fn public_search_excludes_products_that_are_not_listed() {
 			.unwrap();
 		let names: Vec<String> = found.into_iter().filter_map(|s| s.public_name).collect();
 		assert_eq!(names, vec!["Lab Central".to_string()]);
-	})
-	.await
-}
-
-/// A group's shared cost can only be attributed to one product when its
-/// members agree on one.
-#[tokio::test(flavor = "multi_thread")]
-async fn sole_member_product_is_absent_for_a_mixed_group() {
-	commons_tests::db::TestDb::run(|mut conn, _url| async move {
-		let pure = group(&mut conn, "tamanu-only").await;
-		let mixed = group(&mut conn, "mixed").await;
-
-		for (g, product) in [
-			(pure.id, ApplicationType::TamanuCentral),
-			(mixed.id, ApplicationType::TamanuCentral),
-			(mixed.id, ApplicationType::Senaite),
-		] {
-			let kind = product.default_kind();
-			let m = machine(&mut conn, Some(g)).await;
-			Application::create(
-				&mut conn,
-				Application {
-					group_id: Some(g),
-					..server(product, kind, None, m)
-				},
-			)
-			.await
-			.unwrap();
-		}
-
-		let sole = ServerGroup::sole_member_products(&mut conn, &[pure.id, mixed.id])
-			.await
-			.unwrap();
-		assert_eq!(sole.get(&pure.id), Some(&ApplicationType::TamanuCentral));
-		assert_eq!(sole.get(&mixed.id), None, "members span products");
 	})
 	.await
 }

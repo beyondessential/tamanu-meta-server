@@ -914,8 +914,6 @@ pub async fn update(
 	Ok(Json(()))
 }
 
-/// Default downtime threshold for newly-created applications (10 minutes).
-const DEFAULT_ALERT_SECS: i64 = 600;
 /// Enrollment token lifetime: 7 days (human operational timescale).
 const ENROLLMENT_TTL: jiff::SignedDuration = jiff::SignedDuration::from_hours(24 * 7);
 

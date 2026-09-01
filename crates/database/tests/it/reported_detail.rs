@@ -682,8 +682,8 @@ async fn one_box_reports_its_platform_once_for_both_workloads() {
 		let machine_id = machine_of(&mut conn, first).await;
 		let host = format!("http://second.invalid/{}", Uuid::new_v4());
 		let second: Uuid = sql_query(
-			"INSERT INTO applications (host, kind, machine_id) \
-			 VALUES ($1, 'central', $2) RETURNING id",
+			"INSERT INTO applications (host, type, machine_id) \
+			 VALUES ($1, 'tamanu-central', $2) RETURNING id",
 		)
 		.bind::<sql_types::Text, _>(host)
 		.bind::<sql_types::Uuid, _>(machine_id)

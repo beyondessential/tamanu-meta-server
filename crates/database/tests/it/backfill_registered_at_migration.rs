@@ -88,14 +88,14 @@ async fn migration_backfills_enrolled_servers_only() {
 			 INSERT INTO machines (id) VALUES \
 				('{with_statuses}'), ('{device_gone}'), ('{device_only}'), \
 				('{unenrolled}'), ('{already_set}'); \
-			 INSERT INTO applications (id, host, kind, device_id, registered_at, machine_id) VALUES \
-				('{with_statuses}', 'https://a.example.com', 'central', '{device_a}', NULL, \
+			 INSERT INTO applications (id, host, type, device_id, registered_at, machine_id) VALUES \
+				('{with_statuses}', 'https://a.example.com', 'tamanu-central', '{device_a}', NULL, \
 				 '{with_statuses}'), \
-				('{device_gone}', 'https://b.example.com', 'central', NULL, NULL, '{device_gone}'), \
-				('{device_only}', 'https://c.example.com', 'central', '{device_c}', NULL, \
+				('{device_gone}', 'https://b.example.com', 'tamanu-central', NULL, NULL, '{device_gone}'), \
+				('{device_only}', 'https://c.example.com', 'tamanu-central', '{device_c}', NULL, \
 				 '{device_only}'), \
-				('{unenrolled}', 'https://d.example.com', 'central', NULL, NULL, '{unenrolled}'), \
-				('{already_set}', 'https://e.example.com', 'central', '{device_e}', \
+				('{unenrolled}', 'https://d.example.com', 'tamanu-central', NULL, NULL, '{unenrolled}'), \
+				('{already_set}', 'https://e.example.com', 'tamanu-central', '{device_e}', \
 				 '2026-01-01T00:00:00Z', '{already_set}'); \
 			 INSERT INTO statuses (server_id, healthy, health, extra, created_at) VALUES \
 				('{with_statuses}', true, '[]'::jsonb, '{{}}'::jsonb, NOW() - interval '3 hours'), \

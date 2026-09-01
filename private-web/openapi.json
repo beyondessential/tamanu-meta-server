@@ -2163,18 +2163,18 @@
         "tags": [
           "commons"
         ],
-        "summary": "Describe every product canopy monitors.",
-        "description": "The operator UI reads this to decide what to present for a server — which\nroles to offer, whether a version applies and whether it can be graded,\nwhether the public-name field is meaningful — rather than restating the\nmapping client-side, where it would drift as products are added.",
+        "summary": "Describe every application type Canopy monitors.",
+        "description": "The operator UI reads this to decide what to present for an application —\nwhether a version applies and whether it can be graded, whether the\npublic-name field is meaningful — rather than restating the mapping\nclient-side, where it would drift as types are added. It offers no roles to\nchoose from: a type is reported, never entered.",
         "operationId": "products",
         "responses": {
           "200": {
-            "description": "Every product, its capabilities, and the roles it defines.",
+            "description": "Every application type and its capabilities.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/ProductInfo"
+                    "$ref": "#/components/schemas/ApplicationTypeInfo"
                   }
                 }
               }
@@ -6075,64 +6075,6 @@
         ]
       }
     },
-    "/api/servers/create": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "Create a new server.",
-        "description": "Creates the server record, optionally pre-bound to a Tailscale device\nvia `tailscale_identifier`, either ungrouped or in the given group.",
-        "operationId": "create",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateServerArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "New server id.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "string",
-                  "format": "uuid"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
     "/api/servers/delete": {
       "post": {
         "tags": [
@@ -8235,8 +8177,7 @@
         "description": "A single server in the fleet: the unit that reports status, files\nissues, and is monitored for reachability. A server may belong to a\nserver group, and may or may not have a device enrolled against it yet.",
         "required": [
           "id",
-          "product",
-          "kind",
+          "type",
           "machine_id",
           "is_monitored",
           "alert_when_down_for",
@@ -8318,10 +8259,6 @@
             "type": "boolean",
             "description": "Whether this server is actively monitored. When `false`, reachability\nchecks skip it entirely and its issues no longer contribute to\nincidents — useful for test environments and ad-hoc demos. The\n`alert_when_down_for` threshold is preserved while unmonitored, so\nturning monitoring back on doesn't lose the configured value."
           },
-          "kind": {
-            "$ref": "#/components/schemas/ServerKind",
-            "description": "The server's role within its product's topology, for example central\nor facility. Which roles are available depends on the product."
-          },
           "machine_id": {
             "type": "string",
             "format": "uuid",
@@ -8368,10 +8305,6 @@
             "type": "string",
             "description": "Free-form operator notes about this server."
           },
-          "product": {
-            "$ref": "#/components/schemas/Product",
-            "description": "The application this server runs, for example tamanu or senaite.\nDecides which of canopy's per-server features apply to it at all."
-          },
           "public_name": {
             "type": [
               "string",
@@ -8416,6 +8349,10 @@
           "tags": {
             "$ref": "#/components/schemas/TagMap",
             "description": "Key/value tags for this server."
+          },
+          "type": {
+            "$ref": "#/components/schemas/ApplicationType",
+            "description": "What this application is: the software and the role it plays together,\nfor example `tamanu-central`. Decides which of Canopy's per-application\nfeatures apply to it at all."
           }
         }
       },
@@ -8491,6 +8428,39 @@
               "null"
             ],
             "description": "Who set it."
+          }
+        }
+      },
+      "ApplicationType": {
+        "type": "string",
+        "description": "What an application is: the software and the role it plays, together.\n\nA Tamanu central and a Tamanu facility are two types rather than one type\nin two configurations. They behave differently — a large set of checks\nexists only on centrals and another only on facilities — which is not how\ntwo instances of one thing behave.\n\nThe set is closed and defined here rather than configured, because each\ntype's handling is built in. See [`ApplicationType::caps`].",
+        "enum": [
+          "tamanu-central",
+          "tamanu-facility",
+          "senaite",
+          "canopy"
+        ]
+      },
+      "ApplicationTypeInfo": {
+        "type": "object",
+        "description": "One product canopy monitors, with what canopy does for its applications and the\nroles it defines.",
+        "required": [
+          "type",
+          "caps",
+          "label"
+        ],
+        "properties": {
+          "caps": {
+            "$ref": "#/components/schemas/Caps",
+            "description": "What Canopy does for applications of this type."
+          },
+          "label": {
+            "type": "string",
+            "description": "How the type reads when nothing has named the application."
+          },
+          "type": {
+            "$ref": "#/components/schemas/ApplicationType",
+            "description": "The type itself."
           }
         }
       },
@@ -9120,7 +9090,7 @@
       },
       "Caps": {
         "type": "object",
-        "description": "What canopy does for a product's servers.\n\nReachability, health checks and backups are deliberately absent: checks\nare graded by the source that reports them, and backup types are\nadvertised per-server by the agent, so both already work for any product.",
+        "description": "What Canopy does for an application of a given type.\n\nReachability, health checks and backups are deliberately absent: checks are\ngraded by the source that reports them, and backup types are advertised per\nmachine by the agent, so both already work for any type.",
         "required": [
           "version_tracking",
           "public_listing"
@@ -9128,7 +9098,7 @@
         "properties": {
           "public_listing": {
             "type": "boolean",
-            "description": "Whether this product's servers can be listed for end-user-facing\nclients."
+            "description": "Whether applications of this type can be listed for end-user-facing\nclients."
           },
           "redaction": {
             "oneOf": [
@@ -9137,13 +9107,13 @@
               },
               {
                 "$ref": "#/components/schemas/RedactionManifest",
-                "description": "Where this product's masking manifests live, when it publishes them.\nA product without one cannot have a redacting replica restored: the\nworklist withholds the entry rather than serving unmasked data."
+                "description": "Where this type's masking manifests live, when it publishes them. A type\nwithout one cannot have a redacting replica restored: the worklist\nwithholds the entry rather than serving unmasked data."
               }
             ]
           },
           "version_tracking": {
             "$ref": "#/components/schemas/VersionTracking",
-            "description": "How this product's application version is treated."
+            "description": "How this type's application version is treated."
           }
         }
       },
@@ -9467,7 +9437,7 @@
         "required": [
           "server_id",
           "server_name",
-          "kind",
+          "type",
           "result",
           "data",
           "status_created_at"
@@ -9498,10 +9468,6 @@
               "null"
             ],
             "description": "The server's group name, if it belongs to one."
-          },
-          "kind": {
-            "$ref": "#/components/schemas/ServerKind",
-            "description": "The server's kind, for the standard within-rank ordering."
           },
           "rank": {
             "oneOf": [
@@ -9542,6 +9508,10 @@
             "type": "string",
             "format": "date-time",
             "description": "When the check state last updated (the check's latest report)."
+          },
+          "type": {
+            "$ref": "#/components/schemas/ApplicationType",
+            "description": "The application's type, for the standard within-rank ordering."
           }
         }
       },
@@ -9848,121 +9818,6 @@
           "target_role_arn": {
             "type": "string",
             "description": "AWS IAM role ARN used to issue upload credentials to devices; must not\ngrant delete permission."
-          }
-        }
-      },
-      "CreateServerArgs": {
-        "type": "object",
-        "description": "Request to create a new server.",
-        "required": [
-          "kind"
-        ],
-        "properties": {
-          "alert_when_down_for": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "description": "Downtime threshold in seconds before the server is considered\ndown. Defaults to 600 (10 minutes)."
-          },
-          "cloud": {
-            "type": [
-              "boolean",
-              "null"
-            ],
-            "description": "Whether the server runs in a cloud environment, if known."
-          },
-          "geolocation": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/GeoPoint",
-                "description": "Geographic location of the server, if known."
-              }
-            ]
-          },
-          "group_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "Group to place the server in. Omit to create it ungrouped."
-          },
-          "host": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "URL for the server, if known. Can be added or changed later."
-          },
-          "is_monitored": {
-            "type": [
-              "boolean",
-              "null"
-            ],
-            "description": "Whether canopy should actively monitor this server. Defaults to\ntrue."
-          },
-          "kind": {
-            "$ref": "#/components/schemas/ServerKind",
-            "description": "The server's role within its product's topology. Rejected when the\nproduct does not define it."
-          },
-          "name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Name for the server, if any."
-          },
-          "notes": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Free-text operator notes about the server."
-          },
-          "product": {
-            "$ref": "#/components/schemas/Product",
-            "description": "The application this server runs. Defaults to tamanu."
-          },
-          "public_name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Name to list the server under in the public mobile-app server list.\nOmit to keep it unlisted."
-          },
-          "rank": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ServerRank",
-                "description": "Where this server sits in its deployment's promotion order (e.g.\nproduction vs. staging), if applicable."
-              }
-            ]
-          },
-          "tags": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/TagMap",
-                "description": "Arbitrary operator-defined key/value labels for the server."
-              }
-            ]
-          },
-          "tailscale_identifier": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Optional Tailscale identity to pre-bind a device to (an IP, node id,\nor DNS name). When given, a device is created for that identity\nimmediately, and the key the machine presents when it later\nregisters is added to that same device."
           }
         }
       },
@@ -10490,8 +10345,7 @@
           "health",
           "is_monitored",
           "operators",
-          "product",
-          "kind"
+          "type"
         ],
         "properties": {
           "health": {
@@ -10507,10 +10361,6 @@
             "type": "boolean",
             "description": "Whether canopy alerts on this server's checks. An unmonitored\nserver's reachability and health are determined and presented as\nnormal, but raise nothing — so consumers mark it, rather than\nshowing a failure that nobody is being paged about."
           },
-          "kind": {
-            "$ref": "#/components/schemas/ServerKind",
-            "description": "The server's role within its product's topology (for Tamanu, central\nor facility; standalone for a product with no internal roles)."
-          },
           "name": {
             "type": "string",
             "description": "Name of the server."
@@ -10522,10 +10372,6 @@
             },
             "description": "People currently connected to this server, from its latest status\nupdate. Always empty unless the server is actively reporting (`up`\nor `blip`) — a stale report can't be trusted to reflect who is\nconnected right now."
           },
-          "product": {
-            "$ref": "#/components/schemas/Product",
-            "description": "The application the server runs, presented alongside its role."
-          },
           "rank": {
             "oneOf": [
               {
@@ -10536,6 +10382,10 @@
                 "description": "The server's rank, when set. Lets consumers group or order servers by\nrank (e.g. production before clone, demo, and so on) in a consistent\norder."
               }
             ]
+          },
+          "type": {
+            "$ref": "#/components/schemas/ApplicationType",
+            "description": "The application the server runs, presented alongside its role."
           },
           "up": {
             "$ref": "#/components/schemas/ShortStatus",
@@ -10549,8 +10399,7 @@
         "required": [
           "server_id",
           "server_name",
-          "product",
-          "kind",
+          "type",
           "detail",
           "checks"
         ],
@@ -10585,10 +10434,6 @@
             ],
             "description": "Display name of that group, if any."
           },
-          "kind": {
-            "$ref": "#/components/schemas/ServerKind",
-            "description": "The server's role within its product's topology."
-          },
           "nodejs": {
             "type": [
               "string",
@@ -10609,10 +10454,6 @@
               "null"
             ],
             "description": "Reported database engine version."
-          },
-          "product": {
-            "$ref": "#/components/schemas/Product",
-            "description": "The application the server runs. The fleet view reads it to keep the\napplication-version spread to applications that have one to report."
           },
           "rank": {
             "oneOf": [
@@ -10640,6 +10481,10 @@
               "null"
             ],
             "description": "Reported system timezone."
+          },
+          "type": {
+            "$ref": "#/components/schemas/ApplicationType",
+            "description": "The application the server runs. The fleet view reads it to keep the\napplication-version spread to applications that have one to report."
           },
           "version": {
             "oneOf": [
@@ -13140,8 +12985,7 @@
               "required": [
                 "id",
                 "machine_id",
-                "product",
-                "kind",
+                "type",
                 "display_host",
                 "is_monitored",
                 "alert_when_down_for",
@@ -13233,10 +13077,6 @@
                   "type": "boolean",
                   "description": "Whether canopy is actively watching this server. When `false`, the\nreachability sweep skips it and its issues don't contribute to\nincidents."
                 },
-                "kind": {
-                  "$ref": "#/components/schemas/ServerKind",
-                  "description": "The server's role within its product's topology."
-                },
                 "machine_id": {
                   "type": "string",
                   "format": "uuid",
@@ -13268,10 +13108,6 @@
                   "type": "string",
                   "description": "Free-text operator notes about the server."
                 },
-                "product": {
-                  "$ref": "#/components/schemas/Product",
-                  "description": "The application this server runs. Decides which of canopy's\nper-server features apply to it."
-                },
                 "public_name": {
                   "type": [
                     "string",
@@ -13301,6 +13137,10 @@
                 "tags": {
                   "$ref": "#/components/schemas/TagMap",
                   "description": "Arbitrary operator-defined key/value labels attached to the server."
+                },
+                "type": {
+                  "$ref": "#/components/schemas/ApplicationType",
+                  "description": "What this application is: the software and the role it plays together.\nDecides which of Canopy's per-application features apply to it."
                 },
                 "up": {
                   "oneOf": [
@@ -13781,46 +13621,6 @@
           }
         }
       },
-      "Product": {
-        "type": "string",
-        "description": "Which application a server runs.\n\nThe set is closed and defined here rather than configured, because each\nproduct's handling — what canopy tracks for it, what it presents — is\nbuilt in. See [`Product::caps`].",
-        "enum": [
-          "tamanu",
-          "senaite",
-          "canopy"
-        ]
-      },
-      "ProductInfo": {
-        "type": "object",
-        "description": "One product canopy monitors, with what canopy does for its applications and the\nroles it defines.",
-        "required": [
-          "product",
-          "caps",
-          "kinds",
-          "default_kind"
-        ],
-        "properties": {
-          "caps": {
-            "$ref": "#/components/schemas/Caps",
-            "description": "What canopy does for this product's applications."
-          },
-          "default_kind": {
-            "$ref": "#/components/schemas/ServerKind",
-            "description": "The role a server of this product takes when none is chosen."
-          },
-          "kinds": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ServerKind"
-            },
-            "description": "The roles this product defines, in the order they rank when choosing a\ngroup's canonical member."
-          },
-          "product": {
-            "$ref": "#/components/schemas/Product",
-            "description": "The product itself."
-          }
-        }
-      },
       "ProvisionArgs": {
         "type": "object",
         "description": "Request to mint a new device credential.",
@@ -14273,7 +14073,7 @@
       },
       "RedactionManifest": {
         "type": "object",
-        "description": "Where a product publishes the masking manifests that say how to\nde-identify a restored copy of one of its databases.\n\nCanopy holds this rather than the operator: what to mask is a property\nof the product, so an operator declaring a redacting replica says only\nthat it redacts, never where its masking comes from.",
+        "description": "Where a type publishes the masking manifests that say how to de-identify a\nrestored copy of one of its databases.\n\nCanopy holds this rather than the operator: what to mask is a property of\nthe software, so an operator declaring a redacting replica says only that it\nredacts, never where its masking comes from.",
         "required": [
           "url_template",
           "version_query",
@@ -14283,19 +14083,19 @@
         "properties": {
           "artifact_type": {
             "type": "string",
-            "description": "The artefact type under which a version's manifest is registered, so\ncanopy can tell whether the URL it would hand out has actually been\npublished for that version."
+            "description": "The artefact type under which a version's manifest is registered, so\nCanopy can tell whether the URL it would hand out has actually been\npublished for that version."
           },
           "fallback_to_base": {
             "type": "boolean",
-            "description": "Whether to retry at the `major.minor.0` base version when the\nversioned URL 404s, for a product publishing per minor rather than\nper patch."
+            "description": "Whether to retry at the `major.minor.0` base version when the versioned\nURL 404s, for software publishing per minor rather than per patch."
           },
           "url_template": {
             "type": "string",
-            "description": "Where the manifest for a given version lives. `{version}` is\nsubstituted by the consumer with the version it reads out of the\ndata it restored."
+            "description": "Where the manifest for a given version lives. `{version}` is substituted\nby the consumer with the version it reads out of the data it restored."
           },
           "version_query": {
             "type": "string",
-            "description": "Single-row, single-column SQL reading the deployment's own version\nout of the restored database, to substitute into `url_template`."
+            "description": "Single-row, single-column SQL reading the group's own version out of the\nrestored database, to substitute into `url_template`."
           }
         }
       },
@@ -15462,17 +15262,6 @@
             ],
             "description": "Whether canopy should actively monitor this server. Omit to leave\nunchanged."
           },
-          "kind": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ServerKind",
-                "description": "New role for the server within its product's topology. Omit to leave\nunchanged. Rejected when the product does not define it."
-              }
-            ]
-          },
           "may_manage_dns": {
             "type": [
               "boolean",
@@ -15500,17 +15289,6 @@
               "null"
             ],
             "description": "New free-text notes for the server. Omit to leave unchanged."
-          },
-          "product": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/Product",
-                "description": "New application for the server. Omit to leave unchanged. Changing it\nto a product that does not define the server's kind moves the kind to\nthe new product's default, unless this request sets one too."
-              }
-            ]
           },
           "public_name": {
             "type": [
@@ -15905,8 +15683,7 @@
         "required": [
           "id",
           "machine_id",
-          "product",
-          "kind",
+          "type",
           "display_host",
           "is_monitored",
           "alert_when_down_for",
@@ -15998,10 +15775,6 @@
             "type": "boolean",
             "description": "Whether canopy is actively watching this server. When `false`, the\nreachability sweep skips it and its issues don't contribute to\nincidents."
           },
-          "kind": {
-            "$ref": "#/components/schemas/ServerKind",
-            "description": "The server's role within its product's topology."
-          },
           "machine_id": {
             "type": "string",
             "format": "uuid",
@@ -16033,10 +15806,6 @@
             "type": "string",
             "description": "Free-text operator notes about the server."
           },
-          "product": {
-            "$ref": "#/components/schemas/Product",
-            "description": "The application this server runs. Decides which of canopy's\nper-server features apply to it."
-          },
           "public_name": {
             "type": [
               "string",
@@ -16067,6 +15836,10 @@
             "$ref": "#/components/schemas/TagMap",
             "description": "Arbitrary operator-defined key/value labels attached to the server."
           },
+          "type": {
+            "$ref": "#/components/schemas/ApplicationType",
+            "description": "What this application is: the software and the role it plays together.\nDecides which of Canopy's per-application features apply to it."
+          },
           "up": {
             "oneOf": [
               {
@@ -16080,22 +15853,13 @@
           }
         }
       },
-      "ServerKind": {
-        "type": "string",
-        "description": "A server's role relative to the other servers of its product.\n\nWhich kinds are available depends on the server's product; see\n[`Product::kinds`](super::product::Product::kinds).",
-        "enum": [
-          "central",
-          "facility",
-          "standalone"
-        ]
-      },
       "ServerLastStatusData": {
         "type": "object",
         "description": "The server's most recently reported status push: version/host info plus\nhealth.",
         "required": [
           "id",
           "created_at",
-          "product",
+          "type",
           "source",
           "extra",
           "operators"
@@ -16159,10 +15923,6 @@
             ],
             "description": "PostgreSQL version the server reported, if any."
           },
-          "product": {
-            "$ref": "#/components/schemas/Product",
-            "description": "The application the server runs. Travels with the version so a\nconsumer can tell a product with no version from one that has yet to\nreport one."
-          },
           "source": {
             "type": "string",
             "description": "The source that pushed this status (e.g. `alertd`)."
@@ -16173,6 +15933,10 @@
               "null"
             ],
             "description": "Timezone the server reported, if any."
+          },
+          "type": {
+            "$ref": "#/components/schemas/ApplicationType",
+            "description": "What the application is. Travels with the version so a consumer can\ntell a type with no version from one that has yet to report one."
           },
           "version": {
             "oneOf": [
@@ -16203,17 +15967,6 @@
           "offset"
         ],
         "properties": {
-          "kind": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/ServerKind",
-                "description": "Restrict results to applications of this kind. Omit to\ninclude all kinds."
-              }
-            ]
-          },
           "limit": {
             "type": [
               "integer",
@@ -16228,6 +15981,17 @@
             "format": "int64",
             "description": "Number of items to skip from the start of the result set.",
             "minimum": 0
+          },
+          "type": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ApplicationType",
+                "description": "Restrict results to applications of this type. Omit to include all."
+              }
+            ]
           }
         }
       },
@@ -16789,7 +16553,7 @@
           "id",
           "created_at",
           "server_id",
-          "product",
+          "type",
           "extra",
           "operators",
           "checks"
@@ -16864,10 +16628,6 @@
             ],
             "description": "Reported database engine version."
           },
-          "product": {
-            "$ref": "#/components/schemas/Product",
-            "description": "The application the server runs. Travels with the version so a\nconsumer can tell a product with no version from one that has yet to\nreport one."
-          },
           "reporting_schema": {
             "type": [
               "string",
@@ -16886,6 +16646,10 @@
               "null"
             ],
             "description": "Reported system timezone."
+          },
+          "type": {
+            "$ref": "#/components/schemas/ApplicationType",
+            "description": "The application the server runs. Travels with the version so a\nconsumer can tell a product with no version from one that has yet to\nreport one."
           },
           "version": {
             "oneOf": [
@@ -17665,7 +17429,7 @@
       },
       "VersionTracking": {
         "type": "string",
-        "description": "How canopy treats a product's application version.",
+        "description": "How Canopy treats an application's version.",
         "enum": [
           "tracked",
           "reported",

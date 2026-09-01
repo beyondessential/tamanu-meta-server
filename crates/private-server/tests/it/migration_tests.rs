@@ -17,13 +17,13 @@ const FLEET: &str = "INSERT INTO versions (major, minor, patch, changelog, statu
 		 'bbbbbbbb-0000-0000-0000-000000000001'),
 		('bbbbbbbb-0000-0000-0000-0000000000b0',
 		 'bbbbbbbb-0000-0000-0000-000000000001');
-	INSERT INTO applications (id, name, host, kind, group_id, machine_id) VALUES
+	INSERT INTO applications (id, name, host, type, group_id, machine_id) VALUES
 		('bbbbbbbb-0000-0000-0000-0000000000a0', 'central',
-		 'https://central.example.com', 'central',
+		 'https://central.example.com', 'tamanu-central',
 		 'bbbbbbbb-0000-0000-0000-000000000001',
 		 'bbbbbbbb-0000-0000-0000-0000000000a0'),
 		('bbbbbbbb-0000-0000-0000-0000000000b0', 'facility',
-		 'https://facility.example.com', 'facility',
+		 'https://facility.example.com', 'tamanu-facility',
 		 'bbbbbbbb-0000-0000-0000-000000000001',
 		 'bbbbbbbb-0000-0000-0000-0000000000b0');
 	INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES

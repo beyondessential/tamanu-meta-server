@@ -56,7 +56,7 @@ async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Ap
 		.await
 		.expect("group");
 	let server: AppRow = sql_query(
-		"WITH m AS (INSERT INTO machines (group_id) VALUES ($2) RETURNING id) INSERT INTO applications (host, kind, group_id, machine_id) SELECT $1, 'central', $2, m.id FROM m RETURNING id, machine_id",
+		"WITH m AS (INSERT INTO machines (group_id) VALUES ($2) RETURNING id) INSERT INTO applications (host, type, group_id, machine_id) SELECT $1, 'tamanu-central', $2, m.id FROM m RETURNING id, machine_id",
 	)
 	.bind::<sql_types::Text, _>("https://central.kamaka.example")
 	.bind::<sql_types::Uuid, _>(group.id)

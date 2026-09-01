@@ -23,13 +23,13 @@ async fn group_card_version_is_from_highest_rank_kind_member() {
 				 'aaaaaaaa-0000-0000-0000-000000000001'),
 				('aaaaaaaa-0000-0000-0000-0000000000d0',
 				 'aaaaaaaa-0000-0000-0000-000000000001');
-			INSERT INTO applications (id, name, host, kind, rank, group_id, machine_id) VALUES
+			INSERT INTO applications (id, name, host, type, rank, group_id, machine_id) VALUES
 				('aaaaaaaa-0000-0000-0000-0000000000c0', 'prod-central',
-				 'https://prod.example.com', 'central', 'production',
+				 'https://prod.example.com', 'tamanu-central', 'production',
 				 'aaaaaaaa-0000-0000-0000-000000000001',
 				 'aaaaaaaa-0000-0000-0000-0000000000c0'),
 				('aaaaaaaa-0000-0000-0000-0000000000d0', 'dev-facility',
-				 'https://dev.example.com', 'facility', 'dev',
+				 'https://dev.example.com', 'tamanu-facility', 'dev',
 				 'aaaaaaaa-0000-0000-0000-000000000001',
 				 'aaaaaaaa-0000-0000-0000-0000000000d0');",
 		)
@@ -82,9 +82,9 @@ async fn group_card_is_served_when_no_version_is_published() {
 			INSERT INTO machines (id, group_id) VALUES
 				('bbbbbbbb-0000-0000-0000-0000000000c0',
 				 'bbbbbbbb-0000-0000-0000-000000000001');
-			INSERT INTO applications (id, name, host, kind, rank, group_id, machine_id) VALUES
+			INSERT INTO applications (id, name, host, type, rank, group_id, machine_id) VALUES
 				('bbbbbbbb-0000-0000-0000-0000000000c0', 'central',
-				 'https://fresh.example.com', 'central', 'production',
+				 'https://fresh.example.com', 'tamanu-central', 'production',
 				 'bbbbbbbb-0000-0000-0000-000000000001',
 				 'bbbbbbbb-0000-0000-0000-0000000000c0');",
 		)

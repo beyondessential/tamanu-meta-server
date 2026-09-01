@@ -5,6 +5,7 @@
 
 mod admins;
 mod application_certificates;
+mod application_types;
 mod backfill_registered_at_migration;
 mod backup_detection;
 mod backups;
@@ -48,7 +49,6 @@ mod server_domains;
 mod server_enrollment;
 mod server_group_archival;
 mod server_group_version_cache;
-mod server_products;
 mod server_restore_window;
 mod silenced_health_checks;
 mod slack_outbox_enqueue;

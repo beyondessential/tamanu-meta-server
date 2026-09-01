@@ -14,6 +14,19 @@ use crate::applications::Application;
 use crate::pg_duration::PgDuration;
 use crate::statuses::Status;
 
+/// Ordering key for an application's type — lower is higher priority. Breaks a
+/// rank tie when picking a group's canonical member, a central speaking for a
+/// group before a facility does. Types Canopy holds no release train for never
+/// reach this, being filtered out before the ordering applies.
+// spec: APP#capabilities
+pub fn type_priority(r#type: ApplicationType) -> u8 {
+	match r#type {
+		ApplicationType::TamanuCentral => 0,
+		ApplicationType::TamanuFacility => 1,
+		ApplicationType::Senaite | ApplicationType::Canopy => 2,
+	}
+}
+
 /// Ordering key for a server's rank — lower is higher priority. Used to pick a
 /// group's canonical member (and to bucket groups on the status page). `None`
 /// (unranked) sorts last.
@@ -431,16 +444,23 @@ impl ServerGroup {
 				.await?
 		};
 
-		// A group's version is its central's version. Naming the type directly
-		// replaces a precedence order over kinds that happened to put centrals
-		// first, and leaves application types a flat set with no ordering to
-		// maintain as new ones appear. A group with no central has no headline
-		// version rather than one taken from a facility.
+		// The headline comes from the highest-ranked member whose version
+		// Canopy grades against a release train, a central beating a facility
+		// on a rank tie. Ranking by type replaces the precedence over kinds the pair
+		// carried: the order is the same, expressed over one axis instead of
+		// two. A group of nothing but untracked types has no headline version,
+		// there being no version to take.
 		// spec: APP#capabilities
 		let canonical = members
 			.into_iter()
-			.filter(|s| s.r#type == ApplicationType::TamanuCentral)
-			.min_by(|a, b| (rank_priority(a.rank), a.id).cmp(&(rank_priority(b.rank), b.id)));
+			.filter(|s| s.r#type.tracks_versions())
+			.min_by(|a, b| {
+				(rank_priority(a.rank), type_priority(a.r#type), a.id).cmp(&(
+					rank_priority(b.rank),
+					type_priority(b.r#type),
+					b.id,
+				))
+			});
 
 		let (version_application_id, effective_version) = match canonical {
 			None => (None, None),

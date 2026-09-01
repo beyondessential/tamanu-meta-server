@@ -52,7 +52,7 @@ async fn insert_server(
 	conn: &mut diesel_async::AsyncPgConnection,
 	group: Uuid,
 	host: &str,
-	product: Product,
+	r#type: ApplicationType,
 ) -> Uuid {
 	let machine: RowId = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
 		.bind::<sql_types::Uuid, _>(group)
@@ -60,11 +60,11 @@ async fn insert_server(
 		.await
 		.expect("machine");
 	let server: RowId = sql_query(
-		"INSERT INTO applications (host, group_id, product, machine_id) VALUES ($1, $2, $3, $4) RETURNING id",
+		"INSERT INTO applications (host, group_id, type, machine_id) VALUES ($1, $2, $3, $4) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>(host)
 	.bind::<sql_types::Uuid, _>(group)
-	.bind::<sql_types::Text, _>(product.to_string())
+	.bind::<sql_types::Text, _>(r#type.to_string())
 	.bind::<sql_types::Uuid, _>(machine.id)
 	.get_result(conn)
 	.await
@@ -101,7 +101,7 @@ async fn every_server_in_a_planned_group_is_a_candidate() {
 			&mut conn,
 			group,
 			"https://facility.kamaka.example",
-			ApplicationType::TamanuCentral,
+			ApplicationType::TamanuFacility,
 		)
 		.await;
 		plan(&mut conn, group, &target).await;

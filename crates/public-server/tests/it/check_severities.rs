@@ -31,8 +31,8 @@ async fn insert_server(
 		.await
 		.expect("insert machine");
 	sql_query(
-		"INSERT INTO applications (id, host, kind, device_id, group_id, machine_id) \
-		 VALUES ($1, 'https://checks.example.com', 'facility', $2, $3, $1)",
+		"INSERT INTO applications (id, host, type, device_id, group_id, machine_id) \
+		 VALUES ($1, 'https://checks.example.com', 'tamanu-facility', $2, $3, $1)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(device_id)

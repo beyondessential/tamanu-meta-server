@@ -23,11 +23,11 @@ async fn insert_group(conn: &mut database::diesel_async::AsyncPgConnection, name
 	row.id
 }
 
-/// Insert a server with the given kind/rank into a group, returning its id.
+/// Insert an application of the given type and rank into a group, returning its id.
 async fn insert_server(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	group_id: Uuid,
-	kind: &str,
+	r#type: &str,
 	rank: Option<&str>,
 ) -> Uuid {
 	#[derive(diesel::QueryableByName)]
@@ -37,10 +37,10 @@ async fn insert_server(
 	}
 	let host = format!("http://test.invalid/{}", Uuid::new_v4());
 	let row: RowId = sql_query(
-		"WITH m AS (INSERT INTO machines (group_id) VALUES ($4) RETURNING id) INSERT INTO applications (host, kind, rank, group_id, machine_id) SELECT $1, $2, $3, $4, m.id FROM m RETURNING id",
+		"WITH m AS (INSERT INTO machines (group_id) VALUES ($4) RETURNING id) INSERT INTO applications (host, type, rank, group_id, machine_id) SELECT $1, $2, $3, $4, m.id FROM m RETURNING id",
 	)
 	.bind::<sql_types::Text, _>(host)
-	.bind::<sql_types::Text, _>(kind)
+	.bind::<sql_types::Text, _>(r#type)
 	.bind::<sql_types::Nullable<sql_types::Text>, _>(rank)
 	.bind::<sql_types::Uuid, _>(group_id)
 	.get_result(conn)
@@ -104,7 +104,7 @@ async fn recompute_picks_canonical_and_trigger_updates_only_it() {
 	TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn, "Group").await;
 		// dev-facility is the only member at first.
-		let dev = insert_server(&mut conn, group_id, "facility", Some("dev")).await;
+		let dev = insert_server(&mut conn, group_id, "tamanu-facility", Some("dev")).await;
 		insert_status(&mut conn, dev, Some("1.0.0"), -60).await;
 
 		// (a) recompute picks the (lone) canonical member.
@@ -117,7 +117,7 @@ async fn recompute_picks_canonical_and_trigger_updates_only_it() {
 
 		// (b) a higher-ranked server added to the group flips the cache after
 		// recompute.
-		let prod = insert_server(&mut conn, group_id, "central", Some("production")).await;
+		let prod = insert_server(&mut conn, group_id, "tamanu-central", Some("production")).await;
 		insert_status(&mut conn, prod, Some("2.0.0"), -50).await;
 		ServerGroup::recompute_version(&mut conn, group_id)
 			.await
@@ -180,7 +180,7 @@ async fn recompute_picks_canonical_and_trigger_updates_only_it() {
 async fn recompute_clears_cache_when_no_members() {
 	TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn, "Empty").await;
-		let server = insert_server(&mut conn, group_id, "central", Some("production")).await;
+		let server = insert_server(&mut conn, group_id, "tamanu-central", Some("production")).await;
 		insert_status(&mut conn, server, Some("3.0.0"), -10).await;
 		ServerGroup::recompute_version(&mut conn, group_id)
 			.await

@@ -7,9 +7,30 @@
 //!
 //! spec: APP
 
-use commons_types::server::app_type::ApplicationType;
-use database::applications::Application;
+use commons_tests::diesel_async::{AsyncPgConnection, SimpleAsyncConnection};
 use serde_json::json;
+use uuid::Uuid;
+
+/// An application of a given type, on its own machine, in a group. Seeded
+/// directly: a type is reported rather than entered, so there is no operator
+/// flow that creates one.
+async fn insert_application(
+	conn: &mut AsyncPgConnection,
+	group_id: &str,
+	r#type: &str,
+	rank: &str,
+) -> Uuid {
+	let id = Uuid::new_v4();
+	let ty = r#type;
+	conn.batch_execute(&format!(
+		"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{id}', '{group_id}') RETURNING id) \
+		 INSERT INTO applications (id, host, type, rank, group_id, machine_id) \
+		 VALUES ('{id}', 'https://{id}.example.com', '{ty}', '{rank}', '{group_id}', '{id}')"
+	))
+	.await
+	.expect("insert application");
+	id
+}
 
 /// The type catalogue is what the UI reads to decide what to present, so it has
 /// to describe every type's capabilities. It offers no roles to choose from: a
@@ -71,28 +92,11 @@ async fn detail_billing_labels_are_the_servers_own() {
 		let group_id = group_body["id"].as_str().unwrap().to_string();
 
 		// A production Tamanu member, so the group's highest rank is production
-		// and its members span products.
-		let response = private
-			.post("/api/servers/create")
-			.json(&json!({
-				"kind": "central",
-				"rank": "production",
-				"group_id": group_id,
-			}))
-			.await;
-		response.assert_status_ok();
-
-		let response = private
-			.post("/api/servers/create")
-			.json(&json!({
-				"product": "senaite",
-				"kind": "standalone",
-				"rank": "clone",
-				"group_id": group_id,
-			}))
-			.await;
-		response.assert_status_ok();
-		let lims_id: String = response.json();
+		// and its members span types.
+		insert_application(&mut conn, &group_id, "tamanu-central", "production").await;
+		let lims_id = insert_application(&mut conn, &group_id, "senaite", "clone")
+			.await
+			.to_string();
 
 		let response = private
 			.post("/api/servers/get_detail")
@@ -126,7 +130,6 @@ async fn detail_billing_labels_are_the_servers_own() {
 			labels.get("billing.deployment").map(String::as_str),
 			Some("pacific")
 		);
-		let _ = &mut conn;
 	})
 	.await
 }

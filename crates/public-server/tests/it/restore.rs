@@ -44,7 +44,7 @@ async fn make_config(conn: &mut AsyncPgConnection, group_id: Uuid, status: &str)
 async fn make_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uuid {
 	let server_id = Uuid::new_v4();
 	let host = format!("https://srv-{server_id}.example.com");
-	sql_query("WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, kind, group_id, machine_id) VALUES ($1, $2, 'central', $3, $1)")
+	sql_query("WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES ($1, $2, 'tamanu-central', $3, $1)")
 		.bind::<sql_types::Uuid, _>(server_id)
 		.bind::<sql_types::Text, _>(host)
 		.bind::<sql_types::Uuid, _>(group_id)
@@ -393,14 +393,14 @@ async fn worklist_resolves_params_with_defaults_and_nulls() {
 	.await;
 }
 
-/// A server of a product with no masking manifest, so a redacting
+/// A server of a type with no masking manifest, so a redacting
 /// declaration covering it has nothing to redact with.
 async fn make_senaite_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uuid {
 	let server_id = Uuid::new_v4();
 	let host = format!("https://lims-{server_id}.example.com");
 	sql_query(
-		"WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, kind, product, group_id, machine_id) \
-		 VALUES ($1, $2, 'standalone', 'senaite', $3, $1)",
+		"WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) \
+		 VALUES ($1, $2, 'senaite', $3, $1)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Text, _>(host)
@@ -1417,8 +1417,8 @@ async fn a_two_workload_box_gets_one_replica_not_one_per_workload() {
 			// A second workload on the same box.
 			let second = Uuid::new_v4();
 			sql_query(
-				"INSERT INTO applications (id, host, kind, group_id, machine_id) \
-				 VALUES ($1, $2, 'central', $3, $4)",
+				"INSERT INTO applications (id, host, type, group_id, machine_id) \
+				 VALUES ($1, $2, 'tamanu-central', $3, $4)",
 			)
 			.bind::<sql_types::Uuid, _>(second)
 			.bind::<sql_types::Text, _>(format!("https://second-{second}.example.com"))
@@ -1496,6 +1496,132 @@ async fn a_migrate_entry_names_both_the_machine_and_the_candidates_application()
 			);
 			assert_eq!(entry["snapshot_id"], "snap-1");
 			assert_eq!(entry["target_version"], "2.63.2");
+		},
+	)
+	.await;
+}
+
+/// A consumer built before a machine and the software on it became separate
+/// records knows the restored box as `server_id`. Both sides of that exchange
+/// keep working: the worklist still names it, and a report that names only it
+/// is understood.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_earlier_server_id_shape_still_works_end_to_end() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let server = make_server(&mut conn, group).await;
+			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
+
+			public
+				.post("/restore-capabilities")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"intents": [{"intent": "verify", "semantics": ["check", "once"]}]
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			let entries: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.await
+				.json();
+			assert_eq!(entries.len(), 1, "got {entries:?}");
+			// The entry carries both names for the one box, so a consumer on
+			// either shape finds what to restore.
+			assert_eq!(entries[0]["machine_id"], server.to_string());
+			assert_eq!(entries[0]["server_id"], server.to_string());
+
+			// A report in the earlier shape settles the replica exactly as one
+			// naming `machine_id` does.
+			public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"replica_id": entries[0]["replica_id"],
+					"group": group,
+					"server_id": server,
+					"type": "tamanu-postgres",
+					"intent": "verify",
+					"snapshot_id": "snap-1",
+					"outcome": "success",
+					"replica_healthy": true,
+					"observed_at": "2026-06-30T00:00:00Z",
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			let entries: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.await
+				.json();
+			assert!(
+				entries.is_empty(),
+				"a report on the earlier shape verified the snapshot: {entries:?}"
+			);
+		},
+	)
+	.await;
+}
+
+/// Naming the box twice is refused rather than resolved by preference: a
+/// reporter that disagrees with itself about what it restored has not been
+/// understood, and guessing would grade a replica on the wrong restore.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_report_naming_both_machine_and_server_is_refused() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let server = make_server(&mut conn, group).await;
+			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
+
+			public
+				.post("/restore-capabilities")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"intents": [{"intent": "verify", "semantics": ["check", "once"]}]
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			let entries: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.await
+				.json();
+
+			for body in [
+				serde_json::json!({"machine_id": server, "server_id": server}),
+				serde_json::json!({}),
+			] {
+				let mut args = serde_json::json!({
+					"replica_id": entries[0]["replica_id"],
+					"group": group,
+					"type": "tamanu-postgres",
+					"intent": "verify",
+					"snapshot_id": "snap-1",
+					"outcome": "success",
+					"replica_healthy": true,
+					"observed_at": "2026-06-30T00:00:00Z",
+				});
+				for (k, v) in body.as_object().unwrap() {
+					args[k] = v.clone();
+				}
+				public
+					.post("/restore-verification")
+					.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+					.json(&args)
+					.await
+					.assert_status(http::StatusCode::BAD_REQUEST);
+			}
 		},
 	)
 	.await;
