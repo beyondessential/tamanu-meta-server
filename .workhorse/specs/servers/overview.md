@@ -4,10 +4,7 @@ id: FLT
 
 # Machines, applications, and identities
 
-Canopy's fleet is made of three things.
-A **machine** is a host: a box, physical or virtual, that Canopy monitors.
-An **application** is a piece of software running somewhere, and is what an operator reasons about when they think about what a site is running.
-An **identity** is a set of keys, with an optional tailnet identity, that authenticates something to Canopy.
+Canopy's fleet is made of three things: **machines**, the **applications** running on them, and the **identities** that authenticate to Canopy.
 
 Machine-level facts belong to the machine and application-level facts to the application, so a host running two workloads reports its platform, memory and filesystems once rather than once per workload.
 
@@ -73,7 +70,7 @@ Moving a machine to another group moves the applications on it, and there is no 
 ### Environments
 
 Rank is an application's, not a machine's, so a group's environment — its members at one rank — is a set of applications.
-A box is not in an environment: what is production or test about a site is the software serving that role, and the same box can carry a production workload and a test one.
+A box is not in an environment: what is production or test is the software serving that role, and the same box can carry a production workload and a test one.
 
 A machine's stage is therefore derived rather than held: it is the highest rank among the applications on it, so a box shared by a production and a test workload bills and presents as production (see [APP](application-types.md), "Billing attribution").
 That derivation is what lets a machine belong to a group without belonging to one of its environments, and it is why moving a machine between groups moves whole applications rather than reassigning a rank.

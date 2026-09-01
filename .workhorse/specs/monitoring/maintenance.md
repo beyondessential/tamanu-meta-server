@@ -9,7 +9,7 @@ A window is bounded in time, ends itself, and records who declared it and what f
 
 ## Why it exists
 
-An upgrade looks exactly like a site falling over: the machine stops reporting, its checks go stale, and the group opens an incident someone has to read before recognising it as work already under way.
+An upgrade looks exactly like a machine falling over: it stops reporting, its checks go stale, and the group opens an incident someone has to read before recognising it as work already under way.
 Alerting through planned work costs an operator the trust they place in the next alert.
 
 Neither existing control covers it.
