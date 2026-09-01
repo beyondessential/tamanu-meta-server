@@ -2,7 +2,7 @@
 //! purposes of incident roll-up, shared tags, and shared operator notes.
 
 use commons_errors::{AppError, Result};
-use commons_types::server::{TagMap, kind::ServerKind, product::Product, rank::ServerRank};
+use commons_types::server::{TagMap, app_type::ApplicationType, rank::ServerRank};
 use commons_types::version::VersionStr;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -31,14 +31,6 @@ pub fn rank_priority(rank: Option<ServerRank>) -> u8 {
 /// Ordering key for a server's kind — lower is higher priority. Central applications
 /// are the headline of a group; facility ties below them, standalone last.
 // spec: APP#versions
-pub fn kind_priority(kind: ServerKind) -> u8 {
-	match kind {
-		ServerKind::Central => 0,
-		ServerKind::Facility => 1,
-		ServerKind::Standalone => 2,
-	}
-}
-
 fn higher_rank(a: ServerRank, b: ServerRank) -> ServerRank {
 	if rank_priority(Some(a)) <= rank_priority(Some(b)) {
 		a
@@ -396,52 +388,6 @@ impl ServerGroup {
 		Ok(out)
 	}
 
-	/// The product each group's live members agree on, keyed by group id.
-	///
-	/// A group whose members span products is absent from the map, as is one
-	/// with no live members: in both cases there is no single product to
-	/// attribute the group's shared resources to, and naming one of several
-	/// would attribute its cost to the wrong place.
-	// spec: APP#billing-attribution
-	pub async fn sole_member_products(
-		db: &mut AsyncPgConnection,
-		group_ids: &[Uuid],
-	) -> Result<std::collections::HashMap<Uuid, Product>> {
-		use crate::schema::applications::dsl;
-		use std::collections::HashMap;
-
-		if group_ids.is_empty() {
-			return Ok(HashMap::new());
-		}
-		let rows: Vec<(Uuid, String)> = dsl::applications
-			.select((dsl::group_id.assume_not_null(), dsl::product))
-			.filter(dsl::group_id.eq_any(group_ids))
-			.filter(dsl::deleted_at.is_null())
-			.load(db)
-			.await?;
-
-		// Two passes rather than one: a group has to be *removed* once a
-		// second product shows up, which a running "first wins" insert can't
-		// express.
-		let mut seen: HashMap<Uuid, Vec<Product>> = HashMap::new();
-		for (gid, product) in rows {
-			let Ok(product) = product.parse::<Product>() else {
-				continue;
-			};
-			let products = seen.entry(gid).or_default();
-			if !products.contains(&product) {
-				products.push(product);
-			}
-		}
-		Ok(seen
-			.into_iter()
-			.filter_map(|(gid, products)| match products.as_slice() {
-				[sole] => Some((gid, *sole)),
-				_ => None,
-			})
-			.collect())
-	}
-
 	/// Count of live (non-archived) applications in each group, keyed by group id.
 	/// Groups with no live members are absent (callers default to 0).
 	pub async fn live_server_counts(
@@ -485,20 +431,16 @@ impl ServerGroup {
 				.await?
 		};
 
-		// Only a member whose product canopy holds a release train for can
-		// speak for the group's version. A group of products canopy doesn't
-		// track has no headline version rather than one that means nothing.
-		// spec: APP#versions
+		// A group's version is its central's version. Naming the type directly
+		// replaces a precedence order over kinds that happened to put centrals
+		// first, and leaves application types a flat set with no ordering to
+		// maintain as new ones appear. A group with no central has no headline
+		// version rather than one taken from a facility.
+		// spec: APP#capabilities
 		let canonical = members
 			.into_iter()
-			.filter(|s| s.product.tracks_versions())
-			.min_by(|a, b| {
-				(rank_priority(a.rank), kind_priority(a.kind), a.id).cmp(&(
-					rank_priority(b.rank),
-					kind_priority(b.kind),
-					b.id,
-				))
-			});
+			.filter(|s| s.r#type == ApplicationType::TamanuCentral)
+			.min_by(|a, b| (rank_priority(a.rank), a.id).cmp(&(rank_priority(b.rank), b.id)));
 
 		let (version_application_id, effective_version) = match canonical {
 			None => (None, None),

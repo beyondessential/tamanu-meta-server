@@ -13,7 +13,7 @@
 
 use commons_errors::{AppError, Result};
 use commons_types::{
-	server::{product::Product, rank::ServerRank},
+	server::{app_type::ApplicationType, rank::ServerRank},
 	version::VersionStr,
 };
 use diesel::prelude::*;
@@ -260,13 +260,14 @@ impl ReportedDetail {
 		let rows: Vec<Option<VersionStr>> = detail::table
 			.inner_join(applications::table.on(applications::id.eq(detail::application_id)))
 			.filter(applications::rank.eq(ServerRank::Production))
-			// A release branch only means something for a product canopy holds
-			// a release train for. Others would each contribute a branch of
+			// A release branch only means something for a type Canopy holds a
+			// release train for. Others would each contribute a branch of
 			// their own to a count of what the fleet is running.
-			// spec: APP#versions
+			// spec: APP#capabilities
 			.filter(
-				applications::product
-					.eq_any(Product::stored_values_where(Product::tracks_versions)),
+				applications::type_.eq_any(ApplicationType::stored_values_where(
+					ApplicationType::tracks_versions,
+				)),
 			)
 			.filter(applications::deleted_at.is_null())
 			.filter(detail::version.is_not_null())

@@ -8,14 +8,13 @@ use commons_types::{
 	Uuid,
 	device::DeviceRole,
 	geo::GeoPoint,
-	server::{TagMap, kind::ServerKind, product::Product, rank::ServerRank},
+	server::{TagMap, app_type::ApplicationType, rank::ServerRank},
 	status::{HealthState, ShortStatus},
 	version::VersionStr,
 };
 use database::{
 	applications::{Application, PartialServer},
-	devices::{Device, DeviceConnection, TailscaleIdentity},
-	pg_duration::PgDuration,
+	devices::{Device, DeviceConnection},
 	reported_detail::ReportedDetail,
 	server_enrollment_tokens::ServerEnrollmentToken,
 	server_groups::ServerGroup,
@@ -290,8 +289,7 @@ pub(super) fn server_to_info(s: Application) -> ServerInfo {
 		id: s.id,
 		machine_id: s.machine_id,
 		name: s.name,
-		product: s.product,
-		kind: s.kind,
+		r#type: s.r#type,
 		rank: s.rank,
 		host: s.host.as_ref().map(|h| h.0.to_string()),
 		// Default the display host to the raw host; `fill_display_hosts` later
@@ -442,13 +440,13 @@ pub async fn list_some(
 	Json(args): Json<ServerListArgs>,
 ) -> Result<Json<Page<ServerInfo>>> {
 	let mut conn = state.db.get().await?;
-	let total = if let Some(kind) = args.kind {
-		Application::count_by_kind(&mut conn, kind).await?
+	let total = if let Some(r#type) = args.r#type {
+		Application::count_by_type(&mut conn, r#type).await?
 	} else {
 		Application::count_all(&mut conn).await?
 	};
-	let applications = if let Some(kind) = args.kind {
-		Application::list_by_kind(&mut conn, kind, args.offset, args.limit).await?
+	let applications = if let Some(r#type) = args.r#type {
+		Application::list_by_type(&mut conn, r#type, args.offset, args.limit).await?
 	} else {
 		Application::get_all(&mut conn, args.offset, args.limit).await?
 	};
@@ -688,7 +686,7 @@ pub async fn get_detail(
 		// to a product that has one. A canopy instance reports its own build
 		// version and would otherwise be measured against Tamanu's releases.
 		// spec: APP#versions
-		let graded = server.product.tracks_versions();
+		let graded = server.r#type.tracks_versions();
 		let version_distance = latest_version
 			.as_ref()
 			.filter(|_| graded)
@@ -703,11 +701,11 @@ pub async fn get_detail(
 		Some(ServerLastStatusData {
 			id: st.id,
 			created_at: st.created_at,
-			product: server.product,
+			r#type: server.r#type,
 			// A product with no application version presents none, as against
 			// the `unknown` a versioned server shows before it has reported.
 			// spec: APP#versions
-			version: st.version.clone().filter(|_| server.product.has_versions()),
+			version: st.version.clone().filter(|_| server.r#type.has_versions()),
 			version_distance,
 			min_chrome_version,
 			platform: figures.platform(),
@@ -753,7 +751,7 @@ pub async fn get_detail(
 		Some(g) => commons_servers::backup_jobs::BillingLabels::for_server(
 			&g.tags,
 			&g.name,
-			server.product,
+			server.r#type,
 			server.rank,
 		)
 		.into_tags()
@@ -811,46 +809,6 @@ pub struct ServerUpdateArgs {
 	pub server_id: Uuid,
 	/// The fields to change. Any field omitted is left unchanged.
 	pub data: ServerDataUpdate,
-}
-
-/// Settle the product/kind pair an update leaves behind.
-///
-/// A product defines which roles exist, so the two can't move independently:
-/// a kind the target product doesn't define is a bad request, and a product
-/// change that leaves the stored kind undefined carries the server to the new
-/// product's default role rather than stranding it on a role its product
-/// doesn't have.
-///
-/// Reads the stored server only when the answer depends on it.
-// spec: APP#product-and-kind
-async fn settle_kind(
-	conn: &mut database::diesel_async::AsyncPgConnection,
-	server_id: Uuid,
-	product: Option<Product>,
-	kind: Option<ServerKind>,
-) -> Result<Option<ServerKind>> {
-	let target = match product {
-		Some(product) => product,
-		None => match kind {
-			// Nothing to check: neither half of the pair is moving.
-			None => return Ok(None),
-			// The stored product has to define the requested kind.
-			Some(_) => Application::get_by_id(conn, server_id).await?.product,
-		},
-	};
-
-	match kind {
-		Some(kind) if !target.defines_kind(kind) => Err(AppError::BadRequest(format!(
-			"{target} applications have no {kind} role"
-		))),
-		Some(kind) => Ok(Some(kind)),
-		// A product change with no kind: keep the stored kind when the new
-		// product defines it, else move to that product's default.
-		None => {
-			let current = Application::get_by_id(conn, server_id).await?;
-			Ok((!target.defines_kind(current.kind)).then(|| target.default_kind()))
-		}
-	}
 }
 
 /// Update a server's fields.
@@ -913,13 +871,9 @@ pub async fn update(
 		.await?;
 	}
 
-	let kind = settle_kind(&mut conn, args.server_id, args.data.product, args.data.kind).await?;
-
 	let update_data = PartialServer {
 		id: args.server_id,
 		name: args.data.name,
-		product: args.data.product,
-		kind,
 		rank: args.data.rank,
 		// `Some(Some(url))` sets, `Some(None)` clears, `None` leaves unchanged.
 		// The form always sends `host`; an empty string clears it.
@@ -964,7 +918,6 @@ pub async fn update(
 const DEFAULT_ALERT_SECS: i64 = 600;
 /// Enrollment token lifetime: 7 days (human operational timescale).
 const ENROLLMENT_TTL: jiff::SignedDuration = jiff::SignedDuration::from_hours(24 * 7);
-
 
 /// Identifies a single server by id.
 #[derive(Deserialize, ToSchema)]
@@ -1268,8 +1221,6 @@ pub async fn attach_tailscale_device(
 		PartialServer {
 			id: args.server_id,
 			name: None,
-			product: None,
-			kind: None,
 			rank: None,
 			host: None,
 			device_id: Some(Some(device.id)),

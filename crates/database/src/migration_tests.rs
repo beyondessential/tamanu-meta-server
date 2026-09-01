@@ -7,10 +7,7 @@
 use std::collections::HashMap;
 
 use commons_errors::Result;
-use commons_types::{
-	backup::{BackupType, RestoreIntent, RunOutcome},
-	server::product::Product,
-};
+use commons_types::backup::{BackupType, RestoreIntent, RunOutcome};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
@@ -43,7 +40,10 @@ pub async fn candidate_for(
 	db: &mut AsyncPgConnection,
 	server: &Application,
 ) -> Result<Option<Version>> {
-	if server.product != Product::Tamanu {
+	// The migrations under test are Tamanu's, so only Tamanu has candidates —
+	// a central and a facility alike, both being upgraded along the same train.
+	// spec: RST#candidate-versions
+	if server.r#type.software() != "tamanu" {
 		return Ok(None);
 	}
 

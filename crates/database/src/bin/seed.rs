@@ -17,7 +17,7 @@ use commons_types::{
 	device::DeviceRole,
 	geo::GeoPoint,
 	issue::ResolvedReason,
-	server::{TagMap, kind::ServerKind, product::Product, rank::ServerRank},
+	server::{TagMap, app_type::ApplicationType, rank::ServerRank},
 	status::CheckResult,
 	version::{VersionStatus, VersionStr},
 };
@@ -633,17 +633,16 @@ async fn seed_servers(
 		Ok(created.id)
 	}
 
-	fn base(host: &str, kind: ServerKind) -> Application {
-		base_of(Product::Tamanu, host, kind)
+	fn base(host: &str, r#type: ApplicationType) -> Application {
+		base_of(r#type, host)
 	}
 
-	fn base_of(product: Product, host: &str, kind: ServerKind) -> Application {
+	fn base_of(r#type: ApplicationType, host: &str) -> Application {
 		Application {
 			id: Uuid::new_v4(),
 			name: None,
 			host: Some(url(host)),
-			product,
-			kind,
+			r#type,
 			rank: None,
 			device_id: None,
 			// Replaced by `insert`, which is the only path to the database.
@@ -688,7 +687,10 @@ async fn seed_servers(
 			notes: "Primary central server for the Pacific region.".to_string(),
 			tags: tags(&[("owner", "platform-team"), ("hosting", "ec2")]),
 			registered_at: Some(now),
-			..base("https://pacific-central.example.com/", ServerKind::Central)
+			..base(
+				"https://pacific-central.example.com/",
+				ApplicationType::TamanuCentral,
+			)
 		},
 	)
 	.await?;
@@ -705,7 +707,10 @@ async fn seed_servers(
 			notes: "On-prem facility server at Suva hospital.".to_string(),
 			tags: tags(&[("site", "suva")]),
 			registered_at: Some(now),
-			..base("https://suva-facility.example.com/", ServerKind::Facility)
+			..base(
+				"https://suva-facility.example.com/",
+				ApplicationType::TamanuFacility,
+			)
 		},
 	)
 	.await?;
@@ -721,7 +726,10 @@ async fn seed_servers(
 			notes: "Has not reported in a while — exercises the down state.".to_string(),
 			tags: tags(&[("site", "nadi")]),
 			registered_at: Some(now),
-			..base("https://nadi-facility.example.com/", ServerKind::Facility)
+			..base(
+				"https://nadi-facility.example.com/",
+				ApplicationType::TamanuFacility,
+			)
 		},
 	)
 	.await?;
@@ -737,7 +745,10 @@ async fn seed_servers(
 			notes: "Clone environment in the highlands.".to_string(),
 			tags: tags(&[("site", "goroka")]),
 			registered_at: Some(now),
-			..base("https://goroka-facility.example.com/", ServerKind::Facility)
+			..base(
+				"https://goroka-facility.example.com/",
+				ApplicationType::TamanuFacility,
+			)
 		},
 	)
 	.await?;
@@ -753,7 +764,10 @@ async fn seed_servers(
 			notes: "Demo box — monitoring intentionally off.".to_string(),
 			tags: tags(&[("env", "demo")]),
 			registered_at: Some(now),
-			..base("https://demo-sandbox.example.com/", ServerKind::Central)
+			..base(
+				"https://demo-sandbox.example.com/",
+				ApplicationType::TamanuCentral,
+			)
 		},
 	)
 	.await?;
@@ -766,7 +780,10 @@ async fn seed_servers(
 			rank: Some(ServerRank::Test),
 			is_monitored: true,
 			notes: "Ungrouped — appears under the Ungrouped tab.".to_string(),
-			..base("https://lab-test.example.com/", ServerKind::Central)
+			..base(
+				"https://lab-test.example.com/",
+				ApplicationType::TamanuCentral,
+			)
 		},
 	)
 	.await?;
@@ -782,7 +799,7 @@ async fn seed_servers(
 			tags: tags(&[("site", "lautoka")]),
 			..base(
 				"https://lautoka-facility.example.com/",
-				ServerKind::Facility,
+				ApplicationType::TamanuFacility,
 			)
 		},
 	)
@@ -796,7 +813,10 @@ async fn seed_servers(
 			rank: Some(ServerRank::Production),
 			group_id: Some(groups.highlands),
 			notes: "Created but no enrollment token minted yet.".to_string(),
-			..base("https://mendi-facility.example.com/", ServerKind::Facility)
+			..base(
+				"https://mendi-facility.example.com/",
+				ApplicationType::TamanuFacility,
+			)
 		},
 	)
 	.await?;
@@ -806,7 +826,10 @@ async fn seed_servers(
 		conn,
 		Application {
 			notes: "Bare pending server — no name, rank, or group yet.".to_string(),
-			..base("https://unconfigured.example.com/", ServerKind::Central)
+			..base(
+				"https://unconfigured.example.com/",
+				ApplicationType::TamanuCentral,
+			)
 		},
 	)
 	.await?;
@@ -824,9 +847,8 @@ async fn seed_servers(
 			notes: "SENAITE laboratory system for the Pacific region.".to_string(),
 			registered_at: Some(now),
 			..base_of(
-				Product::Senaite,
+				ApplicationType::Senaite,
 				"https://pacific-lims.example.com/",
-				ServerKind::Standalone,
 			)
 		},
 	)
@@ -842,7 +864,10 @@ async fn seed_servers(
 			group_id: Some(groups.demo),
 			notes: "Archived: kept for history, hidden from live listings.".to_string(),
 			registered_at: Some(now),
-			..base("https://old-central.example.com/", ServerKind::Central)
+			..base(
+				"https://old-central.example.com/",
+				ApplicationType::TamanuCentral,
+			)
 		},
 	)
 	.await?;

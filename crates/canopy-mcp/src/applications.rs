@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use commons_types::{
 	Uuid,
-	server::{kind::ServerKind, product::Product, rank::ServerRank},
+	server::{app_type::ApplicationType, rank::ServerRank},
 	status::{HealthState, ShortStatus},
 	version::VersionStr,
 };
@@ -35,11 +35,9 @@ pub struct FindServersArgs {
 	/// Free-text term matched against name, host, or id (case-insensitive).
 	pub query: Option<String>,
 	/// Filter by kind: `central`, `facility`, or `canopy`.
-	pub kind: Option<String>,
+	pub r#type: Option<String>,
 	/// Filter by rank: `production`, `clone`, `demo`, `test`, or `dev`.
 	pub rank: Option<String>,
-	/// Filter to one product (`tamanu`, `senaite`, `canopy`).
-	pub product: Option<String>,
 	/// Filter to one group's id.
 	pub group_id: Option<String>,
 	/// Include archived (soft-deleted) applications. Defaults to false.
@@ -60,8 +58,7 @@ pub(crate) struct ServerSummary {
 	name: Option<String>,
 	host: Option<String>,
 	/// The application the server runs.
-	product: Product,
-	kind: ServerKind,
+	r#type: ApplicationType,
 	rank: Option<ServerRank>,
 	group_id: Option<Uuid>,
 	group_name: Option<String>,
@@ -128,8 +125,7 @@ struct ServerDetail {
 	// spec: MCP#detail
 	machine_id: Uuid,
 	/// The application the server runs.
-	product: Product,
-	kind: ServerKind,
+	r#type: ApplicationType,
 	rank: Option<ServerRank>,
 	cloud: Option<bool>,
 	is_monitored: bool,
@@ -151,17 +147,18 @@ struct ServerDetail {
 #[tool_router(router = applications_router, vis = "pub(crate)")]
 impl CanopyMcp {
 	#[tool(
-		description = "Find applications by name/host/id substring, optionally filtered by product, \
-		               kind, rank, or group. Returns compact records with last-seen, version, and \
-		               health. A server whose product has no application version carries none."
+		description = "Find applications by name/host/id substring, optionally filtered by type, \
+		               rank, or group. A type is the software and its role together, such as \
+		               `tamanu-central` or `tamanu-facility`. Returns compact records with \
+		               last-seen, version, and health. An application whose type has no version \
+		               carries none."
 	)]
 	async fn find_servers(
 		&self,
 		Parameters(args): Parameters<FindServersArgs>,
 	) -> Result<CallToolResult, McpError> {
 		let mut conn = self.conn().await?;
-		let product = parse_opt::<Product>(&args.product, "product")?;
-		let kind = parse_opt::<ServerKind>(&args.kind, "kind")?;
+		let r#type = parse_opt::<ApplicationType>(&args.r#type, "type")?;
 		let rank = parse_opt::<ServerRank>(&args.rank, "rank")?;
 		let group = parse_opt_uuid(&args.group_id, "group_id")?;
 		let limit = args.limit.unwrap_or(DEFAULT_SERVER_LIMIT) as usize;
@@ -179,8 +176,7 @@ impl CanopyMcp {
 
 		let q = args.query.as_deref().map(str::to_lowercase);
 		applications.retain(|s| {
-			product.as_ref().is_none_or(|p| &s.product == p)
-				&& kind.as_ref().is_none_or(|k| &s.kind == k)
+			r#type.as_ref().is_none_or(|t| &s.r#type == t)
 				&& rank.as_ref().is_none_or(|r| s.rank.as_ref() == Some(r))
 				&& group
 					.as_ref()
@@ -339,8 +335,7 @@ impl CanopyMcp {
 			name: server.name.clone(),
 			host: server.host.as_ref().map(|h| h.0.to_string()),
 			machine_id: server.machine_id,
-			product: server.product,
-			kind: server.kind,
+			r#type: server.r#type,
 			rank: server.rank,
 			cloud: server.cloud,
 			is_monitored: server.is_monitored,
@@ -392,8 +387,7 @@ pub(crate) fn summarize(
 		id: s.id,
 		name: s.name.clone(),
 		host: s.host.as_ref().map(|h| h.0.to_string()),
-		product: s.product,
-		kind: s.kind,
+		r#type: s.r#type,
 		rank: s.rank,
 		group_id: s.group_id,
 		group_name,
@@ -406,7 +400,7 @@ pub(crate) fn summarize(
 		version: st
 			.and_then(|st| st.version.clone())
 			.or(retained.version)
-			.filter(|_| s.product.has_versions()),
+			.filter(|_| s.r#type.has_versions()),
 		reachability: s.reachability(st),
 		health,
 	}

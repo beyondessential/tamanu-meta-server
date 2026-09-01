@@ -9,7 +9,7 @@ use commons_errors::Result;
 use commons_types::{
 	Uuid,
 	backup::{BackupConfigStatus, BackupPurpose, BackupType},
-	server::{product::Product, rank::ServerRank, tags::TagMap},
+	server::{app_type::ApplicationType, rank::ServerRank, tags::TagMap},
 };
 use database::{
 	BackupRequest, BackupRun, BackupTypeDefault, ServerBackupCapability, ServerGroupBackupConfig,
@@ -259,21 +259,18 @@ impl BillingLabels {
 	/// `stage = mapped highest rank` (omitted when the group has no ranked
 	/// members).
 	///
-	/// `product` is the one its live members agree on, or `None` when they span
-	/// products; see [`Self::product`].
+	/// `product` is the software to attribute to, or `None` for a grain that is
+	/// not one: a group's own resources carry no product, a group not being a
+	/// piece of software (see [`Self::product`]).
 	// spec: APP#billing-attribution
 	pub fn from_group(
 		tags: &TagMap,
 		group_name: &str,
-		product: Option<Product>,
+		product: Option<String>,
 		highest_rank: Option<ServerRank>,
 	) -> Self {
 		BillingLabels {
-			product: tags
-				.0
-				.get("billing.product")
-				.cloned()
-				.or_else(|| product.map(String::from)),
+			product: tags.0.get("billing.product").cloned().or(product),
 			deployment: tags
 				.0
 				.get("billing.deployment")
@@ -295,13 +292,18 @@ impl BillingLabels {
 	/// never the group's `prod`, and a SENAITE server in a Tamanu group must
 	/// report `product = senaite`.
 	// spec: APP#billing-attribution
+	/// An application's labels. `billing.product` carries the software without
+	/// its role, so a central and a facility of one group attribute to the same
+	/// product — which is what cost allocation groups by, and what the label
+	/// carried when product was a field of its own.
+	// spec: APP#billing-attribution
 	pub fn for_server(
 		tags: &TagMap,
 		group_name: &str,
-		product: Product,
+		r#type: ApplicationType,
 		rank: Option<ServerRank>,
 	) -> Self {
-		Self::from_group(tags, group_name, Some(product), rank)
+		Self::from_group(tags, group_name, Some(r#type.software().to_string()), rank)
 	}
 
 	/// Override the `product` label — e.g. `"backups"` for a backup bucket, which
@@ -848,27 +850,27 @@ mod tests {
 	fn billing_labels_defaults_and_overrides() {
 		// All-unranked group: no stage label, defaults for the rest.
 		let empty = TagMap::default();
-		let b = BillingLabels::from_group(&empty, "my-group", Some(Product::Tamanu), None);
+		let b = BillingLabels::from_group(&empty, "my-group", Some("tamanu".to_string()), None);
 		assert_eq!(b.product.as_deref(), Some("tamanu"));
 		assert_eq!(b.deployment, "my-group");
 		assert_eq!(b.stage, None);
 
 		// A computed deployment (group name) is lower-kebab-cased.
-		let b = BillingLabels::from_group(&empty, "Acme Prod", Some(Product::Tamanu), None);
+		let b = BillingLabels::from_group(&empty, "Acme Prod", Some("tamanu".to_string()), None);
 		assert_eq!(b.deployment, "acme-prod");
 
 		// An explicit billing.deployment tag is honored verbatim (not kebab'd).
 		let mut dep = TagMap::default();
 		dep.0
 			.insert("billing.deployment".into(), "Acme Prod".into());
-		let b = BillingLabels::from_group(&dep, "ignored", Some(Product::Tamanu), None);
+		let b = BillingLabels::from_group(&dep, "ignored", Some("tamanu".to_string()), None);
 		assert_eq!(b.deployment, "Acme Prod");
 
 		// Highest rank maps in when present.
 		let b = BillingLabels::from_group(
 			&empty,
 			"g",
-			Some(Product::Tamanu),
+			Some("tamanu".to_string()),
 			Some(ServerRank::Production),
 		);
 		assert_eq!(b.stage.as_deref(), Some("prod"));
@@ -880,7 +882,7 @@ mod tests {
 		let b = BillingLabels::from_group(
 			&tags,
 			"g",
-			Some(Product::Tamanu),
+			Some("tamanu".to_string()),
 			Some(ServerRank::Production),
 		);
 		assert_eq!(b.product.as_deref(), Some("pgro"));
@@ -915,8 +917,12 @@ mod tests {
 		// A SENAITE server in a Tamanu group attributes to senaite, and to its
 		// own stage rather than the group's highest.
 		let empty = TagMap::default();
-		let b =
-			BillingLabels::for_server(&empty, "Pacific", Product::Senaite, Some(ServerRank::Clone));
+		let b = BillingLabels::for_server(
+			&empty,
+			"Pacific",
+			ApplicationType::Senaite,
+			Some(ServerRank::Clone),
+		);
 		assert_eq!(b.product.as_deref(), Some("senaite"));
 		assert_eq!(b.deployment, "pacific");
 		assert_eq!(b.stage.as_deref(), Some("clone"));

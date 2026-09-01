@@ -97,7 +97,7 @@ pub async fn effective_tags_for_server(
 	if let Some(group_id) = server.group_id {
 		let group = ServerGroup::get_by_id(conn, group_id).await?;
 		for (key, value) in
-			BillingLabels::for_server(&group.tags, &group.name, server.product, server.rank)
+			BillingLabels::for_server(&group.tags, &group.name, server.r#type, server.rank)
 				.into_tags()
 		{
 			merged.0.entry(key).or_insert(value);

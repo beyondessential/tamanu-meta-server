@@ -22,7 +22,7 @@ use commons_types::backup::{
 	BackupPurpose, BackupType, IntentDescriptor, ParamValues, RedactionOutcome, RestoreIntent,
 	RunOutcome, redaction_params, resolve_params, semantics,
 };
-use commons_types::server::product::RedactionManifest;
+use commons_types::server::app_type::RedactionManifest;
 use database::{
 	Db,
 	backups::{BackupRun, NewBackupCredentialIssuance, ServerGroupBackupConfig},
@@ -320,10 +320,10 @@ async fn worklist(
 			// for a redacted one is worse than no replica.
 			let params = if owns_masking {
 				let manifest = if d.redacts {
-					// What to mask is a property of the product in the snapshot,
+					// What to mask is a property of the software in the snapshot,
 					// so it resolves through the applications on the box.
 					// spec: RST#the-masking-manifest
-					match on_box.iter().find_map(|a| a.product.caps().redaction) {
+					match on_box.iter().find_map(|a| a.r#type.caps().redaction) {
 						Some(manifest) => Some(manifest),
 						None => continue,
 					}

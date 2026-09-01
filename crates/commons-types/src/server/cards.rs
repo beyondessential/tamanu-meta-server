@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-	server::{kind::ServerKind, product::Product, rank::ServerRank},
+	server::{app_type::ApplicationType, rank::ServerRank},
 	status::{HealthState, OperatorPresence, ShortStatus},
 	version::VersionStr,
 };
@@ -36,11 +36,8 @@ pub struct FacilityServerStatus {
 	/// order.
 	pub rank: Option<ServerRank>,
 	/// The application the server runs, presented alongside its role.
-	// spec: APP#product-and-kind
-	pub product: Product,
-	/// The server's role within its product's topology (for Tamanu, central
-	/// or facility; standalone for a product with no internal roles).
-	pub kind: ServerKind,
+	// spec: APP
+	pub r#type: ApplicationType,
 }
 
 /// A status-dashboard card summarising one group of equivalent servers, with

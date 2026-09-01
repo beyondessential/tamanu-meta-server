@@ -875,8 +875,9 @@ impl Application {
 	/// read-only tags describing the server itself, under the reserved
 	/// [`RESERVED_TAG_PREFIX`] namespace:
 	///
-	/// - `canopy:product` — the server's [`Product`] (always present).
-	/// - `canopy:kind` — the server's [`ServerKind`] (always present).
+	/// - `canopy:type` — the application's [`ApplicationType`] (always present).
+	/// - `canopy:product` — its software without the role, so a rule written
+	///   against the old classification keeps matching (always present).
 	/// - `canopy:rank` — the server's [`ServerRank`], only when one is set.
 	/// - `canopy:group-id` / `canopy:group-name` — only when grouped.
 	///
@@ -893,12 +894,21 @@ impl Application {
 			None => self.tags.clone(),
 		};
 
+		// The type is what an application is, and what a rule or silence
+		// written against the classification should match on.
+		// spec: APP#where-a-type-comes-from
+		tags.0.insert(
+			format!("{RESERVED_TAG_PREFIX}type"),
+			self.r#type.to_string(),
+		);
+		// The software without its role stays available under its old name.
+		// An operator rule matching `canopy:product == tamanu` keeps matching
+		// a central and a facility alike, as it did when product was a field;
+		// dropping it would break such a rule silently rather than loudly.
 		tags.0.insert(
 			format!("{RESERVED_TAG_PREFIX}product"),
-			self.product.to_string(),
+			self.r#type.software().to_string(),
 		);
-		tags.0
-			.insert(format!("{RESERVED_TAG_PREFIX}kind"), self.kind.to_string());
 		if let Some(rank) = self.rank {
 			tags.0
 				.insert(format!("{RESERVED_TAG_PREFIX}rank"), rank.to_string());
@@ -932,8 +942,7 @@ fn test_server_serialization() {
 	let server = Application {
 		id: Uuid::nil(),
 		name: Some("Test Application".to_string()),
-		product: Product::Tamanu,
-		kind: ServerKind::Central,
+		r#type: ApplicationType::TamanuCentral,
 		rank: Some(ServerRank::Production),
 		host: Some(UrlField("https://example.com/".parse().unwrap())),
 		device_id: Some(Uuid::nil()),
@@ -994,13 +1003,6 @@ pub struct PartialServer {
 	pub id: Uuid,
 	/// New display name for the server.
 	pub name: Option<String>,
-	/// New application for the server. When this changes to a product that
-	/// does not define the server's current kind, the caller settles the kind
-	/// too — the endpoint moves it to the new product's default.
-	#[diesel(deserialize_as = String, serialize_as = String)]
-	pub product: Option<Product>,
-	/// New role for the server, for example central or facility.
-	pub kind: Option<ServerKind>,
 	/// New environment tier for the server, for example production, test,
 	/// or dev.
 	#[diesel(deserialize_as = String, serialize_as = String)]

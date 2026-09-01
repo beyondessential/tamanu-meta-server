@@ -9,7 +9,7 @@ use commons_servers::tailnet_directory::TailnetDirectory;
 
 use crate::ratelimit::RateLimiter;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
-use commons_types::server::{kind::ServerKind, rank::ServerRank};
+use commons_types::server::{app_type::ApplicationType, rank::ServerRank};
 use database::{
 	Db,
 	applications::Application,
@@ -84,22 +84,23 @@ fn rank_order(rank: &Option<ServerRank>) -> u32 {
 )]
 pub async fn list(State(db): State<Db>) -> Result<Json<Vec<PublicServer>>> {
 	let mut db = db.get().await?;
-	let mut applications = Application::list_by_kind(&mut db, ServerKind::Central, 0, None)
-		.await?
-		.into_iter()
-		.filter_map(|s| {
-			// Only list applications that have both a public name and a URL — the
-			// mobile app needs a reachable host.
-			match (s.public_name, s.host) {
-				(Some(name), Some(host)) => Some(PublicServer {
-					name,
-					host,
-					rank: s.rank,
-				}),
-				_ => None,
-			}
-		})
-		.collect::<Vec<_>>();
+	let mut applications =
+		Application::list_by_type(&mut db, ApplicationType::TamanuCentral, 0, None)
+			.await?
+			.into_iter()
+			.filter_map(|s| {
+				// Only list applications that have both a public name and a URL — the
+				// mobile app needs a reachable host.
+				match (s.public_name, s.host) {
+					(Some(name), Some(host)) => Some(PublicServer {
+						name,
+						host,
+						rank: s.rank,
+					}),
+					_ => None,
+				}
+			})
+			.collect::<Vec<_>>();
 
 	applications.sort_by(|a, b| {
 		rank_order(&a.rank)

@@ -7,9 +7,8 @@ use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleUser;
 use commons_types::{
 	server::{
+		app_type::ApplicationType,
 		cards::{FacilityServerStatus, ServerGroupCard},
-		kind::ServerKind,
-		product::Product,
 		rank::ServerRank,
 	},
 	status::{CheckResult, OperatorPresence, ShortStatus},
@@ -271,8 +270,7 @@ pub async fn group_details(
 				is_monitored: s.is_monitored,
 				operators,
 				rank: s.rank,
-				product: s.product,
-				kind: s.kind,
+				r#type: s.r#type,
 			}
 		})
 		.collect();
@@ -307,8 +305,8 @@ pub struct CheckDetailServerData {
 	pub group_name: Option<String>,
 	/// The server's rank, for the standard rank-bucket grouping.
 	pub rank: Option<ServerRank>,
-	/// The server's kind, for the standard within-rank ordering.
-	pub kind: ServerKind,
+	/// The application's type, for the standard within-rank ordering.
+	pub r#type: ApplicationType,
 	/// The check's observed result on its latest report. The UI shows
 	/// warning/failed/broken applications by default and puts passed/skipped
 	/// ones behind a "show healthy" toggle.
@@ -520,12 +518,12 @@ pub async fn check_detail(
 					continue;
 				};
 				applications.push(CheckDetailServerData {
+					r#type: server.r#type,
 					server_id: server.id,
 					server_name: server.name.clone().unwrap_or_default(),
 					group_id: server.group_id,
 					group_name: server.group_id.and_then(|g| group_names.get(&g).cloned()),
 					rank: server.rank,
-					kind: server.kind,
 					result,
 					data: st.detail.clone().unwrap_or_else(|| serde_json::json!({})),
 					failing_since: failing_since(&st),
@@ -594,7 +592,7 @@ pub struct StatusSnapshotData {
 	/// consumer can tell a product with no version from one that has yet to
 	/// report one.
 	// spec: APP#versions
-	pub product: Product,
+	pub r#type: ApplicationType,
 	/// Software version reported in this push.
 	pub version: Option<VersionStr>,
 	/// How many releases behind the latest published version this push's
@@ -688,7 +686,7 @@ pub async fn snapshot(
 	// the distance computation rather than 404'ing the whole
 	// snapshot — the call still wants to surface everything else.
 	// spec: APP#versions
-	let version_distance = if server.product.tracks_versions() {
+	let version_distance = if server.r#type.tracks_versions() {
 		match Version::get_latest_matching(&mut conn, "*".parse()?).await {
 			Ok(v) => status.distance_from_version(&v.as_semver()),
 			Err(_) => None,
@@ -729,7 +727,7 @@ pub async fn snapshot(
 	// only means something for a product whose releases canopy holds.
 	// spec: APP#versions
 	let min_chrome_version = match &status.version {
-		Some(v) if server.product.tracks_versions() => {
+		Some(v) if server.r#type.tracks_versions() => {
 			super::applications::compute_min_chrome_version(&mut conn, v).await
 		}
 		_ => None,
@@ -742,11 +740,11 @@ pub async fn snapshot(
 		created_at: status.created_at,
 		server_id: status.server_id,
 		device_id: status.device_id,
-		product: server.product,
+		r#type: server.r#type,
 		// A product with no application version presents none, as against the
 		// `unknown` a versioned server shows before it has reported one.
 		// spec: APP#versions
-		version: status.version.filter(|_| server.product.has_versions()),
+		version: status.version.filter(|_| server.r#type.has_versions()),
 		version_distance,
 		min_chrome_version,
 		platform: figures.platform(),
@@ -969,9 +967,7 @@ pub struct FleetServerDetailData {
 	/// The application the server runs. The fleet view reads it to keep the
 	/// application-version spread to applications that have one to report.
 	// spec: APP#versions
-	pub product: Product,
-	/// The server's role within its product's topology.
-	pub kind: ServerKind,
+	pub r#type: ApplicationType,
 	/// Application version the server reports running, if any.
 	pub version: Option<VersionStr>,
 	/// Operating system family, derived from the reported database engine.
@@ -1063,12 +1059,11 @@ pub async fn fleet_detail(
 				group_id: server.group_id,
 				group_name: server.group_id.and_then(|g| group_names.get(&g).cloned()),
 				rank: server.rank,
-				product: server.product,
-				kind: server.kind,
+				r#type: server.r#type,
 				// A product with no application version reports none, so the
 				// row carries nothing for the fleet view to count.
 				// spec: APP#versions
-				version: version.filter(|_| server.product.has_versions()),
+				version: version.filter(|_| server.r#type.has_versions()),
 				platform: figures.platform(),
 				postgres: figures.postgres_version(),
 				nodejs: figures.node_version(),

@@ -49,8 +49,12 @@ pub struct FindBackupProblemsArgs {
 
 #[derive(Serialize, Default)]
 struct Counts {
-	by_product: HashMap<String, usize>,
-	by_kind: HashMap<String, usize>,
+	/// Applications by type, the axis Canopy grades and presents on.
+	by_type: HashMap<String, usize>,
+	/// Applications by the software alone, with the role folded away, for a
+	/// client asking how much Tamanu the fleet runs rather than how much of
+	/// each role.
+	by_software: HashMap<String, usize>,
 	by_rank: HashMap<String, usize>,
 }
 
@@ -129,8 +133,11 @@ impl CanopyMcp {
 		let mut health = HealthRollup::default();
 		let mut version_distribution: HashMap<String, usize> = HashMap::new();
 		for s in &applications {
-			*counts.by_product.entry(s.product.to_string()).or_default() += 1;
-			*counts.by_kind.entry(s.kind.to_string()).or_default() += 1;
+			*counts.by_type.entry(s.r#type.to_string()).or_default() += 1;
+			*counts
+				.by_software
+				.entry(s.r#type.software().to_string())
+				.or_default() += 1;
 			if let Some(r) = &s.rank {
 				*counts.by_rank.entry(r.to_string()).or_default() += 1;
 			}

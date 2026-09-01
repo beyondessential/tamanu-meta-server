@@ -9,7 +9,7 @@ use axum::{
 };
 use commons_errors::{AppError, Result};
 use commons_types::{
-	server::{kind::ServerKind, rank::ServerRank},
+	server::{app_type::ApplicationType, rank::ServerRank},
 	status::ShortStatus,
 	version::VersionStr,
 };
@@ -162,9 +162,14 @@ async fn server_versions_page(
 			// each application's own, never a fixed one.
 			// spec: CHK#reachability
 			.select((id, name, host, alert_when_down_for))
+			// Public listing is a property of the type, so this is one filter
+			// where it used to be a product and a kind between them.
+			// spec: APP#capabilities
 			.filter(
 				rank.eq(ServerRank::Production)
-					.and(kind.eq(ServerKind::Central))
+					.and(type_.eq_any(ApplicationType::stored_values_where(|t| {
+						t.caps().public_listing
+					})))
 					.and(host.is_not_null()),
 			)
 			.order(name.asc())

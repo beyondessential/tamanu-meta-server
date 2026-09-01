@@ -136,8 +136,7 @@ struct FindMachinesResult {
 struct MachineApplicationOut {
 	id: Uuid,
 	name: Option<String>,
-	product: String,
-	kind: String,
+	r#type: String,
 	health: HealthState,
 }
 
@@ -324,8 +323,7 @@ impl CanopyMcp {
 				health: app_health.get(&a.id).copied().unwrap_or_default(),
 				id: a.id,
 				name: a.name,
-				product: a.product.to_string(),
-				kind: a.kind.to_string(),
+				r#type: a.r#type.to_string(),
 			})
 			.collect();
 

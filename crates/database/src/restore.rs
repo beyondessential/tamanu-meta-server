@@ -501,7 +501,7 @@ pub async fn redaction_gap_for(
 	db: &mut AsyncPgConnection,
 	server: &crate::applications::Application,
 ) -> Result<Option<(RedactionGapReason, Option<String>)>> {
-	let Some(manifest) = server.product.caps().redaction else {
+	let Some(manifest) = server.r#type.caps().redaction else {
 		return Ok(Some((RedactionGapReason::ProductHasNoManifest, None)));
 	};
 

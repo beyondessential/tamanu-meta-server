@@ -2,10 +2,7 @@ use axum::Json;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
-use commons_types::server::{
-	kind::ServerKind,
-	product::{Caps, Product},
-};
+use commons_types::server::app_type::{ApplicationType, Caps};
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -23,44 +20,41 @@ pub fn routes() -> OpenApiRouter<AppState> {
 /// One product canopy monitors, with what canopy does for its applications and the
 /// roles it defines.
 #[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct ProductInfo {
-	/// The product itself.
-	pub product: Product,
-	/// What canopy does for this product's applications.
+pub struct ApplicationTypeInfo {
+	/// The type itself.
+	pub r#type: ApplicationType,
+	/// What Canopy does for applications of this type.
 	pub caps: Caps,
-	/// The roles this product defines, in the order they rank when choosing a
-	/// group's canonical member.
-	pub kinds: Vec<ServerKind>,
-	/// The role a server of this product takes when none is chosen.
-	pub default_kind: ServerKind,
+	/// How the type reads when nothing has named the application.
+	pub label: String,
 }
 
-/// Describe every product canopy monitors.
+/// Describe every application type Canopy monitors.
 ///
-/// The operator UI reads this to decide what to present for a server — which
-/// roles to offer, whether a version applies and whether it can be graded,
-/// whether the public-name field is meaningful — rather than restating the
-/// mapping client-side, where it would drift as products are added.
+/// The operator UI reads this to decide what to present for an application —
+/// whether a version applies and whether it can be graded, whether the
+/// public-name field is meaningful — rather than restating the mapping
+/// client-side, where it would drift as types are added. It offers no roles to
+/// choose from: a type is reported, never entered.
 // spec: APP#capabilities
 #[utoipa::path(
 	post,
 	path = "/products",
 	tag = "commons",
 	responses(
-		(status = 200, description = "Every product, its capabilities, and the roles it defines.", body = Vec<ProductInfo>),
+		(status = 200, description = "Every application type and its capabilities.", body = Vec<ApplicationTypeInfo>),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
-pub async fn products() -> Result<Json<Vec<ProductInfo>>> {
+pub async fn products() -> Result<Json<Vec<ApplicationTypeInfo>>> {
 	Ok(Json(
-		Product::ALL
+		ApplicationType::ALL
 			.iter()
 			.copied()
-			.map(|product| ProductInfo {
-				product,
-				caps: product.caps(),
-				kinds: product.kinds().to_vec(),
-				default_kind: product.default_kind(),
+			.map(|r#type| ApplicationTypeInfo {
+				r#type,
+				caps: r#type.caps(),
+				label: r#type.label(),
 			})
 			.collect(),
 	))
