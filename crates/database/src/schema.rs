@@ -65,7 +65,6 @@ diesel::table! {
 		rank -> Nullable<Text>,
 		host -> Nullable<Text>,
 		device_id -> Nullable<Uuid>,
-		kind -> Text,
 		cloud -> Nullable<Bool>,
 		geolocation -> Nullable<Array<Nullable<Float8>>>,
 		alert_when_down_for -> Interval,
@@ -78,7 +77,6 @@ diesel::table! {
 		registered_at -> Nullable<Timestamptz>,
 		restore_allowed_until -> Nullable<Timestamptz>,
 		restore_allowed_by -> Nullable<Text>,
-		product -> Text,
 		may_manage_dns -> Bool,
 		may_manage_tls -> Bool,
 		certificate_profile -> Nullable<Text>,
@@ -86,6 +84,8 @@ diesel::table! {
 		name_management_paused_by -> Nullable<Text>,
 		name_management_pause_reason -> Nullable<Text>,
 		machine_id -> Uuid,
+		#[sql_name = "type"]
+		type_ -> Text,
 	}
 }
 

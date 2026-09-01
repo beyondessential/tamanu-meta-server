@@ -1,7 +1,7 @@
 use commons_errors::{AppError, Result};
 use commons_types::{
 	geo::GeoPoint,
-	server::{RESERVED_TAG_PREFIX, TagMap, kind::ServerKind, product::Product, rank::ServerRank},
+	server::{RESERVED_TAG_PREFIX, TagMap, app_type::ApplicationType, rank::ServerRank},
 	status::ShortStatus,
 };
 use diesel::prelude::*;
@@ -59,15 +59,12 @@ pub struct Application {
 	#[diesel(treat_none_as_default_value = false)]
 	pub host: Option<UrlField>,
 
-	/// The application this server runs, for example tamanu or senaite.
-	/// Decides which of canopy's per-server features apply to it at all.
-	// spec: APP#product-and-kind
-	#[diesel(deserialize_as = String, serialize_as = String)]
-	pub product: Product,
-	/// The server's role within its product's topology, for example central
-	/// or facility. Which roles are available depends on the product.
-	#[diesel(deserialize_as = String, serialize_as = String)]
-	pub kind: ServerKind,
+	/// What this application is: the software and the role it plays together,
+	/// for example `tamanu-central`. Decides which of Canopy's per-application
+	/// features apply to it at all.
+	// spec: APP
+	#[diesel(column_name = type_, deserialize_as = String, serialize_as = String)]
+	pub r#type: ApplicationType,
 	/// The server's environment tier, for example production, test, or dev.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub rank: Option<ServerRank>,
@@ -210,7 +207,7 @@ impl Application {
 			.filter(deleted_at.is_null())
 			.order_by((
 				name.is_not_null(),
-				kind.asc(),
+				type_.asc(),
 				name.asc(),
 				created_at.desc(),
 			))
@@ -231,22 +228,22 @@ impl Application {
 			.select(Self::as_select())
 			.filter(id.ne(Uuid::nil()))
 			.filter(deleted_at.is_not_null())
-			.order_by((kind.asc(), name.asc(), created_at.desc()))
+			.order_by((type_.asc(), name.asc(), created_at.desc()))
 			.load(db)
 			.await
 			.map_err(AppError::from)
 	}
 
-	pub async fn list_by_kind(
+	pub async fn list_by_type(
 		db: &mut AsyncPgConnection,
-		k: ServerKind,
+		k: ApplicationType,
 		offset: u64,
 		limit: Option<u64>,
 	) -> Result<Vec<Self>> {
 		use crate::schema::applications::dsl::*;
 		let q = applications
 			.select(Self::as_select())
-			.filter(id.ne(Uuid::nil()).and(kind.eq(k)))
+			.filter(id.ne(Uuid::nil()).and(type_.eq(k)))
 			.filter(deleted_at.is_null())
 			.order_by((name.is_not_null(), name.asc(), created_at.desc()))
 			.offset(offset.try_into().unwrap_or(i64::MAX));
@@ -271,11 +268,11 @@ impl Application {
 			.map(|n: i64| n.try_into().unwrap_or_default())
 	}
 
-	pub async fn count_by_kind(db: &mut AsyncPgConnection, k: ServerKind) -> Result<u64> {
+	pub async fn count_by_type(db: &mut AsyncPgConnection, k: ApplicationType) -> Result<u64> {
 		use crate::schema::applications::dsl::*;
 		applications
 			.count()
-			.filter(id.ne(Uuid::nil()).and(kind.eq(k)))
+			.filter(id.ne(Uuid::nil()).and(type_.eq(k)))
 			.filter(deleted_at.is_null())
 			.get_result(db)
 			.await
@@ -760,15 +757,15 @@ impl Application {
 		use crate::schema::applications::dsl::*;
 		let search_pattern = format!("%{}%", query);
 
-		// Both halves of eligibility, stated rather than implied: only a
-		// product canopy lists publicly, and only its central applications. The
-		// kind filter alone would exclude other products today, but by
-		// accident of their having no central role rather than on purpose.
-		// spec: APP#public-listing
+		// One filter, because eligibility is one fact about the type. It used
+		// to take two — a product that lists publicly, and a central — which
+		// between them said `tamanu-central` without being able to name it.
+		// spec: APP#capabilities
 		let mut query_builder = applications
 			.select(Self::as_select())
-			.filter(product.eq_any(Product::stored_values_where(|p| p.caps().public_listing)))
-			.filter(kind.eq(ServerKind::Central.to_string()))
+			.filter(type_.eq_any(ApplicationType::stored_values_where(|t| {
+				t.caps().public_listing
+			})))
 			.filter(public_name.is_not_null())
 			.filter(deleted_at.is_null())
 			.into_boxed();
