@@ -9,7 +9,7 @@
 
 use base64::Engine;
 use commons_tests::server::{make_signing_certificate, run, run_with_tailnet_device_auth};
-use commons_types::server::{TagMap, kind::ServerKind, product::Product};
+use commons_types::server::{TagMap, app_type::ApplicationType};
 use database::{
 	applications::Application,
 	diesel_async::AsyncPgConnection,
@@ -40,8 +40,8 @@ fn new_server(host: &str, machine_id: Uuid) -> Application {
 		id: Uuid::new_v4(),
 		name: Some("test".into()),
 		host: Some(UrlField(host.parse().unwrap())),
-		product: Product::Tamanu,
-		kind: ServerKind::Central,
+		product: ApplicationType::TamanuCentral,
+		kind: ApplicationType::TamanuCentral,
 		rank: None,
 		device_id: None,
 		machine_id,

@@ -1,6 +1,6 @@
 //! Model-level tests for the per-server restore window.
 
-use commons_types::server::{TagMap, kind::ServerKind, product::Product};
+use commons_types::server::{TagMap, app_type::ApplicationType};
 use database::{
 	applications::Application,
 	machines::{Machine, NewMachine},
@@ -15,8 +15,8 @@ fn new_server(machine_id: Uuid) -> Application {
 		id: Uuid::new_v4(),
 		name: Some("t".into()),
 		host: Some(UrlField("https://restore.example/".parse().unwrap())),
-		product: Product::Tamanu,
-		kind: ServerKind::Central,
+		product: ApplicationType::TamanuCentral,
+		kind: ApplicationType::TamanuCentral,
 		rank: None,
 		device_id: None,
 		machine_id,

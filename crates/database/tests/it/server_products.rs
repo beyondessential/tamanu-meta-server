@@ -5,7 +5,7 @@
 //! spec: APP
 
 use commons_types::server::{
-	RESERVED_TAG_PREFIX, TagMap, kind::ServerKind, product::Product, rank::ServerRank,
+	RESERVED_TAG_PREFIX, TagMap, app_type::ApplicationType, rank::ServerRank,
 };
 use database::{
 	applications::Application,
@@ -114,7 +114,7 @@ async fn product_defaults_to_tamanu() {
 		assert_eq!(stored, "tamanu");
 		assert_eq!(
 			Application::get_by_id(&mut conn, id).await.unwrap().product,
-			Product::Tamanu
+			ApplicationType::TamanuCentral
 		);
 	})
 	.await
@@ -137,8 +137,8 @@ async fn legacy_canopy_kind_still_reads() {
 		.unwrap();
 
 		let loaded = Application::get_by_id(&mut conn, id).await.unwrap();
-		assert_eq!(loaded.product, Product::Canopy);
-		assert_eq!(loaded.kind, ServerKind::Standalone);
+		assert_eq!(loaded.product, ApplicationType::Canopy);
+		assert_eq!(loaded.kind, ApplicationType::Senaite);
 	})
 	.await
 }
@@ -161,8 +161,8 @@ async fn mixed_group_headline_version_comes_from_the_tamanu_member() {
 			Application {
 				group_id: Some(g.id),
 				..server(
-					Product::Senaite,
-					ServerKind::Standalone,
+					ApplicationType::Senaite,
+					ApplicationType::Senaite,
 					Some(ServerRank::Production),
 					lims_machine,
 				)
@@ -176,8 +176,8 @@ async fn mixed_group_headline_version_comes_from_the_tamanu_member() {
 			Application {
 				group_id: Some(g.id),
 				..server(
-					Product::Tamanu,
-					ServerKind::Central,
+					ApplicationType::TamanuCentral,
+					ApplicationType::TamanuCentral,
 					Some(ServerRank::Test),
 					central_machine,
 				)
@@ -228,8 +228,8 @@ async fn group_without_a_versioned_member_has_no_headline_version() {
 			Application {
 				group_id: Some(g.id),
 				..server(
-					Product::Senaite,
-					ServerKind::Standalone,
+					ApplicationType::Senaite,
+					ApplicationType::Senaite,
 					Some(ServerRank::Production),
 					m,
 				)
@@ -258,8 +258,8 @@ async fn production_versions_skip_untracked_products() {
 		let tamanu = Application::create(
 			&mut conn,
 			server(
-				Product::Tamanu,
-				ServerKind::Central,
+				ApplicationType::TamanuCentral,
+				ApplicationType::TamanuCentral,
 				Some(ServerRank::Production),
 				tamanu_machine,
 			),
@@ -270,8 +270,8 @@ async fn production_versions_skip_untracked_products() {
 		let canopy = Application::create(
 			&mut conn,
 			server(
-				Product::Canopy,
-				ServerKind::Standalone,
+				ApplicationType::Canopy,
+				ApplicationType::Senaite,
 				Some(ServerRank::Production),
 				canopy_machine,
 			),
@@ -321,7 +321,7 @@ async fn device_tags_carry_the_product() {
 		let m = machine(&mut conn, None).await;
 		let s = Application::create(
 			&mut conn,
-			server(Product::Senaite, ServerKind::Standalone, None, m),
+			server(ApplicationType::Senaite, ApplicationType::Senaite, None, m),
 		)
 		.await
 		.unwrap();
@@ -352,7 +352,7 @@ async fn public_search_excludes_products_that_are_not_listed() {
 			Application {
 				name: Some("Lab Portal".into()),
 				public_name: Some("Lab Portal".into()),
-				..server(Product::Senaite, ServerKind::Central, None, portal_machine)
+				..server(ApplicationType::Senaite, ApplicationType::TamanuCentral, None, portal_machine)
 			},
 		)
 		.await
@@ -363,7 +363,7 @@ async fn public_search_excludes_products_that_are_not_listed() {
 			Application {
 				name: Some("Lab Central".into()),
 				public_name: Some("Lab Central".into()),
-				..server(Product::Tamanu, ServerKind::Central, None, central_machine)
+				..server(ApplicationType::TamanuCentral, None, central_machine)
 			},
 		)
 		.await
@@ -387,9 +387,9 @@ async fn sole_member_product_is_absent_for_a_mixed_group() {
 		let mixed = group(&mut conn, "mixed").await;
 
 		for (g, product) in [
-			(pure.id, Product::Tamanu),
-			(mixed.id, Product::Tamanu),
-			(mixed.id, Product::Senaite),
+			(pure.id, ApplicationType::TamanuCentral),
+			(mixed.id, ApplicationType::TamanuCentral),
+			(mixed.id, ApplicationType::Senaite),
 		] {
 			let kind = product.default_kind();
 			let m = machine(&mut conn, Some(g)).await;
@@ -407,7 +407,7 @@ async fn sole_member_product_is_absent_for_a_mixed_group() {
 		let sole = ServerGroup::sole_member_products(&mut conn, &[pure.id, mixed.id])
 			.await
 			.unwrap();
-		assert_eq!(sole.get(&pure.id), Some(&Product::Tamanu));
+		assert_eq!(sole.get(&pure.id), Some(&ApplicationType::TamanuCentral));
 		assert_eq!(sole.get(&mixed.id), None, "members span products");
 	})
 	.await

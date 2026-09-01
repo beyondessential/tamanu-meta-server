@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 
 use commons_errors::AppError;
-use commons_types::server::{TagMap, kind::ServerKind, product::Product};
+use commons_types::server::{TagMap, app_type::ApplicationType};
 use database::{
 	applications::{Application, PartialServer},
 	machines::{Machine, NewMachine},
@@ -27,8 +27,8 @@ fn new_server(host: &str, machine_id: Uuid) -> Application {
 		id: Uuid::new_v4(),
 		name: Some("t".into()),
 		host: Some(UrlField(host.parse().unwrap())),
-		product: Product::Tamanu,
-		kind: ServerKind::Central,
+		product: ApplicationType::TamanuCentral,
+		kind: ApplicationType::TamanuCentral,
 		rank: None,
 		device_id: None,
 		machine_id,
