@@ -87,12 +87,10 @@ pub struct ServerInfo {
 	pub machine_id: Uuid,
 	/// Operator-assigned name for the server, if any.
 	pub name: Option<String>,
-	/// The application this server runs. Decides which of canopy's
-	/// per-server features apply to it.
-	// spec: APP#product-and-kind
-	pub product: Product,
-	/// The server's role within its product's topology.
-	pub kind: ServerKind,
+	/// What this application is: the software and the role it plays together.
+	/// Decides which of Canopy's per-application features apply to it.
+	// spec: APP
+	pub r#type: ApplicationType,
 	/// Where this server sits in its deployment's promotion order (e.g.
 	/// production vs. staging), if applicable.
 	pub rank: Option<ServerRank>,
@@ -165,11 +163,10 @@ pub struct ServerLastStatusData {
 	pub id: Uuid,
 	/// When this status was reported.
 	pub created_at: Timestamp,
-	/// The application the server runs. Travels with the version so a
-	/// consumer can tell a product with no version from one that has yet to
-	/// report one.
-	// spec: APP#versions
-	pub product: Product,
+	/// What the application is. Travels with the version so a consumer can
+	/// tell a type with no version from one that has yet to report one.
+	// spec: APP#capabilities
+	pub r#type: ApplicationType,
 	/// Software version the server reported running, if known.
 	pub version: Option<VersionStr>,
 	/// How many releases behind the latest known version this server's
@@ -208,15 +205,6 @@ pub struct ServerDataUpdate {
 	/// New name for the server. Omit to leave unchanged.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub name: Option<String>,
-	/// New application for the server. Omit to leave unchanged. Changing it
-	/// to a product that does not define the server's kind moves the kind to
-	/// the new product's default, unless this request sets one too.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub product: Option<Product>,
-	/// New role for the server within its product's topology. Omit to leave
-	/// unchanged. Rejected when the product does not define it.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub kind: Option<ServerKind>,
 	/// New promotion rank for the server. Omit to leave unchanged.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub rank: Option<ServerRank>,
@@ -416,7 +404,6 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(get_info))
 		.routes(routes!(get_detail))
 		.routes(routes!(update))
-		.routes(routes!(create))
 		.routes(routes!(delete))
 		.routes(routes!(restore))
 		.routes(routes!(mint_enrollment))
@@ -428,9 +415,8 @@ pub fn routes() -> OpenApiRouter<AppState> {
 /// Filter and pagination parameters for listing applications.
 #[derive(Deserialize, ToSchema)]
 pub struct ServerListArgs {
-	/// Restrict results to applications of this kind. Omit to
-	/// include all kinds.
-	pub kind: Option<ServerKind>,
+	/// Restrict results to applications of this type. Omit to include all.
+	pub r#type: Option<ApplicationType>,
 	/// Number of items to skip from the start of the result set.
 	pub offset: u64,
 	/// Maximum number of items to return.
@@ -979,180 +965,6 @@ const DEFAULT_ALERT_SECS: i64 = 600;
 /// Enrollment token lifetime: 7 days (human operational timescale).
 const ENROLLMENT_TTL: jiff::SignedDuration = jiff::SignedDuration::from_hours(24 * 7);
 
-/// Request to create a new server.
-#[derive(Deserialize, ToSchema)]
-pub struct CreateServerArgs {
-	/// Name for the server, if any.
-	pub name: Option<String>,
-	/// URL for the server, if known. Can be added or changed later.
-	#[serde(default)]
-	pub host: Option<String>,
-	/// The application this server runs. Defaults to tamanu.
-	#[serde(default)]
-	pub product: Product,
-	/// The server's role within its product's topology. Rejected when the
-	/// product does not define it.
-	pub kind: ServerKind,
-	/// Where this server sits in its deployment's promotion order (e.g.
-	/// production vs. staging), if applicable.
-	pub rank: Option<ServerRank>,
-	/// Group to place the server in. Omit to create it ungrouped.
-	pub group_id: Option<Uuid>,
-	/// Name to list the server under in the public mobile-app server list.
-	/// Omit to keep it unlisted.
-	pub public_name: Option<String>,
-	/// Whether the server runs in a cloud environment, if known.
-	pub cloud: Option<bool>,
-	/// Geographic location of the server, if known.
-	pub geolocation: Option<GeoPoint>,
-	/// Whether canopy should actively monitor this server. Defaults to
-	/// true.
-	pub is_monitored: Option<bool>,
-	/// Downtime threshold in seconds before the server is considered
-	/// down. Defaults to 600 (10 minutes).
-	pub alert_when_down_for: Option<i64>,
-	/// Free-text operator notes about the server.
-	pub notes: Option<String>,
-	/// Arbitrary operator-defined key/value labels for the server.
-	pub tags: Option<TagMap>,
-	/// Optional Tailscale identity to pre-bind a device to (an IP, node id,
-	/// or DNS name). When given, a device is created for that identity
-	/// immediately, and the key the machine presents when it later
-	/// registers is added to that same device.
-	pub tailscale_identifier: Option<String>,
-}
-
-/// Create a new server.
-///
-/// Creates the server record, optionally pre-bound to a Tailscale device
-/// via `tailscale_identifier`, either ungrouped or in the given group.
-#[utoipa::path(
-	post,
-	path = "/create",
-	tag = "applications",
-	security(("tailscale-admin" = [])),
-	request_body = CreateServerArgs,
-	responses(
-		(status = 200, description = "New server id.", body = Uuid, content_type = "application/json"),
-		(status = 400, body = ProblemDetailsSchema),
-		(status = 409, body = ProblemDetailsSchema),
-	),
-)]
-pub async fn create(
-	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
-	Json(args): Json<CreateServerArgs>,
-) -> Result<Json<Uuid>> {
-	let mut conn = state.db.get().await?;
-
-	let host = args
-		.host
-		.as_deref()
-		.filter(|s| !s.trim().is_empty())
-		.map(Application::canonicalize_host)
-		.transpose()?;
-
-	// Optionally pre-bind a Tailscale device.
-	let device_id = if let Some(identifier) = args.tailscale_identifier.as_deref() {
-		let directory = state
-			.tailnet_directory
-			.as_ref()
-			.ok_or(AppError::AuthTailnetDirectoryUnavailable)?;
-		let entry = directory
-			.resolve_identifier(identifier)
-			.await
-			.map_err(|_| AppError::AuthTailnetDirectoryUnavailable)?
-			.ok_or_else(|| {
-				AppError::NotFound("no tailnet device matches that identifier".into())
-			})?;
-		let device = match Device::from_tailscale_node_id(&mut conn, &entry.node_id).await? {
-			Some(existing) => existing,
-			None => {
-				Device::create_with_tailscale(
-					&mut conn,
-					TailscaleIdentity {
-						node_id: entry.node_id.clone(),
-						node_name: Some(entry.node_name.clone()),
-						tailnet: Some(entry.tailnet.clone()),
-					},
-					DeviceRole::Server,
-				)
-				.await?
-			}
-		};
-		Some(device.id)
-	} else {
-		None
-	};
-
-	// A role its product doesn't define would leave the server misclassified
-	// from the moment it exists.
-	// spec: APP#product-and-kind
-	if !args.product.defines_kind(args.kind) {
-		return Err(AppError::BadRequest(format!(
-			"{} applications have no {} role",
-			args.product, args.kind
-		)));
-	}
-
-	// The operator is really describing a box and the workload on it. Create
-	// the machine first and hang the application off it, so the machine-ish
-	// facts land on the machine and the application takes its group from
-	// there rather than holding one of its own.
-	//
-	// Still 1:1 here: a second workload on a box arrives by report, not
-	// through this form.
-	// spec: FLT#machines-come-from-operators
-	let machine = database::machines::Machine::create(
-		&mut conn,
-		database::machines::NewMachine {
-			name: args.name.clone(),
-			group_id: args.group_id,
-			cloud: args.cloud,
-			geolocation: args.geolocation,
-		},
-	)
-	.await?;
-	if let Some(device_id) = device_id {
-		database::machines::Machine::mark_registered(&mut conn, machine.id, device_id).await?;
-	}
-
-	let server = Application {
-		id: Uuid::new_v4(),
-		name: args.name,
-		host,
-		product: args.product,
-		kind: args.kind,
-		rank: args.rank,
-		device_id,
-		machine_id: machine.id,
-		group_id: args.group_id,
-		public_name: args.public_name,
-		cloud: args.cloud,
-		geolocation: args.geolocation,
-		is_monitored: args.is_monitored.unwrap_or(true),
-		alert_when_down_for: PgDuration(jiff::SignedDuration::from_secs(
-			args.alert_when_down_for.unwrap_or(DEFAULT_ALERT_SECS),
-		)),
-		notes: args.notes.unwrap_or_default(),
-		tags: args.tags.unwrap_or_default(),
-		deleted_at: None,
-		registered_at: None,
-		restore_allowed_until: None,
-		restore_allowed_by: None,
-		// Granted afterwards, deliberately: a server is not trusted with its
-		// own names by the act of being created.
-		may_manage_dns: false,
-		may_manage_tls: false,
-		certificate_profile: None,
-		name_management_paused_at: None,
-		name_management_paused_by: None,
-		name_management_pause_reason: None,
-	};
-
-	let created = Application::create(&mut conn, server).await?;
-	Ok(Json(created.id))
-}
 
 /// Identifies a single server by id.
 #[derive(Deserialize, ToSchema)]
