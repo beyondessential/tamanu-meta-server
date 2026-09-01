@@ -472,6 +472,7 @@ export function RankedDotStrip({ members }: { members: FacilityServerStatus[] })
 							up={box.lead.machine_up}
 							health={box.lead.machine_health}
 							name={box.lead.machine_name}
+							maintained={box.lead.machine_maintained}
 						>
 							{box.applications.map((m) => (
 								<Box key={m.id} component="span" sx={dotCellSx}>

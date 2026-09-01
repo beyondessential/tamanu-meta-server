@@ -24,6 +24,15 @@ function enclosureColor(up: ShortStatus, health: HealthState): string {
 	return NEUTRAL;
 }
 
+// A window hatches the pill's fill rather than cutting through it the way a
+// dot's does. A mask on the enclosure would clip the dots inside it as well,
+// which would say something about the applications — and a window is the box's.
+// The hatch runs the same way as the dot's maintenance cut, so the two read as
+// one idea at either grain.
+// spec: MNT#presentation
+const MAINTAINED_HATCH =
+	"repeating-linear-gradient(45deg, transparent 0 4px, rgba(0, 0, 0, 0.16) 4px 8px)";
+
 function enclosureTitle(up: ShortStatus, health: HealthState): string {
 	if (up === "gone") return "Machine has never reported";
 	if (up === "down") return "Machine unreachable";
@@ -36,16 +45,29 @@ export default function MachineEnclosure({
 	up,
 	health,
 	name,
+	maintained = false,
 	children,
 }: {
 	up: ShortStatus;
 	health: HealthState;
 	/** The box's name, for the tooltip. */
 	name?: string | null;
+	/** Whether a maintenance window suspends this box, its own or its group's.
+	 * A window is declared over a machine and never over an application, so it
+	 * is the enclosure that carries it — the applications inside are suspended
+	 * by their box rather than each saying so. */
+	// spec: MNT#presentation
+	maintained?: boolean;
 	/** The dots for the applications on this machine. */
 	children: ReactNode;
 }) {
-	const title = [name, enclosureTitle(up, health)].filter(Boolean).join(" — ");
+	const title = [
+		name,
+		enclosureTitle(up, health),
+		maintained ? "under maintenance" : null,
+	]
+		.filter(Boolean)
+		.join(" — ");
 	return (
 		<Tooltip title={title}>
 			<Box
@@ -55,6 +77,7 @@ export default function MachineEnclosure({
 					alignItems: "center",
 					bgcolor: enclosureColor(up, health),
 					borderRadius: "999px",
+					backgroundImage: maintained ? MAINTAINED_HATCH : undefined,
 					px: 0.5,
 					py: 0.25,
 					// The dots carry their own right margin; trim the last one so

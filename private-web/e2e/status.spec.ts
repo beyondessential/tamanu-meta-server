@@ -3,6 +3,7 @@ import {
 	resetSeededTables,
 	seedDevice,
 	seedMachine,
+	seedMaintenanceWindow,
 	seedServer,
 	seedServerGroup,
 	seedStatus,
@@ -191,6 +192,93 @@ test.describe("status page", () => {
 		// The dev row is one enclosure holding one — still an enclosure.
 		await expect(rows.nth(1).locator("> span")).toHaveCount(1);
 		await expect(rows.nth(1).locator("> span > span")).toHaveCount(1);
+	});
+
+	/// A window is declared over a box, so the box is what carries it. Before
+	/// this the status page had no maintenance signal at all: a box being
+	/// worked on looked exactly like one that was not.
+	///
+	/// spec: MNT#presentation
+	test("a box under a maintenance window is marked on the status page", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "window-group" });
+		const working = await seedServer(sql, {
+			name: "being-worked-on",
+			rank: "production",
+			groupId: group.id,
+		});
+		const untouched = await seedServer(sql, {
+			name: "left-alone",
+			rank: "production",
+			groupId: group.id,
+		});
+		await seedMaintenanceWindow(sql, {
+			machineId: working.machineId,
+			endsInHours: 2,
+		});
+
+		await page.goto("/status");
+
+		const strip = page
+			.locator(`a[href="/groups/${group.id}"]`)
+			.first()
+			.getByTestId("dot-strip");
+		await expect(strip).toBeVisible();
+
+		// The hatch is a background on the pill, so assert on computed style:
+		// at this size nothing else carries the distinction. Both boxes are
+		// production and sort by their applications' names, so the worked-on
+		// box is first.
+		const fills = await strip
+			.locator("[data-testid='rank-row'] > span")
+			.evaluateAll((els) =>
+				els.map((el) => getComputedStyle(el).backgroundImage),
+			);
+		expect(fills).toHaveLength(2);
+		expect(fills[0]).not.toBe("none");
+		expect(fills[1]).toBe("none");
+		void untouched;
+
+		// And the pill says why.
+		await strip.locator("[data-testid='rank-row'] > span").first().hover();
+		await expect(
+			page.getByRole("tooltip", { name: /under maintenance/ }),
+		).toBeVisible();
+	});
+
+	/// A group's window covers every box in it, so every pill on the card is
+	/// marked rather than the operator having to know the window was group-wide.
+	///
+	/// spec: MNT#presentation
+	test("a group-wide window marks every box on the card", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "whole-group-window" });
+		await seedServer(sql, { name: "one", rank: "production", groupId: group.id });
+		await seedServer(sql, { name: "two", rank: "production", groupId: group.id });
+		await seedMaintenanceWindow(sql, {
+			serverGroupId: group.id,
+			endsInHours: 2,
+		});
+
+		await page.goto("/status");
+
+		const strip = page
+			.locator(`a[href="/groups/${group.id}"]`)
+			.first()
+			.getByTestId("dot-strip");
+		await expect(strip).toBeVisible();
+
+		const fills = await strip
+			.locator("[data-testid='rank-row'] > span")
+			.evaluateAll((els) =>
+				els.map((el) => getComputedStyle(el).backgroundImage),
+			);
+		expect(fills).toHaveLength(2);
+		expect(fills.every((f) => f !== "none")).toBe(true);
 	});
 
 	// spec: FIG#active-versions

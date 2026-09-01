@@ -190,5 +190,7 @@ cover the runtime half of that, which the spec diff cannot see.
 - [ ] The operator tooltip names each person and the machines they are on
 - [x] The status card encloses every machine, including one hosting a single application (verifies spec: CHK)
 - [x] A machine enclosure carries the machine's state; the indicator inside carries the application's (verifies spec: CHK)
+- [x] A box under a maintenance window is marked as such on the status page (verifies spec: CHK, MNT)
+- [x] A group-wide window marks every box in that group's card (verifies spec: MNT)
 - [x] A group card's dots are rank rows of machine enclosures rather than one flat strip
 - [ ] The fleet listing has no ungrouped tab

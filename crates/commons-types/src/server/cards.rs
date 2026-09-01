@@ -51,6 +51,12 @@ pub struct FacilityServerStatus {
 	pub machine_up: ShortStatus,
 	/// The box's own health, from the checks filed against it.
 	pub machine_health: HealthState,
+	/// Whether a maintenance window suspends this box — its own or its
+	/// group's. A window is declared over a machine and never over an
+	/// application, so this is the box's fact and the applications on it are
+	/// suspended by it rather than carrying one of their own.
+	// spec: MNT#presentation
+	pub machine_maintained: bool,
 }
 
 /// A status-dashboard card summarising one group of equivalent servers, with

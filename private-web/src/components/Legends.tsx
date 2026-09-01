@@ -32,11 +32,22 @@ const DOT_ENTRIES: Array<{
 const MACHINE_ENTRIES: Array<{
 	up: ShortStatus;
 	health: HealthState;
+	maintained?: boolean;
 	label: string;
 }> = [
 	{ up: "up", health: "healthy", label: "Machine fine" },
 	{ up: "up", health: "warning", label: "Machine's own checks degraded" },
-	{ up: "down", health: "healthy", label: "Machine down (everything on it with it)" },
+	{
+		up: "down",
+		health: "healthy",
+		label: "Machine down (everything on it with it)",
+	},
+	{
+		up: "up",
+		health: "healthy",
+		maintained: true,
+		label: "Hatched: under maintenance (being worked on)",
+	},
 ];
 
 const VERSION_ENTRIES: Array<{ distance: number | null; label: string }> = [
@@ -84,12 +95,6 @@ export function StatusLegend() {
 					Cut through: unmonitored (state shown, nothing alerts)
 				</Typography>
 			</Stack>
-			<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
-				<StatusDot up="down" maintained />
-				<Typography variant="body2" color="text.secondary">
-					Cut the other way: under maintenance (being worked on)
-				</Typography>
-			</Stack>
 		</Stack>
 	);
 }
@@ -110,14 +115,14 @@ export function OperatorLegend() {
 export function HealthLegend() {
 	return (
 		<Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap" }}>
-			{MACHINE_ENTRIES.map(({ up, health, label }) => (
+			{MACHINE_ENTRIES.map(({ up, health, maintained, label }) => (
 				<Stack
 					key={label}
 					direction="row"
 					spacing={0.5}
 					sx={{ alignItems: "center" }}
 				>
-					<MachineEnclosure up={up} health={health}>
+					<MachineEnclosure up={up} health={health} maintained={maintained}>
 						<StatusDot up="up" health="healthy" />
 					</MachineEnclosure>
 					<Typography variant="body2" color="text.secondary">

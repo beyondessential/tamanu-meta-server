@@ -20,7 +20,7 @@ Each item is a section below; the section carries the detail and the traps.
 - [x] **Retiring the graded reachability states** — `short_status`'s hardcoded thresholds
 - [x] **Fleet query interface** — MCP gains `Get machine` and `Find machines`
 - [x] **Migration** — `{product, kind}` becomes `{type}`
-- [x] **Frontend** — two detail pages, the group tree, the status-page bands
+- [ ] **Frontend** — two detail pages, the group tree, the status-page bands (bands outstanding; the rest done)
 - [ ] **Routes** — deprecation aliases for every renamed path
 
 Carried deferrals, each gated on a step above rather than on a vague later:
@@ -446,6 +446,10 @@ A group card's dots become rank rows of enclosures rather than one flat strip wi
 `FacilityServerStatus` gained the machine — id, name, its own reachability and health — since the card had no way to group by box. Two batch reads came with it (`Machine::get_many`, `MachineReportedDetail::latest_for_machines`) so a page of cards does not ask per box.
 
 CHK gained "One subject per mark": a mark says one thing about one subject, an enclosure means nothing on its own, and a mark carries no second encoding for a second subject.
+
+**Maintenance postdates the mockup, and the status page had none of it.** Windows arrived from main mid-split, so the mockup's colourway never accounted for them — and the card type carried no maintenance at all, meaning a box being worked on looked exactly like one that was not, on the page an operator watches. `FacilityServerStatus.machine_maintained` comes from the one batch `suspended_targets` read, and the enclosure carries it: a window is declared over a machine or a group and never over an application, so the box is what shows it.
+
+The pill is hatched rather than cut. A mask on the enclosure would clip the dots inside it too, which would say something about the applications, and the window is the box's. The hatch runs the same diagonal as the dot's maintenance cut, so the two read as one idea at either grain. The dot keeps its own cut for the surfaces that draw applications without a box — a sibling strip — where it is the window's consequence for that application rather than a window of its own. The legend follows: maintenance moved from the dot's row to the enclosure's.
 
 ## Mockups
 

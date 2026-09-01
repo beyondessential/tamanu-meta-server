@@ -5678,6 +5678,13 @@ export interface components {
              *     grain exists for.
              */
             machine_id: string;
+            /**
+             * @description Whether a maintenance window suspends this box — its own or its
+             *     group's. A window is declared over a machine and never over an
+             *     application, so this is the box's fact and the applications on it are
+             *     suspended by it rather than carrying one of their own.
+             */
+            machine_maintained: boolean;
             /** @description The box's name, where an operator gave it one. */
             machine_name?: string | null;
             /**
