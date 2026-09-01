@@ -69,11 +69,11 @@ Moving a machine to another group moves the applications on it, and there is no 
 
 ### Environments
 
-Rank is an application's, not a machine's, so a group's environment — its members at one rank — is a set of applications.
-A box is not in an environment: what is production or test is the software serving that role, and the same box can carry a production workload and a test one.
+Rank is an application's, so a group's environment — its members at one rank — is a set of applications.
 
-A machine's stage is therefore derived rather than held: it is the highest rank among the applications on it, so a box shared by a production and a test workload bills and presents as production (see [APP](application-types.md), "Billing attribution").
-That derivation is what lets a machine belong to a group without belonging to one of its environments, and it is why moving a machine between groups moves whole applications rather than reassigning a rank.
+A machine serves one environment in practice, since a box is not given a production workload and a demo one.
+Canopy holds no relationship between the two, because nothing it does turns on one: a machine's stage is derived instead, as the highest rank among the applications on it (see [APP](application-types.md), "Billing attribution").
+Deriving it leaves a mixed box well-defined without anyone having to keep a machine's rank in step with what runs on it.
 
 ## What each carries
 
