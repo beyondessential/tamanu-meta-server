@@ -43,6 +43,7 @@ import Incidents from "./routes/Incidents";
 import Maintenance from "./routes/Maintenance";
 import Status from "./routes/Status";
 import MachineCreate from "./routes/MachineCreate";
+import MachineDetail from "./routes/MachineDetail";
 import ServerDetail from "./routes/ServerDetail";
 import ServerEdit from "./routes/ServerEdit";
 import ArchivedList from "./routes/ArchivedList";
@@ -212,6 +213,7 @@ export default function App() {
 						element={<MachineCreate />}
 					/>
 					<Route path="/servers/:id" element={<ServerDetail />} />
+					<Route path="/machines/:id" element={<MachineDetail />} />
 					<Route path="/servers/:id/edit" element={<ServerEdit />} />
 					<Route path="/groups/new" element={<GroupEdit />} />
 					<Route path="/groups/:id" element={<GroupDetail />} />

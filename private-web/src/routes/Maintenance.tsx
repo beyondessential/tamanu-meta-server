@@ -73,6 +73,10 @@ export default function Maintenance() {
 											<RouterLink to={`/groups/${window.server_group_id}`}>
 												{target}
 											</RouterLink>
+										) : window.machine_id ? (
+											<RouterLink to={`/machines/${window.machine_id}`}>
+												{target}
+											</RouterLink>
 										) : (
 											target
 										)}

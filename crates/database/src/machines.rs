@@ -1,5 +1,5 @@
 use commons_errors::{AppError, Result};
-use commons_types::{geo::GeoPoint, server::TagMap};
+use commons_types::{geo::GeoPoint, server::TagMap, status::ShortStatus};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
@@ -360,6 +360,24 @@ impl Machine {
 			.into_iter()
 			.map(|(id, gid, gn)| (id, (gid, gn)))
 			.collect())
+	}
+
+	/// This machine's reachability, from when it last reported and its own
+	/// down threshold.
+	///
+	/// A box's silence is its own fact. An application on it reports on its own
+	/// schedule and against its own threshold, so a machine that has gone quiet
+	/// and a workload that has are two different findings, and a box carrying
+	/// two workloads still has one answer here.
+	// spec: CHK#reachability
+	pub fn reachability(&self, last_reported_at: Option<Timestamp>) -> ShortStatus {
+		last_reported_at.map_or(ShortStatus::Gone, |at| {
+			if at.duration_since(Timestamp::now()).abs() >= self.alert_when_down_for.0 {
+				ShortStatus::Down
+			} else {
+				ShortStatus::Up
+			}
+		})
 	}
 
 	/// The applications running on this machine.

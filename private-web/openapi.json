@@ -4702,6 +4702,63 @@
         ]
       }
     },
+    "/api/machines/get_detail": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Get full detail for one machine.",
+        "description": "Returns the box's record, what it reports about itself, its identity, its\nown health and checks, and the applications running on it. Returns 404 if\nthe machine doesn't exist.",
+        "operationId": "machines_get_detail",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineDetailData"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
     "/api/machines/list": {
       "post": {
         "tags": [
@@ -12385,6 +12442,95 @@
           }
         ],
         "description": "A machine together with the applications running on it."
+      },
+      "MachineDetailData": {
+        "type": "object",
+        "description": "Everything a machine's own page presents.\n\nThe machine's record, what the box reports about itself, its own health and\nchecks, the identity it authenticates with, and the applications running on\nit. An application's version and database engine are not here: those are the\nworkload's, and each application carries its own (see [APP]).",
+        "required": [
+          "machine",
+          "figures",
+          "up",
+          "health",
+          "maintained",
+          "maintenance_settling",
+          "checks",
+          "applications",
+          "billing_labels"
+        ],
+        "properties": {
+          "applications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServerInfo"
+            },
+            "description": "The applications running on this box, each carrying its own\nreachability and health so the page renders a dot per workload."
+          },
+          "billing_labels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BillingTag"
+            },
+            "description": "The machine's effective `billing.*` labels — the ones Canopy hands its\ndevice. A machine carries no product, a box not being a piece of\nsoftware."
+          },
+          "checks": {
+            "$ref": "#/components/schemas/ConsolidatedChecks",
+            "description": "The machine's own checks across every source, graded and classified."
+          },
+          "device_info": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DeviceInfo",
+                "description": "Full detail on the identity bound to this machine, if it has enrolled."
+              }
+            ]
+          },
+          "figures": {
+            "type": "object",
+            "description": "What the box reports about itself, resolved across every source\nreporting on it: platform, hardware, addresses, uptime."
+          },
+          "group": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerGroup",
+                "description": "The group this machine belongs to, with its notes and tags, so the page\nrenders its group section without a second fetch."
+              }
+            ]
+          },
+          "health": {
+            "$ref": "#/components/schemas/HealthState",
+            "description": "The machine's own health, from the checks filed against it. What the\napplications on it make of their own checks is each application's."
+          },
+          "last_reported_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the box last reported anything, across every source."
+          },
+          "machine": {
+            "$ref": "#/components/schemas/Machine",
+            "description": "The machine's own record."
+          },
+          "maintained": {
+            "type": "boolean",
+            "description": "Whether a maintenance window suspends this machine, its own or its\ngroup's."
+          },
+          "maintenance_settling": {
+            "type": "boolean",
+            "description": "Whether the suspension is only the settle period."
+          },
+          "up": {
+            "$ref": "#/components/schemas/ShortStatus",
+            "description": "Whether the box is currently reporting, on its own threshold."
+          }
+        }
       },
       "MachineIdArgs": {
         "type": "object",

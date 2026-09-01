@@ -167,14 +167,20 @@ cover the runtime half of that, which the spec diff cannot see.
 - [x] The edit form shows an application's type rather than offering it
 - [x] The public-name field is offered only for a type eligible for public listing
 - [x] A group names a billing product only when its applications all run one software
-- [ ] Creating a machine lands on that machine's own page
+- [x] Creating a machine lands on that machine's own page
 - [ ] A machine's reachability can be silenced from the machine form, as a server's could
 
-- [ ] The group page lists rank, then machine, then applications
+- [x] The group page lists rank, then machine, then applications
 - [ ] Both detail pages end with the group's tree, with the current page highlighted
 - [ ] The application page presents its own and its machine's checks in one list
 - [ ] The application page carries no backups and no identity
-- [ ] The machine page carries no URL
+- [x] The machine page carries no URL
+- [x] A machine's page presents what the box reports: platform, processors, memory, bestool
+- [x] A box carrying two workloads lists both, each linking to its own page
+- [x] A machine with nothing on it reads as awaiting check-in, on its page and in its group
+- [x] An application links to its machine, and the machine back to the application
+- [x] A maintenance window over a machine suspends the applications on that machine (verifies spec: MNT)
+- [x] A machine's checks are presented on its page, without a silence control
 - [ ] Neither detail page shows a status dot beside its title
 - [ ] A group card's operator count counts people once across machines
 - [ ] The operator tooltip names each person and the machines they are on

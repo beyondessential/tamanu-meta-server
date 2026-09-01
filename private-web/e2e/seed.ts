@@ -135,6 +135,38 @@ export interface SeededServer {
 	machineId: string;
 }
 
+/** A box on its own, with no workload on it — the state a machine is in
+ * between an operator adding it and the first report arriving. */
+export async function seedMachine(
+	sql: Sql,
+	opts: { name?: string; groupId?: string | null } = {},
+): Promise<{ id: string; name: string }> {
+	const id = randomUUID();
+	const name = opts.name ?? randomLabel("box");
+	await sql.query(`INSERT INTO machines (id, name, group_id) VALUES ($1, $2, $3)`, [
+		id,
+		name,
+		opts.groupId ?? null,
+	]);
+	return { id, name };
+}
+
+/** What a box reports about itself. */
+export async function seedMachineReport(
+	sql: Sql,
+	opts: {
+		machineId: string;
+		source?: string;
+		extra?: Record<string, unknown>;
+	},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO machine_reported_detail (machine_id, source, extra, reported_at)
+		 VALUES ($1, $2, $3::jsonb, NOW())`,
+		[opts.machineId, opts.source ?? "alertd", JSON.stringify(opts.extra ?? {})],
+	);
+}
+
 export async function seedServer(
 	sql: Sql,
 	opts: {

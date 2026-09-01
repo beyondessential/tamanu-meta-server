@@ -242,8 +242,8 @@ test.describe("server create → setup → archive flow", () => {
 		await page.getByLabel(/^Name(\s*\*)?$/i).fill("flow-machine");
 		await page.getByRole("button", { name: "Create machine" }).click();
 
-		// Lands back on the group, where the new box now appears.
-		await expect(page).toHaveURL(new RegExp(`/groups/${group.id}$`));
+		// Lands on the new box's own page.
+		await expect(page).toHaveURL(/\/machines\/[0-9a-f-]{36}$/);
 
 		// The workload on it is reported, not entered, so seed one and carry on
 		// through its lifecycle.

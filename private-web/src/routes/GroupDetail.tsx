@@ -5,6 +5,7 @@ import {
 	Chip,
 	LinearProgress,
 	Paper,
+	Link as MuiLink,
 	Stack,
 	Typography,
 } from "@mui/material";
@@ -32,10 +33,13 @@ import {
 	BACKUP_STATUS_LABEL,
 	type BackupConfigStatus,
 	aggregateOperators,
+	compareServersByRankThenType,
 	groupServersByRank,
 	isIncidentLingering,
 	type AggregatedOperator,
+	type GroupMachine,
 	type IncidentData,
+	type ServerInfo,
 } from "../types";
 
 export default function GroupDetail() {
@@ -69,7 +73,7 @@ export default function GroupDetail() {
 		return <Alert severity="error">{detail.error.message}</Alert>;
 	}
 
-	const { group, applications, billing_labels } = detail.data;
+	const { group, applications, machines, billing_labels } = detail.data;
 	const tagEntries = Object.entries(group.tags ?? {});
 	const operators =
 		groupStatuses.status === "ok"
@@ -227,34 +231,15 @@ export default function GroupDetail() {
 
 			<Box>
 				<Typography variant="h5" component="h2" gutterBottom>
-					Servers ({applications.length})
+					Machines ({machines.length})
 				</Typography>
-				{applications.length === 0 ? (
+				{machines.length === 0 ? (
 					<Alert severity="info">
 						Nothing in this group yet. Add a machine; the applications on it
 						arrive by report.
 					</Alert>
 				) : (
-					<Stack spacing={2}>
-						{groupServersByRank(applications).map(([rank, members]) => (
-							<Box key={rank ?? "_unranked"}>
-								{rank && (
-									<Typography
-										variant="overline"
-										color="text.secondary"
-										sx={{ display: "block", mb: 0.5 }}
-									>
-										{rank}
-									</Typography>
-								)}
-								<Stack spacing={1}>
-									{members.map((s) => (
-										<ServerShorty key={s.id} server={s} />
-									))}
-								</Stack>
-							</Box>
-						))}
-					</Stack>
+					<GroupTree machines={machines} applications={applications} />
 				)}
 			</Box>
 
@@ -496,5 +481,87 @@ function ArchivedGroupBanner({
 			This group is archived. Restore it to bring it back to the listings.
 			{action.error && <Box sx={{ mt: 1 }}>{action.error.message}</Box>}
 		</Alert>
+	);
+}
+
+/// The group as an operator navigates it: rank, then the boxes at that rank,
+/// then the workloads on each box.
+///
+/// A machine's rank is the highest among the applications on it, since rank is
+/// a workload's property and a box shared by a production and a test workload
+/// is a production box. A machine carrying nothing yet has no rank to take, and
+/// sorts last — awaiting check-in, not an error.
+/// spec: FLT
+function GroupTree({
+	machines,
+	applications,
+}: {
+	machines: GroupMachine[];
+	applications: ServerInfo[];
+}) {
+	const byMachine = new Map<string, ServerInfo[]>();
+	for (const application of applications) {
+		const list = byMachine.get(application.machine_id);
+		if (list) list.push(application);
+		else byMachine.set(application.machine_id, [application]);
+	}
+
+	// Give each machine the rank of its highest-ranked workload, then reuse the
+	// same rank bucketing the fleet uses everywhere else.
+	const ranked = machines.map((machine) => {
+		const on = byMachine.get(machine.id) ?? [];
+		const [best] = [...on].sort(compareServersByRankThenType);
+		return {
+			machine,
+			applications: [...on].sort(compareServersByRankThenType),
+			rank: best?.rank ?? null,
+			type: best?.type ?? "tamanu-central",
+			name: machine.name ?? "",
+		};
+	});
+
+	return (
+		<Stack spacing={2}>
+			{groupServersByRank(ranked).map(([rank, boxes]) => (
+				<Box key={rank ?? "_unranked"}>
+					<Typography
+						variant="overline"
+						color="text.secondary"
+						sx={{ display: "block", mb: 0.5 }}
+					>
+						{rank ?? "unranked"}
+					</Typography>
+					<Stack spacing={1.5}>
+						{boxes.map((box) => (
+							<Box key={box.machine.id}>
+								<MuiLink
+									component={RouterLink}
+									to={`/machines/${box.machine.id}`}
+									variant="body2"
+									sx={{ fontWeight: 500 }}
+								>
+									{box.machine.name ?? "Unnamed machine"}
+								</MuiLink>
+								{box.applications.length === 0 ? (
+									<Typography
+										variant="body2"
+										color="text.secondary"
+										sx={{ mt: 0.5 }}
+									>
+										Awaiting check-in.
+									</Typography>
+								) : (
+									<Stack spacing={1} sx={{ mt: 0.5, ml: 2 }}>
+										{box.applications.map((application) => (
+											<ServerShorty key={application.id} server={application} />
+										))}
+									</Stack>
+								)}
+							</Box>
+						))}
+					</Stack>
+				</Box>
+			))}
+		</Stack>
 	);
 }

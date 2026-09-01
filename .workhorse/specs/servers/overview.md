@@ -90,6 +90,19 @@ An application's type is among the reserved read-only tags on applications, toge
 A machine's own name as the operating system reports it is a reported figure rather than a field an operator sets (see [FIG](../private-server/figures.md)).
 It is distinct from the DNS names an application serves at: two applications on one machine share one hostname and serve at names of their own.
 
+## Navigating the two grains
+
+Each grain has a page of its own, and each names the other, so an operator moves between a box and the software on it without a search.
+
+A machine's page presents what the box reports about itself — its platform, its processors, its memory, its clock, how long it has been up — together with the machine's own health, the checks filed against it, and the applications running on it.
+A version or a database engine is not there, those being a workload's rather than a box's.
+
+An application's page names the machine it runs on.
+
+A group presents its machines, and under each the applications on it, bucketed by rank.
+A machine takes the rank of the highest-ranked application on it, which is the same derivation its billing stage uses (see [APP](application-types.md), "Billing attribution").
+A machine carrying nothing yet appears in the group as awaiting check-in rather than being absent, since an operator who has just added a box needs to see it.
+
 ## Identities
 
 An identity carries a role naming what it authenticates: a machine, an administrator, a releaser, a backup-restore agent, or a relay.

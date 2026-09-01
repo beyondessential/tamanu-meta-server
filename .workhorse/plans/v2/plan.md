@@ -28,7 +28,7 @@ Carried deferrals, each gated on a step above rather than on a vague later:
 - [x] Remove the `application_default_machine()` scaffolding default — done early, with the operator/enrolment surface
 - [x] Add `machine_id` to the `Application` struct — done with the operator/enrolment surface
 - [ ] **Backup tables take the machine grain** — `backup_runs`, `backup_repo_snapshots`, `server_backup_capabilities` and friends still key on the application that reported them. The rename step deferred them; nothing has claimed them since. Restore replicas now reach a machine's snapshot through a join that exists only because of this, and BAK already says a backup is a machine's
-- [ ] Separate "never reported" from "reported long ago" — `Status::latest_for_servers` looks back seven days for performance, so a target silent longer returns no row and reads as never reported (grey) rather than unreachable (red). Pre-existing, and sharper now the states are three: the fix is a cheap "has this ever reported" fact rather than widening the scan
+- [ ] Separate "never reported" from "reported long ago" — `Status::latest_for_servers` looks back seven days for performance, so a target silent for longer returns no row and reads as never reported (grey) rather than unreachable (red). Pre-existing, and sharper now the states are three: the fix is a cheap "has this ever reported" fact rather than widening the scan -- verify that it does remain cheap, if the query is "somewhat more expensive" it will slow every single view that displays a status, and the /status page (which has all of them at once) will slow to a crawl.
 - [x] Carry the machine on `IssueData` — done with the fleet query interface, which is what presented machine checks first
 - [ ] Link a machine's maintenance window to its detail page — with **Frontend**, which is what creates that page. The fleet maintenance view renders a machine target as plain text until then rather than linking somewhere that 404s
 
@@ -410,10 +410,19 @@ Done: the type replaces the pair throughout the UI. One `ApplicationTypeChip` re
 
 **The create form became the machine form.** Same form minus five fields: no URL, no product, no kind, no rank, no public name. What is left is a box — name, group, location, tailnet identity, monitoring, notes, tags — and `MachineCreateArgs` widened to match `MachineUpdate` so creating and editing cannot disagree about what a field means. Binding a tailnet node at create time sets `device_id` without setting `registered_at`: naming a box is not the box arriving, and a backup deadline counts from arrival.
 
-**Two things are deliberately outstanding, not dropped.**
+**One thing is deliberately outstanding, not dropped.** The reachability switch is not on the machine form. It wrote a server-scoped silence through `silenced_refs.silence_server`, and there is no machine-scoped equivalent: silences are application-scoped, while `scoped_check_policies.machine_id` is the separate policy path. A machine's unreachability is exactly the fact this card makes single, so the switch belongs there — it needs `silence_machine` first. The two create-time e2e tests that covered it are removed with the reason recorded; the edit-form ones still cover the application grain. The same gap is why a machine's checks table presents without a silence control, which its `serverId: null` says explicitly rather than by omission.
 
-- **The reachability switch is not on the machine form.** It wrote a server-scoped silence through `silenced_refs.silence_server`, and there is no machine-scoped equivalent: silences are application-scoped, while `scoped_check_policies.machine_id` is the separate policy path. A machine's unreachability is exactly the fact this card makes single, so the switch belongs there — it needs `silence_machine` first. The two create-time e2e tests that covered it are removed with the reason recorded; the edit-form ones still cover the application grain.
-- **The form lands on the group page, not the machine's own.** There is no `/machines/:id` route yet; the machine detail page is this step's remaining work.
+### The machine's own page, and the group tree
+
+`machines.get_detail` assembles what the page needs: the record, the group, the identity, the figures resolved across every source, the machine's own health and checks, the applications on it each with their own dot, and its billing labels. A machine carries no product, a box not being a piece of software, so its labels are a stage and a group.
+
+**Two pieces had to exist first.** Machine reachability was nowhere: `Application::reachability` reads a `statuses` row, and a machine has none. `Machine::reachability` reads when the box last reported against the box's own threshold, so a quiet machine and a quiet workload are two findings rather than one. And `consolidated_checks_latest` was application-only; rather than a second copy that would drift the way `enrich_issue`'s did, it became `consolidated_checks_for(target: Scope, ..)` with two thin wrappers. The grains differ in which column identifies the target and which rollup answers for it; the catalog gate, silence pass, reachability fill-in and ordering are one implementation.
+
+**`ChecksTable` and `HealthIndicator` moved out of `ServerDetail` into a component**, 619 lines, so the two pages share one implementation rather than one copying the other.
+
+**The group now presents machines, and the applications under each.** A machine takes the rank of its highest-ranked application, the same derivation its billing stage uses. A machine carrying nothing appears as awaiting check-in rather than being absent — before this it was invisible, so an operator who had just added a box had nothing to look at.
+
+**A bug found on the way.** `suspended_targets` returns machine ids since maintenance took the machine grain, but the fleet listing still tested them against the *application* id. Every machine that predates the split took its application's id, so the wrong read agreed with the right one on all existing data and only parted company for a machine created since. Fixed, with a test that seeds deliberately unequal ids and fails on the old code.
 
 
 ## Mockups

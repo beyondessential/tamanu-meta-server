@@ -2372,6 +2372,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/machines/get_detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get full detail for one machine.
+         * @description Returns the box's record, what it reports about itself, its identity, its
+         *     own health and checks, and the applications running on it. Returns 404 if
+         *     the machine doesn't exist.
+         */
+        post: operations["machines_get_detail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/machines/list": {
         parameters: {
             query?: never;
@@ -6901,6 +6923,57 @@ export interface components {
              *     error.
              */
             applications: components["schemas"]["Application"][];
+        };
+        /**
+         * @description Everything a machine's own page presents.
+         *
+         *     The machine's record, what the box reports about itself, its own health and
+         *     checks, the identity it authenticates with, and the applications running on
+         *     it. An application's version and database engine are not here: those are the
+         *     workload's, and each application carries its own (see [APP]).
+         */
+        MachineDetailData: {
+            /**
+             * @description The applications running on this box, each carrying its own
+             *     reachability and health so the page renders a dot per workload.
+             */
+            applications: components["schemas"]["ServerInfo"][];
+            /**
+             * @description The machine's effective `billing.*` labels — the ones Canopy hands its
+             *     device. A machine carries no product, a box not being a piece of
+             *     software.
+             */
+            billing_labels: components["schemas"]["BillingTag"][];
+            /** @description The machine's own checks across every source, graded and classified. */
+            checks: components["schemas"]["ConsolidatedChecks"];
+            device_info?: null | components["schemas"]["DeviceInfo"];
+            /**
+             * @description What the box reports about itself, resolved across every source
+             *     reporting on it: platform, hardware, addresses, uptime.
+             */
+            figures: Record<string, never>;
+            group?: null | components["schemas"]["ServerGroup"];
+            /**
+             * @description The machine's own health, from the checks filed against it. What the
+             *     applications on it make of their own checks is each application's.
+             */
+            health: components["schemas"]["HealthState"];
+            /**
+             * Format: date-time
+             * @description When the box last reported anything, across every source.
+             */
+            last_reported_at?: string | null;
+            /** @description The machine's own record. */
+            machine: components["schemas"]["Machine"];
+            /**
+             * @description Whether a maintenance window suspends this machine, its own or its
+             *     group's.
+             */
+            maintained: boolean;
+            /** @description Whether the suspension is only the settle period. */
+            maintenance_settling: boolean;
+            /** @description Whether the box is currently reporting, on its own threshold. */
+            up: components["schemas"]["ShortStatus"];
         };
         /** @description Identifies one machine. */
         MachineIdArgs: {
@@ -13260,6 +13333,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MachineDetail"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    machines_get_detail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineDetailData"];
                 };
             };
             404: {

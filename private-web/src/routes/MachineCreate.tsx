@@ -67,10 +67,8 @@ export default function MachineCreate() {
 			tags,
 		};
 		try {
-			await action.call(data);
-			// Back to the group: a machine's own page is not built yet, and the
-			// group is where the box now appears.
-			navigate(`/groups/${groupId}`);
+			const machineId = await action.call(data);
+			navigate(`/machines/${machineId}`);
 		} catch {
 			/* surfaced via the actions' errors */
 		}

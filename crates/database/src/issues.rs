@@ -1796,20 +1796,70 @@ type ConsolidatedRow = (
 /// whether it's silenced — most urgent first. This is the live side of the
 /// consolidated checks view; the point-in-time side reconstructs the same
 /// shape from status history.
+/// One application's live consolidated checks.
 pub async fn consolidated_checks_latest(
 	conn: &mut AsyncPgConnection,
 	application_id: Uuid,
+	group_id: Option<Uuid>,
+) -> Result<commons_types::status::ConsolidatedChecks> {
+	consolidated_checks_for(conn, Scope::Application(application_id), group_id).await
+}
+
+/// One machine's live consolidated checks — the box's own, not those of the
+/// applications on it.
+///
+/// A machine hosting two workloads has one set of these, which is the whole
+/// point of the grain: a full disk is a fact about the box, and reading it
+/// twice would say it twice.
+// spec: CHK#targets
+pub async fn consolidated_checks_latest_for_machine(
+	conn: &mut AsyncPgConnection,
+	machine_id: Uuid,
+	group_id: Option<Uuid>,
+) -> Result<commons_types::status::ConsolidatedChecks> {
+	consolidated_checks_for(conn, Scope::Machine(machine_id), group_id).await
+}
+
+/// The live consolidated checks filed against one target, at whichever grain
+/// it is.
+///
+/// The two grains differ only in which column identifies the target and which
+/// rollup answers for it; everything after that — the catalog gate, the
+/// silence pass, the reachability fill-in, the ordering — is the same work.
+/// Keeping it one function is what stops the pair drifting apart.
+async fn consolidated_checks_for(
+	conn: &mut AsyncPgConnection,
+	target: Scope,
 	group_id: Option<Uuid>,
 ) -> Result<commons_types::status::ConsolidatedChecks> {
 	use crate::schema::{issues, scoped_check_policies};
 	use commons_types::status::{ConsolidatedCheck, ConsolidatedChecks};
 	use std::collections::HashSet;
 
-	let health_state = health_from_check_state(conn, &[(application_id, group_id)])
-		.await?
-		.get(&application_id)
-		.copied()
-		.unwrap_or_default();
+	let (target_application, target_machine, _) = target.to_columns();
+	let target_id = match target {
+		Scope::Application(id) | Scope::Machine(id) => id,
+		// A group or canopy-wide rollup is a different question, answered by
+		// its own reader; nothing calls this with one.
+		Scope::Group(_) | Scope::Global => {
+			return Err(AppError::BadRequest(
+				"consolidated checks are read for an application or a machine".into(),
+			));
+		}
+	};
+
+	let health_state = match target {
+		Scope::Machine(id) => machine_health_from_check_state(conn, &[(id, group_id)])
+			.await?
+			.get(&id)
+			.copied()
+			.unwrap_or_default(),
+		_ => health_from_check_state(conn, &[(target_id, group_id)])
+			.await?
+			.get(&target_id)
+			.copied()
+			.unwrap_or_default(),
+	};
 
 	let rows: Vec<ConsolidatedRow> = issues::table
 		.select((
@@ -1819,7 +1869,8 @@ pub async fn consolidated_checks_latest(
 			issues::effective_result,
 			issues::detail,
 		))
-		.filter(issues::application_id.eq(application_id))
+		.filter(issues::application_id.is_not_distinct_from(target_application))
+		.filter(issues::machine_id.is_not_distinct_from(target_machine))
 		.filter(issues::check_name.is_not_null())
 		.filter(issues::effective_result.is_not_null())
 		.load(conn)
@@ -1843,13 +1894,14 @@ pub async fn consolidated_checks_latest(
 			.filter(scoped_check_policies::ceiling.eq("skipped"))
 			.filter(
 				scoped_check_policies::application_id
-					.eq(application_id)
+					.is_not_distinct_from(target_application)
+					.and(scoped_check_policies::machine_id.is_not_distinct_from(target_machine))
 					.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
 			)
 			.load(conn)
 			.await?;
-	// This is one server, so a matching (source, check) at either scope means
-	// silenced here.
+	// This is one target, so a matching (source, check) at either its own scope
+	// or its group's means silenced here.
 	let silenced: HashSet<(String, String)> = silence_rows
 		.into_iter()
 		.map(|(_, _, source, check)| (source, check))
@@ -1885,7 +1937,7 @@ pub async fn consolidated_checks_latest(
 			})
 		})
 		.collect();
-	// Reachability presents for every server, whether or not a reporter has
+	// Reachability presents for every target, whether or not a reporter has
 	// ever gone quiet. The sweep only files this check while it's degraded
 	// (or when it has a degradation to close), so a server that has never
 	// had a problem carries no state row for it — fill that in as passing,

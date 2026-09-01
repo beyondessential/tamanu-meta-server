@@ -1,0 +1,158 @@
+import { expect, test } from "./test-fixtures";
+import {
+	resetSeededTables,
+	seedMachine,
+	seedMachineReport,
+	seedServer,
+	seedServerGroup,
+} from "./seed";
+
+/// The machine's own page: the box, what it reports about itself, and the
+/// workloads on it.
+///
+/// spec: FLT
+test.describe("machine detail", () => {
+	test.beforeEach(async ({ sql }) => {
+		await resetSeededTables(sql);
+	});
+
+	test("presents what the box reports about itself", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "box-group" });
+		const machine = await seedMachine(sql, {
+			name: "big-box",
+			groupId: group.id,
+		});
+		await seedMachineReport(sql, {
+			machineId: machine.id,
+			extra: {
+				hostname: "big-box.internal",
+				platform: "Debian 12",
+				cpuCores: 8,
+				totalMemoryBytes: 34359738368,
+				bestoolVersion: "2.10.5",
+			},
+		});
+
+		await page.goto(`/machines/${machine.id}`);
+
+		await expect(
+			page.getByRole("heading", { level: 1, name: /big-box/ }),
+		).toBeVisible();
+		await expect(page.getByText("Debian 12")).toBeVisible();
+		await expect(page.getByText("8", { exact: true })).toBeVisible();
+		await expect(page.getByText("32.0 GiB")).toBeVisible();
+		await expect(page.getByText("2.10.5")).toBeVisible();
+	});
+
+	test("a box carrying two workloads lists both, and each links to its own page", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "shared-box-group" });
+		const machine = await seedMachine(sql, {
+			name: "shared-box",
+			groupId: group.id,
+		});
+		// Two workloads on the one box: the case the machine grain exists for.
+		await sql.query(
+			`INSERT INTO applications (id, name, host, type, rank, group_id, machine_id)
+			 VALUES (gen_random_uuid(), 'central-on-shared', 'https://c.e2e.invalid',
+			         'tamanu-central', 'production', $1, $2),
+			        (gen_random_uuid(), 'facility-on-shared', 'https://f.e2e.invalid',
+			         'tamanu-facility', 'production', $1, $2)`,
+			[group.id, machine.id],
+		);
+
+		await page.goto(`/machines/${machine.id}`);
+
+		await expect(page.getByText("Applications (2)")).toBeVisible();
+		await expect(
+			page.getByRole("link", { name: "central-on-shared" }),
+		).toBeVisible();
+		await expect(
+			page.getByRole("link", { name: "facility-on-shared" }),
+		).toBeVisible();
+	});
+
+	test("a box with nothing on it reads as awaiting check-in", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "empty-box-group" });
+		const machine = await seedMachine(sql, {
+			name: "fresh-box",
+			groupId: group.id,
+		});
+
+		await page.goto(`/machines/${machine.id}`);
+
+		await expect(page.getByText(/hasn't checked in yet/i)).toBeVisible();
+		await expect(page.getByText("Applications (0)")).toBeVisible();
+		await expect(page.getByText(/nothing reported on this box yet/i)).toBeVisible();
+	});
+
+	test("an application links to the box it runs on, and back", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "round-trip" });
+		const server = await seedServer(sql, {
+			name: "round-trip-app",
+			groupId: group.id,
+		});
+
+		await page.goto(`/servers/${server.id}`);
+		await page.getByRole("link", { name: "This box" }).click();
+		await expect(page).toHaveURL(new RegExp(`/machines/${server.machineId}$`));
+
+		await page.getByRole("link", { name: "round-trip-app" }).click();
+		await expect(page).toHaveURL(new RegExp(`/servers/${server.id}$`));
+	});
+
+	test("the group lists its boxes, including one with nothing on it", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "tree-group" });
+		const server = await seedServer(sql, {
+			name: "tree-app",
+			groupId: group.id,
+		});
+		const empty = await seedMachine(sql, {
+			name: "tree-empty-box",
+			groupId: group.id,
+		});
+
+		await page.goto(`/groups/${group.id}`);
+
+		// Both boxes are here — the one carrying a workload and the one that has
+		// not reported yet, which was invisible when the group listed workloads.
+		await expect(page.getByText("Machines (2)")).toBeVisible();
+		await expect(
+			page.getByRole("link", { name: "tree-empty-box" }),
+		).toBeVisible();
+		await expect(page.getByText("Awaiting check-in.")).toBeVisible();
+		// The workload sits under its box rather than beside it. Matched by its
+		// own href: `seedServer` names the box after the workload, so the two
+		// links share a label.
+		await expect(
+			page.locator(`a[href="/servers/${server.id}"]`),
+		).toBeVisible();
+
+		await page.getByRole("link", { name: "tree-empty-box" }).click();
+		await expect(page).toHaveURL(new RegExp(`/machines/${empty.id}$`));
+	});
+
+	test("creating a machine lands on its own page", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "landing-group" });
+
+		await page.goto(`/groups/${group.id}/machines/new`);
+		await page.getByLabel(/^Name(\s*\*)?$/i).fill("landed-box");
+		await page.getByRole("button", { name: "Create machine" }).click();
+
+		await expect(page).toHaveURL(/\/machines\/[0-9a-f-]{36}$/);
+		await expect(
+			page.getByRole("heading", { level: 1, name: /landed-box/ }),
+		).toBeVisible();
+	});
+});

@@ -335,7 +335,12 @@ pub(super) async fn decorate_with_status(
 	let server_groups: Vec<(Uuid, Option<Uuid>)> =
 		infos.iter().map(|i| (i.id, i.group_id)).collect();
 	let health = database::issues::health_from_check_state(conn, &server_groups).await?;
-	let (maintained_servers, maintained_groups) =
+	// A window is declared over a machine, so what suspends an application is
+	// its machine's window, not one naming the application's own id. The two
+	// coincide for anything that predates the split, which is why reading the
+	// wrong one still looked right.
+	// spec: MNT#presentation
+	let (maintained_machines, maintained_groups) =
 		database::maintenance_windows::MaintenanceWindow::suspended_targets(conn).await?;
 	for info in infos.iter_mut() {
 		let st = by_server.get(&info.id).copied();
@@ -345,7 +350,7 @@ pub(super) async fn decorate_with_status(
 		info.up = Some(st.map(|s| s.short_status(down_after)).unwrap_or_default());
 		info.health = Some(health.get(&info.id).copied().unwrap_or_default());
 		info.maintained = Some(
-			maintained_servers.contains(&info.id)
+			maintained_machines.contains(&info.machine_id)
 				|| info
 					.group_id
 					.is_some_and(|gid| maintained_groups.contains(&gid)),

@@ -12,12 +12,23 @@ use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::tailscale_auth::TailscaleAdmin;
-use commons_types::{Uuid, device::DeviceRole, geo::GeoPoint, server::TagMap};
+use commons_servers::{backup_jobs::BillingLabels, tailscale_auth::TailscaleAdmin};
+use commons_types::{
+	Uuid,
+	device::DeviceRole,
+	geo::GeoPoint,
+	server::TagMap,
+	status::{HealthState, ShortStatus},
+};
 use database::applications::Application;
 use database::devices::{Device, TailscaleIdentity};
+use database::issues::Scope;
 use database::machines::{Machine, MachineUpdate, NewMachine};
+use database::maintenance_windows::MaintenanceWindow;
 use database::pg_duration::PgDuration;
+use database::reported_detail::MachineReportedDetail;
+use database::server_groups::ServerGroup;
+use database::statuses::MergedDetail;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -27,6 +38,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(list))
 		.routes(routes!(get))
+		.routes(routes!(get_detail))
 		.routes(routes!(create))
 		.routes(routes!(update))
 		.routes(routes!(archive))
@@ -100,6 +112,182 @@ pub async fn get(
 	Ok(Json(MachineDetail {
 		machine,
 		applications,
+	}))
+}
+
+/// A machine's effective billing labels.
+///
+/// A box is not a piece of software, so it carries no product. Its stage is the
+/// highest rank among the applications on it — a box shared by a production and
+/// a test workload bills as production — and its deployment comes from its
+/// group. An ungrouped machine carries no attribution at all, there being no
+/// deployment to attribute it to.
+// spec: APP#billing-attribution
+async fn machine_billing_labels(
+	machine: &Machine,
+	group: Option<&ServerGroup>,
+	applications: &[super::applications::ServerInfo],
+) -> Vec<super::server_groups::BillingTag> {
+	let Some(group) = group else {
+		return Vec::new();
+	};
+	let highest_rank = applications
+		.iter()
+		.filter_map(|a| a.rank)
+		.min_by_key(|r| database::server_groups::rank_priority(Some(*r)));
+	BillingLabels::from_group(&machine.tags, &group.name, None, highest_rank)
+		.into_tags()
+		.into_iter()
+		.map(|(key, value)| super::server_groups::BillingTag { key, value })
+		.collect()
+}
+
+/// Everything a machine's own page presents.
+///
+/// The machine's record, what the box reports about itself, its own health and
+/// checks, the identity it authenticates with, and the applications running on
+/// it. An application's version and database engine are not here: those are the
+/// workload's, and each application carries its own (see [APP]).
+#[derive(Serialize, ToSchema)]
+pub struct MachineDetailData {
+	/// The machine's own record.
+	pub machine: Machine,
+	/// The group this machine belongs to, with its notes and tags, so the page
+	/// renders its group section without a second fetch.
+	pub group: Option<ServerGroup>,
+	/// Full detail on the identity bound to this machine, if it has enrolled.
+	pub device_info: Option<super::devices::DeviceInfo>,
+	/// What the box reports about itself, resolved across every source
+	/// reporting on it: platform, hardware, addresses, uptime.
+	// spec: FIG#sourcing
+	#[schema(value_type = Object)]
+	pub figures: serde_json::Value,
+	/// When the box last reported anything, across every source.
+	pub last_reported_at: Option<jiff::Timestamp>,
+	/// Whether the box is currently reporting, on its own threshold.
+	pub up: ShortStatus,
+	/// The machine's own health, from the checks filed against it. What the
+	/// applications on it make of their own checks is each application's.
+	pub health: HealthState,
+	/// Whether a maintenance window suspends this machine, its own or its
+	/// group's.
+	// spec: MNT#presentation
+	pub maintained: bool,
+	/// Whether the suspension is only the settle period.
+	pub maintenance_settling: bool,
+	/// The machine's own checks across every source, graded and classified.
+	pub checks: commons_types::status::ConsolidatedChecks,
+	/// The applications running on this box, each carrying its own
+	/// reachability and health so the page renders a dot per workload.
+	pub applications: Vec<super::applications::ServerInfo>,
+	/// The machine's effective `billing.*` labels — the ones Canopy hands its
+	/// device. A machine carries no product, a box not being a piece of
+	/// software.
+	// spec: APP#billing-attribution
+	pub billing_labels: Vec<super::server_groups::BillingTag>,
+}
+
+/// Get full detail for one machine.
+///
+/// Returns the box's record, what it reports about itself, its identity, its
+/// own health and checks, and the applications running on it. Returns 404 if
+/// the machine doesn't exist.
+#[utoipa::path(
+	post,
+	path = "/get_detail",
+	operation_id = "machines_get_detail",
+	tag = "machines",
+	security(("tailscale-user" = [])),
+	request_body = MachineIdArgs,
+	responses(
+		(status = 200, body = MachineDetailData),
+		(status = 404, body = ProblemDetailsSchema),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn get_detail(
+	State(state): State<AppState>,
+	Json(args): Json<MachineIdArgs>,
+) -> Result<Json<MachineDetailData>> {
+	let mut conn = state.db.get().await?;
+	let machine = Machine::get_by_id(&mut conn, args.machine_id).await?;
+
+	let group = match machine.group_id {
+		Some(gid) => Some(ServerGroup::get_by_id(&mut conn, gid).await?),
+		None => None,
+	};
+
+	// Every source's current report on this box, folded into one view. The
+	// same resolution the application grain uses, so a field one source
+	// omitted is still here.
+	// spec: FIG#sourcing
+	let reports = MachineReportedDetail::for_machine(&mut conn, machine.id).await?;
+	let last_reported_at = reports.iter().map(|r| r.reported_at).max();
+	let figures =
+		MergedDetail::from_reports(reports.iter().map(|r| (r.reported_at, &r.extra))).into_json();
+
+	// One consolidated read drives both the headline health and the checks
+	// table, so they cannot disagree.
+	let checks = database::issues::consolidated_checks_latest_for_machine(
+		&mut conn,
+		machine.id,
+		machine.group_id,
+	)
+	.await?;
+	let health = checks.health_state;
+	let up = machine.reachability(last_reported_at);
+
+	let device_info = match machine.device_id {
+		Some(did) => {
+			let with_info = Device::get_with_info(&mut conn, did).await?;
+			Some(super::devices::DeviceInfo::from_db(with_info, &state).await)
+		}
+		None => None,
+	};
+
+	// The box's own window, or its group's — the same pair an application on
+	// it is judged by, since taking the box down stops the workload too.
+	let maintained =
+		MaintenanceWindow::suspends(&mut conn, Some(machine.id), machine.group_id).await?;
+	let maintenance_settling = maintained && {
+		let mut open = MaintenanceWindow::open_for(&mut conn, Scope::Machine(machine.id))
+			.await?
+			.is_some();
+		if !open && let Some(gid) = machine.group_id {
+			open = MaintenanceWindow::open_for(&mut conn, Scope::Group(gid))
+				.await?
+				.is_some();
+		}
+		!open
+	};
+
+	let mut applications: Vec<super::applications::ServerInfo> = machine
+		.applications(&mut conn)
+		.await?
+		.into_iter()
+		.map(super::applications::server_to_info)
+		.collect();
+	for info in applications.iter_mut() {
+		info.group_name = group.as_ref().map(|g| g.name.clone());
+	}
+	super::applications::decorate_with_status(&mut conn, &mut applications).await?;
+	super::applications::fill_display_hosts(&mut conn, &mut applications).await?;
+
+	let billing_labels = machine_billing_labels(&machine, group.as_ref(), &applications).await;
+
+	Ok(Json(MachineDetailData {
+		machine,
+		group,
+		device_info,
+		figures,
+		last_reported_at,
+		up,
+		health,
+		maintained,
+		maintenance_settling,
+		checks,
+		applications,
+		billing_labels,
 	}))
 }
 

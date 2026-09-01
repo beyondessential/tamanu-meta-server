@@ -337,8 +337,11 @@ impl MaintenanceWindow {
 		Ok(found.is_some())
 	}
 
-	/// The servers and groups currently suspended, for callers judging many
+	/// The machines and groups currently suspended, for callers judging many
 	/// targets in one pass.
+	///
+	/// A window is declared over a machine, so an application is suspended by
+	/// its machine's id appearing here rather than its own.
 	pub async fn suspended_targets(
 		db: &mut AsyncPgConnection,
 	) -> Result<(HashSet<Uuid>, HashSet<Uuid>)> {
@@ -355,17 +358,17 @@ impl MaintenanceWindow {
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
-		let mut servers = HashSet::new();
+		let mut machines = HashSet::new();
 		let mut groups = HashSet::new();
-		for (server, group) in rows {
-			if let Some(id) = server {
-				servers.insert(id);
+		for (machine, group) in rows {
+			if let Some(id) = machine {
+				machines.insert(id);
 			}
 			if let Some(id) = group {
 				groups.insert(id);
 			}
 		}
-		Ok((servers, groups))
+		Ok((machines, groups))
 	}
 
 	/// End every window whose expected end has passed, stamping the end at
