@@ -534,7 +534,7 @@ async fn backup_problems_finds_a_failure_behind_many_later_successes() {
 				 repo_password_ref, status, mode, placement) \
 				VALUES ('{group}', 'b', '', 'arn', 'maint', 'pw', 'ready', 'from_birth', 'external'); \
 			 INSERT INTO backup_runs \
-				(id, device_id, group_id, server_id, type, purpose, outcome, error, reported_at) \
+				(id, device_id, group_id, machine_id, type, purpose, outcome, error, reported_at) \
 			  VALUES ('{}', '{device}', '{group}', '{server}', 'tamanu-postgres', 'backup', \
 				'failure', 'disk full', NOW() - interval '8 hours');",
 			uuid::Uuid::new_v4()
@@ -544,7 +544,7 @@ async fn backup_problems_finds_a_failure_behind_many_later_successes() {
 		for i in 0..30 {
 			sql.push_str(&format!(
 				"INSERT INTO backup_runs \
-					(id, device_id, group_id, server_id, type, purpose, outcome, reported_at) \
+					(id, device_id, group_id, machine_id, type, purpose, outcome, reported_at) \
 				  VALUES ('{}', '{device}', '{group}', '{server}', 'tamanu-postgres', 'backup', \
 					'success', NOW() - interval '{i} minutes');",
 				uuid::Uuid::new_v4()
@@ -595,7 +595,7 @@ async fn seed_backup_runs(conn: &mut impl SimpleAsyncConnection) {
 			('{RSERVER}', 'https://backup-target', 'Backup Target', 'tamanu-central', '{RGROUP}', '{RSERVER}'); \
 		 INSERT INTO devices (id, role) VALUES ('{RDEVICE}', 'machine'); \
 		 INSERT INTO backup_runs \
-			(id, device_id, group_id, server_id, type, purpose, outcome, snapshot_id, bytes_uploaded, s3_sent_raw_bytes, snapshot_logical_bytes, reported_at) \
+			(id, device_id, group_id, machine_id, type, purpose, outcome, snapshot_id, bytes_uploaded, s3_sent_raw_bytes, snapshot_logical_bytes, reported_at) \
 			VALUES \
 			('{RUN_OK}', '{RDEVICE}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'backup', 'success', 'snap-1', 1000, 1200, 900, NOW() - interval '1 hour'), \
 			('{RUN_FAIL}', '{RDEVICE}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'backup', 'failure', NULL, NULL, NULL, NULL, NOW() - interval '10 minutes'); \
@@ -644,7 +644,7 @@ async fn list_backup_runs_filters() {
 			.find(|r| r["id"] == RUN_OK)
 			.expect("seeded run present");
 		assert_eq!(run["group_name"], "Backup Group");
-		assert_eq!(run["server_name"], "Backup Target");
+		assert_eq!(run["machine_name"], "Backup Target");
 		assert_eq!(run["outcome"], "success");
 		assert_eq!(run["s3_sent_raw_bytes"], 1200);
 		assert_eq!(run["snapshot_logical_bytes"], 900);

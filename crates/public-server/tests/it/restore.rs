@@ -63,7 +63,7 @@ async fn make_success_run(
 	snapshot_id: &str,
 ) {
 	sql_query(
-		"INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, snapshot_id) \
+		"INSERT INTO backup_runs (id, device_id, group_id, machine_id, type, purpose, outcome, snapshot_id) \
 		 VALUES ($1, $2, $3, $4, 'tamanu-postgres', 'backup', 'success', $5)",
 	)
 	.bind::<sql_types::Uuid, _>(Uuid::new_v4())

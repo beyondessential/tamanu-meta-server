@@ -4769,7 +4769,7 @@ export interface components {
              *     enabled state), so the "back up now" panel can offer the right types per
              *     server and grey out applications that have declared none.
              */
-            capabilities: components["schemas"]["ServerBackupCapabilityView"][];
+            capabilities: components["schemas"]["MachineBackupCapabilityView"][];
             /** @description One-off backup/restore requests awaiting pickup. */
             pending_requests: components["schemas"]["PendingRequestRow"][];
             /** @description The most recent maintenance runs for the group's backup repository. */
@@ -6964,6 +6964,68 @@ export interface components {
              */
             tags?: components["schemas"]["TagMap"];
         };
+        /** @description Identifies a server. */
+        MachineArgs: {
+            /**
+             * Format: uuid
+             * @description The box to operate on. Backups are a machine's, so this names the box
+             *     rather than a workload on it.
+             */
+            machine_id: string;
+        };
+        /**
+         * @description One backup type a server has advertised support for, whether the operator
+         *     has enabled it, and its most recent activity. Enabling a capability is
+         *     what makes the server eligible for issued backup credentials and
+         *     scheduled runs of that type.
+         */
+        MachineBackupCapabilityView: {
+            /**
+             * @description Whether the operator has enabled scheduled backups of this type for
+             *     this server.
+             */
+            enabled: boolean;
+            /**
+             * Format: date-time
+             * @description When that snapshot was reported.
+             */
+            latest_snapshot_at?: string | null;
+            /**
+             * Format: int64
+             * @description Bytes uploaded by that run, if reported.
+             */
+            latest_snapshot_bytes?: number | null;
+            /**
+             * @description Identifier of this server and type's most recent successful backup,
+             *     if any.
+             */
+            latest_snapshot_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The server this capability belongs to.
+             */
+            machine_id: string;
+            /**
+             * Format: date-time
+             * @description When this server's next backup of this type is expected: the server's own
+             *     last success plus the effective interval, or "now" (overdue) if it's
+             *     scheduled but has never succeeded. `None` for disabled or manual-only
+             *     (no-interval) types. Per-server, so a lagging member isn't masked by a
+             *     freshly-backed-up sibling.
+             */
+            next_backup_at?: string | null;
+            /**
+             * Format: date-time
+             * @description `Some(issued_at)` when a backup of this type appears to be in flight:
+             *     backup credentials were issued and are still valid, and no run has
+             *     been reported since they were issued. `None` otherwise. Lets the UI
+             *     show a "backing up…" state.
+             */
+            processing_since?: string | null;
+            progress?: null | components["schemas"]["LiveProgress"];
+            /** @description Backup type this capability describes. */
+            type: string;
+        };
         /**
          * @description What an operator supplies when adding a machine.
          *
@@ -7668,6 +7730,11 @@ export interface components {
         /** @description A pending one-off backup or restore request. */
         PendingRequestRow: {
             /**
+             * Format: uuid
+             * @description The box the request is for.
+             */
+            machine_id: string;
+            /**
              * @description Why this run was requested: `backup` to write new data, or `restore`
              *     to read existing data.
              */
@@ -7682,11 +7749,6 @@ export interface components {
              *     known.
              */
             requested_by?: string | null;
-            /**
-             * Format: uuid
-             * @description The server the request is for.
-             */
-            server_id: string;
             /** @description Backup type requested. */
             type: string;
         };
@@ -7923,6 +7985,11 @@ export interface components {
              *     `issuance-<id>` for an inferred attempt.
              */
             key: string;
+            /**
+             * Format: uuid
+             * @description The server this run was for, if known.
+             */
+            machine_id?: string | null;
             outcome?: null | components["schemas"]["RunOutcome"];
             progress?: null | components["schemas"]["LiveProgress"];
             /** @description Whether the run was a backup or a restore. */
@@ -7960,11 +8027,6 @@ export interface components {
              * @description Raw bytes sent to S3 during the run, if tallied (reported runs only).
              */
             s3_sent_raw_bytes?: number | null;
-            /**
-             * Format: uuid
-             * @description The server this run was for, if known.
-             */
-            server_id?: string | null;
             /**
              * @description Snapshot the run produced (backup) or used (restore), if any (reported
              *     runs only).
@@ -8175,15 +8237,15 @@ export interface components {
         /** @description Identifies a one-off backup or restore request for a server. */
         RequestArgs: {
             /**
+             * Format: uuid
+             * @description The box to back up or restore.
+             */
+            machine_id: string;
+            /**
              * @description Why this run is requested: `backup` to write new data, or `restore` to
              *     read existing data.
              */
             purpose: string;
-            /**
-             * Format: uuid
-             * @description The server to back up or restore.
-             */
-            server_id: string;
             /** @description Backup type to run. */
             type: string;
         };
@@ -8595,7 +8657,7 @@ export interface components {
              * Format: uuid
              * @description The server the window applies to.
              */
-            server_id: string;
+            machine_id: string;
         };
         /** @description A single server's restore-window state, for the server detail page. */
         RestoreWindowView: {
@@ -8852,67 +8914,6 @@ export interface components {
              * @description The id of the self-alert to resolve.
              */
             id: string;
-        };
-        /** @description Identifies a server. */
-        ServerArgs: {
-            /**
-             * Format: uuid
-             * @description The server to operate on.
-             */
-            server_id: string;
-        };
-        /**
-         * @description One backup type a server has advertised support for, whether the operator
-         *     has enabled it, and its most recent activity. Enabling a capability is
-         *     what makes the server eligible for issued backup credentials and
-         *     scheduled runs of that type.
-         */
-        ServerBackupCapabilityView: {
-            /**
-             * @description Whether the operator has enabled scheduled backups of this type for
-             *     this server.
-             */
-            enabled: boolean;
-            /**
-             * Format: date-time
-             * @description When that snapshot was reported.
-             */
-            latest_snapshot_at?: string | null;
-            /**
-             * Format: int64
-             * @description Bytes uploaded by that run, if reported.
-             */
-            latest_snapshot_bytes?: number | null;
-            /**
-             * @description Identifier of this server and type's most recent successful backup,
-             *     if any.
-             */
-            latest_snapshot_id?: string | null;
-            /**
-             * Format: date-time
-             * @description When this server's next backup of this type is expected: the server's own
-             *     last success plus the effective interval, or "now" (overdue) if it's
-             *     scheduled but has never succeeded. `None` for disabled or manual-only
-             *     (no-interval) types. Per-server, so a lagging member isn't masked by a
-             *     freshly-backed-up sibling.
-             */
-            next_backup_at?: string | null;
-            /**
-             * Format: date-time
-             * @description `Some(issued_at)` when a backup of this type appears to be in flight:
-             *     backup credentials were issued and are still valid, and no run has
-             *     been reported since they were issued. `None` otherwise. Lets the UI
-             *     show a "backing up…" state.
-             */
-            processing_since?: string | null;
-            progress?: null | components["schemas"]["LiveProgress"];
-            /**
-             * Format: uuid
-             * @description The server this capability belongs to.
-             */
-            server_id: string;
-            /** @description Backup type this capability describes. */
-            type: string;
         };
         /**
          * @description Partial update to a server's fields. Only fields present in the request
@@ -9425,7 +9426,7 @@ export interface components {
              * Format: uuid
              * @description The server to update.
              */
-            server_id: string;
+            machine_id: string;
             /** @description Backup type to enable or disable. */
             type: string;
         };
@@ -10426,7 +10427,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ServerArgs"];
+                "application/json": components["schemas"]["MachineArgs"];
             };
         };
         responses: {
@@ -10509,7 +10510,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ServerArgs"];
+                "application/json": components["schemas"]["MachineArgs"];
             };
         };
         responses: {
@@ -10518,7 +10519,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ServerBackupCapabilityView"][];
+                    "application/json": components["schemas"]["MachineBackupCapabilityView"][];
                 };
             };
         };
@@ -10725,7 +10726,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ServerArgs"];
+                "application/json": components["schemas"]["MachineArgs"];
             };
         };
         responses: {
@@ -11007,7 +11008,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ServerArgs"];
+                "application/json": components["schemas"]["MachineArgs"];
             };
         };
         responses: {

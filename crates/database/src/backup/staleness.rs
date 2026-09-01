@@ -40,11 +40,16 @@ use crate::{
 /// its backups run. ~8 days gives a one-day grace over the weekly cadence.
 pub const MAINTENANCE_STALE_AFTER: SignedDuration = SignedDuration::from_hours(8 * 24);
 
-/// One `(server, type)` to classify. Assembled by [`scan_rows`] from the
-/// joined config / schedule / capability / runs / snapshots / associations.
+/// One `(machine, type)` to classify. Assembled by [`scan_rows`] from the
+/// joined config / schedule / capability / runs / snapshots.
+///
+/// A box carrying two workloads is one row per type, not two: what a run
+/// captures is the box's data, and scanning per application would raise the
+/// same late backup twice.
+// spec: BAK
 #[derive(Debug, Clone)]
 pub struct ScanRow {
-	pub server_id: Uuid,
+	pub machine_id: Uuid,
 	pub group_id: Uuid,
 	/// Latest-associated device, recorded on the `NewEvent` actor field.
 	pub device_id: Option<Uuid>,
@@ -52,10 +57,10 @@ pub struct ScanRow {
 	pub is_monitored: bool,
 	pub expected_interval: SignedDuration,
 	pub config_created_at: Timestamp,
-	/// When this application's machine was enrolled. `None` for a machine that
-	/// has never enrolled.
+	/// When this machine was enrolled. `None` for one that never has.
 	pub machine_registered_at: Option<Timestamp>,
-	/// Latest `purpose='backup' AND outcome='success'` for this `(server, type)`.
+	/// Latest `purpose='backup' AND outcome='success'` for this
+	/// `(machine, type)`.
 	pub last_success_at: Option<Timestamp>,
 }
 
@@ -125,9 +130,9 @@ impl ScanRow {
 	}
 }
 
-/// Raw scan-set row: `(server_id, group_id, is_monitored, device_id, type,
+/// Raw scan-set row: `(machine_id, group_id, is_monitored, device_id, type,
 /// has_schedule_override, override_interval, default_interval,
-/// config_created_at)`.
+/// config_created_at, registered_at)`.
 type ScanBaseRow = (
 	Uuid,
 	Uuid,
@@ -144,7 +149,7 @@ type ScanBaseRow = (
 /// A scan-set row with its effective interval resolved, before the success and
 /// anchor lookups are attached.
 struct ScanRowBase {
-	server_id: Uuid,
+	machine_id: Uuid,
 	group_id: Uuid,
 	is_monitored: bool,
 	device_id: Option<Uuid>,
@@ -154,40 +159,42 @@ struct ScanRowBase {
 	machine_registered_at: Option<Timestamp>,
 }
 
-/// Build the scan set: every enabled `(server, type)` capability in a
+/// Build the scan set: every enabled `(machine, type)` capability in a
 /// `status='ready'` group whose effective schedule has a non-NULL
-/// `expected_interval`. Per `(server, type)`, attach the latest backup success
+/// `expected_interval`. Per `(machine, type)`, attach the latest backup success
 /// and the machine's enrolment moment as the anchor.
+///
+/// Rooted at the machine rather than at the applications on it: a capability is
+/// a box's, and a box shared by two workloads owes one backup rather than two.
+// spec: BAK
 pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 	use crate::schema::{
-		applications, backup_type_defaults as defaults, machines,
-		server_backup_capabilities as cap, server_group_backup_config as cfg,
-		server_group_backup_schedule as sched,
+		backup_type_defaults as defaults, machine_backup_capabilities as cap, machines,
+		server_group_backup_config as cfg, server_group_backup_schedule as sched,
 	};
 
-	// Join: applications -> their group's ready config -> enabled capability, with
+	// Join: machines -> their group's ready config -> enabled capability, with
 	// both interval sources left-joined. The effective interval is resolved in
 	// Rust below rather than in SQL, because "override row present but NULL"
 	// (manual-only) and "no override row" (inherit the default) have to stay
 	// distinguishable — a COALESCE would flatten them together.
-	let base: Vec<ScanBaseRow> = applications::table
-		.inner_join(cfg::table.on(cfg::group_id.nullable().eq(applications::group_id)))
-		.inner_join(cap::table.on(cap::server_id.eq(applications::id)))
-		.inner_join(machines::table.on(machines::id.eq(applications::machine_id)))
+	let base: Vec<ScanBaseRow> = machines::table
+		.inner_join(cfg::table.on(cfg::group_id.nullable().eq(machines::group_id)))
+		.inner_join(cap::table.on(cap::machine_id.eq(machines::id)))
 		.left_join(
 			sched::table.on(sched::group_id
 				.eq(cfg::group_id)
 				.and(sched::type_.eq(cap::type_))),
 		)
 		.left_join(defaults::table.on(defaults::type_.eq(cap::type_)))
-		.filter(applications::deleted_at.is_null())
+		.filter(machines::deleted_at.is_null())
 		.filter(cfg::status.eq("ready"))
 		.filter(cap::enabled.eq(true))
 		.select((
-			applications::id,
+			machines::id,
 			cfg::group_id,
-			applications::is_monitored,
-			applications::device_id,
+			machines::is_monitored,
+			machines::device_id,
 			cap::type_,
 			sched::group_id.nullable().is_not_null(),
 			sched::expected_interval.nullable(),
@@ -205,7 +212,7 @@ pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 		.into_iter()
 		.filter_map(
 			|(
-				server_id,
+				machine_id,
 				group_id,
 				is_monitored,
 				device_id,
@@ -222,7 +229,7 @@ pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 					default_interval
 				}?;
 				Some(ScanRowBase {
-					server_id,
+					machine_id,
 					group_id,
 					is_monitored,
 					device_id,
@@ -247,7 +254,7 @@ pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 	let mut last_success: HashMap<(Uuid, BackupType), Timestamp> = HashMap::new();
 	for gid in group_ids {
 		let runs =
-			crate::backups::BackupRun::latest_success_by_server_type_for_group(db, gid).await?;
+			crate::backups::BackupRun::latest_success_by_machine_type_for_group(db, gid).await?;
 		for ((sid, ty), run) in runs {
 			// The data's own moment, not when its upload finished: a backup that
 			// took hours to transfer is as old as what it captured. `anchor` falls
@@ -262,10 +269,10 @@ pub async fn scan_rows(db: &mut AsyncPgConnection) -> Result<Vec<ScanRow>> {
 		.into_iter()
 		.map(|row| {
 			let last_success_at = last_success
-				.get(&(row.server_id, row.r#type.clone()))
+				.get(&(row.machine_id, row.r#type.clone()))
 				.copied();
 			ScanRow {
-				server_id: row.server_id,
+				machine_id: row.machine_id,
 				group_id: row.group_id,
 				device_id: row.device_id,
 				r#type: row.r#type,
@@ -319,28 +326,28 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 
 	// Group the scan by server, preserving first-seen order so the sweep stays
 	// deterministic.
-	let mut by_server: HashMap<Uuid, Vec<&ScanRow>> = HashMap::new();
+	let mut by_machine: HashMap<Uuid, Vec<&ScanRow>> = HashMap::new();
 	let mut order: Vec<Uuid> = Vec::new();
 	for row in rows {
-		by_server
-			.entry(row.server_id)
+		by_machine
+			.entry(row.machine_id)
 			.or_insert_with(|| {
-				order.push(row.server_id);
+				order.push(row.machine_id);
 				Vec::new()
 			})
 			.push(row);
 	}
 
-	for server_id in order {
-		let server_rows = &by_server[&server_id];
+	for machine_id in order {
+		let server_rows = &by_machine[&machine_id];
 		let device_id = server_rows.iter().find_map(|r| r.device_id);
-		let server = Application::get_by_id(db, server_id).await?;
-		let label = server_label(&server);
+		let machine = crate::machines::Machine::get_by_id(db, machine_id).await?;
+		let label = machine_label(&machine);
 
-		// Both flags are per-server now that the check is: whether this
-		// server's staleness (or never) check is currently degraded at all.
-		let stale_open = open_server_issue_active(db, server_id, refs::STALENESS).await?;
-		let never_open = open_server_issue_active(db, server_id, refs::NEVER).await?;
+		// Both flags are per-box now that the check is: whether this box's
+		// staleness (or never) check is currently degraded at all.
+		let stale_open = open_machine_issue_active(db, machine_id, refs::STALENESS).await?;
+		let never_open = open_machine_issue_active(db, machine_id, refs::NEVER).await?;
 
 		let mut stale_instances: Vec<CheckInstance> = Vec::with_capacity(server_rows.len());
 		let mut never_instances: Vec<CheckInstance> = Vec::with_capacity(server_rows.len());
@@ -395,7 +402,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				db,
 				InstancedCheckFiling {
 					source: crate::statuses::CANOPY_SOURCE,
-					scope: Scope::Application(server_id),
+					scope: Scope::Machine(machine_id),
 					device_id,
 					check: refs::STALENESS,
 					title: None,
@@ -428,7 +435,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				db,
 				InstancedCheckFiling {
 					source: crate::statuses::CANOPY_SOURCE,
-					scope: Scope::Application(server_id),
+					scope: Scope::Machine(machine_id),
 					device_id,
 					check: refs::NEVER,
 					title: None,
@@ -607,7 +614,8 @@ async fn sweep_maintenance(db: &mut AsyncPgConnection, now: Timestamp) -> Result
 	Ok(filed)
 }
 
-/// Whether a server-scoped `(canopy, ref)` issue is currently open + active.
+/// Whether an application-scoped `(canopy, ref)` issue is currently open and
+/// active.
 pub(crate) async fn open_server_issue_active(
 	db: &mut AsyncPgConnection,
 	server_id: Uuid,
@@ -632,15 +640,16 @@ pub(crate) async fn open_server_issue_active(
 /// The active flag follows the effective result, so a check whose policy holds
 /// it below alerting is never active however degraded its observations. This is
 /// what a sweep asks in its place, to know whether it has a recorded
+
 /// observation to bring up to date.
-pub(crate) async fn server_check_observed_degraded(
+pub(crate) async fn machine_check_observed_degraded(
 	db: &mut AsyncPgConnection,
-	server_id: Uuid,
+	machine_id: Uuid,
 	r#ref: &str,
 ) -> Result<bool> {
 	use crate::schema::issues::dsl;
 	let n: i64 = dsl::issues
-		.filter(dsl::application_id.eq(server_id))
+		.filter(dsl::machine_id.eq(machine_id))
 		.filter(dsl::source.eq(refs::CANOPY_SOURCE))
 		.filter(dsl::ref_.eq(r#ref))
 		.filter(dsl::observed_result.is_not_null())

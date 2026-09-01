@@ -25,16 +25,22 @@ async fn make_group(conn: &mut AsyncPgConnection) -> Uuid {
 	id
 }
 
-/// Create a live server bound to `device_id`, optionally in `group_id`.
+/// Create a live box bound to `device_id`, with one workload on it, optionally
+/// in `group_id`.
+///
+/// The identity binds to the machine: a backup request resolves identity →
+/// machine → group and never reaches the applications on the box.
+// spec: BAK, FLT#identities
 async fn make_server(
 	conn: &mut AsyncPgConnection,
 	device_id: Uuid,
 	group_id: Option<Uuid>,
 ) -> Uuid {
-	let server_id = Uuid::new_v4();
-	sql_query("INSERT INTO machines (id, group_id) VALUES ($1, $2)")
-		.bind::<sql_types::Uuid, _>(server_id)
+	let machine_id = Uuid::new_v4();
+	sql_query("INSERT INTO machines (id, group_id, device_id) VALUES ($1, $2, $3)")
+		.bind::<sql_types::Uuid, _>(machine_id)
 		.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group_id)
+		.bind::<sql_types::Uuid, _>(device_id)
 		.execute(conn)
 		.await
 		.expect("insert machine");
@@ -42,13 +48,13 @@ async fn make_server(
 		"INSERT INTO applications (id, host, type, device_id, group_id, machine_id) \
 		 VALUES ($1, 'https://srv.example.com', 'tamanu-central', $2, $3, $1)",
 	)
-	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Uuid, _>(machine_id)
 	.bind::<sql_types::Uuid, _>(device_id)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group_id)
 	.execute(conn)
 	.await
 	.expect("insert server");
-	server_id
+	machine_id
 }
 
 async fn make_config(conn: &mut AsyncPgConnection, group_id: Uuid, status: &str) {
@@ -64,11 +70,11 @@ async fn make_config(conn: &mut AsyncPgConnection, group_id: Uuid, status: &str)
 	.expect("insert config");
 }
 
-async fn enable_capability(conn: &mut AsyncPgConnection, server_id: Uuid, r#type: &str) {
+async fn enable_capability(conn: &mut AsyncPgConnection, machine_id: Uuid, r#type: &str) {
 	sql_query(
-		"INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES ($1, $2, true)",
+		"INSERT INTO machine_backup_capabilities (machine_id, type, enabled) VALUES ($1, $2, true)",
 	)
-	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Uuid, _>(machine_id)
 	.bind::<sql_types::Text, _>(r#type)
 	.execute(conn)
 	.await
@@ -77,11 +83,11 @@ async fn enable_capability(conn: &mut AsyncPgConnection, server_id: Uuid, r#type
 
 /// Register a capability that is declared but *not* on the schedule (`enabled =
 /// false`) — only an on-demand request can drive a backup of it.
-async fn declare_capability_disabled(conn: &mut AsyncPgConnection, server_id: Uuid, r#type: &str) {
+async fn declare_capability_disabled(conn: &mut AsyncPgConnection, machine_id: Uuid, r#type: &str) {
 	sql_query(
-		"INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES ($1, $2, false)",
+		"INSERT INTO machine_backup_capabilities (machine_id, type, enabled) VALUES ($1, $2, false)",
 	)
-	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Uuid, _>(machine_id)
 	.bind::<sql_types::Text, _>(r#type)
 	.execute(conn)
 	.await
@@ -89,22 +95,22 @@ async fn declare_capability_disabled(conn: &mut AsyncPgConnection, server_id: Uu
 }
 
 /// Open the server's restore window, expiring an hour from now.
-async fn allow_restore(conn: &mut AsyncPgConnection, server_id: Uuid) {
+async fn allow_restore(conn: &mut AsyncPgConnection, machine_id: Uuid) {
 	sql_query(
 		"UPDATE applications SET restore_allowed_until = now() + interval '1 hour' WHERE id = $1",
 	)
-	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Uuid, _>(machine_id)
 	.execute(conn)
 	.await
 	.expect("open restore window");
 }
 
 /// Set an already-expired restore window (was opened, but the 24h lapsed).
-async fn expire_restore(conn: &mut AsyncPgConnection, server_id: Uuid) {
+async fn expire_restore(conn: &mut AsyncPgConnection, machine_id: Uuid) {
 	sql_query(
 		"UPDATE applications SET restore_allowed_until = now() - interval '1 hour' WHERE id = $1",
 	)
-	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Uuid, _>(machine_id)
 	.execute(conn)
 	.await
 	.expect("expire restore window");
@@ -112,12 +118,12 @@ async fn expire_restore(conn: &mut AsyncPgConnection, server_id: Uuid) {
 
 async fn enqueue_request(
 	conn: &mut AsyncPgConnection,
-	server_id: Uuid,
+	machine_id: Uuid,
 	r#type: &str,
 	purpose: &str,
 ) {
-	sql_query("INSERT INTO backup_requests (server_id, type, purpose) VALUES ($1, $2, $3)")
-		.bind::<sql_types::Uuid, _>(server_id)
+	sql_query("INSERT INTO backup_requests (machine_id, type, purpose) VALUES ($1, $2, $3)")
+		.bind::<sql_types::Uuid, _>(machine_id)
 		.bind::<sql_types::Text, _>(r#type)
 		.bind::<sql_types::Text, _>(purpose)
 		.execute(conn)
@@ -375,7 +381,7 @@ async fn target_ready_but_kube_unconfigured_is_502() {
 #[tokio::test(flavor = "multi_thread")]
 async fn capabilities_registers_and_204() {
 	use commons_types::backup::BackupType;
-	use database::ServerBackupCapability;
+	use database::MachineBackupCapability;
 
 	commons_tests::server::run_with_device_auth(
 		"server",
@@ -390,7 +396,7 @@ async fn capabilities_registers_and_204() {
 				.await;
 			resp.assert_status(http::StatusCode::NO_CONTENT);
 
-			let caps = ServerBackupCapability::list_for_server(&mut conn, server)
+			let caps = MachineBackupCapability::list_for_machine(&mut conn, server)
 				.await
 				.unwrap();
 			assert_eq!(caps.len(), 2);
@@ -465,7 +471,7 @@ async fn report_writes_run_with_context_attribution_and_204() {
 				"group must come from context, not body"
 			);
 			assert_eq!(run.device_id, device_id);
-			assert_eq!(run.server_id, Some(server));
+			assert_eq!(run.machine_id, Some(server));
 			assert_eq!(run.bytes_uploaded, Some(4096));
 			assert_eq!(run.s3_sent_raw_bytes, Some(5000));
 			assert_eq!(run.s3_sent_payload_bytes, Some(4096));
@@ -843,7 +849,7 @@ async fn progress_records_counters_and_extra() {
 				.await
 				.unwrap()
 				.expect("sample recorded");
-			assert_eq!(sample.server_id, Some(server));
+			assert_eq!(sample.machine_id, Some(server));
 			assert_eq!(sample.bytes_read, Some(1_000));
 			assert_eq!(sample.bytes_uploaded, Some(700));
 			assert_eq!(sample.bytes_estimated, Some(5_000));
@@ -1244,9 +1250,9 @@ async fn credentials_during_a_rotation_is_503() {
 		"server",
 		async |mut conn, cert, device_id, public, _| {
 			let group_id = make_group(&mut conn).await;
-			let server_id = make_server(&mut conn, device_id, Some(group_id)).await;
+			let machine_id = make_server(&mut conn, device_id, Some(group_id)).await;
 			make_config(&mut conn, group_id, "ready").await;
-			enable_capability(&mut conn, server_id, "tamanu-postgres").await;
+			enable_capability(&mut conn, machine_id, "tamanu-postgres").await;
 
 			database::backups::ServerGroupBackupConfig::begin_passphrase_rotation(
 				&mut conn,

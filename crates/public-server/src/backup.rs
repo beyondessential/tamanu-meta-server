@@ -34,12 +34,12 @@ use commons_servers::device_auth::ServerDevice;
 use commons_types::backup::{BackupConfigStatus, BackupPurpose, BackupType, RunOutcome};
 use database::{
 	Db,
-	applications::Application,
 	backups::BackupTypeDefault,
 	backups::{
-		BackupRequest, NewBackupCredentialIssuance, NewBackupRun, ServerBackupCapability,
+		BackupRequest, MachineBackupCapability, NewBackupCredentialIssuance, NewBackupRun,
 		ServerGroupBackupConfig,
 	},
+	machines::Machine,
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -75,24 +75,26 @@ pub fn routes() -> OpenApiRouter<AppState> {
 // Shared resolution: device → live server → group_id → ready config
 // ---------------------------------------------------------------------------
 
-/// Resolve the authenticated device to its single live server.
-/// Empty ⇒ 412 (`DeviceHasNoServer`).
-async fn resolve_server(
+/// Resolve the authenticated identity to the box it is enrolled as.
+/// No machine ⇒ 412 (`DeviceHasNoServer`).
+///
+/// Resolution stops here and never reaches the applications on the box, so a
+/// box running two workloads resolves exactly as one running a single workload.
+// spec: BAK
+async fn resolve_machine(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	device_id: Uuid,
-) -> Result<Application> {
-	Application::live_by_device_id(conn, device_id)
+) -> Result<Machine> {
+	Machine::get_by_device_id(conn, device_id)
 		.await?
-		.into_iter()
-		.next()
 		.ok_or(AppError::DeviceHasNoServer)
 }
 
-/// Read the server's `group_id`; ungrouped ⇒ 409.
-fn require_group(server: &Application) -> Result<Uuid> {
-	server
+/// Read the machine's `group_id`; ungrouped ⇒ 409.
+fn require_group(machine: &Machine) -> Result<Uuid> {
+	machine
 		.group_id
-		.ok_or_else(|| AppError::Conflict("server is not in a group".into()))
+		.ok_or_else(|| AppError::Conflict("machine is not in a group".into()))
 }
 
 /// Load the group's backup config and require it be `ready`. Absent or
@@ -138,14 +140,14 @@ async fn require_ready_config(
 /// operator "backup now" request. Neither ⇒ 409.
 async fn require_backupable_capability(
 	conn: &mut database::diesel_async::AsyncPgConnection,
-	server_id: Uuid,
+	machine_id: Uuid,
 	r#type: &BackupType,
 ) -> Result<()> {
-	let enabled = ServerBackupCapability::list_for_server(conn, server_id)
+	let enabled = MachineBackupCapability::list_for_machine(conn, machine_id)
 		.await?
 		.into_iter()
 		.any(|c| &c.r#type == r#type && c.enabled);
-	if enabled || BackupRequest::exists(conn, server_id, r#type, BackupPurpose::Backup).await? {
+	if enabled || BackupRequest::exists(conn, machine_id, r#type, BackupPurpose::Backup).await? {
 		Ok(())
 	} else {
 		Err(AppError::Conflict(format!(
@@ -161,8 +163,19 @@ async fn require_backupable_capability(
 /// only while that deliberate window is open — it is not always available.
 /// (Canopy still drives *automated* restores separately, via the PGRO
 /// restore-replica path.) Window closed or expired ⇒ 409.
-fn require_restore_allowed(server: &Application) -> Result<()> {
-	if server.restore_allowed() {
+/// The window is still an application's field, so a box is restorable while any
+/// workload on it has one open — an operator opening it for the box opens it on
+/// what runs there.
+async fn require_restore_allowed(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	machine: &Machine,
+) -> Result<()> {
+	let open = machine
+		.applications(conn)
+		.await?
+		.iter()
+		.any(|a| a.restore_allowed());
+	if open {
 		Ok(())
 	} else {
 		Err(AppError::Conflict(
@@ -210,7 +223,7 @@ pub struct BackupCapabilitiesArgs {
 	request_body = BackupCapabilitiesArgs,
 	responses(
 		(status = 204, description = "Capabilities registered."),
-		(status = 412, description = "Device is not bound to a live server.", body = ProblemDetailsSchema),
+		(status = 412, description = "Device is not bound to a live machine.", body = ProblemDetailsSchema),
 		(status = 409, description = "Application is not in a group.", body = ProblemDetailsSchema),
 	),
 )]
@@ -222,10 +235,10 @@ async fn capabilities(
 	let mut conn = db.get().await?;
 	let device_id = device.0.0.id;
 
-	let server = resolve_server(&mut conn, device_id).await?;
+	let machine = resolve_machine(&mut conn, device_id).await?;
 	// A capability is per-server; the group is required so the server is a
 	// real, grouped member (matches the other endpoints' 409 on ungrouped).
-	require_group(&server)?;
+	require_group(&machine)?;
 
 	for r#type in &args.types {
 		// Seed `enabled` from the type's auto_enable default for newly-seen
@@ -234,7 +247,7 @@ async fn capabilities(
 			.await?
 			.map(|d| d.auto_enable)
 			.unwrap_or(false);
-		ServerBackupCapability::register(&mut conn, server.id, r#type, seed).await?;
+		MachineBackupCapability::register(&mut conn, machine.id, r#type, seed).await?;
 	}
 
 	Ok(StatusCode::NO_CONTENT)
@@ -389,7 +402,7 @@ pub fn backup_session_policy(bucket: &str, prefix: &str) -> String {
 	responses(
 		(status = 200, body = CredentialProcessOutput),
 		(status = 409, description = "Application ungrouped, no ready config, backup type not enabled, or restore window not open.", body = ProblemDetailsSchema),
-		(status = 412, description = "Device is not bound to a live server.", body = ProblemDetailsSchema),
+		(status = 412, description = "Device is not bound to a live machine.", body = ProblemDetailsSchema),
 		(status = 502, description = "STS issuance failed or is not configured.", body = ProblemDetailsSchema),
 	),
 )]
@@ -402,14 +415,14 @@ async fn credentials(
 	let mut conn = db.get().await?;
 	let device_id = device.0.0.id;
 
-	let server = resolve_server(&mut conn, device_id).await?;
-	let group_id = require_group(&server)?;
+	let machine = resolve_machine(&mut conn, device_id).await?;
+	let group_id = require_group(&machine)?;
 	let cfg = require_ready_config(&mut conn, group_id).await?;
 	match args.purpose {
 		BackupPurpose::Backup => {
-			require_backupable_capability(&mut conn, server.id, &args.r#type).await?
+			require_backupable_capability(&mut conn, machine.id, &args.r#type).await?
 		}
-		BackupPurpose::Restore => require_restore_allowed(&server)?,
+		BackupPurpose::Restore => require_restore_allowed(&mut conn, &machine).await?,
 	}
 
 	// Always attach a bucket-scoped session policy so the issued creds can only
@@ -534,7 +547,7 @@ pub struct BackupTarget {
 	responses(
 		(status = 200, body = BackupTarget),
 		(status = 409, description = "Application ungrouped or no ready config.", body = ProblemDetailsSchema),
-		(status = 412, description = "Device is not bound to a live server.", body = ProblemDetailsSchema),
+		(status = 412, description = "Device is not bound to a live machine.", body = ProblemDetailsSchema),
 		(status = 502, description = "Repo-password Secret unavailable or kube not configured.", body = ProblemDetailsSchema),
 	),
 )]
@@ -546,8 +559,8 @@ async fn target(
 	let mut conn = db.get().await?;
 	let device_id = device.0.0.id;
 
-	let server = resolve_server(&mut conn, device_id).await?;
-	let group_id = require_group(&server)?;
+	let machine = resolve_machine(&mut conn, device_id).await?;
+	let group_id = require_group(&machine)?;
 	let cfg = require_ready_config(&mut conn, group_id).await?;
 
 	let Some(kube) = kube else {
@@ -683,7 +696,7 @@ pub struct ProgressArgs {
 	responses(
 		(status = 204, description = "Progress recorded."),
 		(status = 409, description = "Application is not in a group.", body = ProblemDetailsSchema),
-		(status = 412, description = "Device is not bound to a live server.", body = ProblemDetailsSchema),
+		(status = 412, description = "Device is not bound to a live machine.", body = ProblemDetailsSchema),
 		(status = 429, description = "Reporting progress too frequently.", body = ProblemDetailsSchema),
 	),
 )]
@@ -710,11 +723,11 @@ async fn progress(
 		return Err(AppError::RateLimited);
 	}
 
-	let server = resolve_server(&mut conn, device_id).await?;
+	let machine = resolve_machine(&mut conn, device_id).await?;
 	// As with a report: the server must be grouped so device/group/server come
 	// from the authenticated context rather than the body, but the config need not
 	// be ready — the run is already happening either way.
-	let group_id = require_group(&server)?;
+	let group_id = require_group(&machine)?;
 
 	database::backups::BackupRunProgress::record(
 		&mut conn,
@@ -722,7 +735,7 @@ async fn progress(
 			run_id: args.run_id,
 			device_id,
 			group_id,
-			server_id: Some(server.id),
+			machine_id: Some(machine.id),
 			r#type: args.r#type,
 			purpose: args.purpose,
 			snapshot_taken_at: args.snapshot_taken_at,
@@ -813,7 +826,7 @@ pub struct ReportArgs {
 	responses(
 		(status = 204, description = "Run recorded."),
 		(status = 409, description = "Application ungrouped, or duplicate run_id.", body = ProblemDetailsSchema),
-		(status = 412, description = "Device is not bound to a live server.", body = ProblemDetailsSchema),
+		(status = 412, description = "Device is not bound to a live machine.", body = ProblemDetailsSchema),
 	),
 )]
 async fn report(
@@ -824,10 +837,10 @@ async fn report(
 	let mut conn = db.get().await?;
 	let device_id = device.0.0.id;
 
-	let server = resolve_server(&mut conn, device_id).await?;
+	let machine = resolve_machine(&mut conn, device_id).await?;
 	// A report need not be `ready`, but the server must be grouped:
 	// device_id/group_id come from the authenticated context, never the body.
-	let group_id = require_group(&server)?;
+	let group_id = require_group(&machine)?;
 
 	// Where the report omits a figure this run already reported as progress, take
 	// the last progress value. Progress counters are cumulative, so the final
@@ -855,7 +868,7 @@ async fn report(
 			id: rep.run_id,
 			device_id,
 			group_id,
-			server_id: Some(server.id),
+			machine_id: Some(machine.id),
 			r#type: rep.r#type.clone(),
 			purpose: rep.purpose,
 			outcome: rep.outcome,
@@ -889,7 +902,7 @@ async fn report(
 	// "back up now" for it — regardless of outcome (the operator asked for one
 	// attempt; they can re-request). A scheduled-due signal self-clears once the
 	// successful run advances the staleness anchor, so it needs no clearing here.
-	BackupRequest::clear(&mut conn, server.id, &rep.r#type, rep.purpose).await?;
+	BackupRequest::clear(&mut conn, machine.id, &rep.r#type, rep.purpose).await?;
 
 	Ok(StatusCode::NO_CONTENT)
 }

@@ -10,8 +10,8 @@ use commons_types::{
 	version::VersionStr,
 };
 use database::{
-	applications::Application, backups::BackupRun, backups::ServerBackupCapability,
-	reported_detail::ReportedDetail, server_groups::ServerGroup, statuses::Status,
+	applications::Application, reported_detail::ReportedDetail, server_groups::ServerGroup,
+	statuses::Status,
 };
 use jiff::Timestamp;
 use rmcp::{
@@ -107,21 +107,13 @@ struct FiguresOut {
 }
 
 #[derive(Serialize)]
-struct BackupCapabilityOut {
-	r#type: String,
-	enabled: bool,
-	last_successful_backup_at: Option<Timestamp>,
-	last_snapshot_id: Option<String>,
-}
-
-#[derive(Serialize)]
 struct ServerDetail {
 	id: Uuid,
 	name: Option<String>,
 	host: Option<String>,
 	/// The box this application runs on. Ask `get_machine` about it for the
-	/// platform, hardware, addresses, and backup capability, which are the
-	/// machine's rather than this application's.
+	/// platform, hardware, addresses, and backups, which are the machine's
+	/// rather than this application's.
 	// spec: MCP#detail
 	machine_id: Uuid,
 	/// The application the server runs.
@@ -141,7 +133,6 @@ struct ServerDetail {
 	/// `latest_status`, which is one push and its own metadata.
 	figures: FiguresOut,
 	latest_status: Option<StatusOut>,
-	backups: Vec<BackupCapabilityOut>,
 }
 
 #[tool_router(router = applications_router, vis = "pub(crate)")]
@@ -247,8 +238,9 @@ impl CanopyMcp {
 	}
 
 	#[tool(
-		description = "Full detail for one server: fields, latest status (version, health, \
-		               platform, postgres), owning group, sibling count, and backups."
+		description = "Full detail for one application: fields, latest status (version, health, \
+		               platform, postgres), owning group, sibling count, and the machine it runs \
+		               on. Backups belong to that machine — ask about the machine for them."
 	)]
 	async fn get_server(
 		&self,
@@ -276,22 +268,6 @@ impl CanopyMcp {
 			None => None,
 		};
 		let sibling_count = server.siblings(&mut conn).await.map_err(mcp_err)?.len();
-
-		let caps = ServerBackupCapability::list_for_server(&mut conn, id)
-			.await
-			.map_err(mcp_err)?;
-		let mut backups = Vec::with_capacity(caps.len());
-		for cap in &caps {
-			let last = BackupRun::latest_success_for_server(&mut conn, id, &cap.r#type)
-				.await
-				.map_err(mcp_err)?;
-			backups.push(BackupCapabilityOut {
-				r#type: cap.r#type.to_string(),
-				enabled: cap.enabled,
-				last_successful_backup_at: last.as_ref().map(|r| r.anchor()),
-				last_snapshot_id: last.and_then(|r| r.snapshot_id),
-			});
-		}
 
 		// Health rolls up current check state across every source
 		// (silenced checks skipped in the rollup); `checks` still carries
@@ -349,7 +325,6 @@ impl CanopyMcp {
 			health,
 			figures,
 			latest_status,
-			backups,
 		})
 	}
 }

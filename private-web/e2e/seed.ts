@@ -47,7 +47,7 @@ function randomLabel(prefix: string): string {
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, application_reported_detail, machine_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, upgrade_plans, maintenance_windows, version_known_issues, recovery_vault_writes, application_names, application_certificates, compromised_keys RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, application_reported_detail, machine_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, machine_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, upgrade_plans, maintenance_windows, version_known_issues, recovery_vault_writes, application_names, application_certificates, compromised_keys RESTART IDENTITY CASCADE",
 	);
 	// The truncate takes the migration-seeded nil "Canopy" application with
 	// it; self-alerts attach to that row, so put it back.
@@ -835,7 +835,7 @@ export async function seedBackupRun(
 	opts: {
 		deviceId: string;
 		groupId: string;
-		serverId?: string | null;
+		machineId?: string | null;
 		type?: string;
 		purpose?: "backup" | "restore";
 		outcome?: "success" | "failure";
@@ -859,7 +859,7 @@ export async function seedBackupRun(
 	const id = opts.id ?? randomUUID();
 	await sql.query(
 		`INSERT INTO backup_runs
-		 (id, device_id, group_id, server_id, type, purpose, outcome, error, bytes_uploaded, snapshot_id,
+		 (id, device_id, group_id, machine_id, type, purpose, outcome, error, bytes_uploaded, snapshot_id,
 		  s3_sent_raw_bytes, s3_sent_payload_bytes, s3_received_raw_bytes, s3_received_payload_bytes,
 		  snapshot_logical_bytes, reported_at, snapshot_taken_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
@@ -869,7 +869,7 @@ export async function seedBackupRun(
 			id,
 			opts.deviceId,
 			opts.groupId,
-			opts.serverId ?? null,
+			opts.machineId ?? null,
 			opts.type ?? "tamanu-postgres",
 			opts.purpose ?? "backup",
 			opts.outcome ?? "success",
@@ -974,7 +974,7 @@ export async function seedBackupRunProgress(
 		runId: string;
 		deviceId: string;
 		groupId: string;
-		serverId?: string | null;
+		machineId?: string | null;
 		type?: string;
 		purpose?: "backup" | "restore";
 		observedAgoSecs?: number;
@@ -998,7 +998,7 @@ export async function seedBackupRunProgress(
 ): Promise<void> {
 	await sql.query(
 		`INSERT INTO backup_run_progress
-		 (run_id, device_id, group_id, server_id, type, purpose, observed_at, snapshot_taken_at,
+		 (run_id, device_id, group_id, machine_id, type, purpose, observed_at, snapshot_taken_at,
 		  bytes_read, bytes_hashed, bytes_uploaded, bytes_cached, bytes_estimated,
 		  files_done, files_estimated, errors, ignored_errors, current_path,
 		  s3_sent_raw_bytes, s3_sent_payload_bytes, s3_received_raw_bytes, s3_received_payload_bytes,
@@ -1011,7 +1011,7 @@ export async function seedBackupRunProgress(
 			opts.runId,
 			opts.deviceId,
 			opts.groupId,
-			opts.serverId ?? null,
+			opts.machineId ?? null,
 			opts.type ?? "tamanu-postgres",
 			opts.purpose ?? "backup",
 			opts.observedAgoSecs ?? 0,
@@ -1065,20 +1065,20 @@ export async function seedBackupRepoStats(
 	);
 }
 
-/** Seed a `server_backup_capabilities` row (what a server advertises it can
- * back up, plus the operator-set enabled flag). */
+/** Seed a `machine_backup_capabilities` row (what a box advertises it can back
+ * up, plus the operator-set enabled flag). A capability is the machine's. */
 export async function seedServerBackupCapability(
 	sql: Sql,
 	opts: {
-		serverId: string;
+		machineId: string;
 		type?: string;
 		enabled?: boolean;
 	},
 ): Promise<void> {
 	await sql.query(
-		`INSERT INTO server_backup_capabilities (server_id, type, enabled)
+		`INSERT INTO machine_backup_capabilities (machine_id, type, enabled)
 		 VALUES ($1, $2, $3)`,
-		[opts.serverId, opts.type ?? "tamanu-postgres", opts.enabled ?? true],
+		[opts.machineId, opts.type ?? "tamanu-postgres", opts.enabled ?? true],
 	);
 }
 
@@ -1086,17 +1086,17 @@ export async function seedServerBackupCapability(
 export async function seedBackupRequest(
 	sql: Sql,
 	opts: {
-		serverId: string;
+		machineId: string;
 		type?: string;
 		purpose?: "backup" | "restore";
 		requestedBy?: string | null;
 	},
 ): Promise<void> {
 	await sql.query(
-		`INSERT INTO backup_requests (server_id, type, purpose, requested_by)
+		`INSERT INTO backup_requests (machine_id, type, purpose, requested_by)
 		 VALUES ($1, $2, $3, $4)`,
 		[
-			opts.serverId,
+			opts.machineId,
 			opts.type ?? "tamanu-postgres",
 			opts.purpose ?? "backup",
 			opts.requestedBy ?? null,

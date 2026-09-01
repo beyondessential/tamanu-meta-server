@@ -183,8 +183,8 @@ export type ParamSpec = Solidify<Schemas["BTreeMap"][string]>;
 export type ParamType = Solidify<Schemas["ParamType"]>;
 export type BackupMaintenanceRun = Solidify<Schemas["BackupMaintenanceRun"]>;
 export type PendingRequestRow = Solidify<Schemas["PendingRequestRow"]>;
-export type ServerBackupCapabilityView = Solidify<
-	Schemas["ServerBackupCapabilityView"]
+export type MachineBackupCapabilityView = Solidify<
+	Schemas["MachineBackupCapabilityView"]
 >;
 export type RestoreWindowRow = Solidify<Schemas["RestoreWindowRow"]>;
 export type RestoreWindowView = Solidify<Schemas["RestoreWindowView"]>;

@@ -27,10 +27,27 @@ Carried deferrals, each gated on a step above rather than on a vague later:
 
 - [x] Remove the `application_default_machine()` scaffolding default — done early, with the operator/enrolment surface
 - [x] Add `machine_id` to the `Application` struct — done with the operator/enrolment surface
-- [ ] **Backup tables take the machine grain** — `backup_runs`, `backup_repo_snapshots`, `server_backup_capabilities` and friends still key on the application that reported them. The rename step deferred them; nothing has claimed them since. Restore replicas now reach a machine's snapshot through a join that exists only because of this, and BAK already says a backup is a machine's
+- [~] **Backup tables take the machine grain** — storage, models, handlers and checks moved; 7 e2e tests in `backups.spec.ts` still point at the old location. See the section below
 - [ ] Separate "never reported" from "reported long ago" — `Status::latest_for_servers` looks back seven days for performance, so a target silent for longer returns no row and reads as never reported (grey) rather than unreachable (red). Pre-existing, and sharper now the states are three: the fix is a cheap "has this ever reported" fact rather than widening the scan -- verify that it does remain cheap, if the query is "somewhat more expensive" it will slow every single view that displays a status, and the /status page (which has all of them at once) will slow to a crawl.
 - [x] Carry the machine on `IssueData` — done with the fleet query interface, which is what presented machine checks first
 - [ ] Link a machine's maintenance window to its detail page — with **Frontend**, which is what creates that page. The fleet maintenance view renders a machine target as plain text until then rather than linking somewhere that 404s
+
+## Backups take the machine grain
+
+BAK has said since it was written that a backup is a machine's: a device request resolves identity → machine → group and never reaches the applications on the box, and a box shared by two workloads backs up once. The storage lagged that, keying every backup table on whichever application reported the run.
+
+**Nothing on the wire moved.** A device never names a target — it is resolved from the authenticated identity — so `server_id` on these tables was internal throughout. The whole change is invisible to `bestool-canopy`.
+
+**Five tables**, each column RENAMEd rather than added-and-dropped so it keeps its position: the models load positionally, and a column moved to the end silently misaligns the ones after it. `backup_requests` and `server_backup_capabilities` carry the moved column in their primary key, so two applications on one box collapse to one row — the capability is OR'd and dated from the first advertisement, the request keeps the operator's latest intent. `server_backup_capabilities` becomes `machine_backup_capabilities`.
+
+**What was actually wrong, not just misnamed:**
+
+- `resolve_server` in the public backup handler picked the device's *single live application* — precisely what BAK says must not happen. It resolves the machine now.
+- The staleness scan was rooted at applications joined to capabilities, so a box with two workloads would have produced two staleness rows for its one backup, and alerted twice. It is rooted at machines.
+- The staleness and reconcile checks filed at `Scope::Application`. They file at `Scope::Machine`, which is what makes a shared box's late backup one finding.
+- `latest_success_by_machine_type_for_group` reached the machine by joining applications. That join is gone.
+
+**Outstanding: 7 e2e tests in `backups.spec.ts`.** The backup panel moved off the application page onto the machine's, per FLT ("the application page carries no backups"), and the group page's cross-link plus a few assertions still point at `/servers/{id}#backups`. Rust is green at 1288; typecheck, clippy and biome are clean.
 
 ## Terminology: W1's group / environment / instance
 

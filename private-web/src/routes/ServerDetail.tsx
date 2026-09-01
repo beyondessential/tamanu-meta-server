@@ -6,19 +6,16 @@ import {
 	Box,
 	Button,
 	Chip,
-	Collapse,
 	Dialog,
 	DialogActions,
 	DialogContent,
 	DialogContentText,
 	DialogTitle,
-	Divider,
 	IconButton,
 	LinearProgress,
 	Link as MuiLink,
 	Paper,
 	Stack,
-	Switch,
 	TextField,
 	Tooltip,
 	Typography,
@@ -29,7 +26,6 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import InsightsIcon from "@mui/icons-material/Insights";
 import LanguageIcon from "@mui/icons-material/Language";
 import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
-import RestoreDataIcon from "@mui/icons-material/SettingsBackupRestore";
 import { useEffect, useState } from "react";
 import {
 	Link as RouterLink,
@@ -47,9 +43,6 @@ import SilencedRefsSection from "../components/SilencedRefsSection";
 import StatusDot from "../components/StatusDot";
 import TailnetIdentitySection from "../components/TailnetIdentitySection";
 import TimeAgo from "../components/TimeAgo";
-import { LatestSnapshot } from "../components/SnapshotId";
-import { BackupProcessingChip } from "../components/BackupProcessingChip";
-import { BackupLiveProgress } from "../components/BackupLiveProgress";
 import TimezoneTooltip from "../components/TimezoneTooltip";
 import VersionIndicator from "../components/VersionIndicator";
 import ApplicationTypeChip from "../components/ApplicationTypeChip";
@@ -63,7 +56,6 @@ import ServerSetupInstructions from "../components/ServerSetupInstructions";
 import { callApi, useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
-import { useReloadInterval } from "../hooks/useReloadInterval";
 import { humanSeconds } from "../lib/humanDuration";
 import ServerNameWithGroup from "../components/ServerNameWithGroup";
 import {
@@ -72,7 +64,6 @@ import {
 	type ConsolidatedChecks,
 	type DeviceInfo,
 	type HealthState,
-	type ServerBackupCapabilityView,
 	type ServerDetailData,
 	type ServerGroup,
 	type ServerInfo,
@@ -182,11 +173,6 @@ export default function ServerDetail() {
 			{data.group && (
 				<GroupSection group={data.group} billingLabels={data.billing_labels} />
 			)}
-			<BackupCapabilitiesSection
-				serverId={data.server.id}
-				groupId={data.group?.id ?? null}
-				isAdmin={admin}
-			/>
 			{(data.server.notes || Object.keys(data.server.tags ?? {}).length > 0) && (
 				<NotesAndTagsSection
 					notes={data.server.notes}
@@ -1086,295 +1072,6 @@ function SiblingServers({
 				))}
 			</Stack>
 		</Box>
-	);
-}
-
-/// The all-zero group id, used to query backup config for an ungrouped server:
-/// it always resolves to "no config" rather than erroring on a missing group.
-const NIL_UUID = "00000000-0000-0000-0000-000000000000";
-
-/// Per-(server, type) backup capabilities with an admin-only enable toggle.
-/// Reads `backups.capabilities`; the switch calls `backups.set_capability` and
-/// refetches. Capabilities are advertised by bestool, so a server with none yet
-/// renders an explicit empty state rather than disappearing. When the group has
-/// no active backup config the toggles are greyed + collapsed behind a message,
-/// since they have no effect until backups are set up.
-function BackupCapabilitiesSection({
-	serverId,
-	groupId,
-	isAdmin,
-}: {
-	serverId: string;
-	groupId: string | null;
-	isAdmin: boolean;
-}) {
-	// Poll faster while a backup of any type is in flight, so its figures advance
-	// and the "backing up…" chip appears and clears on its own; back off when
-	// nothing is running. Without this the section was frozen at page load.
-	const [inFlight, setInFlight] = useState(false);
-	const backupTick = useReloadInterval(
-		inFlight ? 5_000 : 30_000,
-		"canopy-data-changed",
-	);
-	const caps = useApi(
-		"backups",
-		"capabilities",
-		{ server_id: serverId },
-		[serverId, backupTick],
-	);
-	const anyInFlight =
-		caps.status === "ok" && caps.data.some((c) => c.processing_since != null);
-	useEffect(() => {
-		setInFlight(anyInFlight);
-	}, [anyInFlight]);
-	// Whether the group has an *active* (ready) backup config. Ungrouped servers
-	// query the nil group, which always returns no config. While this is loading
-	// we optimistically treat the section as active to avoid a grey→normal flash.
-	const config = useApi(
-		"backups",
-		"get",
-		{ server_group_id: groupId ?? NIL_UUID },
-		[groupId],
-	);
-	// The server's restore window: while open, an operator can run an ad-hoc
-	// `bestool canopy restore` on the box. Server-scoped, so it's shown here as
-	// well as on the group backups page.
-	const restore = useApi(
-		"backups",
-		"restore_window",
-		{ server_id: serverId },
-		[serverId],
-	);
-	const allowRestore = useApiAction("backups", "allow_restore");
-	const disallowRestore = useApiAction("backups", "disallow_restore");
-	const restoreUntil =
-		restore.status === "ok" ? restore.data.allowed_until : null;
-	const onAllowRestore = async () => {
-		try {
-			await allowRestore.call({ server_id: serverId });
-			restore.reload();
-		} catch {
-			/* surfaced via allowRestore.error */
-		}
-	};
-	const onDisallowRestore = async () => {
-		try {
-			await disallowRestore.call({ server_id: serverId });
-			restore.reload();
-		} catch {
-			/* surfaced via disallowRestore.error */
-		}
-	};
-
-	const inactive =
-		config.status === "ok" &&
-		!(config.data != null && config.data.status === "ready");
-	const inactiveMessage = !groupId
-		? "This server isn't in a group, so backups can't be configured for it."
-		: config.status === "ok" && config.data == null
-			? "Backups aren't set up for this group yet, so these settings have no effect."
-			: "Backups for this group are still being set up, so these settings have no effect yet.";
-
-	const [showInactive, setShowInactive] = useState(false);
-
-	const rows = (
-		<Stack divider={<Divider />}>
-			{caps.status === "ok" &&
-				caps.data.map((cap) => (
-					<BackupCapabilityRow
-						key={cap.type}
-						serverId={serverId}
-						cap={cap}
-						isAdmin={isAdmin}
-						onChanged={caps.reload}
-					/>
-				))}
-		</Stack>
-	);
-
-	return (
-		<Paper id="backups" variant="outlined" sx={{ p: 2 }}>
-			<Stack
-				direction="row"
-				spacing={2}
-				sx={{ alignItems: "baseline", justifyContent: "space-between" }}
-			>
-				<Typography variant="h6" component="h2" gutterBottom>
-					Backups
-				</Typography>
-				{groupId && (
-					<MuiLink
-						component={RouterLink}
-						to={`/groups/${groupId}/backups`}
-						variant="body2"
-						underline="hover"
-					>
-						Group backups ›
-					</MuiLink>
-				)}
-			</Stack>
-
-			{groupId && isAdmin && (
-				<Box sx={{ mb: 1 }}>
-					{restoreUntil ? (
-						<Alert
-							severity="warning"
-							icon={<RestoreDataIcon fontSize="inherit" />}
-							action={
-								<Button
-									color="inherit"
-									size="small"
-									onClick={onDisallowRestore}
-									disabled={allowRestore.pending || disallowRestore.pending}
-								>
-									Disable
-								</Button>
-							}
-						>
-							Restores are allowed for this server until{" "}
-							<TimeAgo timestamp={restoreUntil} />. While open, the server can
-							restore backups on demand.
-						</Alert>
-					) : (
-						<Button
-							size="small"
-							color="warning"
-							variant="outlined"
-							startIcon={<RestoreDataIcon />}
-							onClick={onAllowRestore}
-							disabled={allowRestore.pending || disallowRestore.pending}
-						>
-							Allow restores (24h)
-						</Button>
-					)}
-					{(allowRestore.error || disallowRestore.error) && (
-						<Alert severity="error" sx={{ mt: 1 }}>
-							{(allowRestore.error || disallowRestore.error)!.message}
-						</Alert>
-					)}
-				</Box>
-			)}
-
-			{inactive && (
-				<Alert
-					severity="info"
-					sx={{ mb: 1 }}
-					action={
-						groupId && isAdmin ? (
-							<Button
-								component={RouterLink}
-								to={`/groups/${groupId}/backups`}
-								color="inherit"
-								size="small"
-							>
-								Set up
-							</Button>
-						) : undefined
-					}
-				>
-					{inactiveMessage}
-				</Alert>
-			)}
-
-			{caps.status === "loading" || caps.status === "idle" ? (
-				<LinearProgress />
-			) : caps.status === "error" ? (
-				<Alert severity="error">{caps.error.message}</Alert>
-			) : caps.data.length === 0 ? (
-				<Typography variant="body2" color="text.secondary">
-					No backup types registered for this server.
-				</Typography>
-			) : inactive ? (
-				// Collapsed + greyed: the toggles still work (they record intent for
-				// when backups are set up), but it's clear they're dormant right now.
-				<>
-					<Button
-						size="small"
-						onClick={() => setShowInactive((s) => !s)}
-						endIcon={
-							<ExpandMoreIcon
-								sx={{
-									transform: showInactive ? "rotate(180deg)" : "none",
-									transition: "transform 150ms",
-								}}
-							/>
-						}
-					>
-						{showInactive
-							? "Hide backup types"
-							: `Show backup types (${caps.data.length})`}
-					</Button>
-					<Collapse in={showInactive}>
-						<Box sx={{ opacity: 0.6, mt: 1 }}>{rows}</Box>
-					</Collapse>
-				</>
-			) : (
-				rows
-			)}
-		</Paper>
-	);
-}
-
-function BackupCapabilityRow({
-	serverId,
-	cap,
-	isAdmin,
-	onChanged,
-}: {
-	serverId: string;
-	cap: ServerBackupCapabilityView;
-	isAdmin: boolean;
-	onChanged: () => void;
-}) {
-	const setCapability = useApiAction("backups", "set_capability");
-	const onToggle = async (enabled: boolean) => {
-		try {
-			await setCapability.call({
-				server_id: serverId,
-				type: cap.type,
-				enabled,
-			});
-			onChanged();
-		} catch {
-			/* surfaced via setCapability.error */
-		}
-	};
-	return (
-		<Stack
-			direction="row"
-			spacing={2}
-			sx={{ alignItems: "center", justifyContent: "space-between", py: 0.5 }}
-		>
-			<Stack spacing={0.25} sx={{ minWidth: 0 }}>
-				<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-					<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
-						{cap.type}
-					</Typography>
-					<BackupProcessingChip since={cap.processing_since} />
-				</Stack>
-				<BackupLiveProgress progress={cap.progress} />
-				<LatestSnapshot
-					id={cap.latest_snapshot_id}
-					at={cap.latest_snapshot_at}
-					bytes={cap.latest_snapshot_bytes}
-				/>
-			</Stack>
-			<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-				{setCapability.error && (
-					<Typography variant="caption" color="error">
-						{setCapability.error.message}
-					</Typography>
-				)}
-				<Switch
-					checked={cap.enabled}
-					disabled={!isAdmin || setCapability.pending}
-					onChange={(e) => onToggle(e.target.checked)}
-					slotProps={{
-						input: { "aria-label": `Enable ${cap.type} backups` },
-					}}
-				/>
-			</Stack>
-		</Stack>
 	);
 }
 

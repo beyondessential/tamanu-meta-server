@@ -54,9 +54,9 @@ pub use backups::{
 	BackupCredentialIssuance, BackupMaintenanceRun, BackupMaintenanceRunFilters,
 	BackupRecoveryVerification, BackupRepoObservedSnapshot, BackupRepoSnapshot, BackupRepoStats,
 	BackupRequest, BackupRun, BackupRunFilters, BackupRunProgress, BackupTypeDefault,
-	MaintenanceOutcomeFilter, NewBackupCredentialIssuance, NewBackupRun, NewBackupRunProgress,
-	NewBackupTypeDefault, NewObservedSnapshot, NewServerGroupBackupConfig,
-	NewServerGroupBackupSchedule, RetentionPolicy, ServerBackupCapability, ServerGroupBackupConfig,
+	MachineBackupCapability, MaintenanceOutcomeFilter, NewBackupCredentialIssuance, NewBackupRun,
+	NewBackupRunProgress, NewBackupTypeDefault, NewObservedSnapshot, NewServerGroupBackupConfig,
+	NewServerGroupBackupSchedule, RetentionPolicy, ServerGroupBackupConfig,
 	ServerGroupBackupSchedule,
 };
 pub use bestool_snippets::{BestoolSnippet, NewBestoolSnippet};

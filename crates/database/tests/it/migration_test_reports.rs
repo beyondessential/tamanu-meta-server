@@ -460,23 +460,26 @@ async fn declare_migrate(
 }
 
 /// A successful backup run, which is the snapshot a migration test would use.
+///
+/// Takes the *machine*: a run captures a box's data.
+// spec: BAK
 async fn record_snapshot(
 	conn: &mut AsyncPgConnection,
 	consumer: Uuid,
 	group: Uuid,
-	server: Uuid,
+	machine: Uuid,
 	snapshot: &str,
 	age_seconds: i64,
 ) {
 	sql_query(
 		"INSERT INTO backup_runs
-		 (id, device_id, group_id, server_id, type, purpose, outcome, snapshot_id, reported_at)
+		 (id, device_id, group_id, machine_id, type, purpose, outcome, snapshot_id, reported_at)
 		 VALUES (gen_random_uuid(), $1, $2, $3, 'tamanu-postgres', 'backup', 'success', $4,
 		         NOW() - make_interval(secs => $5))",
 	)
 	.bind::<sql_types::Uuid, _>(consumer)
 	.bind::<sql_types::Uuid, _>(group)
-	.bind::<sql_types::Uuid, _>(server)
+	.bind::<sql_types::Uuid, _>(machine)
 	.bind::<sql_types::Text, _>(snapshot)
 	.bind::<sql_types::Double, _>(age_seconds as f64)
 	.execute(conn)
@@ -506,7 +509,7 @@ async fn an_untried_candidate_goes_overdue_and_a_tested_one_does_not() {
 		let target = insert_version(&mut conn, 63).await;
 		plan_upgrade(&mut conn, group, &target).await;
 		declare_migrate(&mut conn, consumer, group, 3600).await;
-		record_snapshot(&mut conn, consumer, group, server, "snap-old", 7200).await;
+		record_snapshot(&mut conn, consumer, group, machine, "snap-old", 7200).await;
 
 		let filed = database::restore::sweep_restore_checks(&mut conn)
 			.await

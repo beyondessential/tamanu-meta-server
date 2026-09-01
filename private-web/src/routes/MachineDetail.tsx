@@ -14,12 +14,14 @@ import { useApi } from "../api";
 import ApplicationTypeChip from "../components/ApplicationTypeChip";
 import { ChecksTable, HealthIndicator } from "../components/ChecksTable";
 import { HealthLegend, StatusLegend } from "../components/Legends";
+import MachineBackupSection from "../components/MachineBackupSection";
 import MaintenanceSection from "../components/MaintenanceSection";
 import ServerRankChip from "../components/ServerRankChip";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import StatusDot from "../components/StatusDot";
 import TimeAgo from "../components/TimeAgo";
 import TimezoneTooltip from "../components/TimezoneTooltip";
+import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { humanSeconds } from "../lib/humanDuration";
 import type { MachineDetailData, ServerInfo } from "../types";
@@ -33,6 +35,7 @@ import type { MachineDetailData, ServerInfo } from "../types";
 /// spec: FLT
 export default function MachineDetail() {
 	const { id = "" } = useParams<{ id: string }>();
+	const isAdmin = useIsAdmin() === true;
 	const [refreshTick, setRefreshTick] = useState(0);
 	const bumpRefresh = () => setRefreshTick((t) => t + 1);
 	const detail = useApi("machines", "get_detail", { machine_id: id }, [
@@ -130,6 +133,12 @@ export default function MachineDetail() {
 			</Paper>
 
 			<ApplicationsOnThisBox applications={data.applications} />
+
+			<MachineBackupSection
+				machineId={data.machine.id}
+				groupId={data.group?.id ?? null}
+				isAdmin={isAdmin}
+			/>
 
 			{data.billing_labels.length > 0 && (
 				<Paper variant="outlined" sx={{ p: 2 }}>

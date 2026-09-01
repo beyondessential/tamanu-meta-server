@@ -691,23 +691,23 @@ async fn sweep_restore_checks_raises_for_stale_replica_but_skips_gaps() {
 
 /// Insert a successful backup run whose snapshot was produced `hours_ago`.
 ///
-/// Takes the *application*: `backup_runs` still records which workload reported
-/// the run. The snapshot authority reaches the machine through it.
+/// Takes the *machine*: a run captures a box's data, so that is what it records.
+// spec: BAK
 async fn insert_old_success_run(
 	conn: &mut AsyncPgConnection,
 	device: Uuid,
 	group: Uuid,
-	application: Uuid,
+	machine: Uuid,
 	snapshot: &str,
 	hours_ago: i64,
 ) {
 	sql_query(
-		"INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, snapshot_id, reported_at) \
+		"INSERT INTO backup_runs (id, device_id, group_id, machine_id, type, purpose, outcome, snapshot_id, reported_at) \
 		 VALUES (gen_random_uuid(), $1, $2, $3, 'tamanu-postgres', 'backup', 'success', $4, now() - make_interval(hours => $5))",
 	)
 	.bind::<sql_types::Uuid, _>(device)
 	.bind::<sql_types::Uuid, _>(group)
-	.bind::<sql_types::Uuid, _>(application)
+	.bind::<sql_types::Uuid, _>(machine)
 	.bind::<sql_types::Text, _>(snapshot)
 	.bind::<sql_types::Int4, _>(hours_ago as i32)
 	.execute(conn)
@@ -752,7 +752,8 @@ async fn sweep_once_is_snapshot_driven() {
 		);
 
 		// A snapshot older than the bound, never verified → overdue.
-		insert_old_success_run(&mut conn, consumer, group, application, "snap-1", 2).await;
+		// The run records the box whose data it captured.
+		insert_old_success_run(&mut conn, consumer, group, server, "snap-1", 2).await;
 		assert_eq!(
 			database::restore::sweep_restore_checks(&mut conn)
 				.await

@@ -402,7 +402,7 @@ async fn key_rotation_scenario() {
 			let server_id = uuid::Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
 			sql_query(
 				r#"
-				WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, type, device_id, machine_id)
+				WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, device_id, machine_id)
 				VALUES ($1, 'https://rotation-test.com', 'tamanu-facility', $2, $1)
 			"#,
 			)

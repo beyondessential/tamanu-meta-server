@@ -18,7 +18,7 @@ use std::{collections::BTreeMap, time::Duration};
 use anyhow::{Context, Result};
 use commons_servers::{backup_secrets::BackupSecrets, recovery_vault::Recipients};
 use database::{
-	ServerBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
+	MachineBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
 	applications::Application, server_groups::ServerGroup,
 };
 use jiff::Timestamp;
@@ -90,7 +90,7 @@ struct RecoverySnapshot {
 	taken_at: String,
 	groups: Vec<RecoveryGroup>,
 	applications: Vec<Application>,
-	enabled_capabilities: Vec<ServerBackupCapability>,
+	enabled_capabilities: Vec<MachineBackupCapability>,
 }
 
 #[derive(Serialize)]
@@ -169,7 +169,7 @@ pub async fn build_snapshot_json(
 		taken_at: now.to_string(),
 		groups: recovery_groups,
 		applications,
-		enabled_capabilities: ServerBackupCapability::list_enabled(db)
+		enabled_capabilities: MachineBackupCapability::list_enabled(db)
 			.await
 			.context("list capabilities")?,
 	};

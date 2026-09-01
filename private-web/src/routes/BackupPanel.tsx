@@ -864,7 +864,7 @@ function RunRow({ run, members }: { run: RecentRun; members: ServerInfo[] }) {
 					<TimeAgo timestamp={run.at} />
 					<SnapshotTakenCaption run={run} />
 				</TableCell>
-				<TableCell>{serverLabel(members, run.server_id)}</TableCell>
+				<TableCell>{serverLabel(members, run.machine_id)}</TableCell>
 				<TableCell>{run.type}</TableCell>
 				<TableCell>{run.purpose}</TableCell>
 				<TableCell>
@@ -1636,11 +1636,11 @@ function ServersPanel({
 	const restoreWindows =
 		stats.status === "ok" ? stats.data.restore_windows : [];
 	const restoreWindowFor = (serverId: string) =>
-		restoreWindows.find((w) => w.server_id === serverId);
+		restoreWindows.find((w) => w.machine_id === serverId);
 
 	const onAllowRestore = async (serverId: string) => {
 		try {
-			await allowRestore.call({ server_id: serverId });
+			await allowRestore.call({ machine_id: serverId });
 			stats.reload();
 		} catch {
 			/* surfaced via allowRestore.error */
@@ -1648,7 +1648,7 @@ function ServersPanel({
 	};
 	const onDisallowRestore = async (serverId: string) => {
 		try {
-			await disallowRestore.call({ server_id: serverId });
+			await disallowRestore.call({ machine_id: serverId });
 			stats.reload();
 		} catch {
 			/* surfaced via disallowRestore.error */
@@ -1713,24 +1713,24 @@ function ServersPanel({
 	const typesForServer = (serverId: string): string[] => {
 		const set = new Set<string>();
 		for (const c of capabilities) {
-			if (c.server_id === serverId) set.add(c.type);
+			if (c.machine_id === serverId) set.add(c.type);
 		}
 		for (const p of pending) {
-			if (p.server_id === serverId && p.purpose === "backup") set.add(p.type);
+			if (p.machine_id === serverId && p.purpose === "backup") set.add(p.type);
 		}
 		return [...set].sort();
 	};
 	const pendingFor = (serverId: string, type: string) =>
 		pending.find(
 			(p) =>
-				p.server_id === serverId && p.type === type && p.purpose === "backup",
+				p.machine_id === serverId && p.type === type && p.purpose === "backup",
 		);
 	const capFor = (serverId: string, type: string) =>
-		capabilities.find((c) => c.server_id === serverId && c.type === type);
+		capabilities.find((c) => c.machine_id === serverId && c.type === type);
 
 	const onRequest = async (serverId: string, type: string) => {
 		try {
-			await requestNow.call({ server_id: serverId, type, purpose: "backup" });
+			await requestNow.call({ machine_id: serverId, type, purpose: "backup" });
 			stats.reload();
 		} catch {
 			/* surfaced via requestNow.error */
@@ -1738,7 +1738,7 @@ function ServersPanel({
 	};
 	const onCancel = async (serverId: string, type: string) => {
 		try {
-			await cancel.call({ server_id: serverId, type, purpose: "backup" });
+			await cancel.call({ machine_id: serverId, type, purpose: "backup" });
 			stats.reload();
 		} catch {
 			/* surfaced via cancel.error */

@@ -19,7 +19,7 @@ async fn self_endpoint_returns_server_and_device_ids() {
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = Uuid::new_v4();
 			sql_query(
-				"WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, type, device_id, machine_id) \
+				"WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, device_id, machine_id) \
 				 VALUES ($1, 'https://self.example.com', 'tamanu-central', $2, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)

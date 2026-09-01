@@ -55,7 +55,6 @@ use jiff::{SignedDuration, Timestamp};
 use uuid::Uuid;
 
 use crate::{
-	applications::Application,
 	backup::{
 		refs,
 		staleness::{ScanRow, label_list},
@@ -93,7 +92,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 	}
 	let now = Timestamp::now();
 
-	// Snapshot info per (server_id, type) across the scanned groups.
+	// Snapshot info per (machine_id, type) across the scanned groups.
 	let group_ids: Vec<Uuid> = {
 		let mut s: std::collections::HashSet<Uuid> = rows.iter().map(|r| r.group_id).collect();
 		s.drain().collect()
@@ -141,13 +140,14 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 	// rather than per finding.
 	let labels: HashMap<Uuid, String> = {
 		let ids: Vec<Uuid> = {
-			let mut s: std::collections::HashSet<Uuid> = rows.iter().map(|r| r.server_id).collect();
+			let mut s: std::collections::HashSet<Uuid> =
+				rows.iter().map(|r| r.machine_id).collect();
 			s.drain().collect()
 		};
-		Application::get_by_ids(db, &ids)
+		crate::machines::Machine::get_many(db, &ids)
 			.await?
 			.iter()
-			.map(|s| (s.id, crate::backup::staleness::server_label(s)))
+			.map(|m| (m.id, crate::backup::staleness::machine_label(m)))
 			.collect()
 	};
 
@@ -167,40 +167,40 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 	let mut order: Vec<Uuid> = Vec::new();
 	for row in rows {
 		by_server
-			.entry(row.server_id)
+			.entry(row.machine_id)
 			.or_insert_with(|| {
-				order.push(row.server_id);
+				order.push(row.machine_id);
 				Vec::new()
 			})
 			.push(row);
 	}
 
 	let mut filed = 0usize;
-	for server_id in order {
-		let server_rows = &by_server[&server_id];
+	for machine_id in order {
+		let server_rows = &by_server[&machine_id];
 		let device_id = server_rows.iter().find_map(|r| r.device_id);
 		// A scanned server always exists (the scan joins applications), so the
 		// fallback is unreachable in practice — it just avoids a panic path.
 		let label = labels
-			.get(&server_id)
+			.get(&machine_id)
 			.cloned()
-			.unwrap_or_else(|| server_id.to_string());
+			.unwrap_or_else(|| machine_id.to_string());
 
-		let missing_open = crate::backup::staleness::open_server_issue_active(
+		let missing_open = crate::backup::staleness::open_machine_issue_active(
 			db,
-			server_id,
+			machine_id,
 			refs::RECONCILE_MISSING,
 		)
 		.await?;
-		let gap_open = crate::backup::staleness::open_server_issue_active(
+		let gap_open = crate::backup::staleness::open_machine_issue_active(
 			db,
-			server_id,
+			machine_id,
 			refs::RECONCILE_REPORT_GAP,
 		)
 		.await?;
-		let size_open = crate::backup::staleness::open_server_issue_active(
+		let size_open = crate::backup::staleness::open_machine_issue_active(
 			db,
-			server_id,
+			machine_id,
 			refs::RECONCILE_SIZE_MISMATCH,
 		)
 		.await?;
@@ -208,9 +208,9 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 		// it is never "active" and there is no open finding to key off. What it
 		// leaves behind instead is an observation, which has to be brought up to
 		// date once the repo catches up.
-		let recency_recorded = crate::backup::staleness::server_check_observed_degraded(
+		let recency_recorded = crate::backup::staleness::machine_check_observed_degraded(
 			db,
-			server_id,
+			machine_id,
 			refs::RECONCILE_RECENCY,
 		)
 		.await?;
@@ -231,11 +231,11 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 			let report_fresh = row
 				.last_success_at
 				.is_some_and(|t| now.duration_since(t) <= grace);
-			let snap = snaps.get(&(row.server_id, row.r#type.clone()));
+			let snap = snaps.get(&(row.machine_id, row.r#type.clone()));
 			let snapshot_fresh = snap
 				.and_then(|s| s.latest_snapshot_at)
 				.is_some_and(|t| now.duration_since(t) <= grace);
-			let run = latest_success.get(&(row.server_id, row.r#type.clone()));
+			let run = latest_success.get(&(row.machine_id, row.r#type.clone()));
 
 			// The device named the snapshot it created and the repo doesn't hold
 			// it. Skipped unless every condition for the absence to *mean*
@@ -326,7 +326,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 
 			// Size discrepancy: orthogonal to freshness. Compare the latest run
 			// that has both a reported and an observed size.
-			let sizes = sized.get(&(row.server_id, row.r#type.clone()));
+			let sizes = sized.get(&(row.machine_id, row.r#type.clone()));
 			let mismatch = sizes.is_some_and(|(reported, observed)| reported != observed);
 			any_size |= mismatch;
 			let mut size_detail = serde_json::Map::new();
@@ -355,7 +355,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				db,
 				InstancedCheckFiling {
 					source: crate::statuses::CANOPY_SOURCE,
-					scope: Scope::Application(server_id),
+					scope: Scope::Machine(machine_id),
 					device_id,
 					check: refs::RECONCILE_MISSING,
 					title: None,
@@ -391,7 +391,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				db,
 				InstancedCheckFiling {
 					source: crate::statuses::CANOPY_SOURCE,
-					scope: Scope::Application(server_id),
+					scope: Scope::Machine(machine_id),
 					device_id,
 					check: refs::RECONCILE_RECENCY,
 					title: None,
@@ -426,7 +426,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				db,
 				InstancedCheckFiling {
 					source: crate::statuses::CANOPY_SOURCE,
-					scope: Scope::Application(server_id),
+					scope: Scope::Machine(machine_id),
 					device_id,
 					check: refs::RECONCILE_REPORT_GAP,
 					title: None,
@@ -458,7 +458,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 				db,
 				InstancedCheckFiling {
 					source: crate::statuses::CANOPY_SOURCE,
-					scope: Scope::Application(server_id),
+					scope: Scope::Machine(machine_id),
 					device_id,
 					check: refs::RECONCILE_SIZE_MISMATCH,
 					title: None,
@@ -487,7 +487,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 	Ok(filed)
 }
 
-/// Raw snapshot row: `(server_id, type, latest_snapshot_at, observed_at)`.
+/// Raw snapshot row: `(machine_id, type, latest_snapshot_at, observed_at)`.
 type SnapshotRow = (
 	Option<Uuid>,
 	Option<String>,
@@ -495,8 +495,8 @@ type SnapshotRow = (
 	jiff_diesel::Timestamp,
 );
 
-/// Latest snapshot + observed-at per `(server_id, type)` for the given groups.
-/// Rows with a NULL `server_id` (sources we can't attribute to a server) are
+/// Latest snapshot + observed-at per `(machine_id, type)` for the given groups.
+/// Rows with a NULL `machine_id` (sources we can't attribute to a server) are
 /// skipped.
 async fn snapshot_info(
 	db: &mut AsyncPgConnection,
@@ -510,9 +510,9 @@ async fn snapshot_info(
 
 	let rows: Vec<SnapshotRow> = s::table
 		.filter(s::group_id.eq_any(group_ids))
-		.filter(s::server_id.is_not_null())
+		.filter(s::machine_id.is_not_null())
 		.select((
-			s::server_id,
+			s::machine_id,
 			s::type_,
 			s::latest_snapshot_at,
 			s::observed_at,
@@ -521,15 +521,15 @@ async fn snapshot_info(
 		.await?;
 
 	let mut out: HashMap<(Uuid, BackupType), SnapInfo> = HashMap::new();
-	for (server_id, ty, latest, observed) in rows {
-		let (Some(server_id), Some(ty)) = (server_id, ty) else {
+	for (machine_id, ty, latest, observed) in rows {
+		let (Some(machine_id), Some(ty)) = (machine_id, ty) else {
 			continue;
 		};
 		let info = SnapInfo {
 			latest_snapshot_at: latest.map(Timestamp::from),
 			observed_at: Timestamp::from(observed),
 		};
-		out.entry((server_id, BackupType::from(ty)))
+		out.entry((machine_id, BackupType::from(ty)))
 			.and_modify(|e| {
 				// Keep the freshest snapshot row for the pair.
 				if info.observed_at > e.observed_at {

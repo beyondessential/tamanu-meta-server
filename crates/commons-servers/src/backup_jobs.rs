@@ -12,7 +12,7 @@ use commons_types::{
 	server::{app_type::ApplicationType, rank::ServerRank, tags::TagMap},
 };
 use database::{
-	BackupRequest, BackupRun, BackupTypeDefault, ServerBackupCapability, ServerGroupBackupConfig,
+	BackupRequest, BackupRun, BackupTypeDefault, MachineBackupCapability, ServerGroupBackupConfig,
 	ServerGroupBackupSchedule,
 };
 use diesel_async::AsyncPgConnection;
@@ -122,7 +122,7 @@ pub async fn effective_retention_for_group(
 	db: &mut AsyncPgConnection,
 	group_id: Uuid,
 ) -> Result<Vec<(BackupType, RetentionPolicy)>> {
-	let types = ServerBackupCapability::declared_types_for_group(db, group_id).await?;
+	let types = MachineBackupCapability::declared_types_for_group(db, group_id).await?;
 	let mut out = Vec::with_capacity(types.len());
 	for ty in types {
 		let override_ = ServerGroupBackupSchedule::get(db, group_id, &ty)
@@ -157,7 +157,7 @@ pub async fn effective_interval_for_group(
 	db: &mut AsyncPgConnection,
 	group_id: Uuid,
 ) -> Result<Option<Duration>> {
-	let types = ServerBackupCapability::enabled_types_for_group(db, group_id).await?;
+	let types = MachineBackupCapability::enabled_types_for_group(db, group_id).await?;
 	let mut min: Option<Duration> = None;
 	for ty in types {
 		if let Some(d) = effective_interval_for_type(db, group_id, &ty).await? {
@@ -178,9 +178,9 @@ pub async fn effective_interval_for_group(
 /// successful run reports (advancing the staleness anchor), and a one-off until
 /// the run is reported (which clears the request). The device is responsible
 /// for not starting a second run while one is already in flight.
-pub async fn backups_due_now_for_server(
+pub async fn backups_due_now_for_machine(
 	db: &mut AsyncPgConnection,
-	server_id: Uuid,
+	machine_id: Uuid,
 	group_id: Uuid,
 	now: Timestamp,
 ) -> Result<Vec<BackupType>> {
@@ -194,13 +194,13 @@ pub async fn backups_due_now_for_server(
 
 	let mut due: std::collections::HashSet<BackupType> = std::collections::HashSet::new();
 
-	for req in BackupRequest::pending_for_server(db, server_id).await? {
+	for req in BackupRequest::pending_for_machine(db, machine_id).await? {
 		if req.purpose == BackupPurpose::Backup {
 			due.insert(req.r#type);
 		}
 	}
 
-	for cap in ServerBackupCapability::list_for_server(db, server_id).await? {
+	for cap in MachineBackupCapability::list_for_machine(db, machine_id).await? {
 		if !cap.enabled {
 			continue;
 		}
@@ -210,7 +210,7 @@ pub async fn backups_due_now_for_server(
 		// Due-ness is measured from the data's own moment, matching staleness
 		// detection — otherwise a server could be flagged stale without ever being
 		// asked to back up.
-		let last = BackupRun::latest_success_for_server(db, server_id, &cap.r#type)
+		let last = BackupRun::latest_success_for_machine(db, machine_id, &cap.r#type)
 			.await?
 			.map(|r| r.anchor());
 		if is_due(interval, last, now) {

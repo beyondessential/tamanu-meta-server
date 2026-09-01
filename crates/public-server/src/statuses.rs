@@ -8,7 +8,7 @@ use axum::{
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::{
-	backup_jobs::backups_due_now_for_server, device_auth::ServerDevice, headers::VersionHeader,
+	backup_jobs::backups_due_now_for_machine, device_auth::ServerDevice, headers::VersionHeader,
 };
 use commons_types::{
 	backup::BackupType,
@@ -346,7 +346,7 @@ async fn create(
 	// an ungrouped server or one whose group has no `ready` backup config.
 	let backup_now = match server.group_id {
 		Some(group_id) if source == DEFAULT_SOURCE => {
-			backups_due_now_for_server(&mut db, server_id, group_id, Timestamp::now()).await?
+			backups_due_now_for_machine(&mut db, server_id, group_id, Timestamp::now()).await?
 		}
 		_ => Vec::new(),
 	};

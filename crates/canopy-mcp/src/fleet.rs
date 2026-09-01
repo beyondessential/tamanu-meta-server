@@ -89,8 +89,11 @@ struct BackupProblem {
 	kind: &'static str,
 	severity: &'static str,
 	group_id: Uuid,
+	/// The box the problem is about. A backup is a machine's, so a box shared
+	/// by two workloads reports one problem rather than one per workload.
+	// spec: BAK
 	#[serde(skip_serializing_if = "Option::is_none")]
-	server_id: Option<Uuid>,
+	machine_id: Option<Uuid>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	r#type: Option<String>,
 	detail: String,
@@ -210,7 +213,7 @@ impl CanopyMcp {
 					kind: "overdue_backup",
 					severity: "error",
 					group_id: row.group_id,
-					server_id: Some(row.server_id),
+					machine_id: Some(row.machine_id),
 					r#type: Some(row.r#type.to_string()),
 					detail: format!(
 						"no successful {} backup within its grace window",
@@ -222,7 +225,7 @@ impl CanopyMcp {
 					kind: "never_backed_up",
 					severity: "warning",
 					group_id: row.group_id,
-					server_id: Some(row.server_id),
+					machine_id: Some(row.machine_id),
 					r#type: Some(row.r#type.to_string()),
 					detail: format!("never reported a successful {} backup", row.r#type),
 					since: None,
@@ -244,7 +247,7 @@ impl CanopyMcp {
 					kind: "provisioning_error",
 					severity: "error",
 					group_id: c.group_id,
-					server_id: None,
+					machine_id: None,
 					r#type: None,
 					detail: err.clone(),
 					since: None,
@@ -272,7 +275,7 @@ impl CanopyMcp {
 					kind: "failed_run",
 					severity: "warning",
 					group_id: c.group_id,
-					server_id: run.server_id,
+					machine_id: run.machine_id,
 					r#type: Some(run.r#type.to_string()),
 					detail: run
 						.error
@@ -301,7 +304,7 @@ impl CanopyMcp {
 						kind: "stuck_maintenance",
 						severity: "warning",
 						group_id: c.group_id,
-						server_id: None,
+						machine_id: None,
 						r#type: None,
 						detail: format!(
 							"{} maintenance still running since {}",

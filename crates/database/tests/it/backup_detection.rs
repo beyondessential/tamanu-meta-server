@@ -22,8 +22,8 @@ use database::diesel_async::AsyncPgConnection;
 use database::pg_duration::PgDuration;
 use database::{
 	BackupConfigStatus, BackupPurpose, BackupRepoObservedSnapshot, BackupRepoSnapshot, BackupRun,
-	NewBackupRun, NewObservedSnapshot, NewServerGroupBackupConfig, NewServerGroupBackupSchedule,
-	RunOutcome, ServerBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
+	MachineBackupCapability, NewBackupRun, NewObservedSnapshot, NewServerGroupBackupConfig,
+	NewServerGroupBackupSchedule, RunOutcome, ServerGroupBackupConfig, ServerGroupBackupSchedule,
 };
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::RunQueryDsl;
@@ -47,26 +47,31 @@ async fn insert_group(conn: &mut AsyncPgConnection, name: &str) -> Uuid {
 		.id
 }
 
+/// A box with one workload on it, returning the *machine*. The staleness scan
+/// is rooted at the box, so the monitoring gate under test is the box's.
+// spec: BAK
 async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid, is_monitored: bool) -> Uuid {
-	let machine = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
-		.bind::<sql_types::Uuid, _>(group_id)
-		.get_result::<RowId>(conn)
-		.await
-		.expect("insert machine")
-		.id;
+	let machine =
+		sql_query("INSERT INTO machines (group_id, is_monitored) VALUES ($1, $2) RETURNING id")
+			.bind::<sql_types::Uuid, _>(group_id)
+			.bind::<sql_types::Bool, _>(is_monitored)
+			.get_result::<RowId>(conn)
+			.await
+			.expect("insert machine")
+			.id;
 	let host = format!("http://test.invalid/{}", Uuid::new_v4());
 	sql_query(
 		"INSERT INTO applications (host, type, group_id, is_monitored, machine_id) \
-		 VALUES ($1, 'tamanu-central', $2, $3, $4) RETURNING id",
+		 VALUES ($1, 'tamanu-central', $2, $3, $4)",
 	)
 	.bind::<sql_types::Text, _>(host)
 	.bind::<sql_types::Uuid, _>(group_id)
 	.bind::<sql_types::Bool, _>(is_monitored)
 	.bind::<sql_types::Uuid, _>(machine)
-	.get_result::<RowId>(conn)
+	.execute(conn)
 	.await
-	.expect("insert server")
-	.id
+	.expect("insert application");
+	machine
 }
 
 async fn insert_device(conn: &mut AsyncPgConnection) -> Uuid {
@@ -159,11 +164,11 @@ async fn insert_schedule(
 	.expect("insert schedule");
 }
 
-async fn enable_capability(conn: &mut AsyncPgConnection, server_id: Uuid, ty: &BackupType) {
-	ServerBackupCapability::register(conn, server_id, ty, true)
+async fn enable_capability(conn: &mut AsyncPgConnection, machine_id: Uuid, ty: &BackupType) {
+	MachineBackupCapability::register(conn, machine_id, ty, true)
 		.await
 		.expect("register capability");
-	ServerBackupCapability::set_enabled(conn, server_id, ty, true)
+	MachineBackupCapability::set_enabled(conn, machine_id, ty, true)
 		.await
 		.expect("enable capability");
 }
@@ -173,7 +178,7 @@ async fn insert_backup_success_aged(
 	conn: &mut AsyncPgConnection,
 	device_id: Uuid,
 	group_id: Uuid,
-	server_id: Uuid,
+	machine_id: Uuid,
 	ty: &BackupType,
 	age: SignedDuration,
 ) {
@@ -184,7 +189,7 @@ async fn insert_backup_success_aged(
 			id,
 			device_id,
 			group_id,
-			server_id: Some(server_id),
+			machine_id: Some(machine_id),
 			r#type: ty.clone(),
 			purpose: BackupPurpose::Backup,
 			outcome: RunOutcome::Success,
@@ -218,7 +223,7 @@ async fn insert_backup_success_with_snapshot(
 	conn: &mut AsyncPgConnection,
 	device_id: Uuid,
 	group_id: Uuid,
-	server_id: Uuid,
+	machine_id: Uuid,
 	ty: &BackupType,
 	age: SignedDuration,
 	snapshot_id: &str,
@@ -230,7 +235,7 @@ async fn insert_backup_success_with_snapshot(
 			id,
 			device_id,
 			group_id,
-			server_id: Some(server_id),
+			machine_id: Some(machine_id),
 			r#type: ty.clone(),
 			purpose: BackupPurpose::Backup,
 			outcome: RunOutcome::Success,
@@ -309,16 +314,16 @@ struct IssueRow {
 	escalates: bool,
 }
 
-async fn server_issue(
+async fn machine_issue(
 	conn: &mut AsyncPgConnection,
-	server_id: Uuid,
+	machine_id: Uuid,
 	r#ref: &str,
 ) -> Option<IssueRow> {
 	sql_query(
 		"SELECT observed_result, effective_result, active, escalates FROM issues \
-		 WHERE application_id = $1 AND source = $2 AND \"ref\" = $3",
+		 WHERE machine_id = $1 AND source = $2 AND \"ref\" = $3",
 	)
-	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Uuid, _>(machine_id)
 	.bind::<sql_types::Text, _>(refs::CANOPY_SOURCE)
 	.bind::<sql_types::Text, _>(r#ref)
 	.get_result::<IssueRow>(conn)
@@ -335,14 +340,14 @@ struct MessageRow {
 /// The alert text of a server-scoped issue, for asserting on how it reads.
 async fn issue_message(
 	conn: &mut AsyncPgConnection,
-	server_id: Uuid,
+	machine_id: Uuid,
 	r#ref: &str,
 ) -> Option<String> {
 	sql_query(
 		"SELECT message FROM issues \
-		 WHERE application_id = $1 AND source = $2 AND \"ref\" = $3",
+		 WHERE machine_id = $1 AND source = $2 AND \"ref\" = $3",
 	)
-	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Uuid, _>(machine_id)
 	.bind::<sql_types::Text, _>(refs::CANOPY_SOURCE)
 	.bind::<sql_types::Text, _>(r#ref)
 	.get_result::<MessageRow>(conn)
@@ -361,14 +366,16 @@ struct NameRow {
 /// a check has exactly one entry rather than one per instance.
 async fn issues_matching(
 	conn: &mut AsyncPgConnection,
-	server_id: Uuid,
+	machine_id: Uuid,
 	pattern: &str,
 ) -> Vec<String> {
 	sql_query(
+		// A backup staleness check is the box's, so it files at machine scope.
+		// spec: BAK
 		"SELECT \"ref\" AS name FROM issues \
-		 WHERE application_id = $1 AND source = $2 AND \"ref\" LIKE $3 ORDER BY \"ref\"",
+		 WHERE machine_id = $1 AND source = $2 AND \"ref\" LIKE $3 ORDER BY \"ref\"",
 	)
-	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Uuid, _>(machine_id)
 	.bind::<sql_types::Text, _>(refs::CANOPY_SOURCE)
 	.bind::<sql_types::Text, _>(pattern)
 	.load::<NameRow>(conn)
@@ -405,14 +412,14 @@ struct DetailRow {
 /// A check's stored detail, which is where the per-instance results live.
 async fn issue_detail(
 	conn: &mut AsyncPgConnection,
-	server_id: Uuid,
+	machine_id: Uuid,
 	r#ref: &str,
 ) -> Option<serde_json::Value> {
 	sql_query(
 		"SELECT detail FROM issues \
-		 WHERE application_id = $1 AND source = $2 AND \"ref\" = $3",
+		 WHERE machine_id = $1 AND source = $2 AND \"ref\" = $3",
 	)
-	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Uuid, _>(machine_id)
 	.bind::<sql_types::Text, _>(refs::CANOPY_SOURCE)
 	.bind::<sql_types::Text, _>(r#ref)
 	.get_result::<DetailRow>(conn)
@@ -445,19 +452,19 @@ struct CountRow {
 }
 
 /// Count open (`left_at IS NULL`) incident links for the issue identified by
-/// `(server_id, ref)`. This isolates one per-server issue's incident
+/// `(machine_id, ref)`. This isolates one per-server issue's incident
 /// membership from any group-level incident on the same group.
-async fn server_issue_open_links(
+async fn machine_issue_open_links(
 	conn: &mut AsyncPgConnection,
-	server_id: Uuid,
+	machine_id: Uuid,
 	r#ref: &str,
 ) -> i64 {
 	sql_query(
 		"SELECT COUNT(*) AS n FROM incident_issues ii \
 		 JOIN issues i ON i.id = ii.issue_id \
-		 WHERE i.application_id = $1 AND i.\"ref\" = $2 AND ii.left_at IS NULL",
+		 WHERE i.machine_id = $1 AND i.\"ref\" = $2 AND ii.left_at IS NULL",
 	)
-	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Uuid, _>(machine_id)
 	.bind::<sql_types::Text, _>(r#ref)
 	.get_result::<CountRow>(conn)
 	.await
@@ -495,7 +502,7 @@ fn scan_row(
 	last_success_at: Option<Timestamp>,
 ) -> ScanRow {
 	ScanRow {
-		server_id: Uuid::nil(),
+		machine_id: Uuid::nil(),
 		group_id: Uuid::nil(),
 		device_id: None,
 		r#type: BackupType::TamanuPostgres,
@@ -600,10 +607,10 @@ async fn scan_includes_pair_inheriting_the_type_default_interval() {
 	TestDb::run(|mut conn, _url| async move {
 		let pg = BackupType::TamanuPostgres;
 		let group_id = insert_group(&mut conn, "inherits-default").await;
-		let server_id = insert_server(&mut conn, group_id, true).await;
+		let machine_id = insert_server(&mut conn, group_id, true).await;
 
 		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
-		enable_capability(&mut conn, server_id, &pg).await;
+		enable_capability(&mut conn, machine_id, &pg).await;
 		// Deliberately no `server_group_backup_schedule` row.
 
 		let rows = database::backup::staleness::scan_rows(&mut conn)
@@ -611,7 +618,7 @@ async fn scan_includes_pair_inheriting_the_type_default_interval() {
 			.expect("scan");
 		let row = rows
 			.iter()
-			.find(|r| r.server_id == server_id && r.r#type == pg)
+			.find(|r| r.machine_id == machine_id && r.r#type == pg)
 			.expect("pair inheriting the type default is in the scan set");
 		assert_eq!(
 			row.expected_interval,
@@ -629,10 +636,10 @@ async fn scan_excludes_pair_whose_override_makes_it_manual_only() {
 	TestDb::run(|mut conn, _url| async move {
 		let pg = BackupType::TamanuPostgres;
 		let group_id = insert_group(&mut conn, "manual-only").await;
-		let server_id = insert_server(&mut conn, group_id, true).await;
+		let machine_id = insert_server(&mut conn, group_id, true).await;
 
 		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
-		enable_capability(&mut conn, server_id, &pg).await;
+		enable_capability(&mut conn, machine_id, &pg).await;
 		ServerGroupBackupSchedule::upsert(
 			&mut conn,
 			NewServerGroupBackupSchedule {
@@ -650,7 +657,7 @@ async fn scan_excludes_pair_whose_override_makes_it_manual_only() {
 			.await
 			.expect("scan");
 		assert!(
-			!rows.iter().any(|r| r.server_id == server_id),
+			!rows.iter().any(|r| r.machine_id == machine_id),
 			"a manual-only pair has no cadence to be stale against",
 		);
 	})
@@ -667,18 +674,18 @@ async fn sweep_files_staleness_for_monitored_server_with_old_success() {
 		let pg = BackupType::TamanuPostgres;
 		let interval = SignedDuration::from_hours(12); // grace = 24h.
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id, true).await;
+		let machine_id = insert_server(&mut conn, group_id, true).await;
 		let device_id = insert_device(&mut conn).await;
 
 		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
 		insert_schedule(&mut conn, group_id, &pg, interval).await;
-		enable_capability(&mut conn, server_id, &pg).await;
+		enable_capability(&mut conn, machine_id, &pg).await;
 		// Latest success is 48h old → past the 24h grace → stale.
 		insert_backup_success_aged(
 			&mut conn,
 			device_id,
 			group_id,
-			server_id,
+			machine_id,
 			&pg,
 			SignedDuration::from_hours(48),
 		)
@@ -693,7 +700,7 @@ async fn sweep_files_staleness_for_monitored_server_with_old_success() {
 			.expect("sweep");
 
 		let sref = refs::STALENESS;
-		let issue = server_issue(&mut conn, server_id, sref)
+		let issue = machine_issue(&mut conn, machine_id, sref)
 			.await
 			.expect("staleness issue filed");
 		// The sweep still observes a failure; the shipped ceiling is what caps
@@ -708,7 +715,7 @@ async fn sweep_files_staleness_for_monitored_server_with_old_success() {
 		assert!(!issue.escalates);
 		assert!(issue.active, "staleness issue is active");
 		assert_eq!(
-			server_issue_open_links(&mut conn, server_id, sref).await,
+			machine_issue_open_links(&mut conn, machine_id, sref).await,
 			0,
 			"a warning does not open an incident on its own",
 		);
@@ -722,12 +729,12 @@ async fn sweep_files_never_for_server_that_never_succeeded() {
 		let pg = BackupType::TamanuPostgres;
 		let interval = SignedDuration::from_hours(12); // grace = 24h.
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id, true).await;
+		let machine_id = insert_server(&mut conn, group_id, true).await;
 
 		// Config created 72h ago, no success ever → anchor+grace exceeded.
 		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
 		insert_schedule(&mut conn, group_id, &pg, interval).await;
-		enable_capability(&mut conn, server_id, &pg).await;
+		enable_capability(&mut conn, machine_id, &pg).await;
 
 		let rows = database::backup::staleness::scan_rows(&mut conn)
 			.await
@@ -737,7 +744,7 @@ async fn sweep_files_never_for_server_that_never_succeeded() {
 			.expect("sweep");
 
 		let nref = refs::NEVER;
-		let issue = server_issue(&mut conn, server_id, nref)
+		let issue = machine_issue(&mut conn, machine_id, nref)
 			.await
 			.expect("never issue filed");
 		// Never-reported is a warning (so first-time setup doesn't open an
@@ -746,7 +753,7 @@ async fn sweep_files_never_for_server_that_never_succeeded() {
 		assert!(issue.active);
 		// Staleness ref must NOT be filed when there's never been a success.
 		assert!(
-			server_issue(&mut conn, server_id, refs::STALENESS)
+			machine_issue(&mut conn, machine_id, refs::STALENESS)
 				.await
 				.is_none(),
 			"never path does not also file backup-staleness",
@@ -766,17 +773,17 @@ async fn unmonitored_staleness_records_issue_but_no_incident_link() {
 		let interval = SignedDuration::from_hours(12);
 		let group_id = insert_group(&mut conn, "g").await;
 		// Unmonitored server.
-		let server_id = insert_server(&mut conn, group_id, false).await;
+		let machine_id = insert_server(&mut conn, group_id, false).await;
 		let device_id = insert_device(&mut conn).await;
 
 		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
 		insert_schedule(&mut conn, group_id, &pg, interval).await;
-		enable_capability(&mut conn, server_id, &pg).await;
+		enable_capability(&mut conn, machine_id, &pg).await;
 		insert_backup_success_aged(
 			&mut conn,
 			device_id,
 			group_id,
-			server_id,
+			machine_id,
 			&pg,
 			SignedDuration::from_hours(48),
 		)
@@ -791,13 +798,13 @@ async fn unmonitored_staleness_records_issue_but_no_incident_link() {
 
 		let sref = refs::STALENESS;
 		// Issue/event is still recorded unconditionally.
-		let issue = server_issue(&mut conn, server_id, sref)
+		let issue = machine_issue(&mut conn, machine_id, sref)
 			.await
 			.expect("issue still recorded for unmonitored server");
 		assert!(issue.active);
 		// ...but it must NOT contribute to any incident (is_monitored gate).
 		assert_eq!(
-			server_issue_open_links(&mut conn, server_id, sref).await,
+			machine_issue_open_links(&mut conn, machine_id, sref).await,
 			0,
 			"unmonitored staleness must not open/join an incident",
 		);
@@ -815,21 +822,21 @@ async fn reconcile_files_report_gap_when_snapshot_fresh_but_no_report() {
 		let pg = BackupType::TamanuPostgres;
 		let interval = SignedDuration::from_hours(12); // grace = 24h.
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id, true).await;
+		let machine_id = insert_server(&mut conn, group_id, true).await;
 
 		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
 		insert_schedule(&mut conn, group_id, &pg, interval).await;
-		enable_capability(&mut conn, server_id, &pg).await;
+		enable_capability(&mut conn, machine_id, &pg).await;
 
 		// No backup_runs success at all (report path silent), but a FRESH repo
 		// snapshot landed for this server's source → report-gap.
-		let source = format!("canopy@{server_id}:/data");
+		let source = format!("canopy@{machine_id}:/data");
 		let fresh_snap = Timestamp::now() - SignedDuration::from_hours(2);
 		BackupRepoSnapshot::upsert(
 			&mut conn,
 			group_id,
 			&source,
-			Some(server_id),
+			Some(machine_id),
 			Some(&pg),
 			Some(fresh_snap),
 		)
@@ -844,7 +851,7 @@ async fn reconcile_files_report_gap_when_snapshot_fresh_but_no_report() {
 			.expect("reconcile sweep");
 
 		let gref = refs::RECONCILE_REPORT_GAP;
-		let issue = server_issue(&mut conn, server_id, gref)
+		let issue = machine_issue(&mut conn, machine_id, gref)
 			.await
 			.expect("report-gap issue filed");
 		assert_eq!(
@@ -855,7 +862,7 @@ async fn reconcile_files_report_gap_when_snapshot_fresh_but_no_report() {
 		assert!(issue.active);
 		// Warning never opens an incident on its own.
 		assert_eq!(
-			server_issue_open_links(&mut conn, server_id, gref).await,
+			machine_issue_open_links(&mut conn, machine_id, gref).await,
 			0,
 			"Warning report-gap does not open an incident by itself",
 		);
@@ -872,19 +879,19 @@ async fn reconcile_files_missing_when_the_reported_snapshot_is_absent_from_the_r
 		let pg = BackupType::TamanuPostgres;
 		let interval = SignedDuration::from_hours(12);
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id, true).await;
+		let machine_id = insert_server(&mut conn, group_id, true).await;
 		let device_id = insert_device(&mut conn).await;
 
 		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
 		insert_schedule(&mut conn, group_id, &pg, interval).await;
-		enable_capability(&mut conn, server_id, &pg).await;
+		enable_capability(&mut conn, machine_id, &pg).await;
 
 		// A recent run naming the snapshot it cut...
 		insert_backup_success_with_snapshot(
 			&mut conn,
 			device_id,
 			group_id,
-			server_id,
+			machine_id,
 			&pg,
 			SignedDuration::from_hours(2),
 			"snap-reported",
@@ -902,7 +909,7 @@ async fn reconcile_files_missing_when_the_reported_snapshot_is_absent_from_the_r
 			.expect("reconcile sweep");
 
 		let mref = refs::RECONCILE_MISSING;
-		let issue = server_issue(&mut conn, server_id, mref)
+		let issue = machine_issue(&mut conn, machine_id, mref)
 			.await
 			.expect("reconcile-missing issue filed against the server it concerns");
 		assert_eq!(issue.observed_result.as_deref(), Some("warning"));
@@ -917,19 +924,19 @@ async fn reconcile_files_missing_when_the_reported_snapshot_is_absent_from_the_r
 			"the finding is about one server, not the group",
 		);
 		assert_eq!(
-			server_issue_open_links(&mut conn, server_id, mref).await,
+			machine_issue_open_links(&mut conn, machine_id, mref).await,
 			0,
 			"a warning does not open an incident on its own",
 		);
 
-		let message = issue_message(&mut conn, server_id, mref)
+		let message = issue_message(&mut conn, machine_id, mref)
 			.await
 			.expect("message recorded");
 		assert!(
 			message.contains("its snapshot is not in the repo"),
 			"the message describes the lookup that was made: {message}",
 		);
-		let detail = issue_detail(&mut conn, server_id, mref)
+		let detail = issue_detail(&mut conn, machine_id, mref)
 			.await
 			.expect("detail recorded");
 		assert_eq!(
@@ -950,19 +957,19 @@ async fn reconcile_files_missing_when_the_pair_has_no_snapshot_row_at_all() {
 		let pg = BackupType::TamanuPostgres;
 		let interval = SignedDuration::from_hours(12);
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id, true).await;
+		let machine_id = insert_server(&mut conn, group_id, true).await;
 		let other_id = insert_server(&mut conn, group_id, true).await;
 		let device_id = insert_device(&mut conn).await;
 
 		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
 		insert_schedule(&mut conn, group_id, &pg, interval).await;
-		enable_capability(&mut conn, server_id, &pg).await;
+		enable_capability(&mut conn, machine_id, &pg).await;
 
 		insert_backup_success_with_snapshot(
 			&mut conn,
 			device_id,
 			group_id,
-			server_id,
+			machine_id,
 			&pg,
 			SignedDuration::from_hours(2),
 			"snap-reported",
@@ -990,7 +997,7 @@ async fn reconcile_files_missing_when_the_pair_has_no_snapshot_row_at_all() {
 			.expect("reconcile sweep");
 
 		let mref = refs::RECONCILE_MISSING;
-		let issue = server_issue(&mut conn, server_id, mref)
+		let issue = machine_issue(&mut conn, machine_id, mref)
 			.await
 			.expect("reconcile-missing issue filed for the pair with no snapshot");
 		assert_eq!(issue.observed_result.as_deref(), Some("warning"));
@@ -1014,18 +1021,18 @@ async fn reconcile_leaves_a_healthy_server_alone_when_inspection_lags_the_backup
 		// Backs up every 6h; the repo is inspected weekly.
 		let interval = SignedDuration::from_hours(6);
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id, true).await;
+		let machine_id = insert_server(&mut conn, group_id, true).await;
 		let device_id = insert_device(&mut conn).await;
 
 		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(24 * 30)).await;
 		insert_schedule(&mut conn, group_id, &pg, interval).await;
-		enable_capability(&mut conn, server_id, &pg).await;
+		enable_capability(&mut conn, machine_id, &pg).await;
 
 		insert_backup_success_with_snapshot(
 			&mut conn,
 			device_id,
 			group_id,
-			server_id,
+			machine_id,
 			&pg,
 			SignedDuration::from_hours(2),
 			"snap-two-hours-ago",
@@ -1038,8 +1045,8 @@ async fn reconcile_leaves_a_healthy_server_alone_when_inspection_lags_the_backup
 		BackupRepoSnapshot::upsert(
 			&mut conn,
 			group_id,
-			&format!("canopy@{server_id}:/data"),
-			Some(server_id),
+			&format!("canopy@{machine_id}:/data"),
+			Some(machine_id),
 			Some(&pg),
 			Some(Timestamp::now() - three_days),
 		)
@@ -1064,13 +1071,13 @@ async fn reconcile_leaves_a_healthy_server_alone_when_inspection_lags_the_backup
 			.expect("reconcile sweep");
 
 		assert!(
-			server_issue(&mut conn, server_id, refs::RECONCILE_MISSING)
+			machine_issue(&mut conn, machine_id, refs::RECONCILE_MISSING)
 				.await
 				.is_none(),
 			"a slower inspection cadence is not evidence a backup is missing",
 		);
 		assert!(
-			server_issue(&mut conn, server_id, refs::RECONCILE_RECENCY)
+			machine_issue(&mut conn, machine_id, refs::RECONCILE_RECENCY)
 				.await
 				.is_none(),
 			"and nothing is recorded either: no inspection has looked since the run",
@@ -1087,18 +1094,18 @@ async fn reconcile_records_the_recency_observation_without_alerting() {
 		let pg = BackupType::TamanuPostgres;
 		let interval = SignedDuration::from_hours(12);
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id, true).await;
+		let machine_id = insert_server(&mut conn, group_id, true).await;
 		let device_id = insert_device(&mut conn).await;
 
 		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
 		insert_schedule(&mut conn, group_id, &pg, interval).await;
-		enable_capability(&mut conn, server_id, &pg).await;
+		enable_capability(&mut conn, machine_id, &pg).await;
 
 		insert_backup_success_with_snapshot(
 			&mut conn,
 			device_id,
 			group_id,
-			server_id,
+			machine_id,
 			&pg,
 			SignedDuration::from_hours(2),
 			"snap-reported",
@@ -1110,8 +1117,8 @@ async fn reconcile_records_the_recency_observation_without_alerting() {
 		BackupRepoSnapshot::upsert(
 			&mut conn,
 			group_id,
-			&format!("canopy@{server_id}:/data"),
-			Some(server_id),
+			&format!("canopy@{machine_id}:/data"),
+			Some(machine_id),
 			Some(&pg),
 			Some(Timestamp::now() - SignedDuration::from_hours(72)),
 		)
@@ -1127,7 +1134,7 @@ async fn reconcile_records_the_recency_observation_without_alerting() {
 			.expect("reconcile sweep");
 
 		let rref = refs::RECONCILE_RECENCY;
-		let issue = server_issue(&mut conn, server_id, rref)
+		let issue = machine_issue(&mut conn, machine_id, rref)
 			.await
 			.expect("the observation is recorded");
 		assert_eq!(
@@ -1141,10 +1148,13 @@ async fn reconcile_records_the_recency_observation_without_alerting() {
 			"a timestamp comparison never ranks as an alert",
 		);
 		assert!(!issue.active);
-		assert_eq!(server_issue_open_links(&mut conn, server_id, rref).await, 0,);
+		assert_eq!(
+			machine_issue_open_links(&mut conn, machine_id, rref).await,
+			0,
+		);
 
 		assert!(
-			server_issue(&mut conn, server_id, refs::RECONCILE_MISSING)
+			machine_issue(&mut conn, machine_id, refs::RECONCILE_MISSING)
 				.await
 				.is_none(),
 			"the repo holds the reported snapshot, so nothing is missing",
@@ -1155,8 +1165,8 @@ async fn reconcile_records_the_recency_observation_without_alerting() {
 		BackupRepoSnapshot::upsert(
 			&mut conn,
 			group_id,
-			&format!("canopy@{server_id}:/data"),
-			Some(server_id),
+			&format!("canopy@{machine_id}:/data"),
+			Some(machine_id),
 			Some(&pg),
 			Some(Timestamp::now() - SignedDuration::from_hours(1)),
 		)
@@ -1166,7 +1176,7 @@ async fn reconcile_records_the_recency_observation_without_alerting() {
 			.await
 			.expect("second reconcile sweep");
 		assert_eq!(
-			server_issue(&mut conn, server_id, rref)
+			machine_issue(&mut conn, machine_id, rref)
 				.await
 				.expect("still recorded")
 				.observed_result
@@ -1221,7 +1231,7 @@ async fn reconcile_missing_is_per_server_not_shared_across_the_group() {
 			.expect("reconcile sweep");
 
 		let mref = refs::RECONCILE_MISSING;
-		let broken = server_issue(&mut conn, broken_id, mref)
+		let broken = machine_issue(&mut conn, broken_id, mref)
 			.await
 			.expect("the server whose snapshot is missing holds the alert");
 		assert_eq!(broken.observed_result.as_deref(), Some("warning"));
@@ -1231,7 +1241,7 @@ async fn reconcile_missing_is_per_server_not_shared_across_the_group() {
 			"the healthy server in the same group must not clear it",
 		);
 		assert!(
-			server_issue(&mut conn, healthy_id, mref).await.is_none(),
+			machine_issue(&mut conn, healthy_id, mref).await.is_none(),
 			"the healthy server has no reconcile-missing alert of its own",
 		);
 	})
@@ -1245,24 +1255,25 @@ async fn reconcile_missing_names_the_server_rather_than_its_id() {
 		let pg = BackupType::TamanuPostgres;
 		let interval = SignedDuration::from_hours(12);
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id, true).await;
+		let machine_id = insert_server(&mut conn, group_id, true).await;
 		let device_id = insert_device(&mut conn).await;
 
-		sql_query("UPDATE applications SET name = 'kotare-central' WHERE id = $1")
-			.bind::<sql_types::Uuid, _>(server_id)
+		// The message names the box, so that is what carries the name.
+		sql_query("UPDATE machines SET name = 'kotare-central' WHERE id = $1")
+			.bind::<sql_types::Uuid, _>(machine_id)
 			.execute(&mut conn)
 			.await
-			.expect("name the server");
+			.expect("name the machine");
 
 		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
 		insert_schedule(&mut conn, group_id, &pg, interval).await;
-		enable_capability(&mut conn, server_id, &pg).await;
+		enable_capability(&mut conn, machine_id, &pg).await;
 
 		insert_backup_success_with_snapshot(
 			&mut conn,
 			device_id,
 			group_id,
-			server_id,
+			machine_id,
 			&pg,
 			SignedDuration::from_hours(2),
 			"snap-reported",
@@ -1278,7 +1289,7 @@ async fn reconcile_missing_names_the_server_rather_than_its_id() {
 			.expect("reconcile sweep");
 
 		let mref = refs::RECONCILE_MISSING;
-		let message = issue_message(&mut conn, server_id, mref)
+		let message = issue_message(&mut conn, machine_id, mref)
 			.await
 			.expect("reconcile-missing issue filed");
 		assert!(
@@ -1286,7 +1297,7 @@ async fn reconcile_missing_names_the_server_rather_than_its_id() {
 			"message names the server: {message}",
 		);
 		assert!(
-			!message.contains(&server_id.to_string()),
+			!message.contains(&machine_id.to_string()),
 			"message does not fall back to the id: {message}",
 		);
 	})
@@ -1302,17 +1313,17 @@ async fn reconcile_skips_missing_when_the_group_was_never_inspected() {
 		let pg = BackupType::TamanuPostgres;
 		let interval = SignedDuration::from_hours(12);
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id, true).await;
+		let machine_id = insert_server(&mut conn, group_id, true).await;
 		let device_id = insert_device(&mut conn).await;
 
 		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
 		insert_schedule(&mut conn, group_id, &pg, interval).await;
-		enable_capability(&mut conn, server_id, &pg).await;
+		enable_capability(&mut conn, machine_id, &pg).await;
 		insert_backup_success_with_snapshot(
 			&mut conn,
 			device_id,
 			group_id,
-			server_id,
+			machine_id,
 			&pg,
 			SignedDuration::from_hours(2),
 			"snap-reported",
@@ -1334,13 +1345,13 @@ async fn reconcile_skips_missing_when_the_group_was_never_inspected() {
 			"an uninspected group must not be accused of losing backups",
 		);
 		assert!(
-			server_issue(&mut conn, server_id, refs::RECONCILE_MISSING)
+			machine_issue(&mut conn, machine_id, refs::RECONCILE_MISSING)
 				.await
 				.is_none(),
 			"and no per-server finding either",
 		);
 		assert!(
-			server_issue(&mut conn, server_id, refs::RECONCILE_RECENCY)
+			machine_issue(&mut conn, machine_id, refs::RECONCILE_RECENCY)
 				.await
 				.is_none(),
 			"nor is a recency observation recorded from an inventory that doesn't exist",
@@ -1359,17 +1370,17 @@ async fn reconcile_leaves_an_open_missing_alone_when_the_inventory_goes_stale() 
 		let pg = BackupType::TamanuPostgres;
 		let interval = SignedDuration::from_hours(12);
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id, true).await;
+		let machine_id = insert_server(&mut conn, group_id, true).await;
 		let device_id = insert_device(&mut conn).await;
 
 		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
 		insert_schedule(&mut conn, group_id, &pg, interval).await;
-		enable_capability(&mut conn, server_id, &pg).await;
+		enable_capability(&mut conn, machine_id, &pg).await;
 		insert_backup_success_with_snapshot(
 			&mut conn,
 			device_id,
 			group_id,
-			server_id,
+			machine_id,
 			&pg,
 			SignedDuration::from_hours(2),
 			"snap-reported",
@@ -1387,7 +1398,7 @@ async fn reconcile_leaves_an_open_missing_alone_when_the_inventory_goes_stale() 
 			.await
 			.expect("first sweep");
 		assert!(
-			server_issue(&mut conn, server_id, refs::RECONCILE_MISSING)
+			machine_issue(&mut conn, machine_id, refs::RECONCILE_MISSING)
 				.await
 				.expect("finding raised")
 				.active,
@@ -1401,7 +1412,7 @@ async fn reconcile_leaves_an_open_missing_alone_when_the_inventory_goes_stale() 
 			.await
 			.expect("second sweep");
 		assert!(
-			server_issue(&mut conn, server_id, refs::RECONCILE_MISSING)
+			machine_issue(&mut conn, machine_id, refs::RECONCILE_MISSING)
 				.await
 				.expect("finding still present")
 				.active,
@@ -1417,20 +1428,20 @@ async fn reconcile_clears_report_gap_when_report_and_snapshot_agree() {
 		let pg = BackupType::TamanuPostgres;
 		let interval = SignedDuration::from_hours(12);
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id, true).await;
+		let machine_id = insert_server(&mut conn, group_id, true).await;
 		let device_id = insert_device(&mut conn).await;
 
 		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
 		insert_schedule(&mut conn, group_id, &pg, interval).await;
-		enable_capability(&mut conn, server_id, &pg).await;
+		enable_capability(&mut conn, machine_id, &pg).await;
 
-		let source = format!("canopy@{server_id}:/data");
+		let source = format!("canopy@{machine_id}:/data");
 		let fresh_snap = Timestamp::now() - SignedDuration::from_hours(2);
 		BackupRepoSnapshot::upsert(
 			&mut conn,
 			group_id,
 			&source,
-			Some(server_id),
+			Some(machine_id),
 			Some(&pg),
 			Some(fresh_snap),
 		)
@@ -1446,7 +1457,7 @@ async fn reconcile_clears_report_gap_when_report_and_snapshot_agree() {
 			.expect("first reconcile");
 		let gref = refs::RECONCILE_REPORT_GAP;
 		assert!(
-			server_issue(&mut conn, server_id, gref)
+			machine_issue(&mut conn, machine_id, gref)
 				.await
 				.expect("report-gap open")
 				.active,
@@ -1458,7 +1469,7 @@ async fn reconcile_clears_report_gap_when_report_and_snapshot_agree() {
 			&mut conn,
 			device_id,
 			group_id,
-			server_id,
+			machine_id,
 			&pg,
 			SignedDuration::from_hours(1),
 		)
@@ -1470,7 +1481,7 @@ async fn reconcile_clears_report_gap_when_report_and_snapshot_agree() {
 			.await
 			.expect("second reconcile");
 
-		let issue = server_issue(&mut conn, server_id, gref)
+		let issue = machine_issue(&mut conn, machine_id, gref)
 			.await
 			.expect("report-gap still present (now cleared)");
 		assert!(
@@ -1488,19 +1499,19 @@ async fn reconcile_files_size_mismatch_when_reported_size_differs_from_repo() {
 		let pg = BackupType::TamanuPostgres;
 		let interval = SignedDuration::from_hours(12);
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id, true).await;
+		let machine_id = insert_server(&mut conn, group_id, true).await;
 		let device_id = insert_device(&mut conn).await;
 
 		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
 		insert_schedule(&mut conn, group_id, &pg, interval).await;
-		enable_capability(&mut conn, server_id, &pg).await;
+		enable_capability(&mut conn, machine_id, &pg).await;
 
 		// A reported run (bytes_uploaded = 42, snapshot_id "kopia-snap")...
 		insert_backup_success_aged(
 			&mut conn,
 			device_id,
 			group_id,
-			server_id,
+			machine_id,
 			&pg,
 			SignedDuration::from_hours(2),
 		)
@@ -1522,7 +1533,7 @@ async fn reconcile_files_size_mismatch_when_reported_size_differs_from_repo() {
 			.expect("reconcile sweep");
 
 		let sref = refs::RECONCILE_SIZE_MISMATCH;
-		let issue = server_issue(&mut conn, server_id, sref)
+		let issue = machine_issue(&mut conn, machine_id, sref)
 			.await
 			.expect("size-mismatch issue filed");
 		assert_eq!(
@@ -1532,7 +1543,7 @@ async fn reconcile_files_size_mismatch_when_reported_size_differs_from_repo() {
 		);
 		assert!(issue.active);
 		assert_eq!(
-			server_issue_open_links(&mut conn, server_id, sref).await,
+			machine_issue_open_links(&mut conn, machine_id, sref).await,
 			0,
 			"Warning size-mismatch does not open an incident by itself",
 		);
@@ -1546,19 +1557,19 @@ async fn reconcile_clears_size_mismatch_when_latest_sizes_agree() {
 		let pg = BackupType::TamanuPostgres;
 		let interval = SignedDuration::from_hours(12);
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id, true).await;
+		let machine_id = insert_server(&mut conn, group_id, true).await;
 		let device_id = insert_device(&mut conn).await;
 
 		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
 		insert_schedule(&mut conn, group_id, &pg, interval).await;
-		enable_capability(&mut conn, server_id, &pg).await;
+		enable_capability(&mut conn, machine_id, &pg).await;
 
 		// An older run whose reported size disagrees with the repo → raises.
 		insert_backup_success_aged(
 			&mut conn,
 			device_id,
 			group_id,
-			server_id,
+			machine_id,
 			&pg,
 			SignedDuration::from_hours(5),
 		)
@@ -1578,7 +1589,7 @@ async fn reconcile_clears_size_mismatch_when_latest_sizes_agree() {
 			.expect("first reconcile");
 		let sref = refs::RECONCILE_SIZE_MISMATCH;
 		assert!(
-			server_issue(&mut conn, server_id, sref)
+			machine_issue(&mut conn, machine_id, sref)
 				.await
 				.expect("size-mismatch open")
 				.active,
@@ -1592,7 +1603,7 @@ async fn reconcile_clears_size_mismatch_when_latest_sizes_agree() {
 			&mut conn,
 			device_id,
 			group_id,
-			server_id,
+			machine_id,
 			&pg,
 			SignedDuration::from_hours(1),
 		)
@@ -1611,7 +1622,7 @@ async fn reconcile_clears_size_mismatch_when_latest_sizes_agree() {
 			.await
 			.expect("second reconcile");
 
-		let issue = server_issue(&mut conn, server_id, sref)
+		let issue = machine_issue(&mut conn, machine_id, sref)
 			.await
 			.expect("size-mismatch still present (now cleared)");
 		assert!(
@@ -1656,7 +1667,7 @@ async fn group_event_pages_even_when_all_members_unmonitored() {
 
 		assert_eq!(
 			issue.application_id, None,
-			"group-scoped issue has no server_id"
+			"group-scoped issue has no machine_id"
 		);
 		assert_eq!(issue.server_group_id, Some(group_id));
 		assert!(issue.active);
@@ -1992,13 +2003,13 @@ async fn staleness_is_one_check_per_server_with_the_types_as_instances() {
 		let fresh_type = BackupType::Custom("postgres-config".into());
 
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id, true).await;
+		let machine_id = insert_server(&mut conn, group_id, true).await;
 		let device_id = insert_device(&mut conn).await;
 		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(72)).await;
 
 		for ty in stale_types.iter().chain(std::iter::once(&fresh_type)) {
 			insert_schedule(&mut conn, group_id, ty, interval).await;
-			enable_capability(&mut conn, server_id, ty).await;
+			enable_capability(&mut conn, machine_id, ty).await;
 		}
 		// Three types last succeeded three days ago (stale), one an hour ago.
 		for ty in &stale_types {
@@ -2006,7 +2017,7 @@ async fn staleness_is_one_check_per_server_with_the_types_as_instances() {
 				&mut conn,
 				device_id,
 				group_id,
-				server_id,
+				machine_id,
 				ty,
 				SignedDuration::from_hours(72),
 			)
@@ -2016,7 +2027,7 @@ async fn staleness_is_one_check_per_server_with_the_types_as_instances() {
 			&mut conn,
 			device_id,
 			group_id,
-			server_id,
+			machine_id,
 			&fresh_type,
 			SignedDuration::from_hours(1),
 		)
@@ -2032,14 +2043,14 @@ async fn staleness_is_one_check_per_server_with_the_types_as_instances() {
 
 		// Exactly one staleness issue for the server, and no parameterised
 		// variants alongside it.
-		let issues = issues_matching(&mut conn, server_id, "backup-staleness%").await;
+		let issues = issues_matching(&mut conn, machine_id, "backup-staleness%").await;
 		assert_eq!(
 			issues,
 			vec![refs::STALENESS.to_string()],
 			"one staleness check per server, named for the condition only",
 		);
 
-		let issue = server_issue(&mut conn, server_id, refs::STALENESS)
+		let issue = machine_issue(&mut conn, machine_id, refs::STALENESS)
 			.await
 			.expect("staleness issue filed");
 		assert_eq!(issue.observed_result.as_deref(), Some("failed"));
@@ -2047,7 +2058,7 @@ async fn staleness_is_one_check_per_server_with_the_types_as_instances() {
 
 		// The message names the types it is stale for, and the detail carries
 		// them with their own results — the thing a name per type used to say.
-		let message = issue_message(&mut conn, server_id, refs::STALENESS)
+		let message = issue_message(&mut conn, machine_id, refs::STALENESS)
 			.await
 			.expect("message");
 		for ty in &stale_types {
@@ -2061,7 +2072,7 @@ async fn staleness_is_one_check_per_server_with_the_types_as_instances() {
 			"the fresh type is not named: {message}",
 		);
 
-		let detail = issue_detail(&mut conn, server_id, refs::STALENESS)
+		let detail = issue_detail(&mut conn, machine_id, refs::STALENESS)
 			.await
 			.expect("detail");
 		assert_eq!(detail["total"], 4, "four instances were considered");
@@ -2104,9 +2115,9 @@ async fn a_machine_onboarded_into_an_existing_config_is_not_stale_on_arrival() {
 	TestDb::run(|mut conn, _url| async move {
 		let pg = BackupType::TamanuPostgres;
 		let group_id = insert_group(&mut conn, "long-running").await;
-		let server_id = insert_server(&mut conn, group_id, true).await;
+		let machine_id = insert_server(&mut conn, group_id, true).await;
 		insert_ready_config(&mut conn, group_id, SignedDuration::from_hours(12)).await;
-		enable_capability(&mut conn, server_id, &pg).await;
+		enable_capability(&mut conn, machine_id, &pg).await;
 
 		// The configuration has existed for a month; the box joined an hour ago
 		// and has never backed up.
@@ -2120,9 +2131,9 @@ async fn a_machine_onboarded_into_an_existing_config_is_not_stale_on_arrival() {
 		.expect("age the config");
 		sql_query(
 			"UPDATE machines SET registered_at = NOW() - interval '1 hour' \
-			 WHERE id = (SELECT machine_id FROM applications WHERE id = $1)",
+			 WHERE id = $1",
 		)
-		.bind::<sql_types::Uuid, _>(server_id)
+		.bind::<sql_types::Uuid, _>(machine_id)
 		.execute(&mut conn)
 		.await
 		.expect("enrol the machine");
@@ -2132,7 +2143,7 @@ async fn a_machine_onboarded_into_an_existing_config_is_not_stale_on_arrival() {
 			.expect("scan");
 		let row = rows
 			.iter()
-			.find(|r| r.server_id == server_id && r.r#type == pg)
+			.find(|r| r.machine_id == machine_id && r.r#type == pg)
 			.expect("the pair is in the scan set");
 		assert_eq!(
 			row.classify(Timestamp::now(), false),
@@ -2160,45 +2171,48 @@ async fn a_second_application_does_not_restart_the_machines_anchor() {
 		// The box was enrolled a month ago and has never backed up.
 		sql_query(
 			"UPDATE machines SET registered_at = NOW() - interval '30 days' \
-			 WHERE id = (SELECT machine_id FROM applications WHERE id = $1)",
+			 WHERE id = $1",
 		)
 		.bind::<sql_types::Uuid, _>(first)
 		.execute(&mut conn)
 		.await
 		.expect("enrol the machine");
 
-		// A second workload lands on the same box today.
+		// A second workload lands on the same box today. It shares the box's
+		// group, which the trigger corrects on update rather than on insert.
 		let host = format!("http://test.invalid/{}", Uuid::new_v4());
-		// The group comes from the box, as it does for any caller: the trigger
-		// corrects an application's group on update, not on insert.
-		let second = sql_query(
+		sql_query(
 			"INSERT INTO applications (host, type, machine_id, group_id) \
-			 SELECT $1, 'tamanu-central', machine_id, group_id FROM applications WHERE id = $2 \
-			 RETURNING id",
+			 VALUES ($1, 'tamanu-central', $2, $3)",
 		)
 		.bind::<sql_types::Text, _>(host)
 		.bind::<sql_types::Uuid, _>(first)
-		.get_result::<RowId>(&mut conn)
+		.bind::<sql_types::Uuid, _>(group_id)
+		.execute(&mut conn)
 		.await
-		.expect("insert second application")
-		.id;
-		enable_capability(&mut conn, second, &pg).await;
+		.expect("insert second application");
 
 		let rows = database::backup::staleness::scan_rows(&mut conn)
 			.await
 			.expect("scan");
 		let now = Timestamp::now();
-		for id in [first, second] {
-			let row = rows
-				.iter()
-				.find(|r| r.server_id == id && r.r#type == pg)
-				.expect("both pairs are in the scan set");
-			assert_eq!(
-				row.classify(now, false),
-				StalenessVerdict::Never,
-				"the box has been failing to back up for a month; a new workload does not reset that",
-			);
-		}
+
+		// One row for the box, not one per workload: the capability is the
+		// box's, and a run captures the box's data once.
+		let for_box: Vec<_> = rows
+			.iter()
+			.filter(|r| r.machine_id == first && r.r#type == pg)
+			.collect();
+		assert_eq!(
+			for_box.len(),
+			1,
+			"a box carrying two workloads owes one backup, not two",
+		);
+		assert_eq!(
+			for_box[0].classify(now, false),
+			StalenessVerdict::Never,
+			"the box has been failing to back up for a month; a new workload does not reset that",
+		);
 	})
 	.await;
 }

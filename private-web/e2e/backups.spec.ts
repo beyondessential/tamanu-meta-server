@@ -180,7 +180,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		const group = await seedServerGroup(sql, { name: "sched-group" });
 		const server = await seedServer(sql, { groupId: group.id });
 		// An enabled tamanu-postgres capability makes the type appear in the panel.
-		await seedServerBackupCapability(sql, { serverId: server.id });
+		await seedServerBackupCapability(sql, { machineId: server.machineId });
 		await seedServerGroupBackupConfig(sql, {
 			groupId: group.id,
 			status: "ready",
@@ -220,7 +220,7 @@ test.describe("backups ready: stats + backup-now", () => {
 	}) => {
 		const group = await seedServerGroup(sql, { name: "danger-group" });
 		const server = await seedServer(sql, { groupId: group.id });
-		await seedServerBackupCapability(sql, { serverId: server.id });
+		await seedServerBackupCapability(sql, { machineId: server.machineId });
 		await seedServerGroupBackupConfig(sql, {
 			groupId: group.id,
 			status: "ready",
@@ -331,7 +331,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
-			serverId: server.id,
+			machineId: server.machineId,
 			outcome: "success",
 			bytesUploaded: 2048,
 		});
@@ -382,7 +382,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
-			serverId: server.id,
+			machineId: server.machineId,
 			outcome: "success",
 		});
 		await seedBackupCredentialIssuance(sql, {
@@ -441,7 +441,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
-			serverId: server.id,
+			machineId: server.machineId,
 			s3SentRawBytes: 100,
 			s3SentPayloadBytes: 90,
 			s3ReceivedRawBytes: 10,
@@ -450,7 +450,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
-			serverId: server.id,
+			machineId: server.machineId,
 			s3SentRawBytes: 200,
 			s3SentPayloadBytes: 180,
 			s3ReceivedRawBytes: 20,
@@ -460,7 +460,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
-			serverId: server.id,
+			machineId: server.machineId,
 			s3SentRawBytes: 9999,
 			s3ReceivedRawBytes: 9999,
 			reportedAgoSecs: 40 * 24 * 3600,
@@ -537,7 +537,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
-			serverId: server.id,
+			machineId: server.machineId,
 			outcome: "success",
 			bytesUploaded: 2048,
 			snapshotId: "k0123456789abcdef0123",
@@ -574,7 +574,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
-			serverId: server.id,
+			machineId: server.machineId,
 			outcome: "success",
 			bytesUploaded: null,
 			snapshotLogicalBytes: 4096,
@@ -607,7 +607,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
-			serverId: server.id,
+			machineId: server.machineId,
 			outcome: "failure",
 			error: "kopia: snapshot failed: disk quota exceeded",
 			bytesUploaded: null,
@@ -649,7 +649,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
-			serverId: server.id,
+			machineId: server.machineId,
 			outcome: "success",
 			bytesUploaded: null,
 			s3SentPayloadBytes: 2048, // 2.0 KiB → shown in the Transfer column
@@ -698,7 +698,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
-			serverId: server.id,
+			machineId: server.machineId,
 			outcome: "success",
 			bytesUploaded: 33554432, // 32.0 MiB snapshot
 			snapshotId: "kfedcba9876543210fedc",
@@ -712,7 +712,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
-			serverId: server.id,
+			machineId: server.machineId,
 			purpose: "restore",
 			outcome: "success",
 			bytesUploaded: null,
@@ -767,7 +767,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
-			serverId: server.id,
+			machineId: server.machineId,
 			outcome: "success",
 			bytesUploaded: 1048576, // 1.0 MiB snapshot size
 			s3SentPayloadBytes: 2048, // 2.0 KiB actually sent
@@ -801,7 +801,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		});
 		// A declared type is what enables the button (and names which type runs).
 		await seedServerBackupCapability(sql, {
-			serverId: server.id,
+			machineId: server.machineId,
 			type: "tamanu-postgres",
 		});
 
@@ -810,7 +810,7 @@ test.describe("backups ready: stats + backup-now", () => {
 
 		await expect(async () => {
 			const rows = await sql.query<{ type: string }>(
-				`SELECT type FROM backup_requests WHERE server_id = $1 AND purpose = 'backup'`,
+				`SELECT type FROM backup_requests WHERE machine_id = $1 AND purpose = 'backup'`,
 				[server.id],
 			);
 			expect(rows).toHaveLength(1);
@@ -822,7 +822,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		await page.getByRole("button", { name: /^cancel$/i }).click();
 		await expect(async () => {
 			const rows = await sql.query(
-				`SELECT 1 FROM backup_requests WHERE server_id = $1`,
+				`SELECT 1 FROM backup_requests WHERE machine_id = $1`,
 				[server.id],
 			);
 			expect(rows).toHaveLength(0);
@@ -863,11 +863,11 @@ test.describe("backups ready: stats + backup-now", () => {
 			status: "ready",
 		});
 		await seedServerBackupCapability(sql, {
-			serverId: server.id,
+			machineId: server.machineId,
 			type: "tamanu-postgres",
 		});
 		await seedServerBackupCapability(sql, {
-			serverId: server.id,
+			machineId: server.machineId,
 			type: "files",
 			enabled: false,
 		});
@@ -897,7 +897,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			.click();
 		await expect(async () => {
 			const rows = await sql.query<{ type: string }>(
-				`SELECT type FROM backup_requests WHERE server_id = $1 AND purpose = 'backup'`,
+				`SELECT type FROM backup_requests WHERE machine_id = $1 AND purpose = 'backup'`,
 				[server.id],
 			);
 			expect(rows).toHaveLength(1);
@@ -921,13 +921,13 @@ test.describe("backups ready: stats + backup-now", () => {
 			name: "srv-behind",
 			groupId: group.id,
 		});
-		await seedServerBackupCapability(sql, { serverId: ahead.id });
-		await seedServerBackupCapability(sql, { serverId: behind.id });
+		await seedServerBackupCapability(sql, { machineId: ahead.machineId });
+		await seedServerBackupCapability(sql, { machineId: behind.machineId });
 		// Only `ahead` has actually backed up.
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
-			serverId: ahead.id,
+			machineId: ahead.machineId,
 			outcome: "success",
 			bytesUploaded: 4096,
 			snapshotId: "kdeadbeef0123cafe",
@@ -960,7 +960,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			name: "linky-srv",
 			groupId: group.id,
 		});
-		await seedServerBackupCapability(sql, { serverId: server.id });
+		await seedServerBackupCapability(sql, { machineId: server.machineId });
 		await seedServerGroupBackupConfig(sql, {
 			groupId: group.id,
 			status: "ready",
@@ -1041,7 +1041,7 @@ test.describe("server backup capabilities", () => {
 			groupId: group.id,
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/machines/${server.machineId}`);
 		await expect(
 			page.getByText(/no backup types registered for this server/i),
 		).toBeVisible();
@@ -1060,19 +1060,19 @@ test.describe("server backup capabilities", () => {
 			deviceId: device.id,
 		});
 		await seedServerBackupCapability(sql, {
-			serverId: server.id,
+			machineId: server.machineId,
 			type: "tamanu-postgres",
 		});
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
-			serverId: server.id,
+			machineId: server.machineId,
 			outcome: "success",
 			bytesUploaded: 2048,
 			snapshotId: "k0123456789abcdef0123",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/machines/${server.machineId}`);
 		const backups = page.locator("#backups");
 		await expect(backups.getByText(/k0123456789/)).toBeVisible();
 		await expect(backups.getByText(/2\.0 KiB/)).toBeVisible();
@@ -1092,11 +1092,11 @@ test.describe("server backup capabilities", () => {
 			groupId: group.id,
 		});
 		await seedServerBackupCapability(sql, {
-			serverId: server.id,
+			machineId: server.machineId,
 			type: "tamanu-postgres",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/machines/${server.machineId}`);
 		const backups = page.locator("#backups");
 		await expect(backups.getByText(/no snapshot yet/i)).toBeVisible();
 	});
@@ -1113,7 +1113,7 @@ test.describe("server backup capabilities", () => {
 			groupId: group.id,
 			deviceId: device.id,
 		});
-		await seedServerBackupCapability(sql, { serverId: server.id });
+		await seedServerBackupCapability(sql, { machineId: server.machineId });
 		// Credentials issued 10 minutes ago, no run reported since → in flight.
 		await seedBackupCredentialIssuance(sql, {
 			deviceId: device.id,
@@ -1121,7 +1121,7 @@ test.describe("server backup capabilities", () => {
 			issuedAgoSecs: 600,
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/machines/${server.machineId}`);
 		const backups = page.locator("#backups");
 		await expect(backups.getByText(/backing up…/i)).toBeVisible();
 
@@ -1129,7 +1129,7 @@ test.describe("server backup capabilities", () => {
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
-			serverId: server.id,
+			machineId: server.machineId,
 			outcome: "success",
 			snapshotId: "kfreshsnap0001",
 		});
@@ -1149,11 +1149,11 @@ test.describe("server backup capabilities", () => {
 		});
 		// A declared capability, but the group has NO backup config.
 		await seedServerBackupCapability(sql, {
-			serverId: server.id,
+			machineId: server.machineId,
 			type: "tamanu-postgres",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/machines/${server.machineId}`);
 		const backups = page.locator("#backups");
 		// The message explains the toggles are inert.
 		await expect(backups.getByText(/aren't set up for this group/i)).toBeVisible();
@@ -1178,12 +1178,12 @@ test.describe("server backup capabilities", () => {
 			groupId: group.id,
 		});
 		await seedServerBackupCapability(sql, {
-			serverId: server.id,
+			machineId: server.machineId,
 			type: "tamanu-postgres",
 			enabled: false,
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/machines/${server.machineId}`);
 		const toggle = page.getByRole("switch", {
 			name: /enable tamanu-postgres backups/i,
 		});
@@ -1193,8 +1193,8 @@ test.describe("server backup capabilities", () => {
 
 		await expect(async () => {
 			const rows = await sql.query<{ enabled: boolean }>(
-				`SELECT enabled FROM server_backup_capabilities
-				 WHERE server_id = $1 AND type = 'tamanu-postgres'`,
+				`SELECT enabled FROM machine_backup_capabilities
+				 WHERE machine_id = $1 AND type = 'tamanu-postgres'`,
 				[server.id],
 			);
 			expect(rows[0]!.enabled).toBe(true);
@@ -1409,7 +1409,7 @@ test.describe("restore window", () => {
 			name: "restore-srv",
 			groupId: group.id,
 		});
-		await seedServerBackupCapability(sql, { serverId: server.id });
+		await seedServerBackupCapability(sql, { machineId: server.machineId });
 		await seedServerGroupBackupConfig(sql, {
 			groupId: group.id,
 			status: "ready",
@@ -1458,7 +1458,7 @@ test.describe("restore window", () => {
 			status: "ready",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/machines/${server.machineId}`);
 		const backups = page.locator("#backups");
 
 		await backups.getByRole("button", { name: /allow restores/i }).click();

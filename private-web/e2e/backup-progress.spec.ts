@@ -314,7 +314,7 @@ test.describe("in-flight backup progress", () => {
 			"progress-serverpage",
 		);
 		await seedServerBackupCapability(sql, {
-			serverId: server.id,
+			machineId: server.machineId,
 			type: "tamanu-postgres",
 			enabled: true,
 		});
@@ -354,7 +354,7 @@ test.describe("in-flight backup progress", () => {
 	}) => {
 		const { server } = await seedInFlightGroup(sql, "progress-serverpage-bare");
 		await seedServerBackupCapability(sql, {
-			serverId: server.id,
+			machineId: server.machineId,
 			type: "tamanu-postgres",
 			enabled: true,
 		});
@@ -386,7 +386,7 @@ test.describe("in-flight backup progress", () => {
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
-			serverId: server.id,
+			machineId: server.machineId,
 			outcome: "success",
 			bytesUploaded: 600_000_000_000,
 			reportedAgoSecs: 600,
@@ -420,7 +420,7 @@ test.describe("in-flight backup progress", () => {
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
-			serverId: server.id,
+			machineId: server.machineId,
 			outcome: "success",
 			bytesUploaded: 1_000,
 			reportedAgoSecs: 600,

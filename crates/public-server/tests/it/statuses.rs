@@ -223,7 +223,7 @@ async fn submit_status() {
 			let server_id = Uuid::new_v4();
 			sql_query(
 				r#"
-				WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, type, device_id, machine_id)
+				WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, device_id, machine_id)
 				VALUES ($1, 'https://test.example.com', 'tamanu-facility', $2, $1)
 			"#,
 			)
@@ -327,7 +327,7 @@ async fn submit_status_returns_effective_tags_matching_tags_endpoint() {
 			.await
 			.expect("insert group");
 			sql_query(
-				"WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, type, device_id, group_id, rank, tags, machine_id) \
+				"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, device_id, group_id, rank, tags, machine_id) \
 				 VALUES ($1, 'https://tagged.example.com', 'tamanu-central', $2, $3, 'production', \
 				 '{\"env\": \"server\"}'::jsonb, $1)",
 			)
@@ -655,7 +655,7 @@ async fn insert_health_test_server(
 	let server_id = Uuid::new_v4();
 	sql_query(
 		r#"
-		WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, type, device_id, group_id, machine_id)
+		WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, device_id, group_id, machine_id)
 		VALUES ($1, 'https://health.example.com', 'tamanu-central', $2, $3, $1)
 	"#,
 	)
@@ -2562,7 +2562,7 @@ async fn seed_server_in_group(
 		.expect("insert group");
 	let server_id = Uuid::new_v4();
 	sql_query(
-		"WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, type, device_id, group_id, machine_id) \
+		"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, device_id, group_id, machine_id) \
 		 VALUES ($1, 'https://srv.example.com', 'tamanu-central', $2, $3, $1)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
@@ -2597,7 +2597,7 @@ async fn enable_backup_capability(
 	r#type: &str,
 ) {
 	sql_query(
-		"INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES ($1, $2, true)",
+		"INSERT INTO machine_backup_capabilities (machine_id, type, enabled) VALUES ($1, $2, true)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Text, _>(r#type)
@@ -2682,7 +2682,7 @@ async fn status_no_backup_now_when_recent_success() {
 			seed_backup_config(&mut conn, group_id, "ready").await;
 			enable_backup_capability(&mut conn, server_id, "tamanu-postgres").await;
 			sql_query(
-				"INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, reported_at) \
+				"INSERT INTO backup_runs (id, device_id, group_id, machine_id, type, purpose, outcome, reported_at) \
 				 VALUES ($1, $2, $3, $4, 'tamanu-postgres', 'backup', 'success', now())",
 			)
 			.bind::<sql_types::Uuid, _>(Uuid::new_v4())
@@ -2739,7 +2739,7 @@ async fn status_one_off_request_surfaced_then_cleared_by_report() {
 			// No enabled capability: the type appears only via the explicit request,
 			// so clearing it (not a due schedule) is what empties the signal.
 			sql_query(
-				"INSERT INTO backup_requests (server_id, type, purpose) VALUES ($1, 'tamanu-postgres', 'backup')",
+				"INSERT INTO backup_requests (machine_id, type, purpose) VALUES ($1, 'tamanu-postgres', 'backup')",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
 			.execute(&mut conn)
@@ -3120,7 +3120,7 @@ async fn push_records_the_source_s_current_detail() {
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = Uuid::new_v4();
 			sql_query(
-				"WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, type, device_id, machine_id) \
+				"WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, device_id, machine_id) \
 				 VALUES ($1, 'https://detail.example.com', 'tamanu-central', $2, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)

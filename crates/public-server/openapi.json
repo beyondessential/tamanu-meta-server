@@ -141,7 +141,7 @@
             }
           },
           "412": {
-            "description": "Device is not bound to a live server.",
+            "description": "Device is not bound to a live machine.",
             "content": {
               "application/json": {
                 "schema": {
@@ -198,7 +198,7 @@
             }
           },
           "412": {
-            "description": "Device is not bound to a live server.",
+            "description": "Device is not bound to a live machine.",
             "content": {
               "application/json": {
                 "schema": {
@@ -258,7 +258,7 @@
             }
           },
           "412": {
-            "description": "Device is not bound to a live server.",
+            "description": "Device is not bound to a live machine.",
             "content": {
               "application/json": {
                 "schema": {
@@ -318,7 +318,7 @@
             }
           },
           "412": {
-            "description": "Device is not bound to a live server.",
+            "description": "Device is not bound to a live machine.",
             "content": {
               "application/json": {
                 "schema": {
@@ -365,7 +365,7 @@
             }
           },
           "412": {
-            "description": "Device is not bound to a live server.",
+            "description": "Device is not bound to a live machine.",
             "content": {
               "application/json": {
                 "schema": {

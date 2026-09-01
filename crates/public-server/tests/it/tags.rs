@@ -22,7 +22,7 @@ async fn tags_endpoint_returns_group_tags_when_server_has_none() {
 			.await
 			.unwrap();
 			sql_query(
-				"WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, type, device_id, group_id, machine_id) \
+				"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, device_id, group_id, machine_id) \
 				 VALUES ($1, 'https://t.example.com', 'tamanu-central', $2, $3, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -62,7 +62,7 @@ async fn tags_endpoint_overlays_server_tags_onto_group() {
 			.await
 			.unwrap();
 			sql_query(
-				"WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, type, device_id, group_id, tags, machine_id) \
+				"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, device_id, group_id, tags, machine_id) \
 				 VALUES ($1, 'https://o.example.com', 'tamanu-central', $2, $3, '{\"env\": \"server\", \"region\": \"au\"}'::jsonb, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -378,7 +378,7 @@ async fn tags_endpoint_no_billing_stage_when_server_unranked() {
 				.await
 				.unwrap();
 			sql_query(
-				"WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, type, device_id, group_id, machine_id) \
+				"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, device_id, group_id, machine_id) \
 				 VALUES ($1, 'https://ur.example.com', 'tamanu-central', $2, $3, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -410,7 +410,7 @@ async fn tags_endpoint_no_billing_labels_when_ungrouped() {
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = Uuid::new_v4();
 			sql_query(
-				"WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, type, device_id, machine_id) \
+				"WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, device_id, machine_id) \
 				 VALUES ($1, 'https://nb.example.com', 'tamanu-central', $2, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -515,7 +515,7 @@ async fn tags_endpoint_ungrouped_server_has_no_billing_product() {
 		"server",
 		async |mut conn, cert, device_id, public, _| {
 			sql_query(
-				"WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, type, device_id, machine_id) \
+				"WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, device_id, machine_id) \
 				 VALUES ($1, 'https://lone-lims.example.com', 'senaite', $2, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(Uuid::new_v4())
