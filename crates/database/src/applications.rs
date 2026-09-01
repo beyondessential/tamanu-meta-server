@@ -907,7 +907,7 @@ impl Application {
 		// keeps working across the transition; dropping either would break it
 		// silently rather than loudly. Deprecated: `canopy:type` is the one to
 		// read.
-		// spec: APP#where-a-type-comes-from
+		// spec: API#surfaces-the-definition-does-not-reach
 		tags.0.insert(
 			format!("{RESERVED_TAG_PREFIX}product"),
 			self.r#type.software().to_string(),

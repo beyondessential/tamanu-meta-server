@@ -29,6 +29,10 @@ An operator resolves that by archiving whichever of the two is wrong.
 
 A type appears among the reserved read-only tags in the effective tags Canopy returns to a reporter, so an agent can read the classification Canopy holds for the application it reports on (see [STA](../public-server/statuses.md)).
 
+The software the type is an instance of, and the role it plays within that software, are each served as a reserved tag of their own beside the type.
+Both are derived from the type rather than stored, so the three always agree.
+They are served because a tag key is not part of the API's schema and a consumer reading one cannot tell a withdrawn key from an absent value (see [API](../platform/api-compatibility.md)).
+
 ## Capabilities
 
 A type determines how Canopy treats an application's version, and whether the application is eligible for public listing.
@@ -79,7 +83,7 @@ Each grain's billing labels carry what that grain knows, and nothing inferred fr
 
 An application's labels name the software its type is an instance of, its stage from its own rank, and `billing.deployment` from its group's name.
 Cost allocation groups by software rather than by software-in-a-role, so a central and a facility of one deployment attribute to the same product.
-That label keeps its spelling because cloud cost allocation reads it, and every device reads its own effective tags (see [GRP](groups.md), "Naming").
+That label keeps its spelling because cloud cost allocation reads it, and every device reads its own effective tags.
 
 A machine's labels carry a stage and a group and no type, a box not being a piece of software.
 Its stage is the highest rank among the applications on it, so a box shared by a production and a test workload bills as production.

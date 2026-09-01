@@ -144,11 +144,11 @@ The bar is mechanical: `bestool-canopy` generated from the public OpenAPI spec
 before and after this branch must not be a semver-breaking change. These cases
 cover the runtime half of that, which the spec diff cannot see.
 
-- [x] The public spec loses no path, no schema, no field and no enum variant across the branch
-- [x] A restore worklist entry names the restored box as both `machine_id` and `server_id` (verifies spec: RST)
-- [x] A verification report naming only `server_id` settles its replica exactly as one naming `machine_id` (verifies spec: RST)
-- [x] A verification report naming both, or neither, is refused rather than resolved by preference (verifies spec: RST)
-- [x] An application's device tags carry `canopy:type` and both halves of the pair it replaced (verifies spec: APP)
+- [x] The public spec loses no path, no schema, no field and no enum variant across the branch (verifies spec: API)
+- [x] A restore worklist entry names the restored box as both `machine_id` and `server_id` (verifies spec: API, RST)
+- [x] A verification report naming only `server_id` settles its replica exactly as one naming `machine_id` (verifies spec: API, RST)
+- [x] A verification report naming both, or neither, is refused rather than resolved by preference (verifies spec: API, RST)
+- [x] An application's device tags carry `canopy:type` and both halves of the pair it replaced (verifies spec: API, APP)
 - [x] A Tamanu facility's `canopy:product` reads `tamanu`, so both Tamanu types still bill as one (verifies spec: APP)
 - [ ] A fielded bestool pushing the earlier server-scoped status shape still files its checks (verifies spec: STA)
 

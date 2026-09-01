@@ -46,9 +46,9 @@ The first draft overreached, asserting that a box is not in an environment. It i
 
 ## The wire may not break under it
 
-**The bar, stated mechanically:** the `bestool-canopy` crate, generated from the OpenAPI spec before and after this branch, must not be a semver-breaking change under `cargo-semver-checks`. That turns "keep the wire compatible" from a judgement into something checkable — a removed field, a removed endpoint, a dropped enum variant, or a newly required request field each shows up as a break.
+**The bar is now a standing rule**, in [API](../../specs/platform/api-compatibility.md) and in `AGENTS.md`: the `bestool-canopy` crate generated from the public OpenAPI spec after a change must not be a semver-breaking change against the one generated before it, unless the break has been coordinated. It came out of this card, but it governs every change, so it lives in the specs rather than dying with this plan.
 
-**The bar reaches the public spec.** That is what the agent-facing crate is generated from. The private API is the admin SPA's, versioned with the bundle it ships in, so it is not held to this — a distinction worth stating, since `product` and `kind` live there and nowhere on the public wire.
+**It reaches the public spec only.** That is what the agent-facing crate is generated from. The private API is the admin SPA's, versioned with the bundle it ships in — a distinction worth stating, since `product` and `kind` live there and nowhere on the public wire.
 
 **`product` and `kind` never appeared on the public wire at all.** `PublicServer` and `WorklistEntry` carry neither, and no schema named `Product` or `ServerKind` is emitted. So merging the pair into one type, which felt like the risky change, costs the agent-facing wire nothing. The one agent-facing surface that does carry them is the reserved tags, which are map keys rather than schema, so an agent or an operator rule reading `canopy:product` or `canopy:kind` would have broken *silently*. Both stay emitted, derived from the type, alongside the new `canopy:type`.
 

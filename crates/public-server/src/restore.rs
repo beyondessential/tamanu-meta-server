@@ -122,6 +122,7 @@ pub struct WorklistEntry {
 	/// against the earlier shape keeps working across the transition. Every
 	/// machine that predates the split took its application's id, so for those
 	/// the two values are equal; a machine created since has no server to be.
+	// spec: API#renaming-a-field
 	#[deprecated(note = "use `machine_id`")]
 	#[schema(deprecated)]
 	pub server_id: Uuid,
@@ -606,6 +607,7 @@ pub struct VerificationArgs {
 	/// split took its application's id. Naming both is an error rather than a
 	/// silent preference, because a reporter that disagrees with itself about
 	/// what it restored has not been understood.
+	// spec: API#renaming-a-field
 	#[deprecated(note = "use `machine_id`")]
 	#[schema(deprecated)]
 	pub server_id: Option<Uuid>,
