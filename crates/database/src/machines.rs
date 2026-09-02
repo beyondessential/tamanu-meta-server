@@ -285,7 +285,10 @@ impl Machine {
 	/// so two pushes arriving together for one box would otherwise each see
 	/// nothing and each create. Serialising them on the machine row means the
 	/// second sees what the first created.
-	pub async fn get_by_id_for_update(db: &mut AsyncPgConnection, machine_id: Uuid) -> Result<Self> {
+	pub async fn get_by_id_for_update(
+		db: &mut AsyncPgConnection,
+		machine_id: Uuid,
+	) -> Result<Self> {
 		use crate::schema::machines::dsl;
 		dsl::machines
 			.select(Self::as_select())

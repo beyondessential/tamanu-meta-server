@@ -14,11 +14,11 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::server_enrollment_tokens)]
+#[diesel(table_name = crate::schema::machine_enrollment_tokens)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct ServerEnrollmentToken {
+pub struct MachineEnrollmentToken {
 	pub id: Uuid,
-	pub server_id: Uuid,
+	pub machine_id: Uuid,
 	pub token_hash: Vec<u8>,
 	#[diesel(deserialize_as = jiff_diesel::Timestamp)]
 	pub created_at: Timestamp,
@@ -36,17 +36,17 @@ fn hash_token(plaintext: &str) -> Vec<u8> {
 	Sha256::digest(plaintext.as_bytes()).to_vec()
 }
 
-impl ServerEnrollmentToken {
+impl MachineEnrollmentToken {
 	/// Mint a fresh token for a server, returning the row and the plaintext
 	/// (which the caller must put in the blob and never persist or log). Any
 	/// prior un-consumed tokens for the server are marked consumed in the same
 	/// transaction.
 	pub async fn mint(
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		machine_id: Uuid,
 		ttl: SignedDuration,
 	) -> Result<(Self, String)> {
-		use crate::schema::server_enrollment_tokens::dsl;
+		use crate::schema::machine_enrollment_tokens::dsl;
 
 		let mut raw = [0u8; 32];
 		getrandom::fill(&mut raw).map_err(|e| AppError::custom(format!("CSPRNG failure: {e}")))?;
@@ -59,8 +59,8 @@ impl ServerEnrollmentToken {
 		let token = db
 			.transaction::<_, AppError, _>(async |conn| {
 				diesel::update(
-					dsl::server_enrollment_tokens
-						.filter(dsl::server_id.eq(server_id))
+					dsl::machine_enrollment_tokens
+						.filter(dsl::machine_id.eq(machine_id))
 						.filter(dsl::consumed_at.is_null()),
 				)
 				.set(
@@ -71,9 +71,9 @@ impl ServerEnrollmentToken {
 				.await
 				.map_err(AppError::from)?;
 
-				diesel::insert_into(dsl::server_enrollment_tokens)
+				diesel::insert_into(dsl::machine_enrollment_tokens)
 					.values((
-						dsl::server_id.eq(server_id),
+						dsl::machine_id.eq(machine_id),
 						dsl::token_hash.eq(&token_hash),
 						dsl::expires_at.eq(jiff_diesel::Timestamp::from(expires_at)),
 					))
@@ -92,14 +92,14 @@ impl ServerEnrollmentToken {
 	/// challenge to. Errors generically when not active.
 	pub async fn find_active(
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		machine_id: Uuid,
 		plaintext: &str,
 	) -> Result<Self> {
-		use crate::schema::server_enrollment_tokens::dsl;
+		use crate::schema::machine_enrollment_tokens::dsl;
 
-		dsl::server_enrollment_tokens
+		dsl::machine_enrollment_tokens
 			.select(Self::as_select())
-			.filter(dsl::server_id.eq(server_id))
+			.filter(dsl::machine_id.eq(machine_id))
 			.filter(dsl::token_hash.eq(hash_token(plaintext)))
 			.filter(dsl::consumed_at.is_null())
 			.filter(dsl::expires_at.gt(diesel::dsl::now))
@@ -116,14 +116,14 @@ impl ServerEnrollmentToken {
 	/// makes race-safe (concurrent completes: only one affects a row).
 	pub async fn consume(
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		machine_id: Uuid,
 		token_hash: &[u8],
 	) -> Result<()> {
-		use crate::schema::server_enrollment_tokens::dsl;
+		use crate::schema::machine_enrollment_tokens::dsl;
 
 		let affected = diesel::update(
-			dsl::server_enrollment_tokens
-				.filter(dsl::server_id.eq(server_id))
+			dsl::machine_enrollment_tokens
+				.filter(dsl::machine_id.eq(machine_id))
 				.filter(dsl::token_hash.eq(token_hash))
 				.filter(dsl::consumed_at.is_null())
 				.filter(dsl::expires_at.gt(diesel::dsl::now)),
@@ -142,11 +142,11 @@ impl ServerEnrollmentToken {
 	/// Revoke any outstanding (un-consumed) token for a server, e.g. an
 	/// enrollment ticket issued by mistake. Marks them consumed so they can no
 	/// longer be used; idempotent.
-	pub async fn revoke(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<()> {
-		use crate::schema::server_enrollment_tokens::dsl;
+	pub async fn revoke(db: &mut AsyncPgConnection, machine_id: Uuid) -> Result<()> {
+		use crate::schema::machine_enrollment_tokens::dsl;
 		diesel::update(
-			dsl::server_enrollment_tokens
-				.filter(dsl::server_id.eq(server_id))
+			dsl::machine_enrollment_tokens
+				.filter(dsl::machine_id.eq(machine_id))
 				.filter(dsl::consumed_at.is_null()),
 		)
 		.set(dsl::consumed_at.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))))
@@ -158,12 +158,12 @@ impl ServerEnrollmentToken {
 
 	/// The currently-active token for a server, if any. For the admin UI to show
 	/// "expires <when>" — never reveals the secret (only the hash lives here).
-	pub async fn active_for(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Option<Self>> {
-		use crate::schema::server_enrollment_tokens::dsl;
+	pub async fn active_for(db: &mut AsyncPgConnection, machine_id: Uuid) -> Result<Option<Self>> {
+		use crate::schema::machine_enrollment_tokens::dsl;
 
-		dsl::server_enrollment_tokens
+		dsl::machine_enrollment_tokens
 			.select(Self::as_select())
-			.filter(dsl::server_id.eq(server_id))
+			.filter(dsl::machine_id.eq(machine_id))
 			.filter(dsl::consumed_at.is_null())
 			.filter(dsl::expires_at.gt(diesel::dsl::now))
 			.order(dsl::created_at.desc())

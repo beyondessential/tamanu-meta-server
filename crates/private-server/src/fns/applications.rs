@@ -1,12 +1,10 @@
 use axum::Json;
 use axum::extract::State;
-use base64::Engine;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::{
 	Uuid,
-	device::DeviceRole,
 	geo::GeoPoint,
 	server::{TagMap, app_type::ApplicationType, rank::ServerRank},
 	status::{HealthState, ShortStatus},
@@ -16,7 +14,6 @@ use database::{
 	applications::{Application, PartialServer},
 	devices::{Device, DeviceConnection},
 	reported_detail::ReportedDetail,
-	server_enrollment_tokens::ServerEnrollmentToken,
 	server_groups::ServerGroup,
 	statuses::Status,
 	versions::Version,
@@ -419,10 +416,6 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(update))
 		.routes(routes!(delete))
 		.routes(routes!(restore))
-		.routes(routes!(mint_enrollment))
-		.routes(routes!(revoke_enrollment))
-		.routes(routes!(enrollment_status))
-		.routes(routes!(attach_tailscale_device))
 }
 
 /// Filter and pagination parameters for listing applications.
@@ -938,9 +931,6 @@ pub async fn update(
 	Ok(Json(()))
 }
 
-/// Enrollment token lifetime: 7 days (human operational timescale).
-const ENROLLMENT_TTL: jiff::SignedDuration = jiff::SignedDuration::from_hours(24 * 7);
-
 /// Identifies a single server by id.
 #[derive(Deserialize, ToSchema)]
 pub struct ServerIdOnlyArgs {
@@ -997,270 +987,6 @@ pub async fn restore(
 	let mut conn = state.db.get().await?;
 	Application::restore(&mut conn, args.server_id).await?;
 	Ok(Json(()))
-}
-
-/// A freshly-minted enrollment ticket: the encrypted enrollment payload and
-/// the passphrase that decrypts it.
-#[derive(Serialize, ToSchema)]
-pub struct EnrollmentTicket {
-	/// Base64 (standard) of the age-encrypted enrollment JSON to feed to
-	/// `bestool canopy register`. Encrypted under `passphrase` (age/scrypt), so
-	/// it is safe to copy around on its own.
-	pub ticket: String,
-	/// Freshly-generated 4-word passphrase that decrypts `ticket`. Share this
-	/// out-of-band (a separate channel from the ticket itself).
-	pub passphrase: String,
-	/// When the enrollment token inside the ticket expires.
-	pub expires_at: Timestamp,
-}
-
-/// Mint (or reissue) an enrollment ticket for a server.
-///
-/// Creates a fresh enrollment token and returns it wrapped in a
-/// passphrase-encrypted ticket the operator runs through bestool on the
-/// enrolling machine, plus the 4-word passphrase that decrypts it. The
-/// plaintext token lives only inside the encrypted ticket; reissuing
-/// invalidates any prior token. Fails if the server is archived.
-#[utoipa::path(
-	post,
-	path = "/mint_enrollment",
-	tag = "applications",
-	security(("tailscale-admin" = [])),
-	request_body = ServerIdOnlyArgs,
-	responses(
-		(status = 200, body = EnrollmentTicket),
-		(status = 400, body = ProblemDetailsSchema),
-	),
-)]
-pub async fn mint_enrollment(
-	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
-	Json(args): Json<ServerIdOnlyArgs>,
-) -> Result<Json<EnrollmentTicket>> {
-	use algae_cli::{
-		passphrases::{Passphrase, SecretString},
-		streams::encrypt_stream,
-	};
-
-	let mut conn = state.db.get().await?;
-
-	let server = Application::get_by_id(&mut conn, args.server_id).await?;
-	if server.deleted_at.is_some() {
-		return Err(AppError::Conflict("server is archived".into()));
-	}
-
-	let api_url = std::env::var("PUBLIC_URL")
-		.map_err(|_| AppError::custom("PUBLIC_URL is not configured"))?;
-
-	let (token, plaintext) =
-		ServerEnrollmentToken::mint(&mut conn, args.server_id, ENROLLMENT_TTL).await?;
-
-	let payload = serde_json::json!({
-		"v": "enroll-1",
-		"api_url": api_url,
-		"server_id": args.server_id,
-		"token": plaintext,
-	});
-	let payload_bytes = serde_json::to_vec(&payload).map_err(AppError::custom)?;
-
-	// Encrypt the payload with a fresh 4-word passphrase (age/scrypt), the same
-	// primitives bestool's `protect`/`reveal` use. The ciphertext is base64'd
-	// for transport; the passphrase travels out-of-band.
-	let passphrase = crate::fns::generate_passphrase();
-	let key = Passphrase::new(SecretString::from(passphrase.clone()));
-
-	let mut encrypted = Vec::new();
-	encrypt_stream(
-		&payload_bytes[..],
-		futures::io::Cursor::new(&mut encrypted),
-		Box::new(key),
-	)
-	.await
-	.map_err(|e| AppError::custom(format!("encrypting enrollment ticket: {e}")))?;
-
-	let ticket = base64::engine::general_purpose::STANDARD.encode(&encrypted);
-
-	Ok(Json(EnrollmentTicket {
-		ticket,
-		passphrase,
-		expires_at: token.expires_at,
-	}))
-}
-
-/// Revoke any outstanding enrollment ticket for a server.
-///
-/// Use this when a ticket was issued by mistake or is no longer needed.
-/// Afterwards, the enrollment status endpoint reports no outstanding token,
-/// and the revoked ticket can no longer be used to enroll.
-#[utoipa::path(
-	post,
-	path = "/revoke_enrollment",
-	tag = "applications",
-	security(("tailscale-admin" = [])),
-	request_body = ServerIdOnlyArgs,
-	responses(
-		(status = 200),
-		(status = 400, body = ProblemDetailsSchema),
-	),
-)]
-pub async fn revoke_enrollment(
-	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
-	Json(args): Json<ServerIdOnlyArgs>,
-) -> Result<Json<()>> {
-	let mut conn = state.db.get().await?;
-	ServerEnrollmentToken::revoke(&mut conn, args.server_id).await?;
-	Ok(Json(()))
-}
-
-/// A server's enrollment state: whether a device has registered, and
-/// whether an enrollment token is currently outstanding.
-#[derive(Serialize, ToSchema)]
-pub struct EnrollmentStatus {
-	/// When enrollment completed. Omitted while still awaiting the first
-	/// check-in.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub registered_at: Option<Timestamp>,
-	/// Expiry of the currently-active enrollment token, if one is outstanding.
-	/// Never reveals the token itself.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub token_expires_at: Option<Timestamp>,
-	/// When the currently-active enrollment token was issued, if one is
-	/// outstanding — e.g. to show "a ticket was issued on <date>".
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub token_issued_at: Option<Timestamp>,
-}
-
-/// Get the enrollment state of a server.
-///
-/// Reports whether the server has completed enrollment, and whether an
-/// enrollment token is currently outstanding (issue and expiry times only —
-/// the token itself is never revealed).
-#[utoipa::path(
-	post,
-	path = "/enrollment_status",
-	tag = "applications",
-	security(("tailscale-admin" = [])),
-	request_body = ServerIdOnlyArgs,
-	responses(
-		(status = 200, body = EnrollmentStatus),
-		(status = 400, body = ProblemDetailsSchema),
-	),
-)]
-pub async fn enrollment_status(
-	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
-	Json(args): Json<ServerIdOnlyArgs>,
-) -> Result<Json<EnrollmentStatus>> {
-	let mut conn = state.db.get().await?;
-	let server = Application::get_by_id(&mut conn, args.server_id).await?;
-	let active = ServerEnrollmentToken::active_for(&mut conn, args.server_id).await?;
-	Ok(Json(EnrollmentStatus {
-		registered_at: server.registered_at,
-		token_expires_at: active.as_ref().map(|t| t.expires_at),
-		token_issued_at: active.as_ref().map(|t| t.created_at),
-	}))
-}
-
-/// Request to bind a server to a device identified by its Tailscale node.
-#[derive(Deserialize, ToSchema)]
-pub struct AttachTailscaleDeviceArgs {
-	/// The server to attach the device to.
-	pub server_id: Uuid,
-	/// Any of: a Tailscale CGNAT/ULA IP, a node id, or a DNS name.
-	pub identifier: String,
-}
-
-/// Attach a device to a server via a Tailscale identifier.
-///
-/// Resolves the identifier to a tailnet node, finds the device already
-/// attached to that node or creates a new one for it, and binds that device
-/// to the server. Useful when a server has no device yet (e.g. an
-/// operator-imported server that hasn't reported in) and should be bound to
-/// a tailnet node directly. Returns 409 if the resolved device is already
-/// attached to another live server — detach it there first.
-#[utoipa::path(
-	post,
-	path = "/attach_tailscale_device",
-	tag = "applications",
-	security(("tailscale-admin" = [])),
-	request_body = AttachTailscaleDeviceArgs,
-	responses(
-		(status = 200, description = "Device id newly attached to the server.", body = Uuid, content_type = "application/json"),
-		(status = 404, description = "Identifier does not resolve to a known tailnet node.", body = ProblemDetailsSchema),
-		(status = 409, description = "The resolved device is already attached to another server.", body = ProblemDetailsSchema),
-		(status = 503, description = "Tailnet directory not configured or unreachable.", body = ProblemDetailsSchema),
-	),
-)]
-pub async fn attach_tailscale_device(
-	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
-	Json(args): Json<AttachTailscaleDeviceArgs>,
-) -> Result<Json<Uuid>> {
-	let directory = state
-		.tailnet_directory
-		.as_ref()
-		.ok_or(AppError::AuthTailnetDirectoryUnavailable)?;
-	let entry = directory
-		.resolve_identifier(&args.identifier)
-		.await
-		.map_err(|_| AppError::AuthTailnetDirectoryUnavailable)?
-		.ok_or_else(|| AppError::NotFound("no tailnet device matches that identifier".into()))?;
-
-	let mut conn = state.db.get().await?;
-
-	// Find existing device by node id, or create a new one.
-	let device =
-		if let Some(existing) = Device::from_tailscale_node_id(&mut conn, &entry.node_id).await? {
-			existing
-		} else {
-			Device::create_with_tailscale(
-				&mut conn,
-				database::devices::TailscaleIdentity {
-					node_id: entry.node_id.clone(),
-					node_name: Some(entry.node_name.clone()),
-					tailnet: Some(entry.tailnet.clone()),
-				},
-				DeviceRole::Machine,
-			)
-			.await?
-		};
-
-	// Refuse if the device is already attached to a *different* live server
-	// — the operator should clear that one first. Archived applications don't count
-	// (their device is already released), so scope to the live set.
-	let other_servers = Application::live_by_device_id(&mut conn, device.id).await?;
-	if other_servers.iter().any(|s| s.id != args.server_id) {
-		return Err(AppError::Conflict(format!(
-			"device {} is already attached to another server",
-			device.id,
-		)));
-	}
-
-	Application::update(
-		&mut conn,
-		args.server_id,
-		PartialServer {
-			id: args.server_id,
-			name: None,
-			rank: None,
-			host: None,
-			device_id: Some(Some(device.id)),
-			group_id: None,
-			public_name: None,
-			cloud: None,
-			geolocation: None,
-			is_monitored: None,
-			alert_when_down_for: None,
-			notes: None,
-			tags: None,
-			may_manage_dns: None,
-			may_manage_tls: None,
-		},
-	)
-	.await?;
-
-	Ok(Json(device.id))
 }
 
 pub(crate) async fn compute_min_chrome_version(

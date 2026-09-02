@@ -486,6 +486,30 @@ diesel::table! {
 }
 
 diesel::table! {
+	machine_enrollment_challenges (id) {
+		id -> Uuid,
+		machine_id -> Uuid,
+		token_hash -> Bytea,
+		public_key -> Bytea,
+		nonce -> Bytea,
+		created_at -> Timestamptz,
+		expires_at -> Timestamptz,
+		used_at -> Nullable<Timestamptz>,
+	}
+}
+
+diesel::table! {
+	machine_enrollment_tokens (id) {
+		id -> Uuid,
+		machine_id -> Uuid,
+		token_hash -> Bytea,
+		created_at -> Timestamptz,
+		expires_at -> Timestamptz,
+		consumed_at -> Nullable<Timestamptz>,
+	}
+}
+
+diesel::table! {
 	machine_reported_detail (machine_id, source) {
 		machine_id -> Uuid,
 		source -> Text,
@@ -622,30 +646,6 @@ diesel::table! {
 		machine_id -> Nullable<Uuid>,
 		subject -> Nullable<Text>,
 		application_type -> Nullable<Text>,
-	}
-}
-
-diesel::table! {
-	server_enrollment_challenges (id) {
-		id -> Uuid,
-		server_id -> Uuid,
-		token_hash -> Bytea,
-		public_key -> Bytea,
-		nonce -> Bytea,
-		created_at -> Timestamptz,
-		expires_at -> Timestamptz,
-		used_at -> Nullable<Timestamptz>,
-	}
-}
-
-diesel::table! {
-	server_enrollment_tokens (id) {
-		id -> Uuid,
-		server_id -> Uuid,
-		token_hash -> Bytea,
-		created_at -> Timestamptz,
-		expires_at -> Timestamptz,
-		consumed_at -> Nullable<Timestamptz>,
 	}
 }
 
@@ -866,6 +866,8 @@ diesel::joinable!(issues -> devices (device_id));
 diesel::joinable!(issues -> machines (machine_id));
 diesel::joinable!(issues -> server_groups (server_group_id));
 diesel::joinable!(machine_backup_capabilities -> machines (machine_id));
+diesel::joinable!(machine_enrollment_challenges -> machines (machine_id));
+diesel::joinable!(machine_enrollment_tokens -> machines (machine_id));
 diesel::joinable!(machine_reported_detail -> machines (machine_id));
 diesel::joinable!(machines -> devices (device_id));
 diesel::joinable!(machines -> server_groups (group_id));
@@ -882,8 +884,6 @@ diesel::joinable!(restore_replicas -> server_groups (group_id));
 diesel::joinable!(scoped_check_policies -> applications (application_id));
 diesel::joinable!(scoped_check_policies -> machines (machine_id));
 diesel::joinable!(scoped_check_policies -> server_groups (server_group_id));
-diesel::joinable!(server_enrollment_challenges -> applications (server_id));
-diesel::joinable!(server_enrollment_tokens -> applications (server_id));
 diesel::joinable!(server_group_backup_config -> server_groups (group_id));
 diesel::joinable!(server_group_backup_schedule -> server_groups (group_id));
 diesel::joinable!(server_group_domains -> server_groups (group_id));
@@ -931,6 +931,8 @@ diesel::allow_tables_to_appear_in_same_query!(
 	issue_notes,
 	issues,
 	machine_backup_capabilities,
+	machine_enrollment_challenges,
+	machine_enrollment_tokens,
 	machine_reported_detail,
 	machines,
 	maintenance_windows,
@@ -941,8 +943,6 @@ diesel::allow_tables_to_appear_in_same_query!(
 	restore_consumer_capabilities,
 	restore_replicas,
 	scoped_check_policies,
-	server_enrollment_challenges,
-	server_enrollment_tokens,
 	server_group_backup_config,
 	server_group_backup_schedule,
 	server_group_domains,

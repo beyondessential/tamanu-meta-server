@@ -454,44 +454,23 @@ impl Application {
 		)
 	}
 
-	/// Live (non-archived) applications currently bound to this device.
+	/// Live (non-archived) applications this identity speaks for.
+	///
+	/// An identity belongs to a machine, so the answer is what runs on that
+	/// machine. A box with two workloads answers with both, which is the
+	/// point: one agent reports for everything on its box.
+	// spec: FLT#identities
 	pub async fn live_by_device_id(db: &mut AsyncPgConnection, dev_id: Uuid) -> Result<Vec<Self>> {
-		use crate::schema::applications::dsl::*;
-		applications
+		use crate::schema::{applications, machines};
+		applications::table
+			.inner_join(machines::table.on(machines::id.eq(applications::machine_id)))
 			.select(Self::as_select())
-			.filter(device_id.eq(dev_id))
-			.filter(deleted_at.is_null())
+			.filter(machines::device_id.eq(dev_id))
+			.filter(machines::deleted_at.is_null())
+			.filter(applications::deleted_at.is_null())
 			.load(db)
 			.await
 			.map_err(AppError::from)
-	}
-
-	/// Bind a device to a server (sets `device_id`).
-	pub async fn bind_device(
-		db: &mut AsyncPgConnection,
-		server_id: Uuid,
-		device_id: Uuid,
-	) -> Result<()> {
-		use crate::schema::applications::dsl;
-		diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
-			.set(dsl::device_id.eq(Some(device_id)))
-			.execute(db)
-			.await
-			.map_err(AppError::from)?;
-		Ok(())
-	}
-
-	/// Mark a server enrolled (sets `registered_at = now()`).
-	pub async fn mark_registered(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<()> {
-		use crate::schema::applications::dsl;
-		diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
-			.set(
-				dsl::registered_at.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))),
-			)
-			.execute(db)
-			.await
-			.map_err(AppError::from)?;
-		Ok(())
 	}
 
 	/// This application's reachability, from when it last reported and its own
@@ -606,11 +585,14 @@ impl Application {
 		Ok(rows.into_iter().filter_map(|t| t.parse().ok()).collect())
 	}
 
+	/// Every application this identity speaks for, archived ones included.
+	// spec: FLT#identities
 	pub async fn get_by_device_id(db: &mut AsyncPgConnection, dev_id: Uuid) -> Result<Vec<Self>> {
-		use crate::schema::applications::dsl::*;
-		applications
+		use crate::schema::{applications, machines};
+		applications::table
+			.inner_join(machines::table.on(machines::id.eq(applications::machine_id)))
 			.select(Self::as_select())
-			.filter(device_id.eq(dev_id))
+			.filter(machines::device_id.eq(dev_id))
 			.load(db)
 			.await
 			.map_err(AppError::from)

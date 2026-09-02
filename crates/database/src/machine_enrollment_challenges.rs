@@ -11,11 +11,11 @@ use jiff::{SignedDuration, Timestamp};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, Queryable, Selectable)]
-#[diesel(table_name = crate::schema::server_enrollment_challenges)]
+#[diesel(table_name = crate::schema::machine_enrollment_challenges)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct ServerEnrollmentChallenge {
+pub struct MachineEnrollmentChallenge {
 	pub id: Uuid,
-	pub server_id: Uuid,
+	pub machine_id: Uuid,
 	pub token_hash: Vec<u8>,
 	pub public_key: Vec<u8>,
 	pub nonce: Vec<u8>,
@@ -27,17 +27,17 @@ pub struct ServerEnrollmentChallenge {
 	pub used_at: Option<Timestamp>,
 }
 
-impl ServerEnrollmentChallenge {
+impl MachineEnrollmentChallenge {
 	/// Issue a fresh nonce bound to (server, token, presented key). Returns the
 	/// raw nonce bytes for the caller to hand back to the device.
 	pub async fn create(
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		machine_id: Uuid,
 		token_hash: &[u8],
 		public_key: &[u8],
 		ttl: SignedDuration,
 	) -> Result<Vec<u8>> {
-		use crate::schema::server_enrollment_challenges::dsl;
+		use crate::schema::machine_enrollment_challenges::dsl;
 
 		let mut nonce = [0u8; 32];
 		getrandom::fill(&mut nonce)
@@ -46,9 +46,9 @@ impl ServerEnrollmentChallenge {
 			.checked_add(ttl)
 			.map_err(|e| AppError::custom(format!("bad challenge ttl: {e}")))?;
 
-		diesel::insert_into(dsl::server_enrollment_challenges)
+		diesel::insert_into(dsl::machine_enrollment_challenges)
 			.values((
-				dsl::server_id.eq(server_id),
+				dsl::machine_id.eq(machine_id),
 				dsl::token_hash.eq(token_hash),
 				dsl::public_key.eq(public_key),
 				dsl::nonce.eq(&nonce[..]),
@@ -66,15 +66,15 @@ impl ServerEnrollmentChallenge {
 	/// caller can consume the matching token. Errors generically otherwise.
 	pub async fn take(
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		machine_id: Uuid,
 		nonce: &[u8],
 		public_key: &[u8],
 	) -> Result<Self> {
-		use crate::schema::server_enrollment_challenges::dsl;
+		use crate::schema::machine_enrollment_challenges::dsl;
 
 		diesel::update(
-			dsl::server_enrollment_challenges
-				.filter(dsl::server_id.eq(server_id))
+			dsl::machine_enrollment_challenges
+				.filter(dsl::machine_id.eq(machine_id))
 				.filter(dsl::nonce.eq(nonce))
 				.filter(dsl::public_key.eq(public_key))
 				.filter(dsl::used_at.is_null())

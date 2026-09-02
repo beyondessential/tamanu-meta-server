@@ -2,6 +2,10 @@
 //! public server: begin → sign → complete, plus the opaque-error and
 //! token-state behaviours.
 //!
+//! Enrolment admits a box, so every test here enrols a machine and none of
+//! them creates an application: what runs on the box only comes into being
+//! once the enrolled agent reports it.
+//!
 //! The channel-binding tests set `CANOPY_ENROLL_EKM_HEADER` via
 //! `std::env::set_var`. That's process-global, but safe here because nextest
 //! runs each test in its own process — the same reason the ticket test's
@@ -9,14 +13,10 @@
 
 use base64::Engine;
 use commons_tests::server::{make_signing_certificate, run, run_with_tailnet_device_auth};
-use commons_types::server::{TagMap, app_type::ApplicationType};
 use database::{
-	applications::Application,
 	diesel_async::AsyncPgConnection,
+	machine_enrollment_tokens::MachineEnrollmentToken,
 	machines::{Machine, NewMachine},
-	pg_duration::PgDuration,
-	server_enrollment_tokens::ServerEnrollmentToken,
-	url_field::UrlField,
 };
 use jiff::SignedDuration;
 use serde_json::{Value, json};
@@ -26,8 +26,8 @@ fn b64() -> base64::engine::general_purpose::GeneralPurpose {
 	base64::engine::general_purpose::STANDARD
 }
 
-/// The box an application runs on. Enrolment binds an identity to the
-/// application, so these tests only need the machine to exist.
+/// The box to enrol. An operator creates it; enrolment is what binds it to
+/// the identity that then speaks for it.
 async fn machine(conn: &mut AsyncPgConnection) -> Uuid {
 	Machine::create(conn, NewMachine::default())
 		.await
@@ -35,36 +35,11 @@ async fn machine(conn: &mut AsyncPgConnection) -> Uuid {
 		.id
 }
 
-fn new_server(host: &str, machine_id: Uuid) -> Application {
-	Application {
-		id: Uuid::new_v4(),
-		name: Some("test".into()),
-		host: Some(UrlField(host.parse().unwrap())),
-		r#type: ApplicationType::TamanuCentral,
-		rank: None,
-		device_id: None,
-		machine_id,
-		group_id: None,
-		public_name: None,
-		cloud: None,
-		geolocation: None,
-		is_monitored: true,
-		alert_when_down_for: PgDuration(SignedDuration::from_secs(600)),
-		notes: String::new(),
-		tags: TagMap::default(),
-		deleted_at: None,
-		registered_at: None,
-		may_manage_dns: false,
-		may_manage_tls: false,
-		certificate_profile: None,
-		name_management_paused_at: None,
-		name_management_paused_by: None,
-		name_management_pause_reason: None,
-	}
-}
-
-/// Drive begin → sign → complete for a server with the given cert/key, and
+/// Drive begin → sign → complete for a machine with the given cert/key, and
 /// return the `complete` response (caller asserts status).
+///
+/// The wire field stays `server_id`: it is the name fielded agents send, and
+/// the value has always identified the box.
 async fn run_handshake(
 	public: &axum_test::TestServer,
 	server_id: Uuid,
@@ -160,22 +135,18 @@ async fn tailnet_enrollment_happy_path() {
 		async |mut conn, fwd_ip, _node, _dev, _public, private| {
 			use database::Device;
 			let (spki, _cert, key) = make_signing_certificate();
-			let m = machine(&mut conn).await;
-			let server =
-				Application::create(&mut conn, new_server("https://ts-enroll.example/", m))
-					.await
-					.unwrap();
+			let machine_id = machine(&mut conn).await;
 			let (_t, token) =
-				ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+				MachineEnrollmentToken::mint(&mut conn, machine_id, SignedDuration::from_hours(1))
 					.await
 					.unwrap();
 
-			run_tailnet_handshake(&private, fwd_ip, server.id, &token, &spki, &key, None)
+			run_tailnet_handshake(&private, fwd_ip, machine_id, &token, &spki, &key, None)
 				.await
 				.assert_status_ok();
 
 			// Registered + bound to a device carrying the body-supplied key; token spent.
-			let after = Application::get_by_id(&mut conn, server.id).await.unwrap();
+			let after = Machine::get_by_id(&mut conn, machine_id).await.unwrap();
 			assert!(after.registered_at.is_some(), "registered_at set");
 			assert!(after.device_id.is_some(), "device bound");
 			let bound = Device::from_key(&mut conn, &spki).await.unwrap().unwrap();
@@ -185,7 +156,7 @@ async fn tailnet_enrollment_happy_path() {
 				"body SPKI bound the device"
 			);
 			assert!(
-				ServerEnrollmentToken::find_active(&mut conn, server.id, &token)
+				MachineEnrollmentToken::find_active(&mut conn, machine_id, &token)
 					.await
 					.is_err(),
 				"token consumed",
@@ -201,19 +172,16 @@ async fn internet_path_rejects_body_spki() {
 		// On the internet mTLS mount there is no tailnet directory, so a
 		// body-supplied SPKI must NOT be accepted — the cert can't be skipped.
 		let (spki, _cert, _key) = make_signing_certificate();
-		let m = machine(&mut conn).await;
-		let server = Application::create(&mut conn, new_server("https://gate.example/", m))
-			.await
-			.unwrap();
+		let machine_id = machine(&mut conn).await;
 		let (_t, token) =
-			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+			MachineEnrollmentToken::mint(&mut conn, machine_id, SignedDuration::from_hours(1))
 				.await
 				.unwrap();
 
 		let resp = public
 			.post("/servers/register/begin")
 			.json(&json!({
-				"server_id": server.id,
+				"server_id": machine_id,
 				"token": token,
 				"spki": b64().encode(&spki),
 			}))
@@ -233,12 +201,9 @@ async fn tailnet_ignores_the_mtls_certificate_header() {
 			// cert sent in the (forgeable) client-certificate header.
 			let (spki_real, _c, key_real) = make_signing_certificate();
 			let (spki_forged, cert_forged, _k) = make_signing_certificate();
-			let m = machine(&mut conn).await;
-			let server = Application::create(&mut conn, new_server("https://ts-forge.example/", m))
-				.await
-				.unwrap();
+			let machine_id = machine(&mut conn).await;
 			let (_t, token) =
-				ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+				MachineEnrollmentToken::mint(&mut conn, machine_id, SignedDuration::from_hours(1))
 					.await
 					.unwrap();
 
@@ -248,7 +213,7 @@ async fn tailnet_ignores_the_mtls_certificate_header() {
 			run_tailnet_handshake(
 				&private,
 				fwd_ip,
-				server.id,
+				machine_id,
 				&token,
 				&spki_real,
 				&key_real,
@@ -295,21 +260,21 @@ async fn enrollment_adds_key_to_tailscale_precreated_device() {
 		)
 		.await
 		.unwrap();
-		let m = machine(&mut conn).await;
-		let mut s = new_server("https://ts.example/", m);
-		s.device_id = Some(device.id);
-		let server = Application::create(&mut conn, s).await.unwrap();
+		let machine_id = machine(&mut conn).await;
+		Machine::bind_device(&mut conn, machine_id, device.id)
+			.await
+			.unwrap();
 		let (_t, token) =
-			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+			MachineEnrollmentToken::mint(&mut conn, machine_id, SignedDuration::from_hours(1))
 				.await
 				.unwrap();
 
-		run_handshake(&public, server.id, &token, &spki, &cert, &key)
+		run_handshake(&public, machine_id, &token, &spki, &cert, &key)
 			.await
 			.assert_status_ok();
 
 		// The key landed on the *existing* device; no second device was made.
-		let after = Application::get_by_id(&mut conn, server.id).await.unwrap();
+		let after = Machine::get_by_id(&mut conn, machine_id).await.unwrap();
 		assert_eq!(
 			after.device_id,
 			Some(device.id),
@@ -322,33 +287,27 @@ async fn enrollment_adds_key_to_tailscale_precreated_device() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn enrollment_rejects_key_bound_to_another_live_server() {
+async fn enrollment_rejects_key_bound_to_another_live_machine() {
 	run(async |mut conn, public, _private| {
 		let (spki, cert, key) = make_signing_certificate();
 
-		// Application A enrolls with this cert.
-		let m = machine(&mut conn).await;
-		let a = Application::create(&mut conn, new_server("https://a.example/", m))
-			.await
-			.unwrap();
+		// Machine A enrols with this cert.
+		let machine_a = machine(&mut conn).await;
 		let (_ta, token_a) =
-			ServerEnrollmentToken::mint(&mut conn, a.id, SignedDuration::from_hours(1))
+			MachineEnrollmentToken::mint(&mut conn, machine_a, SignedDuration::from_hours(1))
 				.await
 				.unwrap();
-		run_handshake(&public, a.id, &token_a, &spki, &cert, &key)
+		run_handshake(&public, machine_a, &token_a, &spki, &cert, &key)
 			.await
 			.assert_status_ok();
 
-		// Application B tries to enroll with the SAME key while A is live → refused.
-		let m = machine(&mut conn).await;
-		let b = Application::create(&mut conn, new_server("https://b.example/", m))
-			.await
-			.unwrap();
+		// Machine B tries to enrol with the SAME key while A is live → refused.
+		let machine_b = machine(&mut conn).await;
 		let (_tb, token_b) =
-			ServerEnrollmentToken::mint(&mut conn, b.id, SignedDuration::from_hours(1))
+			MachineEnrollmentToken::mint(&mut conn, machine_b, SignedDuration::from_hours(1))
 				.await
 				.unwrap();
-		run_handshake(&public, b.id, &token_b, &spki, &cert, &key)
+		run_handshake(&public, machine_b, &token_b, &spki, &cert, &key)
 			.await
 			.assert_status_forbidden();
 	})
@@ -359,12 +318,9 @@ async fn enrollment_rejects_key_bound_to_another_live_server() {
 async fn enrollment_happy_path() {
 	run(async |mut conn, public, _private| {
 		let (spki, cert, signing_key) = make_signing_certificate();
-		let m = machine(&mut conn).await;
-		let server = Application::create(&mut conn, new_server("https://happy.example/", m))
-			.await
-			.unwrap();
+		let machine_id = machine(&mut conn).await;
 		let (_t, token) =
-			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+			MachineEnrollmentToken::mint(&mut conn, machine_id, SignedDuration::from_hours(1))
 				.await
 				.unwrap();
 
@@ -372,7 +328,7 @@ async fn enrollment_happy_path() {
 		let resp = public
 			.post("/servers/register/begin")
 			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
-			.json(&json!({"server_id": server.id, "token": token}))
+			.json(&json!({"server_id": machine_id, "token": token}))
 			.await;
 		resp.assert_status_ok();
 		let begin: Value = resp.json();
@@ -380,9 +336,9 @@ async fn enrollment_happy_path() {
 		assert_eq!(begin["channel_binding_required"], json!(false));
 		let nonce = b64().decode(&nonce_b64).unwrap();
 
-		// sign transcript: nonce ‖ server_id ‖ spki
+		// sign transcript: nonce ‖ machine id ‖ spki
 		let mut transcript = nonce.clone();
-		transcript.extend_from_slice(server.id.as_bytes());
+		transcript.extend_from_slice(machine_id.as_bytes());
 		transcript.extend_from_slice(&spki);
 		let rng = ring::rand::SystemRandom::new();
 		let sig = signing_key.sign(&rng, &transcript).unwrap();
@@ -392,16 +348,16 @@ async fn enrollment_happy_path() {
 		let resp = public
 			.post("/servers/register/complete")
 			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
-			.json(&json!({"server_id": server.id, "nonce": nonce_b64, "signature": sig_b64}))
+			.json(&json!({"server_id": machine_id, "nonce": nonce_b64, "signature": sig_b64}))
 			.await;
 		resp.assert_status_ok();
 
-		// server is now registered + bound; token is spent.
-		let after = Application::get_by_id(&mut conn, server.id).await.unwrap();
+		// the machine is now registered + bound; token is spent.
+		let after = Machine::get_by_id(&mut conn, machine_id).await.unwrap();
 		assert!(after.registered_at.is_some(), "registered_at set");
 		assert!(after.device_id.is_some(), "device bound");
 		assert!(
-			ServerEnrollmentToken::find_active(&mut conn, server.id, &token)
+			MachineEnrollmentToken::find_active(&mut conn, machine_id, &token)
 				.await
 				.is_err(),
 			"token consumed"
@@ -414,19 +370,16 @@ async fn enrollment_happy_path() {
 async fn enrollment_bad_signature_is_opaque_and_keeps_token() {
 	run(async |mut conn, public, _private| {
 		let (_spki, cert, _key) = make_signing_certificate();
-		let m = machine(&mut conn).await;
-		let server = Application::create(&mut conn, new_server("https://badsig.example/", m))
-			.await
-			.unwrap();
+		let machine_id = machine(&mut conn).await;
 		let (_t, token) =
-			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+			MachineEnrollmentToken::mint(&mut conn, machine_id, SignedDuration::from_hours(1))
 				.await
 				.unwrap();
 
 		let resp = public
 			.post("/servers/register/begin")
 			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
-			.json(&json!({"server_id": server.id, "token": token}))
+			.json(&json!({"server_id": machine_id, "token": token}))
 			.await;
 		resp.assert_status_ok();
 		let nonce_b64 = resp.json::<Value>()["nonce"].as_str().unwrap().to_string();
@@ -436,7 +389,7 @@ async fn enrollment_bad_signature_is_opaque_and_keeps_token() {
 			.post("/servers/register/complete")
 			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
 			.json(&json!({
-				"server_id": server.id,
+				"server_id": machine_id,
 				"nonce": nonce_b64,
 				"signature": b64().encode([0u8; 72]),
 			}))
@@ -445,7 +398,7 @@ async fn enrollment_bad_signature_is_opaque_and_keeps_token() {
 
 		// token must NOT have been burned by a failed complete.
 		assert!(
-			ServerEnrollmentToken::find_active(&mut conn, server.id, &token)
+			MachineEnrollmentToken::find_active(&mut conn, machine_id, &token)
 				.await
 				.is_ok(),
 			"token still active after bad signature"
@@ -455,33 +408,33 @@ async fn enrollment_bad_signature_is_opaque_and_keeps_token() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn enrollment_rate_limited_per_server() {
+async fn enrollment_rate_limited_per_machine() {
 	run(async |_conn, public, _private| {
-		let server_id = Uuid::new_v4();
-		// The per-server budget is 20/min; the rate check runs before any token
-		// or server validation, so even bogus begins count. The 21st trips 429.
+		let machine_id = Uuid::new_v4();
+		// The per-machine budget is 20/min; the rate check runs before any token
+		// or machine validation, so even bogus begins count. The 21st trips 429.
 		let mut saw_429 = false;
 		for _ in 0..25 {
 			let resp = public
 				.post("/servers/register/begin")
-				.json(&json!({"server_id": server_id, "token": "x"}))
+				.json(&json!({"server_id": machine_id, "token": "x"}))
 				.await;
 			if resp.status_code() == 429 {
 				saw_429 = true;
 				break;
 			}
 		}
-		assert!(saw_429, "per-server rate limit should trip with 429");
+		assert!(saw_429, "per-machine rate limit should trip with 429");
 	})
 	.await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn enrollment_unknown_server_and_bad_token_are_opaque() {
+async fn enrollment_unknown_machine_and_bad_token_are_opaque() {
 	run(async |mut conn, public, _private| {
 		let (_spki, cert, _key) = make_signing_certificate();
 
-		// unknown server id
+		// unknown machine id
 		let resp = public
 			.post("/servers/register/begin")
 			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
@@ -489,15 +442,12 @@ async fn enrollment_unknown_server_and_bad_token_are_opaque() {
 			.await;
 		resp.assert_status_forbidden();
 
-		// known server, wrong token
-		let m = machine(&mut conn).await;
-		let server = Application::create(&mut conn, new_server("https://badtok.example/", m))
-			.await
-			.unwrap();
+		// known machine, wrong token
+		let machine_id = machine(&mut conn).await;
 		let resp = public
 			.post("/servers/register/begin")
 			.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
-			.json(&json!({"server_id": server.id, "token": "not-the-token"}))
+			.json(&json!({"server_id": machine_id, "token": "not-the-token"}))
 			.await;
 		resp.assert_status_forbidden();
 	})
@@ -511,18 +461,15 @@ async fn re_enrollment_replaces_the_device() {
 
 		// First enrollment with cert A.
 		let (spki_a, cert_a, key_a) = make_signing_certificate();
-		let m = machine(&mut conn).await;
-		let server = Application::create(&mut conn, new_server("https://reenroll.example/", m))
-			.await
-			.unwrap();
+		let machine_id = machine(&mut conn).await;
 		let (_ta, token_a) =
-			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+			MachineEnrollmentToken::mint(&mut conn, machine_id, SignedDuration::from_hours(1))
 				.await
 				.unwrap();
-		run_handshake(&public, server.id, &token_a, &spki_a, &cert_a, &key_a)
+		run_handshake(&public, machine_id, &token_a, &spki_a, &cert_a, &key_a)
 			.await
 			.assert_status_ok();
-		let device_a = Application::get_by_id(&mut conn, server.id)
+		let device_a = Machine::get_by_id(&mut conn, machine_id)
 			.await
 			.unwrap()
 			.device_id
@@ -531,14 +478,14 @@ async fn re_enrollment_replaces_the_device() {
 		// Re-enroll with a DIFFERENT box (cert B) — replaces the device.
 		let (spki_b, cert_b, key_b) = make_signing_certificate();
 		let (_tb, token_b) =
-			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+			MachineEnrollmentToken::mint(&mut conn, machine_id, SignedDuration::from_hours(1))
 				.await
 				.unwrap();
-		run_handshake(&public, server.id, &token_b, &spki_b, &cert_b, &key_b)
+		run_handshake(&public, machine_id, &token_b, &spki_b, &cert_b, &key_b)
 			.await
 			.assert_status_ok();
 
-		let device_b = Application::get_by_id(&mut conn, server.id)
+		let device_b = Machine::get_by_id(&mut conn, machine_id)
 			.await
 			.unwrap()
 			.device_id
@@ -629,12 +576,9 @@ async fn channel_binding_happy_path() {
 	unsafe { std::env::set_var("CANOPY_ENROLL_EKM_HEADER", EKM_HEADER) };
 	run(async |mut conn, public, _private| {
 		let (spki, cert, key) = make_signing_certificate();
-		let m = machine(&mut conn).await;
-		let server = Application::create(&mut conn, new_server("https://cb.example/", m))
-			.await
-			.unwrap();
+		let machine_id = machine(&mut conn).await;
 		let (_t, token) =
-			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+			MachineEnrollmentToken::mint(&mut conn, machine_id, SignedDuration::from_hours(1))
 				.await
 				.unwrap();
 
@@ -642,7 +586,7 @@ async fn channel_binding_happy_path() {
 		let ekm = [7u8; 32];
 		let (begin, complete) = run_cb_handshake(
 			&public,
-			server.id,
+			machine_id,
 			&token,
 			&spki,
 			&cert,
@@ -658,7 +602,7 @@ async fn channel_binding_happy_path() {
 		);
 		complete.assert_status_ok();
 		assert!(
-			Application::get_by_id(&mut conn, server.id)
+			Machine::get_by_id(&mut conn, machine_id)
 				.await
 				.unwrap()
 				.registered_at
@@ -674,12 +618,9 @@ async fn channel_binding_missing_header_is_rejected() {
 	unsafe { std::env::set_var("CANOPY_ENROLL_EKM_HEADER", EKM_HEADER) };
 	run(async |mut conn, public, _private| {
 		let (spki, cert, key) = make_signing_certificate();
-		let m = machine(&mut conn).await;
-		let server = Application::create(&mut conn, new_server("https://cb-missing.example/", m))
-			.await
-			.unwrap();
+		let machine_id = machine(&mut conn).await;
 		let (_t, token) =
-			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+			MachineEnrollmentToken::mint(&mut conn, machine_id, SignedDuration::from_hours(1))
 				.await
 				.unwrap();
 
@@ -688,7 +629,7 @@ async fn channel_binding_missing_header_is_rejected() {
 		let ekm = [7u8; 32];
 		let (_begin, complete) = run_cb_handshake(
 			&public,
-			server.id,
+			machine_id,
 			&token,
 			&spki,
 			&cert,
@@ -699,7 +640,7 @@ async fn channel_binding_missing_header_is_rejected() {
 		.await;
 		complete.assert_status_forbidden();
 		assert!(
-			ServerEnrollmentToken::find_active(&mut conn, server.id, &token)
+			MachineEnrollmentToken::find_active(&mut conn, machine_id, &token)
 				.await
 				.is_ok(),
 			"token not burned by a failed complete",
@@ -713,12 +654,9 @@ async fn channel_binding_mismatch_is_rejected() {
 	unsafe { std::env::set_var("CANOPY_ENROLL_EKM_HEADER", EKM_HEADER) };
 	run(async |mut conn, public, _private| {
 		let (spki, cert, key) = make_signing_certificate();
-		let m = machine(&mut conn).await;
-		let server = Application::create(&mut conn, new_server("https://cb-mismatch.example/", m))
-			.await
-			.unwrap();
+		let machine_id = machine(&mut conn).await;
 		let (_t, token) =
-			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+			MachineEnrollmentToken::mint(&mut conn, machine_id, SignedDuration::from_hours(1))
 				.await
 				.unwrap();
 
@@ -727,7 +665,7 @@ async fn channel_binding_mismatch_is_rejected() {
 		// binding itself.
 		let (_begin, complete) = run_cb_handshake(
 			&public,
-			server.id,
+			machine_id,
 			&token,
 			&spki,
 			&cert,
@@ -748,13 +686,9 @@ async fn tailnet_path_skips_channel_binding() {
 		"server",
 		async |mut conn, fwd_ip, _node, _dev, _public, private| {
 			let (spki, _cert, key) = make_signing_certificate();
-			let m = machine(&mut conn).await;
-			let server =
-				Application::create(&mut conn, new_server("https://cb-tailnet.example/", m))
-					.await
-					.unwrap();
+			let machine_id = machine(&mut conn).await;
 			let (_t, token) =
-				ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+				MachineEnrollmentToken::mint(&mut conn, machine_id, SignedDuration::from_hours(1))
 					.await
 					.unwrap();
 
@@ -766,7 +700,9 @@ async fn tailnet_path_skips_channel_binding() {
 			let begin = private
 				.post("/public/servers/register/begin")
 				.add_header("Forwarded", &fwd)
-				.json(&json!({"server_id": server.id, "token": token, "spki": b64().encode(&spki)}))
+				.json(
+					&json!({"server_id": machine_id, "token": token, "spki": b64().encode(&spki)}),
+				)
 				.await;
 			begin.assert_status_ok();
 			assert_eq!(
@@ -775,7 +711,7 @@ async fn tailnet_path_skips_channel_binding() {
 				"tailnet mount never requires channel binding",
 			);
 
-			run_tailnet_handshake(&private, fwd_ip, server.id, &token, &spki, &key, None)
+			run_tailnet_handshake(&private, fwd_ip, machine_id, &token, &spki, &key, None)
 				.await
 				.assert_status_ok();
 		},

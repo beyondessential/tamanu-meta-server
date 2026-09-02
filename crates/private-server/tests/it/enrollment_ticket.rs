@@ -8,21 +8,18 @@ use algae_cli::{
 };
 use base64::Engine;
 use commons_tests::diesel_async::{AsyncPgConnection, SimpleAsyncConnection};
-use database::server_enrollment_tokens::ServerEnrollmentToken;
+use database::machine_enrollment_tokens::MachineEnrollmentToken;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-/// An application to enrol. Seeded rather than created through the API: an
-/// application's type is reported, so there is no operator flow that makes one.
-async fn seed_application(conn: &mut AsyncPgConnection) -> String {
+/// A machine to enrol. It carries no application, and is not supposed to:
+/// enrolment is what admits the box, and what runs on the box only exists once
+/// the enrolled agent reports it.
+async fn seed_machine(conn: &mut AsyncPgConnection) -> String {
 	let id = Uuid::new_v4();
-	conn.batch_execute(&format!(
-		"WITH m AS (INSERT INTO machines (id) VALUES ('{id}') RETURNING id) \
-		 INSERT INTO applications (id, type, machine_id) \
-		 VALUES ('{id}', 'tamanu-central', '{id}')"
-	))
-	.await
-	.expect("seed application");
+	conn.batch_execute(&format!("INSERT INTO machines (id) VALUES ('{id}')"))
+		.await
+		.expect("seed machine");
 	id.to_string()
 }
 
@@ -32,13 +29,12 @@ async fn mint_enrollment_ticket_round_trips_to_active_token() {
 		// PUBLIC_URL is read by the handler to build the payload.
 		unsafe { std::env::set_var("PUBLIC_URL", "https://api.example.test") };
 
-		// An application to enrol.
-		let server_id = seed_application(&mut conn).await;
+		let machine_id = seed_machine(&mut conn).await;
 
 		// Mint an encrypted enrollment ticket.
 		let response = private
-			.post("/api/servers/mint_enrollment")
-			.json(&json!({ "server_id": server_id }))
+			.post("/api/machines/mint_enrollment")
+			.json(&json!({ "machine_id": machine_id }))
 			.await;
 		response.assert_status_ok();
 		let body: Value = response.json();
@@ -72,13 +68,15 @@ async fn mint_enrollment_ticket_round_trips_to_active_token() {
 		// (a) The decrypted payload carries a token.
 		let payload: Value = serde_json::from_slice(&decrypted).expect("payload is JSON");
 		assert_eq!(payload["v"], "enroll-1");
-		assert_eq!(payload["server_id"], server_id);
+		// The ticket key stays `server_id`: it is what a fielded bestool reads,
+		// and what it sends back when it registers.
+		assert_eq!(payload["server_id"], machine_id);
 		let token = payload["token"].as_str().expect("token in payload");
 
-		// (b) That token is the real, active enrollment token for the server.
-		ServerEnrollmentToken::find_active(&mut conn, server_id.parse().unwrap(), token)
+		// (b) That token is the real, active enrollment token for the machine.
+		MachineEnrollmentToken::find_active(&mut conn, machine_id.parse().unwrap(), token)
 			.await
-			.expect("decrypted token is active for the server");
+			.expect("decrypted token is active for the machine");
 	})
 	.await
 }
@@ -90,11 +88,11 @@ async fn enrollment_token_never_leaks_in_the_clear() {
 	commons_tests::server::run(async |mut conn, public, private| {
 		unsafe { std::env::set_var("PUBLIC_URL", "https://api.example.test") };
 
-		let server_id = seed_application(&mut conn).await;
+		let machine_id = seed_machine(&mut conn).await;
 
 		let mint = private
-			.post("/api/servers/mint_enrollment")
-			.json(&json!({ "server_id": server_id }))
+			.post("/api/machines/mint_enrollment")
+			.json(&json!({ "machine_id": machine_id }))
 			.await;
 		mint.assert_status_ok();
 		let mint_body = mint.text();
@@ -129,8 +127,8 @@ async fn enrollment_token_never_leaks_in_the_clear() {
 
 		// (b) enrollment_status returns only timestamps — never the token.
 		let status = private
-			.post("/api/servers/enrollment_status")
-			.json(&json!({ "server_id": server_id }))
+			.post("/api/machines/enrollment_status")
+			.json(&json!({ "machine_id": machine_id }))
 			.await;
 		status.assert_status_ok();
 		assert!(
@@ -142,7 +140,7 @@ async fn enrollment_token_never_leaks_in_the_clear() {
 		// does not echo the token back, even though we sent it.
 		let begin = public
 			.post("/servers/register/begin")
-			.json(&json!({ "server_id": server_id, "token": token }))
+			.json(&json!({ "server_id": machine_id, "token": token }))
 			.await;
 		begin.assert_status_forbidden();
 		assert!(

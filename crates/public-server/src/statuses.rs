@@ -22,11 +22,11 @@ use commons_types::{
 use database::{
 	Db,
 	applications::Application,
-	machines::Machine,
 	check_policies::{CheckPolicy, EvaluationContext, FilingScope, GradedResult},
 	devices::Device,
 	diesel_async::{AsyncConnection, AsyncPgConnection},
 	issues::{CheckStateStamp, Issue, NewEvent},
+	machines::Machine,
 	silenced_refs::silenced_health_checks_for_server,
 	statuses::{NewStatus, Status},
 };

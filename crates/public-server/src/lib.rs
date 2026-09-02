@@ -9,6 +9,7 @@ pub mod artifacts;
 pub mod backup;
 pub mod bestool;
 pub mod calendar;
+pub mod enrollment;
 pub mod machines;
 pub mod mcp;
 pub mod names;
@@ -36,7 +37,11 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.nest("/certificates", names::certificate_routes())
 		.nest("/names", names::routes())
 		.nest("/machines", machines::routes())
-		.nest("/servers", applications::routes())
+		.nest(
+			"/servers",
+			// Enrolment is the machine's, but fielded agents call it here.
+			applications::routes().merge(enrollment::routes()),
+		)
 		.nest("/status", statuses::routes())
 		.nest("/tags", tags::routes())
 		.nest("/versions", versions::routes());

@@ -1,12 +1,13 @@
-//! Model-level tests for server archival and enrollment-token lifecycle.
+//! Model-level tests for application archival and the enrolment-token
+//! lifecycle. A ticket admits a box, so it is minted against the machine.
 
 use commons_types::server::{TagMap, app_type::ApplicationType};
 use database::{
 	Device, DeviceKey,
 	applications::Application,
+	machine_enrollment_tokens::MachineEnrollmentToken,
 	machines::{Machine, NewMachine},
 	pg_duration::PgDuration,
-	server_enrollment_tokens::ServerEnrollmentToken,
 	url_field::UrlField,
 };
 use jiff::SignedDuration;
@@ -111,38 +112,37 @@ async fn token_reissue_invalidates_prior_and_consume_is_single_use() {
 		let machine = Machine::create(&mut conn, NewMachine::default())
 			.await
 			.unwrap();
-		let server = Application::create(&mut conn, new_server("https://tok.example/", machine.id))
-			.await
-			.unwrap();
+		// No application on it: a ticket admits the box, and what runs on the
+		// box only exists once the enrolled agent reports it.
 
 		let (_t1, first) =
-			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+			MachineEnrollmentToken::mint(&mut conn, machine.id, SignedDuration::from_hours(1))
 				.await
 				.unwrap();
 		// Reissue: the first token must no longer be active.
 		let (t2, second) =
-			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+			MachineEnrollmentToken::mint(&mut conn, machine.id, SignedDuration::from_hours(1))
 				.await
 				.unwrap();
 		assert!(
-			ServerEnrollmentToken::find_active(&mut conn, server.id, &first)
+			MachineEnrollmentToken::find_active(&mut conn, machine.id, &first)
 				.await
 				.is_err(),
 			"reissue invalidated the prior token"
 		);
 		assert!(
-			ServerEnrollmentToken::find_active(&mut conn, server.id, &second)
+			MachineEnrollmentToken::find_active(&mut conn, machine.id, &second)
 				.await
 				.is_ok(),
 			"reissued token is active"
 		);
 
 		// Consume is single-use.
-		ServerEnrollmentToken::consume(&mut conn, server.id, &t2.token_hash)
+		MachineEnrollmentToken::consume(&mut conn, machine.id, &t2.token_hash)
 			.await
 			.unwrap();
 		assert!(
-			ServerEnrollmentToken::consume(&mut conn, server.id, &t2.token_hash)
+			MachineEnrollmentToken::consume(&mut conn, machine.id, &t2.token_hash)
 				.await
 				.is_err(),
 			"second consume fails"
@@ -157,34 +157,30 @@ async fn revoke_invalidates_the_active_token() {
 		let machine = Machine::create(&mut conn, NewMachine::default())
 			.await
 			.unwrap();
-		let server =
-			Application::create(&mut conn, new_server("https://revoke.example/", machine.id))
-				.await
-				.unwrap();
 		let (_t, token) =
-			ServerEnrollmentToken::mint(&mut conn, server.id, SignedDuration::from_hours(1))
+			MachineEnrollmentToken::mint(&mut conn, machine.id, SignedDuration::from_hours(1))
 				.await
 				.unwrap();
 		assert!(
-			ServerEnrollmentToken::active_for(&mut conn, server.id)
+			MachineEnrollmentToken::active_for(&mut conn, machine.id)
 				.await
 				.unwrap()
 				.is_some()
 		);
 
-		ServerEnrollmentToken::revoke(&mut conn, server.id)
+		MachineEnrollmentToken::revoke(&mut conn, machine.id)
 			.await
 			.unwrap();
 
 		assert!(
-			ServerEnrollmentToken::active_for(&mut conn, server.id)
+			MachineEnrollmentToken::active_for(&mut conn, machine.id)
 				.await
 				.unwrap()
 				.is_none(),
 			"no active token after revoke"
 		);
 		assert!(
-			ServerEnrollmentToken::find_active(&mut conn, server.id, &token)
+			MachineEnrollmentToken::find_active(&mut conn, machine.id, &token)
 				.await
 				.is_err(),
 			"revoked token can't be presented"

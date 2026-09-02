@@ -29,10 +29,10 @@ use database::{
 	check_policies::CheckPolicy,
 	devices::NewDeviceConnection,
 	issues::{Incident, Issue, NewEvent},
+	machine_enrollment_tokens::MachineEnrollmentToken,
 	machines::{Machine, NewMachine},
 	notes::{IncidentNote, IssueNote},
 	pg_duration::PgDuration,
-	server_enrollment_tokens::ServerEnrollmentToken,
 	server_groups::{NewServerGroup, ServerGroup},
 	silenced_refs::{ServerGroupSilencedRef, ServerSilencedRef},
 	statuses::Status,
@@ -55,8 +55,8 @@ const TEN_MINUTES: PgDuration = PgDuration(SignedDuration::from_secs(600));
 /// server row (id all-zeroes) is inserted by a migration and must survive; we
 /// delete only the non-nil rows below.
 const TRUNCATE_TABLES: &[&str] = &[
-	"server_enrollment_challenges",
-	"server_enrollment_tokens",
+	"machine_enrollment_challenges",
+	"machine_enrollment_tokens",
 	"slack_outbox",
 	"incident_notes",
 	"issue_notes",
@@ -914,12 +914,13 @@ async fn seed_enrollment_tokens(
 	conn: &mut AsyncPgConnection,
 	applications: &SeededServers,
 ) -> Result<()> {
-	let (_token, _plaintext) = ServerEnrollmentToken::mint(
-		conn,
-		applications.pending_with_token,
-		SignedDuration::from_hours(48),
-	)
-	.await?;
+	// A ticket admits a box, so it is minted against the machine. The seed
+	// names its boxes by the application on them, so the machine is read back
+	// off that application.
+	let pending = Application::get_by_id(conn, applications.pending_with_token).await?;
+	let (_token, _plaintext) =
+		MachineEnrollmentToken::mint(conn, pending.machine_id, SignedDuration::from_hours(48))
+			.await?;
 	let _ = applications.pending_no_token;
 	Ok(())
 }
@@ -1331,7 +1332,7 @@ async fn report(conn: &mut AsyncPgConnection) -> Result<()> {
 		"device_connections",
 		"server_groups",
 		"applications",
-		"server_enrollment_tokens",
+		"machine_enrollment_tokens",
 		"statuses",
 		"issues",
 		"incidents",
