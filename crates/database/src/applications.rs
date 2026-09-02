@@ -517,6 +517,26 @@ impl Application {
 		Ok(())
 	}
 
+	/// Every application type present on a live application, so a surface
+	/// listing types can offer the ones the fleet actually uses as well as the
+	/// ones Canopy has handling for. The set is open, so the catalogue cannot
+	/// be a constant.
+	// spec: APP#where-a-type-comes-from
+	pub async fn distinct_types(db: &mut AsyncPgConnection) -> Result<Vec<ApplicationType>> {
+		use crate::schema::applications::dsl;
+		let rows: Vec<String> = dsl::applications
+			.select(dsl::type_)
+			.filter(dsl::deleted_at.is_null())
+			.distinct()
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		// A stored value that does not parse is not a type this build can say
+		// anything about; leaving it out of the catalogue is the same as any
+		// other unknown.
+		Ok(rows.into_iter().filter_map(|t| t.parse().ok()).collect())
+	}
+
 	pub async fn get_by_device_id(db: &mut AsyncPgConnection, dev_id: Uuid) -> Result<Vec<Self>> {
 		use crate::schema::applications::dsl::*;
 		applications

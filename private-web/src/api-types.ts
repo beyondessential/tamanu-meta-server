@@ -4408,18 +4408,10 @@ export interface components {
             paused_by?: string | null;
         };
         /**
-         * @description What an application is: the software and the role it plays, together.
-         *
-         *     A Tamanu central and a Tamanu facility are two types rather than one type
-         *     in two configurations. They behave differently — a large set of checks
-         *     exists only on centrals and another only on facilities — which is not how
-         *     two instances of one thing behave.
-         *
-         *     The set is closed and defined here rather than configured, because each
-         *     type's handling is built in. See [`ApplicationType::caps`].
-         * @enum {string}
+         * @description What an application is: the software and the role it plays, as a slug. The set is open — a report carrying a type Canopy does not know creates an application of that type, which simply carries no per-type capabilities.
+         * @example tamanu-central
          */
-        ApplicationType: "tamanu-central" | "tamanu-facility" | "senaite" | "canopy";
+        ApplicationType: string;
         /**
          * @description One product canopy monitors, with what canopy does for its applications and the
          *     roles it defines.

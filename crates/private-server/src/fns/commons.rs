@@ -1,4 +1,5 @@
 use axum::Json;
+use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
@@ -46,15 +47,29 @@ pub struct ApplicationTypeInfo {
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
-pub async fn products() -> Result<Json<Vec<ApplicationTypeInfo>>> {
+pub async fn products(State(state): State<AppState>) -> Result<Json<Vec<ApplicationTypeInfo>>> {
+	let mut conn = state.db_read.get().await?;
+	// The types Canopy has handling for, plus the ones the fleet is actually
+	// running. The set is open, so a constant list would leave a reported type
+	// without a label or capabilities anywhere the SPA presents it.
+	// spec: APP#where-a-type-comes-from
+	let mut types: Vec<ApplicationType> = ApplicationType::KNOWN.to_vec();
+	for in_use in database::applications::Application::distinct_types(&mut conn).await? {
+		if !types.contains(&in_use) {
+			types.push(in_use);
+		}
+	}
+	// Alphabetical, everywhere types are listed. An invented precedence is
+	// surprising to read and is one more thing to maintain as types appear.
+	types.sort_by_key(ToString::to_string);
+
 	Ok(Json(
-		ApplicationType::ALL
-			.iter()
-			.copied()
+		types
+			.into_iter()
 			.map(|r#type| ApplicationTypeInfo {
-				r#type,
 				caps: r#type.caps(),
 				label: r#type.label(),
+				r#type,
 			})
 			.collect(),
 	))

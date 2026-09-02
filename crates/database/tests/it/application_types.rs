@@ -118,9 +118,9 @@ async fn type_defaults_to_a_tamanu_central() {
 #[tokio::test(flavor = "multi_thread")]
 async fn every_type_round_trips_through_the_column() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
-		for want in ApplicationType::ALL {
+		for want in ApplicationType::KNOWN {
 			let m = machine(&mut conn, None).await;
-			let made = Application::create(&mut conn, server(*want, None, m))
+			let made = Application::create(&mut conn, server(want.clone(), None, m))
 				.await
 				.unwrap();
 			let loaded = Application::get_by_id(&mut conn, made.id).await.unwrap();

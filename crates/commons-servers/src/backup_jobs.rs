@@ -300,7 +300,7 @@ impl BillingLabels {
 	pub fn for_server(
 		tags: &TagMap,
 		group_name: &str,
-		r#type: ApplicationType,
+		r#type: &ApplicationType,
 		rank: Option<ServerRank>,
 	) -> Self {
 		Self::from_group(tags, group_name, Some(r#type.software().to_string()), rank)
@@ -920,7 +920,7 @@ mod tests {
 		let b = BillingLabels::for_server(
 			&empty,
 			"Pacific",
-			ApplicationType::Senaite,
+			&ApplicationType::Senaite,
 			Some(ServerRank::Clone),
 		);
 		assert_eq!(b.product.as_deref(), Some("senaite"));

@@ -16,6 +16,45 @@ test.describe("application types", () => {
 		await resetSeededTables(sql);
 	});
 
+	/// The set of types is open: a report is the only thing that creates an
+	/// application and it carries the type, so a deployment brings a new kind of
+	/// application without Canopy being changed and released.
+	///
+	/// spec: APP#where-a-type-comes-from
+	test("an application of a type Canopy has never seen is monitored like any other", async ({
+		page,
+		sql,
+	}) => {
+		await seedVersion(sql, { major: 2, minor: 34, patch: 1, status: "published" });
+		const group = await seedServerGroup(sql, { name: "open-type-group" });
+		const server = await seedServer(sql, {
+			name: "lab-box",
+			type: "open-mrs",
+			groupId: group.id,
+		});
+		await seedStatus(sql, {
+			serverId: server.id,
+			version: "1.2.3",
+			extra: { bestoolVersion: "2.10.5" },
+		});
+
+		await page.goto(`/servers/${server.id}`);
+
+		// It presents as the sentence case of its type, by the same rule as
+		// every other type.
+		await expect(
+			page.getByText("Open mrs", { exact: true }).first(),
+		).toBeVisible();
+
+		// Its version is presented as reported and graded against nothing:
+		// Canopy holds no release train for it, so there is no distance from a
+		// latest release to state.
+		await expect(page.getByText("1.2.3")).toBeVisible();
+		await expect(
+			page.getByRole("link", { name: /versions behind/ }),
+		).toHaveCount(0);
+	});
+
 	test("a Tamanu server presents its version graded against the catalogue", async ({
 		page,
 		sql,
@@ -54,7 +93,12 @@ test.describe("application types", () => {
 		// One chip carries what it is. There is no separate role chip: SENAITE
 		// instances hold no role relative to each other, so the software alone
 		// names the type.
-		await expect(page.getByText("SENAITE", { exact: true })).toBeVisible();
+		//
+		// The chip reads as the sentence case of the type, which is the one rule
+		// for every type. Types are an open set, so a table of per-type styling
+		// could only cover the ones Canopy happens to know.
+		// spec: FLT#naming
+		await expect(page.getByText("Senaite", { exact: true })).toBeVisible();
 		await expect(page.getByText("standalone", { exact: true })).toHaveCount(0);
 		// There is no version affordance at all — not even "unknown". There is no
 		// version to learn, so an unknown would read as a reporting failure.

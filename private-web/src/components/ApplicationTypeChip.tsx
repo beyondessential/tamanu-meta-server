@@ -4,7 +4,12 @@ import type { ApplicationType } from "../types";
 
 // The software carries the colour, so a central and a facility read as two of
 // the same thing at a glance. The label is what tells them apart.
-const COLORS: Record<ApplicationType, "success" | "secondary" | "default"> = {
+//
+// Types are an open set, so this covers the ones Canopy knows and anything
+// else takes the neutral colour. Deriving a colour from an unknown slug would
+// make two unrelated products collide on one at random.
+// spec: APP#where-a-type-comes-from
+const COLORS: Record<string, "success" | "secondary" | "default"> = {
 	"tamanu-central": "success",
 	"tamanu-facility": "success",
 	senaite: "secondary",
@@ -18,6 +23,6 @@ export default function ApplicationTypeChip({
 }) {
 	const label = useApplicationTypeLabel(type);
 	return (
-		<Chip size="small" variant="outlined" color={COLORS[type]} label={label} />
+		<Chip size="small" variant="outlined" color={COLORS[type] ?? "default"} label={label} />
 	);
 }

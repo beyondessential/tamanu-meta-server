@@ -14,19 +14,6 @@ use crate::applications::Application;
 use crate::pg_duration::PgDuration;
 use crate::statuses::Status;
 
-/// Ordering key for an application's type — lower is higher priority. Breaks a
-/// rank tie when picking a group's canonical member, a central speaking for a
-/// group before a facility does. Types Canopy holds no release train for never
-/// reach this, being filtered out before the ordering applies.
-// spec: APP#capabilities
-pub fn type_priority(r#type: ApplicationType) -> u8 {
-	match r#type {
-		ApplicationType::TamanuCentral => 0,
-		ApplicationType::TamanuFacility => 1,
-		ApplicationType::Senaite | ApplicationType::Canopy => 2,
-	}
-}
-
 /// Ordering key for a server's rank — lower is higher priority. Used to pick a
 /// group's canonical member (and to bucket groups on the status page). `None`
 /// (unranked) sorts last.
@@ -391,20 +378,20 @@ impl ServerGroup {
 		// Two passes rather than one: a group has to be *removed* once a
 		// second software shows up, which a running "first wins" insert can't
 		// express.
-		let mut seen: HashMap<Uuid, Vec<&'static str>> = HashMap::new();
+		let mut seen: HashMap<Uuid, Vec<String>> = HashMap::new();
 		for (gid, r#type) in rows {
 			let Ok(r#type) = r#type.parse::<ApplicationType>() else {
 				continue;
 			};
 			let software = seen.entry(gid).or_default();
-			if !software.contains(&r#type.software()) {
-				software.push(r#type.software());
+			if !software.iter().any(|s| s == r#type.software()) {
+				software.push(r#type.software().to_owned());
 			}
 		}
 		Ok(seen
 			.into_iter()
-			.filter_map(|(gid, software)| match software.as_slice() {
-				[sole] => Some((gid, (*sole).to_owned())),
+			.filter_map(|(gid, mut software)| match software.as_mut_slice() {
+				[sole] => Some((gid, std::mem::take(sole))),
 				_ => None,
 			})
 			.collect())
@@ -490,30 +477,37 @@ impl ServerGroup {
 				.await?
 		};
 
-		// The headline comes from the highest-ranked member whose version
-		// Canopy grades against a release train, a central beating a facility
-		// on a rank tie. Ranking by type replaces the precedence over kinds the pair
-		// carried: the order is the same, expressed over one axis instead of
-		// two. A group of nothing but untracked types has no headline version,
-		// there being no version to take.
+		// A deployment's version is its central's version, so the headline
+		// names that outright: the `tamanu-central` on the group's
+		// highest-ranked machine. Saying it directly is clearer than a
+		// precedence order over types that happens to put centrals first, and
+		// it leaves types a flat set with no ordering to maintain as new ones
+		// appear.
+		//
+		// A group with no central falls back to the highest-ranked member
+		// whose version Canopy grades against a release train, so a
+		// facility-only deployment still has a headline. A group of nothing
+		// but untracked types has none, there being no version to take.
 		// spec: APP#capabilities
 		let canonical = members
-			.into_iter()
-			.filter(|s| s.r#type.tracks_versions())
-			.min_by(|a, b| {
-				(rank_priority(a.rank), type_priority(a.r#type), a.id).cmp(&(
-					rank_priority(b.rank),
-					type_priority(b.r#type),
-					b.id,
-				))
-			});
+			.iter()
+			.filter(|s| s.r#type == ApplicationType::TamanuCentral)
+			.min_by_key(|s| (rank_priority(s.rank), s.id))
+			.or_else(|| {
+				members
+					.iter()
+					.filter(|s| s.r#type.tracks_versions())
+					.min_by_key(|s| (rank_priority(s.rank), s.id))
+			})
+			.map(|s| s.id);
 
 		let (version_application_id, effective_version) = match canonical {
 			None => (None, None),
-			Some(server) => {
+			Some(application_id) => {
 				let version =
-					crate::reported_detail::ReportedDetail::last_version(db, server.id).await?;
-				(Some(server.id), version)
+					crate::reported_detail::ReportedDetail::last_version(db, application_id)
+						.await?;
+				(Some(application_id), version)
 			}
 		};
 

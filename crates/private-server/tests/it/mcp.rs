@@ -238,20 +238,38 @@ async fn find_servers_filters_and_decorates() {
 			.collect();
 		assert_eq!(names, vec!["Prod Central"]);
 
-		// Bad enum → error (protocol or tool-level).
+		// A type Canopy has never seen is a type, not an error: the set is
+		// open, so filtering by one simply matches nothing rather than being
+		// refused. What is refused is a value that is not a type at all.
+		// spec: APP#where-a-type-comes-from
+		let unknown = private
+			.post("/api/mcp")
+			.add_header("accept", ACCEPT)
+			.add_header("mcp-protocol-version", PROTO)
+			.json(&serde_json::json!({
+				"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+				"params": { "name": "find_servers", "arguments": { "type": "open-mrs" } }
+			}))
+			.await;
+		let env = parse_envelope(&unknown.text());
+		assert!(
+			env.get("error").is_none() && env["result"]["isError"] != serde_json::json!(true),
+			"an unknown type filters rather than erroring: {env}"
+		);
+
 		let bad = private
 			.post("/api/mcp")
 			.add_header("accept", ACCEPT)
 			.add_header("mcp-protocol-version", PROTO)
 			.json(&serde_json::json!({
 				"jsonrpc": "2.0", "id": 9, "method": "tools/call",
-				"params": { "name": "find_servers", "arguments": { "type": "nonsense" } }
+				"params": { "name": "find_servers", "arguments": { "type": "not a slug" } }
 			}))
 			.await;
 		let env = parse_envelope(&bad.text());
 		assert!(
 			env.get("error").is_some() || env["result"]["isError"] == serde_json::json!(true),
-			"a type outside the closed set should error: {env}"
+			"a value that is not a type at all should error: {env}"
 		);
 	})
 	.await

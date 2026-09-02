@@ -10,18 +10,26 @@ The type is the axis that decides which of Canopy's per-application features app
 A type names the software and the role it plays together, so a Tamanu central and a Tamanu facility are two types rather than one type in two configurations.
 They are different types because they are different things: a large set of checks exists only on centrals and another only on facilities, which is not how two instances of one thing behave.
 
-The set of types is closed and defined by Canopy, since each type's handling is built in rather than configured.
-The types are `tamanu-central`, `tamanu-facility`, `senaite` and `canopy`.
+The set of types is open.
+A report is the only thing that creates an application and it carries the type, so a deployment brings a new kind of application to Canopy without Canopy being changed and released.
 Software whose instances hold no role relative to each other has a single type named for the software alone.
 
+Canopy holds built-in handling for the types it knows — `tamanu-central`, `tamanu-facility`, `senaite` and `canopy` — and a type it does not know carries none of that handling.
+Such an application is monitored like any other: it is reachable or not, its checks are graded, its box is backed up, its figures are presented.
+What it does not get is the per-type behaviour below, which exists only where Canopy has something specific to do.
+
+A type is a slug: lowercase letters and digits in hyphen-separated segments, beginning with a letter.
+Being open is not being unconstrained — a type is presented, stored, and used to address reported material — so a reported value that is not a slug is a reporting error and is refused rather than adopted as a new type.
+
 Types are a flat set with no ordering among them.
+Wherever types are listed or sorted, they sort alphabetically; there is no precedence between them to consult, and an invented one would be surprising to read and would have nothing to say about a type Canopy has never seen.
 
 ## Where a type comes from
 
 An application's type is reported, never entered.
 The software running on a machine is what an application is, and the report that creates an application is what tells Canopy its type (see [FLT](overview.md), "Applications come from reports").
 
-Canopy adopts a reported type silently.
+Canopy adopts a reported type silently, whether or not it knows that type.
 
 An application does not change type.
 A reporter that reports a different type for an application it was already reporting has, as far as Canopy can tell, stopped reporting one application and started reporting another: the first becomes unreachable and the second is created beside it (see [STA](../public-server/statuses.md), "Identifying an application").
@@ -42,6 +50,9 @@ A Canopy instance reports a version that Canopy does not track as a release trai
 A SENAITE application has no version at all.
 
 Applications of type `tamanu-central` are eligible for public listing, and no other type is.
+
+A type Canopy does not know has no capabilities: its version stands as reported and is graded against nothing, it is not eligible for public listing, and it publishes no masking manifest, so a redacting replica of one is withheld rather than served unmasked.
+Anywhere a capability decides which applications a query covers, the types considered are the ones Canopy knows, since a capability is something Canopy has handling for and an unknown type has none.
 
 Reachability and health monitoring apply to every application whatever its type, since an application's checks are graded by the source that reports them rather than by the software beneath them (see [CHK](../monitoring/checks.md)).
 Backups apply to every machine whatever its applications: a machine backs up the types its agent advertises, and which types those are is a property of the agent (see [BAK](../public-server/backup.md)).

@@ -244,32 +244,22 @@ export const SERVER_RANK_ORDER: ServerRank[] = [
 	"dev",
 ];
 
-/// Display order for application types — centrals first, then facilities,
-/// then the types that hold no role relative to each other. Used as a
-/// tiebreak within a single rank in status-dot lists and group detail views.
-export const APPLICATION_TYPE_ORDER: ApplicationType[] = [
-	"tamanu-central",
-	"tamanu-facility",
-	"senaite",
-	"canopy",
-];
-
-/// Sort key combining rank index (with `null` ranks pushed last) and
-/// type index. Stable per-rank ordering matches what the UI grouping
-/// expects.
-export function serverSortKey(s: {
-	rank?: ServerRank | null;
-	type: ApplicationType;
-}): [number, number] {
+/// Sort key for a rank, with `null` ranks pushed last. Ranks are an ordered
+/// set; types are not, so a type tiebreak sorts alphabetically at the
+/// comparison rather than through a table here.
+export function serverSortKey(s: { rank?: ServerRank | null }): number {
 	const rankIndex =
 		s.rank == null ? Infinity : SERVER_RANK_ORDER.indexOf(s.rank);
-	const rankKey = rankIndex === -1 ? SERVER_RANK_ORDER.length : rankIndex;
-	const typeIndex = APPLICATION_TYPE_ORDER.indexOf(s.type);
-	const typeKey =
-		typeIndex === -1 ? APPLICATION_TYPE_ORDER.length : typeIndex;
-	return [rankKey, typeKey];
+	return rankIndex === -1 ? SERVER_RANK_ORDER.length : rankIndex;
 }
 
+/// Rank first, then type alphabetically, then name.
+///
+/// Application types are a flat, open set: a deployment can report a type
+/// Canopy has never seen, so there is no precedence to consult and an invented
+/// one would be surprising to read. Alphabetical is the rule everywhere types
+/// are listed.
+/// spec: APP#where-a-type-comes-from
 export function compareServersByRankThenType<
 	T extends {
 		rank?: ServerRank | null;
@@ -277,13 +267,12 @@ export function compareServersByRankThenType<
 		name?: string | null;
 	},
 >(a: T, b: T): number {
-	const [ar, ak] = serverSortKey(a);
-	const [br, bk] = serverSortKey(b);
+	const ar = serverSortKey(a);
+	const br = serverSortKey(b);
 	if (ar !== br) return ar - br;
-	if (ak !== bk) return ak - bk;
-	const an = a.name ?? "";
-	const bn = b.name ?? "";
-	return an.localeCompare(bn);
+	const byType = a.type.localeCompare(b.type);
+	if (byType !== 0) return byType;
+	return (a.name ?? "").localeCompare(b.name ?? "");
 }
 
 /// Group a flat application list into rank buckets in display order, with
@@ -351,7 +340,10 @@ export function rankMachines(
 			machine,
 			applications: on,
 			rank: best?.rank ?? null,
-			type: best?.type ?? "tamanu-central",
+			// A box carrying nothing has no type to take. It has no rank
+			// either, so it sorts last on rank alone and this never decides an
+			// ordering — naming a type here would be inventing one.
+			type: best?.type ?? "",
 			name: machine.name ?? "",
 		};
 	});

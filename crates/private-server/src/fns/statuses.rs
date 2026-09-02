@@ -559,7 +559,7 @@ pub async fn check_detail(
 					continue;
 				};
 				applications.push(CheckDetailServerData {
-					r#type: server.r#type,
+					r#type: server.r#type.clone(),
 					server_id: server.id,
 					server_name: server.name.clone().unwrap_or_default(),
 					group_id: server.group_id,
@@ -781,7 +781,7 @@ pub async fn snapshot(
 		created_at: status.created_at,
 		server_id: status.server_id,
 		device_id: status.device_id,
-		r#type: server.r#type,
+		r#type: server.r#type.clone(),
 		// A product with no application version presents none, as against the
 		// `unknown` a versioned server shows before it has reported one.
 		// spec: APP#versions
@@ -1100,7 +1100,7 @@ pub async fn fleet_detail(
 				group_id: server.group_id,
 				group_name: server.group_id.and_then(|g| group_names.get(&g).cloned()),
 				rank: server.rank,
-				r#type: server.r#type,
+				r#type: server.r#type.clone(),
 				// A product with no application version reports none, so the
 				// row carries nothing for the fleet view to count.
 				// spec: APP#versions

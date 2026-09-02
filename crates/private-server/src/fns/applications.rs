@@ -445,12 +445,12 @@ pub async fn list_some(
 	Json(args): Json<ServerListArgs>,
 ) -> Result<Json<Page<ServerInfo>>> {
 	let mut conn = state.db.get().await?;
-	let total = if let Some(r#type) = args.r#type {
+	let total = if let Some(r#type) = args.r#type.clone() {
 		Application::count_by_type(&mut conn, r#type).await?
 	} else {
 		Application::count_all(&mut conn).await?
 	};
-	let applications = if let Some(r#type) = args.r#type {
+	let applications = if let Some(r#type) = args.r#type.clone() {
 		Application::list_by_type(&mut conn, r#type, args.offset, args.limit).await?
 	} else {
 		Application::get_all(&mut conn, args.offset, args.limit).await?
@@ -706,7 +706,7 @@ pub async fn get_detail(
 		Some(ServerLastStatusData {
 			id: st.id,
 			created_at: st.created_at,
-			r#type: server.r#type,
+			r#type: server.r#type.clone(),
 			// A product with no application version presents none, as against
 			// the `unknown` a versioned server shows before it has reported.
 			// spec: APP#versions
@@ -756,7 +756,7 @@ pub async fn get_detail(
 		Some(g) => commons_servers::backup_jobs::BillingLabels::for_server(
 			&g.tags,
 			&g.name,
-			server.r#type,
+			&server.r#type,
 			server.rank,
 		)
 		.into_tags()
