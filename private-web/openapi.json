@@ -4597,6 +4597,74 @@
         ]
       }
     },
+    "/api/machines/attach_tailscale_device": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Attach an identity to a machine via a Tailscale identifier.",
+        "description": "Resolves the identifier to a tailnet node, finds the identity already on\nthat node or mints one for it, and binds it to the machine. Useful when an\noperator can already see the box on the tailnet and wants to name it now\nrather than wait for enrolment. `registered_at` stays unset: naming a box is\nnot the box arriving.\n\nReturns 409 if the resolved identity already speaks for another live\nmachine; detach it there first.",
+        "operationId": "machines_attach_tailscale_device",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachTailscaleDeviceArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Identity now bound to the machine.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Identifier does not resolve to a known tailnet node.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The resolved identity already speaks for another machine.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Tailnet directory not configured or unreachable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/machines/create": {
       "post": {
         "tags": [
@@ -4641,6 +4709,53 @@
         "security": [
           {
             "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/machines/enrollment_status": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Get the enrollment state of a machine.",
+        "description": "Reports whether the machine has completed enrollment, and whether an\nenrollment token is currently outstanding (issue and expiry times only —\nthe token itself is never revealed).",
+        "operationId": "enrollment_status",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
           }
         ]
       }
@@ -4795,6 +4910,93 @@
         "security": [
           {
             "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/machines/mint_enrollment": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Mint (or reissue) an enrollment ticket for a machine.",
+        "description": "Creates a fresh enrollment token and returns it wrapped in a\npassphrase-encrypted ticket the operator runs through bestool on the\nenrolling machine, plus the 4-word passphrase that decrypts it. The\nplaintext token lives only inside the encrypted ticket; reissuing\ninvalidates any prior token. Fails if the server is archived.",
+        "operationId": "mint_enrollment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentTicket"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/machines/revoke_enrollment": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Revoke any outstanding enrollment ticket for a machine.",
+        "description": "Use this when a ticket was issued by mistake or is no longer needed.\nAfterwards, the enrollment status endpoint reports no outstanding token,\nand the revoked ticket can no longer be used to enroll.",
+        "operationId": "revoke_enrollment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
           }
         ]
       }
@@ -6064,74 +6266,6 @@
         ]
       }
     },
-    "/api/servers/attach_tailscale_device": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "Attach a device to a server via a Tailscale identifier.",
-        "description": "Resolves the identifier to a tailnet node, finds the device already\nattached to that node or creates a new one for it, and binds that device\nto the server. Useful when a server has no device yet (e.g. an\noperator-imported server that hasn't reported in) and should be bound to\na tailnet node directly. Returns 409 if the resolved device is already\nattached to another live server — detach it there first.",
-        "operationId": "attach_tailscale_device",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AttachTailscaleDeviceArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Device id newly attached to the server.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "string",
-                  "format": "uuid"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Identifier does not resolve to a known tailnet node.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "The resolved device is already attached to another server.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Tailnet directory not configured or unreachable.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
     "/api/servers/delete": {
       "post": {
         "tags": [
@@ -6153,53 +6287,6 @@
         "responses": {
           "200": {
             "description": ""
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/servers/enrollment_status": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "Get the enrollment state of a server.",
-        "description": "Reports whether the server has completed enrollment, and whether an\nenrollment token is currently outstanding (issue and expiry times only —\nthe token itself is never revealed).",
-        "operationId": "enrollment_status",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerIdOnlyArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnrollmentStatus"
-                }
-              }
-            }
           },
           "400": {
             "description": "",
@@ -6450,53 +6537,6 @@
         ]
       }
     },
-    "/api/servers/mint_enrollment": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "Mint (or reissue) an enrollment ticket for a server.",
-        "description": "Creates a fresh enrollment token and returns it wrapped in a\npassphrase-encrypted ticket the operator runs through bestool on the\nenrolling machine, plus the 4-word passphrase that decrypts it. The\nplaintext token lives only inside the encrypted ticket; reissuing\ninvalidates any prior token. Fails if the server is archived.",
-        "operationId": "mint_enrollment",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerIdOnlyArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnrollmentTicket"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
     "/api/servers/restore": {
       "post": {
         "tags": [
@@ -6520,46 +6560,6 @@
             "description": ""
           },
           "409": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/servers/revoke_enrollment": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "Revoke any outstanding enrollment ticket for a server.",
-        "description": "Use this when a ticket was issued by mistake or is no longer needed.\nAfterwards, the enrollment status endpoint reports no outstanding token,\nand the revoked ticket can no longer be used to enroll.",
-        "operationId": "revoke_enrollment",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerIdOnlyArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": ""
-          },
-          "400": {
             "description": "",
             "content": {
               "application/json": {
@@ -8716,9 +8716,9 @@
       },
       "AttachTailscaleDeviceArgs": {
         "type": "object",
-        "description": "Request to bind a server to a device identified by its Tailscale node.",
+        "description": "Request to bind a machine to the identity of a Tailscale node.",
         "required": [
-          "server_id",
+          "machine_id",
           "identifier"
         ],
         "properties": {
@@ -8726,10 +8726,10 @@
             "type": "string",
             "description": "Any of: a Tailscale CGNAT/ULA IP, a node id, or a DNS name."
           },
-          "server_id": {
+          "machine_id": {
             "type": "string",
             "format": "uuid",
-            "description": "The server to attach the device to."
+            "description": "The machine to attach the identity to."
           }
         }
       },
@@ -10464,7 +10464,7 @@
       },
       "EnrollmentStatus": {
         "type": "object",
-        "description": "A server's enrollment state: whether a device has registered, and\nwhether an enrollment token is currently outstanding.",
+        "description": "A machine's enrollment state: whether a device has registered, and\nwhether an enrollment token is currently outstanding.",
         "properties": {
           "registered_at": {
             "type": [

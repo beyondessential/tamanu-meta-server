@@ -2329,6 +2329,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/machines/attach_tailscale_device": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Attach an identity to a machine via a Tailscale identifier.
+         * @description Resolves the identifier to a tailnet node, finds the identity already on
+         *     that node or mints one for it, and binds it to the machine. Useful when an
+         *     operator can already see the box on the tailnet and wants to name it now
+         *     rather than wait for enrolment. `registered_at` stays unset: naming a box is
+         *     not the box arriving.
+         *
+         *     Returns 409 if the resolved identity already speaks for another live
+         *     machine; detach it there first.
+         */
+        post: operations["machines_attach_tailscale_device"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/machines/create": {
         parameters: {
             query?: never;
@@ -2344,6 +2371,28 @@ export interface paths {
          *     identity, and the applications on it arrive by report.
          */
         post: operations["machines_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/machines/enrollment_status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get the enrollment state of a machine.
+         * @description Reports whether the machine has completed enrollment, and whether an
+         *     enrollment token is currently outstanding (issue and expiry times only —
+         *     the token itself is never revealed).
+         */
+        post: operations["enrollment_status"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2411,6 +2460,52 @@ export interface paths {
          *     JSON object.
          */
         post: operations["machines_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/machines/mint_enrollment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint (or reissue) an enrollment ticket for a machine.
+         * @description Creates a fresh enrollment token and returns it wrapped in a
+         *     passphrase-encrypted ticket the operator runs through bestool on the
+         *     enrolling machine, plus the 4-word passphrase that decrypts it. The
+         *     plaintext token lives only inside the encrypted ticket; reissuing
+         *     invalidates any prior token. Fails if the server is archived.
+         */
+        post: operations["mint_enrollment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/machines/revoke_enrollment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke any outstanding enrollment ticket for a machine.
+         * @description Use this when a ticket was issued by mistake or is no longer needed.
+         *     Afterwards, the enrollment status endpoint reports no outstanding token,
+         *     and the revoked ticket can no longer be used to enroll.
+         */
+        post: operations["revoke_enrollment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3052,31 +3147,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/servers/attach_tailscale_device": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Attach a device to a server via a Tailscale identifier.
-         * @description Resolves the identifier to a tailnet node, finds the device already
-         *     attached to that node or creates a new one for it, and binds that device
-         *     to the server. Useful when a server has no device yet (e.g. an
-         *     operator-imported server that hasn't reported in) and should be bound to
-         *     a tailnet node directly. Returns 409 if the resolved device is already
-         *     attached to another live server — detach it there first.
-         */
-        post: operations["attach_tailscale_device"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/servers/delete": {
         parameters: {
             query?: never;
@@ -3092,28 +3162,6 @@ export interface paths {
          *     regular listings but can be restored later.
          */
         post: operations["delete"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/servers/enrollment_status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Get the enrollment state of a server.
-         * @description Reports whether the server has completed enrollment, and whether an
-         *     enrollment token is currently outstanding (issue and expiry times only —
-         *     the token itself is never revealed).
-         */
-        post: operations["enrollment_status"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3252,30 +3300,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/servers/mint_enrollment": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Mint (or reissue) an enrollment ticket for a server.
-         * @description Creates a fresh enrollment token and returns it wrapped in a
-         *     passphrase-encrypted ticket the operator runs through bestool on the
-         *     enrolling machine, plus the 4-word passphrase that decrypts it. The
-         *     plaintext token lives only inside the encrypted ticket; reissuing
-         *     invalidates any prior token. Fails if the server is archived.
-         */
-        post: operations["mint_enrollment"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/servers/restore": {
         parameters: {
             query?: never;
@@ -3292,28 +3316,6 @@ export interface paths {
          *     isn't archived has no effect.
          */
         post: operations["restore"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/servers/revoke_enrollment": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Revoke any outstanding enrollment ticket for a server.
-         * @description Use this when a ticket was issued by mistake or is no longer needed.
-         *     Afterwards, the enrollment status endpoint reports no outstanding token,
-         *     and the revoked ticket can no longer be used to enroll.
-         */
-        post: operations["revoke_enrollment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4489,15 +4491,15 @@ export interface components {
              */
             identifier: string;
         };
-        /** @description Request to bind a server to a device identified by its Tailscale node. */
+        /** @description Request to bind a machine to the identity of a Tailscale node. */
         AttachTailscaleDeviceArgs: {
             /** @description Any of: a Tailscale CGNAT/ULA IP, a node id, or a DNS name. */
             identifier: string;
             /**
              * Format: uuid
-             * @description The server to attach the device to.
+             * @description The machine to attach the identity to.
              */
-            server_id: string;
+            machine_id: string;
         };
         /**
          * @description Whether a restore attempt is under way for a group, for showing beside a
@@ -5618,7 +5620,7 @@ export interface components {
             observations: number;
         };
         /**
-         * @description A server's enrollment state: whether a device has registered, and
+         * @description A machine's enrollment state: whether a device has registered, and
          *     whether an enrollment token is currently outstanding.
          */
         EnrollmentStatus: {
@@ -13533,6 +13535,57 @@ export interface operations {
             };
         };
     };
+    machines_attach_tailscale_device: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttachTailscaleDeviceArgs"];
+            };
+        };
+        responses: {
+            /** @description Identity now bound to the machine. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string;
+                };
+            };
+            /** @description Identifier does not resolve to a known tailnet node. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The resolved identity already speaks for another machine. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description Tailnet directory not configured or unreachable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     machines_create: {
         parameters: {
             query?: never;
@@ -13555,6 +13608,37 @@ export interface operations {
                 };
             };
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    enrollment_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollmentStatus"];
+                };
+            };
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13660,6 +13744,66 @@ export interface operations {
                 };
             };
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    mint_enrollment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollmentTicket"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    revoke_enrollment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -14521,57 +14665,6 @@ export interface operations {
             };
         };
     };
-    attach_tailscale_device: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AttachTailscaleDeviceArgs"];
-            };
-        };
-        responses: {
-            /** @description Device id newly attached to the server. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": string;
-                };
-            };
-            /** @description Identifier does not resolve to a known tailnet node. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-            /** @description The resolved device is already attached to another server. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-            /** @description Tailnet directory not configured or unreachable. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
     delete: {
         parameters: {
             query?: never;
@@ -14590,37 +14683,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    enrollment_status: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ServerIdOnlyArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnrollmentStatus"];
-                };
             };
             400: {
                 headers: {
@@ -14794,37 +14856,6 @@ export interface operations {
             };
         };
     };
-    mint_enrollment: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ServerIdOnlyArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnrollmentTicket"];
-                };
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
     restore: {
         parameters: {
             query?: never;
@@ -14845,35 +14876,6 @@ export interface operations {
                 content?: never;
             };
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    revoke_enrollment: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ServerIdOnlyArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: {
                 headers: {
                     [name: string]: unknown;
                 };

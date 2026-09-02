@@ -288,6 +288,16 @@ test.describe("server create → setup → archive flow", () => {
 		// Lands on the new box's own page.
 		await expect(page).toHaveURL(/\/machines\/[0-9a-f-]{36}$/);
 
+		// Setup — enrolment admits the box, so an unenrolled machine auto-mints
+		// a ticket and shows the bestool register command for the operator to
+		// run. No application is involved: nothing runs here until the enrolled
+		// agent reports it.
+		await expect(page.getByText(/hasn't checked in yet/i)).toBeVisible();
+		await expect(page.getByText(/bestool canopy register/)).toBeVisible();
+		await expect(
+			page.getByRole("heading", { name: "Set up this machine" }),
+		).toBeVisible();
+
 		// The workload on it is reported, not entered, so seed one and carry on
 		// through its lifecycle.
 		const server = await seedServer(sql, {
@@ -299,10 +309,11 @@ test.describe("server create → setup → archive flow", () => {
 			page.getByRole("heading", { level: 1, name: /flow-server/ }),
 		).toBeVisible();
 
-		// Setup — an unregistered server auto-mints an enrollment ticket, showing
-		// the bestool register command for the operator to run.
-		await expect(page.getByText(/hasn't checked in yet/i)).toBeVisible();
-		await expect(page.getByText(/bestool canopy register/)).toBeVisible();
+		// An application never mints a ticket. It points at its box instead.
+		await expect(page.getByText(/bestool canopy register/)).toHaveCount(0);
+		await page.getByRole("link", { name: "Enrol its machine" }).click();
+		await expect(page).toHaveURL(/\/machines\/[0-9a-f-]{36}$/);
+		await page.goBack();
 
 		// Archive — confirm the dialog; since the server is in a group, it
 		// redirects to that group's page (not the servers list).

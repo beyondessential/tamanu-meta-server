@@ -19,46 +19,50 @@ import { useReloadInterval } from "../hooks/useReloadInterval";
 import TimeAgo from "./TimeAgo";
 import type { EnrollmentTicket } from "../types";
 
-/// Setup / enrollment instructions for a server. Mints an encrypted enrollment
+/// Setup / enrollment instructions for a machine. Mints an encrypted enrollment
 /// ticket plus its 4-word passphrase and shows the `bestool canopy register`
 /// command for the operator to run (with the passphrase shared out-of-band),
 /// plus a live "waiting for check-in" → "registered" indicator.
 ///
-/// The component is driven by `servers.enrollment_status`, not local state: if
+/// Enrolment admits the box, so it is keyed on the machine. What runs on the
+/// box comes into being from the enrolled agent's first report, and so has
+/// nothing to do here.
+///
+/// The component is driven by `machines.enrollment_status`, not local state: if
 /// a ticket is already outstanding (e.g. after a page reload, or a re-enroll
 /// someone else started) it shows that *pending* state rather than minting a
 /// fresh ticket (which would invalidate the outstanding one). The ticket and
 /// passphrase are only displayable in the session that minted them — after a
 /// reload we can show that one is outstanding, but not its secret; the operator
 /// reissues (deliberately) or cancels.
-export default function ServerSetupInstructions({
-	serverId,
+export default function MachineSetupInstructions({
+	machineId,
 	onRegistered,
 	reEnroll = false,
 }: {
-	serverId: string;
+	machineId: string;
 	/// Fired once when enrollment completes. For initial setup that's the first
 	/// `registered_at`; for re-enroll it's `registered_at` *changing* from its
 	/// value at mount (a new device completing the handshake).
 	onRegistered?: () => void;
-	/// Re-enrollment of an already-registered server. Initial setup auto-mints a
+	/// Re-enrollment of an already-registered machine. Initial setup auto-mints a
 	/// ticket; re-enroll waits for the operator to press "Re-enroll a device".
 	reEnroll?: boolean;
 }) {
-	const mint = useApiAction("servers", "mint_enrollment");
-	const revoke = useApiAction("servers", "revoke_enrollment");
+	const mint = useApiAction("machines", "mint_enrollment");
+	const revoke = useApiAction("machines", "revoke_enrollment");
 	const [ticket, setTicket] = useState<EnrollmentTicket | null>(null);
 	const [copied, setCopied] = useState(false);
 	const [copiedPassphrase, setCopiedPassphrase] = useState(false);
 
 	// Poll enrollment status — the source of truth for whether a ticket is
-	// outstanding and whether the server has (re-)registered.
+	// outstanding and whether the machine has (re-)registered.
 	const tick = useReloadInterval(5000);
 	const status = useApi(
-		"servers",
+		"machines",
 		"enrollment_status",
-		{ server_id: serverId },
-		[serverId, tick],
+		{ machine_id: machineId },
+		[machineId, tick],
 	);
 	const statusLoaded = status.status === "ok";
 	const registeredAt = statusLoaded ? status.data.registered_at : null;
@@ -69,7 +73,7 @@ export default function ServerSetupInstructions({
 		? new Date(tokenIssuedAt).toLocaleString()
 		: null;
 
-	// In re-enroll mode the server is already registered, so "done" means the
+	// In re-enroll mode the machine is already registered, so "done" means the
 	// `registered_at` timestamp has *changed* since we opened. Capture the value
 	// at first status load as the baseline.
 	const baselineRegisteredAt = useRef<string | null | undefined>(undefined);
@@ -87,7 +91,7 @@ export default function ServerSetupInstructions({
 	const doMint = () => {
 		setTicket(null);
 		mint
-			.call({ server_id: serverId })
+			.call({ machine_id: machineId })
 			.then(setTicket)
 			.catch(() => {
 				/* surfaced via mint.error */
@@ -116,7 +120,7 @@ export default function ServerSetupInstructions({
 
 	const onCancel = async () => {
 		try {
-			await revoke.call({ server_id: serverId });
+			await revoke.call({ machine_id: machineId });
 			setTicket(null);
 			status.reload();
 		} catch {
@@ -163,7 +167,7 @@ export default function ServerSetupInstructions({
 					color="text.secondary"
 					sx={{ display: "block", mt: 1 }}
 				>
-					Issue a new enrollment ticket to bind this server to a replacement
+					Issue a new enrollment ticket to bind this machine to a replacement
 					device. The current device keeps working until the new one checks
 					in.
 				</Typography>
@@ -198,7 +202,7 @@ export default function ServerSetupInstructions({
 					sx={{ alignItems: "center", justifyContent: "space-between" }}
 				>
 					<Typography variant="h6" component="h2">
-						{reEnroll ? "Re-enroll a device" : "Set up this server"}
+						{reEnroll ? "Re-enroll a device" : "Set up this machine"}
 					</Typography>
 					<RegistrationState
 						registered={registeredView}
@@ -214,7 +218,7 @@ export default function ServerSetupInstructions({
 								color="text.secondary"
 								sx={{ flex: 1 }}
 							>
-								Run this on the {reEnroll ? "replacement " : ""}server; it
+								Run this on the {reEnroll ? "replacement " : ""}machine; it
 								will prompt for the passphrase shown below.
 							</Typography>
 							<Tooltip title={copied ? "Copied" : "Copy command"}>
@@ -377,7 +381,7 @@ function RegistrationState({
 		<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 			<CircularProgress size={14} />
 			<Typography variant="body2" color="text.secondary">
-				waiting for this server to check in…
+				waiting for this machine to check in…
 				{tokenExpiresAt && (
 					<>
 						{" "}

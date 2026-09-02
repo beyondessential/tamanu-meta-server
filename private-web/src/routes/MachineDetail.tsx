@@ -14,6 +14,8 @@ import ApplicationTypeChip from "../components/ApplicationTypeChip";
 import { ChecksTable, HealthIndicator } from "../components/ChecksTable";
 import { HealthLegend, StatusLegend } from "../components/Legends";
 import MachineBackupSection from "../components/MachineBackupSection";
+import MachineIdentitySection from "../components/MachineIdentitySection";
+import MachineSetupInstructions from "../components/MachineSetupInstructions";
 import MaintenanceSection from "../components/MaintenanceSection";
 import ServerRankChip from "../components/ServerRankChip";
 import SilencedRefsSection from "../components/SilencedRefsSection";
@@ -97,9 +99,16 @@ export default function MachineDetail() {
 				<Alert severity="warning">This machine is archived.</Alert>
 			)}
 			{!enrolled && data.machine.deleted_at == null && (
-				<Alert severity="info">
-					This machine hasn't checked in yet. Enrol it to start reporting.
-				</Alert>
+				<>
+					<Alert severity="info">
+						This machine hasn't checked in yet. Follow the setup
+						instructions below to enrol it.
+					</Alert>
+					<MachineSetupInstructions
+						machineId={data.machine.id}
+						onRegistered={() => detail.reload()}
+					/>
+				</>
 			)}
 
 			<Paper variant="outlined" sx={{ p: 2 }}>
@@ -190,6 +199,14 @@ export default function MachineDetail() {
 					))}
 				</Paper>
 			)}
+
+			<MachineIdentitySection
+				machineId={data.machine.id}
+				deviceInfo={data.device_info}
+				isAdmin={isAdmin}
+				enrolled={enrolled}
+				refresh={() => detail.reload()}
+			/>
 
 			<SilencedRefsSection
 				scope="machine"

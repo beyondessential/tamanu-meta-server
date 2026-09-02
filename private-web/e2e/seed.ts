@@ -211,15 +211,14 @@ export interface SeededServer {
  * between an operator adding it and the first report arriving. */
 export async function seedMachine(
 	sql: Sql,
-	opts: { name?: string; groupId?: string | null } = {},
+	opts: { name?: string; groupId?: string | null; deviceId?: string } = {},
 ): Promise<{ id: string; name: string }> {
 	const id = randomUUID();
 	const name = opts.name ?? randomLabel("box");
-	await sql.query(`INSERT INTO machines (id, name, group_id) VALUES ($1, $2, $3)`, [
-		id,
-		name,
-		opts.groupId ?? null,
-	]);
+	await sql.query(
+		`INSERT INTO machines (id, name, group_id, device_id) VALUES ($1, $2, $3, $4)`,
+		[id, name, opts.groupId ?? null, opts.deviceId ?? null],
+	);
 	return { id, name };
 }
 

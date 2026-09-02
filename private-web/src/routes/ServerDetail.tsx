@@ -1,7 +1,4 @@
 import {
-	Accordion,
-	AccordionDetails,
-	AccordionSummary,
 	Alert,
 	Box,
 	Button,
@@ -16,17 +13,15 @@ import {
 	Link as MuiLink,
 	Paper,
 	Stack,
-	TextField,
 	Tooltip,
 	Typography,
 } from "@mui/material";
 import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
 import EditIcon from "@mui/icons-material/Edit";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import InsightsIcon from "@mui/icons-material/Insights";
 import LanguageIcon from "@mui/icons-material/Language";
 import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import ActionButton from "../components/ActionButton";
 import { ChecksTable, HealthIndicator } from "../components/ChecksTable";
@@ -36,7 +31,6 @@ import ServerCertificatesSection from "../components/ServerCertificatesSection";
 import MaintenanceSection from "../components/MaintenanceSection";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import StatusDot from "../components/StatusDot";
-import TailnetIdentitySection from "../components/TailnetIdentitySection";
 import TimeAgo from "../components/TimeAgo";
 import TimezoneTooltip from "../components/TimezoneTooltip";
 import VersionIndicator from "../components/VersionIndicator";
@@ -47,8 +41,7 @@ import {
 } from "../hooks/useApplicationTypes";
 import { HealthLegend, StatusLegend, VersionLegend } from "../components/Legends";
 import ServerRankChip from "../components/ServerRankChip";
-import ServerSetupInstructions from "../components/ServerSetupInstructions";
-import { callApi, useApi, useApiAction } from "../api";
+import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { humanSeconds } from "../lib/humanDuration";
@@ -57,7 +50,6 @@ import {
 	compareServersByRankThenType,
 	groupServersByRank,
 	type ConsolidatedChecks,
-	type DeviceInfo,
 	type HealthState,
 	type ServerDetailData,
 	type ServerGroup,
@@ -129,16 +121,16 @@ export default function ServerDetail() {
 				/>
 			) : (
 				!registered && (
-					<>
-						<Alert severity="info">
-							This server hasn't checked in yet. Follow the setup
-							instructions below to enroll it.
-						</Alert>
-						<ServerSetupInstructions
-							serverId={data.server.id}
-							onRegistered={() => detail.reload()}
-						/>
-					</>
+					<Alert severity="info">
+						This server hasn't checked in yet.{" "}
+						<MuiLink
+							component={RouterLink}
+							to={`/machines/${data.server.machine_id}`}
+						>
+							Enrol its machine
+						</MuiLink>{" "}
+						to start reporting.
+					</Alert>
 				)
 			)}
 			<InfoSection
@@ -162,14 +154,20 @@ export default function ServerDetail() {
 				/>
 			)}
 			<ServerCertificatesSection serverId={data.server.id} />
-			<AdvancedIdentitySection
-				host={data.server.display_host}
-				serverId={data.server.id}
-				deviceInfo={data.device_info}
-				isAdmin={admin}
-				registered={registered}
-				refresh={() => detail.reload()}
-			/>
+			{data.server.display_host && (
+				<Paper variant="outlined" sx={{ p: 2 }}>
+					<Typography variant="h6" component="h2" gutterBottom>
+						URL
+					</Typography>
+					<MuiLink
+						href={data.server.display_host}
+						target="_blank"
+						rel="noopener noreferrer"
+					>
+						{data.server.display_host}
+					</MuiLink>
+				</Paper>
+			)}
 			{data.siblings.length > 0 && (
 				<SiblingServers
 					siblings={data.siblings}
@@ -420,300 +418,6 @@ function ArchivedBanner({
 			)}
 		</Alert>
 	);
-}
-
-/// Shows the server's URL (when it has one) and folds the device + Tailscale
-/// identity detail into a collapsed-by-default "Identity" accordion, since the
-/// device is now an internal implementation detail of enrollment rather than
-/// something operators set up by hand.
-function AdvancedIdentitySection({
-	host,
-	serverId,
-	deviceInfo,
-	isAdmin,
-	registered,
-	refresh,
-}: {
-	host: string;
-	serverId: string;
-	deviceInfo: DeviceInfo | null;
-	isAdmin: boolean;
-	registered: boolean;
-	refresh: () => void;
-}) {
-	return (
-		<Stack spacing={2}>
-			{host && (
-				<Paper variant="outlined" sx={{ p: 2 }}>
-					<Typography variant="h6" component="h2" gutterBottom>
-						URL
-					</Typography>
-					<MuiLink href={host} target="_blank" rel="noopener noreferrer">
-						{host}
-					</MuiLink>
-				</Paper>
-			)}
-			<Accordion variant="outlined" disableGutters>
-				<AccordionSummary expandIcon={<ExpandMoreIcon />}>
-					<Typography variant="h6" component="h2">
-						Identity
-					</Typography>
-				</AccordionSummary>
-				<AccordionDetails>
-					<Stack spacing={2}>
-						<DeviceCard
-							serverId={serverId}
-							deviceInfo={deviceInfo}
-							refresh={refresh}
-						/>
-						{deviceInfo && (
-							<TailnetIdentitySection
-								device={deviceInfo}
-								refresh={refresh}
-							/>
-						)}
-						{isAdmin && registered && (
-							<ServerSetupInstructions
-								serverId={serverId}
-								reEnroll
-								onRegistered={refresh}
-							/>
-						)}
-					</Stack>
-				</AccordionDetails>
-			</Accordion>
-		</Stack>
-	);
-}
-
-function DeviceCard({
-	serverId,
-	deviceInfo,
-	refresh,
-}: {
-	serverId: string;
-	deviceInfo: DeviceInfo | null;
-	refresh: () => void;
-}) {
-	const [attachOpen, setAttachOpen] = useState(false);
-	return (
-		<Stack
-			direction={{ xs: "column", md: "row" }}
-			spacing={2}
-			useFlexGap
-			sx={{ "& > *": { flex: 1 } }}
-		>
-			<Paper variant="outlined" sx={{ p: 2 }}>
-				<Typography variant="h6" component="h2" gutterBottom>
-					Device
-				</Typography>
-				{deviceInfo ? (
-					<Stack
-						direction="row"
-						spacing={1}
-						sx={{ alignItems: "center", flexWrap: "wrap" }}
-						useFlexGap
-					>
-						<MuiLink
-							component={RouterLink}
-							to={`/devices/${deviceInfo.device.id}`}
-							underline="hover"
-						>
-							{deviceShortName(deviceInfo)}
-						</MuiLink>
-						{deviceInfo.device.tailscale_node_id != null && (
-							<Chip
-								size="small"
-								variant="outlined"
-								color="success"
-								label="tailnet"
-							/>
-						)}
-						{deviceInfo.keys.length > 0 && (
-							<Chip
-								size="small"
-								variant="outlined"
-								label="mTLS"
-							/>
-						)}
-					</Stack>
-				) : (
-					<Stack spacing={1} sx={{ alignItems: "flex-start" }}>
-						<Typography variant="body2" color="text.secondary">
-							No device attached. Bind this server to a Tailscale
-							node and canopy will auto-create the device row if
-							it doesn't exist yet.
-						</Typography>
-						<Button
-							variant="contained"
-							onClick={() => setAttachOpen(true)}
-						>
-							Attach Tailscale device
-						</Button>
-					</Stack>
-				)}
-			</Paper>
-			<AttachServerDeviceDialog
-				open={attachOpen}
-				onClose={() => setAttachOpen(false)}
-				serverId={serverId}
-				onAttached={() => {
-					setAttachOpen(false);
-					refresh();
-				}}
-			/>
-		</Stack>
-	);
-}
-
-function AttachServerDeviceDialog({
-	open,
-	onClose,
-	serverId,
-	onAttached,
-}: {
-	open: boolean;
-	onClose: () => void;
-	serverId: string;
-	onAttached: () => void;
-}) {
-	const [identifier, setIdentifier] = useState("");
-	const [preview, setPreview] = useState<
-		import("../types").TailnetLiveInfo | null
-	>(null);
-	const [previewError, setPreviewError] = useState<string | null>(null);
-	const [previewLoading, setPreviewLoading] = useState(false);
-	const attachAction = useApiAction("servers", "attach_tailscale_device");
-
-	useEffect(() => {
-		if (!open) {
-			setIdentifier("");
-			setPreview(null);
-			setPreviewError(null);
-		}
-	}, [open]);
-
-	useEffect(() => {
-		const value = identifier.trim();
-		if (!open || value === "") {
-			setPreview(null);
-			setPreviewError(null);
-			return;
-		}
-		let cancelled = false;
-		setPreviewLoading(true);
-		const handle = setTimeout(async () => {
-			try {
-				const r = await callApi(
-					"devices",
-					"resolve_tailnet_identifier",
-					{ identifier: value },
-				);
-				if (cancelled) return;
-				setPreview(r.matched);
-				setPreviewError(
-					r.matched ? null : "No tailnet node matches that identifier.",
-				);
-			} catch (err) {
-				if (cancelled) return;
-				setPreview(null);
-				setPreviewError(err instanceof Error ? err.message : String(err));
-			} finally {
-				if (!cancelled) setPreviewLoading(false);
-			}
-		}, 250);
-		return () => {
-			cancelled = true;
-			clearTimeout(handle);
-		};
-	}, [identifier, open]);
-
-	const onConfirm = async () => {
-		try {
-			await attachAction.call({ server_id: serverId, identifier });
-			onAttached();
-		} catch {
-			/* surfaced via attachAction.error */
-		}
-	};
-
-	return (
-		<Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
-			<DialogTitle>Attach Tailscale device to server</DialogTitle>
-			<DialogContent>
-				<Stack spacing={2} sx={{ mt: 1 }}>
-					<Typography variant="body2" color="text.secondary">
-						Paste any Tailscale identifier — IP, node ID, or DNS
-						name. If a device row exists for that node, it's
-						attached to the server; otherwise canopy creates a new
-						device row first.
-					</Typography>
-					<TextField
-						label="Tailscale identifier"
-						placeholder="100.64.0.42 / nodekey:… / device.example.ts.net"
-						value={identifier}
-						onChange={(e) => setIdentifier(e.target.value)}
-						autoFocus
-						fullWidth
-					/>
-					{previewLoading && <LinearProgress />}
-					{preview && (
-						<Paper variant="outlined" sx={{ p: 1.5 }}>
-							<Stack spacing={0.5}>
-								<Typography variant="caption" color="text.secondary">
-									Resolves to
-								</Typography>
-								<Typography variant="body2">
-									{preview.display_name}
-								</Typography>
-								<Typography
-									variant="body2"
-									color="text.secondary"
-									sx={{ fontFamily: "monospace" }}
-								>
-									{preview.node_id}
-								</Typography>
-								<Typography variant="body2" color="text.secondary">
-									{preview.addresses.join(", ")}
-								</Typography>
-							</Stack>
-						</Paper>
-					)}
-					{previewError && identifier.trim() !== "" && (
-						<Alert severity="info">{previewError}</Alert>
-					)}
-					{attachAction.error && (
-						<Alert severity="error">{attachAction.error.message}</Alert>
-					)}
-				</Stack>
-			</DialogContent>
-			<DialogActions>
-				<Button onClick={onClose} disabled={attachAction.pending}>
-					Cancel
-				</Button>
-				<Button
-					variant="contained"
-					onClick={onConfirm}
-					disabled={
-						attachAction.pending ||
-						preview === null ||
-						identifier.trim() === ""
-					}
-				>
-					{attachAction.pending ? "Attaching…" : "Attach"}
-				</Button>
-			</DialogActions>
-		</Dialog>
-	);
-}
-
-function deviceShortName(info: DeviceInfo): string {
-	const namedKey = info.keys.findLast(
-		(k) => k.name && k.name !== "Initial Key",
-	);
-	if (namedKey?.name) return namedKey.name;
-	if (info.latest_connection) return info.latest_connection.ip;
-	return info.device.id;
 }
 
 function InfoSection({
