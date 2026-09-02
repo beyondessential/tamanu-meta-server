@@ -30,7 +30,7 @@ Carried deferrals, each gated on a step above rather than on a vague later:
 - [x] Remove the `application_default_machine()` scaffolding default — done early, with the operator/enrolment surface
 - [x] Add `machine_id` to the `Application` struct — done with the operator/enrolment surface
 - [~] **Backup tables take the machine grain** — storage, models, handlers and checks moved; 7 e2e tests in `backups.spec.ts` still point at the old location. See the section below
-- [ ] Separate "never reported" from "reported long ago" — `Status::latest_for_servers` looks back seven days for performance, so a target silent for longer returns no row and reads as never reported (grey) rather than unreachable (red). Pre-existing, and sharper now the states are three: the fix is a cheap "has this ever reported" fact rather than widening the scan -- verify that it does remain cheap, if the query is "somewhat more expensive" it will slow every single view that displays a status, and the /status page (which has all of them at once) will slow to a crawl.
+- [ ] Separate "never reported" from "reported long ago" — `Status::latest_for_servers` looks back seven days for performance, so a target silent for longer returns no row and reads as never reported (grey) rather than unreachable (red). Pre-existing, and sharper now the states are three: the fix is a cheap "has this ever reported" fact rather than widening the scan -- verify that it does remain cheap, if the query is "somewhat more expensive" it will slow every single view that displays a status, and the /status page (which has all of them at once) will slow to a crawl. Investigated: the fact is already stored, in rows the code already reads. See the subsection under "Retiring the graded reachability states".
 - [x] Carry the machine on `IssueData` — done with the fleet query interface, which is what presented machine checks first
 - [x] Link a machine's maintenance window to its detail page — done with the machine page; the fleet maintenance view links a machine target rather than rendering it as plain text
 
@@ -378,6 +378,48 @@ Two things found on the way:
 - **`away` and `down` never carried a health signal.** `StatusDot`'s reachable set was `{up, blip}`, so a target in either graded state showed no health outline. Collapsing to `{up}` makes that rule legible rather than incidental.
 
 Specs: CHK gained a line separating the check's three results (how much of what should be reporting still is) from the target's reachability (whether anything is), which reads as a contradiction otherwise. MCP's "recent-activity window" and "not recently seen" were a second, undefined vocabulary for the same idea and now point at the target's own threshold.
+
+### Separating "never reported" from "reported long ago"
+
+`Status::latest_for_servers` and `Status::latest_for_server` both bound their lookback at seven days, so an application quiet for longer returns no row and every consumer of that absence reads it as never reported.
+Widening the scan is not on the table and the measurements say why: prod carries around a hundred weekly partitions with the better part of a million rows per server, a predicate on `server_id` alone cannot be partition-pruned, and the unbounded form was measured at 217s for a single row while evicting the buffer pool for everything else.
+
+**The fact is already stored, in rows the code already reads.**
+`application_reported_detail` is the current-state projection of pushes, keyed `(application_id, source)`, written by `ReportedDetail::record` in the same transaction as every recorded status insert.
+That insert has exactly one writer, so the two cannot disagree, and nothing deletes from the projection but the application's own foreign-key cascade.
+Its `reported_at` is "when this source last reported", unbounded, and a `DISTINCT ON (application_id)` read over `application_id = ANY($1)` is a primary-key index scan of one to three rows per application.
+That is the shape `ReportedDetail::last_versions` already runs, and the read `MachineReportedDetail::latest_for_machines` already performs at the machine grain on every fleet-wide view.
+
+So the machine grain is already right.
+`Machine::reachability` takes an `Option<Timestamp>` from the projection and returns `Gone` only for a box that has genuinely never reported.
+Only the application grain routes reachability through the windowed status read.
+
+The codebase reasoned to the edge of this and stopped.
+`canopy_mcp::applications::Retained`'s doc comment already says the projection "has no such problem: one row per (server, source), which is why `last_version` is already unbounded there", then keeps reachability on the windowed read and calls the grey reading "the documented trade, not an oversight".
+It takes the version off those rows and leaves `reported_at` on them.
+
+Two shapes for the fix, ranked by what a view pays:
+
+- **A `last_reported_at` column on `applications`**, maintained on ingest. Views pay nothing at all, because every call site already holds the Application row. The precedent is `server_groups.effective_version`, a cached column added for this same reason, maintained by a row-level trigger on the partitioned parent. The cost is one small update per push.
+- **A batch read of the projection**, one extra index query per view, which is what the machine grain already pays on the same pages. No write cost, no new column, and the two grains then read the same way, which is what CHK asks for.
+
+Either clears the bar.
+The second is the smaller change and the symmetric one, so `Application::reachability` would take an `Option<Timestamp>` exactly as `Machine::reachability` does, and drop its dependence on the status row.
+
+**Horizon caveat.** The projection was itself backfilled from a thirty-day window when it was created, so an application quiet since before that has no row and still reads as never reported.
+A backfill from full status history is a single sequential aggregate over every partition, affordable once in a migration but not free.
+Anything quiet that long is a decommissioned box rather than an outage, so backfilling from the projection is enough.
+
+**Five sites read the absence, and one of them wants something different.**
+
+- `Application::reachability` returns `Gone`, which `StatusDot` paints grey under "never reported wins over everything". The longest-dead applications render greyest, which is the loudest symptom.
+- The application detail page and the group card both derive `up` that way, from the singular and batch reads respectively.
+- `Status::sweep_staleness`'s backstop, for an application with no counted source, files "Application X has never reported" with a null `elapsed_secs`. A false statement in an operator-facing issue.
+- `GroupDetail`'s `allGone` gates the archive affordance on every member being `gone`, mirroring `ServerGroup::soft_delete`'s "no member reported in the last week". Fixing `up` takes the button away from exactly the groups that qualify, so the affordance needs its own field rather than riding on reachability.
+- `ServerGroup::soft_delete` queries the windowed read itself and genuinely wants "nothing in the last week", so the rule is unaffected. Its comment should stop calling that "gone" once the word means never.
+
+This is a code defect and not a spec change: CHK already says "A target that has reported at some point presents as unreachable however long ago that was; never reported is for one that has never been heard from at all."
+
 
 ## Check identity
 
