@@ -22,6 +22,7 @@ use commons_types::{
 use database::{
 	Db,
 	applications::Application,
+	machines::Machine,
 	check_policies::{CheckPolicy, EvaluationContext, FilingScope, GradedResult},
 	devices::Device,
 	diesel_async::{AsyncConnection, AsyncPgConnection},
@@ -183,16 +184,79 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(check_severities))
 }
 
-/// Submit a status heartbeat for a server.
+/// The application type a unified push names, if it names one.
 ///
-/// Records a periodic status push against the server identified in the
-/// path: overall self-reported health, a per-check breakdown, and any
-/// free-form extra data. Each failed or warning check opens (or keeps
+/// A unified push predates the split, so it has no field that says "this is
+/// what I am". `tamanuServerKind` is the one thing in it that does: it named
+/// the role a Tamanu application played, and role and software together are
+/// what a type is. Anything else falls through to the machine's own record.
+// spec: STA#transitional-unified-pushes
+fn reported_application_type(extra: &serde_json::Value) -> Option<ApplicationType> {
+	// The same mapping the split itself used to collapse product and kind
+	// into a type, so a box reports the type it was backfilled with.
+	match extra.get("tamanuServerKind")?.as_str()? {
+		"facility" => Some(ApplicationType::TamanuFacility),
+		_ => Some(ApplicationType::TamanuCentral),
+	}
+}
+
+/// The application a unified push is about.
+///
+/// A unified push describes one application, the format having no way to say
+/// otherwise, so the answer is one record. Where the push names its type
+/// Canopy correlates on it and adopts what it does not already hold; where it
+/// does not, the machine's own record answers, which it can as long as there
+/// is exactly one to answer with.
+///
+/// Refusing rather than guessing is the point of the last arm. Every machine
+/// in the fleet came out of the split holding exactly one application, so a
+/// machine that has none or has several and a reporter that will not say which
+/// is a genuinely new situation, and attributing a box's whole picture to an
+/// arbitrary one of its workloads is the failure this card exists to stop.
+// spec: STA#transitional-unified-pushes
+async fn resolve_unified_application(
+	db: &mut AsyncPgConnection,
+	machine: &Machine,
+	extra: &serde_json::Value,
+	create: bool,
+) -> Result<Application> {
+	if create && let Some(r#type) = reported_application_type(extra) {
+		return Application::from_report(db, machine, &r#type).await;
+	}
+
+	let applications = machine.applications(db).await?;
+	if let Some(r#type) = reported_application_type(extra)
+		&& let Some(found) = applications.iter().find(|a| a.r#type == r#type)
+	{
+		return Ok(found.clone());
+	}
+
+	match applications.as_slice() {
+		[only] => Ok(only.clone()),
+		[] => Err(AppError::Conflict(
+			"this push names no application Canopy holds, and the machine has none".into(),
+		)),
+		_ => Err(AppError::Conflict(
+			"this push names no application Canopy holds, and the machine has several".into(),
+		)),
+	}
+}
+
+/// Submit a status heartbeat for a machine.
+///
+/// `server_id` in the path is the id the agent was enrolled with, which
+/// identifies the machine it runs on. Canopy works out which application on
+/// that machine the push describes from the push itself.
+///
+/// Records a periodic status push against that machine: overall
+/// self-reported health, a per-check breakdown, and any free-form extra
+/// data. Machine-subject checks and detail file against the machine and the
+/// rest against its application. Each failed or warning check opens (or keeps
 /// open) an issue at that check's operator-configured severity, and each
-/// passed check closes any issue it previously opened; the server's
+/// passed check closes any issue it previously opened; the application's
 /// tracked software version is also updated from the payload.
 ///
-/// The calling device must be the one enrolled for this exact server (or
+/// The calling device must be the one enrolled for this exact machine (or
 /// hold the admin role). The response carries only return-path
 /// instructions: a `backup_now` list of backup types the server should
 /// back up immediately — devices should treat a non-empty list as a
@@ -222,7 +286,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 	),
 )]
 async fn create(
-	Path(server_id): Path<Uuid>,
+	Path(machine_id): Path<Uuid>,
 	State(db): State<Db>,
 	State(dns_zones): State<Vec<commons_types::dns::ManagedZone>>,
 	device: ServerDevice,
@@ -232,8 +296,13 @@ async fn create(
 	let mut db = db.get().await?;
 	let Device { role, id, .. } = device.0.0;
 
-	let server = Application::get_by_id(&mut db, server_id).await?;
-	let is_authorized = role == DeviceRole::Admin || server.device_id == Some(id);
+	// The id on the wire is the machine's: an agent identifies the box it runs
+	// on, reports that box's disk, memory, load and addresses, and enrols as a
+	// device belonging to it. Which workloads that box runs is Canopy's to
+	// work out from what the push says, not something the path can carry.
+	// spec: STA#push
+	let machine = Machine::get_by_id(&mut db, machine_id).await?;
+	let is_authorized = role == DeviceRole::Admin || machine.device_id == Some(id);
 
 	if !is_authorized {
 		return Err(AppError::custom(
@@ -275,6 +344,22 @@ async fn create(
 		commons_types::source::IngestMode::Deny => return Err(AppError::IngestDenied(source)),
 	};
 
+	// Which application this unified push is about. Resolved under a lock on
+	// the machine row, because a push that finds no application for what it
+	// describes creates one and two arriving together for one box would
+	// otherwise each see nothing and each create. An ignored source records
+	// nowhere, so it reads without creating.
+	// spec: FLT#applications-come-from-reports
+	let server = db
+		.transaction::<_, AppError, _>(async |conn| {
+			if record {
+				Machine::get_by_id_for_update(conn, machine.id).await?;
+			}
+			resolve_unified_application(conn, &machine, &extra, record).await
+		})
+		.await?;
+	let server_id = server.id;
+
 	// The server's effective tags: stored server+group tags plus the
 	// synthetic `canopy:*` tags and computed `billing.*` labels. Computed
 	// once and used for both grading (per CHK, rules evaluate against the
@@ -314,7 +399,7 @@ async fn create(
 			database::reported_detail::ReportedDetail::record(
 				conn,
 				server_id,
-				server.machine_id,
+				machine.id,
 				&status.source,
 				&status.extra,
 				status.version.as_ref(),
@@ -324,7 +409,7 @@ async fn create(
 			file_health_events(
 				conn,
 				server_id,
-				server.machine_id,
+				machine.id,
 				server.group_id,
 				&server.r#type,
 				Some(id),
@@ -343,10 +428,9 @@ async fn create(
 	// backups — other sources (the tamanu heartbeat, seedling) would
 	// treat an instruction they can't act on as noise at best. Empty for
 	// an ungrouped server or one whose group has no `ready` backup config.
-	let backup_now = match server.group_id {
+	let backup_now = match machine.group_id {
 		Some(group_id) if source == DEFAULT_SOURCE => {
-			backups_due_now_for_machine(&mut db, server.machine_id, group_id, Timestamp::now())
-				.await?
+			backups_due_now_for_machine(&mut db, machine.id, group_id, Timestamp::now()).await?
 		}
 		_ => Vec::new(),
 	};
@@ -356,7 +440,7 @@ async fn create(
 	let check_severities = effective_check_severities(
 		&mut db,
 		server_id,
-		server.machine_id,
+		machine.id,
 		server.group_id,
 		&server.r#type,
 		&source,
@@ -389,7 +473,10 @@ async fn create(
 /// status-push response as `check_severities`, scoped to the pushing
 /// source.
 ///
-/// The calling device must be the one enrolled for this exact server (or
+/// `server_id` in the path is the id the agent was enrolled with, which
+/// identifies the machine it runs on.
+///
+/// The calling device must be the one enrolled for this exact machine (or
 /// hold the admin role).
 #[utoipa::path(
 	get,
@@ -408,24 +495,31 @@ async fn create(
 	),
 )]
 async fn check_severities(
-	Path(server_id): Path<Uuid>,
+	Path(machine_id): Path<Uuid>,
 	State(db): State<Db>,
 	device: ServerDevice,
 ) -> Result<Json<BTreeMap<String, CheckSeverity>>> {
 	let mut db = db.get().await?;
 	let Device { role, id, .. } = device.0.0;
 
-	let server = Application::get_by_id(&mut db, server_id).await?;
-	if role != DeviceRole::Admin && server.device_id != Some(id) {
+	let machine = Machine::get_by_id(&mut db, machine_id).await?;
+	if role != DeviceRole::Admin && machine.device_id != Some(id) {
 		return Err(AppError::custom(
-			"device is not authorized to read this server's check severities",
+			"device is not authorized to read this machine's check severities",
 		));
 	}
 
+	// The read has no payload to name an application with, so it answers for
+	// the machine's own, exactly as a unified push with no type does. A
+	// response shaped for one application cannot answer for a box running
+	// several, so it says so rather than picking one.
+	let server =
+		resolve_unified_application(&mut db, &machine, &serde_json::Value::Null, false).await?;
+
 	let map = effective_check_severities(
 		&mut db,
-		server_id,
-		server.machine_id,
+		server.id,
+		machine.id,
 		server.group_id,
 		&server.r#type,
 		DEFAULT_SOURCE,

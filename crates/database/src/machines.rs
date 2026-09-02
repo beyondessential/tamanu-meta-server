@@ -279,6 +279,23 @@ impl Machine {
 			.map_err(AppError::from)
 	}
 
+	/// Like [`Machine::get_by_id`] but takes a `FOR UPDATE` row lock.
+	///
+	/// A report that finds no application for what it describes creates one,
+	/// so two pushes arriving together for one box would otherwise each see
+	/// nothing and each create. Serialising them on the machine row means the
+	/// second sees what the first created.
+	pub async fn get_by_id_for_update(db: &mut AsyncPgConnection, machine_id: Uuid) -> Result<Self> {
+		use crate::schema::machines::dsl;
+		dsl::machines
+			.select(Self::as_select())
+			.filter(dsl::id.eq(machine_id))
+			.for_update()
+			.first(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn get_by_ids(db: &mut AsyncPgConnection, ids: &[Uuid]) -> Result<Vec<Self>> {
 		use crate::schema::machines::dsl;
 		if ids.is_empty() {

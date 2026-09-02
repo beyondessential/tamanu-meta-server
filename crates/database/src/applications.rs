@@ -309,6 +309,69 @@ impl Application {
 		Ok(created)
 	}
 
+	/// The application a report describes, created if Canopy does not hold it.
+	///
+	/// A report is the only thing that creates an application, so a type
+	/// reported on a machine that has none of it is adopted without ceremony
+	/// rather than refused. Everything else about the new record is left for
+	/// an operator: it takes its machine's group, because which deployment a
+	/// box belongs to is the one fact the box cannot know, and nothing else.
+	///
+	/// Concurrent reports for one box are serialised by the caller on the
+	/// machine row (see [`crate::machines::Machine::get_by_id_for_update`]),
+	/// so two arriving together cannot both create.
+	// spec: FLT#applications-come-from-reports
+	pub async fn from_report(
+		db: &mut AsyncPgConnection,
+		machine: &crate::machines::Machine,
+		r#type: &ApplicationType,
+	) -> Result<Self> {
+		use crate::schema::applications::dsl;
+
+		let existing = dsl::applications
+			.select(Self::as_select())
+			.filter(dsl::machine_id.eq(machine.id))
+			.filter(dsl::type_.eq(r#type.to_string()))
+			.filter(dsl::deleted_at.is_null())
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)?;
+		if let Some(existing) = existing {
+			return Ok(existing);
+		}
+
+		Self::create(
+			db,
+			Self {
+				id: Uuid::new_v4(),
+				name: None,
+				host: None,
+				r#type: r#type.clone(),
+				rank: None,
+				device_id: None,
+				machine_id: machine.id,
+				group_id: machine.group_id,
+				public_name: None,
+				cloud: machine.cloud,
+				geolocation: machine.geolocation,
+				is_monitored: true,
+				alert_when_down_for: machine.alert_when_down_for,
+				notes: String::new(),
+				tags: TagMap::default(),
+				deleted_at: None,
+				registered_at: Some(Timestamp::now()),
+				may_manage_dns: false,
+				may_manage_tls: false,
+				certificate_profile: None,
+				name_management_paused_at: None,
+				name_management_paused_by: None,
+				name_management_pause_reason: None,
+			},
+		)
+		.await
+	}
+
 	/// Archive a server: hide it from live listings and monitoring while
 	/// retaining its history. Releases its device (clears `device_id` and
 	/// revokes the device's credentials) so the box can only return through the
