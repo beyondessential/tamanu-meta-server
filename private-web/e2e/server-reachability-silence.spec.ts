@@ -135,7 +135,7 @@ test.describe("the reachability alerting switch, on both forms", () => {
 
 		expect(await reachabilitySilences(sql, server.id)).toBe(1);
 		// And the check itself now shows as silenced, so the two surfaces agree.
-		await expect(page.getByText("silenced (server)")).toBeVisible();
+		await expect(page.getByText("silenced (application)")).toBeVisible();
 	});
 
 	test("saving with the switch untouched leaves the silence alone", async ({

@@ -266,13 +266,17 @@ test.describe("silenced healthchecks", () => {
 			page.getByText("Unhealthy", { exact: true }),
 		).not.toBeVisible();
 
-		// The row is still listed and flagged as silenced. Exact matching:
-		// the Silenced refs section also shows the full
-		// "status/health/a-silenced" ref, which substring-matches.
+		// The row is still listed and flagged as silenced. The row labels the
+		// check by its namespace, an application check being namespaced to
+		// the type that reported it. Exact matching: the Silenced refs
+		// section also shows the full "alertd/health/a-silenced" ref, which
+		// substring-matches the bare name.
 		await expect(
-			page.getByText("a-silenced", { exact: true }),
+			page.getByText("tamanu-central.a-silenced", { exact: true }),
 		).toBeVisible();
-		await expect(page.getByText("silenced (server)")).toBeVisible();
+		await expect(
+			page.getByText("silenced (application)"),
+		).toBeVisible();
 		await expect(
 			page.getByRole("button", { name: "Manage silence for a-silenced" }),
 		).toBeVisible();
@@ -283,8 +287,12 @@ test.describe("silenced healthchecks", () => {
 		await expect(page.getByTestId("CancelIcon")).toHaveCount(0);
 
 		// And it sorts with the skipped tail, after passing checks.
-		const passed = page.getByText("m-passes", { exact: true });
-		const silenced = page.getByText("a-silenced", { exact: true });
+		const passed = page.getByText("tamanu-central.m-passes", {
+			exact: true,
+		});
+		const silenced = page.getByText("tamanu-central.a-silenced", {
+			exact: true,
+		});
 		const passedY = (await passed.boundingBox())!.y;
 		const silencedY = (await silenced.boundingBox())!.y;
 		expect(passedY).toBeLessThan(silencedY);

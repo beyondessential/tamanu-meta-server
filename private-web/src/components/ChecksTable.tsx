@@ -144,20 +144,20 @@ export function ChecksTable(props: {
 		[props.target.kind, props.target.id, props.refreshTick],
 	);
 	const ownApi = props.target.kind === "application" ? applicationApi : machineApi;
-	const serverSilences: Silence[] = ownApi.status === "ok" ? ownApi.data : [];
+	const ownSilences: Silence[] = ownApi.status === "ok" ? ownApi.data : [];
 	if (props.groupId) {
 		return (
 			<ChecksTableGrouped
 				{...props}
 				groupId={props.groupId}
-				serverSilences={serverSilences}
+				ownSilences={ownSilences}
 			/>
 		);
 	}
 	return (
 		<ChecksTableBody
 			{...props}
-			serverSilences={serverSilences}
+			ownSilences={ownSilences}
 			groupSilences={[]}
 		/>
 	);
@@ -171,7 +171,7 @@ function ChecksTableGrouped(props: {
 	maintained: boolean;
 	refreshTick: number;
 	onSilenced: () => void;
-	serverSilences: Silence[];
+	ownSilences: Silence[];
 }) {
 	const groupApi = useApi(
 		"silenced_refs",
@@ -190,7 +190,7 @@ function ChecksTableBody({
 	groupId,
 	maintained,
 	onSilenced,
-	serverSilences,
+	ownSilences,
 	groupSilences,
 }: {
 	checks: ConsolidatedChecks;
@@ -199,7 +199,7 @@ function ChecksTableBody({
 	groupId: string | null;
 	maintained: boolean;
 	onSilenced: () => void;
-	serverSilences: Silence[];
+	ownSilences: Silence[];
 	groupSilences: ServerGroupSilencedRef[];
 }) {
 	const entries = checks.checks;
@@ -220,8 +220,8 @@ function ChecksTableBody({
 					// different check, and canopy's own checks are silenced
 					// at a bare ref rather than under `health/`.
 					const refName = silenceRef(entry.source, entry.check);
-					const serverSilence =
-						serverSilences.find(
+					const ownSilence =
+						ownSilences.find(
 							(s) => s.source === entry.source && s.ref === refName,
 						) ?? null;
 					// A group covers several application types, so its silences
@@ -243,7 +243,7 @@ function ChecksTableBody({
 							groupId={groupId}
 							maintained={maintained}
 							onSilenced={onSilenced}
-							serverSilence={serverSilence}
+							ownSilence={ownSilence}
 							groupSilence={groupSilence}
 						/>
 					);
@@ -278,7 +278,7 @@ function CheckRow({
 	groupId,
 	maintained,
 	onSilenced,
-	serverSilence,
+	ownSilence,
 	groupSilence,
 }: {
 	entry: ConsolidatedCheck;
@@ -287,7 +287,7 @@ function CheckRow({
 	groupId: string | null;
 	maintained: boolean;
 	onSilenced: () => void;
-	serverSilence: Silence | null;
+	ownSilence: Silence | null;
 	groupSilence: ServerGroupSilencedRef | null;
 }) {
 	const isAdmin = useIsAdmin() === true;
@@ -350,7 +350,8 @@ function CheckRow({
 						check={entry.check}
 					/>
 					<SilencedChip
-						serverSilence={serverSilence}
+						targetKind={target.kind}
+						ownSilence={ownSilence}
 						groupSilence={groupSilence}
 					/>
 					{maintained && effective === "skipped" && (
@@ -373,7 +374,7 @@ function CheckRow({
 					groupId={groupId}
 					source={entry.source}
 					onSilenced={onSilenced}
-					serverSilence={serverSilence}
+					ownSilence={ownSilence}
 					groupSilence={groupSilence}
 				/>
 			)}
@@ -472,21 +473,23 @@ function MaintenanceSkipChip() {
 }
 
 function SilencedChip({
-	serverSilence,
+	targetKind,
+	ownSilence,
 	groupSilence,
 }: {
-	serverSilence: Silence | null;
+	targetKind: CheckTarget["kind"];
+	ownSilence: Silence | null;
 	groupSilence: ServerGroupSilencedRef | null;
 }) {
-	if (!serverSilence && !groupSilence) return null;
+	if (!ownSilence && !groupSilence) return null;
 	const scopes: string[] = [];
-	if (serverSilence) scopes.push("server");
+	if (ownSilence) scopes.push(targetKind);
 	if (groupSilence) scopes.push("group");
 	const tooltipLines: string[] = [];
-	if (serverSilence) {
+	if (ownSilence) {
 		tooltipLines.push(
-			`Server-scope silence${
-				serverSilence.created_by ? ` by ${serverSilence.created_by}` : ""
+			`${targetKind === "machine" ? "Machine" : "Application"}-scope silence${
+				ownSilence.created_by ? ` by ${ownSilence.created_by}` : ""
 			}`,
 		);
 	}
@@ -523,7 +526,7 @@ function SilenceCheckButton({
 	groupId,
 	source,
 	onSilenced,
-	serverSilence,
+	ownSilence,
 	groupSilence,
 }: {
 	check: string;
@@ -532,7 +535,7 @@ function SilenceCheckButton({
 	groupId: string | null;
 	source: string;
 	onSilenced: () => void;
-	serverSilence: Silence | null;
+	ownSilence: Silence | null;
 	groupSilence: ServerGroupSilencedRef | null;
 }) {
 	const silenceServer = useApiAction("silenced_refs", "silence_server");
@@ -550,7 +553,7 @@ function SilenceCheckButton({
 		unsilenceMachine.error ??
 		unsilenceGroup.error;
 	const refName = silenceRef(source, check);
-	const silenced = !!serverSilence || !!groupSilence;
+	const silenced = !!ownSilence || !!groupSilence;
 	const handle = async (fn: () => Promise<unknown>) => {
 		try {
 			await fn();
@@ -602,7 +605,7 @@ function SilenceCheckButton({
 							scopeLabel={
 								target.kind === "machine" ? "this machine" : "this server"
 							}
-							silence={serverSilence}
+							silence={ownSilence}
 							onSilence={() =>
 								handle(() =>
 									target.kind === "machine"

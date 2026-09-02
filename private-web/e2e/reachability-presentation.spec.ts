@@ -54,7 +54,7 @@ test.describe("reachability presents before anything is wrong", () => {
 		).toBeVisible();
 		// The chip only matches if the UI builds canopy's ref the same way the
 		// backend stores it.
-		await expect(page.getByText("silenced (server)")).toBeVisible();
+		await expect(page.getByText("silenced (application)")).toBeVisible();
 	});
 });
 
