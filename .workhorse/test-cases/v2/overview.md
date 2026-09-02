@@ -2,6 +2,9 @@
 
 Coverage the card owes. An unticked box is a scenario not yet covered.
 
+The unticked cases carry over to card G3, which groups them by whether the
+behaviour still needs building or only wants a test.
+
 ## Model and lifecycle
 
 - [x] Creating a machine in a group, with no applications, presents as not-yet-checked-in rather than as an error (verifies spec: FLT)
