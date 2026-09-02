@@ -73,7 +73,7 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 - [ ] A reporter field named `source`, `health`, `check` or `result` inside `detail` is recorded and does not collide with the envelope (verifies spec: STA)
 - [ ] Two applications sharing a key cannot be expressed in a payload (verifies spec: STA)
 - [ ] Correlation is by machine, key and type together (verifies spec: STA)
-- [ ] A check name reported bare is catalogued qualified by the reporting application's type (verifies spec: STA, CHK)
+- [x] A check name reported bare is catalogued qualified by the reporting application's type (verifies spec: STA, CHK)
 - [ ] A push response returns effective tags for the machine and each application described (verifies spec: STA)
 - [x] `caddy_certs` files against the application while `caddy_version` files against the machine (verifies spec: STA)
 - [x] `ips` files against the machine while `ips_errors` files against the application (verifies spec: STA)
@@ -91,8 +91,8 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 
 ## Identities
 
-- [ ] A machine-gated route resolves the machine from the authenticated identity (verifies spec: FLT)
-- [ ] An admin-gated route resolves no machine (verifies spec: FLT)
+- [x] A machine-gated route resolves the machine from the authenticated identity (verifies spec: FLT)
+- [x] An admin-gated route resolves no machine (verifies spec: FLT)
 - [x] `GET /machines/self` returns the identity, its machine, and the applications on it (verifies spec: DID)
 - [x] `GET /servers/self` keeps the shape it has always had, for callers that predate the split (verifies spec: API, DID)
 - [x] Enrolment accepts `server` as an alias for the machine role, and Canopy stores and presents `machine` (verifies spec: DTR)
@@ -133,7 +133,7 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 - [x] A certificate request from a two-application machine resolves to the application declaring the requested name (verifies spec: CRT)
 - [x] A request for a name none of the machine's applications declares is refused identically whether another application holds it or nobody does (verifies spec: CRT)
 - [x] The entitlement answer carries one entry per application on the machine (verifies spec: CRT)
-- [ ] The entitlement answer on a status-push response matches the standalone one (verifies spec: CRT, STA)
+- [x] The entitlement answer on a status-push response matches the standalone one (verifies spec: CRT, STA)
 - [x] Releasing a name stops renewal and leaves existing records and certificates in place (verifies spec: CRT)
 
 ## Fleet query interface
@@ -157,7 +157,7 @@ cover the runtime half of that, which the spec diff cannot see.
 - [x] A verification report naming both, or neither, is refused rather than resolved by preference (verifies spec: API, RST)
 - [x] An application's device tags carry `canopy:type` and both halves of the pair it replaced (verifies spec: API, APP)
 - [x] A Tamanu facility's `canopy:product` reads `tamanu`, so both Tamanu types still bill as one (verifies spec: APP)
-- [ ] A fielded bestool pushing the earlier server-scoped status shape still files its checks (verifies spec: STA)
+- [x] A fielded bestool pushing the earlier server-scoped status shape still files its checks (verifies spec: STA)
 
 ## Migration
 

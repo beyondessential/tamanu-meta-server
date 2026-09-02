@@ -664,3 +664,59 @@ async fn entitlements_carry_one_entry_per_application_on_the_machine() {
 	)
 	.await
 }
+
+/// The push response is not a summary of the entitlements answer, it is the
+/// answer: an agent that only ever pushes status learns of a new domain or a
+/// withdrawn grant without asking a second question.
+// spec: CRT#what-an-application-may-act-on
+// spec: STA
+#[tokio::test(flavor = "multi_thread")]
+async fn the_push_response_carries_the_whole_entitlements_answer() {
+	configure_zones("tamanu.app=Z1");
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _private| {
+			let first = entitled(&mut conn, device_id, Some("fiji.tamanu.app"), true, true).await;
+
+			// A second workload on the box, so the answer is one the flat
+			// fields cannot carry on their own.
+			let second = Uuid::new_v4();
+			conn.batch_execute(&format!(
+				"INSERT INTO applications \
+				   (id, name, host, type, group_id, may_manage_dns, may_manage_tls, machine_id) \
+				 SELECT '{second}', 'push-2', 'https://{second}.example.invalid', \
+				        'tamanu-facility', group_id, false, true, machine_id \
+				 FROM applications WHERE id = '{first}'"
+			))
+			.await
+			.expect("second application on the same box");
+
+			let standalone = public
+				.get("/names/entitlements")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.await;
+			standalone.assert_status_ok();
+			let standalone: serde_json::Value = standalone.json();
+
+			let pushed = public
+				.post(&format!("/status/{first}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({"source": "alertd", "health": []}))
+				.await;
+			pushed.assert_status_ok();
+			let pushed: serde_json::Value = pushed.json();
+
+			assert_eq!(
+				pushed["names"], standalone,
+				"the two routes answer the same question, so they answer it the \
+				 same way"
+			);
+			assert_eq!(
+				pushed["names"]["applications"].as_array().unwrap().len(),
+				2,
+				"both workloads on the box are in the answer"
+			);
+		},
+	)
+	.await
+}

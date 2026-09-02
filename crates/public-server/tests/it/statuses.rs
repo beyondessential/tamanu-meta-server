@@ -3472,3 +3472,160 @@ async fn an_empty_health_set_is_the_source_reporting_nothing_not_a_legacy_push()
 	)
 	.await
 }
+
+/// A reporter names its checks bare, so the same name arrives from workloads of
+/// different products meaning different things. Ingestion catalogues each under
+/// the namespace of the type that reported it, so an operator grades the two
+/// separately.
+// spec: STA#health-and-detail, CHK
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bare_check_name_is_catalogued_under_the_reporting_types_namespace() {
+	commons_tests::server::run_with_device_auth(
+		"admin",
+		async |mut conn, cert, device_id, public, _| {
+			let central = insert_health_test_server(&mut conn, device_id).await;
+
+			// A second workload of another product on the same box, reporting
+			// the same bare check name.
+			let facility = Uuid::new_v4();
+			sql_query(
+				"INSERT INTO applications (id, host, type, group_id, machine_id) \
+				 SELECT $1, 'https://facility.example.com', 'tamanu-facility', group_id, machine_id \
+				 FROM applications WHERE id = $2",
+			)
+			.bind::<sql_types::Uuid, _>(facility)
+			.bind::<sql_types::Uuid, _>(central)
+			.execute(&mut conn)
+			.await
+			.expect("second application");
+
+			for id in [central, facility] {
+				post_status(
+					&public,
+					&cert,
+					&mut conn,
+					id,
+					serde_json::json!({ "health": [ { "check": "disk", "result": "warning" } ] }),
+				)
+				.await;
+			}
+
+			#[derive(QueryableByName)]
+			struct CatalogRow {
+				#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+				subject: Option<String>,
+				#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+				application_type: Option<String>,
+			}
+			let rows: Vec<CatalogRow> = sql_query(
+				"SELECT subject, application_type FROM check_policies \
+				 WHERE source = 'alertd' AND check_name = 'disk' \
+				 ORDER BY application_type",
+			)
+			.load(&mut conn)
+			.await
+			.expect("catalog rows");
+
+			let namespaces: Vec<_> = rows
+				.iter()
+				.map(|r| (r.subject.as_deref(), r.application_type.as_deref()))
+				.collect();
+			assert_eq!(
+				namespaces,
+				vec![
+					(Some("application"), Some("tamanu-central")),
+					(Some("application"), Some("tamanu-facility")),
+				],
+				"one bare name, one catalog row per reporting type",
+			);
+		},
+	)
+	.await
+}
+
+/// The transition is not a cutover: bestools already in the field push the
+/// unified shape, with no `machine` section and detail spread flat across the
+/// envelope. Canopy separates that push itself, so the box's checks and fields
+/// reach the machine and the workload's reach the application.
+// spec: STA#transitional-unified-pushes
+#[tokio::test(flavor = "multi_thread")]
+async fn a_unified_push_from_a_fielded_agent_still_files_its_checks() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			// The shape a bestool in the field sends today: one flat set of
+			// checks mixing machine-subject (disk_free) and application-subject
+			// (database) material, and detail fields on the envelope.
+			post_status(
+				&public,
+				&cert,
+				&mut conn,
+				server_id,
+				serde_json::json!({
+					"source": "alertd",
+					"healthy": false,
+					"health": [
+						{ "check": "database", "result": "passed" },
+						{ "check": "disk_free", "result": "warning", "free_pct": 4 },
+					],
+					"uptimeSecs": 4321,
+					"timezone": "Pacific/Auckland",
+				}),
+			)
+			.await;
+
+			let database = fetch_issue(&mut conn, server_id, "alertd", "health/database")
+				.await
+				.expect("the workload's check files against the application");
+			assert!(!database.active, "a passing check is not an open issue");
+
+			let disk: IssueRow = sql_query(
+				r#"
+				SELECT escalates, active, message, description,
+					(resolved_at IS NOT NULL) AS is_resolved,
+					observed_result, effective_result
+				FROM issues
+				WHERE machine_id = $1 AND application_id IS NULL
+				  AND source = 'alertd' AND ref = 'health/disk_free'
+			"#,
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.get_result(&mut conn)
+			.await
+			.expect("the box's check files against the machine");
+			assert!(disk.active);
+			assert_eq!(disk.observed_result.as_deref(), Some("warning"));
+
+			// Detail separates on the same axis, without the agent knowing.
+			let machine: ExtraOnly = sql_query(
+				"SELECT extra FROM machine_reported_detail \
+				 WHERE machine_id = $1 AND source = 'alertd'",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.get_result(&mut conn)
+			.await
+			.expect("machine detail recorded");
+			assert_eq!(machine.extra["uptimeSecs"], 4321);
+			assert!(machine.extra.get("timezone").is_none());
+
+			let application: ExtraOnly = sql_query(
+				"SELECT extra FROM application_reported_detail \
+				 WHERE application_id = $1 AND source = 'alertd'",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.get_result(&mut conn)
+			.await
+			.expect("application detail recorded");
+			assert_eq!(application.extra["timezone"], "Pacific/Auckland");
+			assert!(application.extra.get("uptimeSecs").is_none());
+
+			// The push is still recorded whole as history.
+			let row = fetch_latest_health(&mut conn, server_id).await;
+			assert_eq!(row.health.as_array().expect("array").len(), 2);
+			assert_eq!(row.extra["uptimeSecs"], 4321);
+		},
+	)
+	.await
+}

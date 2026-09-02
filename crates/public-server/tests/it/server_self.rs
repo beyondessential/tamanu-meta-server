@@ -206,3 +206,76 @@ async fn a_row_stored_as_server_reads_as_the_machine_role() {
 	)
 	.await
 }
+
+/// The machine an identity belongs to is resolved where it is needed, and the
+/// resolution is the identity's alone: a machine identity resolves the box it
+/// was enrolled as, whatever else is on the fleet.
+// spec: FLT#identities
+#[tokio::test(flavor = "multi_thread")]
+async fn a_machine_gated_route_resolves_the_machine_from_the_identity() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let mine = Uuid::new_v4();
+			let theirs = Uuid::new_v4();
+			sql_query("INSERT INTO machines (id, device_id) VALUES ($1, $2)")
+				.bind::<sql_types::Uuid, _>(mine)
+				.bind::<sql_types::Uuid, _>(device_id)
+				.execute(&mut conn)
+				.await
+				.unwrap();
+			// Another box on the fleet, with no identity of its own.
+			sql_query("INSERT INTO machines (id) VALUES ($1)")
+				.bind::<sql_types::Uuid, _>(theirs)
+				.execute(&mut conn)
+				.await
+				.unwrap();
+
+			let response = public
+				.get("/machines/self")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.await;
+			response.assert_status_ok();
+			let body: MachineSelfResponse = response.json();
+			assert_eq!(body.machine_id, mine);
+			assert_eq!(body.device_id, device_id);
+		},
+	)
+	.await
+}
+
+/// An admin credential is not a box, so nothing resolves a machine for it. It
+/// still passes an admin-gated route, which has no business with the
+/// association and never asks for it.
+// spec: FLT#identities
+#[tokio::test(flavor = "multi_thread")]
+async fn an_admin_identity_resolves_no_machine() {
+	commons_tests::server::run_with_device_auth(
+		"admin",
+		async |mut conn, cert, _device_id, public, _| {
+			sql_query(
+				"INSERT INTO versions (major, minor, patch, changelog, status) \
+				 VALUES (1, 0, 1, 'yankable', 'published')",
+			)
+			.execute(&mut conn)
+			.await
+			.unwrap();
+
+			// Admin-gated: answered without a machine anywhere in the picture.
+			let yank = public
+				.delete("/versions/1.0.1")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.await;
+			yank.assert_status_ok();
+
+			// The same identity on a machine-gated route passes the gate — an
+			// admin may act as any role — and then resolves no machine.
+			let response = public
+				.get("/machines/self")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.await;
+			response.assert_status(StatusCode::PRECONDITION_FAILED);
+		},
+	)
+	.await
+}
