@@ -15,7 +15,6 @@ use database::{
 	server_groups::{NewServerGroup, ServerGroup},
 	url_field::UrlField,
 };
-use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::SignedDuration;
 use uuid::Uuid;
@@ -81,33 +80,27 @@ async fn group(conn: &mut AsyncPgConnection, name: &str) -> ServerGroup {
 	.unwrap()
 }
 
-/// An application's type defaults to a Tamanu central, so a row inserted
-/// without one reads as the type the fleet is overwhelmingly made of rather
-/// than failing to parse.
+/// There is no default type. A report is the only thing that creates an
+/// application and it carries the type, so an application without one does not
+/// arise — and recording one as a Tamanu central it is not would be a guess
+/// presented as a fact.
+/// spec: APP#where-a-type-comes-from
 #[tokio::test(flavor = "multi_thread")]
-async fn type_defaults_to_a_tamanu_central() {
+async fn an_application_has_no_type_to_fall_back_on() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
-		use database::schema::applications;
-
 		let id = Uuid::new_v4();
-		diesel::sql_query(
+		let inserted = diesel::sql_query(
+			// Deliberately omits the type: the point is that there is nothing
+			// for it to fall back to.
 			"WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, machine_id) VALUES ($1, 'https://legacy.example', $1)",
 		)
 		.bind::<diesel::sql_types::Uuid, _>(id)
 		.execute(&mut conn)
-		.await
-		.unwrap();
+		.await;
 
-		let stored: String = applications::table
-			.select(applications::type_)
-			.filter(applications::id.eq(id))
-			.first(&mut conn)
-			.await
-			.unwrap();
-		assert_eq!(stored, "tamanu-central");
-		assert_eq!(
-			Application::get_by_id(&mut conn, id).await.unwrap().r#type,
-			ApplicationType::TamanuCentral
+		assert!(
+			inserted.is_err(),
+			"an application with no type is refused rather than defaulted"
 		);
 	})
 	.await
@@ -230,56 +223,13 @@ async fn group_without_a_versioned_member_has_no_headline_version() {
 	.await
 }
 
-/// A group of facilities still has a headline version. A facility's version is
-/// graded against the same release train a central's is, so there is a version
-/// to present; a central is only preferred when both are there.
+/// A deployment's version is its central's version, so the central speaks for
+/// the group whatever else is in it — not by outranking other types, but
+/// because nothing else is considered. Here the facility is the higher-ranked
+/// of the two and still does not carry the headline.
+/// spec: APP#capabilities
 #[tokio::test(flavor = "multi_thread")]
-async fn a_group_of_facilities_still_has_a_headline_version() {
-	commons_tests::db::TestDb::run(|mut conn, _url| async move {
-		let g = group(&mut conn, "facilities-only").await;
-		let m = machine(&mut conn, Some(g.id)).await;
-		let facility = Application::create(
-			&mut conn,
-			Application {
-				group_id: Some(g.id),
-				..server(
-					ApplicationType::TamanuFacility,
-					Some(ServerRank::Production),
-					m,
-				)
-			},
-		)
-		.await
-		.unwrap();
-
-		ReportedDetail::record(
-			&mut conn,
-			facility.id,
-			facility.machine_id,
-			"alertd",
-			&serde_json::json!({}),
-			Some(&"2.31.0".parse().unwrap()),
-		)
-		.await
-		.unwrap();
-		ServerGroup::recompute_version(&mut conn, g.id)
-			.await
-			.unwrap();
-
-		let after = ServerGroup::get_by_id(&mut conn, g.id).await.unwrap();
-		assert_eq!(after.version_application_id, Some(facility.id));
-		assert_eq!(
-			after.effective_version.map(|v| v.to_string()),
-			Some("2.31.0".to_string())
-		);
-	})
-	.await
-}
-
-/// A central and a facility at one rank is the tie the type ordering exists
-/// for: the central speaks for the group.
-#[tokio::test(flavor = "multi_thread")]
-async fn a_central_outranks_a_facility_on_a_tie() {
+async fn only_a_central_speaks_for_the_group() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {
 		let g = group(&mut conn, "both").await;
 		let fm = machine(&mut conn, Some(g.id)).await;
@@ -301,11 +251,7 @@ async fn a_central_outranks_a_facility_on_a_tie() {
 			&mut conn,
 			Application {
 				group_id: Some(g.id),
-				..server(
-					ApplicationType::TamanuCentral,
-					Some(ServerRank::Production),
-					cm,
-				)
+				..server(ApplicationType::TamanuCentral, Some(ServerRank::Dev), cm)
 			},
 		)
 		.await

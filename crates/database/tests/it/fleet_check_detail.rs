@@ -20,7 +20,7 @@ async fn insert_server(conn: &mut diesel_async::AsyncPgConnection, host: &str) -
 		.await
 		.expect("insert machine");
 	let row: RowId =
-		sql_query("INSERT INTO applications (host, machine_id) VALUES ($1, $2) RETURNING id")
+		sql_query("INSERT INTO applications (type, host, machine_id) VALUES ('tamanu-central', $1, $2) RETURNING id")
 			.bind::<sql_types::Text, _>(host)
 			.bind::<sql_types::Uuid, _>(machine.id)
 			.get_result(conn)

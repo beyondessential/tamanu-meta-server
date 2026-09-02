@@ -37,8 +37,8 @@ async fn insert_server_full(
 		.expect("insert machine");
 	let row: RowId = sql_query(
 		r#"
-			INSERT INTO applications (host, alert_when_down_for, is_monitored, machine_id)
-			VALUES ($1, ($2 || ' seconds')::INTERVAL, $3, $4)
+			INSERT INTO applications (type, host, alert_when_down_for, is_monitored, machine_id)
+			VALUES ('tamanu-central', $1, ($2 || ' seconds')::INTERVAL, $3, $4)
 			RETURNING id
 		"#,
 	)
@@ -72,8 +72,8 @@ async fn insert_grouped_server(
 		.expect("insert machine");
 	let row: RowId = sql_query(
 		r#"
-			INSERT INTO applications (host, alert_when_down_for, is_monitored, group_id, machine_id)
-			VALUES ($1, ($2 || ' seconds')::INTERVAL, $3, $4, $5)
+			INSERT INTO applications (type, host, alert_when_down_for, is_monitored, group_id, machine_id)
+			VALUES ('tamanu-central', $1, ($2 || ' seconds')::INTERVAL, $3, $4, $5)
 			RETURNING id
 		"#,
 	)
@@ -306,7 +306,7 @@ async fn new_servers_default_to_ten_minutes() {
 			.get_result(&mut conn)
 			.await
 			.expect("insert machine");
-		sql_query("INSERT INTO applications (host, machine_id) VALUES ('http://new.invalid/', $1)")
+		sql_query("INSERT INTO applications (type, host, machine_id) VALUES ('tamanu-central', 'http://new.invalid/', $1)")
 			.bind::<sql_types::Uuid, _>(machine.id)
 			.execute(&mut conn)
 			.await
@@ -338,8 +338,8 @@ async fn check_constraint_forbids_non_positive_duration() {
 				.await
 				.expect("insert machine");
 			let res = sql_query(&format!(
-				"INSERT INTO applications (host, alert_when_down_for, machine_id) \
-				 VALUES ('http://bad.invalid/', {bad}, '{machine_id}')",
+				"INSERT INTO applications (type, host, alert_when_down_for, machine_id) \
+				 VALUES ('tamanu-central', 'http://bad.invalid/', {bad}, '{machine_id}')",
 				machine_id = machine.id
 			))
 			.execute(&mut conn)

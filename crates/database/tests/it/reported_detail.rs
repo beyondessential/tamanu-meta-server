@@ -21,7 +21,7 @@ async fn insert_server(conn: &mut AsyncPgConnection) -> Uuid {
 		.await
 		.expect("insert machine");
 	let server: RowId =
-		sql_query("INSERT INTO applications (host, machine_id) VALUES ($1, $2) RETURNING id")
+		sql_query("INSERT INTO applications (type, host, machine_id) VALUES ('tamanu-central', $1, $2) RETURNING id")
 			.bind::<sql_types::Text, _>(host)
 			.bind::<sql_types::Uuid, _>(machine.id)
 			.get_result(conn)
@@ -37,7 +37,7 @@ async fn insert_production_server(conn: &mut AsyncPgConnection) -> Uuid {
 		.await
 		.expect("insert machine");
 	let server: RowId = sql_query(
-		"INSERT INTO applications (host, rank, machine_id) VALUES ($1, 'production', $2) RETURNING id",
+		"INSERT INTO applications (type, host, rank, machine_id) VALUES ('tamanu-central', $1, 'production', $2) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>(host)
 	.bind::<sql_types::Uuid, _>(machine.id)

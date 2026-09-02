@@ -240,7 +240,7 @@ async fn insert_server(conn: &mut diesel_async::AsyncPgConnection) -> uuid::Uuid
 		id: uuid::Uuid,
 	}
 	let row: RowId = diesel::sql_query(
-		"WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (host, machine_id) SELECT 'http://sc.invalid/', m.id FROM m RETURNING id",
+		"WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (type, host, machine_id) SELECT 'tamanu-central', 'http://sc.invalid/', m.id FROM m RETURNING id",
 	)
 	.get_result(conn)
 	.await

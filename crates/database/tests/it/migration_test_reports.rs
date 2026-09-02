@@ -38,7 +38,7 @@ async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> (Uuid, U
 		.await
 		.expect("machine");
 	let row: RowId = sql_query(
-		"INSERT INTO applications (host, group_id, machine_id) VALUES ($1, $2, $3) RETURNING id",
+		"INSERT INTO applications (type, host, group_id, machine_id) VALUES ('tamanu-central', $1, $2, $3) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>("https://central.kamaka.example")
 	.bind::<sql_types::Uuid, _>(group_id)

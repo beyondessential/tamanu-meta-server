@@ -58,7 +58,7 @@ async fn insert_server(
 		.await
 		.expect("insert machine");
 	let row: RowId = sql_query(
-		"INSERT INTO applications (host, group_id, is_monitored, machine_id) VALUES ($1, $2, $3, $4) RETURNING id",
+		"INSERT INTO applications (type, host, group_id, is_monitored, machine_id) VALUES ('tamanu-central', $1, $2, $3, $4) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>(host)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group)
@@ -230,7 +230,7 @@ async fn a_machine_check_files_once_not_once_per_application() {
 		let machine = insert_machine(&mut conn, Some(group), true).await;
 
 		for host in ["http://one.invalid/", "http://two.invalid/"] {
-			sql_query("INSERT INTO applications (host, group_id, machine_id) VALUES ($1, $2, $3)")
+			sql_query("INSERT INTO applications (type, host, group_id, machine_id) VALUES ('tamanu-central', $1, $2, $3)")
 				.bind::<sql_types::Text, _>(host)
 				.bind::<sql_types::Uuid, _>(group)
 				.bind::<sql_types::Uuid, _>(machine)

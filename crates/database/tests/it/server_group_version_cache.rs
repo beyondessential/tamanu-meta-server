@@ -103,8 +103,10 @@ async fn cache(
 async fn recompute_picks_canonical_and_trigger_updates_only_it() {
 	TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn, "Group").await;
-		// dev-facility is the only member at first.
-		let dev = insert_server(&mut conn, group_id, "tamanu-facility", Some("dev")).await;
+		// A dev central is the only member at first. The headline is a
+		// central's version, so the members that can carry it are centrals;
+		// rank is what orders them.
+		let dev = insert_server(&mut conn, group_id, "tamanu-central", Some("dev")).await;
 		insert_status(&mut conn, dev, Some("1.0.0"), -60).await;
 
 		// (a) recompute picks the (lone) canonical member.
@@ -136,7 +138,7 @@ async fn recompute_picks_canonical_and_trigger_updates_only_it() {
 			"canonical server's new version updates the cache"
 		);
 
-		// A later status from the non-canonical dev server is ignored.
+		// A later status from the non-canonical dev central is ignored.
 		insert_status(&mut conn, dev, Some("9.9.9"), -5).await;
 		let (_, ver) = cache(&mut conn, group_id).await;
 		assert_eq!(

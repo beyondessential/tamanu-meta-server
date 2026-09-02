@@ -433,13 +433,15 @@ The set being open is cheap here: the type is not on the public wire at all, so 
 Recorded because two of these were *restored* during implementation in response to failing tests, where the test was encoding the rule the working doc had already replaced. The lesson is the general one: a failing test is not the specification, and when one disagrees with the working doc it is the test that is stale.
 
 - [x] `ApplicationType` was a closed four-variant enum whose `FromStr` and `FromSql` rejected anything else, and derived `Default`. It now carries an `Other(String)` for a type Canopy has no handling for, and has no default. That costs `Copy`, which is the bulk of the diff.
-- [x] `server_groups::type_priority` ranked types against each other to break a rank tie when picking a group's canonical member. Gone: the headline names the `tamanu-central` on the group's highest-ranked machine directly, falling back to the highest-ranked version-tracked member so a facility-only deployment still has one.
+- [x] `server_groups::type_priority` ranked types against each other to break a rank tie when picking a group's canonical member. Gone: the headline names the `tamanu-central` on the group's highest-ranked machine, and nothing else. There is no fallback — a deployment has a central, and a group without one has no headline version rather than borrowing a facility's. The first pass at this invented a facility fallback, which is a deployment shape that does not exist.
 - [x] `APPLICATION_TYPE_ORDER` gave types a display precedence in the SPA. Gone: rank is an ordered set and types are not, so the tiebreak sorts alphabetically.
 - [x] `ApplicationType::label` title-cased and special-cased SENAITE. Now the sentence case of the slug for every type, which is what FLT already said.
 
 Two things follow that were not in the original list. The type catalogue endpoint could no longer be a constant — it returns the types Canopy knows *plus* the ones the fleet is running, so a reported type has a label and capabilities everywhere the SPA presents it. And the wire schema for a type becomes a plain string rather than an enum of four, which is free here because the type is not on the public wire.
 
 Open is not unconstrained: a type is a slug, and a reported value that is not one is a reporting error refused at parse rather than adopted as a new type. That gate is the Rust type every write goes through, not a column constraint.
+
+There is no default at either level. The Rust `Default` derive is gone and so is the column default, which recorded a typeless row as a Tamanu central it was not. Roughly two dozen test seeds were leaning on that default and now say what they are seeding.
 
 The closed set is inherited rather than invented here — `Product` on main is a closed enum and the base spec says "the set is closed and defined by Canopy" — but the working doc had already decided otherwise for this card, so carrying the sentence forward was the error.
 

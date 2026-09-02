@@ -50,8 +50,8 @@ async fn insert_server(
 		.await
 		.expect("insert machine");
 	let application: RowId = sql_query(
-		"INSERT INTO applications (host, group_id, machine_id) \
-		 VALUES ('http://maint.invalid/', $1, $2) RETURNING id",
+		"INSERT INTO applications (type, host, group_id, machine_id) \
+		 VALUES ('tamanu-central', 'http://maint.invalid/', $1, $2) RETURNING id",
 	)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group_id)
 	.bind::<sql_types::Uuid, _>(machine.id)
@@ -648,8 +648,8 @@ async fn a_machine_window_covers_every_application_on_the_box() {
 
 		// A second workload on the same box.
 		let second: RowId = sql_query(
-			"INSERT INTO applications (host, group_id, machine_id) \
-			 VALUES ('http://maint2.invalid/', $1, $2) RETURNING id",
+			"INSERT INTO applications (type, host, group_id, machine_id) \
+			 VALUES ('tamanu-central', 'http://maint2.invalid/', $1, $2) RETURNING id",
 		)
 		.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(group_id))
 		.bind::<sql_types::Uuid, _>(machine_id)

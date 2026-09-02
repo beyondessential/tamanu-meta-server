@@ -484,21 +484,14 @@ impl ServerGroup {
 		// it leaves types a flat set with no ordering to maintain as new ones
 		// appear.
 		//
-		// A group with no central falls back to the highest-ranked member
-		// whose version Canopy grades against a release train, so a
-		// facility-only deployment still has a headline. A group of nothing
-		// but untracked types has none, there being no version to take.
+		// There is no fallback. A group with no central has no headline
+		// version, because a deployment's version is a thing its central has
+		// and nothing else stands in for it.
 		// spec: APP#capabilities
 		let canonical = members
 			.iter()
 			.filter(|s| s.r#type == ApplicationType::TamanuCentral)
 			.min_by_key(|s| (rank_priority(s.rank), s.id))
-			.or_else(|| {
-				members
-					.iter()
-					.filter(|s| s.r#type.tracks_versions())
-					.min_by_key(|s| (rank_priority(s.rank), s.id))
-			})
 			.map(|s| s.id);
 
 		let (version_application_id, effective_version) = match canonical {
