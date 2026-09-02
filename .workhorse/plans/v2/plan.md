@@ -377,6 +377,39 @@ Two things found on the way:
 
 Specs: CHK gained a line separating the check's three results (how much of what should be reporting still is) from the target's reachability (whether anything is), which reads as a contradiction otherwise. MCP's "recent-activity window" and "not recently seen" were a second, undefined vocabulary for the same idea and now point at the target's own threshold.
 
+## Check identity
+
+Two questions that look alike and are not: what a check *result* is filed against, and what distinguishes one *check* from another. The first is the target — an application, a machine, a group, Canopy — and that is `Scope`, which already exists and is untouched by any of this. The second is the check's identity, which is a namespace and a name.
+
+Reachability is the case that separates them. It is one check, filed at every target: same concept, same rules, no ceiling. Two targets, one identity. Reading the target axis and calling it identity is the mistake to avoid here, and it is the one I made twice.
+
+`version` is the opposite case. A box's version, a Tamanu's version and another product's version are unrelated conditions colliding on a name — different meanings, different rules, so different checks. That is what a namespace is for.
+
+**Namespacing exists because of control over names, not because of targets.** Canopy's own names are curated: we choose every one and can guarantee it means a single thing, so `canopy` needs no namespace and its checks are identified by name alone. Names arriving over the device API are not curated, so they need a namespace to keep unrelated conditions apart.
+
+So a source is one of two things:
+
+- **flat** — a curated namespace where names are unique by construction. `canopy` and `manual`.
+- **structured** — namespaced by a subject, which is either the machine or an application of a given type.
+
+The subject is `Machine` or `Application(type)` and nothing else, because those are the only things a device push is ever about. A group check and a Canopy-wide check are always canopy's own, so they live in the flat namespace and never need a subject. There is no `Group` subject and no `Global` subject; the flat case *is* the unscoped case.
+
+Resolving a filed check to its catalog entry therefore needs the namespace, and for a structured source's application check that means the application's type. Canopy's own filings need nothing, which is most of the code the earlier attempts were disturbing.
+
+### The wire keeps the split shape
+
+The push shape stays as the split mockup has it: a source, the machine, and the applications. Every push arriving over the device API is structured, so the API carries no flat source today.
+
+That is a statement about what is needed now, not a structural bar. A fourth key alongside `machine` and `applications` — for a source whose checks belong to no subject — is a coherent extension, and the spec's language must leave room for it rather than asserting that API sources are structured by nature. When something needs to push flat data, that is when its shape gets decided.
+
+### The application type has to be open
+
+An application type is not a closed set. Canopy holds built-in handling for the types it knows — Tamanu splitting into central and facility is the reason the axis exists at all — but a new product must be able to report itself without a Canopy release. A closed set means no deployment can push a new kind of application until Canopy is changed and shipped, which is not a constraint worth having.
+
+This is inherited rather than introduced: `Product` on main is a closed enum, and the base spec says "the set is closed and defined by Canopy, since each product's handling is built in rather than configured." Collapsing product and kind into one type carried that sentence forward instead of questioning it. The type axis is this card's to rework, so it is this card's to open.
+
+The set being open is cheap here: the type is not on the public wire at all, so the compatibility bar does not reach it.
+
 ## Routes
 
 No route is deleted, and the step turned out to be pure addition: nothing on the public wire had actually been renamed, so there was no old path to alias. The whole diff against the base spec is one added path.
