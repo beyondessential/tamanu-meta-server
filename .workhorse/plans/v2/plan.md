@@ -476,19 +476,6 @@ The pill is hatched rather than cut. A mask on the enclosure would clip the dots
 
 Going back to the mockup for the band layout caught two deviations in what had already landed. The enclosure was a solid fill where the mockup draws an outline with a wash — the pill is context for the dots inside it, not a competitor to them. And the rank rows had lost the watermark: the mockup spells the rank out behind its own row, faint enough to read only when looked for, which is what replaces the triangle rather than nothing replacing it. Both corrected, and the test case for the watermark restored — I had rewritten it into a weaker one when the watermark went missing.
 
-### The grain is part of a check's identity
-
-A machine-subject `disk_free` and an application-subject `disk_free` are two different checks — at the silence level and at the ceiling, rules and stats level. That settles the cascade question by dissolving it: there is no "machine silence" to cascade, only the silencing of a machine-subject check, and the applications on the box are never in its scope because they were never subjects of it.
-
-The catalog was keyed `(source, check_name)`, which does not carry the grain. It is not ambiguous *today*: `CheckSubject::of(name)` makes the grain a function of the name, so one name has exactly one subject and the two-key row is the same row either way. It goes ambiguous the moment a reporter states its own subject, which is precisely what L2 does — and a catalog that merges the two would hand one operator ceiling to two different checks without ever saying so.
-
-So the key becomes `(source, subject, check_name)`, where the subject is the grain the check is filed at. The filing already knows it: `CheckFiling.scope` names the target, and the grain follows from which variant it is.
-
-- [x] `Scope::grain()` and a `CheckGrain` beside `CheckSubject`, so the axis has one name
-- [x] `check_policies` takes the column, with the primary key and every read and write following it
-- [x] The migration assigns each existing row its grain from the check's own filing site, so an operator's ceiling stays attached to the check it was set on
-- [x] The catalog surface presents the grain, since two rows may now share a name
-
 ## Mockups
 
 Under `.workhorse/design/mockups/v2/`:

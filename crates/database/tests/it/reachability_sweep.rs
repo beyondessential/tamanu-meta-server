@@ -146,12 +146,10 @@ async fn insert_check_state(
 	minutes_ago: i32,
 ) {
 	// Mirror ingestion's upsert_default: a check-state only keeps its source
-	// "expected" for reachability if a live catalog row backs it. These states
-	// are filed against applications, so the catalog row takes that grain.
+	// "expected" for reachability if a live catalog row backs it.
 	sql_query(
-		"INSERT INTO check_policies (source, subject, check_name) \
-		 VALUES ($1, 'application', $2) \
-		 ON CONFLICT (source, subject, check_name) DO NOTHING",
+		"INSERT INTO check_policies (source, check_name) VALUES ($1, $2) \
+		 ON CONFLICT (source, check_name) DO NOTHING",
 	)
 	.bind::<sql_types::Text, _>(source)
 	.bind::<sql_types::Text, _>(check)

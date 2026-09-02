@@ -12,12 +12,11 @@ use commons_types::{
 		rank::ServerRank,
 	},
 	status::{CheckResult, OperatorPresence, ShortStatus},
-	subject::CheckGrain,
 	version::VersionStr,
 };
 use database::{
 	applications::Application,
-	check_policies::{CheckKey, CheckPolicy},
+	check_policies::CheckPolicy,
 	devices::DeviceConnection,
 	issues::Issue,
 	reported_detail::ReportedDetail,
@@ -412,16 +411,12 @@ pub struct CheckDetailCanopyData {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CheckDetailArgs {
 	/// The source that reports the check. A check's identity is the
-	/// (source, grain, check) triple — a same-named check from another
-	/// source, or at another grain, is a different check.
+	/// (source, check) pair — a same-named check from another source is
+	/// a different check.
 	pub source: String,
 	/// The healthcheck name to look up, exactly as reported by devices in
 	/// `health[].check` (an arbitrary, device/plugin-defined string).
 	pub check: String,
-	/// What the check asserts something about: `application`, `machine`,
-	/// `group`, or `canopy`.
-	#[schema(value_type = String)]
-	pub grain: CheckGrain,
 }
 
 /// Response for [`check_detail`]: the queried check's catalog policy
@@ -432,13 +427,10 @@ pub struct CheckDetailData {
 	/// The source that was queried, echoed back with `check` so the page
 	/// can render its heading without re-decoding the request.
 	pub source: String,
-	/// The grain that was queried, echoed back for the same reason.
-	#[schema(value_type = String)]
-	pub grain: CheckGrain,
 	/// The check name that was queried.
 	pub check: String,
-	/// The configured policy ceiling for this check, or `None` if the source
-	/// has never reported it at this grain (so it has no catalog row).
+	/// The configured policy ceiling for this (source, check), or `None`
+	/// if the source has never reported it (so it has no catalog row).
 	#[schema(value_type = Option<String>)]
 	pub ceiling: Option<CheckResult>,
 	/// Whether this check's policy escalates its effective failures.
@@ -611,11 +603,10 @@ pub async fn check_detail(
 	});
 	groups.sort_by(|a, b| a.group_name.cmp(&b.group_name));
 
-	let policy = CheckPolicy::get(&mut conn, &args.source, args.grain, &args.check).await?;
+	let policy = CheckPolicy::get(&mut conn, &args.source, &args.check).await?;
 
 	Ok(Json(CheckDetailData {
 		source: args.source,
-		grain: args.grain,
 		check: args.check,
 		ceiling: policy.as_ref().map(|p| p.ceiling),
 		escalates: policy.as_ref().is_some_and(|p| p.escalates),
@@ -865,8 +856,6 @@ async fn consolidated_checks_at(
 	at: Option<Timestamp>,
 ) -> commons_errors::Result<SnapshotState> {
 	use commons_types::status::{CheckResult, ConsolidatedCheck, ConsolidatedChecks, HealthState};
-	use commons_types::subject::CheckGrain;
-	use database::check_policies::CheckKey;
 	use database::check_policies::{CheckPolicy, EvaluationContext, ScopedCheckPolicy};
 
 	let statuses = Status::latest_per_source_at(conn, server.id, at).await?;
@@ -901,7 +890,7 @@ async fn consolidated_checks_at(
 	// consolidated view: this drops decommissioned checks and orphaned
 	// check-states (a source's catalog rows removed out from under its
 	// states) so the point-in-time view reconstructs the same shape.
-	let cataloged = CheckPolicy::live_cataloged_keys(conn).await?;
+	let cataloged = CheckPolicy::live_cataloged_pairs(conn).await?;
 	// Grading tables loaded once, not once per check: a status can carry
 	// dozens of checks, and re-querying the catalog and the scoped chain for
 	// each one turned this reconstruction into a few hundred round-trips.
@@ -940,14 +929,7 @@ async fn consolidated_checks_at(
 			let Some(name) = obj.get("check").and_then(|v| v.as_str()) else {
 				continue;
 			};
-			// This reconstructs one application's own checks, so every entry
-			// here is graded and gated at the application grain; the machine's
-			// are the machine page's to present.
-			if !cataloged.contains(&CheckKey::new(
-				&status.source,
-				CheckGrain::Application,
-				name,
-			)) {
+			if !cataloged.contains(&(status.source.clone(), name.to_string())) {
 				continue;
 			}
 			let Some(observed) = CheckResult::from_entry(obj) else {
@@ -968,18 +950,11 @@ async fn consolidated_checks_at(
 				check_extra: &check_extra,
 				tags: &tags,
 			};
-			let catalog_key = CheckKey::new(&status.source, CheckGrain::Application, name);
-			let scoped_key = (status.source.clone(), name.to_string());
-			let fleet = CheckPolicy::grade(
-				grading.get(&catalog_key),
-				&status.source,
-				name,
-				observed,
-				&ctx,
-			);
+			let key = (status.source.clone(), name.to_string());
+			let fleet = CheckPolicy::grade(grading.get(&key), &status.source, name, observed, &ctx);
 			let graded = CheckPolicy::chain_scoped(
 				fleet,
-				chains.get(&scoped_key).map_or(&[][..], Vec::as_slice),
+				chains.get(&key).map_or(&[][..], Vec::as_slice),
 				&ctx,
 			);
 			// The check's own detail fields, verbatim.

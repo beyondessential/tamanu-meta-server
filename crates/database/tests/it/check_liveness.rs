@@ -3,7 +3,6 @@
 //! checks, so a source whose every check is retired stops being expected.
 
 use commons_types::status::{CheckResult, HealthState};
-use commons_types::subject::CheckGrain;
 use database::check_policies::CheckPolicy;
 use database::issues::{CheckFiling, Issue, Scope, file_check, health_from_check_state};
 use diesel::{QueryableByName, sql_query, sql_types};
@@ -298,7 +297,7 @@ async fn decommission_resolves_states_and_marks_catalog() {
 			HealthState::Unhealthy,
 		);
 
-		CheckPolicy::decommission(&mut conn, "alertd", CheckGrain::Application, "x", "op")
+		CheckPolicy::decommission(&mut conn, "alertd", "x", "op")
 			.await
 			.expect("decommission");
 

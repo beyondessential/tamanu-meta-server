@@ -5,7 +5,6 @@
 //! group-scope silences under one reporting source).
 
 use commons_types::status::CheckResult;
-use commons_types::subject::CheckGrain;
 use database::check_policies::{CheckPolicy, IfLadder};
 use database::silenced_refs::{
 	ServerGroupSilencedRef, ServerSilencedRef, silenced_health_checks_for_server,
@@ -51,22 +50,16 @@ async fn insert_server(conn: &mut diesel_async::AsyncPgConnection, group_id: Opt
 async fn ceiling_map_returns_static_ceilings_for_one_source() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		for check in ["disk_space", "cert_expiry", "chatty"] {
-			CheckPolicy::upsert_default(&mut conn, "alertd", CheckGrain::Application, check)
+			CheckPolicy::upsert_default(&mut conn, "alertd", check)
 				.await
 				.expect("seed");
 		}
-		CheckPolicy::upsert_default(
-			&mut conn,
-			"seedling",
-			CheckGrain::Application,
-			"other_source_check",
-		)
-		.await
-		.expect("seed other source");
+		CheckPolicy::upsert_default(&mut conn, "seedling", "other_source_check")
+			.await
+			.expect("seed other source");
 		CheckPolicy::update(
 			&mut conn,
 			"alertd",
-			CheckGrain::Application,
 			"disk_space",
 			CheckResult::Failed,
 			false,
@@ -78,7 +71,6 @@ async fn ceiling_map_returns_static_ceilings_for_one_source() {
 		CheckPolicy::update(
 			&mut conn,
 			"alertd",
-			CheckGrain::Application,
 			"chatty",
 			CheckResult::Passed,
 			false,
@@ -102,23 +94,16 @@ async fn ceiling_map_returns_static_ceilings_for_one_source() {
 #[tokio::test(flavor = "multi_thread")]
 async fn ceiling_map_ignores_conditional_rules() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		CheckPolicy::upsert_default(&mut conn, "alertd", CheckGrain::Application, "ruled")
+		CheckPolicy::upsert_default(&mut conn, "alertd", "ruled")
 			.await
 			.expect("seed");
 		let ladder: IfLadder = serde_json::from_value(json!({"if": [
 			{"==": [{"var": "check.result"}, "failed"]}, "failed",
 		]}))
 		.expect("parse ladder");
-		CheckPolicy::update_rules(
-			&mut conn,
-			"alertd",
-			CheckGrain::Application,
-			"ruled",
-			Some(&ladder),
-			"alice",
-		)
-		.await
-		.expect("set rules");
+		CheckPolicy::update_rules(&mut conn, "alertd", "ruled", Some(&ladder), "alice")
+			.await
+			.expect("set rules");
 
 		// The expression could grade a failure through at push time, but
 		// the static map must only reflect the ceiling column.

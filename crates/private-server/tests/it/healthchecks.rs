@@ -64,7 +64,6 @@ async fn update_changes_policy_and_stamps_review_metadata() {
 			.json(&json!({
 				"source": "alertd",
 				"check_name": "disk_space",
-				"grain": "application",
 				"ceiling": "failed",
 				"escalates": true
 			}))
@@ -100,7 +99,6 @@ async fn update_rejects_unknown_ceiling() {
 			.json(&json!({
 				"source": "alertd",
 				"check_name": "disk_space",
-				"grain": "application",
 				"ceiling": "extremely_critical"
 			}))
 			.await;
@@ -124,7 +122,6 @@ async fn update_marks_reviewed_even_when_policy_unchanged() {
 			.json(&json!({
 				"source": "alertd",
 				"check_name": "noisy_check",
-				"grain": "application",
 				"ceiling": "warning"
 			}))
 			.await;
@@ -193,7 +190,6 @@ async fn update_rules_accepts_valid_ladder() {
 			.json(&json!({
 				"source": "alertd",
 				"check_name": "disk_space",
-				"grain": "application",
 				"rules": {"if": [
 					{">": [{"var": "check.used_pct"}, 95]}, "failed"
 				]}
@@ -221,7 +217,7 @@ async fn update_rules_with_null_clears_the_column() {
 
 		let response = private
 			.post("/api/healthchecks/update_rules")
-			.json(&json!({"source": "alertd", "grain": "application", "check_name": "disk_space", "rules": null}))
+			.json(&json!({"source": "alertd", "check_name": "disk_space", "rules": null}))
 			.await;
 		response.assert_status_ok();
 		let body: serde_json::Value = response.json();
@@ -243,7 +239,7 @@ async fn update_rules_normalises_empty_ladder_to_null() {
 		// normalise it to null at write time.
 		let response = private
 			.post("/api/healthchecks/update_rules")
-			.json(&json!({"source": "alertd", "grain": "application", "check_name": "disk_space", "rules": {"if": []}}))
+			.json(&json!({"source": "alertd", "check_name": "disk_space", "rules": {"if": []}}))
 			.await;
 		// Either the API rejects an empty ladder OR normalises it. Both
 		// land at `rule_count == 0` and a null rules column.
@@ -285,7 +281,7 @@ async fn update_rules_rejects_malformed_shapes() {
 		for (rules, label) in cases {
 			let response = private
 				.post("/api/healthchecks/update_rules")
-				.json(&json!({"source": "alertd", "grain": "application", "check_name": "disk_space", "rules": rules}))
+				.json(&json!({"source": "alertd", "check_name": "disk_space", "rules": rules}))
 				.await;
 			assert!(
 				!response.status_code().is_success(),
@@ -308,7 +304,7 @@ async fn sample_returns_null_when_no_server_has_reported_the_check() {
 		.unwrap();
 		let response = private
 			.post("/api/healthchecks/sample")
-			.json(&json!({"source": "alertd", "grain": "application", "check_name": "uncharted_check"}))
+			.json(&json!({"source": "alertd", "check_name": "uncharted_check"}))
 			.await;
 		response.assert_status_ok();
 		let body: serde_json::Value = response.json();
@@ -339,7 +335,7 @@ async fn sample_materialises_latest_push_for_this_check() {
 
 		let response = private
 			.post("/api/healthchecks/sample")
-			.json(&json!({"source": "alertd", "grain": "application", "check_name": "disk_space"}))
+			.json(&json!({"source": "alertd", "check_name": "disk_space"}))
 			.await;
 		response.assert_status_ok();
 		let body: serde_json::Value = response.json();
@@ -392,7 +388,7 @@ async fn sample_normalises_result_form_entries() {
 
 		let response = private
 			.post("/api/healthchecks/sample")
-			.json(&json!({"source": "alertd", "grain": "application", "check_name": "queue_depth"}))
+			.json(&json!({"source": "alertd", "check_name": "queue_depth"}))
 			.await;
 		response.assert_status_ok();
 		let body: serde_json::Value = response.json();
@@ -426,7 +422,7 @@ async fn sample_picks_the_most_recent_push_across_servers() {
 
 		let response = private
 			.post("/api/healthchecks/sample")
-			.json(&json!({"source": "alertd", "grain": "application", "check_name": "cert_expiry"}))
+			.json(&json!({"source": "alertd", "check_name": "cert_expiry"}))
 			.await;
 		response.assert_status_ok();
 		let body: serde_json::Value = response.json();

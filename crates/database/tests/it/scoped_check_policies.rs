@@ -4,7 +4,6 @@
 //! `file_check`; the silence CRUD through the `silenced_refs` facade.
 
 use commons_types::status::CheckResult;
-use commons_types::subject::CheckGrain;
 use database::{
 	check_policies::{CheckPolicy, EvaluationContext, FilingScope, ScopedCheckPolicy},
 	issues::{CheckFiling, Issue, Scope, file_check},
@@ -138,7 +137,6 @@ async fn server_scoped_rule_can_upgrade_past_the_fleet_ceiling() {
 		CheckPolicy::register(
 			&mut conn,
 			CANOPY_SOURCE,
-			CheckGrain::Application,
 			"tiered",
 			CheckResult::Warning,
 			false,
@@ -174,7 +172,6 @@ async fn server_scoped_rule_can_upgrade_past_the_fleet_ceiling() {
 		let graded = CheckPolicy::apply_scoped(
 			&mut conn,
 			CANOPY_SOURCE,
-			CheckGrain::Application,
 			"tiered",
 			CheckResult::Failed,
 			&ctx,
@@ -196,7 +193,6 @@ async fn server_scoped_rule_can_upgrade_past_the_fleet_ceiling() {
 		let graded = CheckPolicy::apply_scoped(
 			&mut conn,
 			CANOPY_SOURCE,
-			CheckGrain::Application,
 			"tiered",
 			CheckResult::Failed,
 			&ctx,
@@ -284,7 +280,7 @@ async fn silence_on_a_scoped_rule_row_keeps_the_rules() {
 async fn decommission_clears_the_checks_silences() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn, None).await;
-		CheckPolicy::upsert_default(&mut conn, "alertd", CheckGrain::Application, "noisy")
+		CheckPolicy::upsert_default(&mut conn, "alertd", "noisy")
 			.await
 			.expect("seed catalog");
 		ScopedCheckPolicy::silence(
@@ -297,7 +293,7 @@ async fn decommission_clears_the_checks_silences() {
 		.await
 		.expect("silence");
 
-		CheckPolicy::decommission(&mut conn, "alertd", CheckGrain::Application, "noisy", "op")
+		CheckPolicy::decommission(&mut conn, "alertd", "noisy", "op")
 			.await
 			.expect("decommission");
 
@@ -317,7 +313,7 @@ async fn decommission_clears_the_checks_silences() {
 async fn list_silences_excludes_orphaned_check_silences() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn, None).await;
-		CheckPolicy::upsert_default(&mut conn, "bestool-alertd", CheckGrain::Application, "sync")
+		CheckPolicy::upsert_default(&mut conn, "bestool-alertd", "sync")
 			.await
 			.expect("seed catalog");
 		ScopedCheckPolicy::silence(

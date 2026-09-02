@@ -516,17 +516,8 @@ async fn file_health_events(
 	// whatever its result. New checks land at the default warning
 	// ceiling; operators can review and adjust from the /healthchecks
 	// page.
-	// A check is identified by its grain as well as its name, so the row is
-	// created against the grain the check's subject belongs to.
-	// spec: CHK#a-check-is-identified-by-its-grain
 	for check_name in curr_check_results.keys() {
-		CheckPolicy::upsert_default(
-			conn,
-			&status.source,
-			CheckSubject::of(check_name).into(),
-			check_name,
-		)
-		.await?;
+		CheckPolicy::upsert_default(conn, &status.source, check_name).await?;
 	}
 
 	// Status-level extras are shared across every per-check evaluation.
@@ -556,7 +547,6 @@ async fn file_health_events(
 		let graded = CheckPolicy::apply_scoped(
 			conn,
 			&status.source,
-			subject.into(),
 			check,
 			*result,
 			&ctx,

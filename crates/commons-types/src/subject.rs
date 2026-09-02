@@ -15,12 +15,9 @@
 //! application was the only target available.
 // spec: STA
 
-use std::fmt;
-use std::str::FromStr;
-
 use serde::{Deserialize, Serialize};
 
-/// The grain a check's result belongs to, among the two a reporter can push.
+/// The grain a check's result belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CheckSubject {
@@ -28,88 +25,6 @@ pub enum CheckSubject {
 	Machine,
 	/// The workload: its version, its database, its own health.
 	Application,
-}
-
-/// What a check asserts something about — part of the check's identity, not a
-/// property of one result.
-///
-/// A machine-subject `disk_free` and an application-subject `disk_free` are two
-/// different checks: they have their own ceilings, their own rules, their own
-/// statistics, and are silenced separately. So the catalog is keyed by the
-/// grain as well as by the source and the name.
-///
-/// That the grain is currently derivable from the name (see [`CheckSubject`])
-/// is a property of unified pushes, not of checks. A reporter that states its
-/// own subject can file either grain under any name, and a catalog keyed on the
-/// name alone would hand one operator ceiling to both.
-// spec: CHK#a-check-is-identified-by-its-grain
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CheckGrain {
-	/// About one application.
-	Application,
-	/// About one machine.
-	Machine,
-	/// About one group, rather than anything in it — a group's backup
-	/// repository, say.
-	Group,
-	/// About Canopy itself.
-	Canopy,
-}
-
-impl CheckGrain {
-	/// How the grain reads in a sentence about the check.
-	pub fn label(self) -> &'static str {
-		match self {
-			Self::Application => "application",
-			Self::Machine => "machine",
-			Self::Group => "group",
-			Self::Canopy => "canopy",
-		}
-	}
-}
-
-impl fmt::Display for CheckGrain {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.write_str(self.label())
-	}
-}
-
-impl TryFrom<String> for CheckGrain {
-	type Error = String;
-
-	fn try_from(value: String) -> Result<Self, String> {
-		value.parse()
-	}
-}
-
-impl From<CheckGrain> for String {
-	fn from(grain: CheckGrain) -> Self {
-		grain.to_string()
-	}
-}
-
-impl FromStr for CheckGrain {
-	type Err = String;
-
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		match s {
-			"application" => Ok(Self::Application),
-			"machine" => Ok(Self::Machine),
-			"group" => Ok(Self::Group),
-			"canopy" => Ok(Self::Canopy),
-			other => Err(format!("unknown check grain {other:?}")),
-		}
-	}
-}
-
-impl From<CheckSubject> for CheckGrain {
-	fn from(subject: CheckSubject) -> Self {
-		match subject {
-			CheckSubject::Machine => Self::Machine,
-			CheckSubject::Application => Self::Application,
-		}
-	}
 }
 
 /// The checks that describe the box rather than the workload on it.

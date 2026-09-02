@@ -1,9 +1,5 @@
-//! Operator-owned catalog of check policies: per (source, grain, check), how
-//! an observed result transforms into the effective result Canopy acts on.
-//!
-//! The grain is part of the check's identity, not a property of one result: a
-//! machine-subject `disk_free` and an application-subject one are two checks
-//! and carry their own ceilings, rules and statistics.
+//! Operator-owned catalog of check policies: per (source, check), how an
+//! observed result transforms into the effective result Canopy acts on.
 //!
 //! An entry carries a **ceiling** (the maximum effective result on the
 //! urgency ordering — `failed` changes nothing, `warning` grades failures
@@ -24,7 +20,6 @@ use crate::issues::Scope;
 use crate::maintenance_windows::MaintenanceWindow;
 use commons_errors::{AppError, Result};
 use commons_types::status::CheckResult;
-use commons_types::subject::CheckGrain;
 use diesel::dsl::{AsSelect, SqlTypeOf};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -41,17 +36,16 @@ pub const GONE_QUIET_HOURS: i64 = 24 * 7;
 /// raises a canopy-wide warning.
 pub const STALE_ALERT_HOURS: i64 = 24 * 30;
 
-/// The policy for one (source, grain, check). An entry is created
-/// automatically the first time a source reports a check with this name at
-/// this grain, at the default ceiling; operators then review and adjust how
-/// that check's results are graded going forward.
-// spec: CHK#a-check-is-identified-by-its-grain
+/// The policy for one (source, check). An entry is created automatically
+/// the first time a source reports a check with this name, at the default
+/// ceiling; operators then review and adjust how that check's results are
+/// graded going forward.
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema)]
 #[diesel(table_name = crate::schema::check_policies)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct CheckPolicy {
-	/// The source that reports this check. Together with `subject` and
-	/// `check_name`, uniquely identifies this policy.
+	/// The source that reports this check. Together with `check_name`,
+	/// uniquely identifies this policy.
 	pub source: String,
 	/// The check's name, as reported in status pushes.
 	pub check_name: String,
@@ -105,37 +99,6 @@ pub struct CheckPolicy {
 	pub decommissioned_at: Option<Timestamp>,
 	/// The operator who decommissioned this check. `None` while live.
 	pub decommissioned_by: Option<String>,
-	/// What this check asserts something about. Part of its identity: the
-	/// same name filed at two grains is two checks, each with its own
-	/// ceiling, rules and statistics.
-	// spec: CHK#a-check-is-identified-by-its-grain
-	#[diesel(deserialize_as = String, serialize_as = String)]
-	#[schema(value_type = String)]
-	pub subject: CheckGrain,
-}
-
-/// What identifies a check: who reports it, what it asserts something about,
-/// and what it is called.
-///
-/// The grain sits between the source and the name because it is the coarser
-/// distinction: two grains under one name are two checks, and only then does
-/// the name tell them apart.
-// spec: CHK#a-check-is-identified-by-its-grain
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct CheckKey {
-	pub source: String,
-	pub grain: CheckGrain,
-	pub check_name: String,
-}
-
-impl CheckKey {
-	pub fn new(source: &str, grain: CheckGrain, check_name: &str) -> Self {
-		Self {
-			source: source.to_owned(),
-			grain,
-			check_name: check_name.to_owned(),
-		}
-	}
 }
 
 /// Escalation only makes sense at a `failed` ceiling: it bypasses
@@ -234,34 +197,23 @@ impl CheckPolicy {
 		Ok(reanimated)
 	}
 
-	/// The set of `(source, grain, check)` triples backed by a **live**
-	/// catalog row (present and not decommissioned). Callers require
-	/// membership before treating a check-state as a real check — anything
-	/// user-facing (health, presentation) ignores states with no live catalog
-	/// row: both decommissioned checks and orphaned check-states (an `issues`
-	/// row whose check has no catalog row at all, e.g. a superseded source
+	/// The set of `(source, check)` pairs backed by a **live** catalog row
+	/// (present and not decommissioned). Callers require membership before
+	/// treating a check-state as a real check — anything user-facing
+	/// (health, presentation) ignores states with no live catalog row: both
+	/// decommissioned checks and orphaned check-states (an `issues` row whose
+	/// (source, check) has no catalog row at all, e.g. a superseded source
 	/// whose catalog rows were removed while its states lingered).
-	// spec: CHK#a-check-is-identified-by-its-grain
-	pub async fn live_cataloged_keys(
+	pub async fn live_cataloged_pairs(
 		db: &mut AsyncPgConnection,
-	) -> Result<std::collections::HashSet<CheckKey>> {
+	) -> Result<std::collections::HashSet<(String, String)>> {
 		use crate::schema::check_policies::dsl;
 		Ok(dsl::check_policies
-			.select((dsl::source, dsl::subject, dsl::check_name))
+			.select((dsl::source, dsl::check_name))
 			.filter(dsl::decommissioned_at.is_null())
-			.load::<(String, String, String)>(db)
+			.load::<(String, String)>(db)
 			.await?
 			.into_iter()
-			.filter_map(|(source, subject, check_name)| {
-				// A row whose grain does not parse is a row this build does not
-				// understand; treating it as absent is the same as treating an
-				// unknown check as uncatalogued, which callers already handle.
-				subject.parse().ok().map(|grain| CheckKey {
-					source,
-					grain,
-					check_name,
-				})
-			})
 			.collect())
 	}
 
@@ -282,19 +234,14 @@ impl CheckPolicy {
 			.map_err(AppError::from)
 	}
 
-	/// Decommission a `(source, grain, check)` fleet-wide: mark the catalog
-	/// row, resolve the check's outstanding states on every target (recording
+	/// Decommission a `(source, check)` fleet-wide: mark the catalog row,
+	/// resolve the check's outstanding states on every server (recording
 	/// decommissioning as the reason, re-evaluating incident membership),
 	/// and — when the source has no live checks left — clear its per-server
 	/// staleness so a retired reporter stops being flagged. Operator action.
-	///
-	/// Retiring one grain leaves the other alone: the same name at another
-	/// grain is a different check and goes on being reported and graded.
-	// spec: CHK#a-check-is-identified-by-its-grain
 	pub async fn decommission(
 		db: &mut AsyncPgConnection,
 		source: &str,
-		grain: CheckGrain,
 		check_name: &str,
 		by: &str,
 	) -> Result<()> {
@@ -304,12 +251,7 @@ impl CheckPolicy {
 
 		let now = jiff_diesel::Timestamp::from(Timestamp::now());
 		diesel::update(
-			cp::check_policies.filter(
-				cp::source
-					.eq(source)
-					.and(cp::subject.eq(grain.label()))
-					.and(cp::check_name.eq(check_name)),
-			),
+			cp::check_policies.filter(cp::source.eq(source).and(cp::check_name.eq(check_name))),
 		)
 		.set((
 			cp::decommissioned_at.eq(Some(now)),
@@ -318,34 +260,16 @@ impl CheckPolicy {
 		.execute(db)
 		.await?;
 
-		// Resolve the check's outstanding states, so they stop counting toward
-		// health and incidents. Scoped to the grain being retired, by the same
-		// columns a filing writes: a machine-subject check leaves rows against
-		// machines, and looking only at application-scoped rows would strand
-		// them open forever.
-		let states = iss::issues
+		// Resolve the check's outstanding states on every server, so they
+		// stop counting toward health and incidents.
+		let state_ids: Vec<Uuid> = iss::issues
 			.select(iss::id)
 			.filter(iss::source.eq(source))
 			.filter(iss::check_name.eq(check_name))
+			.filter(iss::application_id.is_not_null())
 			.filter(iss::resolved_at.is_null())
-			.into_boxed();
-		let states = match grain {
-			CheckGrain::Application => states.filter(iss::application_id.is_not_null()),
-			CheckGrain::Machine => states.filter(iss::machine_id.is_not_null()),
-			CheckGrain::Group => states.filter(
-				iss::server_group_id
-					.is_not_null()
-					.and(iss::application_id.is_null())
-					.and(iss::machine_id.is_null()),
-			),
-			CheckGrain::Canopy => states.filter(
-				iss::application_id
-					.is_null()
-					.and(iss::machine_id.is_null())
-					.and(iss::server_group_id.is_null()),
-			),
-		};
-		let state_ids: Vec<Uuid> = states.load(db).await?;
+			.load(db)
+			.await?;
 		for id in state_ids {
 			crate::issues::Issue::resolve(db, id, by, ResolvedReason::Decommissioned).await?;
 		}
@@ -353,28 +277,13 @@ impl CheckPolicy {
 		// Clear any scoped silences for the now-dead check: a silence on a
 		// check that contributes to nothing is dead configuration, and it
 		// would otherwise linger in the operator's silence list forever.
-		//
-		// A silence names a source and a check but not a grain, so one is
-		// cleared only when the name has no live catalog row left at any
-		// grain — otherwise retiring one grain would lift a silence still
-		// doing work for the other.
-		let live_elsewhere: bool = cp::check_policies
-			.filter(cp::source.eq(source))
-			.filter(cp::check_name.eq(check_name))
-			.filter(cp::subject.ne(grain.label()))
-			.filter(cp::decommissioned_at.is_null())
-			.count()
-			.get_result::<i64>(db)
-			.await? > 0;
 		use crate::schema::scoped_check_policies::dsl as scp;
-		if !live_elsewhere {
-			diesel::delete(
-				scp::scoped_check_policies
-					.filter(scp::source.eq(source).and(scp::check_name.eq(check_name))),
-			)
-			.execute(db)
-			.await?;
-		}
+		diesel::delete(
+			scp::scoped_check_policies
+				.filter(scp::source.eq(source).and(scp::check_name.eq(check_name))),
+		)
+		.execute(db)
+		.await?;
 
 		// A source whose checks are all decommissioned drops out of
 		// source_freshness, so it stops counting toward reachability with no
@@ -382,7 +291,7 @@ impl CheckPolicy {
 		Ok(())
 	}
 
-	/// Insert a row for `(source, grain, check_name)` with default values
+	/// Insert a row for `(source, check_name)` with default values
 	/// (ceiling = warning) if and only if no row exists yet. Idempotent:
 	/// safe to call on every status push for every check seen, including
 	/// healthy ones. Concurrent pushes are serialised by Postgres via
@@ -390,17 +299,12 @@ impl CheckPolicy {
 	pub async fn upsert_default(
 		db: &mut AsyncPgConnection,
 		source: &str,
-		grain: CheckGrain,
 		check_name: &str,
 	) -> Result<()> {
 		use crate::schema::check_policies::dsl;
 		diesel::insert_into(dsl::check_policies)
-			.values((
-				dsl::source.eq(source),
-				dsl::subject.eq(grain.label()),
-				dsl::check_name.eq(check_name),
-			))
-			.on_conflict((dsl::source, dsl::subject, dsl::check_name))
+			.values((dsl::source.eq(source), dsl::check_name.eq(check_name)))
+			.on_conflict((dsl::source, dsl::check_name))
 			.do_nothing()
 			.execute(db)
 			.await
@@ -422,7 +326,6 @@ impl CheckPolicy {
 	pub async fn register(
 		db: &mut AsyncPgConnection,
 		source: &str,
-		grain: CheckGrain,
 		check_name: &str,
 		ceiling: CheckResult,
 		escalates: bool,
@@ -433,7 +336,6 @@ impl CheckPolicy {
 		diesel::insert_into(dsl::check_policies)
 			.values((
 				dsl::source.eq(source),
-				dsl::subject.eq(grain.label()),
 				dsl::check_name.eq(check_name),
 				dsl::ceiling.eq(ceiling.to_string()),
 				dsl::escalates.eq(escalates_normalised(ceiling, escalates)),
@@ -441,7 +343,7 @@ impl CheckPolicy {
 				dsl::reviewed_at.eq(Some(now)),
 				dsl::reviewed_by.eq(Some(source)),
 			))
-			.on_conflict((dsl::source, dsl::subject, dsl::check_name))
+			.on_conflict((dsl::source, dsl::check_name))
 			.do_nothing()
 			.execute(db)
 			.await
@@ -464,7 +366,6 @@ impl CheckPolicy {
 		Self::register(
 			db,
 			crate::statuses::CANOPY_SOURCE,
-			CheckGrain::Application,
 			crate::statuses::REACHABILITY_REF,
 			CheckResult::Failed,
 			false,
@@ -492,12 +393,11 @@ impl CheckPolicy {
 	pub async fn apply(
 		db: &mut AsyncPgConnection,
 		source: &str,
-		grain: CheckGrain,
 		check_name: &str,
 		observed: CheckResult,
 		ctx: &EvaluationContext<'_>,
 	) -> Result<GradedResult> {
-		let entry = Self::fleet_grading(db, source, grain, check_name).await?;
+		let entry = Self::fleet_grading(db, source, check_name).await?;
 		Ok(Self::grade(
 			entry.as_ref(),
 			source,
@@ -515,7 +415,6 @@ impl CheckPolicy {
 	pub async fn fleet_grading(
 		db: &mut AsyncPgConnection,
 		source: &str,
-		grain: CheckGrain,
 		check_name: &str,
 	) -> Result<Option<FleetGrading>> {
 		use crate::schema::check_policies::dsl;
@@ -526,12 +425,7 @@ impl CheckPolicy {
 				dsl::rules,
 				dsl::reviewed_at.is_not_null(),
 			))
-			.filter(
-				dsl::source
-					.eq(source)
-					.and(dsl::subject.eq(grain.label()))
-					.and(dsl::check_name.eq(check_name)),
-			)
+			.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name)))
 			.first(db)
 			.await
 			.optional()?;
@@ -583,7 +477,7 @@ impl CheckPolicy {
 		}
 	}
 
-	/// Grading fields for every catalog row, keyed by [`CheckKey`].
+	/// Grading fields for every catalog row, keyed by `(source, check_name)`.
 	///
 	/// For callers grading many checks in one pass: the catalog holds one row
 	/// per distinct check the fleet reports, so a single load is far cheaper
@@ -591,42 +485,29 @@ impl CheckPolicy {
 	/// [`Self::grade`].
 	pub async fn grading_table(
 		db: &mut AsyncPgConnection,
-	) -> Result<HashMap<CheckKey, FleetGrading>> {
+	) -> Result<HashMap<(String, String), FleetGrading>> {
 		use crate::schema::check_policies::dsl;
-		let rows: Vec<(
-			String,
-			String,
-			String,
-			String,
-			bool,
-			Option<JsonValue>,
-			bool,
-		)> = dsl::check_policies
-			.select((
-				dsl::source,
-				dsl::subject,
-				dsl::check_name,
-				dsl::ceiling,
-				dsl::escalates,
-				dsl::rules,
-				dsl::reviewed_at.is_not_null(),
-			))
-			.load(db)
-			.await
-			.map_err(AppError::from)?;
+		let rows: Vec<(String, String, String, bool, Option<JsonValue>, bool)> =
+			dsl::check_policies
+				.select((
+					dsl::source,
+					dsl::check_name,
+					dsl::ceiling,
+					dsl::escalates,
+					dsl::rules,
+					dsl::reviewed_at.is_not_null(),
+				))
+				.load(db)
+				.await
+				.map_err(AppError::from)?;
 		Ok(rows
 			.into_iter()
-			.filter_map(
-				|(source, subject, check_name, ceiling, escalates, rules, reviewed)| {
-					let grain = subject.parse().ok()?;
-					Some((
-						CheckKey {
-							source,
-							grain,
-							check_name,
-						},
+			.map(
+				|(source, check_name, ceiling, escalates, rules, reviewed)| {
+					(
+						(source, check_name),
 						FleetGrading::from_row((ceiling, escalates, rules, reviewed)),
-					))
+					)
 				},
 			)
 			.collect())
@@ -649,13 +530,12 @@ impl CheckPolicy {
 	pub async fn apply_scoped(
 		db: &mut AsyncPgConnection,
 		source: &str,
-		grain: CheckGrain,
 		check_name: &str,
 		observed: CheckResult,
 		ctx: &EvaluationContext<'_>,
 		scope: FilingScope,
 	) -> Result<GradedResult> {
-		let fleet = Self::apply(db, source, grain, check_name, observed, ctx).await?;
+		let fleet = Self::apply(db, source, check_name, observed, ctx).await?;
 		let scoped = ScopedCheckPolicy::chain_for(db, source, check_name, scope).await?;
 		Ok(Self::chain_scoped(fleet, &scoped, ctx))
 	}
@@ -686,18 +566,12 @@ impl CheckPolicy {
 	pub async fn update_documentation(
 		db: &mut AsyncPgConnection,
 		source: &str,
-		grain: CheckGrain,
 		check_name: &str,
 		documentation: Option<&str>,
 	) -> Result<Self> {
 		use crate::schema::check_policies::dsl;
 		diesel::update(
-			dsl::check_policies.filter(
-				dsl::source
-					.eq(source)
-					.and(dsl::subject.eq(grain.label()))
-					.and(dsl::check_name.eq(check_name)),
-			),
+			dsl::check_policies.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name))),
 		)
 		.set(dsl::documentation.eq(documentation))
 		.returning(Self::as_select())
@@ -712,7 +586,6 @@ impl CheckPolicy {
 	pub async fn update_rules(
 		db: &mut AsyncPgConnection,
 		source: &str,
-		grain: CheckGrain,
 		check_name: &str,
 		rules: Option<&IfLadder>,
 		by: &str,
@@ -722,12 +595,7 @@ impl CheckPolicy {
 		let rules_json: Option<JsonValue> =
 			rules.map(|l| serde_json::to_value(l).expect("IfLadder always serialises"));
 		diesel::update(
-			dsl::check_policies.filter(
-				dsl::source
-					.eq(source)
-					.and(dsl::subject.eq(grain.label()))
-					.and(dsl::check_name.eq(check_name)),
-			),
+			dsl::check_policies.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name))),
 		)
 		.set((
 			dsl::rules.eq(rules_json),
@@ -746,13 +614,6 @@ impl CheckPolicy {
 	/// expressions evaluated per push against the report's contents, so
 	/// they can't be resolved ahead of time and are ignored here. An
 	/// unparseable ceiling falls back to warning, same as [`Self::apply`].
-	///
-	/// A reporter runs a check under one name and is told one ceiling for it,
-	/// so where a name is catalogued at more than one grain the most permissive
-	/// ceiling wins — the one that lets the most urgent result through. Telling
-	/// a reporter to skip a check whose other grain still alerts on it would
-	/// lose that grain's results entirely.
-	// spec: CHK#a-check-is-identified-by-its-grain
 	pub async fn ceiling_map_for_source(
 		db: &mut AsyncPgConnection,
 		source: &str,
@@ -764,18 +625,10 @@ impl CheckPolicy {
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
-		let mut map: BTreeMap<String, CheckResult> = BTreeMap::new();
-		for (name, ceiling) in rows {
-			let ceiling = ceiling.parse().unwrap_or(CheckResult::Warning);
-			map.entry(name)
-				.and_modify(|held| {
-					if ceiling.urgency_rank() < held.urgency_rank() {
-						*held = ceiling;
-					}
-				})
-				.or_insert(ceiling);
-		}
-		Ok(map)
+		Ok(rows
+			.into_iter()
+			.map(|(name, ceiling)| (name, ceiling.parse().unwrap_or(CheckResult::Warning)))
+			.collect())
 	}
 
 	pub async fn list(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
@@ -794,41 +647,15 @@ impl CheckPolicy {
 	pub async fn get(
 		db: &mut AsyncPgConnection,
 		source: &str,
-		grain: CheckGrain,
 		check_name: &str,
 	) -> Result<Option<Self>> {
 		use crate::schema::check_policies::dsl;
 		dsl::check_policies
 			.select(Self::as_select())
-			.filter(
-				dsl::source
-					.eq(source)
-					.and(dsl::subject.eq(grain.label()))
-					.and(dsl::check_name.eq(check_name)),
-			)
+			.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name)))
 			.first(db)
 			.await
 			.optional()
-			.map_err(AppError::from)
-	}
-
-	/// Every catalog row sharing a source and a name, across grains, ordered by
-	/// grain. For a caller that has a name but not the grain — an agent asking
-	/// what a check does, say — so it can see that a name covers two checks
-	/// rather than being handed one of them arbitrarily.
-	// spec: CHK#a-check-is-identified-by-its-grain
-	pub async fn matching_name(
-		db: &mut AsyncPgConnection,
-		source: &str,
-		check_name: &str,
-	) -> Result<Vec<Self>> {
-		use crate::schema::check_policies::dsl;
-		dsl::check_policies
-			.select(Self::as_select())
-			.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name)))
-			.order(dsl::subject.asc())
-			.load(db)
-			.await
 			.map_err(AppError::from)
 	}
 
@@ -844,7 +671,6 @@ impl CheckPolicy {
 	pub async fn update(
 		db: &mut AsyncPgConnection,
 		source: &str,
-		grain: CheckGrain,
 		check_name: &str,
 		ceiling: CheckResult,
 		escalates: bool,
@@ -854,12 +680,7 @@ impl CheckPolicy {
 		use crate::schema::check_policies::dsl;
 		let now = Timestamp::now();
 		diesel::update(
-			dsl::check_policies.filter(
-				dsl::source
-					.eq(source)
-					.and(dsl::subject.eq(grain.label()))
-					.and(dsl::check_name.eq(check_name)),
-			),
+			dsl::check_policies.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name))),
 		)
 		.set((
 			dsl::ceiling.eq(ceiling.to_string()),
@@ -902,15 +723,8 @@ pub struct ScopedCheckPolicy {
 	pub check_name: String,
 	/// Set for an application-scoped transform.
 	pub application_id: Option<Uuid>,
-	/// Set for a machine-scoped transform: it applies to the machine-subject
-	/// check and to nothing else. There is no silencing of a machine, only of
-	/// a machine-subject check, so an application-subject check of the same
-	/// name is a different check and is untouched.
-	///
-	/// That check is also presented on the applications the box carries, and
-	/// this quiets it there too — one check seen from several places, not a
-	/// transform reaching the applications' own checks.
-	// spec: CHK#a-machines-checks-present-on-its-applications
+	/// Set for a machine-scoped transform. Silencing a machine's check quiets
+	/// it wherever it presents, including on the applications that show it.
 	pub machine_id: Option<Uuid>,
 	/// Set for a group-scoped transform. All of `application_id`,
 	/// `machine_id` and `server_group_id` unset means canopy-wide scope.
@@ -1050,10 +864,6 @@ impl ScopedCheckPolicy {
 	/// catalog row (decommissioned, or orphaned with no catalog row at all)
 	/// — are excluded: the check contributes to nothing, so its silence is
 	/// dead config that shouldn't clutter the operator's list.
-	///
-	/// Liveness is asked of the name across every grain rather than at one:
-	/// a group's silence covers the machines and the applications in it, so
-	/// the check it names need not be catalogued at the group's own grain.
 	pub async fn list_silences(db: &mut AsyncPgConnection, scope: Scope) -> Result<Vec<Self>> {
 		use crate::schema::scoped_check_policies::dsl;
 		let (server, machine, group) = scope.to_columns();
@@ -1070,14 +880,10 @@ impl ScopedCheckPolicy {
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
-		let cataloged = CheckPolicy::live_cataloged_keys(db).await?;
-		let live_names: std::collections::HashSet<(&str, &str)> = cataloged
-			.iter()
-			.map(|k| (k.source.as_str(), k.check_name.as_str()))
-			.collect();
+		let cataloged = CheckPolicy::live_cataloged_pairs(db).await?;
 		Ok(rows
 			.into_iter()
-			.filter(|r| live_names.contains(&(r.source.as_str(), r.check_name.as_str())))
+			.filter(|r| cataloged.contains(&(r.source.clone(), r.check_name.clone())))
 			.collect())
 	}
 

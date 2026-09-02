@@ -19,7 +19,6 @@ use commons_types::{
 	issue::ResolvedReason,
 	server::{TagMap, app_type::ApplicationType, rank::ServerRank},
 	status::CheckResult,
-	subject::CheckGrain,
 	version::{VersionStatus, VersionStr},
 };
 use database::{
@@ -320,7 +319,6 @@ async fn seed_known_issues(conn: &mut AsyncPgConnection) -> Result<()> {
 /// unreviewed default, and one carrying a conditional rules ladder.
 async fn seed_healthchecks(conn: &mut AsyncPgConnection, admins: &[String]) -> Result<()> {
 	// upsert_default creates rows at the default severity (warning, unreviewed).
-	// All of these describe the workload rather than the box it runs on.
 	for check in [
 		"database_connectivity",
 		"disk_space",
@@ -328,14 +326,13 @@ async fn seed_healthchecks(conn: &mut AsyncPgConnection, admins: &[String]) -> R
 		"certificate_expiry",
 		"backup_freshness",
 	] {
-		CheckPolicy::upsert_default(conn, "alertd", CheckGrain::Application, check).await?;
+		CheckPolicy::upsert_default(conn, "alertd", check).await?;
 	}
 
 	let reviewer = &admins[0];
 	CheckPolicy::update(
 		conn,
 		"alertd",
-		CheckGrain::Application,
 		"database_connectivity",
 		CheckResult::Failed,
 		true,
@@ -346,7 +343,6 @@ async fn seed_healthchecks(conn: &mut AsyncPgConnection, admins: &[String]) -> R
 	CheckPolicy::update(
 		conn,
 		"alertd",
-		CheckGrain::Application,
 		"disk_space",
 		CheckResult::Failed,
 		false,
@@ -357,7 +353,6 @@ async fn seed_healthchecks(conn: &mut AsyncPgConnection, admins: &[String]) -> R
 	CheckPolicy::update(
 		conn,
 		"alertd",
-		CheckGrain::Application,
 		"backup_freshness",
 		CheckResult::Passed,
 		false,
@@ -386,15 +381,7 @@ async fn seed_healthchecks(conn: &mut AsyncPgConnection, admins: &[String]) -> R
 			),
 		],
 	};
-	CheckPolicy::update_rules(
-		conn,
-		"alertd",
-		CheckGrain::Application,
-		"sync_lag",
-		Some(&ladder),
-		reviewer,
-	)
-	.await?;
+	CheckPolicy::update_rules(conn, "alertd", "sync_lag", Some(&ladder), reviewer).await?;
 
 	Ok(())
 }

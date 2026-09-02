@@ -297,7 +297,7 @@ diesel::table! {
 }
 
 diesel::table! {
-	check_policies (source, subject, check_name) {
+	check_policies (source, check_name) {
 		source -> Text,
 		check_name -> Text,
 		ceiling -> Text,
@@ -312,7 +312,6 @@ diesel::table! {
 		last_seen -> Nullable<Timestamptz>,
 		decommissioned_at -> Nullable<Timestamptz>,
 		decommissioned_by -> Nullable<Text>,
-		subject -> Text,
 	}
 }
 

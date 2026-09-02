@@ -27,17 +27,6 @@ A silence on a machine check is machine-scoped and quiets it everywhere it appea
 
 Reachability is not presented this way, each grain having its own (see "Reachability").
 
-### A check is identified by its grain
-
-A check is identified by its source, the grain it asserts something about, and its name.
-A machine-subject `disk_free` and an application-subject `disk_free` are two different checks: they carry their own ceiling, their own rules, their own documentation, their own statistics, and are silenced separately.
-
-So the grain is not a property of a result but of the check, and a name says nothing on its own about which check is meant.
-An operator surface that names a check names its grain alongside it, and retiring a check at one grain leaves the same name at another grain reporting and grading as before.
-
-Where a reporter is told what to do with a check, it is told once per name: a reporter runs a check under a name and cannot be given two answers for it, so a name catalogued at more than one grain is offered the ceiling that lets the most urgent result through.
-Otherwise silencing one grain would stop the other's results arriving at all.
-
 ## Sources
 
 A source is a named reporter of checks, identified by a short string.
@@ -107,7 +96,7 @@ The observed result is always recorded as reported; everything Canopy acts on �
 Policy is a transformation of results: for each check it maps the observed result to the effective one.
 There is one vocabulary on both sides — policy speaks in results, and what a source is told about its checks is the policy itself, not a projection of it.
 
-Fleet-wide policy lives in a catalog keyed by (source, grain, check).
+Fleet-wide policy lives in a catalog keyed by (source, check).
 An entry carries:
 
 - a **ceiling** — the maximum effective result, on the urgency ordering: a ceiling of `failed` changes nothing, `warning` grades failures as warnings, `passed` means recorded but never alerting, and `skipped` additionally tells the source not to bother running the check.
@@ -143,7 +132,7 @@ A silence is per target and records who set it; a fleet-wide decision is a polic
 
 ## Documentation
 
-Each catalogued check can carry operator-authored documentation: a single markdown document.
+Each catalogued (source, check) can carry operator-authored documentation: a single markdown document.
 By convention it covers three things — a general description of what the check observes, what each result means (what makes it fail as opposed to warn), and hints for solving a failure — and the editor seeds new documentation with a template of those sections; Canopy attaches no meaning to the document's structure.
 Operators author and edit the documentation in the operator UI; it is presented alongside the check wherever its state is presented, and is available over the MCP interface (see [MCP](../private-server/mcp.md)) so agents work from curated knowledge about a check rather than deriving it.
 Canopy's own checks ship with their documentation.
