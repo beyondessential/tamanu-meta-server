@@ -2630,6 +2630,62 @@ fn backup_now(body: &serde_json::Value) -> Vec<String> {
 		.collect()
 }
 
+/// A box whose id differs from the workload's, which is every box the fleet
+/// gains from here: only the migration's backfill made the two agree. The
+/// backup instruction is the machine's, so it has to be read off the machine
+/// even when an application id is sitting right there.
+// spec: BKJ, STA#push
+#[tokio::test(flavor = "multi_thread")]
+async fn status_backup_now_reads_the_machine_not_the_application() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			let group_id = Uuid::new_v4();
+			sql_query("INSERT INTO server_groups (id, name) VALUES ($1, 'unequal-ids')")
+				.bind::<sql_types::Uuid, _>(group_id)
+				.execute(&mut conn)
+				.await
+				.expect("insert group");
+			let machine_id = Uuid::new_v4();
+			let application_id = Uuid::new_v4();
+			assert_ne!(machine_id, application_id);
+			sql_query("INSERT INTO machines (id, group_id, device_id) VALUES ($1, $2, $3)")
+				.bind::<sql_types::Uuid, _>(machine_id)
+				.bind::<sql_types::Uuid, _>(group_id)
+				.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(device_id))
+				.execute(&mut conn)
+				.await
+				.expect("insert machine");
+			sql_query(
+				"INSERT INTO applications (id, host, type, group_id, machine_id) \
+				 VALUES ($1, 'https://unequal.example.com', 'tamanu-central', $2, $3)",
+			)
+			.bind::<sql_types::Uuid, _>(application_id)
+			.bind::<sql_types::Uuid, _>(group_id)
+			.bind::<sql_types::Uuid, _>(machine_id)
+			.execute(&mut conn)
+			.await
+			.expect("insert application");
+
+			seed_backup_config(&mut conn, group_id, "ready").await;
+			enable_backup_capability(&mut conn, machine_id, "tamanu-postgres").await;
+
+			let resp = public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({ "health": [] }))
+				.await;
+			resp.assert_status_ok();
+			assert_eq!(
+				backup_now(&resp.json()),
+				vec!["tamanu-postgres"],
+				"the due type is the machine's capability, not the application's id"
+			);
+		},
+	)
+	.await
+}
+
 /// An enabled type with no prior successful run is schedule-due (the seeded
 /// 6h `tamanu-postgres` default applies), so the heartbeat names it.
 #[tokio::test(flavor = "multi_thread")]

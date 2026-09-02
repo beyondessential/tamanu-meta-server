@@ -121,6 +121,7 @@ is a regression.
 
 - [x] A machine onboarded into an existing backup configuration is not stale on arrival (verifies spec: BKJ)
 - [x] Adding a second application to a machine does not restart that machine's backup staleness anchor (verifies spec: BKJ)
+- [x] The heartbeat's backup instruction is read off the machine, on a box whose id differs from its application's (verifies spec: BKJ, STA)
 - [x] Backup capability and participation follow the machine, and a two-application box is one participant (verifies spec: BAK, BKO)
 - [x] A device request resolves identity to machine to group, without reaching the applications on it (verifies spec: BAK)
 - [x] A restore-replica declaration names a machine, and a whole-group declaration expands over machines (verifies spec: RST)
