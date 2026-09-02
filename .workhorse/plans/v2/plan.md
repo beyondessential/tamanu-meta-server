@@ -396,15 +396,65 @@ The subject is `Machine` or `Application(type)` and nothing else, because those 
 
 Resolving a filed check to its catalog entry therefore needs the namespace, and for a structured source's application check that means the application's type. Canopy's own filings need nothing, which is most of the code the earlier attempts were disturbing.
 
-### Still to design: storage and migration
+### Storage: the namespace sits beside the source, and is never encoded into it
 
-The model above is settled; how it is stored and how existing rows get there is not, and both earlier attempts failed by skipping straight to an implementation. Open, in order:
+`source` keeps meaning the reporter, everywhere it already appears. It is a name a device push carries and an operator recognises, and nine tables key on it for reasons that have nothing to do with check identity — reported detail, backup snapshots, statuses, `source_policies`. Overloading it to carry a namespace would drag all of them into this.
 
-- **How a namespace is stored.** Whether the source column carries the namespace outright, or the namespace is a source name beside a nullable subject, and which of `source_policies` and source freshness key on the reporter name alone rather than on the whole namespace.
-- **How a check-state finds its catalog entry.** An application check's namespace needs that application's type, which the state row does not carry, so every gate joining state to catalog needs it or the type is denormalised onto the state.
-- **The migration is a fan-out, not a rename.** One `alertd` entry becomes one per namespace that actually reports it, derivable from existing check-states. What each derived entry inherits — ceiling, rules, documentation, and whether the review stamp carries over or each is re-vetted — is undecided.
+`source_policies` is the clearest case. Reachability and ingest are properties of *the reporter* — whether we hear from it at all, and what we do with what it sends. They are not per-namespace and its key stays `(source)` untouched.
 
-This waits on the application type being open, since the namespace of an application check is built from a type.
+So the namespace is its own columns, on the tables that carry a check's identity and nowhere else:
+
+- `subject TEXT NULL` — `NULL` for flat, `'machine'`, or `'application'`
+- `application_type TEXT NULL` — set when and only when `subject = 'application'`
+
+with a CHECK enumerating those three shapes, so a half-populated namespace cannot be written. This is the `Scope::from_columns`/`to_columns` idiom AGENTS.md mandates, applied to a second axis: a Rust enum is the only thing that constructs or reads the pair, and no code hand-matches the columns. The enum wants a name of its own rather than reusing `CheckSubject`, which answers a different question — which half of a unified push a reading belongs to — and conflating the two is how this went wrong twice already.
+
+Two tables get the columns. `check_policies` is the catalog, and `scoped_check_policies` overrides and silences entries in it, so both key on identity. `issues` derives.
+
+`check_policies`'s primary key `(source, check_name)` becomes three partial unique indexes, one per namespace shape, matching how `scoped_check_policies` already handles a nullable-column key:
+
+- `(source, check_name) WHERE subject IS NULL`
+- `(source, check_name) WHERE subject = 'machine'`
+- `(source, application_type, check_name) WHERE subject = 'application'`
+
+A single `UNIQUE NULLS NOT DISTINCT` would also work on PG 18, but the repo has no precedent for it and the partial indexes read the same as the neighbouring table.
+
+### Deriving the namespace costs nothing on the read paths
+
+An application check's namespace needs that application's type, which a check-state row does not carry. Storing the type on the row was the alternative, and it is not needed.
+
+The catalog gate is not a join today. `live_cataloged_pairs` loads the whole catalog once per call into a `HashSet<(String, String)>` and each row does an in-memory `contains`. Adding the namespace widens that key. Same one load, same one lookup per row — the cost is replaced, not added.
+
+The type is already in hand at the callers. `health_from_check_state` takes `(id, group_id)` pairs the caller built from `ServerInfo`s it had loaded anyway, and `ServerInfo` carries `type`. Widening that tuple adds no query at any of them, and the `group_of` map the loop already builds gains a sibling.
+
+`source_freshness` is the exception and the only real cost: it takes bare ids and scans fleet-wide without the applications loaded, so it needs one extra query for a type map. It runs from `reconcile_liveness`, a periodic job rather than a request path, which is the right place to pay it.
+
+A `check_subjects` table with the namespace behind an id was considered and rejected. The subject of an application check is its type slug, and the type is an open set living on `applications.type`; a subjects table becomes a second answer to "what types exist" that can drift from the first. It buys integrity the CHECK already gives, on a value that is two short columns.
+
+### The migration is a fan-out, and it uses the ingest rule
+
+**Only structured sources fan out.** `canopy` and `manual` are flat, so their entries take `subject = NULL` and are otherwise untouched. That is most of the catalog, and none of it moves.
+
+**The fan-out derives the namespace with `CheckSubject::of`** — the same function `statuses.rs` already uses to split a unified push. Any other rule, however sensible on its own, puts a migrated entry in one namespace and the next report of the same check in another, so day one after the migration is a duplicate catalog. The migration and the ingest path have to read from the same list or they disagree by construction.
+
+So, per entry from a structured source:
+
+- **A machine-subject name is a re-key, not a fan-out.** One entry, `subject = 'machine'`. No multiplication, because the machine namespace has nothing to vary over.
+- **An application-subject name becomes one entry per application type that has reported it**, read off existing check-states.
+
+**Ceiling, rules, documentation and the review stamp all carry.** The stamp is the one that looked like a question and is not. Pending review hard-caps a check's effective result at warning, so registering the derived entries as unreviewed would, at the moment of migration, stop every vetted check in the fleet from opening an incident — a failed `disk_free` would go quiet. Beyond that being a bad migration, it misreads what the review was: the operator vetted this name from this source across exactly the fleet the fan-out covers, so splitting that decision into the namespaces it was already in force in preserves it rather than claiming a review nobody did. A namespace that *first reports after* the migration is genuinely new, and registers pending review by the ordinary rule.
+
+**`first_seen` and `last_seen` are re-derived per namespace, not inherited.** `last_seen` drives seven-day decommissioning candidacy, so copying the original's would make a namespace that stopped reporting a year ago look fresh and keep a dead check alive forever. `first_seen` copied would misdate when that namespace appeared. Both are in the check-states the fan-out is already reading.
+
+**Decommissioned entries fan out the same way.** Decommissioning resolves states rather than deleting them, so the namespaces are still derivable and the retirement record survives per namespace. A resurrected check re-registers pending review regardless, so nothing rides on getting its old policy back.
+
+**One case is unresolvable**: an application-subject entry with no check-states left, because the only application reporting it was deleted and cascaded its states away. Its type is not recoverable and there is nothing running to serve. Those entries are dropped, which is what already happens semantically — a later report re-registers the check pending review. What is actually lost is operator-authored documentation for a check nothing is running, and the migration should say how many it dropped rather than doing it silently.
+
+**`scoped_check_policies` fans out too, and further than the catalog does.** A row scoped to an application takes that application's type and stays one row. A row scoped to a machine, a group, or Canopy-wide, on an application-subject check, covers a target that spans types, so it becomes one row per type present in that target. That multiplication is real and worth counting before running it.
+
+### The spec's phrasing needs correcting with this
+
+CHK already carries the substance — two types reporting the same name are two entries — but says a check is catalogued "as `<type>.<check>`", which reads as the name being concatenated in storage. It is not: the namespace is its own columns and `<type>.<check>` is how an entry presents. Line 99's "keyed by (source, check)" needs the namespace too. Both land with the implementation so spec and code move together.
 
 ### The wire keeps the split shape
 
