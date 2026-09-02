@@ -184,7 +184,14 @@ Removed `NewServer` and its `From<Application>` conversion: dead since the crate
 
 `/api/machines` exists — list, get (with the applications on the box), create, update, archive — all admin-gated except the two reads, with `machines` registered as an OpenAPI tag.
 
-Enrolment now marks the machine as well as the application. The application is still marked too, because enrolment is keyed by application until that flow moves to the machine outright.
+**Enrolment is the machine's, end to end.** An operator creates the box; enrolment binds it to the identity that then speaks for it. It touches no application, and cannot: applications come into being from the enrolled agent's first report, so requiring one to enrol would require a row that nothing has yet had the means to create.
+
+What that meant concretely:
+
+- The tokens and challenges are keyed on `machine_id` (migration `enrollment_binds_a_machine`), and `Machine::mark_registered` is what a completed handshake calls.
+- The public flow lives in a dedicated `crates/public-server/src/enrollment.rs`, not in `machines.rs`, because `machines::routes()` mounts at `/machines` while the enrolment paths must stay at `/servers/register/*` for public-API compatibility. `OpenApiRouter::merge` lets the two modules share the `/servers` prefix. The wire field stays `server_id`, and so does the key inside the age-encrypted ticket: that is what fielded agents send, and the value has always identified the box.
+- The private API moved freely, since it ships with the SPA: minting, revoking, status, and Tailscale attachment are all under `/api/machines`.
+- The SPA followed. The setup instructions and the identity accordion are the machine page's; the application page's unregistered banner links to its box rather than minting a ticket. That branch was already effectively dead — applications are created with `registered_at` set, and there is no operator-facing application create endpoint.
 
 **The `application_default_machine()` default is gone.** Omitting a machine is now a NOT NULL violation, which is what it should always have been: the hazard was a caller that should attach to an *existing* machine silently getting a second one, wrong for exactly the two-workload host this card serves.
 
@@ -692,21 +699,19 @@ The sections above tick off what landed. This one records what the specs on this
 
 None of it is visible today. Every machine came out of the migration 1:1 with an application, so each wrong reading agrees with the right one on the whole current fleet, and they only part company for the two-workload box the card exists to support.
 
-### The push and the enrolment resolve the wrong grain
+### The push and the enrolment resolve the machine: done
 
-This is the root cause of the item below it, and the card's own named trap sprung.
+The id on the wire is the machine's, and both readings now take it that way.
 
-The id on the wire is the machine's. `POST /status/{server_id}` resolves it with `Application::get_by_id` and authorises on `applications.device_id`, which is one of the machine-ish columns the machine migration copied across and left in place. Enrolment does the same: `register_begin` requires an application to exist, the token is minted and found per application, and the device binds to an application before the machine is marked registered from `application.machine_id`.
+`POST /status/{server_id}` resolves `Machine::get_by_id` and authorises on `machines.device_id`. Which application the push describes is then worked out from the push itself, under a row lock on the machine so two pushes arriving together for one box cannot each create:
 
-Both readings agree with the right one on the whole current fleet, because the migration gave every machine its application's id. They part company for a box that runs two workloads, which is the case the card exists for.
+- Where the push names its type, Canopy correlates on it. `tamanuServerKind` is the only field a unified push carries that says what the reporter is, and role plus software is what a type is, so it maps through the same collapse the split's own backfill used. A push that names a type Canopy does not already hold for that box creates the application, which is FLT's "a report is the only thing that creates an application" and the reason the fleet can grow past what the migration produced.
+- Where it does not, the machine's own record answers, as long as there is exactly one to answer with.
+- Where there is none or several, the push is a 409. Refusing rather than guessing is the point: attributing a box's whole picture to an arbitrary one of its workloads is the failure this card exists to stop, and every machine came out of the split holding exactly one application, so either case is genuinely new.
 
-### Nothing creates an application
+An ignored source reads without creating, since it records nowhere.
 
-`Application::create` has no production caller: only `bin/seed.rs` and tests. The operator flow that used to create one (`servers::create`, routed on main) became `machines::create`, which creates a machine alone, and FLT's replacement for it ("A report is the only thing that creates an application") was never built. So a new box can be enrolled and its workload cannot be registered at all.
-
-This is the one item that is a regression rather than an unbuilt addition, and it is why the fleet cannot grow past what the migration produced.
-
-The fix is the specced one rather than a new operator flow. Once the push resolves the machine it is addressed to, the applications on that box follow from what reports about it, which is what FLT describes. It does not wait on a new wire shape.
+Enrolment is the machine's outright — see the enrolment section above. `applications.device_id` is vestigial now that every reader resolves through the machine, so dropping the column is unblocked.
 
 ### The push keeps the unified shape
 

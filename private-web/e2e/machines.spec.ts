@@ -97,7 +97,7 @@ test.describe("machine detail", () => {
 	/// and the ticket is minted for it. Nothing runs here until the enrolled
 	/// agent reports it, so no application is involved.
 	///
-	/// spec: ENR
+	/// spec: FLT#machines-come-from-operators
 	test("an unenrolled box offers the setup instructions and mints its ticket", async ({
 		page,
 		sql,
@@ -125,7 +125,7 @@ test.describe("machine detail", () => {
 	/// The identity is bound to the box, not to any workload on it, so the
 	/// device detail and re-enrolment sit behind the machine's own accordion.
 	///
-	/// spec: ENR
+	/// spec: DTR
 	test("the box carries the identity that speaks for it", async ({
 		page,
 		sql,

@@ -82,6 +82,11 @@ is a regression.
 - [ ] A push response returns effective tags for the machine and each application described (verifies spec: STA)
 - [x] `caddy_certs` files against the application while `caddy_version` files against the machine (verifies spec: STA)
 - [x] `ips` files against the machine while `ips_errors` files against the application (verifies spec: STA)
+- [x] A push is authorised against the machine the identity is bound to, not against any application (verifies spec: STA, DID)
+- [ ] A push naming a type the box does not yet run creates that application (verifies spec: FLT)
+- [ ] A push naming no type against a box running two applications is refused rather than attributed to one (verifies spec: STA)
+- [ ] A push naming no type against a box running none is refused (verifies spec: STA)
+- [ ] A push from an ignored source resolves its application without creating one (verifies spec: STA, CHK)
 
 ## Figures
 
@@ -101,6 +106,9 @@ is a regression.
 - [x] `GET /machines/self` returns the identity, its machine, and the applications on it (verifies spec: DID)
 - [x] `GET /servers/self` keeps the shape it has always had, for callers that predate the split (verifies spec: API, DID)
 - [x] Enrolment accepts `server` as an alias for the machine role, and Canopy stores and presents `machine` (verifies spec: DTR)
+- [x] Enrolment binds a machine to an identity and creates no application (verifies spec: FLT, DTR)
+- [x] An unenrolled machine's page offers the setup instructions and mints the box's ticket (verifies spec: FLT)
+- [x] The identity that speaks for a box is presented on the machine, not on any application (verifies spec: DTR)
 
 ## Billing
 
