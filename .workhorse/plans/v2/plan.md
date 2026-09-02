@@ -30,7 +30,7 @@ Carried deferrals, each gated on a step above rather than on a vague later:
 - [~] **Backup tables take the machine grain** — storage, models, handlers and checks moved; 7 e2e tests in `backups.spec.ts` still point at the old location. See the section below
 - [ ] Separate "never reported" from "reported long ago" — `Status::latest_for_servers` looks back seven days for performance, so a target silent for longer returns no row and reads as never reported (grey) rather than unreachable (red). Pre-existing, and sharper now the states are three: the fix is a cheap "has this ever reported" fact rather than widening the scan -- verify that it does remain cheap, if the query is "somewhat more expensive" it will slow every single view that displays a status, and the /status page (which has all of them at once) will slow to a crawl.
 - [x] Carry the machine on `IssueData` — done with the fleet query interface, which is what presented machine checks first
-- [ ] Link a machine's maintenance window to its detail page — with **Frontend**, which is what creates that page. The fleet maintenance view renders a machine target as plain text until then rather than linking somewhere that 404s
+- [x] Link a machine's maintenance window to its detail page — done with the machine page; the fleet maintenance view links a machine target rather than rendering it as plain text
 
 ## Backups take the machine grain
 
