@@ -396,6 +396,16 @@ The subject is `Machine` or `Application(type)` and nothing else, because those 
 
 Resolving a filed check to its catalog entry therefore needs the namespace, and for a structured source's application check that means the application's type. Canopy's own filings need nothing, which is most of the code the earlier attempts were disturbing.
 
+### Still to design: storage and migration
+
+The model above is settled; how it is stored and how existing rows get there is not, and both earlier attempts failed by skipping straight to an implementation. Open, in order:
+
+- **How a namespace is stored.** Whether the source column carries the namespace outright, or the namespace is a source name beside a nullable subject, and which of `source_policies` and source freshness key on the reporter name alone rather than on the whole namespace.
+- **How a check-state finds its catalog entry.** An application check's namespace needs that application's type, which the state row does not carry, so every gate joining state to catalog needs it or the type is denormalised onto the state.
+- **The migration is a fan-out, not a rename.** One `alertd` entry becomes one per namespace that actually reports it, derivable from existing check-states. What each derived entry inherits — ceiling, rules, documentation, and whether the review stamp carries over or each is re-vetted — is undecided.
+
+This waits on the application type being open, since the namespace of an application check is built from a type.
+
 ### The wire keeps the split shape
 
 The push shape stays as the split mockup has it: a source, the machine, and the applications. Every push arriving over the device API is structured, so the API carries no flat source today.
