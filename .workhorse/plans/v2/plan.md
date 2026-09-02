@@ -679,3 +679,37 @@ Under `.workhorse/design/mockups/v2/`:
 ## Adjacent
 
 Card W1 settles deployment/group/rank terminology, which is why the group tables keep their names here. Cards L2 and N1 turn on the same machine/application axis from bestool's side. K1 wants the cluster/identity separation this resolves.
+
+## Specced and not built
+
+The sections above tick off what landed. This one records what the specs on this branch describe and the code does not do, because a ticked plan beside a spec that overstates the system is how the gap stayed invisible.
+
+None of it is visible today. Every machine came out of the migration 1:1 with an application, so each wrong reading agrees with the right one on the whole current fleet, and they only part company for the two-workload box the card exists to support.
+
+### Nothing creates an application
+
+`Application::create` has no production caller: only `bin/seed.rs` and tests. The operator flow that used to create one (`servers::create`, routed on main) became `machines::create`, which creates a machine alone, and FLT's replacement for it ("A report is the only thing that creates an application") was never built. So a new box can be enrolled and its workload cannot be registered at all.
+
+This is the one item that is a regression rather than an unbuilt addition, and it is why the fleet cannot grow past what the migration produced.
+
+### The push keeps the unified shape
+
+`StatusPayload` is `source`, `healthy`, `health` and a flat `extra`. STA describes a source, a `machine` section and an `applications` section with per-application `detail`, and describes correlation by machine, key and type. Ingest does separate a unified push by subject, so the split rule is real and tested; what is missing is the shape on the wire and the correlation that comes with it.
+
+### The reachability check is filed at one grain
+
+`Status::sweep_staleness` reads `Application::get_all` and files `Scope::Application`; no `Scope::Machine` reachability filing exists anywhere in the tree. CHK says Canopy "keeps one `reachability` check per target" and that machines and applications each have reachability computed the same way.
+
+`Machine::reachability` grades the dot correctly off the projection, so the box's state presents while its check never fires. That is a second definition of the same idea diverging from the first, which is exactly what retiring the graded states was meant to stop.
+
+### An application does not see its machine's checks
+
+CHK: "Every machine check appears on every application on that machine, marked as belonging to the machine", and "An application's contributing checks include its machine's, so a box whose disk is filling makes every application on it degraded."
+
+`consolidated_checks_for` answers for the one target it is given, and the machine wrapper's own doc comment scopes it to "the box's own, not those of the applications on it". Nothing merges the machine's set into an application's list or its rollup.
+
+### The fleet spread is application-grained
+
+FIG: "A machine figure spreads over machines and an application figure over applications, so a box running two applications is one machine in a platform spread", and "A crossing counts machines, whatever figures are on its axes."
+
+`fleet_detail` returns one row per application with no machine on it, and `ReportedDetail::all` fans each machine's detail onto every application it hosts. A two-application box therefore counts twice on platform, bestool version and every crossing. The fan-out is right for a detail page, which asks about one application, and wrong for a spread, which counts.

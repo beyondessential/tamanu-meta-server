@@ -2,8 +2,10 @@
 
 Coverage the card owes. An unticked box is a scenario not yet covered.
 
-The unticked cases carry over to card G3, which groups them by whether the
-behaviour still needs building or only wants a test.
+The unticked cases carry over to card G3. Most of them are unticked because the
+behaviour they verify was specced on this card and not built, not because the
+coverage was deferred; G3 says which is which, and leads with the one item that
+is a regression.
 
 ## Model and lifecycle
 
