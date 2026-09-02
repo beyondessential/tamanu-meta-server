@@ -3394,3 +3394,81 @@ async fn a_machine_check_keeps_its_reporters_source() {
 	)
 	.await
 }
+
+/// The three push shapes are told apart by their health field, and an empty set
+/// of checks is not the absence of one: a source with nothing to report is
+/// still that source describing the target, and recovers what it last reported
+/// rather than being re-attributed to Tamanu.
+// spec: STA#transitional-unified-pushes
+#[tokio::test(flavor = "multi_thread")]
+async fn an_empty_health_set_is_the_source_reporting_nothing_not_a_legacy_push() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			// alertd reports a failing check, then reports nothing at all.
+			post_status(
+				&public,
+				&cert,
+				&mut conn,
+				server_id,
+				serde_json::json!({ "health": [ { "check": "disk", "result": "failed" } ] }),
+			)
+			.await;
+			assert!(
+				fetch_issue(&mut conn, server_id, "alertd", "health/disk")
+					.await
+					.expect("per-check issue filed")
+					.active
+			);
+
+			post_status(
+				&public,
+				&cert,
+				&mut conn,
+				server_id,
+				serde_json::json!({ "health": [], "uptime": 7 }),
+			)
+			.await;
+
+			let row = fetch_latest_health(&mut conn, server_id).await;
+			assert_eq!(
+				row.health,
+				serde_json::json!([]),
+				"an empty set stays empty rather than becoming the Tamanu heartbeat",
+			);
+			assert_eq!(row.extra.get("uptime").and_then(|v| v.as_i64()), Some(7));
+			assert!(
+				!fetch_issue(&mut conn, server_id, "alertd", "health/disk")
+					.await
+					.expect("the check state survives")
+					.active,
+				"reporting no checks recovers the ones the source last reported",
+			);
+			assert!(
+				fetch_issue(&mut conn, server_id, "tamanu", "health/tasks")
+					.await
+					.is_none(),
+				"and no heartbeat is synthesised under the tamanu source",
+			);
+
+			// Omitting the field entirely is the legacy shape, and does become
+			// the heartbeat.
+			post_status(
+				&public,
+				&cert,
+				&mut conn,
+				server_id,
+				serde_json::json!({ "uptime": 8 }),
+			)
+			.await;
+			assert!(
+				fetch_issue(&mut conn, server_id, "tamanu", "health/tasks")
+					.await
+					.is_some(),
+			);
+		},
+	)
+	.await
+}

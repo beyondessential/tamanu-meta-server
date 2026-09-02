@@ -66,7 +66,8 @@ Canopy accepts an earlier format in which a machine's and its application's mate
 
 A push carrying a `machine` section is in the current format and is taken as given.
 A push carrying health checks but no `machine` section is a unified push, and Canopy separates it into machine-subject and application-subject material itself before ingesting it.
-A push carrying no health checks at all is a legacy Tamanu report.
+A push carrying no health field at all is a legacy Tamanu report.
+An empty set of health checks is a different thing: the reporter is describing the target and saying it currently has no checks for it, so the push is ingested as any other and recovers what that source previously reported.
 
 Canopy holds the list of check names and detail fields that are machine-subject in order to do that separation.
 Everything not on that list is application-subject, so a check or field Canopy does not recognise is filed against the application, which is where an unrecognised one has always gone.

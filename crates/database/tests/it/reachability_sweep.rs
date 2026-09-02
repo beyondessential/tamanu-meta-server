@@ -589,3 +589,46 @@ async fn sweep_closes_issue_when_server_returns() {
 	})
 	.await
 }
+
+/// Going unreachable says the target's results are no longer current; it does
+/// not discard them. The last observed result of each check stays exactly as it
+/// was last reported, and reachability is the separate fact filed alongside.
+// spec: CHK
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unreachable_target_keeps_its_last_observed_check_results() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let id = insert_server(&mut conn, "http://keeps-results.invalid/", 600).await;
+		insert_check_state(&mut conn, id, "alertd", "db", 20).await;
+		insert_check_state(&mut conn, id, "otheragent", "ping", 30).await;
+
+		let filed = Status::sweep_staleness(&mut conn).await.expect("sweep");
+		assert_eq!(filed, 1);
+		let reachability = issue_for(&mut conn, id).await.expect("reachability issue");
+		assert_eq!(
+			reachability.observed_result,
+			Some(CheckResult::Failed),
+			"nothing is reaching Canopy, so the target presents as unreachable",
+		);
+
+		for (source, check) in [("alertd", "db"), ("otheragent", "ping")] {
+			let kept = Issue::list_by_source_ref(
+				&mut conn,
+				source,
+				&format!("health/{check}"),
+				std::slice::from_ref(&id),
+			)
+			.await
+			.expect("list issues")
+			.into_iter()
+			.next()
+			.unwrap_or_else(|| panic!("{source}'s {check} state survives the sweep"));
+			assert_eq!(
+				kept.observed_result,
+				Some(CheckResult::Passed),
+				"{source}'s last observed result is untouched by going unreachable",
+			);
+			assert_eq!(kept.message, "seeded");
+		}
+	})
+	.await
+}

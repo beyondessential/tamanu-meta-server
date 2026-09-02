@@ -39,7 +39,7 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 - [ ] Every application on an unreachable machine is independently unreachable, with no propagation step (verifies spec: CHK)
 - [ ] Applications recover independently when their machine reports again (verifies spec: CHK)
 - [ ] An application dropped from a live machine's report is unreachable while its machine stays reachable (verifies spec: CHK)
-- [ ] An unreachable target keeps its last observed check results and is presented as unreachable (verifies spec: CHK)
+- [x] An unreachable target keeps its last observed check results and is presented as unreachable (verifies spec: CHK)
 - [ ] An application's reachability check can be silenced independently of its machine's (verifies spec: CHK)
 - [ ] A machine's reachability silence is reachable from an application on that machine (verifies spec: CHK)
 - [x] Reachability is measured against the target's own threshold, not a fixed one (verifies spec: CHK)
@@ -69,7 +69,7 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 
 - [ ] A split push is ingested against the machine and applications it names, unmodified (verifies spec: STA)
 - [x] A unified push is separated by the machine-subject rule and ingested against both grains (verifies spec: STA)
-- [ ] A push with no health checks is still treated as a legacy Tamanu report (verifies spec: STA)
+- [x] A push with no health field is a legacy Tamanu report, while an empty health set is the source reporting nothing (verifies spec: STA)
 - [ ] A reporter field named `source`, `health`, `check` or `result` inside `detail` is recorded and does not collide with the envelope (verifies spec: STA)
 - [ ] Two applications sharing a key cannot be expressed in a payload (verifies spec: STA)
 - [ ] Correlation is by machine, key and type together (verifies spec: STA)
