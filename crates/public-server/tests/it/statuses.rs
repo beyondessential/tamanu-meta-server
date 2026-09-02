@@ -1,3 +1,6 @@
+use commons_types::{namespace::Namespace, server::app_type::ApplicationType};
+use database::check_policies::{CheckPolicy, ScopedCheckPolicy};
+use database::issues::Scope;
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
@@ -111,15 +114,23 @@ async fn set_check_severity(
 		"debug" => ("skipped", false),
 		other => panic!("unknown severity {other}"),
 	};
+	// Every server that grades against this seed is a tamanu-central, so the
+	// row has to land in the namespace ingest will look it up under.
+	let (subject, application_type) =
+		Namespace::for_application("alertd", check_name, &ApplicationType::TamanuCentral)
+			.to_columns();
 	sql_query(
-		"INSERT INTO check_policies (source, check_name, ceiling, escalates, reviewed_at, reviewed_by) \
-		 VALUES ('alertd', $1, $2, $3, NOW(), 'test') \
-		 ON CONFLICT (source, check_name) DO UPDATE \
+		"INSERT INTO check_policies \
+		 (source, subject, application_type, check_name, ceiling, escalates, reviewed_at, reviewed_by) \
+		 VALUES ('alertd', $1, $2, $3, $4, $5, NOW(), 'test') \
+		 ON CONFLICT (source, subject, application_type, check_name) DO UPDATE \
 		 SET ceiling = EXCLUDED.ceiling, \
 		     escalates = EXCLUDED.escalates, \
 		     reviewed_at = EXCLUDED.reviewed_at, \
 		     reviewed_by = EXCLUDED.reviewed_by",
 	)
+	.bind::<sql_types::Nullable<sql_types::Text>, _>(subject)
+	.bind::<sql_types::Nullable<sql_types::Text>, _>(application_type)
 	.bind::<sql_types::Text, _>(check_name)
 	.bind::<sql_types::Text, _>(ceiling)
 	.bind::<sql_types::Bool, _>(escalates)
@@ -1249,13 +1260,14 @@ async fn submit_status_with_all_failing_checks_silenced_opens_no_incident() {
 
 			// Pre-silence both failing checks at server scope.
 			for check in ["database", "disk"] {
-				sql_query(
-					"INSERT INTO scoped_check_policies (application_id, source, check_name, ceiling) \
-					 VALUES ($1, 'alertd', $2, 'skipped')",
+				ScopedCheckPolicy::silence(
+					&mut conn,
+					Scope::Application(server_id),
+					"alertd",
+					&Namespace::for_application("alertd", check, &ApplicationType::TamanuCentral),
+					check,
+					None,
 				)
-				.bind::<sql_types::Uuid, _>(server_id)
-				.bind::<sql_types::Text, _>(check)
-				.execute(&mut conn)
 				.await
 				.expect("seed silence");
 			}
@@ -1307,12 +1319,14 @@ async fn submit_status_with_partial_silence_opens_incident_for_unsilenced() {
 			let server_id = insert_health_test_server(&mut conn, device_id).await;
 
 			// Silence only one of the two failing checks.
-			sql_query(
-				"INSERT INTO scoped_check_policies (application_id, source, check_name, ceiling) \
-				 VALUES ($1, 'alertd', 'database', 'skipped')",
+			ScopedCheckPolicy::silence(
+				&mut conn,
+				Scope::Application(server_id),
+				"alertd",
+				&Namespace::for_application("alertd", "database", &ApplicationType::TamanuCentral),
+				"database",
+				None,
 			)
-			.bind::<sql_types::Uuid, _>(server_id)
-			.execute(&mut conn)
 			.await
 			.expect("seed silence");
 
@@ -1807,13 +1821,14 @@ async fn set_check_rules(
 	check_name: &str,
 	rules: serde_json::Value,
 ) {
-	// Ensure the catalog row exists.
-	sql_query(
-		"INSERT INTO check_policies (source, check_name) VALUES ('alertd', $1) \
-		 ON CONFLICT (source, check_name) DO NOTHING",
+	// Ensure the catalog row exists, in the namespace ingest will read it
+	// back out of.
+	CheckPolicy::upsert_default(
+		conn,
+		"alertd",
+		&Namespace::for_application("alertd", check_name, &ApplicationType::TamanuCentral),
+		check_name,
 	)
-	.bind::<sql_types::Text, _>(check_name)
-	.execute(conn)
 	.await
 	.expect("ensure catalog row");
 	// Setting rules reviews the policy in production (via update_rules), and

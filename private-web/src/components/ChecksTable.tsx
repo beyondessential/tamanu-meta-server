@@ -41,11 +41,13 @@ import OperatorAvatars from "./OperatorAvatars";
 import TimeAgo from "./TimeAgo";
 import {
 	healthcheckPath,
+	sameNamespace,
 	silenceRef,
 	type CheckResult,
 	type ConsolidatedCheck,
 	type ConsolidatedChecks,
 	type HealthState,
+	type NamespaceRef,
 	type OperatorPresence,
 	type ServerGroupSilencedRef,
 	type ShortStatus,
@@ -222,9 +224,15 @@ function ChecksTableBody({
 						serverSilences.find(
 							(s) => s.source === entry.source && s.ref === refName,
 						) ?? null;
+					// A group covers several application types, so its silences
+					// are matched on the namespace too: the same check name
+					// silenced for another type is another check.
 					const groupSilence =
 						groupSilences.find(
-							(s) => s.source === entry.source && s.ref === refName,
+							(s) =>
+								s.source === entry.source &&
+								s.ref === refName &&
+								sameNamespace(s.namespace, entry.namespace),
 						) ?? null;
 					return (
 						<CheckRow
@@ -326,14 +334,21 @@ function CheckRow({
 					useFlexGap
 				>
 					<Typography variant="body2" sx={{ fontFamily: "monospace" }}>
-						<MuiLink component={RouterLink} to={healthcheckPath(entry.source, entry.check)}>
-							{entry.check}
+						<MuiLink
+							component={RouterLink}
+							to={healthcheckPath(entry.source, entry.namespace, entry.check)}
+						>
+							{entry.qualified_name}
 						</MuiLink>
 					</Typography>
 					<Typography variant="caption" color="text.secondary">
 						{entry.source}
 					</Typography>
-					<CheckDocButton source={entry.source} check={entry.check} />
+					<CheckDocButton
+						source={entry.source}
+						namespace={entry.namespace}
+						check={entry.check}
+					/>
 					<SilencedChip
 						serverSilence={serverSilence}
 						groupSilence={groupSilence}
@@ -353,6 +368,7 @@ function CheckRow({
 			{isAdmin && (
 				<SilenceCheckButton
 					check={entry.check}
+					namespace={entry.namespace}
 					target={target}
 					groupId={groupId}
 					source={entry.source}
@@ -502,6 +518,7 @@ function SilencedChip({
  * and the page's `SilencedRefsSection` refetch in lockstep. */
 function SilenceCheckButton({
 	check,
+	namespace,
 	target,
 	groupId,
 	source,
@@ -510,6 +527,7 @@ function SilenceCheckButton({
 	groupSilence,
 }: {
 	check: string;
+	namespace: NamespaceRef;
 	target: CheckTarget;
 	groupId: string | null;
 	source: string;
@@ -626,6 +644,8 @@ function SilenceCheckButton({
 											server_group_id: groupId,
 											source,
 											ref: refName,
+											application_type:
+												namespace.application_type,
 										}),
 									)
 								}
@@ -635,6 +655,8 @@ function SilenceCheckButton({
 											server_group_id: groupId,
 											source,
 											ref: refName,
+											application_type:
+												namespace.application_type,
 										}),
 									)
 								}

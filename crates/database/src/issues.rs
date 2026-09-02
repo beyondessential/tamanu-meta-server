@@ -1,6 +1,7 @@
 //! Issues, events, incidents.
 
 use commons_errors::{AppError, Result};
+use commons_types::namespace::Namespace;
 use commons_types::status::CheckResult;
 use diesel::prelude::*;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
@@ -1173,17 +1174,11 @@ pub async fn file_check_instances(
 		!filing.instances.is_empty(),
 		"a filing with no instances says nothing; skip the call instead",
 	);
-	CheckPolicy::register(
-		conn,
-		source,
-		filing.check,
-		filing.default_ceiling,
-		filing.default_escalates,
-		filing.documentation,
-	)
-	.await?;
-
 	let status_extra = serde_json::Map::new();
+	// The application type comes out of the same load the tags do, because the
+	// check's namespace needs it: an application-subject check from a structured
+	// source is one catalog entry per type.
+	let mut application_type = None;
 	let (tags, scope): (
 		std::collections::HashMap<String, serde_json::Value>,
 		FilingScope,
@@ -1191,6 +1186,7 @@ pub async fn file_check_instances(
 		Scope::Application(application_id) => {
 			let server = Application::get_by_id(conn, application_id).await?;
 			let group_id = server.group_id;
+			application_type = Some(server.r#type.clone());
 			let tags = server
 				.tags_merged_with_group(conn)
 				.await?
@@ -1241,11 +1237,30 @@ pub async fn file_check_instances(
 		Scope::Global => (Default::default(), FilingScope::default()),
 	};
 
+	let namespace =
+		Namespace::of(source, filing.check, application_type.as_ref()).ok_or_else(|| {
+			AppError::Custom(format!(
+				"{} from {source} is an application check, so it cannot be filed against {:?}",
+				filing.check, filing.scope
+			))
+		})?;
+
+	CheckPolicy::register(
+		conn,
+		source,
+		&namespace,
+		filing.check,
+		filing.default_ceiling,
+		filing.default_escalates,
+		filing.documentation,
+	)
+	.await?;
+
 	// The catalog entry and the scoped chain are properties of the check, not
 	// of any one instance: read them once and grade purely from there, so a
 	// server with a dozen backup types still costs two queries.
-	let fleet = CheckPolicy::fleet_grading(conn, source, filing.check).await?;
-	let chain = ScopedCheckPolicy::chain_for(conn, source, filing.check, scope).await?;
+	let fleet = CheckPolicy::fleet_grading(conn, source, &namespace, filing.check).await?;
+	let chain = ScopedCheckPolicy::chain_for(conn, source, &namespace, filing.check, scope).await?;
 
 	let mut graded_instances: Vec<GradedInstance> = Vec::with_capacity(filing.instances.len());
 	let mut escalates = false;
@@ -1484,31 +1499,47 @@ pub async fn health_from_check_state(
 	// backs it: this skips decommissioned checks and orphaned check-states
 	// (no catalog row at all) fleet-wide. See `live_cataloged_pairs`.
 	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_pairs(conn).await?;
+	// Which catalog row backs a state follows the application's type, so a check
+	// decommissioned for one type stops counting there and nowhere else.
+	let types = Application::types_by_id(conn, &server_ids).await?;
 
 	let group_ids: Vec<Uuid> = group_of.values().filter_map(|g| *g).collect();
-	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
-		scoped_check_policies::table
-			.select((
-				scoped_check_policies::application_id,
-				scoped_check_policies::server_group_id,
-				scoped_check_policies::source,
-				scoped_check_policies::check_name,
-			))
-			.filter(scoped_check_policies::ceiling.eq("skipped"))
-			.filter(
-				scoped_check_policies::application_id
-					.eq_any(&server_ids)
-					.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
-			)
-			.load(conn)
-			.await?;
-	let mut server_silences: HashSet<(Uuid, String, String)> = HashSet::new();
-	let mut group_silences: HashSet<(Uuid, String, String)> = HashSet::new();
-	for (application_id, group_id, source, check) in silence_rows {
+	let silence_rows: Vec<(
+		Option<Uuid>,
+		Option<Uuid>,
+		Option<String>,
+		Option<String>,
+		String,
+		String,
+	)> = scoped_check_policies::table
+		.select((
+			scoped_check_policies::application_id,
+			scoped_check_policies::server_group_id,
+			scoped_check_policies::subject,
+			scoped_check_policies::application_type,
+			scoped_check_policies::source,
+			scoped_check_policies::check_name,
+		))
+		.filter(scoped_check_policies::ceiling.eq("skipped"))
+		.filter(
+			scoped_check_policies::application_id
+				.eq_any(&server_ids)
+				.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
+		)
+		.load(conn)
+		.await?;
+	// The namespace is part of the key: a group spans several application
+	// types, so a silence on one type's `version` leaves another type's alone.
+	let mut server_silences: HashSet<(Uuid, Namespace, String, String)> = HashSet::new();
+	let mut group_silences: HashSet<(Uuid, Namespace, String, String)> = HashSet::new();
+	for (application_id, group_id, subject, ty, source, check) in silence_rows {
+		let Ok(ns) = Namespace::from_columns(subject.as_deref(), ty.as_deref()) else {
+			continue;
+		};
 		if let Some(sid) = application_id {
-			server_silences.insert((sid, source, check));
+			server_silences.insert((sid, ns, source, check));
 		} else if let Some(gid) = group_id {
-			group_silences.insert((gid, source, check));
+			group_silences.insert((gid, ns, source, check));
 		}
 	}
 
@@ -1523,14 +1554,22 @@ pub async fn health_from_check_state(
 			continue;
 		};
 		let key = (application_id, source, check_name);
-		if !cataloged.contains(&(key.1.clone(), key.2.clone())) {
+		if !crate::check_policies::CheckPolicy::live_for(
+			&cataloged,
+			&key.1,
+			&key.2,
+			types.get(&application_id),
+		) {
 			continue;
 		}
-		if server_silences.contains(&key) {
+		let Some(ns) = Namespace::of(&key.1, &key.2, types.get(&application_id)) else {
+			continue;
+		};
+		if server_silences.contains(&(key.0, ns.clone(), key.1.clone(), key.2.clone())) {
 			continue;
 		}
 		if let Some(Some(gid)) = group_of.get(&application_id)
-			&& group_silences.contains(&(*gid, key.1.clone(), key.2.clone()))
+			&& group_silences.contains(&(*gid, ns, key.1.clone(), key.2.clone()))
 		{
 			continue;
 		}
@@ -1624,7 +1663,9 @@ pub async fn machine_health_from_check_state(
 			continue;
 		};
 		let key = (machine_id, source, check_name);
-		if !cataloged.contains(&(key.1.clone(), key.2.clone())) {
+		// A machine's checks are in the machine namespace or a curated source's
+		// flat one; no application type bears on either.
+		if !crate::check_policies::CheckPolicy::live_for(&cataloged, &key.1, &key.2, None) {
 			continue;
 		}
 		if machine_silences.contains(&key) {
@@ -1708,31 +1749,45 @@ pub async fn check_detail_by_server(
 		.await?;
 
 	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_pairs(conn).await?;
+	let types = Application::types_by_id(conn, &server_ids).await?;
 
 	let group_ids: Vec<Uuid> = group_of.values().filter_map(|g| *g).collect();
-	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
-		scoped_check_policies::table
-			.select((
-				scoped_check_policies::application_id,
-				scoped_check_policies::server_group_id,
-				scoped_check_policies::source,
-				scoped_check_policies::check_name,
-			))
-			.filter(scoped_check_policies::ceiling.eq("skipped"))
-			.filter(
-				scoped_check_policies::application_id
-					.eq_any(&server_ids)
-					.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
-			)
-			.load(conn)
-			.await?;
-	let mut server_silences: HashSet<(Uuid, String, String)> = HashSet::new();
-	let mut group_silences: HashSet<(Uuid, String, String)> = HashSet::new();
-	for (application_id, group_id, source, check) in silence_rows {
+	let silence_rows: Vec<(
+		Option<Uuid>,
+		Option<Uuid>,
+		Option<String>,
+		Option<String>,
+		String,
+		String,
+	)> = scoped_check_policies::table
+		.select((
+			scoped_check_policies::application_id,
+			scoped_check_policies::server_group_id,
+			scoped_check_policies::subject,
+			scoped_check_policies::application_type,
+			scoped_check_policies::source,
+			scoped_check_policies::check_name,
+		))
+		.filter(scoped_check_policies::ceiling.eq("skipped"))
+		.filter(
+			scoped_check_policies::application_id
+				.eq_any(&server_ids)
+				.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
+		)
+		.load(conn)
+		.await?;
+	// The namespace is part of the key: a group spans several application
+	// types, so a silence on one type's `version` leaves another type's alone.
+	let mut server_silences: HashSet<(Uuid, Namespace, String, String)> = HashSet::new();
+	let mut group_silences: HashSet<(Uuid, Namespace, String, String)> = HashSet::new();
+	for (application_id, group_id, subject, ty, source, check) in silence_rows {
+		let Ok(ns) = Namespace::from_columns(subject.as_deref(), ty.as_deref()) else {
+			continue;
+		};
 		if let Some(sid) = application_id {
-			server_silences.insert((sid, source, check));
+			server_silences.insert((sid, ns, source, check));
 		} else if let Some(gid) = group_id {
-			group_silences.insert((gid, source, check));
+			group_silences.insert((gid, ns, source, check));
 		}
 	}
 
@@ -1741,7 +1796,12 @@ pub async fn check_detail_by_server(
 		let (Some(application_id), Some(check)) = (application_id, check_name) else {
 			continue;
 		};
-		if !cataloged.contains(&(source.clone(), check.clone())) {
+		if !crate::check_policies::CheckPolicy::live_for(
+			&cataloged,
+			&source,
+			&check,
+			types.get(&application_id),
+		) {
 			continue;
 		}
 		let Some(stored) = effective
@@ -1750,9 +1810,18 @@ pub async fn check_detail_by_server(
 		else {
 			continue;
 		};
-		let silenced = server_silences.contains(&(application_id, source.clone(), check.clone()))
-			|| matches!(group_of.get(&application_id), Some(Some(gid))
-				if group_silences.contains(&(*gid, source.clone(), check.clone())));
+		let silenced = match Namespace::of(&source, &check, types.get(&application_id)) {
+			Some(ns) => {
+				server_silences.contains(&(
+					application_id,
+					ns.clone(),
+					source.clone(),
+					check.clone(),
+				)) || matches!(group_of.get(&application_id), Some(Some(gid))
+					if group_silences.contains(&(*gid, ns.clone(), source.clone(), check.clone())))
+			}
+			None => false,
+		};
 		let effective = if silenced {
 			CheckResult::Skipped
 		} else {
@@ -1884,13 +1953,19 @@ async fn consolidated_checks_for(
 	// row at all — invisible in settings and unmanageable, so never a
 	// phantom failure here). See `live_cataloged_pairs`.
 	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_pairs(conn).await?;
+	// Only an application has a type; a machine's checks are in the machine
+	// namespace or a curated source's flat one.
+	let application_type = match target_application {
+		Some(id) => Some(Application::get_by_id(conn, id).await?.r#type),
+		None => None,
+	};
 
 	let group_ids: Vec<Uuid> = group_id.into_iter().collect();
-	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
+	let silence_rows: Vec<(Option<String>, Option<String>, String, String)> =
 		scoped_check_policies::table
 			.select((
-				scoped_check_policies::application_id,
-				scoped_check_policies::server_group_id,
+				scoped_check_policies::subject,
+				scoped_check_policies::application_type,
 				scoped_check_policies::source,
 				scoped_check_policies::check_name,
 			))
@@ -1903,22 +1978,30 @@ async fn consolidated_checks_for(
 			)
 			.load(conn)
 			.await?;
-	// This is one target, so a matching (source, check) at either its own scope
-	// or its group's means silenced here.
-	let silenced: HashSet<(String, String)> = silence_rows
+	// This is one target, so a matching check at either its own scope or its
+	// group's means silenced here. The namespace has to match too: a group
+	// spans several application types, so a silence on one type's `version` is
+	// not a silence on another type's.
+	let silenced: HashSet<(Namespace, String, String)> = silence_rows
 		.into_iter()
-		.map(|(_, _, source, check)| (source, check))
+		.filter_map(|(subject, ty, source, check)| {
+			let ns = Namespace::from_columns(subject.as_deref(), ty.as_deref()).ok()?;
+			Some((ns, source, check))
+		})
 		.collect();
 
 	let mut checks: Vec<ConsolidatedCheck> = rows
 		.into_iter()
 		.filter_map(|(source, check_name, observed, effective, detail)| {
 			let check = check_name?;
-			if !cataloged.contains(&(source.clone(), check.clone())) {
+			let namespace = Namespace::of(&source, &check, application_type.as_ref())?;
+			if !crate::check_policies::CheckPolicy::live_in(&cataloged, &source, &namespace, &check)
+			{
 				return None;
 			}
 			let stored: CheckResult = effective.as_deref().and_then(|e| e.parse().ok())?;
-			let is_silenced = silenced.contains(&(source.clone(), check.clone()));
+			let is_silenced =
+				silenced.contains(&(namespace.clone(), source.clone(), check.clone()));
 			// A silence is a scoped ceiling of `skipped`: cap the effective
 			// result here so the live view matches both the health rollup
 			// (which excludes silenced checks) and the snapshot path (which
@@ -1933,6 +2016,8 @@ async fn consolidated_checks_for(
 			Some(ConsolidatedCheck {
 				silenced: is_silenced,
 				observed: observed.as_deref().and_then(|o| o.parse().ok()),
+				qualified_name: namespace.qualified_name(&check),
+				namespace: (&namespace).into(),
 				source,
 				check,
 				effective,
@@ -1952,15 +2037,26 @@ async fn consolidated_checks_for(
 		crate::statuses::CANOPY_SOURCE.to_string(),
 		crate::statuses::REACHABILITY_REF.to_string(),
 	);
-	if cataloged.contains(&reachability)
-		&& !checks
-			.iter()
-			.any(|c| c.source == reachability.0 && c.check == reachability.1)
+	if crate::check_policies::CheckPolicy::live_for(
+		&cataloged,
+		&reachability.0,
+		&reachability.1,
+		application_type.as_ref(),
+	) && !checks
+		.iter()
+		.any(|c| c.source == reachability.0 && c.check == reachability.1)
 	{
-		let is_silenced = silenced.contains(&reachability);
+		// Reachability is canopy's own, so it is flat whatever the target.
+		let is_silenced = silenced.contains(&(
+			Namespace::Flat,
+			reachability.0.clone(),
+			reachability.1.clone(),
+		));
 		checks.push(ConsolidatedCheck {
 			silenced: is_silenced,
 			observed: Some(CheckResult::Passed),
+			namespace: (&Namespace::Flat).into(),
+			qualified_name: reachability.1.clone(),
 			source: reachability.0,
 			check: reachability.1,
 			effective: if is_silenced {
@@ -1992,21 +2088,45 @@ impl Issue {
 	/// carry the observed/effective results, the check's detail, and the
 	/// degraded-streak timestamps. A check's identity is the pair — a
 	/// same-named check from another source is a different check.
+	/// Every check-state row for one catalog entry.
+	///
+	/// `namespace` is what makes this one entry rather than a name: an
+	/// application-namespaced check is narrowed to applications of its type,
+	/// and a machine-namespaced one to machines, so two types reporting one
+	/// name do not pool their states onto each other's page. A curated
+	/// source's flat entry is one check filed at whatever grain suits it, so
+	/// it takes every row.
 	pub async fn check_state_for_check(
 		conn: &mut AsyncPgConnection,
 		source: &str,
+		namespace: &Namespace,
 		check_name: &str,
 	) -> Result<Vec<Issue>> {
 		use crate::schema::issues::dsl;
 
-		dsl::issues
+		let mut query = dsl::issues
 			.select(Issue::as_select())
 			.filter(dsl::source.eq(source))
 			.filter(dsl::check_name.eq(check_name))
 			.filter(dsl::observed_result.is_not_null())
-			.load(conn)
-			.await
-			.map_err(AppError::from)
+			.into_boxed();
+
+		match namespace {
+			Namespace::Flat => {}
+			Namespace::Machine => query = query.filter(dsl::machine_id.is_not_null()),
+			Namespace::Application(ty) => {
+				query = query.filter(
+					dsl::application_id.nullable().eq_any(
+						crate::schema::applications::dsl::applications
+							.select(crate::schema::applications::dsl::id)
+							.filter(crate::schema::applications::dsl::type_.eq(ty.to_string()))
+							.nullable(),
+					),
+				)
+			}
+		}
+
+		query.load(conn).await.map_err(AppError::from)
 	}
 }
 
@@ -3735,6 +3855,7 @@ impl Issue {
 		// no catalog entry to silence or decommission. Mirrors the health
 		// rollup (see [`health_from_check_state`]).
 		let cataloged = CheckPolicy::live_cataloged_pairs(db).await?;
+		let types = crate::applications::Application::types_by_id(db, server_ids).await?;
 
 		let rows: Vec<(Uuid, String, String, jiff_diesel::Timestamp)> = dsl::issues
 			.filter(
@@ -3758,7 +3879,7 @@ impl Issue {
 
 		let mut latest: HashMap<(Uuid, String), Timestamp> = HashMap::new();
 		for (server, source, check, seen) in rows {
-			if !cataloged.contains(&(source.clone(), check)) {
+			if !CheckPolicy::live_for(&cataloged, &source, &check, types.get(&server)) {
 				continue;
 			}
 			let seen: Timestamp = seen.into();

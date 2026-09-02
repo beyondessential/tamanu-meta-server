@@ -13,8 +13,8 @@ use commons_servers::{
 use commons_types::{
 	backup::BackupType,
 	device::DeviceRole,
-	namespace::{RESERVED_SOURCES, is_reserved},
-	server::TagMap,
+	namespace::{Namespace, RESERVED_SOURCES, is_reserved},
+	server::{TagMap, app_type::ApplicationType},
 	status::{CheckResult, CheckSeverity},
 	subject::CheckSubject,
 	version::VersionStr,
@@ -326,6 +326,7 @@ async fn create(
 				server_id,
 				server.machine_id,
 				server.group_id,
+				&server.r#type,
 				Some(id),
 				&status,
 				&tags,
@@ -356,6 +357,7 @@ async fn create(
 		server_id,
 		server.machine_id,
 		server.group_id,
+		&server.r#type,
 		&source,
 	)
 	.await?;
@@ -424,6 +426,7 @@ async fn check_severities(
 		server_id,
 		server.machine_id,
 		server.group_id,
+		&server.r#type,
 		DEFAULT_SOURCE,
 	)
 	.await?;
@@ -443,13 +446,19 @@ async fn effective_check_severities(
 	server_id: Uuid,
 	machine_id: Uuid,
 	group_id: Option<Uuid>,
+	application_type: &ApplicationType,
 	source: &str,
 ) -> Result<BTreeMap<String, CheckSeverity>> {
-	let mut map: BTreeMap<String, CheckSeverity> = CheckPolicy::ceiling_map_for_source(db, source)
-		.await?
-		.into_iter()
-		.map(|(name, ceiling)| (name, ceiling.into()))
-		.collect();
+	// Keyed by bare check name, because that is what the reporter sends and
+	// reads back. The catalog is narrowed to the namespaces this reporter can
+	// file into, so another application type's same-named check is not in here
+	// to collide with.
+	let mut map: BTreeMap<String, CheckSeverity> =
+		CheckPolicy::ceiling_map_for_source(db, source, Some(application_type))
+			.await?
+			.into_iter()
+			.map(|(name, ceiling)| (name, ceiling.into()))
+			.collect();
 
 	// Silences are keyed per (source, check): only this source's own
 	// silences force its checks to skip.
@@ -503,6 +512,7 @@ async fn file_health_events(
 	server_id: Uuid,
 	machine_id: Uuid,
 	group_id: Option<Uuid>,
+	application_type: &ApplicationType,
 	device_id: Option<Uuid>,
 	status: &Status,
 	tags: &std::collections::HashMap<String, serde_json::Value>,
@@ -513,9 +523,12 @@ async fn file_health_events(
 	// Upsert a catalog row for every check name seen on this push,
 	// whatever its result. New checks land at the default warning
 	// ceiling; operators can review and adjust from the /healthchecks
-	// page.
+	// page. A name resolves to the namespace its subject and this
+	// source put it in, so a machine check on a Tamanu push is the
+	// box's entry and not one Tamanu owns.
 	for check_name in curr_check_results.keys() {
-		CheckPolicy::upsert_default(conn, &status.source, check_name).await?;
+		let namespace = Namespace::for_application(&status.source, check_name, application_type);
+		CheckPolicy::upsert_default(conn, &status.source, &namespace, check_name).await?;
 	}
 
 	// Status-level extras are shared across every per-check evaluation.
@@ -542,9 +555,11 @@ async fn file_health_events(
 			tags,
 		};
 		let subject = CheckSubject::of(check);
+		let namespace = Namespace::for_application(&status.source, check, application_type);
 		let graded = CheckPolicy::apply_scoped(
 			conn,
 			&status.source,
+			&namespace,
 			check,
 			*result,
 			&ctx,

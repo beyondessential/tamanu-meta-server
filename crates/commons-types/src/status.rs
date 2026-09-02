@@ -2,6 +2,8 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
+use crate::namespace::NamespaceRef;
+
 /// How a server should treat one of its healthchecks, distilled from
 /// canopy's operator-side configuration (the policy catalog and the
 /// silences) into a three-level device-facing vocabulary.
@@ -425,17 +427,24 @@ pub enum HealthState {
 	Unhealthy,
 }
 
-/// One check in a server's consolidated state: a single `(source, check)`
-/// with its results already graded by policy, ready to present. The same
-/// shape whether taken from current state or reconstructed as of a past
-/// time, and across every reporting source — the presentation never sees a
-/// single source's raw report.
+/// One check in a server's consolidated state: a single check identity with
+/// its results already graded by policy, ready to present. The same shape
+/// whether taken from current state or reconstructed as of a past time, and
+/// across every reporting source — the presentation never sees a single
+/// source's raw report.
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ConsolidatedCheck {
 	/// The source that reports this check.
 	pub source: String,
 	/// The check's name, as reported.
 	pub check: String,
+	/// Which catalog entry this check resolves to. Two application types
+	/// reporting one name are two checks, so the name alone does not address
+	/// a policy, a silence or a document — this does.
+	pub namespace: NamespaceRef,
+	/// How the check reads to an operator: `<type>.<check>` where it is one
+	/// application type's, the bare name otherwise.
+	pub qualified_name: String,
 	/// What the source reported, before policy. `None` if the stored state
 	/// carried no observed result.
 	#[schema(value_type = Option<String>)]

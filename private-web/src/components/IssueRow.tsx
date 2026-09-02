@@ -242,6 +242,7 @@ function Header({
 				<Box sx={{ flexShrink: 0 }}>
 					<CheckDocButton
 						source={issue.source}
+						namespace={issue.namespace ?? undefined}
 						check={headerCheckName(issue) as string}
 					/>
 				</Box>
@@ -363,6 +364,7 @@ function IssueActions({
 	const snooze = useApiAction("issues", "snooze");
 	const unsnooze = useApiAction("issues", "unsnooze");
 	const silenceServer = useApiAction("silenced_refs", "silence_server");
+	const silenceMachine = useApiAction("silenced_refs", "silence_machine");
 	const silenceGroup = useApiAction("silenced_refs", "silence_group");
 
 	const [resolveOpen, setResolveOpen] = useState(false);
@@ -386,6 +388,7 @@ function IssueActions({
 		?? snooze.error
 		?? unsnooze.error
 		?? silenceServer.error
+		?? silenceMachine.error
 		?? silenceGroup.error;
 
 	return (
@@ -547,6 +550,24 @@ function IssueActions({
 								For this server
 							</Button>
 						)}
+						{issue.machine_id != null && (
+							<Button
+								variant="outlined"
+								size="small"
+								startIcon={<NotificationsOffOutlinedIcon />}
+								onClick={() =>
+									wrap(() =>
+										silenceMachine.call({
+											machine_id: issue.machine_id,
+											source: issue.source,
+											ref: issue.ref,
+										}),
+									).then(() => setSilenceOpen(false))
+								}
+							>
+								For this machine
+							</Button>
+						)}
 						{issue.server_group_id && (
 							<Button
 								variant="outlined"
@@ -558,6 +579,11 @@ function IssueActions({
 											server_group_id: issue.server_group_id!,
 											source: issue.source,
 											ref: issue.ref,
+											// A group spans several application types,
+											// so the silence names the one this issue's
+											// check belongs to.
+											application_type:
+												issue.namespace?.application_type ?? null,
 										}),
 									).then(() => setSilenceOpen(false))
 								}
@@ -605,7 +631,10 @@ function IssueMeta({ issue }: { issue: IssueData }) {
 				sx={{ fontFamily: "monospace", fontSize: "0.9em" }}
 			>
 				{checkName ? (
-					<MuiLink component={RouterLink} to={healthcheckPath(issue.source, checkName)}>
+					<MuiLink
+						component={RouterLink}
+						to={healthcheckPath(issue.source, issue.namespace ?? undefined, checkName)}
+					>
 						{issue.ref}
 					</MuiLink>
 				) : (

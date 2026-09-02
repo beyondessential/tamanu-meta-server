@@ -1,8 +1,11 @@
 //! `issues::consolidated_checks_latest` — a server's current checks across
 //! every source, graded, with the health rollup matching the headline.
 
+use commons_types::namespace::Namespace;
 use commons_types::status::{CheckResult, HealthState};
-use database::check_policies::CheckPolicy;
+use database::check_policies::{CheckPolicy, ScopedCheckPolicy};
+
+use crate::helpers::app_ns;
 use database::issues::{CheckFiling, Scope, consolidated_checks_latest, file_check};
 use database::statuses::{CANOPY_SOURCE, REACHABILITY_REF};
 use diesel::{QueryableByName, sql_query, sql_types};
@@ -161,12 +164,14 @@ async fn latest_excludes_decommissioned_and_flags_silenced() {
 		.execute(&mut conn)
 		.await
 		.expect("decommission");
-		sql_query(
-			"INSERT INTO scoped_check_policies (application_id, source, check_name, ceiling, created_by) \
-			 VALUES ($1, 'alertd', 'hushed', 'skipped', 'op')",
+		ScopedCheckPolicy::silence(
+			&mut conn,
+			Scope::Application(server_id),
+			"alertd",
+			&app_ns(),
+			"hushed",
+			Some("op"),
 		)
-		.bind::<sql_types::Uuid, _>(server_id)
-		.execute(&mut conn)
 		.await
 		.expect("silence");
 
@@ -231,14 +236,15 @@ async fn synthesised_reachability_reflects_a_silence() {
 			.await
 			.expect("seed canopy's own checks");
 		let server_id = insert_server(&mut conn).await;
-		sql_query(
-			"INSERT INTO scoped_check_policies (application_id, source, check_name, ceiling, created_by) \
-			 VALUES ($1, $2, $3, 'skipped', 'op')",
+		// Reachability is canopy's own, so it is flat: no namespace to name.
+		ScopedCheckPolicy::silence(
+			&mut conn,
+			Scope::Application(server_id),
+			CANOPY_SOURCE,
+			&Namespace::Flat,
+			REACHABILITY_REF,
+			Some("op"),
 		)
-		.bind::<sql_types::Uuid, _>(server_id)
-		.bind::<sql_types::Text, _>(CANOPY_SOURCE)
-		.bind::<sql_types::Text, _>(REACHABILITY_REF)
-		.execute(&mut conn)
 		.await
 		.expect("silence reachability");
 

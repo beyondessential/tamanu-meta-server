@@ -59,10 +59,19 @@ New sources default to `on` and `allow`. A source that isn't ingested (`ignore` 
 A check's name is a category, not an instance.
 It names the condition being checked, and it is the unit an operator configures once and then reasons about across the whole fleet.
 
-A check reported for an application is catalogued under the application's type together with the reported name, as `<type>.<check>`, so two types reporting the same name are two entries rather than one.
-A check reported for a machine has no type to qualify it and is catalogued under the name alone.
+A check's identity is the source that reports it, the namespace it belongs to, and its name.
+The namespace is a field of its own beside the name, and it takes one of three shapes.
+A check reported for an application belongs to the reporting application's type, so two types reporting the same name are two entries rather than one.
+A check reported for a machine belongs to the machine namespace, there being no application type to distinguish it by.
+A check from a source Canopy curates itself is flat: those names are Canopy's own and mean one thing fleet-wide.
 
-The qualification is derived from where a check was filed rather than asserted alongside it, so a reporter needs no knowledge of the scheme and the two cannot fall out of step.
+An entry whose namespace is an application type presents as `<type>.<check>`, and every other entry as its name alone.
+That is how an entry reads and not how it is held: the namespace is never concatenated into the name, and an address for a check carries the namespace as a part of its own.
+
+A namespace is derived from where a check was filed rather than asserted alongside it, so a reporter needs no knowledge of the scheme and the two cannot fall out of step.
+
+An address naming only a source and a check name resolves to the one entry it can mean.
+Where several entries share that source and name, Canopy asks which was meant rather than picking one.
 
 Anything that varies between instances of the same condition — which backup configuration, which restore intent, which certificate — belongs in the check's detail, and never in its name.
 Detail is where policy rules read from, so an operator can grade or silence one instance differently from the rest without a catalog entry for each.
@@ -96,7 +105,7 @@ The observed result is always recorded as reported; everything Canopy acts on �
 Policy is a transformation of results: for each check it maps the observed result to the effective one.
 There is one vocabulary on both sides — policy speaks in results, and what a source is told about its checks is the policy itself, not a projection of it.
 
-Fleet-wide policy lives in a catalog keyed by (source, check).
+Fleet-wide policy lives in a catalog keyed by a check's identity, so an operator grades one application type's check without touching another type's check of the same name.
 An entry carries:
 
 - a **ceiling** — the maximum effective result, on the urgency ordering: a ceiling of `failed` changes nothing, `warning` grades failures as warnings, `passed` means recorded but never alerting, and `skipped` additionally tells the source not to bother running the check.
@@ -130,9 +139,13 @@ A silence that quiets a check in one of those and not the others is a defect rat
 Silencing a check everywhere is not a silence but the check's own ceiling in the fleet catalog, so no scope above the group is offered as one.
 A silence is per target and records who set it; a fleet-wide decision is a policy the catalog holds.
 
+A silence names a check, so it names that check's namespace: quieting one application type's check leaves another type's check of the same name alerting.
+A silence on a target that is itself of one type needs no namespace stated, the target supplying it.
+A group spans several types, so a group silence states which type's check it quiets.
+
 ## Documentation
 
-Each catalogued (source, check) can carry operator-authored documentation: a single markdown document.
+Each catalogued check can carry operator-authored documentation: a single markdown document.
 By convention it covers three things — a general description of what the check observes, what each result means (what makes it fail as opposed to warn), and hints for solving a failure — and the editor seeds new documentation with a template of those sections; Canopy attaches no meaning to the document's structure.
 Operators author and edit the documentation in the operator UI; it is presented alongside the check wherever its state is presented, and is available over the MCP interface (see [MCP](../private-server/mcp.md)) so agents work from curated knowledge about a check rather than deriving it.
 Canopy's own checks ship with their documentation.
@@ -211,8 +224,8 @@ A target that has reported at some point presents as unreachable however long ag
 Reachability is a per-target signal about reporters that have gone quiet; check liveness is a fleet-wide signal about a catalogued check that has gone away everywhere.
 For each catalogued check Canopy tracks when it was most recently reported on any target.
 
-A (source, check) not reported anywhere for seven days is surfaced to operators as a candidate for decommissioning.
-A (source, check) not reported anywhere for thirty days raises a Canopy-wide warning (see [SELF](../private-server/self-alerts.md)).
+A catalogued check not reported anywhere for seven days is surfaced to operators as a candidate for decommissioning.
+A catalogued check not reported anywhere for thirty days raises a Canopy-wide warning (see [SELF](../private-server/self-alerts.md)).
 
 Decommissioning is an operator action, never automatic: the candidate list and the Canopy-wide warning surface what has gone away, and an operator decides.
 A decommissioned check is retired fleet-wide: its state on every target is resolved, recording decommissioning as the reason, and it then contributes to nothing — not health, not incidents, not reachability.

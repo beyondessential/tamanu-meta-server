@@ -96,6 +96,7 @@ export type ServerGroup = Solidify<Schemas["ServerGroup"]>;
 export type GroupDetail = Solidify<Schemas["GroupDetail"]>;
 export type SummaryData = Solidify<Schemas["SummaryData"]>;
 export type CheckDetailData = Solidify<Schemas["CheckDetailData"]>;
+export type NamespaceRef = Solidify<Schemas["NamespaceRef"]>;
 export type CheckDetailServerData = Solidify<
 	Schemas["CheckDetailServerData"]
 >;
@@ -417,23 +418,82 @@ export function checkResultOf(
 	return null;
 }
 
+/// A namespace as one URL segment: `-` for a curated source's unqualified
+/// entry, `machine` for the box's, `application.<type>` for one application
+/// type's.
+///
+/// The subject leads even though the type alone would usually be enough,
+/// because the type set is open: a deployment can report an application type
+/// called `machine`, and `application.machine` is still unmistakably that
+/// type rather than the box.
+export function namespaceSegment(namespace: NamespaceRef | undefined): string {
+	const subject = namespace?.subject ?? null;
+	if (subject === null) return "-";
+	if (subject === "application") {
+		return `application.${encodeURIComponent(namespace?.application_type ?? "")}`;
+	}
+	return encodeURIComponent(subject);
+}
+
+/// The namespace a URL segment names, or `null` if it names none of the three
+/// shapes an entry can have. A bad segment is a broken link to report, not one
+/// to guess at.
+export function namespaceFromSegment(segment: string): NamespaceRef | null {
+	if (segment === "-") return { subject: null, application_type: null };
+	if (segment === "machine") return { subject: "machine", application_type: null };
+	const type = segment.startsWith("application.") ? segment.slice(12) : null;
+	if (type) {
+		return { subject: "application", application_type: decodeURIComponent(type) };
+	}
+	return null;
+}
+
+/// Whether two namespace refs name the same catalog entry. An absent field
+/// and an explicit `null` are the same absence, so they compare equal.
+export function sameNamespace(a: NamespaceRef | undefined, b: NamespaceRef | undefined): boolean {
+	return (
+		(a?.subject ?? null) === (b?.subject ?? null) &&
+		(a?.application_type ?? null) === (b?.application_type ?? null)
+	);
+}
+
+/// How a check reads to an operator: `<type>.<check>` where it is one
+/// application type's, the bare name otherwise. The qualification is
+/// presentation — the name is stored on its own.
+export function qualifiedCheckName(
+	namespace: NamespaceRef | undefined,
+	check: string,
+): string {
+	return namespace?.subject === "application" && namespace.application_type
+		? `${namespace.application_type}.${check}`
+		: check;
+}
+
 /// Route to the per-healthcheck "who's affected" page for `check`. Check
 /// names are arbitrary strings reported by devices (not restricted to
 /// URL-safe characters), so every link builder must go through this
-/// instead of interpolating the name directly. A check's identity is
-/// the (source, check) pair — same-named checks from different sources
-/// are different checks.
-export function healthcheckPath(source: string, check: string): string {
-	return `/healthchecks/${encodeURIComponent(source)}/${encodeURIComponent(check)}`;
+/// instead of interpolating the name directly. A check's identity is the
+/// (source, namespace, check) triple — a same-named check from another
+/// source, or from another application type, is a different check.
+export function healthcheckPath(
+	source: string,
+	namespace: NamespaceRef | undefined,
+	check: string,
+): string {
+	return `/healthchecks/${encodeURIComponent(source)}/${namespaceSegment(namespace)}/${encodeURIComponent(check)}`;
 }
 
 /// Route to the policy editor for `check`. Like [`healthcheckPath`], a
-/// check's identity is the (source, check) pair — the editor is scoped to
-/// one such pair, so every link builder must carry the source and go
+/// check's identity is the (source, namespace, check) triple — the editor is
+/// scoped to one such entry, so every link builder must carry all three and go
 /// through this instead of interpolating the (arbitrary, not necessarily
 /// URL-safe) name directly.
-export function healthcheckSettingsPath(source: string, check: string): string {
-	return `/settings/healthchecks/${encodeURIComponent(source)}/${encodeURIComponent(check)}`;
+export function healthcheckSettingsPath(
+	source: string,
+	namespace: NamespaceRef | undefined,
+	check: string,
+): string {
+	return `/settings/healthchecks/${encodeURIComponent(source)}/${namespaceSegment(namespace)}/${encodeURIComponent(check)}`;
 }
 
 /// Route to the Sources page — the per-source reachability/ingest policy
@@ -465,6 +525,20 @@ export const RESERVED_SOURCES = ["canopy", "manual"];
 /// ref silently fails to match an existing silence.
 export function silenceRef(source: string, check: string): string {
 	return RESERVED_SOURCES.includes(source) ? check : `health/${check}`;
+}
+
+/// A silence ref as it reads to an operator: the `health/` prefix, where the
+/// source has one, then the qualified check name. Two application types
+/// silenced for one check name are two rows, and only the qualifier tells
+/// them apart.
+export function qualifiedSilenceRef(
+	namespace: NamespaceRef | undefined,
+	ref: string,
+): string {
+	const slash = ref.indexOf("/");
+	const prefix = slash === -1 ? "" : ref.slice(0, slash + 1);
+	const check = slash === -1 ? ref : ref.slice(slash + 1);
+	return `${prefix}${qualifiedCheckName(namespace, check)}`;
 }
 
 /// Canopy's per-server reachability check, with the ref its silence is

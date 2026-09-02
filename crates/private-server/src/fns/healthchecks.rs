@@ -8,7 +8,7 @@ use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
-use commons_types::namespace::is_reserved;
+use commons_types::namespace::{Namespace, NamespaceRef, is_reserved};
 use commons_types::source::{IngestMode, ReachabilityMode};
 use commons_types::status::CheckResult;
 use database::applications::Application;
@@ -45,7 +45,16 @@ pub struct CheckPolicyData {
 	/// The source that reports this check.
 	pub source: String,
 	/// The healthcheck's name, exactly as reported by monitored applications.
+	/// Two application types reporting this name are two entries, told apart
+	/// by `namespace`.
 	pub check_name: String,
+	/// Which catalog entry this is: the box's, one application type's, or a
+	/// curated source's unqualified one. Send it back verbatim to name this
+	/// entry in an edit.
+	pub namespace: NamespaceRef,
+	/// How the entry reads to an operator: `<type>.<check>` where it is one
+	/// application type's, the bare name otherwise.
+	pub qualified_name: String,
 	/// The maximum effective result for this check when no conditional
 	/// rule (see `rules`) overrides it: an observed result more urgent
 	/// than the ceiling grades down to it. One of `failed`, `warning`,
@@ -120,6 +129,13 @@ pub struct CheckPolicyData {
 	pub rule_count: u32,
 }
 
+/// The namespace a request names, refused if the pair is not one of the three
+/// shapes a catalog entry can have. A request naming a shape the schema will
+/// not store is a mistake to report, not one to interpret.
+fn namespace_of(r: &NamespaceRef) -> Result<Namespace> {
+	Namespace::try_from(r).map_err(|e| AppError::BadRequest(e.to_string()))
+}
+
 fn rule_count(rules: &Option<JsonValue>) -> u32 {
 	let Some(v) = rules else { return 0 };
 	serde_json::from_value::<IfLadder>(v.clone())
@@ -131,9 +147,16 @@ impl From<CheckPolicy> for CheckPolicyData {
 	fn from(h: CheckPolicy) -> Self {
 		let pending_review = h.reviewed_at.is_none();
 		let rule_count = rule_count(&h.rules);
+		let qualified_name = h.qualified_name();
+		let namespace = NamespaceRef {
+			subject: h.subject,
+			application_type: h.application_type,
+		};
 		Self {
 			source: h.source,
 			check_name: h.check_name,
+			namespace,
+			qualified_name,
 			ceiling: h.ceiling,
 			escalates: h.escalates,
 			first_seen: h.first_seen,
@@ -328,6 +351,10 @@ pub struct HealthcheckUpdateArgs {
 	/// The healthcheck name to update; must already exist in the
 	/// catalog.
 	pub check_name: String,
+	/// Which catalog entry is meant, as returned in the entry's `namespace`.
+	/// Omitted is the unqualified namespace a curated source's checks live in.
+	#[serde(default)]
+	pub namespace: NamespaceRef,
 	/// The ceiling to apply to this check's observed results when no
 	/// conditional rule overrides it: one of `failed`, `warning`,
 	/// `passed`, or `skipped`.
@@ -381,6 +408,7 @@ pub async fn update(
 	let row = CheckPolicy::update(
 		&mut conn,
 		&args.source,
+		&namespace_of(&args.namespace)?,
 		&args.check_name,
 		args.ceiling,
 		args.escalates,
@@ -399,6 +427,10 @@ pub struct DecommissionArgs {
 	/// The healthcheck name to decommission; must already exist in the
 	/// catalog.
 	pub check_name: String,
+	/// Which catalog entry is meant, as returned in the entry's `namespace`.
+	/// Omitted is the unqualified namespace a curated source's checks live in.
+	#[serde(default)]
+	pub namespace: NamespaceRef,
 }
 
 /// Decommission a check fleet-wide.
@@ -427,7 +459,14 @@ pub async fn decommission(
 	Json(args): Json<DecommissionArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	CheckPolicy::decommission(&mut conn, &args.source, &args.check_name, &admin.0.login).await?;
+	CheckPolicy::decommission(
+		&mut conn,
+		&args.source,
+		&namespace_of(&args.namespace)?,
+		&args.check_name,
+		&admin.0.login,
+	)
+	.await?;
 	Ok(Json(()))
 }
 
@@ -439,6 +478,10 @@ pub struct UpdateDocumentationArgs {
 	/// The healthcheck name to document; must already exist in the
 	/// catalog.
 	pub check_name: String,
+	/// Which catalog entry is meant, as returned in the entry's `namespace`.
+	/// Omitted is the unqualified namespace a curated source's checks live in.
+	#[serde(default)]
+	pub namespace: NamespaceRef,
 	/// The new markdown document, or `null` (or blank) to clear it.
 	#[serde(default)]
 	pub documentation: Option<String>,
@@ -474,9 +517,14 @@ pub async fn update_documentation(
 		.map(str::trim)
 		.filter(|d| !d.is_empty());
 	let mut conn = state.db.get().await?;
-	let row =
-		CheckPolicy::update_documentation(&mut conn, &args.source, &args.check_name, documentation)
-			.await?;
+	let row = CheckPolicy::update_documentation(
+		&mut conn,
+		&args.source,
+		&namespace_of(&args.namespace)?,
+		&args.check_name,
+		documentation,
+	)
+	.await?;
 	Ok(Json(row.into()))
 }
 
@@ -488,6 +536,10 @@ pub struct UpdateRulesArgs {
 	/// The healthcheck name whose rules to replace; must already exist
 	/// in the catalog.
 	pub check_name: String,
+	/// Which catalog entry is meant, as returned in the entry's `namespace`.
+	/// Omitted is the unqualified namespace a curated source's checks live in.
+	#[serde(default)]
+	pub namespace: NamespaceRef,
 	/// The new conditional rules to store, or `null` to remove all
 	/// conditional rules and rely solely on the ceiling. Same shape as
 	/// the `rules` field returned when listing checks. A ladder with no
@@ -541,6 +593,7 @@ pub async fn update_rules(
 	let row = CheckPolicy::update_rules(
 		&mut conn,
 		&args.source,
+		&namespace_of(&args.namespace)?,
 		&args.check_name,
 		ladder.as_ref(),
 		&admin.0.login,
@@ -558,6 +611,10 @@ pub struct SampleArgs {
 	pub source: String,
 	/// The healthcheck name to sample.
 	pub check_name: String,
+	/// Which catalog entry is meant, as returned in the entry's `namespace`.
+	/// Omitted is the unqualified namespace a curated source's checks live in.
+	#[serde(default)]
+	pub namespace: NamespaceRef,
 }
 
 /// A real-world sample of the data a conditional rule can reference for a
@@ -622,8 +679,17 @@ pub async fn sample(
 	Json(args): Json<SampleArgs>,
 ) -> Result<Json<HealthcheckSampleResponse>> {
 	let mut conn = state.db.get().await?;
-	let Some(status) =
-		Status::latest_for_check_name(&mut conn, &args.source, &args.check_name).await?
+	// Sampled from a push by an application of the entry's own type: another
+	// type's same-named check carries different fields, and a rule written
+	// against those would grade nothing.
+	let namespace = namespace_of(&args.namespace)?;
+	let Some(status) = Status::latest_for_check_name(
+		&mut conn,
+		&args.source,
+		&args.check_name,
+		namespace.application_type(),
+	)
+	.await?
 	else {
 		return Ok(Json(HealthcheckSampleResponse {
 			check_name: args.check_name,

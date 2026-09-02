@@ -38,6 +38,8 @@ import {
 	SERVER_RANK_ORDER,
 	compareServersByRankThenType,
 	healthcheckSettingsPath,
+	namespaceFromSegment,
+	qualifiedCheckName,
 	type CheckDetailData,
 	type CheckDetailGroupData,
 	type CheckDetailServerData,
@@ -48,8 +50,8 @@ import {
 
 const HEALTHY_RESULTS: readonly string[] = ["passed", "skipped"];
 
-/// Detail page for a single healthcheck — one (source, check), since
-/// that pair is the check's identity. Three sections: the operator
+/// Detail page for a single healthcheck — one (source, namespace, check),
+/// since that triple is the check's identity. Three sections: the operator
 /// documentation, the check's fleet-wide stability rollup, and the
 /// needs-attention list — every live server whose *current* state from
 /// that source flags it, most urgent first, with the servers reporting
@@ -59,16 +61,30 @@ const HEALTHY_RESULTS: readonly string[] = ["passed", "skipped"];
 /// Linked from wherever a check name shows up — server detail, issue
 /// rows, and the healthchecks settings catalog.
 export default function CheckDetail() {
-	const { source, check } = useParams<{ source: string; check: string }>();
-	usePageTitle(check ?? "Healthcheck");
+	const { source, namespace: segment, check } = useParams<{
+		source: string;
+		namespace: string;
+		check: string;
+	}>();
+	const namespace = namespaceFromSegment(segment ?? "-");
+	const title = qualifiedCheckName(namespace ?? undefined, check ?? "");
+	usePageTitle(title || "Healthcheck");
 	const tick = useReloadInterval(30_000, "canopy-data-changed");
 	const [showHealthy, setShowHealthy] = useState(false);
 	const result = useApi(
 		"statuses",
 		"check_detail",
-		{ source: source ?? "", check: check ?? "" },
-		[source, check, tick],
+		{ source: source ?? "", namespace: namespace ?? {}, check: check ?? "" },
+		[source, segment, check, tick],
 	);
+
+	if (!namespace) {
+		return (
+			<Alert severity="error">
+				<code>{segment}</code> is not a check namespace.
+			</Alert>
+		);
+	}
 
 	return (
 		<Stack spacing={2}>
@@ -78,7 +94,7 @@ export default function CheckDetail() {
 				</Typography>
 				<Stack direction="row" spacing={1} sx={{ alignItems: "center", mt: 0.5 }}>
 					<Typography variant="h6" component="h2" sx={{ fontFamily: "monospace" }}>
-						{check}
+						{title}
 					</Typography>
 					<Typography variant="body2" color="text.secondary">
 						reported by {source}
@@ -99,7 +115,7 @@ export default function CheckDetail() {
 				<Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
 					<MuiLink
 						component={RouterLink}
-						to={healthcheckSettingsPath(source ?? "", check ?? "")}
+						to={healthcheckSettingsPath(source ?? "", namespace, check ?? "")}
 					>
 						Configure ceiling / rules / documentation
 					</MuiLink>

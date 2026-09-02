@@ -16,7 +16,7 @@ test.describe("healthcheck settings page", () => {
 			ceiling: "warning",
 		});
 
-		await page.goto("/settings/healthchecks/alertd/caddy_version");
+		await page.goto("/settings/healthchecks/alertd/machine/caddy_version");
 
 		// The link used to be rendered twice (a copy-paste bug). There must be
 		// exactly one, and it must carry the source in its href — the "who's
@@ -27,7 +27,7 @@ test.describe("healthcheck settings page", () => {
 		await expect(links).toHaveCount(1);
 		await expect(links).toHaveAttribute(
 			"href",
-			"/healthchecks/alertd/caddy_version",
+			"/healthchecks/alertd/machine/caddy_version",
 		);
 	});
 
@@ -50,7 +50,7 @@ test.describe("healthcheck settings page", () => {
 
 		// The alertd page shows only alertd's entry (its warning ceiling),
 		// not a lumped-together view of both sources.
-		await page.goto("/settings/healthchecks/alertd/version");
+		await page.goto("/settings/healthchecks/alertd/application.tamanu-central/version");
 		await expect(page.getByText("source: alertd")).toBeVisible();
 		await expect(page.getByText("source: bestool")).toHaveCount(0);
 		await expect(
@@ -60,7 +60,7 @@ test.describe("healthcheck settings page", () => {
 		).toHaveCount(1);
 
 		// The bestool page is a separate, independently-addressable editor.
-		await page.goto("/settings/healthchecks/bestool/version");
+		await page.goto("/settings/healthchecks/bestool/application.tamanu-central/version");
 		await expect(page.getByText("source: bestool")).toBeVisible();
 		await expect(page.getByText("source: alertd")).toHaveCount(0);
 	});
@@ -77,7 +77,7 @@ test.describe("healthcheck settings page", () => {
 			ceiling: "failed",
 		});
 
-		await page.goto("/settings/healthchecks/alertd/caddy_version");
+		await page.goto("/settings/healthchecks/alertd/machine/caddy_version");
 
 		// The escalate toggle is an interactive, enabled switch for admins
 		// (non-admins get a read-only chip instead). MUI's Switch is exposed
@@ -104,7 +104,7 @@ test.describe("healthcheck settings page", () => {
 			ceiling: "warning",
 		});
 
-		await page.goto("/settings/healthchecks/alertd/caddy_version");
+		await page.goto("/settings/healthchecks/alertd/machine/caddy_version");
 		const escalate = page.getByRole("switch", { name: /Escalates/ });
 		await expect(escalate).toBeDisabled();
 

@@ -11,6 +11,7 @@ import NotificationsActiveOutlinedIcon from "@mui/icons-material/NotificationsAc
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
+import { qualifiedSilenceRef, namespaceSegment, type NamespaceRef } from "../types";
 import TimeAgo from "./TimeAgo";
 
 /// Listed at the bottom of the server / group detail page. Renders the
@@ -96,10 +97,13 @@ export default function SilencedRefsSection({
 			<Stack spacing={1}>
 				{rows.map((row) => (
 					<SilencedRow
-						key={`${row.source}\x00${row.ref}`}
+						key={`${row.source}\x00${namespaceSegment(
+							"namespace" in row ? row.namespace : undefined,
+						)}\x00${row.ref}`}
 						scope={scope}
 						id={id}
 						source={row.source}
+						namespace={"namespace" in row ? row.namespace : null}
 						refName={row.ref}
 						createdAt={row.created_at}
 						createdBy={row.created_by ?? null}
@@ -140,6 +144,7 @@ function SilencedRow({
 	scope,
 	id,
 	source,
+	namespace,
 	refName,
 	createdAt,
 	createdBy,
@@ -149,6 +154,10 @@ function SilencedRow({
 	scope: "server" | "machine" | "group";
 	id: string;
 	source: string;
+	/** Which catalog entry a group-scoped silence quiets. A group spans
+	 * several application types, so the ref alone does not say. A server's
+	 * or machine's own silences need none: the target fixes the namespace. */
+	namespace: NamespaceRef | null;
 	refName: string;
 	createdAt: string;
 	createdBy: string | null;
@@ -177,6 +186,7 @@ function SilencedRow({
 					server_group_id: id,
 					source,
 					ref: refName,
+					application_type: namespace?.application_type ?? null,
 				});
 			}
 			onChanged();
@@ -204,7 +214,7 @@ function SilencedRow({
 					component="code"
 					sx={{ fontFamily: "monospace", fontWeight: 500 }}
 				>
-					{source}/{refName}
+					{source}/{qualifiedSilenceRef(namespace ?? undefined, refName)}
 				</Typography>
 				<Box sx={{ flex: 1 }} />
 				<Typography variant="caption" color="text.secondary">

@@ -4,6 +4,7 @@ use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::Uuid;
+use commons_types::server::app_type::ApplicationType;
 use database::silenced_refs::{MachineSilencedRef, ServerGroupSilencedRef, ServerSilencedRef};
 use serde::Deserialize;
 use utoipa::ToSchema;
@@ -84,6 +85,13 @@ pub struct SilenceGroupArgs {
 	/// The specific issue identifier within `source` to silence.
 	#[serde(rename = "ref")]
 	pub r#ref: String,
+	/// Which application type's check is meant, for a check named by an
+	/// application rather than by a box. A group covers several types, so the
+	/// caller names the one it is silencing from; `null` is a machine's check
+	/// or a curated source's.
+	#[serde(default)]
+	#[schema(value_type = Option<String>)]
+	pub application_type: Option<ApplicationType>,
 }
 
 /// List server-scoped silences for a server.
@@ -228,6 +236,7 @@ pub async fn silence_group(
 		args.server_group_id,
 		&args.source,
 		&args.r#ref,
+		args.application_type.as_ref(),
 		Some(&admin.0.login),
 	)
 	.await?;
@@ -255,8 +264,14 @@ pub async fn unsilence_group(
 	Json(args): Json<SilenceGroupArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	ServerGroupSilencedRef::remove(&mut conn, args.server_group_id, &args.source, &args.r#ref)
-		.await?;
+	ServerGroupSilencedRef::remove(
+		&mut conn,
+		args.server_group_id,
+		&args.source,
+		&args.r#ref,
+		args.application_type.as_ref(),
+	)
+	.await?;
 	Ok(Json(()))
 }
 

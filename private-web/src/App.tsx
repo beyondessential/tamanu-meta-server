@@ -35,6 +35,7 @@ import GroupDetail from "./routes/GroupDetail";
 import GroupEdit from "./routes/GroupEdit";
 import GroupsList from "./routes/GroupsList";
 import CheckDetail from "./routes/CheckDetail";
+import CheckRedirect from "./routes/CheckRedirect";
 import HealthcheckSettings from "./routes/HealthcheckSettings";
 import Healthchecks from "./routes/Healthchecks";
 import SourcesSettings from "./routes/SourcesSettings";
@@ -197,7 +198,14 @@ export default function App() {
 					<Route path="/alerts" element={<SelfAlerts />} />
 					<Route path="/incidents" element={<Incidents />} />
 					<Route path="/incidents/:id" element={<IncidentDetail />} />
-					<Route path="/healthchecks/:source/:check" element={<CheckDetail />} />
+					<Route
+						path="/healthchecks/:source/:namespace/:check"
+						element={<CheckDetail />}
+					/>
+					<Route
+						path="/healthchecks/:source/:check"
+						element={<CheckRedirect settings={false} />}
+					/>
 					<Route path="/upgrades" element={<Upgrades />} />
 					<Route path="/maintenance" element={<Maintenance />} />
 					<Route path="/versions" element={<Versions />} />
@@ -240,8 +248,12 @@ export default function App() {
 							element={<SourcesSettings />}
 						/>
 						<Route
-							path="healthchecks/:source/:checkName"
+							path="healthchecks/:source/:namespace/:checkName"
 							element={<HealthcheckSettings />}
+						/>
+						<Route
+							path="healthchecks/:source/:check"
+							element={<CheckRedirect settings />}
 						/>
 						<Route path="restore-consumers" element={<RestoreConsumers />} />
 						<Route path="mcp-tokens" element={<McpTokens />} />

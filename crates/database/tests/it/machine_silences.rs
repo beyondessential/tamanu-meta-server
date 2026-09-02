@@ -167,6 +167,8 @@ async fn a_group_silence_covers_a_machine_in_it() {
 			group,
 			SOURCE,
 			REF,
+			// `disk_free` is the box's check, so there is no type to name.
+			None,
 			Some("op"),
 		)
 		.await

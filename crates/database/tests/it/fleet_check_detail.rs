@@ -2,7 +2,10 @@
 //! per-check bag of fields, which is what a `check.field` fleet lookup reads.
 
 use commons_types::status::CheckResult;
+use database::check_policies::ScopedCheckPolicy;
 use database::issues::{CheckFiling, Scope, check_detail_by_server, file_check};
+
+use crate::helpers::app_ns;
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::RunQueryDsl;
 use serde_json::json;
@@ -147,12 +150,14 @@ async fn silenced_reads_skipped_and_decommissioned_is_absent() {
 		.await
 		.expect("file");
 
-		sql_query(
-			"INSERT INTO scoped_check_policies (application_id, source, check_name, ceiling, created_by) \
-			 VALUES ($1, 'alertd', 'hushed', 'skipped', 'op')",
+		ScopedCheckPolicy::silence(
+			&mut conn,
+			Scope::Application(server_id),
+			"alertd",
+			&app_ns(),
+			"hushed",
+			Some("op"),
 		)
-		.bind::<sql_types::Uuid, _>(server_id)
-		.execute(&mut conn)
 		.await
 		.expect("silence");
 		sql_query(

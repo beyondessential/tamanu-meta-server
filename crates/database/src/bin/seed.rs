@@ -17,6 +17,7 @@ use commons_types::{
 	device::DeviceRole,
 	geo::GeoPoint,
 	issue::ResolvedReason,
+	namespace::Namespace,
 	server::{TagMap, app_type::ApplicationType, rank::ServerRank},
 	status::CheckResult,
 	version::{VersionStatus, VersionStr},
@@ -318,48 +319,62 @@ async fn seed_known_issues(conn: &mut AsyncPgConnection) -> Result<()> {
 /// Seed the healthcheck-severity catalog: a few reviewed entries, an
 /// unreviewed default, and one carrying a conditional rules ladder.
 async fn seed_healthchecks(conn: &mut AsyncPgConnection, admins: &[String]) -> Result<()> {
+	// None of these is a machine-subject name, so each is one catalog entry per
+	// application type reporting it — which is what the seeded fleet looks like.
+	let namespaces = [
+		Namespace::Application(ApplicationType::TamanuCentral),
+		Namespace::Application(ApplicationType::TamanuFacility),
+	];
+
 	// upsert_default creates rows at the default severity (warning, unreviewed).
-	for check in [
-		"database_connectivity",
-		"disk_space",
-		"sync_lag",
-		"certificate_expiry",
-		"backup_freshness",
-	] {
-		CheckPolicy::upsert_default(conn, "alertd", check).await?;
+	for ns in &namespaces {
+		for check in [
+			"database_connectivity",
+			"disk_space",
+			"sync_lag",
+			"certificate_expiry",
+			"backup_freshness",
+		] {
+			CheckPolicy::upsert_default(conn, "alertd", ns, check).await?;
+		}
 	}
 
 	let reviewer = &admins[0];
-	CheckPolicy::update(
-		conn,
-		"alertd",
-		"database_connectivity",
-		CheckResult::Failed,
-		true,
-		Some("DB down means the server is effectively offline."),
-		reviewer,
-	)
-	.await?;
-	CheckPolicy::update(
-		conn,
-		"alertd",
-		"disk_space",
-		CheckResult::Failed,
-		false,
-		Some("Page when disk is critically low."),
-		reviewer,
-	)
-	.await?;
-	CheckPolicy::update(
-		conn,
-		"alertd",
-		"backup_freshness",
-		CheckResult::Passed,
-		false,
-		None,
-		reviewer,
-	)
-	.await?;
+	for ns in &namespaces {
+		CheckPolicy::update(
+			conn,
+			"alertd",
+			ns,
+			"database_connectivity",
+			CheckResult::Failed,
+			true,
+			Some("DB down means the server is effectively offline."),
+			reviewer,
+		)
+		.await?;
+		CheckPolicy::update(
+			conn,
+			"alertd",
+			ns,
+			"disk_space",
+			CheckResult::Failed,
+			false,
+			Some("Page when disk is critically low."),
+			reviewer,
+		)
+		.await?;
+		CheckPolicy::update(
+			conn,
+			"alertd",
+			ns,
+			"backup_freshness",
+			CheckResult::Passed,
+			false,
+			None,
+			reviewer,
+		)
+		.await?;
+	}
 
 	// A conditional rules ladder: grade sync_lag by how far behind it is.
 	use database::check_policies::{Condition, IfLadder, Var};
@@ -381,7 +396,9 @@ async fn seed_healthchecks(conn: &mut AsyncPgConnection, admins: &[String]) -> R
 			),
 		],
 	};
-	CheckPolicy::update_rules(conn, "alertd", "sync_lag", Some(&ladder), reviewer).await?;
+	for ns in &namespaces {
+		CheckPolicy::update_rules(conn, "alertd", ns, "sync_lag", Some(&ladder), reviewer).await?;
+	}
 
 	Ok(())
 }
@@ -1285,6 +1302,7 @@ async fn seed_silences(
 		groups.demo,
 		"healthcheck",
 		"backup_freshness",
+		Some(&ApplicationType::TamanuFacility),
 		Some(&admins[0]),
 	)
 	.await?;

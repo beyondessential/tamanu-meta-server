@@ -1,6 +1,9 @@
+use commons_types::namespace::Namespace;
+use commons_types::server::app_type::ApplicationType;
 use commons_types::source::{IngestMode, ReachabilityMode};
 use commons_types::status::CheckResult;
 use database::{
+	check_policies::CheckPolicy,
 	issues::Issue,
 	source_policies::SourcePolicy,
 	statuses::{CANOPY_SOURCE, REACHABILITY_REF, Status},
@@ -145,15 +148,16 @@ async fn insert_check_state(
 	check: &str,
 	minutes_ago: i32,
 ) {
-	// Mirror ingestion's upsert_default: a check-state only keeps its source
-	// "expected" for reachability if a live catalog row backs it.
-	sql_query(
-		"INSERT INTO check_policies (source, check_name) VALUES ($1, $2) \
-		 ON CONFLICT (source, check_name) DO NOTHING",
+	// Go through ingestion's own upsert rather than reproducing it: a
+	// check-state only keeps its source "expected" for reachability if a live
+	// catalog row backs it, and the row has to land in the namespace ingest
+	// would have put it in. Every server here is a tamanu-central.
+	CheckPolicy::upsert_default(
+		conn,
+		source,
+		&Namespace::for_application(source, check, &ApplicationType::TamanuCentral),
+		check,
 	)
-	.bind::<sql_types::Text, _>(source)
-	.bind::<sql_types::Text, _>(check)
-	.execute(conn)
 	.await
 	.expect("catalog the seeded check");
 	sql_query(

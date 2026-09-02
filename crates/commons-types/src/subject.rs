@@ -234,4 +234,33 @@ mod tests {
 			 check would land in different namespaces"
 		);
 	}
+
+	/// The Playwright seeds carry their own copy too, because they write the
+	/// rows ingestion would have written and cannot call this list from
+	/// TypeScript.
+	///
+	/// A name here and not there would have a spec seeding a catalog entry in
+	/// one namespace while the server files the check into another, so the
+	/// page under test reads a row nothing reports into and the failure looks
+	/// like a UI bug.
+	#[test]
+	fn the_e2e_seed_snapshot_matches_the_subject_list() {
+		let ts = include_str!("../../../private-web/e2e/seed.ts");
+		let array = ts
+			.split_once("const MACHINE_SUBJECT_CHECKS = [")
+			.expect("the e2e seed no longer snapshots the machine list")
+			.1
+			.split_once("];")
+			.expect("the snapshot has no terminator")
+			.0;
+
+		let snapshot: Vec<&str> = array.split('"').skip(1).step_by(2).collect();
+
+		assert_eq!(
+			snapshot, MACHINE_SUBJECT_CHECKS,
+			"the e2e seed's machine-check snapshot has drifted from the list \
+			 ingest uses, so a seeded catalog entry and the check the server \
+			 files would land in different namespaces"
+		);
+	}
 }

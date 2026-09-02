@@ -8,6 +8,7 @@
 use std::collections::BTreeSet;
 
 use commons_tests::db::TestDb;
+use commons_types::server::app_type::ApplicationType;
 use database::silenced_refs::{
 	ServerGroupSilencedRef, ServerSilencedRef, silenced_health_checks_for_server,
 };
@@ -71,9 +72,16 @@ async fn combines_server_and_group_scopes() {
 		ServerSilencedRef::add(&mut conn, ungrouped, "alertd", "health/disk", None)
 			.await
 			.unwrap();
-		ServerGroupSilencedRef::add(&mut conn, group, "alertd", "health/uploads", None)
-			.await
-			.unwrap();
+		ServerGroupSilencedRef::add(
+			&mut conn,
+			group,
+			"alertd",
+			"health/uploads",
+			Some(&ApplicationType::TamanuCentral),
+			None,
+		)
+		.await
+		.unwrap();
 
 		// Application scope and group scope combine for the grouped server.
 		assert_eq!(

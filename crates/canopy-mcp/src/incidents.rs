@@ -80,6 +80,12 @@ pub struct CheckDocArgs {
 struct CheckDocOut {
 	source: String,
 	check_name: String,
+	/// How the check presents: `<type>.<check>` where it is one application
+	/// type's, the bare name otherwise.
+	qualified_name: String,
+	/// The application type this entry is for, or `null` where the check is the
+	/// machine's or a curated source's.
+	application_type: Option<String>,
 	ceiling: CheckResult,
 	escalates: bool,
 	/// Operator-authored markdown, or `null` if nobody has documented
@@ -617,22 +623,41 @@ impl CanopyMcp {
 	) -> Result<CallToolResult, McpError> {
 		use database::check_policies::CheckPolicy;
 		let mut conn = self.conn().await?;
-		let Some(policy) = CheckPolicy::get(&mut conn, &args.source, &args.check_name)
-			.await
-			.map_err(mcp_err)?
-		else {
+		// A name can be several entries: an application-subject check is one per
+		// type, each with its own ceiling and documentation. Return them all
+		// rather than picking one, so the caller sees what it is choosing between.
+		let policies =
+			CheckPolicy::get_across_namespaces(&mut conn, &args.source, &args.check_name)
+				.await
+				.map_err(mcp_err)?;
+		if policies.is_empty() {
 			return Ok(not_found(format!(
 				"no catalog entry for ({}, {}) — that source has never reported that check",
 				args.source, args.check_name
 			)));
-		};
-		ok_json(&CheckDocOut {
-			source: policy.source,
-			check_name: policy.check_name,
-			ceiling: policy.ceiling,
-			escalates: policy.escalates,
-			documentation: policy.documentation,
-		})
+		}
+		let out: Vec<CheckDocOut> = policies
+			.into_iter()
+			.map(|policy| {
+				let namespace = policy.namespace().ok();
+				CheckDocOut {
+					qualified_name: namespace.as_ref().map_or_else(
+						|| policy.check_name.clone(),
+						|ns| ns.qualified_name(&policy.check_name),
+					),
+					application_type: namespace
+						.as_ref()
+						.and_then(|ns| ns.application_type())
+						.map(|t| t.to_string()),
+					source: policy.source,
+					check_name: policy.check_name,
+					ceiling: policy.ceiling,
+					escalates: policy.escalates,
+					documentation: policy.documentation,
+				}
+			})
+			.collect();
+		ok_json(&out)
 	}
 
 	#[tool(

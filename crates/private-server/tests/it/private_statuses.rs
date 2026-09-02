@@ -1000,7 +1000,7 @@ async fn snapshot_returns_latest_when_at_omitted() {
 		.await
 		.unwrap();
 		conn.batch_execute(
-			"INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'db');
+			"INSERT INTO check_policies (source, subject, application_type, check_name) VALUES ('alertd', 'application', 'tamanu-central', 'db');
 
 			INSERT INTO statuses (server_id, created_at, healthy, health) VALUES
 			('20000000-0000-0000-0000-000000000001', NOW() - INTERVAL '2 hours', true, '[]'::jsonb),
@@ -1181,8 +1181,8 @@ async fn fleet_detail_carries_healthcheck_fields() {
 			('50000000-0000-0000-0000-000000000001', 'checked', 'https://checked.example.com', 'tamanu-central', '50000000-0000-0000-0000-000000000001'),
 			('50000000-0000-0000-0000-000000000002', 'unchecked', 'https://unchecked.example.com', 'tamanu-central', '50000000-0000-0000-0000-000000000002');
 
-			INSERT INTO check_policies (source, check_name) VALUES
-			('alertd', 'diskspace');
+			INSERT INTO check_policies (source, subject, application_type, check_name) VALUES
+			('alertd', 'application', 'tamanu-central', 'diskspace');
 
 			INSERT INTO issues (application_id, source, ref, check_name, observed_result, effective_result, detail, message, active) VALUES
 			('50000000-0000-0000-0000-000000000001', 'alertd', 'health/diskspace', 'diskspace',
@@ -1312,7 +1312,7 @@ async fn snapshot_at_time_returns_prior_row() {
 		conn.batch_execute(
 			"WITH m AS (INSERT INTO machines (id) VALUES ('20000000-0000-0000-0000-000000000002') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
 			('20000000-0000-0000-0000-000000000002', 'https://snap2.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000002');
-			INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'old'), ('alertd', 'mid'), ('alertd', 'new')",
+			INSERT INTO check_policies (source, subject, application_type, check_name) VALUES ('alertd', 'application', 'tamanu-central', 'old'), ('alertd', 'application', 'tamanu-central', 'mid'), ('alertd', 'application', 'tamanu-central', 'new')",
 		)
 		.await
 		.unwrap();
@@ -1612,7 +1612,7 @@ async fn check_detail_excludes_ungrouped_and_archived_servers() {
 async fn check_detail_returns_catalog_policy_and_ignores_non_matching_check() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO check_policies (source, check_name, ceiling) VALUES ('alertd', 'postgres', 'failed');
+			"INSERT INTO check_policies (source, subject, application_type, check_name, ceiling) VALUES ('alertd', 'application', 'tamanu-central', 'postgres', 'failed');
 			WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
 			('11111111-1111-1111-1111-111111111111', 'Failing Application', 'https://failing.example.com', 'production', 'tamanu-central', '11111111-1111-1111-1111-111111111111');
 			INSERT INTO issues (application_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
@@ -1624,7 +1624,11 @@ async fn check_detail_returns_catalog_policy_and_ignores_non_matching_check() {
 		// The check this server is actually failing.
 		let r = private
 			.post("/api/statuses/check_detail")
-			.json(&serde_json::json!({"source": "alertd", "check": "postgres"}))
+			.json(&serde_json::json!({
+				"source": "alertd",
+				"namespace": {"subject": "application", "application_type": "tamanu-central"},
+				"check": "postgres",
+			}))
 			.await;
 		r.assert_status_ok();
 		let data: CheckDetailResponse = r.json();
@@ -1635,7 +1639,11 @@ async fn check_detail_returns_catalog_policy_and_ignores_non_matching_check() {
 		// catalog lookup still runs (and correctly finds nothing).
 		let r = private
 			.post("/api/statuses/check_detail")
-			.json(&serde_json::json!({"source": "alertd", "check": "unrelated_check"}))
+			.json(&serde_json::json!({
+				"source": "alertd",
+				"namespace": {"subject": "application", "application_type": "tamanu-central"},
+				"check": "unrelated_check",
+			}))
 			.await;
 		r.assert_status_ok();
 		let data: CheckDetailResponse = r.json();
@@ -1654,7 +1662,7 @@ async fn snapshot_merges_all_sources() {
 		conn.batch_execute(
 			"WITH m AS (INSERT INTO machines (id) VALUES ('30000000-0000-0000-0000-00000000000a') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
 				('30000000-0000-0000-0000-00000000000a', 'https://multi.example.com', 'tamanu-central', '30000000-0000-0000-0000-00000000000a'); \
-				 INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'db'), ('tamanu', 'tasks'); \
+				 INSERT INTO check_policies (source, subject, application_type, check_name) VALUES ('alertd', 'application', 'tamanu-central', 'db'), ('tamanu', 'application', 'tamanu-central', 'tasks'); \
 			 INSERT INTO statuses (server_id, source, healthy, health, extra) VALUES \
 				('30000000-0000-0000-0000-00000000000a', 'alertd', true, \
 				 '[{\"check\":\"db\",\"result\":\"passed\"}]'::jsonb, '{\"queue\":3}'::jsonb), \
@@ -1701,10 +1709,11 @@ async fn snapshot_surfaces_per_check_results() {
 		// snapshot returns the operator-set grading; version_gated has a
 		// rules ladder firing on a specific status.bestoolVersion.
 		conn.batch_execute(
-			"INSERT INTO check_policies (source, check_name, ceiling, escalates) VALUES \
-				('alertd', 'catalog_only', 'warning', FALSE), \
-				('alertd', 'elevated', 'failed', FALSE), \
-				('alertd', 'passing', 'warning', FALSE), ('alertd', 'version_gated', 'warning', FALSE); \
+			"INSERT INTO check_policies (source, subject, application_type, check_name, ceiling, escalates) VALUES \
+				('alertd', 'application', 'tamanu-central', 'catalog_only', 'warning', FALSE), \
+				('alertd', 'application', 'tamanu-central', 'elevated', 'failed', FALSE), \
+				('alertd', 'application', 'tamanu-central', 'passing', 'warning', FALSE), \
+				('alertd', 'application', 'tamanu-central', 'version_gated', 'warning', FALSE); \
 			 UPDATE check_policies \
 				SET rules = '{\"if\":[{\"in_range\":[{\"var\":\"status.bestoolVersion\"},\">=1.0.0 <2.0.0\"]},\"failed\"]}'::jsonb \
 				WHERE check_name = 'version_gated'; UPDATE check_policies SET reviewed_at = NOW(), reviewed_by = 'test' WHERE source = 'alertd';",
@@ -1759,9 +1768,13 @@ async fn snapshot_check_results_cover_result_form() {
 		// `elevated` has its catalog base bumped to error: a failed
 		// result uses it, a warning result ignores it (fixed Warning).
 		conn.batch_execute(
-			"INSERT INTO check_policies (source, check_name, ceiling) VALUES \
-				('alertd', 'elevated', 'failed'), \
-				('alertd', 'degraded', 'failed'), ('alertd', 'busted', 'warning'), ('alertd', 'absent', 'warning'), ('alertd', 'fine', 'warning'); UPDATE check_policies SET reviewed_at = NOW(), reviewed_by = 'test' WHERE source = 'alertd';",
+			"INSERT INTO check_policies (source, subject, application_type, check_name, ceiling) VALUES \
+				('alertd', 'application', 'tamanu-central', 'elevated', 'failed'), \
+				('alertd', 'application', 'tamanu-central', 'degraded', 'failed'), \
+				('alertd', 'application', 'tamanu-central', 'busted', 'warning'), \
+				('alertd', 'application', 'tamanu-central', 'absent', 'warning'), \
+				('alertd', 'application', 'tamanu-central', 'fine', 'warning'); \
+			 UPDATE check_policies SET reviewed_at = NOW(), reviewed_by = 'test' WHERE source = 'alertd';",
 		)
 		.await
 		.unwrap();
@@ -1829,7 +1842,7 @@ async fn get_detail_health_excludes_silenced_checks() {
 			('11111111-1111-1111-1111-111111111111', '1.0.0', true,
 			 '[{\"check\": \"postgres\", \"result\": \"failed\"}]'::jsonb, '{}'::jsonb, NOW());
 
-			INSERT INTO check_policies (source, check_name, ceiling) VALUES ('alertd', 'postgres', 'failed');
+			INSERT INTO check_policies (source, subject, application_type, check_name, ceiling) VALUES ('alertd', 'application', 'tamanu-central', 'postgres', 'failed');
 
 			INSERT INTO issues (application_id, source, ref, check_name, observed_result, effective_result, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/postgres', 'postgres', 'failed', 'failed', 'postgres failed', true, NOW(), NOW(), NOW(), NOW())",
@@ -1851,8 +1864,8 @@ async fn get_detail_health_excludes_silenced_checks() {
 		assert_eq!(body["health"], "unhealthy");
 
 		conn.batch_execute(
-			"INSERT INTO scoped_check_policies (application_id, source, check_name, ceiling) VALUES
-			('11111111-1111-1111-1111-111111111111', 'alertd', 'postgres', 'skipped')",
+			"INSERT INTO scoped_check_policies (application_id, source, subject, application_type, check_name, ceiling) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', 'application', 'tamanu-central', 'postgres', 'skipped')",
 		)
 		.await
 		.unwrap();
@@ -1904,8 +1917,10 @@ async fn group_details_member_health_excludes_group_silenced_checks() {
 			INSERT INTO issues (application_id, source, ref, check_name, observed_result, effective_result, message, active, first_seen, last_seen, degraded_since, last_degraded_at) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd', 'health/disk', 'disk', 'failed', 'failed', 'disk failed', true, NOW(), NOW(), NOW(), NOW());
 
-			INSERT INTO scoped_check_policies (server_group_id, source, check_name, ceiling) VALUES
-			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'alertd', 'disk', 'skipped')",
+			INSERT INTO check_policies (source, subject, application_type, check_name) VALUES ('alertd', 'application', 'tamanu-central', 'disk');
+
+			INSERT INTO scoped_check_policies (server_group_id, source, subject, application_type, check_name, ceiling) VALUES
+			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'alertd', 'application', 'tamanu-central', 'disk', 'skipped')",
 		)
 		.await
 		.unwrap();
@@ -1934,10 +1949,10 @@ async fn snapshot_reports_and_excludes_silenced_checks() {
 			('11111111-1111-1111-1111-111111111111', '1.0.0', true,
 			 '[{\"check\": \"postgres\", \"result\": \"failed\"}, {\"check\": \"disk\", \"result\": \"passed\"}]'::jsonb, '{}'::jsonb, NOW());
 
-			INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'postgres'), ('alertd', 'disk');
+			INSERT INTO check_policies (source, subject, application_type, check_name) VALUES ('alertd', 'application', 'tamanu-central', 'postgres'), ('alertd', 'application', 'tamanu-central', 'disk');
 
-			INSERT INTO scoped_check_policies (application_id, source, check_name, ceiling) VALUES
-			('11111111-1111-1111-1111-111111111111', 'alertd', 'postgres', 'skipped')",
+			INSERT INTO scoped_check_policies (application_id, source, subject, application_type, check_name, ceiling) VALUES
+			('11111111-1111-1111-1111-111111111111', 'alertd', 'application', 'tamanu-central', 'postgres', 'skipped')",
 		)
 		.await
 		.unwrap();

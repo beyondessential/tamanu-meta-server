@@ -24,6 +24,8 @@
 //! unrelated conditions apart.
 // spec: CHK
 
+use serde::{Deserialize, Serialize};
+
 use crate::{server::app_type::ApplicationType, subject::CheckSubject};
 
 /// Source value canopy uses for conditions it determines itself:
@@ -106,6 +108,20 @@ impl Namespace {
 		}
 	}
 
+	/// The namespace of a check reported for an application of this type.
+	///
+	/// Total, unlike [`Self::of`]: the only case that has no namespace is an
+	/// application-subject check with no type to qualify by, and a check
+	/// reported for an application has one. Ingest goes through here.
+	pub fn for_application(
+		source: &str,
+		check_name: &str,
+		application_type: &ApplicationType,
+	) -> Self {
+		Self::of(source, check_name, Some(application_type))
+			.unwrap_or_else(|| Self::Application(application_type.clone()))
+	}
+
 	/// The `(subject, application_type)` storage columns for this namespace.
 	pub fn to_columns(&self) -> (Option<&'static str>, Option<String>) {
 		match self {
@@ -156,6 +172,43 @@ impl Namespace {
 			Self::Application(ty) => Some(ty),
 			Self::Flat | Self::Machine => None,
 		}
+	}
+}
+
+/// A namespace on the wire, as the pair of fields it is stored as.
+///
+/// The private API names a check by source, namespace and name, so this is
+/// what a request carries and what a listing returns alongside the
+/// presentational qualified form. It mirrors the storage columns rather than
+/// inventing a third encoding, so a row read out of a listing goes straight
+/// back into a mutation.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct NamespaceRef {
+	/// `machine`, `application`, or `null` for a curated source, whose names
+	/// are unqualified.
+	#[serde(default)]
+	pub subject: Option<String>,
+	/// The application type, set when and only when `subject` is
+	/// `application`.
+	#[serde(default)]
+	pub application_type: Option<String>,
+}
+
+impl From<&Namespace> for NamespaceRef {
+	fn from(ns: &Namespace) -> Self {
+		let (subject, application_type) = ns.to_columns();
+		Self {
+			subject: subject.map(str::to_owned),
+			application_type,
+		}
+	}
+}
+
+impl TryFrom<&NamespaceRef> for Namespace {
+	type Error = NamespaceFromColumnsError;
+
+	fn try_from(r: &NamespaceRef) -> Result<Self, Self::Error> {
+		Self::from_columns(r.subject.as_deref(), r.application_type.as_deref())
 	}
 }
 
@@ -220,6 +273,22 @@ mod tests {
 	#[test]
 	fn an_application_check_with_no_type_has_no_namespace() {
 		assert_eq!(Namespace::of("alertd", "version", None), None);
+	}
+
+	#[test]
+	fn the_application_form_agrees_with_the_general_one() {
+		for (source, check) in [
+			(CANOPY_SOURCE, "version"),
+			("alertd", "disk_free"),
+			("alertd", "version"),
+		] {
+			let ty = ApplicationType::TamanuCentral;
+			assert_eq!(
+				Some(Namespace::for_application(source, check, &ty)),
+				Namespace::of(source, check, Some(&ty)),
+				"{source}/{check} derived two ways"
+			);
+		}
 	}
 
 	#[test]

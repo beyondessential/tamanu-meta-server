@@ -3,7 +3,12 @@ use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
-use commons_types::{Uuid, issue::ResolvedReason, status::CheckResult};
+use commons_types::{
+	Uuid,
+	issue::ResolvedReason,
+	namespace::{Namespace, NamespaceRef},
+	status::CheckResult,
+};
 use database::applications::Application;
 use database::issues::{
 	CheckFiling, Incident, Issue, IssueFilter, IssueIncidentRef, IssueListFilters, MANUAL_SOURCE,
@@ -53,6 +58,15 @@ pub struct IssueData {
 	/// What raised the issue (for example, an automated health check or a
 	/// manually submitted event).
 	pub source: String,
+	/// Which catalog entry the check behind this issue resolves to, when the
+	/// issue is a check's. Absent for an issue that is not a check's, and for
+	/// one whose namespace cannot be derived — a structured source's
+	/// application-subject check filed at a grain with no application type.
+	pub namespace: Option<NamespaceRef>,
+	/// How the check behind this issue reads to an operator: `<type>.<check>`
+	/// where it is one application type's, the bare name otherwise. Absent
+	/// alongside `namespace`.
+	pub qualified_name: Option<String>,
 	/// Identifier used to match new incoming events to this issue; unique
 	/// within its source and server.
 	#[serde(rename = "ref")]
@@ -132,6 +146,12 @@ impl From<IssueIncidentRef> for IssueIncidentLink {
 
 /// All the non-Issue extras we tuck into an `IssueData`.
 struct IssueEnrichment<'a> {
+	/// The namespace of the check behind this issue, derived from its source,
+	/// name, and its target's application type. Issues carry no namespace
+	/// columns of their own: a check-state's namespace is a function of what
+	/// it is filed against, and deriving it through the one function is what
+	/// keeps it agreeing with the catalog.
+	namespace: Option<Namespace>,
 	server_name: Option<String>,
 	server_host: String,
 	machine_name: Option<String>,
@@ -154,6 +174,12 @@ impl IssueData {
 			server_group_id: e.server_group_id,
 			server_group_name: e.server_group_name,
 			device_id: i.device_id,
+			namespace: e.namespace.as_ref().map(NamespaceRef::from),
+			qualified_name: e
+				.namespace
+				.as_ref()
+				.zip(i.check_name.as_deref())
+				.map(|(ns, check)| ns.qualified_name(check)),
 			source: i.source,
 			r#ref: i.r#ref,
 			escalates: i.escalates,
@@ -220,6 +246,7 @@ pub(crate) async fn enrich_issues(
 	let names = Application::names_by_ids(conn, &server_ids).await?;
 	let group_refs = Application::group_refs_by_server_ids(conn, &server_ids).await?;
 	let machine_names = database::machines::Machine::names_by_ids(conn, &machine_ids).await?;
+	let application_types = Application::types_by_id(conn, &server_ids).await?;
 	let machine_groups = database::machines::Machine::group_refs_by_ids(conn, &machine_ids).await?;
 	let user_logins = collect_user_logins(&issues);
 	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
@@ -249,9 +276,20 @@ pub(crate) async fn enrich_issues(
 				.into_iter()
 				.map(IssueIncidentLink::from)
 				.collect();
+			// A check's namespace follows its target's application type, the
+			// same as it does on ingest, so an issue links to the catalog
+			// entry the check actually files into.
+			let namespace = i.check_name.as_deref().and_then(|check| {
+				Namespace::of(
+					&i.source,
+					check,
+					i.application_id.and_then(|sid| application_types.get(&sid)),
+				)
+			});
 			IssueData::from_with(
 				i,
 				IssueEnrichment {
+					namespace,
 					server_name: name,
 					server_host: host.unwrap_or_default(),
 					machine_name,

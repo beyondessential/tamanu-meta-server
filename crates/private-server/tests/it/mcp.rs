@@ -1255,8 +1255,9 @@ async fn find_issues_by_application_includes_its_machines_issues() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		seed_two_workload_box(&mut conn).await;
 		conn.batch_execute(&format!(
-			"INSERT INTO check_policies (source, check_name) VALUES \
-				('alertd', 'disk_free'), ('alertd', 'tamanu_version'); \
+			"INSERT INTO check_policies (source, subject, application_type, check_name) VALUES \
+				('alertd', 'machine', NULL, 'disk_free'), \
+				('alertd', 'application', 'tamanu-central', 'tamanu_version'); \
 			 INSERT INTO issues \
 				(machine_id, source, ref, check_name, observed_result, effective_result, \
 				 message, active, first_seen, last_seen, degraded_since, last_degraded_at) \

@@ -4951,6 +4951,13 @@ export interface components {
              */
             check: string;
             /**
+             * @description Which catalog entry is meant, as returned in the entry's `namespace`.
+             *     Two application types reporting this name are two checks with separate
+             *     pages; omitted is the unqualified namespace a curated source's checks
+             *     live in.
+             */
+            namespace?: components["schemas"]["NamespaceRef"];
+            /**
              * @description The source that reports the check. A check's identity is the
              *     (source, check) pair — a same-named check from another source is
              *     a different check.
@@ -5106,7 +5113,11 @@ export interface components {
              *     it may stop running the check).
              */
             ceiling: string;
-            /** @description The healthcheck's name, exactly as reported by monitored applications. */
+            /**
+             * @description The healthcheck's name, exactly as reported by monitored applications.
+             *     Two application types reporting this name are two entries, told apart
+             *     by `namespace`.
+             */
             check_name: string;
             /**
              * Format: date-time
@@ -5141,10 +5152,21 @@ export interface components {
              *     candidate.
              */
             last_seen?: string | null;
+            /**
+             * @description Which catalog entry this is: the box's, one application type's, or a
+             *     curated source's unqualified one. Send it back verbatim to name this
+             *     entry in an edit.
+             */
+            namespace: components["schemas"]["NamespaceRef"];
             /** @description Free-form operator notes about this check. */
             notes?: string | null;
             /** @description `true` if no operator has reviewed this policy yet. */
             pending_review: boolean;
+            /**
+             * @description How the entry reads to an operator: `<type>.<check>` where it is one
+             *     application type's, the bare name otherwise.
+             */
+            qualified_name: string;
             /**
              * Format: date-time
              * @description When an operator last reviewed or updated this policy. `null` if
@@ -5235,11 +5257,11 @@ export interface components {
             limit?: number | null;
         };
         /**
-         * @description One check in a server's consolidated state: a single `(source, check)`
-         *     with its results already graded by policy, ready to present. The same
-         *     shape whether taken from current state or reconstructed as of a past
-         *     time, and across every reporting source — the presentation never sees a
-         *     single source's raw report.
+         * @description One check in a server's consolidated state: a single check identity with
+         *     its results already graded by policy, ready to present. The same shape
+         *     whether taken from current state or reconstructed as of a past time, and
+         *     across every reporting source — the presentation never sees a single
+         *     source's raw report.
          */
         ConsolidatedCheck: {
             /** @description The check's name, as reported. */
@@ -5255,10 +5277,21 @@ export interface components {
              */
             effective: string;
             /**
+             * @description Which catalog entry this check resolves to. Two application types
+             *     reporting one name are two checks, so the name alone does not address
+             *     a policy, a silence or a document — this does.
+             */
+            namespace: components["schemas"]["NamespaceRef"];
+            /**
              * @description What the source reported, before policy. `None` if the stored state
              *     carried no observed result.
              */
             observed?: string | null;
+            /**
+             * @description How the check reads to an operator: `<type>.<check>` where it is one
+             *     application type's, the bare name otherwise.
+             */
+            qualified_name: string;
             /** @description Whether this check is silenced at server or group scope. */
             silenced: boolean;
             /** @description The source that reports this check. */
@@ -5382,6 +5415,11 @@ export interface components {
              *     catalog.
              */
             check_name: string;
+            /**
+             * @description Which catalog entry is meant, as returned in the entry's `namespace`.
+             *     Omitted is the unqualified namespace a curated source's checks live in.
+             */
+            namespace?: components["schemas"]["NamespaceRef"];
             /** @description The source whose check to decommission. */
             source: string;
         };
@@ -6034,6 +6072,11 @@ export interface components {
              */
             escalates?: boolean;
             /**
+             * @description Which catalog entry is meant, as returned in the entry's `namespace`.
+             *     Omitted is the unqualified namespace a curated source's checks live in.
+             */
+            namespace?: components["schemas"]["NamespaceRef"];
+            /**
              * @description Operator notes to store alongside the new policy. Omitting this
              *     or sending `null` clears any existing notes — there's no way to
              *     leave them unchanged implicitly, so resend the current value to
@@ -6415,8 +6458,15 @@ export interface components {
             machine_name?: string | null;
             /** @description Latest human-readable message describing the issue's state. */
             message: string;
+            namespace?: null | components["schemas"]["NamespaceRef"];
             /** @description The result the source reported on the latest filing, before policy. */
             observed_result?: string | null;
+            /**
+             * @description How the check behind this issue reads to an operator: `<type>.<check>`
+             *     where it is one application type's, the bare name otherwise. Absent
+             *     alongside `namespace`.
+             */
+            qualified_name?: string | null;
             /**
              * @description Identifier used to match new incoming events to this issue; unique
              *     within its source and server.
@@ -7443,6 +7493,27 @@ export interface components {
              *     zone does — in which case Canopy can publish nothing for it.
              */
             zone?: string | null;
+        };
+        /**
+         * @description A namespace on the wire, as the pair of fields it is stored as.
+         *
+         *     The private API names a check by source, namespace and name, so this is
+         *     what a request carries and what a listing returns alongside the
+         *     presentational qualified form. It mirrors the storage columns rather than
+         *     inventing a third encoding, so a row read out of a listing goes straight
+         *     back into a mutation.
+         */
+        NamespaceRef: {
+            /**
+             * @description The application type, set when and only when `subject` is
+             *     `application`.
+             */
+            application_type?: string | null;
+            /**
+             * @description `machine`, `application`, or `null` for a curated source, whose names
+             *     are unqualified.
+             */
+            subject?: string | null;
         };
         /**
          * @description An open window with the target it covers, named so a fleet-wide view
@@ -8802,6 +8873,11 @@ export interface components {
             /** @description The healthcheck name to sample. */
             check_name: string;
             /**
+             * @description Which catalog entry is meant, as returned in the entry's `namespace`.
+             *     Omitted is the unqualified namespace a curated source's checks live in.
+             */
+            namespace?: components["schemas"]["NamespaceRef"];
+            /**
              * @description The source that reports the check. A check's identity is the
              *     (source, check) pair; another source's same-named check may carry
              *     entirely different fields.
@@ -9124,6 +9200,12 @@ export interface components {
             created_at: string;
             /** @description The operator who created this silence. `None` if not recorded. */
             created_by?: string | null;
+            /**
+             * @description Which catalog entry this silence quiets. A group covers several
+             *     application types, so two of them reporting one check name are two
+             *     silences here, and the ref alone does not tell them apart.
+             */
+            namespace: components["schemas"]["NamespaceRef"];
             /** @description The issue reference this silence matches. */
             ref: string;
             /**
@@ -9525,6 +9607,13 @@ export interface components {
          *     whole server group.
          */
         SilenceGroupArgs: {
+            /**
+             * @description Which application type's check is meant, for a check named by an
+             *     application rather than by a box. A group covers several types, so the
+             *     caller names the one it is silencing from; `null` is a machine's check
+             *     or a curated source's.
+             */
+            application_type?: string | null;
             /** @description The specific issue identifier within `source` to silence. */
             ref: string;
             /**
@@ -10025,6 +10114,11 @@ export interface components {
             check_name: string;
             /** @description The new markdown document, or `null` (or blank) to clear it. */
             documentation?: string | null;
+            /**
+             * @description Which catalog entry is meant, as returned in the entry's `namespace`.
+             *     Omitted is the unqualified namespace a curated source's checks live in.
+             */
+            namespace?: components["schemas"]["NamespaceRef"];
             /** @description The source whose check to document. */
             source: string;
         };
@@ -10045,6 +10139,11 @@ export interface components {
              *     in the catalog.
              */
             check_name: string;
+            /**
+             * @description Which catalog entry is meant, as returned in the entry's `namespace`.
+             *     Omitted is the unqualified namespace a curated source's checks live in.
+             */
+            namespace?: components["schemas"]["NamespaceRef"];
             /**
              * @description The new conditional rules to store, or `null` to remove all
              *     conditional rules and rely solely on the ceiling. Same shape as

@@ -9421,6 +9421,10 @@
             "type": "string",
             "description": "The healthcheck name to look up, exactly as reported by devices in\n`health[].check` (an arbitrary, device/plugin-defined string)."
           },
+          "namespace": {
+            "$ref": "#/components/schemas/NamespaceRef",
+            "description": "Which catalog entry is meant, as returned in the entry's `namespace`.\nTwo application types reporting this name are two checks with separate\npages; omitted is the unqualified namespace a curated source's checks\nlive in."
+          },
           "source": {
             "type": "string",
             "description": "The source that reports the check. A check's identity is the\n(source, check) pair — a same-named check from another source is\na different check."
@@ -9687,6 +9691,8 @@
         "required": [
           "source",
           "check_name",
+          "namespace",
+          "qualified_name",
           "ceiling",
           "escalates",
           "first_seen",
@@ -9701,7 +9707,7 @@
           },
           "check_name": {
             "type": "string",
-            "description": "The healthcheck's name, exactly as reported by monitored applications."
+            "description": "The healthcheck's name, exactly as reported by monitored applications.\nTwo application types reporting this name are two entries, told apart\nby `namespace`."
           },
           "decommissioned_at": {
             "type": [
@@ -9735,6 +9741,10 @@
             "format": "date-time",
             "description": "When this check was most recently reported on any server across the\nfleet. `null` until liveness has been reconciled since it first\nappeared. A check quiet for long enough is a decommissioning\ncandidate."
           },
+          "namespace": {
+            "$ref": "#/components/schemas/NamespaceRef",
+            "description": "Which catalog entry this is: the box's, one application type's, or a\ncurated source's unqualified one. Send it back verbatim to name this\nentry in an edit."
+          },
           "notes": {
             "type": [
               "string",
@@ -9745,6 +9755,10 @@
           "pending_review": {
             "type": "boolean",
             "description": "`true` if no operator has reviewed this policy yet."
+          },
+          "qualified_name": {
+            "type": "string",
+            "description": "How the entry reads to an operator: `<type>.<check>` where it is one\napplication type's, the bare name otherwise."
           },
           "reviewed_at": {
             "type": [
@@ -9847,10 +9861,12 @@
       },
       "ConsolidatedCheck": {
         "type": "object",
-        "description": "One check in a server's consolidated state: a single `(source, check)`\nwith its results already graded by policy, ready to present. The same\nshape whether taken from current state or reconstructed as of a past\ntime, and across every reporting source — the presentation never sees a\nsingle source's raw report.",
+        "description": "One check in a server's consolidated state: a single check identity with\nits results already graded by policy, ready to present. The same shape\nwhether taken from current state or reconstructed as of a past time, and\nacross every reporting source — the presentation never sees a single\nsource's raw report.",
         "required": [
           "source",
           "check",
+          "namespace",
+          "qualified_name",
           "effective",
           "silenced",
           "detail"
@@ -9868,12 +9884,20 @@
             "type": "string",
             "description": "The result after policy grading — what everything acts on and what\nthe presentation colours by."
           },
+          "namespace": {
+            "$ref": "#/components/schemas/NamespaceRef",
+            "description": "Which catalog entry this check resolves to. Two application types\nreporting one name are two checks, so the name alone does not address\na policy, a silence or a document — this does."
+          },
           "observed": {
             "type": [
               "string",
               "null"
             ],
             "description": "What the source reported, before policy. `None` if the stored state\ncarried no observed result."
+          },
+          "qualified_name": {
+            "type": "string",
+            "description": "How the check reads to an operator: `<type>.<check>` where it is one\napplication type's, the bare name otherwise."
           },
           "silenced": {
             "type": "boolean",
@@ -10075,6 +10099,10 @@
           "check_name": {
             "type": "string",
             "description": "The healthcheck name to decommission; must already exist in the\ncatalog."
+          },
+          "namespace": {
+            "$ref": "#/components/schemas/NamespaceRef",
+            "description": "Which catalog entry is meant, as returned in the entry's `namespace`.\nOmitted is the unqualified namespace a curated source's checks live in."
           },
           "source": {
             "type": "string",
@@ -11148,6 +11176,10 @@
             "type": "boolean",
             "description": "Whether an effective failure of this check should notify\nimmediately, bypassing the incident grace period."
           },
+          "namespace": {
+            "$ref": "#/components/schemas/NamespaceRef",
+            "description": "Which catalog entry is meant, as returned in the entry's `namespace`.\nOmitted is the unqualified namespace a curated source's checks live in."
+          },
           "notes": {
             "type": [
               "string",
@@ -11689,12 +11721,30 @@
             "type": "string",
             "description": "Latest human-readable message describing the issue's state."
           },
+          "namespace": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NamespaceRef",
+                "description": "Which catalog entry the check behind this issue resolves to, when the\nissue is a check's. Absent for an issue that is not a check's, and for\none whose namespace cannot be derived — a structured source's\napplication-subject check filed at a grain with no application type."
+              }
+            ]
+          },
           "observed_result": {
             "type": [
               "string",
               "null"
             ],
             "description": "The result the source reported on the latest filing, before policy."
+          },
+          "qualified_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "How the check behind this issue reads to an operator: `<type>.<check>`\nwhere it is one application type's, the bare name otherwise. Absent\nalongside `namespace`."
           },
           "ref": {
             "type": "string",
@@ -13281,6 +13331,26 @@
               "null"
             ],
             "description": "Apex of the managed zone covering this name, or null where no configured\nzone does — in which case Canopy can publish nothing for it."
+          }
+        }
+      },
+      "NamespaceRef": {
+        "type": "object",
+        "description": "A namespace on the wire, as the pair of fields it is stored as.\n\nThe private API names a check by source, namespace and name, so this is\nwhat a request carries and what a listing returns alongside the\npresentational qualified form. It mirrors the storage columns rather than\ninventing a third encoding, so a row read out of a listing goes straight\nback into a mutation.",
+        "properties": {
+          "application_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The application type, set when and only when `subject` is\n`application`."
+          },
+          "subject": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`machine`, `application`, or `null` for a curated source, whose names\nare unqualified."
           }
         }
       },
@@ -15419,6 +15489,10 @@
             "type": "string",
             "description": "The healthcheck name to sample."
           },
+          "namespace": {
+            "$ref": "#/components/schemas/NamespaceRef",
+            "description": "Which catalog entry is meant, as returned in the entry's `namespace`.\nOmitted is the unqualified namespace a curated source's checks live in."
+          },
           "source": {
             "type": "string",
             "description": "The source that reports the check. A check's identity is the\n(source, check) pair; another source's same-named check may carry\nentirely different fields."
@@ -15939,6 +16013,7 @@
           "server_group_id",
           "source",
           "ref",
+          "namespace",
           "created_at"
         ],
         "properties": {
@@ -15953,6 +16028,10 @@
               "null"
             ],
             "description": "The operator who created this silence. `None` if not recorded."
+          },
+          "namespace": {
+            "$ref": "#/components/schemas/NamespaceRef",
+            "description": "Which catalog entry this silence quiets. A group covers several\napplication types, so two of them reporting one check name are two\nsilences here, and the ref alone does not tell them apart."
           },
           "ref": {
             "type": "string",
@@ -16640,6 +16719,13 @@
           "ref"
         ],
         "properties": {
+          "application_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which application type's check is meant, for a check named by an\napplication rather than by a box. A group covers several types, so the\ncaller names the one it is silencing from; `null` is a machine's check\nor a curated source's."
+          },
           "ref": {
             "type": "string",
             "description": "The specific issue identifier within `source` to silence."
@@ -17432,6 +17518,10 @@
             ],
             "description": "The new markdown document, or `null` (or blank) to clear it."
           },
+          "namespace": {
+            "$ref": "#/components/schemas/NamespaceRef",
+            "description": "Which catalog entry is meant, as returned in the entry's `namespace`.\nOmitted is the unqualified namespace a curated source's checks live in."
+          },
           "source": {
             "type": "string",
             "description": "The source whose check to document."
@@ -17470,6 +17560,10 @@
           "check_name": {
             "type": "string",
             "description": "The healthcheck name whose rules to replace; must already exist\nin the catalog."
+          },
+          "namespace": {
+            "$ref": "#/components/schemas/NamespaceRef",
+            "description": "Which catalog entry is meant, as returned in the entry's `namespace`.\nOmitted is the unqualified namespace a curated source's checks live in."
           },
           "rules": {
             "description": "The new conditional rules to store, or `null` to remove all\nconditional rules and rely solely on the ceiling. Same shape as\nthe `rules` field returned when listing checks. A ladder with no\ncondition/result pairs is treated the same as `null`."

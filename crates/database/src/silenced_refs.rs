@@ -14,13 +14,16 @@
 
 use std::collections::BTreeSet;
 
-use commons_errors::Result;
+use commons_errors::{AppError, Result};
+use commons_types::namespace::{Namespace, NamespaceRef};
+use commons_types::server::app_type::ApplicationType;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::applications::Application;
 use crate::check_policies::ScopedCheckPolicy;
 use crate::issues::{
 	MANUAL_SOURCE, Scope, reevaluate_open_issues_for_group_ref,
@@ -47,6 +50,35 @@ fn check_to_ref(source: &str, check: &str) -> String {
 	} else {
 		format!("{HEALTH_REF_PREFIX}{check}")
 	}
+}
+
+/// The namespace a silence names, from the check's name and whatever the
+/// target can say about the application type.
+///
+/// A curated source's names are flat, so nothing needs to be known. A
+/// structured source's machine-subject check is in the machine namespace,
+/// which no type bears on. Only a structured source's application-subject
+/// check needs one, and where it comes from follows the scope: an
+/// application-scoped silence reads it off the application, a group-scoped one
+/// takes it from the operator (who silenced the check while looking at one),
+/// and a machine-scoped one has none — a machine never files an application's
+/// check, so there is nothing at that scope to silence.
+fn namespace_for(
+	source: &str,
+	check: &str,
+	application_type: Option<&ApplicationType>,
+) -> Result<Namespace> {
+	Namespace::of(source, check, application_type).ok_or_else(|| {
+		AppError::Custom(format!(
+			"{check} from {source} is an application check, so silencing it needs an application type"
+		))
+	})
+}
+
+/// The application type of the application a silence is scoped to, for
+/// resolving the check's namespace.
+async fn type_of(db: &mut AsyncPgConnection, application_id: Uuid) -> Result<ApplicationType> {
+	Ok(Application::get_by_id(db, application_id).await?.r#type)
 }
 
 /// A silenced issue reference scoped to a single server: issues matching
@@ -80,6 +112,10 @@ pub struct ServerGroupSilencedRef {
 	/// The issue reference this silence matches.
 	#[serde(rename = "ref")]
 	pub r#ref: String,
+	/// Which catalog entry this silence quiets. A group covers several
+	/// application types, so two of them reporting one check name are two
+	/// silences here, and the ref alone does not tell them apart.
+	pub namespace: NamespaceRef,
 	/// When this silence was created.
 	pub created_at: Timestamp,
 	/// The operator who created this silence. `None` if not recorded.
@@ -128,8 +164,12 @@ pub async fn is_silenced(
 	let is_silence =
 		|p: Option<ScopedCheckPolicy>| p.is_some_and(|p| p.ceiling.as_deref() == Some("skipped"));
 	// The event's own scope, when it has one below the group.
+	let namespace = match scope {
+		Scope::Application(id) => namespace_for(source, check, Some(&type_of(db, id).await?))?,
+		_ => namespace_for(source, check, None)?,
+	};
 	if matches!(scope, Scope::Application(_) | Scope::Machine(_))
-		&& is_silence(ScopedCheckPolicy::get(db, scope, source, check).await?)
+		&& is_silence(ScopedCheckPolicy::get(db, scope, source, &namespace, check).await?)
 	{
 		return Ok(true);
 	}
@@ -137,7 +177,7 @@ pub async fn is_silenced(
 		return Ok(false);
 	};
 	Ok(is_silence(
-		ScopedCheckPolicy::get(db, Scope::Group(gid), source, check).await?,
+		ScopedCheckPolicy::get(db, Scope::Group(gid), source, &namespace, check).await?,
 	))
 }
 
@@ -165,10 +205,24 @@ pub async fn silenced_health_checks_for_server(
 	// operator would keep being run and reported: the silence would hold on
 	// canopy's side and be invisible to the agent.
 	// spec: STA
+	// A group-scoped silence is shared by every namespace filing under that
+	// group, so it is narrowed to the ones this reporter can file into: the
+	// machine's, its own application type's, and the flat one a curated source
+	// uses. Without that, silencing one application type's check would silence
+	// its namesake on every other type in the group.
+	let application_type = type_of(db, application_id).await?.to_string();
 	let rows: Vec<String> = dsl::scoped_check_policies
 		.select(dsl::check_name)
 		.filter(dsl::ceiling.eq("skipped"))
 		.filter(dsl::source.eq(source))
+		.filter(
+			dsl::subject
+				.is_null()
+				.or(dsl::subject.is_not_distinct_from(commons_types::namespace::SUBJECT_MACHINE))
+				.or(dsl::subject
+					.is_not_distinct_from(commons_types::namespace::SUBJECT_APPLICATION)
+					.and(dsl::application_type.is_not_distinct_from(application_type))),
+		)
 		.filter(
 			dsl::application_id
 				.eq(application_id)
@@ -202,11 +256,14 @@ impl ServerSilencedRef {
 		r#ref: &str,
 		created_by: Option<&str>,
 	) -> Result<Self> {
+		let check = ref_to_check(r#ref);
+		let namespace = namespace_for(source, check, Some(&type_of(db, application_id).await?))?;
 		let policy = ScopedCheckPolicy::silence(
 			db,
 			Scope::Application(application_id),
 			source,
-			ref_to_check(r#ref),
+			&namespace,
+			check,
 			created_by,
 		)
 		.await?;
@@ -222,11 +279,14 @@ impl ServerSilencedRef {
 		source: &str,
 		r#ref: &str,
 	) -> Result<()> {
+		let check = ref_to_check(r#ref);
+		let namespace = namespace_for(source, check, Some(&type_of(db, application_id).await?))?;
 		ScopedCheckPolicy::unsilence(
 			db,
 			Scope::Application(application_id),
 			source,
-			ref_to_check(r#ref),
+			&namespace,
+			check,
 		)
 		.await?;
 		reevaluate_open_issues_for_server_ref(db, application_id, source, r#ref).await?;
@@ -251,6 +311,7 @@ impl ServerGroupSilencedRef {
 	fn from_policy(p: ScopedCheckPolicy) -> Option<Self> {
 		Some(Self {
 			server_group_id: p.server_group_id?,
+			namespace: (&p.namespace().ok()?).into(),
 			r#ref: check_to_ref(&p.source, &p.check_name),
 			source: p.source,
 			created_at: p.created_at,
@@ -258,18 +319,26 @@ impl ServerGroupSilencedRef {
 		})
 	}
 
+	/// Add a group-scoped silence. `application_type` names which type's check is
+	/// meant, and is required for an application-subject check from a structured
+	/// source: the operator silences group-wide from one server's check row, so
+	/// the caller knows the type even though the group covers several.
 	pub async fn add(
 		db: &mut AsyncPgConnection,
 		server_group_id: Uuid,
 		source: &str,
 		r#ref: &str,
+		application_type: Option<&ApplicationType>,
 		created_by: Option<&str>,
 	) -> Result<Self> {
+		let check = ref_to_check(r#ref);
+		let namespace = namespace_for(source, check, application_type)?;
 		let policy = ScopedCheckPolicy::silence(
 			db,
 			Scope::Group(server_group_id),
 			source,
-			ref_to_check(r#ref),
+			&namespace,
+			check,
 			created_by,
 		)
 		.await?;
@@ -282,14 +351,12 @@ impl ServerGroupSilencedRef {
 		server_group_id: Uuid,
 		source: &str,
 		r#ref: &str,
+		application_type: Option<&ApplicationType>,
 	) -> Result<()> {
-		ScopedCheckPolicy::unsilence(
-			db,
-			Scope::Group(server_group_id),
-			source,
-			ref_to_check(r#ref),
-		)
-		.await?;
+		let check = ref_to_check(r#ref);
+		let namespace = namespace_for(source, check, application_type)?;
+		ScopedCheckPolicy::unsilence(db, Scope::Group(server_group_id), source, &namespace, check)
+			.await?;
 		reevaluate_open_issues_for_group_ref(db, server_group_id, source, r#ref).await?;
 		Ok(())
 	}
@@ -328,11 +395,14 @@ impl MachineSilencedRef {
 		r#ref: &str,
 		created_by: Option<&str>,
 	) -> Result<Self> {
+		let check = ref_to_check(r#ref);
+		let namespace = namespace_for(source, check, None)?;
 		let policy = ScopedCheckPolicy::silence(
 			db,
 			Scope::Machine(machine_id),
 			source,
-			ref_to_check(r#ref),
+			&namespace,
+			check,
 			created_by,
 		)
 		.await?;
@@ -348,7 +418,9 @@ impl MachineSilencedRef {
 		source: &str,
 		r#ref: &str,
 	) -> Result<()> {
-		ScopedCheckPolicy::unsilence(db, Scope::Machine(machine_id), source, ref_to_check(r#ref))
+		let check = ref_to_check(r#ref);
+		let namespace = namespace_for(source, check, None)?;
+		ScopedCheckPolicy::unsilence(db, Scope::Machine(machine_id), source, &namespace, check)
 			.await?;
 		reevaluate_open_issues_for_machine_ref(db, machine_id, source, r#ref).await?;
 		Ok(())

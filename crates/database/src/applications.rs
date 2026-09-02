@@ -547,6 +547,29 @@ impl Application {
 			.map_err(AppError::from)
 	}
 
+	/// The type of each of these applications, for resolving the namespace of a
+	/// check filed against them. Applications whose stored type does not parse
+	/// are absent, the same as any other unknown type.
+	pub async fn types_by_id(
+		db: &mut AsyncPgConnection,
+		ids: &[Uuid],
+	) -> Result<std::collections::HashMap<Uuid, ApplicationType>> {
+		use crate::schema::applications::dsl;
+		if ids.is_empty() {
+			return Ok(Default::default());
+		}
+		let rows: Vec<(Uuid, String)> = dsl::applications
+			.select((dsl::id, dsl::type_))
+			.filter(dsl::id.eq_any(ids))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(rows
+			.into_iter()
+			.filter_map(|(id, t)| Some((id, t.parse().ok()?)))
+			.collect())
+	}
+
 	pub async fn get_by_ids(db: &mut AsyncPgConnection, ids: &[Uuid]) -> Result<Vec<Self>> {
 		use crate::schema::applications::dsl::*;
 		applications

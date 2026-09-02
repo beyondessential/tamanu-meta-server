@@ -1,5 +1,6 @@
 use commons_errors::{AppError, Result};
 use commons_types::{
+	server::app_type::ApplicationType,
 	status::{CheckResult, ShortStatus},
 	version::VersionStr,
 };
@@ -361,10 +362,18 @@ impl Status {
 	/// and the `health @>` containment is not indexable, so without the
 	/// window a check that has stopped reporting scans every partition
 	/// across every server.
+	/// The most recent push carrying this check.
+	///
+	/// `application_type` narrows to pushes from applications of that type,
+	/// and is how a caller samples the check it means: an application-subject
+	/// name is one check per type, and another type's push carries different
+	/// fields under the same name. `None` samples any type, which is what a
+	/// machine's check or a curated source's wants.
 	pub async fn latest_for_check_name(
 		db: &mut AsyncPgConnection,
 		source: &str,
 		check_name: &str,
+		application_type: Option<&ApplicationType>,
 	) -> Result<Option<Status>> {
 		use diesel::sql_types::{Text, Uuid as DUuid};
 		use diesel::{QueryableByName, sql_query};
@@ -378,17 +387,25 @@ impl Status {
 		// Two-step: pick the id via raw SQL (JSONB containment needs a
 		// parameterised JSON literal that Diesel's typed DSL doesn't
 		// express cleanly), then load the typed Status row by id.
-		let picked: Option<Picked> = sql_query(format!(
+		let type_clause = if application_type.is_some() {
+			"AND server_id IN (SELECT id FROM applications WHERE type = $3) "
+		} else {
+			""
+		};
+		let query = sql_query(format!(
 			"SELECT id FROM statuses \
 			 WHERE source = $1 \
 			 AND health @> jsonb_build_array(jsonb_build_object('check', $2::text)) \
+			 {type_clause}\
 			 AND created_at >= {GRACE_LOOKBACK_SQL} \
 			 ORDER BY created_at DESC LIMIT 1"
 		))
 		.bind::<Text, _>(source)
-		.bind::<Text, _>(check_name)
-		.get_result(db)
-		.await
+		.bind::<Text, _>(check_name);
+		let picked: Option<Picked> = match application_type {
+			Some(ty) => query.bind::<Text, _>(ty.to_string()).get_result(db).await,
+			None => query.get_result(db).await,
+		}
 		.optional()
 		.map_err(AppError::from)?;
 		let Some(Picked { row_id }) = picked else {

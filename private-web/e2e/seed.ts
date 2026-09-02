@@ -41,6 +41,78 @@ function randomLabel(prefix: string): string {
 	return `${prefix}-${randomBytes(4).toString("hex")}`;
 }
 
+// ── The check namespace ─────────────────────────────────────────────────────
+//
+// A check's identity is its source, its namespace, and its name, so a seeded
+// catalog row or silence that leaves the namespace off is one ingestion could
+// never produce: the UI would then be reading a row nothing files into.
+// These helpers derive it the way `Namespace::of` does, so the rows a spec
+// seeds are the rows a real report would have made.
+
+/** The checks that describe the box rather than the workload on it.
+ *
+ * A snapshot of MACHINE_SUBJECT_CHECKS in crates/commons-types/src/subject.rs.
+ * `the_e2e_seed_snapshot_matches_the_subject_list`, beside that list, parses
+ * this array to hold the two together, so keep the quoting as it is. */
+const MACHINE_SUBJECT_CHECKS = [
+	"billing_tags",
+	"btrfs",
+	"caddy_resolvers",
+	"caddy_version",
+	"caddyfile_version",
+	"canopy_registration",
+	"disk_free",
+	"external_users",
+	"held_captures",
+	"inodes",
+	"ips",
+	"load",
+	"memory",
+	"munin",
+	"tailscale",
+	"tailscale_config",
+	"time_sync",
+	"uptime",
+];
+
+/** Sources whose check names canopy curates itself. Their names mean one
+ * thing fleet-wide, so they are namespaced flat. */
+const RESERVED_SOURCES = ["canopy", "manual"];
+
+/** The two namespace columns, as `Namespace::to_columns` writes them. */
+export interface SeedNamespace {
+	subject: string | null;
+	applicationType: string | null;
+}
+
+/** The namespace a check lands in: flat for a curated source, the machine's
+ * for a name that describes the box, and the reporting application's type
+ * otherwise. */
+export function namespaceOf(
+	source: string,
+	checkName: string,
+	applicationType: string,
+): SeedNamespace {
+	if (RESERVED_SOURCES.includes(source)) {
+		return { subject: null, applicationType: null };
+	}
+	if (MACHINE_SUBJECT_CHECKS.includes(checkName)) {
+		return { subject: "machine", applicationType: null };
+	}
+	return { subject: "application", applicationType };
+}
+
+/** What kind of application a seeded row is, for the namespace its checks
+ * land in. Falls back to a Tamanu central, which is what `seedServer`
+ * defaults to. */
+async function applicationTypeOf(sql: Sql, applicationId: string): Promise<string> {
+	const rows = await sql.query<{ type: string }>(
+		"SELECT type FROM applications WHERE id = $1",
+		[applicationId],
+	);
+	return rows[0]?.type ?? "tamanu-central";
+}
+
 /** Wipe every table this suite seeds into. Use from a `beforeEach`
  * when a test needs to make assertions that depend on the absence
  * of data (the "empty state" UI banners, mostly). Fast — single
@@ -352,6 +424,9 @@ export async function seedStatus(
 	// Mirror ingestion: each check in the push has a check-state row, which
 	// is what the health rollup and attention pages read. Degraded checks
 	// carry the degraded-streak stamps; healthy ones record inactive state.
+	// The reporting application's type decides the namespace a check that
+	// names the workload belongs to.
+	const applicationType = await applicationTypeOf(sql, opts.serverId);
 	for (const entry of (opts.health ?? []) as Record<string, unknown>[]) {
 		const check = entry.check;
 		if (typeof check !== "string") continue;
@@ -365,12 +440,15 @@ export async function seedStatus(
 					: null;
 		if (result === null) continue;
 		// Mirror ingestion's upsert_default: a check-state only presents and
-		// counts if a live catalog row backs it. Never clobbers an explicit
-		// seedCheckPolicy for the same (source, check).
+		// counts if a live catalog row backs it, in the namespace the reporter
+		// files into. Never clobbers an explicit seedCheckPolicy for the same
+		// entry.
+		const ns = namespaceOf(source, check, applicationType);
 		await sql.query(
-			`INSERT INTO check_policies (source, check_name) VALUES ($1, $2)
-			 ON CONFLICT (source, check_name) DO NOTHING`,
-			[source, check],
+			`INSERT INTO check_policies (source, subject, application_type, check_name)
+			 VALUES ($1, $2, $3, $4)
+			 ON CONFLICT (source, subject, application_type, check_name) DO NOTHING`,
+			[source, ns.subject, ns.applicationType, check],
 		);
 		const degraded = ["failed", "warning", "broken"].includes(result);
 		await sql.query(
@@ -441,6 +519,7 @@ export async function seedCheckStability(
 export interface SeededCheckPolicy {
 	source: string;
 	checkName: string;
+	namespace: SeedNamespace;
 }
 
 /** Policy row for a (source, check), as ingestion would have upserted
@@ -460,16 +539,26 @@ export async function seedCheckPolicy(
 		 * candidate ("gone quiet"). */
 		lastSeen?: string | null;
 		decommissionedAt?: string | null;
+		/** Which application type reports it, for a check that names the
+		 * workload. Defaults to a Tamanu central, as `seedServer` does. */
+		applicationType?: ApplicationType;
 	},
 ): Promise<SeededCheckPolicy> {
 	const source = opts.source ?? "alertd";
+	const namespace = namespaceOf(
+		source,
+		opts.checkName,
+		opts.applicationType ?? "tamanu-central",
+	);
 	await sql.query(
-		`INSERT INTO check_policies (source, check_name, ceiling, escalates, notes, documentation, last_seen, decommissioned_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		 ON CONFLICT (source, check_name)
+		`INSERT INTO check_policies (source, subject, application_type, check_name, ceiling, escalates, notes, documentation, last_seen, decommissioned_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		 ON CONFLICT (source, subject, application_type, check_name)
 		 DO UPDATE SET ceiling = EXCLUDED.ceiling, escalates = EXCLUDED.escalates, notes = EXCLUDED.notes, documentation = EXCLUDED.documentation, last_seen = EXCLUDED.last_seen, decommissioned_at = EXCLUDED.decommissioned_at`,
 		[
 			source,
+			namespace.subject,
+			namespace.applicationType,
 			opts.checkName,
 			opts.ceiling ?? "warning",
 			opts.escalates ?? false,
@@ -479,7 +568,7 @@ export async function seedCheckPolicy(
 			opts.decommissionedAt ?? null,
 		],
 	);
-	return { source, checkName: opts.checkName };
+	return { source, checkName: opts.checkName, namespace };
 }
 
 /** The check name a silence ref maps to in scoped-policy storage:
@@ -501,14 +590,21 @@ export async function seedServerSilencedRef(
 		createdBy?: string | null;
 	},
 ): Promise<void> {
+	const source = opts.source ?? "alertd";
+	const check = refToCheck(opts.ref);
+	// A silence names a check, so it names a namespace: quieting one
+	// application type's check leaves another type's same-named check alone.
+	const ns = namespaceOf(source, check, await applicationTypeOf(sql, opts.serverId));
 	await sql.query(
-		`INSERT INTO scoped_check_policies (application_id, source, check_name, ceiling, created_by)
-		 VALUES ($1, $2, $3, 'skipped', $4)
+		`INSERT INTO scoped_check_policies (application_id, source, subject, application_type, check_name, ceiling, created_by)
+		 VALUES ($1, $2, $3, $4, $5, 'skipped', $6)
 		 ON CONFLICT DO NOTHING`,
 		[
 			opts.serverId,
-			opts.source ?? "alertd",
-			refToCheck(opts.ref),
+			source,
+			ns.subject,
+			ns.applicationType,
+			check,
 			opts.createdBy ?? null,
 		],
 	);
@@ -523,16 +619,25 @@ export async function seedGroupSilencedRef(
 		ref: string;
 		source?: string;
 		createdBy?: string | null;
+		/** Which application type's check is silenced. A group spans several,
+		 * so the same name reported by another type is another silence.
+		 * Defaults to a Tamanu central, as `seedServer` does. */
+		applicationType?: ApplicationType;
 	},
 ): Promise<void> {
+	const source = opts.source ?? "alertd";
+	const check = refToCheck(opts.ref);
+	const ns = namespaceOf(source, check, opts.applicationType ?? "tamanu-central");
 	await sql.query(
-		`INSERT INTO scoped_check_policies (server_group_id, source, check_name, ceiling, created_by)
-		 VALUES ($1, $2, $3, 'skipped', $4)
+		`INSERT INTO scoped_check_policies (server_group_id, source, subject, application_type, check_name, ceiling, created_by)
+		 VALUES ($1, $2, $3, $4, $5, 'skipped', $6)
 		 ON CONFLICT DO NOTHING`,
 		[
 			opts.groupId,
-			opts.source ?? "alertd",
-			refToCheck(opts.ref),
+			source,
+			ns.subject,
+			ns.applicationType,
+			check,
 			opts.createdBy ?? null,
 		],
 	);
@@ -608,10 +713,22 @@ export async function seedIssue(
 	// backs it (mirrors ingestion's upsert_default); never clobbers an
 	// explicit seedCheckPolicy for the same (source, check).
 	if (opts.serverId || opts.machineId) {
+		const source = opts.source ?? "alertd";
+		// A machine-scoped issue names a check about the box, which derives to
+		// the machine namespace whatever type is passed; the fallback only
+		// matters for a server-scoped one, and there the application says.
+		const ns = namespaceOf(
+			source,
+			check,
+			opts.serverId
+				? await applicationTypeOf(sql, opts.serverId)
+				: "tamanu-central",
+		);
 		await sql.query(
-			`INSERT INTO check_policies (source, check_name) VALUES ($1, $2)
-			 ON CONFLICT (source, check_name) DO NOTHING`,
-			[opts.source ?? "alertd", check],
+			`INSERT INTO check_policies (source, subject, application_type, check_name)
+			 VALUES ($1, $2, $3, $4)
+			 ON CONFLICT (source, subject, application_type, check_name) DO NOTHING`,
+			[source, ns.subject, ns.applicationType, check],
 		);
 	}
 	// Every seeded issue was degraded at some point — that's what makes it

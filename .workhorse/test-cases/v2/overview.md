@@ -53,8 +53,12 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 - [ ] A machine-scoped and an application-scoped issue in one group join the same incident (verifies spec: INC)
 - [x] A silence on a machine check quiets it on every application presenting it (verifies spec: CHK)
 - [ ] An application's health rollup counts its machine's checks (verifies spec: CHK)
-- [ ] An application check is catalogued as `<type>.<check>`; two types reporting one name are two entries (verifies spec: CHK)
-- [ ] A machine check is catalogued under its bare name (verifies spec: CHK)
+- [x] An application check is catalogued as `<type>.<check>`; two types reporting one name are two entries (verifies spec: CHK)
+- [x] A machine check is catalogued under its bare name (verifies spec: CHK)
+- [x] A curated source's check is catalogued by name alone, even when that name is a machine one (verifies spec: CHK)
+- [x] A silence on one type's namespace leaves the other type's state alone (verifies spec: CHK)
+- [x] A namespace first reporting after the split registers pending review (verifies spec: CHK)
+- [x] Decommissioning one namespace's check leaves the same name in another namespace live (verifies spec: CHK)
 - [ ] A machine's monitoring switch does not silence the applications on it (verifies spec: CHK)
 - [x] A machine-scoped issue does not collide with a canopy-wide issue on the same `(source, ref)` (verifies spec: CHK)
 
@@ -158,6 +162,15 @@ cover the runtime half of that, which the spec diff cannot see.
 - [ ] `alert_when_down_for`, the group and the identity link land on the machine (verifies spec: FLT)
 - [ ] A migrated application's type is corrected by the first report that disagrees with it (verifies spec: APP)
 - [ ] Existing silences, incidents and check states survive the rename intact
+- [x] Each application type that reported a check gets its own catalog entry, with its own first and last seen (verifies spec: CHK)
+- [x] A machine-subject name from a structured source is re-keyed, not multiplied (verifies spec: CHK)
+- [x] Curated sources' catalog entries pass through the fan-out untouched (verifies spec: CHK)
+- [x] The fan-out carries the review stamp, so no vetted check drops to its pending-review cap at migration (verifies spec: CHK)
+- [x] A catalog entry with no application left to name a type is dropped, and the loss is filed as an issue naming it
+- [x] A group-, machine- or fleet-scoped policy on an application check becomes one row per live type in that scope (verifies spec: CHK)
+- [x] A scoped policy over a scope with no applications is dropped
+- [x] The fleet-wide fan-out does not mint a namespace from canopy's own nil application
+- [x] Rolling the migration back collapses each check to its most recently reported namespace, spanning the whole set's first and last seen
 
 ## Interface
 

@@ -6,6 +6,7 @@ use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleUser;
 use commons_types::{
+	namespace::{Namespace, NamespaceRef},
 	server::{
 		app_type::ApplicationType,
 		cards::{FacilityServerStatus, ServerGroupCard},
@@ -417,6 +418,12 @@ pub struct CheckDetailArgs {
 	/// The healthcheck name to look up, exactly as reported by devices in
 	/// `health[].check` (an arbitrary, device/plugin-defined string).
 	pub check: String,
+	/// Which catalog entry is meant, as returned in the entry's `namespace`.
+	/// Two application types reporting this name are two checks with separate
+	/// pages; omitted is the unqualified namespace a curated source's checks
+	/// live in.
+	#[serde(default)]
+	pub namespace: NamespaceRef,
 }
 
 /// Response for [`check_detail`]: the queried check's catalog policy
@@ -491,7 +498,10 @@ pub async fn check_detail(
 	Json(args): Json<CheckDetailArgs>,
 ) -> Result<Json<CheckDetailData>> {
 	let mut conn = state.db_read.get().await?;
-	let states = Issue::check_state_for_check(&mut conn, &args.source, &args.check).await?;
+	let namespace = Namespace::try_from(&args.namespace)
+		.map_err(|e| commons_errors::AppError::BadRequest(e.to_string()))?;
+	let states =
+		Issue::check_state_for_check(&mut conn, &args.source, &namespace, &args.check).await?;
 
 	// Live applications only: archived applications and canopy's own row never
 	// appear on the check detail page.
@@ -603,7 +613,7 @@ pub async fn check_detail(
 	});
 	groups.sort_by(|a, b| a.group_name.cmp(&b.group_name));
 
-	let policy = CheckPolicy::get(&mut conn, &args.source, &args.check).await?;
+	let policy = CheckPolicy::get(&mut conn, &args.source, &namespace, &args.check).await?;
 
 	Ok(Json(CheckDetailData {
 		source: args.source,
@@ -929,7 +939,12 @@ async fn consolidated_checks_at(
 			let Some(name) = obj.get("check").and_then(|v| v.as_str()) else {
 				continue;
 			};
-			if !cataloged.contains(&(status.source.clone(), name.to_string())) {
+			// Which catalog entry this reading belongs to follows the
+			// reporting application's type, the same as it does on ingest: a
+			// machine-subject name lands in the box's entry whatever workload
+			// carried it up.
+			let namespace = Namespace::for_application(&status.source, name, &server.r#type);
+			if !cataloged.contains(&(status.source.clone(), namespace.clone(), name.to_string())) {
 				continue;
 			}
 			let Some(observed) = CheckResult::from_entry(obj) else {
@@ -950,7 +965,7 @@ async fn consolidated_checks_at(
 				check_extra: &check_extra,
 				tags: &tags,
 			};
-			let key = (status.source.clone(), name.to_string());
+			let key = (status.source.clone(), namespace.clone(), name.to_string());
 			let fleet = CheckPolicy::grade(grading.get(&key), &status.source, name, observed, &ctx);
 			let graded = CheckPolicy::chain_scoped(
 				fleet,
@@ -964,6 +979,8 @@ async fn consolidated_checks_at(
 			detail.remove("result");
 			checks.push(ConsolidatedCheck {
 				silenced: silenced.contains(name),
+				qualified_name: namespace.qualified_name(name),
+				namespace: (&namespace).into(),
 				source: status.source.clone(),
 				check: name.to_string(),
 				observed: Some(observed),
