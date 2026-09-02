@@ -402,13 +402,32 @@ The push shape stays as the split mockup has it: a source, the machine, and the 
 
 That is a statement about what is needed now, not a structural bar. A fourth key alongside `machine` and `applications` — for a source whose checks belong to no subject — is a coherent extension, and the spec's language must leave room for it rather than asserting that API sources are structured by nature. When something needs to push flat data, that is when its shape gets decided.
 
-### The application type has to be open
+### The application type is an open set
 
-An application type is not a closed set. Canopy holds built-in handling for the types it knows — Tamanu splitting into central and facility is the reason the axis exists at all — but a new product must be able to report itself without a Canopy release. A closed set means no deployment can push a new kind of application until Canopy is changed and shipped, which is not a constraint worth having.
+The working doc settled this at the start and the implementation drifted from it. "No operator ever fills in an application, its type or its version; those are only reported on a report. A report is the only thing that creates an application." A report carrying a type Canopy has never seen creates an application of that type, and no Canopy release is needed for a new product to appear. A closed set would mean no deployment can push a new kind of application until Canopy ships, which is not a constraint worth having.
 
-This is inherited rather than introduced: `Product` on main is a closed enum, and the base spec says "the set is closed and defined by Canopy, since each product's handling is built in rather than configured." Collapsing product and kind into one type carried that sentence forward instead of questioning it. The type axis is this card's to rework, so it is this card's to open.
+Canopy keeps built-in handling for the types it knows — Tamanu splitting into central and facility is why the axis exists at all — and a type it does not know simply has none of it. That is the whole of the special-casing: known types carry capabilities, unknown types carry none.
 
-The set being open is cheap here: the type is not on the public wire at all, so the compatibility bar does not reach it.
+What follows, each of which the code currently gets wrong:
+
+- **No default type.** There was never a call for one. The type comes from a report or the application does not exist.
+- **Version tracking for an unknown type is `Reported`.** Canopy holds no release train for it, so its version stands as reported and is graded against nothing.
+- **Types are a flat set with no ordering.** Anywhere types are listed or sorted, they sort alphabetically. An invented precedence is surprising to read and is one more thing to maintain as types appear.
+- **A group's headline version names the thing directly**: the application version of the `tamanu-central` on the group's highest-ranked machine. Not a type precedence breaking a rank tie — that is the rule the working doc replaced, and `type_priority` reintroduced it.
+- **An application presents as the sentence case of its type**, so `tamanu-central` reads as "Tamanu central", with no per-type label and no special cases. An operator's own name for an application overrides it and is optional.
+
+The set being open is cheap here: the type is not on the public wire at all, so the compatibility bar does not reach it, and the column is already text.
+
+### Where the code diverged from the working doc
+
+Recorded because two of these were *restored* during implementation in response to failing tests, where the test was encoding the rule the working doc had already replaced.
+
+- `ApplicationType` is a closed four-variant enum whose `FromStr` and `FromSql` reject anything else, and it derives `Default`.
+- `server_groups::type_priority` ranks types against each other to break a rank tie when picking a group's canonical member.
+- `APPLICATION_TYPE_ORDER` in the SPA gives types a display precedence, and the sort helper orders by rank then type.
+- `ApplicationType::label` title-cases and special-cases SENAITE rather than returning the sentence case of the slug.
+
+The closed set is inherited rather than invented here — `Product` on main is a closed enum and the base spec says "the set is closed and defined by Canopy" — but the working doc had already decided otherwise for this card, so carrying the sentence forward was the error.
 
 ## Routes
 
