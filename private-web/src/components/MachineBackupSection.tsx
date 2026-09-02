@@ -67,8 +67,8 @@ export default function BackupCapabilitiesSection({
 	useEffect(() => {
 		setInFlight(anyInFlight);
 	}, [anyInFlight]);
-	// Whether the group has an *active* (ready) backup config. Ungrouped servers
-	// query the nil group, which always returns no config. While this is loading
+	// Whether the group has an *active* (ready) backup config. An ungrouped box
+	// queries the nil group, which always returns no config. While this is loading
 	// we optimistically treat the section as active to avoid a grey→normal flash.
 	const config = useApi(
 		"backups",
@@ -76,9 +76,10 @@ export default function BackupCapabilitiesSection({
 		{ server_group_id: groupId ?? NIL_UUID },
 		[groupId],
 	);
-	// The server's restore window: while open, an operator can run an ad-hoc
-	// `bestool canopy restore` on the box. Server-scoped, so it's shown here as
-	// well as on the group backups page.
+	// The machine's restore window: while open, an operator can run an ad-hoc
+	// `bestool canopy restore` on the box. The window is the box's, so it shows
+	// here as well as on the group backups page.
+	// spec: BKO#allowing-a-restore
 	const restore = useApi(
 		"backups",
 		"restore_window",
@@ -110,7 +111,7 @@ export default function BackupCapabilitiesSection({
 		config.status === "ok" &&
 		!(config.data != null && config.data.status === "ready");
 	const inactiveMessage = !groupId
-		? "This server isn't in a group, so backups can't be configured for it."
+		? "This machine isn't in a group, so backups can't be configured for it."
 		: config.status === "ok" && config.data == null
 			? "Backups aren't set up for this group yet, so these settings have no effect."
 			: "Backups for this group are still being set up, so these settings have no effect yet.";
@@ -171,8 +172,8 @@ export default function BackupCapabilitiesSection({
 								</Button>
 							}
 						>
-							Restores are allowed for this server until{" "}
-							<TimeAgo timestamp={restoreUntil} />. While open, the server can
+							Restores are allowed for this machine until{" "}
+							<TimeAgo timestamp={restoreUntil} />. While open, the box can
 							restore backups on demand.
 						</Alert>
 					) : (
@@ -222,7 +223,7 @@ export default function BackupCapabilitiesSection({
 				<Alert severity="error">{caps.error.message}</Alert>
 			) : caps.data.length === 0 ? (
 				<Typography variant="body2" color="text.secondary">
-					No backup types registered for this server.
+					No backup types registered for this machine.
 				</Typography>
 			) : inactive ? (
 				// Collapsed + greyed: the toggles still work (they record intent for

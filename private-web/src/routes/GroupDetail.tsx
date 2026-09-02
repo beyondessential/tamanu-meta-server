@@ -33,9 +33,9 @@ import {
 	BACKUP_STATUS_LABEL,
 	type BackupConfigStatus,
 	aggregateOperators,
-	compareServersByRankThenType,
 	groupServersByRank,
 	isIncidentLingering,
+	rankMachines,
 	type AggregatedOperator,
 	type GroupMachine,
 	type IncidentData,
@@ -487,10 +487,8 @@ function ArchivedGroupBanner({
 /// The group as an operator navigates it: rank, then the boxes at that rank,
 /// then the workloads on each box.
 ///
-/// A machine's rank is the highest among the applications on it, since rank is
-/// a workload's property and a box shared by a production and a test workload
-/// is a production box. A machine carrying nothing yet has no rank to take, and
-/// sorts last — awaiting check-in, not an error.
+/// The group's boxes, each with the workloads it carries, in the fleet's rank
+/// bands.
 /// spec: FLT
 function GroupTree({
 	machines,
@@ -499,26 +497,7 @@ function GroupTree({
 	machines: GroupMachine[];
 	applications: ServerInfo[];
 }) {
-	const byMachine = new Map<string, ServerInfo[]>();
-	for (const application of applications) {
-		const list = byMachine.get(application.machine_id);
-		if (list) list.push(application);
-		else byMachine.set(application.machine_id, [application]);
-	}
-
-	// Give each machine the rank of its highest-ranked workload, then reuse the
-	// same rank bucketing the fleet uses everywhere else.
-	const ranked = machines.map((machine) => {
-		const on = byMachine.get(machine.id) ?? [];
-		const [best] = [...on].sort(compareServersByRankThenType);
-		return {
-			machine,
-			applications: [...on].sort(compareServersByRankThenType),
-			rank: best?.rank ?? null,
-			type: best?.type ?? "tamanu-central",
-			name: machine.name ?? "",
-		};
-	});
+	const ranked = rankMachines(machines, applications);
 
 	return (
 		<Stack spacing={2}>

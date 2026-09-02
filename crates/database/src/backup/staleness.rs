@@ -634,13 +634,12 @@ pub(crate) async fn open_server_issue_active(
 	Ok(n > 0)
 }
 
-/// Whether a server-scoped `(canopy, ref)` check last *observed* something
+/// Whether a machine-scoped `(canopy, ref)` check last *observed* something
 /// other than a pass.
 ///
 /// The active flag follows the effective result, so a check whose policy holds
 /// it below alerting is never active however degraded its observations. This is
 /// what a sweep asks in its place, to know whether it has a recorded
-
 /// observation to bring up to date.
 pub(crate) async fn machine_check_observed_degraded(
 	db: &mut AsyncPgConnection,

@@ -132,7 +132,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 	let mut latest_success: HashMap<(Uuid, BackupType), crate::backups::BackupRun> = HashMap::new();
 	for gid in &group_ids {
 		latest_success.extend(
-			crate::backups::BackupRun::latest_success_by_server_type_for_group(db, *gid).await?,
+			crate::backups::BackupRun::latest_success_by_machine_type_for_group(db, *gid).await?,
 		);
 	}
 
@@ -156,7 +156,7 @@ pub async fn sweep(db: &mut AsyncPgConnection, rows: &[ScanRow]) -> Result<usize
 	let mut sized: HashMap<(Uuid, BackupType), (i64, i64)> = HashMap::new();
 	for gid in &group_ids {
 		sized.extend(
-			crate::backups::BackupRun::latest_sized_by_server_type_for_group(db, *gid).await?,
+			crate::backups::BackupRun::latest_sized_by_machine_type_for_group(db, *gid).await?,
 		);
 	}
 

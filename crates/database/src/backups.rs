@@ -728,7 +728,7 @@ impl MachineBackupCapability {
 			.map_err(AppError::from)
 	}
 
-	/// Distinct backup types that are **enabled** on any non-archived server in
+	/// Distinct backup types that are **enabled** on any non-archived machine in
 	/// the group — i.e. the types the group is actively expected to back up on a
 	/// schedule. Used for scheduling cadence and staleness alerting.
 	pub async fn enabled_types_for_group(
@@ -739,7 +739,7 @@ impl MachineBackupCapability {
 	}
 
 	/// Distinct backup types **declared** (advertised by bestool) on any
-	/// non-archived server in the group, regardless of their enabled flag — i.e.
+	/// non-archived machine in the group, regardless of their enabled flag — i.e.
 	/// every type the repo can hold snapshots for, including manual-only
 	/// (disabled) ones. Retention is resolved per declared type so a manual
 	/// backup of a non-scheduled type still gets its own policy, not the global.
@@ -750,17 +750,21 @@ impl MachineBackupCapability {
 		Self::types_for_group(db, group_id, false).await
 	}
 
+	/// A capability belongs to a machine, so this reaches the group through the
+	/// box that declared it. Going via the applications would find nothing for a
+	/// box carrying no workload, and would double-count one carrying two.
+	// spec: BKO#participation-and-on-demand
 	async fn types_for_group(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
 		enabled_only: bool,
 	) -> Result<Vec<BackupType>> {
-		use crate::schema::{applications, machine_backup_capabilities as cap};
+		use crate::schema::{machine_backup_capabilities as cap, machines};
 
 		let mut q = cap::table
-			.inner_join(applications::table.on(applications::id.eq(cap::machine_id)))
-			.filter(applications::group_id.eq(group_id))
-			.filter(applications::deleted_at.is_null())
+			.inner_join(machines::table.on(machines::id.eq(cap::machine_id)))
+			.filter(machines::group_id.eq(group_id))
+			.filter(machines::deleted_at.is_null())
 			.into_boxed();
 		if enabled_only {
 			q = q.filter(cap::enabled.eq(true));
@@ -1330,7 +1334,14 @@ impl BackupRun {
 	///
 	/// "Latest" is by [`Self::anchor`], matching what the caller then measures
 	/// staleness from; see [`ANCHOR_SQL`] for why the two must agree.
-	pub async fn latest_success_by_server_type_for_group(
+	/// Latest successful backup per `(machine, type)` within a group.
+	///
+	/// This is the snapshot authority a restore replica is pointed at: what gets
+	/// restored is a snapshot, and a snapshot is what a machine backed up (see
+	/// RST, "Snapshot authority"). A box carrying two workloads has one latest
+	/// snapshot per type, being one box.
+	// spec: RST#snapshot-authority
+	pub async fn latest_success_by_machine_type_for_group(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
 	) -> Result<HashMap<(Uuid, BackupType), Self>> {
@@ -1349,58 +1360,15 @@ impl BackupRun {
 
 		Ok(rows
 			.into_iter()
-			.filter_map(|r| r.machine_id.map(|sid| ((sid, r.r#type.clone()), r)))
+			.filter_map(|r| r.machine_id.map(|mid| ((mid, r.r#type.clone()), r)))
 			.collect())
 	}
 
-	/// Latest successful backup per `(machine, type)` within a group.
-	///
-	/// This is the snapshot authority a restore replica is pointed at: what gets
-	/// restored is a snapshot, and a snapshot is what a machine backed up (see
-	/// RST, "Snapshot authority").
-	///
-	/// `backup_runs` still records the application that reported the run rather
-	/// than the box it was taken from, so the machine comes from a join. A
-	/// machine running two workloads that both report a backup of one type has
-	/// one latest snapshot, the most recent of them — which is what the box
-	/// actually holds. The join goes away when the backup tables take the
-	/// machine grain themselves.
-	// spec: RST#snapshot-authority
-	pub async fn latest_success_by_machine_type_for_group(
-		db: &mut AsyncPgConnection,
-		group_id: Uuid,
-	) -> Result<HashMap<(Uuid, BackupType), Self>> {
-		use crate::schema::backup_runs;
-
-		// A run carries its own machine now, so this no longer reaches through
-		// the application that reported it.
-		let rows: Vec<(Uuid, Self)> = backup_runs::table
-			.filter(backup_runs::group_id.eq(group_id))
-			.filter(backup_runs::purpose.eq(BackupPurpose::Backup))
-			.filter(backup_runs::outcome.eq(RunOutcome::Success))
-			.filter(backup_runs::machine_id.is_not_null())
-			.select((backup_runs::machine_id.assume_not_null(), Self::as_select()))
-			.distinct_on((backup_runs::machine_id, backup_runs::type_))
-			.order_by((
-				backup_runs::machine_id,
-				backup_runs::type_,
-				anchor_expr().desc(),
-			))
-			.load(db)
-			.await
-			.map_err(AppError::from)?;
-
-		Ok(rows
-			.into_iter()
-			.map(|(machine_id, r)| ((machine_id, r.r#type.clone()), r))
-			.collect())
-	}
-
-	/// Latest *reported* backup per `(server, type)` within a group, regardless of
-	/// outcome (success or failure). Keyed `(machine_id, type)`. Used to tell
-	/// whether a backup has been reported since credentials were last issued —
-	/// i.e. whether one is still in flight.
-	pub async fn latest_report_by_server_type_for_group(
+	/// Latest *reported* backup per `(machine, type)` within a group, regardless
+	/// of outcome (success or failure). Used to tell whether a backup has been
+	/// reported since credentials were last issued — i.e. whether one is still
+	/// in flight.
+	pub async fn latest_report_by_machine_type_for_group(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
 	) -> Result<HashMap<(Uuid, BackupType), Timestamp>> {
@@ -1609,7 +1577,7 @@ impl BackupRun {
 	/// device-reported size (`bytes_uploaded`) and an inspection-observed size
 	/// (`snapshot_logical_bytes`), both non-zero. Keyed `(machine_id, type)` →
 	/// `(reported, observed)`. The basis for the size-discrepancy check.
-	pub async fn latest_sized_by_server_type_for_group(
+	pub async fn latest_sized_by_machine_type_for_group(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
 	) -> Result<HashMap<(Uuid, BackupType), (i64, i64)>> {

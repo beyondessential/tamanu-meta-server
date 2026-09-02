@@ -61,6 +61,16 @@ Participation is a machine's, not an application's: a box hosting two workloads 
 An operator may queue a one-off backup — or restore — for a `(machine, type)` to run on the next cycle, and may cancel a queued one before it runs.
 An operator may also request a one-off full maintenance run for a group, to reclaim storage or apply repo-settings changes without waiting for the scheduled cadence, and may cancel it before the scheduler picks it up (see [BKJ](../jobs/backup.md)); at most one such request is pending per group.
 
+### Allowing a restore
+
+An ad-hoc restore reads the group's whole backup history, so it is refused unless an operator has deliberately allowed it for the machine being restored.
+An operator opens the machine's restore window; it stays open for a day and then closes on its own, and opening it again restarts that day.
+An operator may close it early, and closing an already-closed window is accepted without effect.
+
+The window is opened over a machine, since a restore rewrites the box rather than one workload on it.
+Canopy records who opened it and shows the operator when it closes, both on the group's backup view and on the machine's own page.
+An expired window reads as closed everywhere it is shown, so the figure an operator reads is what a device would be granted.
+
 ## Status
 
 The operator can see, per group: the repo's size and cost basis, recent runs with their outcomes and errors, recent maintenance, the latest snapshot per machine, and any in-flight or pending one-off requests — including a pending on-demand full maintenance request and who made it.

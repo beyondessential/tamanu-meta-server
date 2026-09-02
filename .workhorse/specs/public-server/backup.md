@@ -48,6 +48,14 @@ A device may include the run identifier it minted (the same one it reports the r
 A `(type, purpose)` is issuable only when the type is an enabled capability of the machine, or an operator has queued a one-off request of that purpose for it; otherwise it is refused.
 The group's configuration must be ready: until then the endpoints refuse, so a half-provisioned group cannot be written to.
 
+### The restore window
+
+Restore credentials read the group's entire backup history, so a device may mint them only while an operator has the machine's restore window open (see [BKO](../private-server/backup.md)).
+A device whose machine has no open window is refused, and told that restores must be enabled in Canopy first.
+
+The window is the machine's, matching what a restore does: a restore rewrites the box, so one is opened once for the box however many workloads it carries.
+Credentials already minted keep their own short lifetime when the window closes, and no further ones are issued.
+
 ## Target
 
 A device fetches the repo coordinates for its group each run: the storage kind, bucket, prefix, region, and the repo passphrase.

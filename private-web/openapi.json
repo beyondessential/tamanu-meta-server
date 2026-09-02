@@ -1268,7 +1268,7 @@
           "backups"
         ],
         "summary": "Get backup statistics for a group.",
-        "description": "Returns the group's cached repository stats, recent backup and\nmaintenance runs, pending one-off requests, and each member server's\ndeclared backup capabilities.",
+        "description": "Returns the group's cached repository stats, recent backup and\nmaintenance runs, pending one-off requests, and each member machine's\ndeclared backup capabilities.",
         "operationId": "backups_stats",
         "requestBody": {
           "content": {
@@ -8515,21 +8515,6 @@
             "format": "date-time",
             "description": "When a device successfully completed enrollment for this server.\nWhile `None`, the server is awaiting its first check-in and the UI\nshows setup instructions."
           },
-          "restore_allowed_by": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Who opened the current restore window (Tailscale login), if any."
-          },
-          "restore_allowed_until": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time",
-            "description": "Until when this server is allowed to mint restore credentials for\nitself (ad-hoc `bestool canopy restore`). An operator opens this\nwindow and it auto-expires; `None` (or a past instant) means restores\nare not currently allowed. Restores read the group's backup repo, so\nthey're gated behind this deliberate, time-boxed opt-in rather than\nalways available."
-          },
           "tags": {
             "$ref": "#/components/schemas/TagMap",
             "description": "Key/value tags for this server."
@@ -12490,6 +12475,21 @@
             "format": "date-time",
             "description": "When an identity completed enrolment for this machine. While `None`,\nthe machine is awaiting its first check-in.\n\nAlso the anchor a backup deadline counts from, which is why it belongs\nto the machine: anchoring on an application's registration would\nrestart a box's backup clock every time a workload was added to it."
           },
+          "restore_allowed_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who opened the current restore window (Tailscale login), if any."
+          },
+          "restore_allowed_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Until when this machine is allowed to mint restore credentials for\nitself (ad-hoc `bestool canopy restore`). An operator opens this window\nand it auto-expires; `None` (or a past instant) means restores are not\ncurrently allowed. Restores read the group's backup repo, so they are\ngated behind this deliberate, time-boxed opt-in rather than always\navailable.\n\nA restore rewrites the box, so the window belongs to the box: a machine\ncarrying two workloads is opened once and restored once."
+          },
           "tags": {
             "$ref": "#/components/schemas/TagMap",
             "description": "Key/value tags for this machine. A check filed against a machine is\ngraded by policy against these rather than against any application's.\nAn application's type is not among them, not being a property of a box."
@@ -15187,7 +15187,7 @@
       },
       "RestoreWindowRow": {
         "type": "object",
-        "description": "A server's currently-open restore window, as shown in the group stats.",
+        "description": "A machine's currently-open restore window, as shown in the group stats.",
         "required": [
           "machine_id",
           "allowed_until"
@@ -15203,18 +15203,18 @@
           "allowed_until": {
             "type": "string",
             "format": "date-time",
-            "description": "When the window closes; the server may mint restore credentials until\nthen."
+            "description": "When the window closes; the machine may mint restore credentials until\nthen."
           },
           "machine_id": {
             "type": "string",
             "format": "uuid",
-            "description": "The server the window applies to."
+            "description": "The machine the window applies to."
           }
         }
       },
       "RestoreWindowView": {
         "type": "object",
-        "description": "A single server's restore-window state, for the server detail page.",
+        "description": "A single machine's restore-window state, for the machine detail page.",
         "properties": {
           "allowed_by": {
             "type": [
@@ -15229,7 +15229,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "When the restore window closes, or `null` if restores are not currently\nallowed for this server."
+            "description": "When the restore window closes, or `null` if restores are not currently\nallowed for this machine."
           }
         }
       },

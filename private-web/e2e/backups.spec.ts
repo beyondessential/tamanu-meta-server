@@ -252,7 +252,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			.toBe("true:2");
 	});
 
-	test("servers panel groups by rank then kind, like the group page", async ({
+	test("machines panel groups by rank then kind, like the group page", async ({
 		page,
 		sql,
 	}) => {
@@ -289,10 +289,12 @@ test.describe("backups ready: stats + backup-now", () => {
 
 		await page.goto(`/groups/${group.id}/backups`);
 
+		// Boxes, not workloads: each seeded application gets a box of its own,
+		// named after it, and the box takes its workload's rank.
 		const panel = page
-			.getByRole("heading", { name: "Servers", exact: true })
+			.getByRole("heading", { name: "Machines", exact: true })
 			.locator("..");
-		await expect(panel.locator('a[href^="/servers/"]')).toHaveText([
+		await expect(panel.locator('a[href^="/machines/"]')).toHaveText([
 			"zzz-prod-central",
 			"aaa-prod-facility",
 			"ccc-clone",
@@ -811,7 +813,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		await expect(async () => {
 			const rows = await sql.query<{ type: string }>(
 				`SELECT type FROM backup_requests WHERE machine_id = $1 AND purpose = 'backup'`,
-				[server.id],
+				[server.machineId],
 			);
 			expect(rows).toHaveLength(1);
 			expect(rows[0]!.type).toBe("tamanu-postgres");
@@ -823,13 +825,13 @@ test.describe("backups ready: stats + backup-now", () => {
 		await expect(async () => {
 			const rows = await sql.query(
 				`SELECT 1 FROM backup_requests WHERE machine_id = $1`,
-				[server.id],
+				[server.machineId],
 			);
 			expect(rows).toHaveLength(0);
 		}).toPass();
 	});
 
-	test("a server with no declared types has a disabled backup-now button", async ({
+	test("a machine with no declared types has a disabled backup-now button", async ({
 		page,
 		sql,
 	}) => {
@@ -841,7 +843,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		});
 
 		await page.goto(`/groups/${group.id}/backups`);
-		// The server appears in the "Back up now" panel, but its button is greyed
+		// The box appears in the "Back up now" panel, but its button is greyed
 		// out because it has registered no backup types.
 		await expect(page.getByText("no-types-srv")).toBeVisible();
 		await expect(
@@ -849,7 +851,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		).toBeDisabled();
 	});
 
-	test("a server declaring multiple types offers a backup-now per type", async ({
+	test("a machine declaring multiple types offers a backup-now per type", async ({
 		page,
 		sql,
 	}) => {
@@ -877,7 +879,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		// Both declared types are listed (the disabled-for-schedule one too, since
 		// a one-off backup-now overrides the enabled gate), each with its own button.
 		const panel = page
-			.getByRole("heading", { name: /^servers$/i })
+			.getByRole("heading", { name: /^machines$/i })
 			.locator("..");
 		await expect(panel.getByText("tamanu-postgres")).toBeVisible();
 		await expect(panel.getByText("files")).toBeVisible();
@@ -898,14 +900,14 @@ test.describe("backups ready: stats + backup-now", () => {
 		await expect(async () => {
 			const rows = await sql.query<{ type: string }>(
 				`SELECT type FROM backup_requests WHERE machine_id = $1 AND purpose = 'backup'`,
-				[server.id],
+				[server.machineId],
 			);
 			expect(rows).toHaveLength(1);
 			expect(rows[0]!.type).toBe("files");
 		}).toPass();
 	});
 
-	test("servers panel shows per-server next-backup (a lagging member isn't masked)", async ({
+	test("machines panel shows per-machine next-backup (a lagging box isn't masked)", async ({
 		page,
 		sql,
 	}) => {
@@ -935,23 +937,23 @@ test.describe("backups ready: stats + backup-now", () => {
 
 		await page.goto(`/groups/${group.id}/backups`);
 		const panel = page
-			.getByRole("heading", { name: /^servers$/i })
+			.getByRole("heading", { name: /^machines$/i })
 			.locator("..");
 		await expect(panel.getByText("Next backup")).toBeVisible();
 
-		// The ahead server's next backup is in the future; it has a snapshot.
+		// The ahead box's next backup is in the future; it has a snapshot.
 		const aheadRow = panel.getByRole("row").filter({ hasText: "srv-ahead" });
 		await expect(aheadRow.getByText(/^in /)).toBeVisible();
 		await expect(aheadRow.getByText(/kdeadbeef/)).toBeVisible();
 
-		// The behind server never backed up → due now (not masked by `ahead`).
+		// The behind box never backed up → due now (not masked by `ahead`).
 		const behindRow = panel.getByRole("row").filter({ hasText: "srv-behind" });
 		// exact: the "Backup now" button also contains "now".
 		await expect(behindRow.getByText("now", { exact: true })).toBeVisible();
 		await expect(behindRow.getByText(/no snapshot yet/i)).toBeVisible();
 	});
 
-	test("backup page names the group and cross-links to/from the server backup section", async ({
+	test("backup page names the group and cross-links to/from the machine backup section", async ({
 		page,
 		sql,
 	}) => {
@@ -976,9 +978,13 @@ test.describe("backups ready: stats + backup-now", () => {
 			page.getByRole("link", { name: /back to linky group/i }),
 		).toBeVisible();
 
-		// The server in the "back up now" panel links to its page's backup section.
+		// The box in the "back up now" panel links to its page's backup section.
+		// Backups are the box's, so the link goes to the machine, never to a
+		// workload on it.
 		await page.getByRole("link", { name: "linky-srv" }).click();
-		await expect(page).toHaveURL(new RegExp(`/servers/${server.id}#backups$`));
+		await expect(page).toHaveURL(
+			new RegExp(`/machines/${server.machineId}#backups$`),
+		);
 
 		// That backup section links back to the group's backup page.
 		await page.getByRole("link", { name: /group backups/i }).click();
@@ -1026,12 +1032,12 @@ test.describe("backups ready: stats + backup-now", () => {
 	});
 });
 
-test.describe("server backup capabilities", () => {
+test.describe("machine backup capabilities", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
 	});
 
-	test("server with no capabilities shows the empty state", async ({
+	test("machine with no capabilities shows the empty state", async ({
 		page,
 		sql,
 	}) => {
@@ -1043,7 +1049,7 @@ test.describe("server backup capabilities", () => {
 
 		await page.goto(`/machines/${server.machineId}`);
 		await expect(
-			page.getByText(/no backup types registered for this server/i),
+			page.getByText(/no backup types registered for this machine/i),
 		).toBeVisible();
 	});
 
@@ -1195,7 +1201,7 @@ test.describe("server backup capabilities", () => {
 			const rows = await sql.query<{ enabled: boolean }>(
 				`SELECT enabled FROM machine_backup_capabilities
 				 WHERE machine_id = $1 AND type = 'tamanu-postgres'`,
-				[server.id],
+				[server.machineId],
 			);
 			expect(rows[0]!.enabled).toBe(true);
 		}).toPass();
@@ -1400,7 +1406,7 @@ test.describe("restore window", () => {
 		await resetSeededTables(sql);
 	});
 
-	test("group backups page: allow then disable restores for a server", async ({
+	test("group backups page: allow then disable restores for a machine", async ({
 		page,
 		sql,
 	}) => {
@@ -1426,8 +1432,8 @@ test.describe("restore window", () => {
 			by: string | null;
 		}>(
 			`SELECT restore_allowed_until AS until, restore_allowed_by AS by
-			 FROM applications WHERE id = $1`,
-			[server.id],
+			 FROM machines WHERE id = $1`,
+			[server.machineId],
 		);
 		expect(opened[0]!.until).not.toBeNull();
 		expect(opened[0]!.by).toBe("admin@localhost");
@@ -1438,13 +1444,13 @@ test.describe("restore window", () => {
 			row.getByRole("button", { name: /allow restores/i }),
 		).toBeVisible();
 		const closed = await sql.query<{ until: string | null }>(
-			`SELECT restore_allowed_until AS until FROM applications WHERE id = $1`,
-			[server.id],
+			`SELECT restore_allowed_until AS until FROM machines WHERE id = $1`,
+			[server.machineId],
 		);
 		expect(closed[0]!.until).toBeNull();
 	});
 
-	test("server detail page: allow then disable restores", async ({
+	test("machine detail page: allow then disable restores", async ({
 		page,
 		sql,
 	}) => {
@@ -1463,11 +1469,11 @@ test.describe("restore window", () => {
 
 		await backups.getByRole("button", { name: /allow restores/i }).click();
 		await expect(
-			backups.getByText(/restores are allowed for this server until/i),
+			backups.getByText(/restores are allowed for this machine until/i),
 		).toBeVisible();
 		const opened = await sql.query<{ until: string | null }>(
-			`SELECT restore_allowed_until AS until FROM applications WHERE id = $1`,
-			[server.id],
+			`SELECT restore_allowed_until AS until FROM machines WHERE id = $1`,
+			[server.machineId],
 		);
 		expect(opened[0]!.until).not.toBeNull();
 
@@ -1476,8 +1482,8 @@ test.describe("restore window", () => {
 			backups.getByRole("button", { name: /allow restores/i }),
 		).toBeVisible();
 		const closed = await sql.query<{ until: string | null }>(
-			`SELECT restore_allowed_until AS until FROM applications WHERE id = $1`,
-			[server.id],
+			`SELECT restore_allowed_until AS until FROM machines WHERE id = $1`,
+			[server.machineId],
 		);
 		expect(closed[0]!.until).toBeNull();
 	});

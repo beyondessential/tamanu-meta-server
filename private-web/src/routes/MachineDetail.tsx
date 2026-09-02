@@ -7,9 +7,8 @@ import {
 	Stack,
 	Typography,
 } from "@mui/material";
-import { useState } from "react";
-import { Link as RouterLink } from "react-router-dom";
-import { useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link as RouterLink, useLocation, useParams } from "react-router-dom";
 import { useApi } from "../api";
 import ApplicationTypeChip from "../components/ApplicationTypeChip";
 import { ChecksTable, HealthIndicator } from "../components/ChecksTable";
@@ -42,6 +41,19 @@ export default function MachineDetail() {
 		id,
 		refreshTick,
 	]);
+	// Honour a `#backups` anchor (linked from the group's backup page): once the
+	// detail has loaded and the section is painted, scroll it into view.
+	const location = useLocation();
+	const detailLoaded = detail.status === "ok";
+	useEffect(() => {
+		if (!detailLoaded || location.hash !== "#backups") return;
+		const frame = requestAnimationFrame(() => {
+			document
+				.getElementById("backups")
+				?.scrollIntoView({ behavior: "smooth", block: "start" });
+		});
+		return () => cancelAnimationFrame(frame);
+	}, [detailLoaded, location.hash]);
 	usePageTitle(
 		detail.status === "ok"
 			? (machineLabel(detail.data) ?? "Unnamed machine")

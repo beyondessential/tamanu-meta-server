@@ -6,17 +6,12 @@ use commons_types::{
 };
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use jiff::{SignedDuration, Timestamp};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::pg_duration::PgDuration;
 use super::url_field::UrlField;
-
-/// How long a restore window stays open once an operator allows restores for a
-/// server. Restores read the group's backup repo, so the window is deliberately
-/// short-lived; opening it again re-arms it from the moment of the new request.
-const RESTORE_WINDOW: SignedDuration = SignedDuration::from_hours(24);
 
 /// Recompute each distinct, present group id, deduping repeats and skipping
 /// `None`. Used by the server write paths that can change a group's canonical
@@ -133,23 +128,6 @@ pub struct Application {
 		treat_none_as_default_value = false
 	)]
 	pub registered_at: Option<Timestamp>,
-	/// Until when this server is allowed to mint restore credentials for
-	/// itself (ad-hoc `bestool canopy restore`). An operator opens this
-	/// window and it auto-expires; `None` (or a past instant) means restores
-	/// are not currently allowed. Restores read the group's backup repo, so
-	/// they're gated behind this deliberate, time-boxed opt-in rather than
-	/// always available.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	#[diesel(
-		deserialize_as = jiff_diesel::NullableTimestamp,
-		serialize_as = jiff_diesel::NullableTimestamp,
-		treat_none_as_default_value = false
-	)]
-	pub restore_allowed_until: Option<Timestamp>,
-	/// Who opened the current restore window (Tailscale login), if any.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	#[diesel(treat_none_as_default_value = false)]
-	pub restore_allowed_by: Option<String>,
 	/// Whether this server may manage its own DNS records for names under its
 	/// group's domains. Withheld by default: a server without it is
 	/// authenticated and refused. Unlike the restore window this is a standing
@@ -453,17 +431,6 @@ impl Application {
 		Ok(())
 	}
 
-	/// Open the restore window for a server: allow it to mint restore
-	/// credentials for itself until [`RESTORE_WINDOW`] from now. Re-arming an
-	/// already-open window resets the expiry. Returns the new expiry so callers
-	/// can echo it back to the operator. `allowed_by` is the operator's identity
-	/// (Tailscale login) for audit.
-	/// Pause Canopy acting on this server's behalf: no certificate ordered or
-	/// renewed, no address record changed. Nothing already in place is withdrawn.
-	///
-	/// Pausing an already-paused server leaves the original pause standing, so the
-	/// recorded reason and age stay those of the pause that first stopped the
-	/// work — which is the one an operator is investigating.
 	/// This application's reachability, from its latest report and its own down
 	/// threshold.
 	///
@@ -548,47 +515,6 @@ impl Application {
 			return Err(AppError::DatabaseQuery(diesel::result::Error::NotFound));
 		}
 		Ok(())
-	}
-
-	pub async fn allow_restore(
-		db: &mut AsyncPgConnection,
-		server_id: Uuid,
-		allowed_by: Option<&str>,
-	) -> Result<Timestamp> {
-		use crate::schema::applications::dsl;
-		let until = Timestamp::now() + RESTORE_WINDOW;
-		diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
-			.set((
-				dsl::restore_allowed_until.eq(jiff_diesel::NullableTimestamp::from(Some(until))),
-				dsl::restore_allowed_by.eq(allowed_by),
-			))
-			.execute(db)
-			.await
-			.map_err(AppError::from)?;
-		Ok(until)
-	}
-
-	/// Close the restore window for a server immediately (clears both the
-	/// expiry and the recorded operator). Clearing an already-closed window is a
-	/// no-op.
-	pub async fn disallow_restore(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<()> {
-		use crate::schema::applications::dsl;
-		diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
-			.set((
-				dsl::restore_allowed_until.eq(jiff_diesel::NullableTimestamp::from(None)),
-				dsl::restore_allowed_by.eq::<Option<String>>(None),
-			))
-			.execute(db)
-			.await
-			.map_err(AppError::from)?;
-		Ok(())
-	}
-
-	/// Whether this server's restore window is currently open (set and not yet
-	/// expired).
-	pub fn restore_allowed(&self) -> bool {
-		self.restore_allowed_until
-			.is_some_and(|until| until > Timestamp::now())
 	}
 
 	pub async fn get_by_device_id(db: &mut AsyncPgConnection, dev_id: Uuid) -> Result<Vec<Self>> {
@@ -946,6 +872,8 @@ fn canonicalize_host_defaults_to_https() {
 
 #[test]
 fn test_server_serialization() {
+	use jiff::SignedDuration;
+
 	let server = Application {
 		id: Uuid::nil(),
 		name: Some("Test Application".to_string()),
@@ -964,8 +892,6 @@ fn test_server_serialization() {
 		tags: TagMap::default(),
 		deleted_at: None,
 		registered_at: None,
-		restore_allowed_until: None,
-		restore_allowed_by: None,
 		may_manage_dns: false,
 		may_manage_tls: false,
 		certificate_profile: None,

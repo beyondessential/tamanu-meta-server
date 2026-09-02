@@ -94,10 +94,10 @@ async fn declare_capability_disabled(conn: &mut AsyncPgConnection, machine_id: U
 	.expect("insert disabled capability");
 }
 
-/// Open the server's restore window, expiring an hour from now.
+/// Open the machine's restore window, expiring an hour from now.
 async fn allow_restore(conn: &mut AsyncPgConnection, machine_id: Uuid) {
 	sql_query(
-		"UPDATE applications SET restore_allowed_until = now() + interval '1 hour' WHERE id = $1",
+		"UPDATE machines SET restore_allowed_until = now() + interval '1 hour' WHERE id = $1",
 	)
 	.bind::<sql_types::Uuid, _>(machine_id)
 	.execute(conn)
@@ -108,7 +108,7 @@ async fn allow_restore(conn: &mut AsyncPgConnection, machine_id: Uuid) {
 /// Set an already-expired restore window (was opened, but the 24h lapsed).
 async fn expire_restore(conn: &mut AsyncPgConnection, machine_id: Uuid) {
 	sql_query(
-		"UPDATE applications SET restore_allowed_until = now() - interval '1 hour' WHERE id = $1",
+		"UPDATE machines SET restore_allowed_until = now() - interval '1 hour' WHERE id = $1",
 	)
 	.bind::<sql_types::Uuid, _>(machine_id)
 	.execute(conn)

@@ -43,8 +43,6 @@ fn server(r#type: ApplicationType, rank: Option<ServerRank>, machine_id: Uuid) -
 		tags: TagMap::default(),
 		deleted_at: None,
 		registered_at: None,
-		restore_allowed_until: None,
-		restore_allowed_by: None,
 		may_manage_dns: false,
 		may_manage_tls: false,
 		certificate_profile: None,

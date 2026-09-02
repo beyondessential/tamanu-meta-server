@@ -315,6 +315,48 @@ export function groupServersByRank<
 	return result;
 }
 
+/// A machine carrying the applications on it, ranked so it can go through the
+/// same bucketing as a workload.
+export interface RankedMachine {
+	machine: GroupMachine;
+	applications: ServerInfo[];
+	rank: ServerRank | null;
+	type: ApplicationType;
+	name: string;
+}
+
+/// Give each machine the rank of its highest-ranked workload, so a box sorts
+/// into the same bands the fleet uses everywhere else.
+///
+/// Rank is a workload's property, so a box shared by a production and a test
+/// workload is a production box. A machine carrying nothing yet has no rank to
+/// take and sorts last: awaiting check-in, not an error.
+/// spec: FLT
+export function rankMachines(
+	machines: readonly GroupMachine[],
+	applications: readonly ServerInfo[],
+): RankedMachine[] {
+	const byMachine = new Map<string, ServerInfo[]>();
+	for (const application of applications) {
+		const list = byMachine.get(application.machine_id);
+		if (list) list.push(application);
+		else byMachine.set(application.machine_id, [application]);
+	}
+	return machines.map((machine) => {
+		const on = [...(byMachine.get(machine.id) ?? [])].sort(
+			compareServersByRankThenType,
+		);
+		const [best] = on;
+		return {
+			machine,
+			applications: on,
+			rank: best?.rank ?? null,
+			type: best?.type ?? "tamanu-central",
+			name: machine.name ?? "",
+		};
+	});
+}
+
 /// Per-check result vocabulary. Hand-written mirror of the Rust
 /// `commons_types::status::CheckResult` (the source of truth) — the
 /// private API ships `health[]` as raw JSON, so this never appears in

@@ -27,12 +27,7 @@ import InsightsIcon from "@mui/icons-material/Insights";
 import LanguageIcon from "@mui/icons-material/Language";
 import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
 import { useEffect, useState } from "react";
-import {
-	Link as RouterLink,
-	useLocation,
-	useNavigate,
-	useParams,
-} from "react-router-dom";
+import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import ActionButton from "../components/ActionButton";
 import { ChecksTable, HealthIndicator } from "../components/ChecksTable";
 import IncidentsLink from "../components/IncidentsLink";
@@ -99,19 +94,6 @@ export default function ServerDetail() {
 	);
 	const hasOpenIncident =
 		openIncidents.status === "ok" && openIncidents.data.length > 0;
-	// Honour a `#backups` anchor (linked from the group's backup page): once the
-	// detail has loaded and the section is painted, scroll it into view.
-	const location = useLocation();
-	const detailLoaded = detail.status === "ok";
-	useEffect(() => {
-		if (!detailLoaded || location.hash !== "#backups") return;
-		const frame = requestAnimationFrame(() => {
-			document
-				.getElementById("backups")
-				?.scrollIntoView({ behavior: "smooth", block: "start" });
-		});
-		return () => cancelAnimationFrame(frame);
-	}, [detailLoaded, location.hash]);
 	usePageTitle(
 		detail.status === "ok"
 			? (detail.data.server.name ?? "Unnamed server")

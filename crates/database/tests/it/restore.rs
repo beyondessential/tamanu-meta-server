@@ -720,7 +720,7 @@ async fn sweep_once_is_snapshot_driven() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
-		let (server, application) = insert_server(&mut conn, group).await;
+		let (server, _application) = insert_server(&mut conn, group).await;
 
 		RestoreConsumerCapability::register(
 			&mut conn,

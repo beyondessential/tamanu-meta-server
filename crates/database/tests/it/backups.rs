@@ -447,7 +447,7 @@ async fn latest_sized_lists_only_runs_with_both_sizes() {
 		.expect("record");
 
 		// Reported size present but not yet inspected → not comparable.
-		let map = BackupRun::latest_sized_by_server_type_for_group(&mut conn, group_id)
+		let map = BackupRun::latest_sized_by_machine_type_for_group(&mut conn, group_id)
 			.await
 			.unwrap();
 		assert!(map.is_empty(), "no observed size yet → nothing to compare");
@@ -460,7 +460,7 @@ async fn latest_sized_lists_only_runs_with_both_sizes() {
 		)
 		.await
 		.expect("backfill");
-		let map = BackupRun::latest_sized_by_server_type_for_group(&mut conn, group_id)
+		let map = BackupRun::latest_sized_by_machine_type_for_group(&mut conn, group_id)
 			.await
 			.unwrap();
 		assert_eq!(
@@ -535,7 +535,7 @@ async fn latest_success_ignores_restore_and_failure() {
 			"latest successful *backup* is the original, not the restore/failure"
 		);
 
-		let map = BackupRun::latest_success_by_server_type_for_group(&mut conn, group_id)
+		let map = BackupRun::latest_success_by_machine_type_for_group(&mut conn, group_id)
 			.await
 			.unwrap();
 		assert_eq!(map.get(&(machine_id, pg)).map(|r| r.id), Some(good));
@@ -2018,7 +2018,7 @@ async fn latest_success_selects_by_data_age_not_report_order() {
 			"must pick the run with the newest data, not the newest report (b={b})",
 		);
 
-		let map = BackupRun::latest_success_by_server_type_for_group(&mut conn, group_id)
+		let map = BackupRun::latest_success_by_machine_type_for_group(&mut conn, group_id)
 			.await
 			.unwrap();
 		assert_eq!(

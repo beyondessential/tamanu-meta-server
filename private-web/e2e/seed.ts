@@ -200,10 +200,15 @@ export async function seedServer(
 	const alertWhenDownFor = opts.alertWhenDownFor ?? 600;
 	// A box of its own for each seeded workload, 1:1, carrying the same group
 	// so the machine and the application agree on which deployment they're in.
+	//
+	// An identity belongs to the box, so a seeded device is bound to the machine
+	// as well as to the workload, the way enrolment binds both. Anything that
+	// resolves a device to what it speaks for — backups, reports — goes through
+	// the machine, and would find nothing if only the application carried it.
 	const machineId = randomUUID();
 	await sql.query(
-		`INSERT INTO machines (id, name, group_id) VALUES ($1, $2, $3)`,
-		[machineId, name, opts.groupId ?? null],
+		`INSERT INTO machines (id, name, group_id, device_id) VALUES ($1, $2, $3, $4)`,
+		[machineId, name, opts.groupId ?? null, opts.deviceId ?? null],
 	);
 	await sql.query(
 		`INSERT INTO applications (id, name, host, type, rank, group_id, device_id, is_monitored, alert_when_down_for, notes, tags, may_manage_dns, may_manage_tls, machine_id)

@@ -2,11 +2,16 @@ use commons_errors::{AppError, Result};
 use commons_types::{geo::GeoPoint, server::TagMap, status::ShortStatus};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
-use jiff::Timestamp;
+use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::pg_duration::PgDuration;
+
+/// How long a restore window stays open once an operator allows restores for a
+/// machine. Restores read the group's backup repo, so the window is deliberately
+/// short-lived; opening it again re-arms it from the moment of the new request.
+const RESTORE_WINDOW: SignedDuration = SignedDuration::from_hours(24);
 
 /// A host in the fleet: a box, physical or virtual, that canopy monitors.
 ///
@@ -87,6 +92,27 @@ pub struct Machine {
 		treat_none_as_default_value = false
 	)]
 	pub registered_at: Option<Timestamp>,
+	/// Until when this machine is allowed to mint restore credentials for
+	/// itself (ad-hoc `bestool canopy restore`). An operator opens this window
+	/// and it auto-expires; `None` (or a past instant) means restores are not
+	/// currently allowed. Restores read the group's backup repo, so they are
+	/// gated behind this deliberate, time-boxed opt-in rather than always
+	/// available.
+	///
+	/// A restore rewrites the box, so the window belongs to the box: a machine
+	/// carrying two workloads is opened once and restored once.
+	// spec: BKO#allowing-a-restore
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(
+		deserialize_as = jiff_diesel::NullableTimestamp,
+		serialize_as = jiff_diesel::NullableTimestamp,
+		treat_none_as_default_value = false
+	)]
+	pub restore_allowed_until: Option<Timestamp>,
+	/// Who opened the current restore window (Tailscale login), if any.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(treat_none_as_default_value = false)]
+	pub restore_allowed_by: Option<String>,
 	#[serde(skip)]
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub created_at: Timestamp,
@@ -378,6 +404,54 @@ impl Machine {
 				ShortStatus::Up
 			}
 		})
+	}
+
+	/// Open the restore window for a machine: allow it to mint restore
+	/// credentials for itself until [`RESTORE_WINDOW`] from now. Re-arming an
+	/// already-open window resets the expiry. Returns the new expiry so callers
+	/// can echo it back to the operator. `allowed_by` is the operator's identity
+	/// (Tailscale login) for audit.
+	// spec: BKO#allowing-a-restore
+	pub async fn allow_restore(
+		db: &mut AsyncPgConnection,
+		machine_id: Uuid,
+		allowed_by: Option<&str>,
+	) -> Result<Timestamp> {
+		use crate::schema::machines::dsl;
+		let until = Timestamp::now() + RESTORE_WINDOW;
+		diesel::update(dsl::machines.filter(dsl::id.eq(machine_id)))
+			.set((
+				dsl::restore_allowed_until.eq(jiff_diesel::NullableTimestamp::from(Some(until))),
+				dsl::restore_allowed_by.eq(allowed_by),
+			))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(until)
+	}
+
+	/// Close the restore window for a machine immediately (clears both the
+	/// expiry and the recorded operator). Clearing an already-closed window is a
+	/// no-op.
+	// spec: BKO#allowing-a-restore
+	pub async fn disallow_restore(db: &mut AsyncPgConnection, machine_id: Uuid) -> Result<()> {
+		use crate::schema::machines::dsl;
+		diesel::update(dsl::machines.filter(dsl::id.eq(machine_id)))
+			.set((
+				dsl::restore_allowed_until.eq(jiff_diesel::NullableTimestamp::from(None)),
+				dsl::restore_allowed_by.eq::<Option<String>>(None),
+			))
+			.execute(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(())
+	}
+
+	/// Whether this machine's restore window is currently open (set and not yet
+	/// expired).
+	pub fn restore_allowed(&self) -> bool {
+		self.restore_allowed_until
+			.is_some_and(|until| until > Timestamp::now())
 	}
 
 	/// Several machines at once, for a view that has a page of them and would

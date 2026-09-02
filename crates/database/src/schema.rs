@@ -75,8 +75,6 @@ diesel::table! {
 		is_monitored -> Bool,
 		deleted_at -> Nullable<Timestamptz>,
 		registered_at -> Nullable<Timestamptz>,
-		restore_allowed_until -> Nullable<Timestamptz>,
-		restore_allowed_by -> Nullable<Text>,
 		may_manage_dns -> Bool,
 		may_manage_tls -> Bool,
 		certificate_profile -> Nullable<Text>,
@@ -509,6 +507,8 @@ diesel::table! {
 		tags -> Jsonb,
 		deleted_at -> Nullable<Timestamptz>,
 		registered_at -> Nullable<Timestamptz>,
+		restore_allowed_until -> Nullable<Timestamptz>,
+		restore_allowed_by -> Nullable<Text>,
 	}
 }
 

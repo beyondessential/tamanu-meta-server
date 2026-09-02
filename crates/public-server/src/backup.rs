@@ -17,7 +17,7 @@
 //! identically: **412** when the device is bound to no live server, **409**
 //! when the server is ungrouped / has no `ready` config / (for a backup) the
 //! type is neither an enabled capability nor has a pending request / (for a
-//! restore) the server's restore window isn't open, **502** when STS or kube
+//! restore) the machine's restore window isn't open, **502** when STS or kube
 //! fails or isn't configured.
 //!
 //! `/backup-progress` and `/backup-report` deliberately stop at *grouped*: they
@@ -157,29 +157,19 @@ async fn require_backupable_capability(
 	}
 }
 
-/// The **restore**-issuance gate: an operator must have opened the server's
+/// The **restore**-issuance gate: an operator must have opened the machine's
 /// time-boxed restore window. Restore creds are read access to the group's
 /// entire backup history, so an ad-hoc `bestool canopy restore` self-authorizes
 /// only while that deliberate window is open — it is not always available.
 /// (Canopy still drives *automated* restores separately, via the PGRO
 /// restore-replica path.) Window closed or expired ⇒ 409.
-/// The window is still an application's field, so a box is restorable while any
-/// workload on it has one open — an operator opening it for the box opens it on
-/// what runs there.
-async fn require_restore_allowed(
-	conn: &mut database::diesel_async::AsyncPgConnection,
-	machine: &Machine,
-) -> Result<()> {
-	let open = machine
-		.applications(conn)
-		.await?
-		.iter()
-		.any(|a| a.restore_allowed());
-	if open {
+// spec: BAK#the-restore-window
+fn require_restore_allowed(machine: &Machine) -> Result<()> {
+	if machine.restore_allowed() {
 		Ok(())
 	} else {
 		Err(AppError::Conflict(
-			"restores are not currently allowed for this server; \
+			"restores are not currently allowed for this machine; \
 			 enable restores for it in canopy (they stay open for 24 hours)"
 				.into(),
 		))
@@ -422,7 +412,7 @@ async fn credentials(
 		BackupPurpose::Backup => {
 			require_backupable_capability(&mut conn, machine.id, &args.r#type).await?
 		}
-		BackupPurpose::Restore => require_restore_allowed(&mut conn, &machine).await?,
+		BackupPurpose::Restore => require_restore_allowed(&machine)?,
 	}
 
 	// Always attach a bucket-scoped session policy so the issued creds can only

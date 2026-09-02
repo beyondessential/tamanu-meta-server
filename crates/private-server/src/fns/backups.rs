@@ -28,7 +28,7 @@ use database::{
 	BackupMaintenanceRun, BackupRecoveryVerification, BackupRepoStats, BackupRequest, BackupRun,
 	BackupTypeDefault, MachineBackupCapability, NewBackupTypeDefault, NewServerGroupBackupConfig,
 	NewServerGroupBackupSchedule, RecoveryVaultWrite, RetentionPolicy, ServerGroupBackupConfig,
-	ServerGroupBackupSchedule, applications::Application, server_groups::ServerGroup,
+	ServerGroupBackupSchedule, machines::Machine, server_groups::ServerGroup,
 };
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -786,23 +786,23 @@ pub struct BackupStatsView {
 	pub s3_month_received_bytes: i64,
 }
 
-/// A server's currently-open restore window, as shown in the group stats.
+/// A machine's currently-open restore window, as shown in the group stats.
 #[derive(Serialize, ToSchema)]
 pub struct RestoreWindowRow {
-	/// The server the window applies to.
+	/// The machine the window applies to.
 	pub machine_id: Uuid,
-	/// When the window closes; the server may mint restore credentials until
+	/// When the window closes; the machine may mint restore credentials until
 	/// then.
 	pub allowed_until: Timestamp,
 	/// Who opened the window (Tailscale login), if known.
 	pub allowed_by: Option<String>,
 }
 
-/// A single server's restore-window state, for the server detail page.
+/// A single machine's restore-window state, for the machine detail page.
 #[derive(Serialize, ToSchema)]
 pub struct RestoreWindowView {
 	/// When the restore window closes, or `null` if restores are not currently
-	/// allowed for this server.
+	/// allowed for this machine.
 	pub allowed_until: Option<Timestamp>,
 	/// Who opened the current window (Tailscale login), if known.
 	pub allowed_by: Option<String>,
@@ -811,11 +811,11 @@ pub struct RestoreWindowView {
 impl RestoreWindowView {
 	/// The window as reported to operators: reflects the stored values only
 	/// while the window is still open, so an expired window reads as closed.
-	fn of(server: &database::applications::Application) -> Self {
-		if server.restore_allowed() {
+	fn of(machine: &Machine) -> Self {
+		if machine.restore_allowed() {
 			Self {
-				allowed_until: server.restore_allowed_until,
-				allowed_by: server.restore_allowed_by.clone(),
+				allowed_until: machine.restore_allowed_until,
+				allowed_by: machine.restore_allowed_by.clone(),
 			}
 		} else {
 			Self {
@@ -1626,7 +1626,7 @@ pub async fn group_schedules(
 	let mut last_success: std::collections::HashMap<BackupType, Timestamp> =
 		std::collections::HashMap::new();
 	for ((_, ty), run) in
-		BackupRun::latest_success_by_server_type_for_group(&mut conn, args.server_group_id).await?
+		BackupRun::latest_success_by_machine_type_for_group(&mut conn, args.server_group_id).await?
 	{
 		let at = run.anchor();
 		last_success
@@ -1908,8 +1908,8 @@ pub async fn restore_window(
 	Json(args): Json<MachineArgs>,
 ) -> Result<Json<RestoreWindowView>> {
 	let mut conn = state.db.get().await?;
-	let server = Application::get_by_id(&mut conn, args.machine_id).await?;
-	Ok(Json(RestoreWindowView::of(&server)))
+	let machine = Machine::get_by_id(&mut conn, args.machine_id).await?;
+	Ok(Json(RestoreWindowView::of(&machine)))
 }
 
 /// Allow this server to restore for the next 24 hours.
@@ -1939,7 +1939,7 @@ pub async fn allow_restore(
 ) -> Result<Json<RestoreWindowView>> {
 	let mut conn = state.db.get().await?;
 	let allowed_until =
-		Application::allow_restore(&mut conn, args.machine_id, Some(&admin.login)).await?;
+		Machine::allow_restore(&mut conn, args.machine_id, Some(&admin.login)).await?;
 	Ok(Json(RestoreWindowView {
 		allowed_until: Some(allowed_until),
 		allowed_by: Some(admin.login),
@@ -1967,7 +1967,7 @@ pub async fn disallow_restore(
 	Json(args): Json<MachineArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	Application::disallow_restore(&mut conn, args.machine_id).await?;
+	Machine::disallow_restore(&mut conn, args.machine_id).await?;
 	Ok(Json(()))
 }
 
@@ -2043,7 +2043,7 @@ pub async fn cancel_maintenance(
 /// Get backup statistics for a group.
 ///
 /// Returns the group's cached repository stats, recent backup and
-/// maintenance runs, pending one-off requests, and each member server's
+/// maintenance runs, pending one-off requests, and each member machine's
 /// declared backup capabilities.
 #[utoipa::path(
 	post,
@@ -2063,7 +2063,9 @@ pub async fn stats(
 	Json(args): Json<BackupsGroupArgs>,
 ) -> Result<Json<BackupStatsView>> {
 	let mut conn = state.db.get().await?;
-	let group = ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
+	// Establishes the 404 for an unknown group. Everything below is keyed by the
+	// group's id rather than read off the row itself.
+	ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
 
 	let stats = BackupRepoStats::get(&mut conn, args.server_group_id).await?;
 	let reported_runs =
@@ -2073,13 +2075,15 @@ pub async fn stats(
 	let (s3_month_sent_bytes, s3_month_received_bytes) =
 		BackupRun::s3_traffic_this_month_for_group(&mut conn, args.server_group_id).await?;
 
-	// Pending requests + declared capabilities across the group's member applications.
-	let members = group.list_servers(&mut conn).await?;
-	let machines =
-		database::machines::Machine::list_for_group(&mut conn, args.server_group_id).await?;
+	// Pending requests + declared capabilities across the group's member machines.
+	// A backup is taken of a box, so a group's backup surface counts boxes: two
+	// workloads sharing a host declare one set of capabilities between them.
+	// spec: BKO#status
+	let machines = Machine::list_for_group(&mut conn, args.server_group_id).await?;
 	// Latest successful backup per (server, type), to decorate each capability.
 	let latest_by =
-		BackupRun::latest_success_by_server_type_for_group(&mut conn, args.server_group_id).await?;
+		BackupRun::latest_success_by_machine_type_for_group(&mut conn, args.server_group_id)
+			.await?;
 	// In-flight detection: latest backup-cred issuance per (device, type) and the
 	// latest reported run (any outcome) per (server, type).
 	let latest_issuance = BackupCredentialIssuance::latest_backup_by_device_type_for_group(
@@ -2088,9 +2092,9 @@ pub async fn stats(
 	)
 	.await?;
 	let latest_report =
-		BackupRun::latest_report_by_server_type_for_group(&mut conn, args.server_group_id).await?;
-	let device_by_server: std::collections::HashMap<Uuid, Option<Uuid>> =
-		members.iter().map(|s| (s.id, s.device_id)).collect();
+		BackupRun::latest_report_by_machine_type_for_group(&mut conn, args.server_group_id).await?;
+	let device_by_machine: std::collections::HashMap<Uuid, Option<Uuid>> =
+		machines.iter().map(|m| (m.id, m.device_id)).collect();
 	let now = Timestamp::now();
 
 	// Merge reported runs with credential issuances into the recent-runs view:
@@ -2180,17 +2184,17 @@ pub async fn stats(
 	let mut pending_requests = Vec::new();
 	let mut capabilities = Vec::new();
 	let mut restore_windows = Vec::new();
-	for server in &members {
-		if server.restore_allowed() {
-			if let Some(allowed_until) = server.restore_allowed_until {
-				restore_windows.push(RestoreWindowRow {
-					machine_id: server.id,
-					allowed_until,
-					allowed_by: server.restore_allowed_by.clone(),
-				});
-			}
+	for machine in &machines {
+		if machine.restore_allowed()
+			&& let Some(allowed_until) = machine.restore_allowed_until
+		{
+			restore_windows.push(RestoreWindowRow {
+				machine_id: machine.id,
+				allowed_until,
+				allowed_by: machine.restore_allowed_by.clone(),
+			});
 		}
-		for req in BackupRequest::pending_for_machine(&mut conn, server.id).await? {
+		for req in BackupRequest::pending_for_machine(&mut conn, machine.id).await? {
 			pending_requests.push(PendingRequestRow {
 				machine_id: req.machine_id,
 				r#type: req.r#type,
@@ -2199,7 +2203,7 @@ pub async fn stats(
 				requested_by: req.requested_by,
 			});
 		}
-		for cap in MachineBackupCapability::list_for_machine(&mut conn, server.id).await? {
+		for cap in MachineBackupCapability::list_for_machine(&mut conn, machine.id).await? {
 			let last = latest_by.get(&(cap.machine_id, cap.r#type.clone()));
 			let interval = match intervals.get(&cap.r#type) {
 				Some(v) => *v,
@@ -2210,7 +2214,7 @@ pub async fn stats(
 					v
 				}
 			};
-			let issuance = device_by_server
+			let issuance = device_by_machine
 				.get(&cap.machine_id)
 				.copied()
 				.flatten()
@@ -2357,7 +2361,7 @@ pub async fn capabilities(
 	// The capability is the box's, so the group and the identity come from the
 	// box rather than from a workload on it.
 	// spec: BAK
-	let (group_id, device_id) = database::machines::Machine::get_by_id(&mut conn, args.machine_id)
+	let (group_id, device_id) = Machine::get_by_id(&mut conn, args.machine_id)
 		.await
 		.ok()
 		.map(|m| (m.group_id, m.device_id))
@@ -2367,7 +2371,7 @@ pub async fn capabilities(
 	let (latest_issuance, latest_report) = match group_id {
 		Some(g) => (
 			BackupCredentialIssuance::latest_backup_by_device_type_for_group(&mut conn, g).await?,
-			BackupRun::latest_report_by_server_type_for_group(&mut conn, g).await?,
+			BackupRun::latest_report_by_machine_type_for_group(&mut conn, g).await?,
 		),
 		None => Default::default(),
 	};

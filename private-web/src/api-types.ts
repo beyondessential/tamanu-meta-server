@@ -628,7 +628,7 @@ export interface paths {
         /**
          * Get backup statistics for a group.
          * @description Returns the group's cached repository stats, recent backup and
-         *     maintenance runs, pending one-off requests, and each member server's
+         *     maintenance runs, pending one-off requests, and each member machine's
          *     declared backup capabilities.
          */
         post: operations["backups_stats"];
@@ -4362,18 +4362,6 @@ export interface components {
              *     shows setup instructions.
              */
             registered_at?: string | null;
-            /** @description Who opened the current restore window (Tailscale login), if any. */
-            restore_allowed_by?: string | null;
-            /**
-             * Format: date-time
-             * @description Until when this server is allowed to mint restore credentials for
-             *     itself (ad-hoc `bestool canopy restore`). An operator opens this
-             *     window and it auto-expires; `None` (or a past instant) means restores
-             *     are not currently allowed. Restores read the group's backup repo, so
-             *     they're gated behind this deliberate, time-boxed opt-in rather than
-             *     always available.
-             */
-            restore_allowed_until?: string | null;
             /** @description Key/value tags for this server. */
             tags?: components["schemas"]["TagMap"];
             /**
@@ -6957,6 +6945,21 @@ export interface components {
              *     restart a box's backup clock every time a workload was added to it.
              */
             registered_at?: string | null;
+            /** @description Who opened the current restore window (Tailscale login), if any. */
+            restore_allowed_by?: string | null;
+            /**
+             * Format: date-time
+             * @description Until when this machine is allowed to mint restore credentials for
+             *     itself (ad-hoc `bestool canopy restore`). An operator opens this window
+             *     and it auto-expires; `None` (or a past instant) means restores are not
+             *     currently allowed. Restores read the group's backup repo, so they are
+             *     gated behind this deliberate, time-boxed opt-in rather than always
+             *     available.
+             *
+             *     A restore rewrites the box, so the window belongs to the box: a machine
+             *     carrying two workloads is opened once and restored once.
+             */
+            restore_allowed_until?: string | null;
             /**
              * @description Key/value tags for this machine. A check filed against a machine is
              *     graded by policy against these rather than against any application's.
@@ -8643,30 +8646,30 @@ export interface components {
             /** @description The backup type to restore, for example `tamanu-postgres`. */
             type: string;
         };
-        /** @description A server's currently-open restore window, as shown in the group stats. */
+        /** @description A machine's currently-open restore window, as shown in the group stats. */
         RestoreWindowRow: {
             /** @description Who opened the window (Tailscale login), if known. */
             allowed_by?: string | null;
             /**
              * Format: date-time
-             * @description When the window closes; the server may mint restore credentials until
+             * @description When the window closes; the machine may mint restore credentials until
              *     then.
              */
             allowed_until: string;
             /**
              * Format: uuid
-             * @description The server the window applies to.
+             * @description The machine the window applies to.
              */
             machine_id: string;
         };
-        /** @description A single server's restore-window state, for the server detail page. */
+        /** @description A single machine's restore-window state, for the machine detail page. */
         RestoreWindowView: {
             /** @description Who opened the current window (Tailscale login), if known. */
             allowed_by?: string | null;
             /**
              * Format: date-time
              * @description When the restore window closes, or `null` if restores are not currently
-             *     allowed for this server.
+             *     allowed for this machine.
              */
             allowed_until?: string | null;
         };
