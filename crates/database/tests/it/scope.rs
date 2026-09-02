@@ -281,3 +281,187 @@ async fn a_machine_check_files_once_not_once_per_application() {
 	})
 	.await
 }
+
+async fn insert_application_on(
+	conn: &mut diesel_async::AsyncPgConnection,
+	machine: Uuid,
+	group: Option<Uuid>,
+	host: &str,
+) -> Uuid {
+	let row: RowId = sql_query(
+		"INSERT INTO applications (type, host, group_id, machine_id) VALUES ('tamanu-central', $1, $2, $3) RETURNING id",
+	)
+	.bind::<sql_types::Text, _>(host)
+	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group)
+	.bind::<sql_types::Uuid, _>(machine)
+	.get_result(conn)
+	.await
+	.expect("insert application");
+	row.id
+}
+
+fn failed_stamp(check: &str) -> database::issues::CheckStateStamp {
+	database::issues::CheckStateStamp {
+		check: check.into(),
+		observed: commons_types::status::CheckResult::Failed,
+		effective: commons_types::status::CheckResult::Failed,
+		escalates: false,
+		detail: None,
+	}
+}
+
+#[derive(QueryableByName)]
+struct Count {
+	#[diesel(sql_type = sql_types::BigInt)]
+	n: i64,
+}
+
+/// An incident is keyed on its target, and both grains resolve to the same
+/// group, so a failing box and a failing workload on it are one incident for
+/// operators to work rather than two pages for one outage.
+// spec: INC
+#[tokio::test(flavor = "multi_thread")]
+async fn both_grains_in_one_group_join_the_same_incident() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = insert_group(&mut conn).await;
+		let machine = insert_machine(&mut conn, Some(group), true).await;
+		let application =
+			insert_application_on(&mut conn, machine, Some(group), "http://both.invalid/").await;
+
+		database::issues::raise_machine_event_with_state(
+			&mut conn,
+			machine,
+			"alertd",
+			None,
+			"disk_free",
+			None,
+			"disk 2% free",
+			true,
+			Some(&failed_stamp("disk_free")),
+		)
+		.await
+		.expect("file machine check");
+
+		database::issues::NewEvent {
+			source: "alertd".into(),
+			r#ref: "app_down".into(),
+			description: None,
+			message: "the workload is down".into(),
+			active: Some(true),
+			occurred_at: None,
+		}
+		.save_with_state(
+			&mut conn,
+			application,
+			None,
+			Some(&failed_stamp("app_down")),
+			false,
+		)
+		.await
+		.expect("file application check");
+
+		let incidents: Count =
+			sql_query("SELECT COUNT(*) AS n FROM incidents WHERE server_group_id = $1")
+				.bind::<sql_types::Uuid, _>(group)
+				.get_result(&mut conn)
+				.await
+				.expect("count incidents");
+		assert_eq!(
+			incidents.n, 1,
+			"one incident for the group, not one per grain"
+		);
+
+		let links: Count = sql_query(
+			"SELECT COUNT(*) AS n FROM incident_issues ii \
+			 JOIN incidents inc ON inc.id = ii.incident_id \
+			 WHERE inc.server_group_id = $1 AND ii.left_at IS NULL",
+		)
+		.bind::<sql_types::Uuid, _>(group)
+		.get_result(&mut conn)
+		.await
+		.expect("count links");
+		assert_eq!(links.n, 2, "both grains contribute to the one incident");
+	})
+	.await
+}
+
+/// Excusing a box from monitoring is a statement about the box. The workloads
+/// on it keep their own switch, so their checks still page.
+// spec: CHK
+#[tokio::test(flavor = "multi_thread")]
+async fn a_machines_monitoring_switch_does_not_silence_the_applications_on_it() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = insert_group(&mut conn).await;
+		let machine = insert_machine(&mut conn, Some(group), false).await;
+		let application =
+			insert_application_on(&mut conn, machine, Some(group), "http://loud.invalid/").await;
+
+		// The application still resolves as monitored: it carries its own flag.
+		assert_eq!(
+			Scope::Application(application)
+				.resolve_incident_target(&mut conn)
+				.await
+				.expect("resolve"),
+			Some((IncidentTarget::Group(group), true)),
+		);
+
+		// The unmonitored machine's own check files, but stays out of incidents.
+		database::issues::raise_machine_event_with_state(
+			&mut conn,
+			machine,
+			"alertd",
+			None,
+			"disk_free",
+			None,
+			"disk 2% free",
+			true,
+			Some(&failed_stamp("disk_free")),
+		)
+		.await
+		.expect("file machine check");
+		let after_machine: Count =
+			sql_query("SELECT COUNT(*) AS n FROM incidents WHERE server_group_id = $1")
+				.bind::<sql_types::Uuid, _>(group)
+				.get_result(&mut conn)
+				.await
+				.expect("count incidents");
+		assert_eq!(
+			after_machine.n, 0,
+			"an excused box opens no incident of its own"
+		);
+
+		// The application on it does.
+		database::issues::NewEvent {
+			source: "alertd".into(),
+			r#ref: "app_down".into(),
+			description: None,
+			message: "the workload is down".into(),
+			active: Some(true),
+			occurred_at: None,
+		}
+		.save_with_state(
+			&mut conn,
+			application,
+			None,
+			Some(&failed_stamp("app_down")),
+			false,
+		)
+		.await
+		.expect("file application check");
+
+		let links: Count = sql_query(
+			"SELECT COUNT(*) AS n FROM incident_issues ii \
+			 JOIN issues i ON i.id = ii.issue_id \
+			 WHERE i.application_id = $1 AND ii.left_at IS NULL",
+		)
+		.bind::<sql_types::Uuid, _>(application)
+		.get_result(&mut conn)
+		.await
+		.expect("count links");
+		assert_eq!(
+			links.n, 1,
+			"the workload's own check still opens an incident"
+		);
+	})
+	.await
+}

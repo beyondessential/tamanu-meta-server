@@ -8,7 +8,7 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 - [ ] A machine's first report creates the applications it describes (verifies spec: FLT)
 - [ ] An application Canopy has not seen before is adopted silently, with no operator step (verifies spec: APP)
 - [ ] A report that omits a previously-reported application does not remove it (verifies spec: FLT)
-- [ ] Only an operator archives an application; an archived one leaves the live fleet with its history intact (verifies spec: FLT)
+- [x] Only an operator archives an application; an archived one leaves the live fleet with its history intact (verifies spec: FLT)
 - [x] Archiving a machine archives the applications on it (verifies spec: FLT)
 - [ ] An application with no operator-set name presents as the sentence case of its type (verifies spec: FLT)
 - [ ] An operator-set name overrides the default and survives further reports (verifies spec: FLT)
@@ -53,7 +53,7 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 
 - [ ] Every machine check presents on every application on that machine, marked as the machine's (verifies spec: CHK)
 - [x] A degraded machine check contributes one issue at machine scope, not one per application (verifies spec: CHK)
-- [ ] A machine-scoped and an application-scoped issue in one group join the same incident (verifies spec: INC)
+- [x] A machine-scoped and an application-scoped issue in one group join the same incident (verifies spec: INC)
 - [x] A silence on a machine check quiets it on every application presenting it (verifies spec: CHK)
 - [ ] An application's health rollup counts its machine's checks (verifies spec: CHK)
 - [x] An application check is catalogued as `<type>.<check>`; two types reporting one name are two entries (verifies spec: CHK)
@@ -62,7 +62,7 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 - [x] A silence on one type's namespace leaves the other type's state alone (verifies spec: CHK)
 - [x] A namespace first reporting after the split registers pending review (verifies spec: CHK)
 - [x] Decommissioning one namespace's check leaves the same name in another namespace live (verifies spec: CHK)
-- [ ] A machine's monitoring switch does not silence the applications on it (verifies spec: CHK)
+- [x] A machine's monitoring switch does not silence the applications on it (verifies spec: CHK)
 - [x] A machine-scoped issue does not collide with a canopy-wide issue on the same `(source, ref)` (verifies spec: CHK)
 
 ## Status pushes
@@ -99,10 +99,10 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 
 ## Billing
 
-- [ ] An application's labels name its type, stage and deployment (verifies spec: APP)
-- [ ] A machine's labels carry no type, and its stage is the highest rank among its applications (verifies spec: APP)
-- [ ] A group's labels carry no type (verifies spec: APP)
-- [ ] A group's backup storage still attributes to Canopy's backup product (verifies spec: APP)
+- [x] An application's labels name its type, stage and deployment (verifies spec: APP)
+- [x] A machine's labels carry no type, and its stage is the highest rank among its applications (verifies spec: APP)
+- [x] A group's labels carry no type (verifies spec: APP)
+- [x] A group's backup storage still attributes to Canopy's backup product (verifies spec: APP)
 
 ## Backups and restores
 

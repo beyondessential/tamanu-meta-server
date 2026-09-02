@@ -284,18 +284,17 @@ impl BillingLabels {
 		}
 	}
 
-	/// Labels for one server's own resources: its own product and its own rank,
-	/// against the deployment its group names.
+	/// Labels for one application's own resources: its own product and its own
+	/// rank, against the deployment its group names.
 	///
-	/// Every label describing the server carries the server's value rather than
-	/// its group's — a `rank = clone` server must report `stage = clone` and
-	/// never the group's `prod`, and a SENAITE server in a Tamanu group must
-	/// report `product = senaite`.
-	// spec: APP#billing-attribution
-	/// An application's labels. `billing.product` carries the software without
-	/// its role, so a central and a facility of one group attribute to the same
-	/// product — which is what cost allocation groups by, and what the label
-	/// carried when product was a field of its own.
+	/// Every label describing the application carries the application's value
+	/// rather than its group's — a `rank = clone` application reports
+	/// `stage = clone` and never the group's `prod`, and a SENAITE application
+	/// in a Tamanu group reports `product = senaite`.
+	///
+	/// `billing.product` carries the software without its role, so a central and
+	/// a facility of one group attribute to the same product: that is what cost
+	/// allocation groups by.
 	// spec: APP#billing-attribution
 	pub fn for_server(
 		tags: &TagMap,
@@ -926,6 +925,32 @@ mod tests {
 		assert_eq!(b.product.as_deref(), Some("senaite"));
 		assert_eq!(b.deployment, "pacific");
 		assert_eq!(b.stage.as_deref(), Some("clone"));
+	}
+
+	#[test]
+	fn application_labels_name_the_software_without_its_role() {
+		// Cost allocation groups by software, so a central and a facility of one
+		// deployment attribute to the same product. Each still carries its own
+		// stage, and both take the deployment from the group.
+		let empty = TagMap::default();
+		let central = BillingLabels::for_server(
+			&empty,
+			"Pacific",
+			&ApplicationType::TamanuCentral,
+			Some(ServerRank::Production),
+		);
+		let facility = BillingLabels::for_server(
+			&empty,
+			"Pacific",
+			&ApplicationType::TamanuFacility,
+			Some(ServerRank::Test),
+		);
+		assert_eq!(central.product.as_deref(), Some("tamanu"));
+		assert_eq!(facility.product.as_deref(), Some("tamanu"));
+		assert_eq!(central.stage.as_deref(), Some("prod"));
+		assert_eq!(facility.stage.as_deref(), Some("test"));
+		assert_eq!(central.deployment, "pacific");
+		assert_eq!(facility.deployment, "pacific");
 	}
 
 	#[test]

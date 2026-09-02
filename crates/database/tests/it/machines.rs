@@ -443,3 +443,74 @@ async fn moving_an_application_between_machines_takes_the_new_group() {
 	})
 	.await;
 }
+
+/// Archival of an application is an operator's act on that application alone:
+/// it does not travel up to the box or sideways to the workload beside it, and
+/// the archived record keeps everything filed against it.
+// spec: FLT#archival
+#[tokio::test(flavor = "multi_thread")]
+async fn only_an_operator_archives_an_application_and_its_history_survives() {
+	TestDb::run(async |mut conn, _url| {
+		let machine = Machine::create(&mut conn, NewMachine::default())
+			.await
+			.expect("create machine");
+		let retired = insert_application_on(&mut conn, machine.id).await;
+		let kept = insert_application_on(&mut conn, machine.id).await;
+
+		database::issues::NewEvent {
+			source: "alertd".into(),
+			r#ref: "app_down".into(),
+			description: None,
+			message: "the workload was down".into(),
+			active: Some(true),
+			occurred_at: None,
+		}
+		.save_with_state(&mut conn, retired, None, None, false)
+		.await
+		.expect("file an issue against it");
+
+		database::applications::Application::soft_delete(&mut conn, retired)
+			.await
+			.expect("archive");
+
+		let live = database::applications::Application::get_all(&mut conn, 0, None)
+			.await
+			.expect("live applications");
+		assert!(
+			!live.iter().any(|a| a.id == retired),
+			"an archived application leaves the live fleet"
+		);
+		assert!(
+			live.iter().any(|a| a.id == kept),
+			"the workload beside it is untouched"
+		);
+
+		assert!(
+			database::applications::Application::list_archived(&mut conn)
+				.await
+				.expect("archived applications")
+				.iter()
+				.any(|a| a.id == retired),
+			"its record is retained, in the archived view"
+		);
+
+		let issues: i64 =
+			sql_query("SELECT count(*) AS count FROM issues WHERE application_id = $1")
+				.bind::<sql_types::Uuid, _>(retired)
+				.get_result::<Count>(&mut conn)
+				.await
+				.expect("count")
+				.count;
+		assert_eq!(issues, 1, "its history is intact");
+
+		assert!(
+			Machine::get_by_id(&mut conn, machine.id)
+				.await
+				.expect("machine")
+				.deleted_at
+				.is_none(),
+			"archiving a workload does not archive the box it runs on"
+		);
+	})
+	.await;
+}

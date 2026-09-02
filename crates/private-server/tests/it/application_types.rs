@@ -133,3 +133,73 @@ async fn detail_billing_labels_are_the_servers_own() {
 	})
 	.await
 }
+
+/// A box is not a piece of software, so it carries no product however many
+/// workloads run on it. Its stage is the highest rank among them: a box shared
+/// by a production and a test workload bills as production, because that is
+/// what the spend is really supporting.
+///
+/// spec: APP#billing-attribution
+#[tokio::test(flavor = "multi_thread")]
+async fn a_machines_labels_carry_no_type_and_take_the_highest_rank_on_it() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		let group = private
+			.post("/api/server_groups/create")
+			.json(&json!({ "name": "Pacific" }))
+			.await;
+		group.assert_status_ok();
+		let group_body: serde_json::Value = group.json();
+		let group_id = group_body["id"].as_str().unwrap().to_string();
+
+		// One box, two workloads of different software and different ranks.
+		let machine = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (id, group_id) VALUES ('{machine}', '{group_id}')"
+		))
+		.await
+		.expect("insert machine");
+		for (r#type, rank) in [("tamanu-central", "test"), ("senaite", "production")] {
+			let id = Uuid::new_v4();
+			conn.batch_execute(&format!(
+				"INSERT INTO applications (id, host, type, rank, group_id, machine_id) \
+				 VALUES ('{id}', 'https://{id}.example.com', '{type}', '{rank}', '{group_id}', '{machine}')"
+			))
+			.await
+			.expect("insert application");
+		}
+
+		let response = private
+			.post("/api/machines/get_detail")
+			.json(&json!({ "machine_id": machine.to_string() }))
+			.await;
+		response.assert_status_ok();
+		let body: serde_json::Value = response.json();
+		let labels: std::collections::HashMap<String, String> = body["billing_labels"]
+			.as_array()
+			.expect("billing labels")
+			.iter()
+			.map(|t| {
+				(
+					t["key"].as_str().unwrap().to_string(),
+					t["value"].as_str().unwrap().to_string(),
+				)
+			})
+			.collect();
+
+		assert_eq!(
+			labels.get("billing.product"),
+			None,
+			"a box is not a piece of software, so it attributes to no product"
+		);
+		assert_eq!(
+			labels.get("billing.stage").map(String::as_str),
+			Some("prod"),
+			"the highest rank on the box, not the lowest and not the first"
+		);
+		assert_eq!(
+			labels.get("billing.deployment").map(String::as_str),
+			Some("pacific")
+		);
+	})
+	.await
+}
