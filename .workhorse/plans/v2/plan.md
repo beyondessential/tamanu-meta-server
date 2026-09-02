@@ -30,7 +30,7 @@ Carried deferrals, each gated on a step above rather than on a vague later:
 - [x] Remove the `application_default_machine()` scaffolding default — done early, with the operator/enrolment surface
 - [x] Add `machine_id` to the `Application` struct — done with the operator/enrolment surface
 - [~] **Backup tables take the machine grain** — storage, models, handlers and checks moved; 7 e2e tests in `backups.spec.ts` still point at the old location. See the section below
-- [ ] Separate "never reported" from "reported long ago" — `Status::latest_for_servers` looks back seven days for performance, so a target silent for longer returns no row and reads as never reported (grey) rather than unreachable (red). Pre-existing, and sharper now the states are three: the fix is a cheap "has this ever reported" fact rather than widening the scan -- verify that it does remain cheap, if the query is "somewhat more expensive" it will slow every single view that displays a status, and the /status page (which has all of them at once) will slow to a crawl. Investigated: the fact is already stored, in rows the code already reads. See the subsection under "Retiring the graded reachability states".
+- [x] Separate "never reported" from "reported long ago" — `Status::latest_for_servers` looks back seven days for performance, so a target silent for longer returns no row and reads as never reported (grey) rather than unreachable (red). Pre-existing, and sharper now the states are three: the fix is a cheap "has this ever reported" fact rather than widening the scan -- verify that it does remain cheap, if the query is "somewhat more expensive" it will slow every single view that displays a status, and the /status page (which has all of them at once) will slow to a crawl. Done: reachability across every grain now grades on `ReportedDetail::last_reported_ats`, a primary-key read of the current-state projection, so it stays as cheap as the status window it replaces. See the subsection under "Retiring the graded reachability states".
 - [x] Carry the machine on `IssueData` — done with the fleet query interface, which is what presented machine checks first
 - [x] Link a machine's maintenance window to its detail page — done with the machine page; the fleet maintenance view links a machine target rather than rendering it as plain text
 
@@ -419,6 +419,14 @@ Anything quiet that long is a decommissioned box rather than an outage, so backf
 - `ServerGroup::soft_delete` queries the windowed read itself and genuinely wants "nothing in the last week", so the rule is unaffected. Its comment should stop calling that "gone" once the word means never.
 
 This is a code defect and not a spec change: CHK already says "A target that has reported at some point presents as unreachable however long ago that was; never reported is for one that has never been heard from at all."
+
+**What landed.** The batch read, as the second shape.
+`ReportedDetail::last_reported_ats` and `last_reported_at` answer the question off the projection, and `ShortStatus::grade` holds the grading in one place so `Application::reachability`, `Machine::reachability`, and the two sites that hold a threshold without a model row cannot drift.
+`Status::short_status` had no callers left and is gone.
+Every reading site takes the later of the projection row and the status window, so an application whose projection row predates the backfill horizon still reads from whatever history does reach it.
+`sweep_staleness`'s backstop takes the same timestamp, so it no longer files "has never reported" against applications that have.
+`ServerGroupCard` carries `all_members_quiet`, computed from the same windowed read `soft_delete` enforces, and `GroupDetail` gates the archive affordance on it rather than on member reachability.
+Coverage: a Rust test that a long-quiet application is unreachable rather than never reported and one that a never-reported application still is, a sweep test that the backstop reports elapsed time rather than "has never reported", and a Playwright test that a group whose members all reported months ago still offers the archive, which is the case the old dot-derived gate would have hidden.
 
 
 ## Check identity

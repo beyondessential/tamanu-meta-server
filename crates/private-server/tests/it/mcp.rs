@@ -1019,19 +1019,47 @@ async fn find_servers_retains_the_version_of_a_long_offline_server() {
 			s["version"], "2.30.0",
 			"the last version it reported is retained, got {s}",
 		);
-		// Both still come from the windowed status read. Answering
-		// "when, however long ago" against `statuses` means scanning every
-		// weekly partition, which is exactly what the lookback cap exists to
-		// refuse; `application_reported_detail` carries the version without that
-		// cost. So the version is retained and these two are not.
+		// Both come from the same projection row, which carries when the
+		// source last reported as well as what it reported. Answering either
+		// from `statuses` means scanning every weekly partition, which is what
+		// the lookback cap exists to refuse; `application_reported_detail` is
+		// one row per (application, source) reached by primary key, so it
+		// answers both unbounded.
 		assert!(
-			s["last_seen"].is_null(),
-			"last_seen stays bounded by the status window: {s}",
+			!s["last_seen"].is_null(),
+			"a server past the status window still has a last-seen: {s}",
 		);
 		assert_eq!(
-			s["reachability"], "gone",
-			"a server outside the status window is still gone",
+			s["reachability"], "down",
+			"a server that reported a month ago is unreachable, not never heard from",
 		);
+	})
+	.await
+}
+
+/// The state above is the one it is not: a server that has genuinely never
+/// reported has no projection row, so it stays `gone` with no last-seen.
+#[tokio::test(flavor = "multi_thread")]
+async fn find_servers_reports_a_never_reported_server_as_gone() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		conn.batch_execute(&format!(
+			"WITH m AS (INSERT INTO machines (id) VALUES ('{SRV_OFFLINE}') RETURNING id) INSERT INTO applications (id, host, name, type, rank, machine_id) VALUES \
+				('{SRV_OFFLINE}', 'https://never-spoke', 'Never Spoke', 'tamanu-central', 'production', '{SRV_OFFLINE}');"
+		))
+		.await
+		.expect("seed never-reported server");
+
+		let found = call_tool!(
+			private,
+			"find_servers",
+			serde_json::json!({ "query": "Never Spoke" })
+		);
+		let applications = found["applications"].as_array().unwrap();
+		assert_eq!(applications.len(), 1, "seeded server should match");
+		let s = &applications[0];
+
+		assert!(s["last_seen"].is_null(), "nothing was ever heard: {s}");
+		assert_eq!(s["reachability"], "gone");
 	})
 	.await
 }

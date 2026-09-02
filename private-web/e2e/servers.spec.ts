@@ -1,5 +1,11 @@
 import { expect, test } from "./test-fixtures";
-import { resetSeededTables, seedServer, seedServerGroup, seedVersion } from "./seed";
+import {
+	resetSeededTables,
+	seedApplicationReport,
+	seedServer,
+	seedServerGroup,
+	seedVersion,
+} from "./seed";
 
 test.describe("servers list page", () => {
 	test.beforeEach(async ({ sql }) => {
@@ -218,6 +224,43 @@ test.describe("archived view", () => {
 		await expect(page.getByRole("link", { name: "gone-grp" })).toBeVisible();
 		await expect(page.getByText(/gone-1/)).toBeVisible();
 		await expect(page.getByText(/gone-2/)).toBeVisible();
+	});
+
+	test("a group whose servers reported long ago still archives", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "quiet-grp" });
+		const one = await seedServer(sql, {
+			name: "quiet-1",
+			type: "tamanu-central",
+			groupId: group.id,
+		});
+		const two = await seedServer(sql, {
+			name: "quiet-2",
+			type: "tamanu-facility",
+			groupId: group.id,
+		});
+		// Both reported months ago and nothing since, so both are unreachable
+		// rather than never heard from. Archiving is still the right call: the
+		// button asks whether every member has gone quiet, not what colour its
+		// dot is.
+		for (const s of [one, two]) {
+			await seedApplicationReport(sql, {
+				applicationId: s.id,
+				reportedAt: "NOW() - INTERVAL '90 days'",
+			});
+		}
+		page.on("dialog", (d) => d.accept());
+
+		await page.goto(`/groups/${group.id}`);
+		await page.getByRole("button", { name: "Archive" }).click();
+		await expect(page).toHaveURL(/\/servers$/);
+
+		await page.goto("/servers/archived");
+		await expect(page.getByRole("link", { name: "quiet-grp" })).toBeVisible();
+		await expect(page.getByText(/quiet-1/)).toBeVisible();
+		await expect(page.getByText(/quiet-2/)).toBeVisible();
 	});
 });
 

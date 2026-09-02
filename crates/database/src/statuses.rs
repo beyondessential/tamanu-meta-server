@@ -1,9 +1,5 @@
 use commons_errors::{AppError, Result};
-use commons_types::{
-	server::app_type::ApplicationType,
-	status::{CheckResult, ShortStatus},
-	version::VersionStr,
-};
+use commons_types::{server::app_type::ApplicationType, status::CheckResult, version::VersionStr};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::{SignedDuration, Timestamp};
@@ -201,10 +197,26 @@ impl Status {
 		}
 
 		// Backstop for applications with no counted source (never reported, or
-		// every source excluded): the latest status row, any source.
+		// every source excluded): when anything last reported, any source.
+		//
+		// Read from the current-state projection rather than from status
+		// history, which is capped at `GRACE_LOOKBACK_SQL`: an application
+		// quiet for longer than that window is absent from the windowed read,
+		// so this filed "has never reported" against applications that had,
+		// and with no elapsed time on the event to contradict it.
+		let last_reported =
+			crate::reported_detail::ReportedDetail::last_reported_ats(db, &server_ids).await?;
 		let statuses = Self::latest_for_servers(db, &server_ids).await?;
-		let status_map: HashMap<Uuid, Status> =
-			statuses.into_iter().map(|s| (s.server_id, s)).collect();
+		let status_map: HashMap<Uuid, Timestamp> = statuses
+			.into_iter()
+			.map(|s| (s.server_id, s.created_at))
+			.chain(last_reported)
+			.fold(HashMap::new(), |mut acc, (id, at)| {
+				acc.entry(id)
+					.and_modify(|held| *held = (*held).max(at))
+					.or_insert(at);
+				acc
+			});
 
 		let existing_issues =
 			Issue::list_by_source_ref(db, CANOPY_SOURCE, REACHABILITY_REF, &server_ids).await?;
@@ -241,7 +253,7 @@ impl Status {
 			let (observed, message, detail) = if expected.is_empty() {
 				let elapsed = status_map
 					.get(&server.id)
-					.map(|s| now.duration_since(s.created_at).abs());
+					.map(|at| now.duration_since(*at).abs());
 				let down = elapsed.map(|e| e >= threshold).unwrap_or(true);
 				if down {
 					let message = match elapsed {
@@ -570,28 +582,6 @@ impl Status {
 	/// see [`commons_types::status::operators_from_health`].
 	pub fn operators(&self) -> Vec<commons_types::status::OperatorPresence> {
 		commons_types::status::operators_from_health(&self.health)
-	}
-
-	/// Whether this report leaves its target reachable, against the target's own
-	/// down threshold.
-	///
-	/// The same threshold the `reachability` check is graded on, so the
-	/// indicator and the check can no longer disagree. They previously did:
-	/// this read fixed 2/10/30-minute bands while the check read
-	/// `alert_when_down_for`, so a target configured to five minutes showed a
-	/// healthy dot while its own reachability check had already failed.
-	///
-	/// There are no degrees between reachable and unreachable — a target is one
-	/// or the other, and never reported is the third state, which is the absence
-	/// of a report rather than anything this can return.
-	// spec: CHK#reachability
-	pub fn short_status(&self, down_after: SignedDuration) -> ShortStatus {
-		let since = self.created_at.duration_since(Timestamp::now()).abs();
-		if since >= down_after {
-			ShortStatus::Down
-		} else {
-			ShortStatus::Up
-		}
 	}
 
 	pub fn distance_from_version(&self, version: &Version) -> Option<u64> {

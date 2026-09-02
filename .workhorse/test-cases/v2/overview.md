@@ -44,6 +44,9 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 - [ ] A machine's reachability silence is reachable from an application on that machine (verifies spec: CHK)
 - [x] Reachability is measured against the target's own threshold, not a fixed one (verifies spec: CHK)
 - [x] A gap inside the threshold is simply reachable, with no intermediate state (verifies spec: CHK)
+- [x] A target quiet for longer than the status lookback window is unreachable, not never reported (verifies spec: CHK)
+- [x] A target with no report at all is never reported, on every surface that presents one (verifies spec: CHK)
+- [x] A group whose members all reported long ago still offers the archive that cascades to them (verifies spec: FLT)
 - [ ] A dead application on a live machine is unhealthy rather than unreachable (verifies spec: CHK)
 
 ## Checks

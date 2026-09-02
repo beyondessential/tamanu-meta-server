@@ -130,6 +130,28 @@ async fn insert_status_at(
 	.expect("insert status");
 }
 
+/// Record a source's report against the current-state projection, dated
+/// `days_ago`, without a matching status row inside the lookback window.
+async fn insert_reported_detail_days_ago(
+	conn: &mut diesel_async::AsyncPgConnection,
+	server_id: Uuid,
+	source: &str,
+	days_ago: i32,
+) {
+	sql_query(
+		r#"
+			INSERT INTO application_reported_detail (application_id, source, extra, reported_at)
+			VALUES ($1, $2, '{}'::jsonb, NOW() - ($3 || ' days')::INTERVAL)
+		"#,
+	)
+	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Text, _>(source)
+	.bind::<sql_types::Text, _>(days_ago.to_string())
+	.execute(conn)
+	.await
+	.expect("insert reported detail");
+}
+
 async fn issue_for(conn: &mut diesel_async::AsyncPgConnection, server_id: Uuid) -> Option<Issue> {
 	Issue::list_by_source_ref(conn, CANOPY_SOURCE, REACHABILITY_REF, &[server_id])
 		.await
@@ -224,6 +246,41 @@ async fn sweep_files_when_no_status_ever() {
 		);
 		assert!(issue.message.contains("(threshold 10m)"));
 		assert!(!issue.message.contains("106751991167300d"));
+	})
+	.await
+}
+
+/// The backstop read status history, which is capped at the grace lookback, so
+/// an application quiet for longer than the window looked identical to one that
+/// had never reported: it filed "has never reported" with no elapsed time,
+/// against applications that had reported for years.
+#[tokio::test(flavor = "multi_thread")]
+async fn sweep_distinguishes_a_long_silence_from_never_reporting() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let id = insert_server(&mut conn, "http://quiet.invalid/", 600).await;
+		// Well past the lookback the windowed status read is capped at, so
+		// nothing about this application is visible in status history.
+		insert_reported_detail_days_ago(&mut conn, id, "alertd", 90).await;
+
+		let filed = Status::sweep_staleness(&mut conn).await.expect("sweep");
+		assert_eq!(filed, 1);
+		let issue = issue_for(&mut conn, id).await.expect("issue exists");
+		assert_eq!(issue.effective_result, Some(CheckResult::Failed));
+		assert!(
+			issue.message.contains("has not reported for"),
+			"expected an elapsed-time message, got: {}",
+			issue.message
+		);
+		assert!(
+			!issue.message.contains("has never reported"),
+			"an application that reported 90 days ago has reported: {}",
+			issue.message
+		);
+		let detail = issue.detail.clone().expect("issue carries detail");
+		assert!(
+			detail["elapsed_secs"].as_i64().unwrap_or_default() > 0,
+			"the event carries how long the silence has run: {detail}",
+		);
 	})
 	.await
 }

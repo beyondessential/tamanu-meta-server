@@ -153,6 +153,70 @@ impl ReportedDetail {
 		Ok(rows)
 	}
 
+	/// When each of `application_ids` last reported, whichever source it was
+	/// and however long ago. Applications that have never reported are absent
+	/// from the map.
+	///
+	/// This is what reachability is graded on, so a target quiet for months
+	/// reads as unreachable rather than as never heard from. Answering it from
+	/// status history needs a lookback cap (`statuses::GRACE_LOOKBACK_SQL`),
+	/// which is what made a long silence indistinguishable from no report at
+	/// all. Here there is one row per (application, source) and the read is
+	/// driven by the primary key, so the question is affordable unbounded —
+	/// the same read [`MachineReportedDetail::latest_for_machines`] does at the
+	/// machine grain.
+	// spec: CHK#reachability
+	pub async fn last_reported_ats(
+		db: &mut AsyncPgConnection,
+		application_ids: &[Uuid],
+	) -> Result<std::collections::HashMap<Uuid, Timestamp>> {
+		use crate::schema::application_reported_detail::dsl;
+		use std::collections::HashMap;
+
+		if application_ids.is_empty() {
+			return Ok(HashMap::new());
+		}
+		let rows: Vec<(Uuid, jiff_diesel::Timestamp)> = dsl::application_reported_detail
+			.select((dsl::application_id, dsl::reported_at))
+			.filter(dsl::application_id.eq_any(application_ids))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		let mut latest: HashMap<Uuid, Timestamp> = HashMap::new();
+		for (id, at) in rows {
+			let at = Timestamp::from(at);
+			latest
+				.entry(id)
+				.and_modify(|held| {
+					if at > *held {
+						*held = at;
+					}
+				})
+				.or_insert(at);
+		}
+		Ok(latest)
+	}
+
+	/// When `application` last reported, however long ago — the single form of
+	/// [`Self::last_reported_ats`], and unbounded for the same reason.
+	// spec: CHK#reachability
+	pub async fn last_reported_at(
+		db: &mut AsyncPgConnection,
+		application: Uuid,
+	) -> Result<Option<Timestamp>> {
+		use crate::schema::application_reported_detail::dsl;
+
+		let at: Option<jiff_diesel::Timestamp> = dsl::application_reported_detail
+			.select(dsl::reported_at)
+			.filter(dsl::application_id.eq(application))
+			.order(dsl::reported_at.desc())
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)?;
+		Ok(at.map(Timestamp::from))
+	}
+
 	/// Every source's current detail for every server that has any. Small
 	/// enough to read whole — one row per (server, source) across the fleet.
 	pub async fn all(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {

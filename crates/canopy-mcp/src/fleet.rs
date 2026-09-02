@@ -14,6 +14,7 @@ use database::{
 		BackupMaintenanceRun, BackupMaintenanceRunFilters, BackupRun, BackupRunFilters,
 		MaintenanceOutcomeFilter, ServerGroupBackupConfig,
 	},
+	reported_detail::ReportedDetail,
 	server_groups::ServerGroup,
 	statuses::Status,
 };
@@ -126,6 +127,9 @@ impl CanopyMcp {
 			.await
 			.map_err(mcp_err)?;
 		let st_by: HashMap<Uuid, &Status> = statuses.iter().map(|s| (s.server_id, s)).collect();
+		let last_reported = ReportedDetail::last_reported_ats(&mut conn, &ids)
+			.await
+			.map_err(mcp_err)?;
 		let server_groups: Vec<(Uuid, Option<Uuid>)> =
 			applications.iter().map(|s| (s.id, s.group_id)).collect();
 		let state_health = database::issues::health_from_check_state(&mut conn, &server_groups)
@@ -145,7 +149,11 @@ impl CanopyMcp {
 				*counts.by_rank.entry(r.to_string()).or_default() += 1;
 			}
 			let st = st_by.get(&s.id).copied();
-			match s.reachability(st) {
+			let last_reported_at = last_reported
+				.get(&s.id)
+				.copied()
+				.max(st.map(|s| s.created_at));
+			match s.reachability(last_reported_at) {
 				ShortStatus::Down | ShortStatus::Gone => health.unreachable += 1,
 				ShortStatus::Up => match state_health.get(&s.id).copied().unwrap_or_default() {
 					HealthState::Healthy => health.healthy += 1,

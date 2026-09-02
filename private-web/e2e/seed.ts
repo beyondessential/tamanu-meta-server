@@ -239,6 +239,50 @@ export async function seedMachineReport(
 	);
 }
 
+/** What an application last reported, written straight to the current-state
+ * projection with no matching status row.
+ *
+ * This is the state a long-quiet application is really in: `statuses` is
+ * pruned and read through a lookback window, so history from months ago is
+ * gone, while the projection carries one row per (application, source) for as
+ * long as the application exists. Seeding it alone gives an application that
+ * has reported, just not recently, which is what separates unreachable from
+ * never heard from. */
+export async function seedApplicationReport(
+	sql: Sql,
+	opts: {
+		applicationId: string;
+		source?: string;
+		version?: string | null;
+		extra?: Record<string, unknown>;
+		/** ISO 8601 timestamp or relative SQL like `NOW() - INTERVAL '90 days'`.
+		 * Defaults to NOW(). */
+		reportedAt?: string;
+	},
+): Promise<void> {
+	const useSqlExpr =
+		opts.reportedAt !== undefined && opts.reportedAt.toUpperCase().startsWith("NOW");
+	const reportedAtClause = opts.reportedAt === undefined
+		? "NOW()"
+		: useSqlExpr
+			? opts.reportedAt
+			: "$5";
+	const params: unknown[] = [
+		opts.applicationId,
+		opts.source ?? "alertd",
+		JSON.stringify(opts.extra ?? {}),
+		opts.version ?? null,
+	];
+	if (!useSqlExpr && opts.reportedAt !== undefined) params.push(opts.reportedAt);
+	await sql.query(
+		`INSERT INTO application_reported_detail (application_id, source, extra, version, reported_at)
+		 VALUES ($1, $2, $3::jsonb, $4, ${reportedAtClause})
+		 ON CONFLICT (application_id, source) DO UPDATE
+		 SET extra = EXCLUDED.extra, version = EXCLUDED.version, reported_at = EXCLUDED.reported_at`,
+		params,
+	);
+}
+
 export async function seedServer(
 	sql: Sql,
 	opts: {

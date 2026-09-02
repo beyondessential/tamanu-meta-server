@@ -246,14 +246,22 @@ impl ServerGroup {
 				.map_err(AppError::from)?;
 
 			if !member_ids.is_empty() {
-				// A member is "gone" iff it's absent from `latest_for_servers`
+				// A member is quiet iff it's absent from `latest_for_servers`
 				// (no status in the last 7 days). Allow the cascade only when
-				// every live member is gone; any recent reporter blocks it.
+				// every live member is quiet; any recent reporter blocks it.
+				//
+				// This is deliberately the windowed question and not
+				// reachability: a member that last reported months ago is
+				// unreachable rather than never heard from, and archiving it
+				// is still the right call. The card carries the same fact as
+				// `all_members_quiet` so the button offered matches what this
+				// allows.
 				let recent = Status::latest_for_servers(conn, &member_ids).await?;
 				if !recent.is_empty() {
 					return Err(AppError::Conflict(format!(
 						"group {group_id} has {} server(s) that reported within the last \
-						 week; only a group whose applications are all gone can be archived",
+						 week; only a group whose applications have all gone quiet can be \
+						 archived",
 						recent.len(),
 					)));
 				}

@@ -204,6 +204,12 @@ impl CanopyMcp {
 		let last_versions = ReportedDetail::last_versions(&mut conn, &missed)
 			.await
 			.map_err(mcp_err)?;
+		// Every application's last report, not just the ones the window
+		// missed: reachability is graded on it, and the same read answers
+		// both "quiet for a week" and "never heard from".
+		let last_reported = ReportedDetail::last_reported_ats(&mut conn, &ids)
+			.await
+			.map_err(mcp_err)?;
 
 		let group_names = Application::group_names_by_server_ids(&mut conn, &ids)
 			.await
@@ -222,6 +228,7 @@ impl CanopyMcp {
 					st_by.get(&s.id).copied(),
 					Retained {
 						version: last_versions.get(&s.id).cloned(),
+						last_reported_at: last_reported.get(&s.id).copied(),
 					},
 					group_names.get(&s.id).cloned().flatten(),
 					health.get(&s.id).copied().unwrap_or_default(),
@@ -262,6 +269,14 @@ impl CanopyMcp {
 		let version = ReportedDetail::last_version(&mut conn, id)
 			.await
 			.map_err(mcp_err)?;
+		// The projection covers every report however old; the status window
+		// covers only the last week. Take the later of the two, so a server
+		// whose projection row predates the table's backfill horizon still
+		// reads from whatever history does reach it.
+		let last_reported_at = ReportedDetail::last_reported_at(&mut conn, id)
+			.await
+			.map_err(mcp_err)?
+			.max(latest.as_ref().map(|s| s.created_at));
 
 		let group = match server.group_id {
 			Some(gid) => ServerGroup::get_by_id(&mut conn, gid).await.ok(),
@@ -285,7 +300,7 @@ impl CanopyMcp {
 			version: version.clone(),
 			health,
 			healthy: s.healthy,
-			reachability: server.reachability(Some(s)),
+			reachability: server.reachability(last_reported_at),
 			checks: s.health.clone(),
 		});
 
@@ -321,7 +336,7 @@ impl CanopyMcp {
 			group_id: server.group_id,
 			group_name: group.as_ref().map(|g| g.name.clone()),
 			sibling_count,
-			reachability: server.reachability(latest.as_ref()),
+			reachability: server.reachability(last_reported_at),
 			health,
 			figures,
 			latest_status,
@@ -335,20 +350,19 @@ impl CanopyMcp {
 /// What a server last told canopy, read from the current-state projection
 /// rather than from status history.
 ///
-/// Only the version. `last_seen` and `reachability` stay sourced from the
-/// windowed status read: `statuses` is partitioned by week and a predicate on
-/// `server_id` alone can't be pruned, so answering "when was it last seen,
-/// however long ago" means scanning every partition — the cost
-/// `statuses::GRACE_LOOKBACK_SQL` exists to refuse. `application_reported_detail`
-/// has no such problem: one row per (server, source), which is why
-/// `last_version` is already unbounded there.
+/// The version and when it last reported, both unbounded. `statuses` is
+/// partitioned by week and a predicate on `server_id` alone can't be pruned,
+/// so answering either question from status history means scanning every
+/// partition — the cost `statuses::GRACE_LOOKBACK_SQL` exists to refuse.
+/// `application_reported_detail` has no such problem: one row per (server,
+/// source), reached by primary key.
 ///
-/// So a server past the window still reports what it was running, and still
-/// reads as `gone` with no last-seen. That is the documented trade, not an
-/// oversight.
+/// So a server past the window reports what it was running, when it was last
+/// heard from, and reads as unreachable rather than as never heard from.
 #[derive(Default)]
 pub(crate) struct Retained {
 	pub version: Option<VersionStr>,
+	pub last_reported_at: Option<Timestamp>,
 }
 
 pub(crate) fn summarize(
@@ -358,6 +372,11 @@ pub(crate) fn summarize(
 	group_name: Option<String>,
 	health: HealthState,
 ) -> ServerSummary {
+	// The projection covers every report however old; the status window covers
+	// only the last week. Take the later of the two, so a server whose
+	// projection row predates the table's backfill horizon still reads from
+	// whatever history does reach it.
+	let last_reported_at = retained.last_reported_at.max(st.map(|s| s.created_at));
 	ServerSummary {
 		id: s.id,
 		name: s.name.clone(),
@@ -368,7 +387,7 @@ pub(crate) fn summarize(
 		group_name,
 		is_monitored: s.is_monitored,
 		archived: s.deleted_at.is_some(),
-		last_seen: st.map(|s| s.created_at),
+		last_seen: last_reported_at,
 		// A type with no application version carries none rather than a
 		// stale value from a status that predates its classification.
 		// spec: APP#versions
@@ -376,7 +395,7 @@ pub(crate) fn summarize(
 			.and_then(|st| st.version.clone())
 			.or(retained.version)
 			.filter(|_| s.r#type.has_versions()),
-		reachability: s.reachability(st),
+		reachability: s.reachability(last_reported_at),
 		health,
 	}
 }

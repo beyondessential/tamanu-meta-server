@@ -234,6 +234,19 @@ pub async fn group_details(
 		.into_iter()
 		.map(|s| (s.server_id, s))
 		.collect();
+	// The archive affordance asks the same question `ServerGroup::soft_delete`
+	// enforces: has every member been quiet for longer than the status window.
+	// A member unreachable for months has still reported, so member
+	// reachability cannot answer it, and the card carries the fact rather than
+	// letting the UI infer it from dots that no longer mean that.
+	let all_members_quiet = !server_ids.is_empty() && status_map.is_empty();
+	// Reachability is graded on this rather than on the status window, so a
+	// member quiet for longer than the window reads as unreachable rather than
+	// as never heard from.
+	// spec: CHK#reachability
+	let last_reported =
+		database::reported_detail::ReportedDetail::last_reported_ats(&mut conn, &server_ids)
+			.await?;
 	// Member health rolls up current check state across every source
 	// (silenced checks already skipped in the rollup).
 	let member_groups: Vec<(Uuid, Option<Uuid>)> =
@@ -284,7 +297,12 @@ pub async fn group_details(
 		.into_iter()
 		.map(|s| {
 			let st = status_map.get(&s.id);
-			let up = s.reachability(st);
+			let up = s.reachability(
+				last_reported
+					.get(&s.id)
+					.copied()
+					.max(st.map(|st| st.created_at)),
+			);
 			// Active presence only: an application that has stopped reporting
 			// may well still have those sessions, but we cannot assert "in the
 			// server right now" from a report that is past its own threshold.
@@ -329,6 +347,7 @@ pub async fn group_details(
 		version: card_version,
 		version_distance,
 		members,
+		all_members_quiet,
 	}))
 }
 

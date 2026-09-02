@@ -330,6 +330,12 @@ pub(super) async fn decorate_with_status(
 	let statuses = Status::latest_for_servers(conn, &ids).await?;
 	let by_server: std::collections::HashMap<Uuid, &Status> =
 		statuses.iter().map(|s| (s.server_id, s)).collect();
+	// Reachability is graded on this rather than on the status window, so an
+	// application quiet for longer than the window reads as unreachable rather
+	// than as never heard from.
+	// spec: CHK#reachability
+	let last_reported =
+		database::reported_detail::ReportedDetail::last_reported_ats(conn, &ids).await?;
 	// Health comes from current check state across every source
 	// (silenced checks already skipped in the rollup).
 	let server_groups: Vec<(Uuid, Option<Uuid>)> =
@@ -347,7 +353,11 @@ pub(super) async fn decorate_with_status(
 		// Each application's own threshold, carried on the info we are filling.
 		// spec: CHK#reachability
 		let down_after = jiff::SignedDuration::from_secs(info.alert_when_down_for);
-		info.up = Some(st.map(|s| s.short_status(down_after)).unwrap_or_default());
+		let last_reported_at = last_reported
+			.get(&info.id)
+			.copied()
+			.max(st.map(|s| s.created_at));
+		info.up = Some(ShortStatus::grade(last_reported_at, down_after));
 		info.health = Some(health.get(&info.id).copied().unwrap_or_default());
 		info.maintained = Some(
 			maintained_machines.contains(&info.machine_id)
@@ -645,7 +655,16 @@ pub async fn get_detail(
 	server_details.group_name = group.as_ref().map(|g| g.name.clone());
 	fill_display_hosts(&mut conn, std::slice::from_mut(&mut server_details)).await?;
 
-	let up = server.reachability(status.as_ref());
+	// The projection covers every report however old; the status window covers
+	// only the last week. Take the later of the two, so an application whose
+	// projection row predates the table's backfill horizon still reads from
+	// whatever history does reach it.
+	// spec: CHK#reachability
+	let last_reported_at =
+		database::reported_detail::ReportedDetail::last_reported_at(&mut conn, server.id)
+			.await?
+			.max(status.as_ref().map(|s| s.created_at));
+	let up = server.reachability(last_reported_at);
 	// One consolidated read drives both the headline health chip and the
 	// checks table, so they can't disagree: the rollup and the list come
 	// from the same graded state across every source.

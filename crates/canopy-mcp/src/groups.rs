@@ -174,6 +174,9 @@ impl CanopyMcp {
 		let last_versions = ReportedDetail::last_versions(&mut conn, &missed)
 			.await
 			.map_err(mcp_err)?;
+		let last_reported = ReportedDetail::last_reported_ats(&mut conn, &mids)
+			.await
+			.map_err(mcp_err)?;
 		let member_groups: Vec<(Uuid, Option<Uuid>)> =
 			members.iter().map(|s| (s.id, s.group_id)).collect();
 		let health = database::issues::health_from_check_state(&mut conn, &member_groups)
@@ -187,6 +190,7 @@ impl CanopyMcp {
 					st_by.get(&s.id).copied(),
 					Retained {
 						version: last_versions.get(&s.id).cloned(),
+						last_reported_at: last_reported.get(&s.id).copied(),
 					},
 					Some(group.name.clone()),
 					health.get(&s.id).copied().unwrap_or_default(),

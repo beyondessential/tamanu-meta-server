@@ -66,6 +66,33 @@ pub enum ShortStatus {
 	Gone,
 }
 
+impl ShortStatus {
+	/// Grade a target from when it last reported and its own down threshold.
+	///
+	/// `last_reported_at` is when anything last reported about the target,
+	/// however long ago, so `None` means never — not merely nothing recent.
+	/// Sourcing it from a windowed read of status history makes a target
+	/// quiet for longer than the window read as never heard from, which is
+	/// the state that outranks every other on every surface.
+	///
+	/// Every grain grades the same way. Which threshold applies is the
+	/// target's own, which is why the models call this rather than each
+	/// caller reaching for a clock of its own.
+	// spec: CHK#reachability
+	pub fn grade(
+		last_reported_at: Option<jiff::Timestamp>,
+		down_after: jiff::SignedDuration,
+	) -> Self {
+		last_reported_at.map_or(Self::Gone, |at| {
+			if at.duration_since(jiff::Timestamp::now()).abs() >= down_after {
+				Self::Down
+			} else {
+				Self::Up
+			}
+		})
+	}
+}
+
 impl Display for ShortStatus {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {

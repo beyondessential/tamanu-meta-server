@@ -84,13 +84,17 @@ export default function GroupDetail() {
 			? activeIncidents.data[0]
 			: null;
 
-	// A group archives when empty, or when all its members are "gone" (no
-	// recent status) — in which case archiving cascades to those servers.
-	const allGone = applications.every((s) => s.up === "gone");
+	// A group archives when empty, or when every member has gone quiet, in
+	// which case archiving cascades to those servers. The card carries that
+	// fact: it is the same windowed question the archive itself enforces, and
+	// a member unreachable for months is quiet without reading as "gone".
+	const allQuiet =
+		applications.length === 0 ||
+		(groupStatuses.status === "ok" && groupStatuses.data.all_members_quiet);
 	const onArchive = async () => {
 		const cascade =
 			applications.length > 0
-				? ` This also archives its ${applications.length} gone server${applications.length === 1 ? "" : "s"}.`
+				? ` This also archives its ${applications.length} quiet server${applications.length === 1 ? "" : "s"}.`
 				: "";
 		if (
 			!confirm(
@@ -153,7 +157,7 @@ export default function GroupDetail() {
 						>
 							Edit
 						</Button>
-						{allGone && !group.deleted_at && (
+						{allQuiet && !group.deleted_at && (
 							<Button
 								variant="outlined"
 								color="error"

@@ -188,6 +188,13 @@ async fn server_versions_page(
 	} else {
 		Vec::new()
 	};
+	// Reachability is graded on this rather than on the status window, so a
+	// server quiet for longer than the window reads as unreachable rather than
+	// as never heard from.
+	// spec: CHK#reachability
+	let last_reported =
+		database::reported_detail::ReportedDetail::last_reported_ats(&mut conn, &server_ids)
+			.await?;
 
 	let mut server_infos: Vec<ServerVersionInfo> = Vec::new();
 	for (id, name, host, down_after) in applications {
@@ -195,9 +202,13 @@ async fn server_versions_page(
 		let status = statuses.iter().find(|s| s.server_id == id);
 
 		let version = status.and_then(|s| s.version.clone());
-		let up = status
-			.map(|s| s.short_status(down_after.0))
-			.unwrap_or_default();
+		let up = ShortStatus::grade(
+			last_reported
+				.get(&id)
+				.copied()
+				.max(status.map(|s| s.created_at)),
+			down_after.0,
+		);
 
 		let version_distance = if let (Some(_), Some(latest)) = (&version, &latest_version) {
 			status.and_then(|s| s.distance_from_version(latest))

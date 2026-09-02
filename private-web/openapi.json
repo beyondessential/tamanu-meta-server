@@ -15961,9 +15961,14 @@
           "id",
           "name",
           "notes",
-          "members"
+          "members",
+          "all_members_quiet"
         ],
         "properties": {
+          "all_members_quiet": {
+            "type": "boolean",
+            "description": "Whether every member of the group has been quiet for long enough that\narchiving the group cascades to them.\n\nThis is the archive rule, not a reachability reading: a member that\nlast reported months ago is thoroughly unreachable but has still\nreported, so `up` alone cannot answer it. Both this and the rule the\narchive itself enforces ask the same question of the same window, so\nthe button offered and the outcome cannot disagree."
+          },
           "id": {
             "type": "string",
             "format": "uuid",

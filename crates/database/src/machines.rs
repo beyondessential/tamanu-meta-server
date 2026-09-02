@@ -397,13 +397,7 @@ impl Machine {
 	/// two workloads still has one answer here.
 	// spec: CHK#reachability
 	pub fn reachability(&self, last_reported_at: Option<Timestamp>) -> ShortStatus {
-		last_reported_at.map_or(ShortStatus::Gone, |at| {
-			if at.duration_since(Timestamp::now()).abs() >= self.alert_when_down_for.0 {
-				ShortStatus::Down
-			} else {
-				ShortStatus::Up
-			}
-		})
+		ShortStatus::grade(last_reported_at, self.alert_when_down_for.0)
 	}
 
 	/// Open the restore window for a machine: allow it to mint restore

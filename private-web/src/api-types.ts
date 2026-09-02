@@ -9165,6 +9165,17 @@ export interface components {
          */
         ServerGroupCard: {
             /**
+             * @description Whether every member of the group has been quiet for long enough that
+             *     archiving the group cascades to them.
+             *
+             *     This is the archive rule, not a reachability reading: a member that
+             *     last reported months ago is thoroughly unreachable but has still
+             *     reported, so `up` alone cannot answer it. Both this and the rule the
+             *     archive itself enforces ask the same question of the same window, so
+             *     the button offered and the outcome cannot disagree.
+             */
+            all_members_quiet: boolean;
+            /**
              * Format: uuid
              * @description Unique identifier of the group.
              */

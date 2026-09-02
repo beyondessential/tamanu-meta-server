@@ -431,17 +431,23 @@ impl Application {
 		Ok(())
 	}
 
-	/// This application's reachability, from its latest report and its own down
-	/// threshold.
+	/// This application's reachability, from when it last reported and its own
+	/// down threshold.
 	///
 	/// The threshold lives here rather than at each call site so the indicator
 	/// and the `reachability` check cannot be graded on different clocks, which
 	/// is exactly how they came to disagree.
+	///
+	/// `last_reported_at` is when any source last reported on this
+	/// application, from `ReportedDetail::last_reported_ats`, and is `None`
+	/// only for one that has never reported. Reading it from status history
+	/// instead capped the question at a lookback window, so an application
+	/// quiet for longer than the window read as never heard from — grey, and
+	/// outranking every other state — when it was the most thoroughly
+	/// unreachable thing in the fleet.
 	// spec: CHK#reachability
-	pub fn reachability(&self, latest: Option<&crate::statuses::Status>) -> ShortStatus {
-		latest.map_or(ShortStatus::Gone, |status| {
-			status.short_status(self.alert_when_down_for.0)
-		})
+	pub fn reachability(&self, last_reported_at: Option<Timestamp>) -> ShortStatus {
+		ShortStatus::grade(last_reported_at, self.alert_when_down_for.0)
 	}
 
 	// spec: CRT#pausing-a-server
