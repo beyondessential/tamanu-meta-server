@@ -449,20 +449,19 @@ pub async fn register_complete(
 
 			// Refuse to graft this key onto an identity already serving a
 			// different live server.
-			if let Some(existing) = Device::from_key(conn, &spki).await? {
-				if Application::live_by_device_id(conn, existing.id)
+			if let Some(existing) = Device::from_key(conn, &spki).await?
+				&& Application::live_by_device_id(conn, existing.id)
 					.await?
 					.iter()
 					.any(|s| s.id != args.server_id)
-				{
-					tracing::warn!(
-						target: "enrollment",
-						server_id = %args.server_id,
-						device_id = %existing.id,
-						"enrollment rejected: presented key is already bound to another live server",
-					);
-					return Err(AppError::EnrollmentFailed);
-				}
+			{
+				tracing::warn!(
+					target: "enrollment",
+					server_id = %args.server_id,
+					device_id = %existing.id,
+					"enrollment rejected: presented key is already bound to another live server",
+				);
+				return Err(AppError::EnrollmentFailed);
 			}
 
 			// Resolve the device to bind. Helper: reuse the box's prior device
