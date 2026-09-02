@@ -448,6 +448,8 @@ So, per entry from a structured source:
 
 **One case is unresolvable**: an application-subject entry with no check-states left, because the only application reporting it was deleted and cascaded its states away. Its type is not recoverable and there is nothing running to serve. Those entries are dropped, which is what already happens semantically — a later report re-registers the check pending review. What is actually lost is operator-authored documentation for a check nothing is running, and the migration should say how many it dropped rather than doing it silently.
 
+**Saying so means filing an issue, not raising a notice.** A `RAISE NOTICE` was the plan; `migrate.rs` prints nothing a Postgres notice arrives on at any verbosity, so in the deployment path it would land nowhere and only ever be seen by whoever ran the file by hand. The migration raises the notice anyway, for that reader, and also files a canopy-wide `manual` issue naming the dropped entries. That puts it where an operator already looks, and resolving it is how they say they have dealt with it.
+
 **`scoped_check_policies` fans out too, and further than the catalog does.** A row scoped to an application takes that application's type and stays one row. A row scoped to a machine, a group, or Canopy-wide, on an application-subject check, covers a target that spans types, so it becomes one row per type present in that target. That multiplication is real and worth counting before running it.
 
 ### The spec's phrasing needs correcting with this
