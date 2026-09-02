@@ -7,6 +7,7 @@ pub mod device;
 pub mod dns;
 pub mod geo;
 pub mod issue;
+pub mod namespace;
 pub mod server;
 pub mod source;
 pub mod status;

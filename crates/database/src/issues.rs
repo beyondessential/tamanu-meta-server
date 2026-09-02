@@ -1019,7 +1019,10 @@ impl Scope {
 }
 
 /// The source operator-raised manual conditions file under.
-pub const MANUAL_SOURCE: &str = "manual";
+///
+/// Defined with the check namespace, since being curated by canopy is what
+/// makes this source's names unqualified.
+pub use commons_types::namespace::MANUAL_SOURCE;
 
 /// One canopy-determined or operator-raised check result to file:
 /// reachability, backup health, key expiry, self-monitoring, manual

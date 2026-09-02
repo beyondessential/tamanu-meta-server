@@ -13,6 +13,7 @@ use commons_servers::{
 use commons_types::{
 	backup::BackupType,
 	device::DeviceRole,
+	namespace::{RESERVED_SOURCES, is_reserved},
 	server::TagMap,
 	status::{CheckResult, CheckSeverity},
 	subject::CheckSubject,
@@ -131,9 +132,6 @@ const LEGACY_SOURCE: &str = "tamanu";
 /// always passing on receipt. Its value is that it stops — a Tamanu
 /// server that goes quiet trips the source-staleness net.
 const LEGACY_CHECK: &str = "tasks";
-/// Source names a push may not claim: `canopy` is canopy's own
-/// determinations (reachability sweep etc.), `manual` is operator-entered.
-const RESERVED_SOURCES: &[&str] = &[database::statuses::CANOPY_SOURCE, "manual"];
 /// Prefix for per-check refs. Each check is filed at
 /// `(<source>, health/<check_name>)` — one thread per check, brokenness
 /// included (a broken check retains the previous definite result's
@@ -866,7 +864,7 @@ fn split_health_from_extra(
 	let source = match obj.remove("source") {
 		None => DEFAULT_SOURCE.to_string(),
 		Some(serde_json::Value::String(s)) if !s.is_empty() => {
-			if RESERVED_SOURCES.iter().any(|r| s.eq_ignore_ascii_case(r)) {
+			if is_reserved(&s) {
 				return Err(AppError::BadRequest(format!(
 					"`source` must not be a reserved name ({})",
 					RESERVED_SOURCES.join(", "),

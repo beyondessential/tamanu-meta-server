@@ -15,7 +15,10 @@ use crate::issues::Issue;
 
 /// Source value canopy uses when it files reachability issues on behalf of a
 /// server. Combined with [`REACHABILITY_REF`] to dedupe / find-or-create.
-pub const CANOPY_SOURCE: &str = "canopy";
+///
+/// Defined with the check namespace, since being curated by canopy is what
+/// makes this source's names unqualified.
+pub use commons_types::namespace::CANOPY_SOURCE;
 
 /// Ref value canopy uses for the one reachability issue per server. Stable so
 /// the find-or-create in [`NewEvent::save`] coalesces every cycle into the

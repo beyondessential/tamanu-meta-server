@@ -8,6 +8,7 @@ use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
+use commons_types::namespace::is_reserved;
 use commons_types::source::{IngestMode, ReachabilityMode};
 use commons_types::status::CheckResult;
 use database::applications::Application;
@@ -265,7 +266,7 @@ pub async fn set_source_reachability(
 	_admin: TailscaleAdmin,
 	Json(args): Json<SetSourceReachabilityArgs>,
 ) -> Result<Json<()>> {
-	if args.source == "canopy" || args.source == "manual" {
+	if is_reserved(&args.source) {
 		return Err(AppError::BadRequest(
 			"the reserved canopy/manual sources have no reachability policy".into(),
 		));
@@ -309,7 +310,7 @@ pub async fn set_source_ingest(
 	_admin: TailscaleAdmin,
 	Json(args): Json<SetSourceIngestArgs>,
 ) -> Result<Json<()>> {
-	if args.source == "canopy" || args.source == "manual" {
+	if is_reserved(&args.source) {
 		return Err(AppError::BadRequest(
 			"the reserved canopy/manual sources have no ingest policy".into(),
 		));
