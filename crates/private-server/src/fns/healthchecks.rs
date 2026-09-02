@@ -10,6 +10,7 @@ use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::source::{IngestMode, ReachabilityMode};
 use commons_types::status::CheckResult;
+use commons_types::subject::CheckGrain;
 use database::applications::Application;
 use database::check_policies::{CheckPolicy, IfLadder};
 use database::source_policies::SourcePolicy;
@@ -327,6 +328,11 @@ pub struct HealthcheckUpdateArgs {
 	/// The healthcheck name to update; must already exist in the
 	/// catalog.
 	pub check_name: String,
+	/// What the check asserts something about: `application`, `machine`,
+	/// `group`, or `canopy`. Part of the check's identity — the same name at
+	/// two grains is two checks with their own policies.
+	#[schema(value_type = String)]
+	pub grain: CheckGrain,
 	/// The ceiling to apply to this check's observed results when no
 	/// conditional rule overrides it: one of `failed`, `warning`,
 	/// `passed`, or `skipped`.
@@ -380,6 +386,7 @@ pub async fn update(
 	let row = CheckPolicy::update(
 		&mut conn,
 		&args.source,
+		args.grain,
 		&args.check_name,
 		args.ceiling,
 		args.escalates,
@@ -398,6 +405,11 @@ pub struct DecommissionArgs {
 	/// The healthcheck name to decommission; must already exist in the
 	/// catalog.
 	pub check_name: String,
+	/// What the check asserts something about: `application`, `machine`,
+	/// `group`, or `canopy`. Part of the check's identity — the same name at
+	/// two grains is two checks with their own policies.
+	#[schema(value_type = String)]
+	pub grain: CheckGrain,
 }
 
 /// Decommission a check fleet-wide.
@@ -426,7 +438,14 @@ pub async fn decommission(
 	Json(args): Json<DecommissionArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	CheckPolicy::decommission(&mut conn, &args.source, &args.check_name, &admin.0.login).await?;
+	CheckPolicy::decommission(
+		&mut conn,
+		&args.source,
+		args.grain,
+		&args.check_name,
+		&admin.0.login,
+	)
+	.await?;
 	Ok(Json(()))
 }
 
@@ -438,6 +457,11 @@ pub struct UpdateDocumentationArgs {
 	/// The healthcheck name to document; must already exist in the
 	/// catalog.
 	pub check_name: String,
+	/// What the check asserts something about: `application`, `machine`,
+	/// `group`, or `canopy`. Part of the check's identity — the same name at
+	/// two grains is two checks with their own policies.
+	#[schema(value_type = String)]
+	pub grain: CheckGrain,
 	/// The new markdown document, or `null` (or blank) to clear it.
 	#[serde(default)]
 	pub documentation: Option<String>,
@@ -473,9 +497,14 @@ pub async fn update_documentation(
 		.map(str::trim)
 		.filter(|d| !d.is_empty());
 	let mut conn = state.db.get().await?;
-	let row =
-		CheckPolicy::update_documentation(&mut conn, &args.source, &args.check_name, documentation)
-			.await?;
+	let row = CheckPolicy::update_documentation(
+		&mut conn,
+		&args.source,
+		args.grain,
+		&args.check_name,
+		documentation,
+	)
+	.await?;
 	Ok(Json(row.into()))
 }
 
@@ -487,6 +516,11 @@ pub struct UpdateRulesArgs {
 	/// The healthcheck name whose rules to replace; must already exist
 	/// in the catalog.
 	pub check_name: String,
+	/// What the check asserts something about: `application`, `machine`,
+	/// `group`, or `canopy`. Part of the check's identity — the same name at
+	/// two grains is two checks with their own policies.
+	#[schema(value_type = String)]
+	pub grain: CheckGrain,
 	/// The new conditional rules to store, or `null` to remove all
 	/// conditional rules and rely solely on the ceiling. Same shape as
 	/// the `rules` field returned when listing checks. A ladder with no
@@ -540,6 +574,7 @@ pub async fn update_rules(
 	let row = CheckPolicy::update_rules(
 		&mut conn,
 		&args.source,
+		args.grain,
 		&args.check_name,
 		ladder.as_ref(),
 		&admin.0.login,

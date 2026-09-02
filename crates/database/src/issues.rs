@@ -1,7 +1,9 @@
 //! Issues, events, incidents.
 
+use crate::check_policies::CheckKey;
 use commons_errors::{AppError, Result};
 use commons_types::status::CheckResult;
+use commons_types::subject::CheckGrain;
 use diesel::prelude::*;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use jiff::{SignedDuration, Timestamp};
@@ -958,6 +960,21 @@ pub enum Scope {
 }
 
 impl Scope {
+	/// What a check filed at this scope asserts something about.
+	///
+	/// Part of the check's identity rather than of the filing: the catalog is
+	/// keyed by it, so the same name filed at two grains is two checks with
+	/// their own ceilings, rules and statistics.
+	// spec: CHK#a-check-is-identified-by-its-grain
+	pub fn grain(self) -> CheckGrain {
+		match self {
+			Scope::Application(_) => CheckGrain::Application,
+			Scope::Machine(_) => CheckGrain::Machine,
+			Scope::Group(_) => CheckGrain::Group,
+			Scope::Global => CheckGrain::Canopy,
+		}
+	}
+
 	/// The `(application_id, machine_id, server_group_id)` storage columns for
 	/// this scope.
 	pub fn to_columns(self) -> (Option<Uuid>, Option<Uuid>, Option<Uuid>) {
@@ -1173,6 +1190,7 @@ pub async fn file_check_instances(
 	CheckPolicy::register(
 		conn,
 		source,
+		filing.scope.grain(),
 		filing.check,
 		filing.default_ceiling,
 		filing.default_escalates,
@@ -1241,7 +1259,8 @@ pub async fn file_check_instances(
 	// The catalog entry and the scoped chain are properties of the check, not
 	// of any one instance: read them once and grade purely from there, so a
 	// server with a dozen backup types still costs two queries.
-	let fleet = CheckPolicy::fleet_grading(conn, source, filing.check).await?;
+	let fleet =
+		CheckPolicy::fleet_grading(conn, source, filing.scope.grain(), filing.check).await?;
 	let chain = ScopedCheckPolicy::chain_for(conn, source, filing.check, scope).await?;
 
 	let mut graded_instances: Vec<GradedInstance> = Vec::with_capacity(filing.instances.len());
@@ -1479,8 +1498,8 @@ pub async fn health_from_check_state(
 
 	// A check-state only contributes to health if a live catalog policy
 	// backs it: this skips decommissioned checks and orphaned check-states
-	// (no catalog row at all) fleet-wide. See `live_cataloged_pairs`.
-	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_pairs(conn).await?;
+	// (no catalog row at all) fleet-wide. See `live_cataloged_keys`.
+	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_keys(conn).await?;
 
 	let group_ids: Vec<Uuid> = group_of.values().filter_map(|g| *g).collect();
 	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
@@ -1520,7 +1539,7 @@ pub async fn health_from_check_state(
 			continue;
 		};
 		let key = (application_id, source, check_name);
-		if !cataloged.contains(&(key.1.clone(), key.2.clone())) {
+		if !cataloged.contains(&CheckKey::new(&key.1, CheckGrain::Application, &key.2)) {
 			continue;
 		}
 		if server_silences.contains(&key) {
@@ -1583,7 +1602,7 @@ pub async fn machine_health_from_check_state(
 		.load(conn)
 		.await?;
 
-	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_pairs(conn).await?;
+	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_keys(conn).await?;
 
 	let group_ids: Vec<Uuid> = group_of.values().filter_map(|g| *g).collect();
 	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
@@ -1621,7 +1640,7 @@ pub async fn machine_health_from_check_state(
 			continue;
 		};
 		let key = (machine_id, source, check_name);
-		if !cataloged.contains(&(key.1.clone(), key.2.clone())) {
+		if !cataloged.contains(&CheckKey::new(&key.1, CheckGrain::Machine, &key.2)) {
 			continue;
 		}
 		if machine_silences.contains(&key) {
@@ -1704,7 +1723,7 @@ pub async fn check_detail_by_server(
 		.load(conn)
 		.await?;
 
-	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_pairs(conn).await?;
+	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_keys(conn).await?;
 
 	let group_ids: Vec<Uuid> = group_of.values().filter_map(|g| *g).collect();
 	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
@@ -1738,7 +1757,7 @@ pub async fn check_detail_by_server(
 		let (Some(application_id), Some(check)) = (application_id, check_name) else {
 			continue;
 		};
-		if !cataloged.contains(&(source.clone(), check.clone())) {
+		if !cataloged.contains(&CheckKey::new(&source, CheckGrain::Application, &check)) {
 			continue;
 		}
 		let Some(stored) = effective
@@ -1879,8 +1898,8 @@ async fn consolidated_checks_for(
 	// A check-state only presents if a live catalog policy backs it: this
 	// excludes decommissioned checks and orphaned check-states (no catalog
 	// row at all — invisible in settings and unmanageable, so never a
-	// phantom failure here). See `live_cataloged_pairs`.
-	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_pairs(conn).await?;
+	// phantom failure here). See `live_cataloged_keys`.
+	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_keys(conn).await?;
 
 	let group_ids: Vec<Uuid> = group_id.into_iter().collect();
 	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
@@ -1911,7 +1930,7 @@ async fn consolidated_checks_for(
 		.into_iter()
 		.filter_map(|(source, check_name, observed, effective, detail)| {
 			let check = check_name?;
-			if !cataloged.contains(&(source.clone(), check.clone())) {
+			if !cataloged.contains(&CheckKey::new(&source, target.grain(), &check)) {
 				return None;
 			}
 			let stored: CheckResult = effective.as_deref().and_then(|e| e.parse().ok())?;
@@ -1949,10 +1968,13 @@ async fn consolidated_checks_for(
 		crate::statuses::CANOPY_SOURCE.to_string(),
 		crate::statuses::REACHABILITY_REF.to_string(),
 	);
-	if cataloged.contains(&reachability)
-		&& !checks
-			.iter()
-			.any(|c| c.source == reachability.0 && c.check == reachability.1)
+	if cataloged.contains(&CheckKey::new(
+		&reachability.0,
+		target.grain(),
+		&reachability.1,
+	)) && !checks
+		.iter()
+		.any(|c| c.source == reachability.0 && c.check == reachability.1)
 	{
 		let is_silenced = silenced.contains(&reachability);
 		checks.push(ConsolidatedCheck {
@@ -3731,7 +3753,7 @@ impl Issue {
 		// source would hold applications into a reachability warning forever, with
 		// no catalog entry to silence or decommission. Mirrors the health
 		// rollup (see [`health_from_check_state`]).
-		let cataloged = CheckPolicy::live_cataloged_pairs(db).await?;
+		let cataloged = CheckPolicy::live_cataloged_keys(db).await?;
 
 		let rows: Vec<(Uuid, String, String, jiff_diesel::Timestamp)> = dsl::issues
 			.filter(
@@ -3755,7 +3777,7 @@ impl Issue {
 
 		let mut latest: HashMap<(Uuid, String), Timestamp> = HashMap::new();
 		for (server, source, check, seen) in rows {
-			if !cataloged.contains(&(source.clone(), check)) {
+			if !cataloged.contains(&CheckKey::new(&source, CheckGrain::Application, &check)) {
 				continue;
 			}
 			let seen: Timestamp = seen.into();

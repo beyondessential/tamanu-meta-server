@@ -3,15 +3,16 @@
 //! through the private-server `/api/healthchecks` endpoints.
 
 use commons_types::status::CheckResult;
+use commons_types::subject::CheckGrain;
 use database::check_policies::CheckPolicy;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn upsert_default_inserts_then_is_idempotent() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		CheckPolicy::upsert_default(&mut conn, "alertd", "disk_space")
+		CheckPolicy::upsert_default(&mut conn, "alertd", CheckGrain::Application, "disk_space")
 			.await
 			.expect("first upsert");
-		CheckPolicy::upsert_default(&mut conn, "alertd", "disk_space")
+		CheckPolicy::upsert_default(&mut conn, "alertd", CheckGrain::Application, "disk_space")
 			.await
 			.expect("second upsert is no-op");
 
@@ -31,16 +32,17 @@ async fn upsert_default_inserts_then_is_idempotent() {
 #[tokio::test(flavor = "multi_thread")]
 async fn same_check_name_is_distinct_per_source() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		CheckPolicy::upsert_default(&mut conn, "alertd", "disk_space")
+		CheckPolicy::upsert_default(&mut conn, "alertd", CheckGrain::Application, "disk_space")
 			.await
 			.expect("alertd upsert");
-		CheckPolicy::upsert_default(&mut conn, "seedling", "disk_space")
+		CheckPolicy::upsert_default(&mut conn, "seedling", CheckGrain::Application, "disk_space")
 			.await
 			.expect("seedling upsert");
 
 		CheckPolicy::update(
 			&mut conn,
 			"alertd",
+			CheckGrain::Application,
 			"disk_space",
 			CheckResult::Failed,
 			false,
@@ -50,10 +52,11 @@ async fn same_check_name_is_distinct_per_source() {
 		.await
 		.expect("update alertd entry");
 
-		let seedling = CheckPolicy::get(&mut conn, "seedling", "disk_space")
-			.await
-			.expect("get")
-			.expect("seedling row exists");
+		let seedling =
+			CheckPolicy::get(&mut conn, "seedling", CheckGrain::Application, "disk_space")
+				.await
+				.expect("get")
+				.expect("seedling row exists");
 		assert_eq!(
 			seedling.ceiling,
 			CheckResult::Warning,
@@ -66,12 +69,13 @@ async fn same_check_name_is_distinct_per_source() {
 #[tokio::test(flavor = "multi_thread")]
 async fn upsert_default_does_not_overwrite_operator_policy() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		CheckPolicy::upsert_default(&mut conn, "alertd", "disk_space")
+		CheckPolicy::upsert_default(&mut conn, "alertd", CheckGrain::Application, "disk_space")
 			.await
 			.expect("seed");
 		CheckPolicy::update(
 			&mut conn,
 			"alertd",
+			CheckGrain::Application,
 			"disk_space",
 			CheckResult::Failed,
 			true,
@@ -82,7 +86,7 @@ async fn upsert_default_does_not_overwrite_operator_policy() {
 		.expect("operator update");
 
 		// A subsequent push from ingestion must not revert the row.
-		CheckPolicy::upsert_default(&mut conn, "alertd", "disk_space")
+		CheckPolicy::upsert_default(&mut conn, "alertd", CheckGrain::Application, "disk_space")
 			.await
 			.expect("upsert again");
 
@@ -108,18 +112,26 @@ async fn apply_caps_at_ceiling_or_defaults_to_warning() {
 		};
 		// Unknown check → default policy (programmer-error path;
 		// ingestion upserts before reading in production).
-		let unknown = CheckPolicy::apply(&mut conn, "alertd", "ghost", CheckResult::Failed, &ctx)
-			.await
-			.expect("apply");
+		let unknown = CheckPolicy::apply(
+			&mut conn,
+			"alertd",
+			CheckGrain::Application,
+			"ghost",
+			CheckResult::Failed,
+			&ctx,
+		)
+		.await
+		.expect("apply");
 		assert_eq!(unknown.effective, CheckResult::Warning);
 		assert!(!unknown.escalates);
 
-		CheckPolicy::upsert_default(&mut conn, "alertd", "cert_expiry")
+		CheckPolicy::upsert_default(&mut conn, "alertd", CheckGrain::Application, "cert_expiry")
 			.await
 			.expect("seed");
 		CheckPolicy::update(
 			&mut conn,
 			"alertd",
+			CheckGrain::Application,
 			"cert_expiry",
 			CheckResult::Failed,
 			true,
@@ -133,6 +145,7 @@ async fn apply_caps_at_ceiling_or_defaults_to_warning() {
 		let failed = CheckPolicy::apply(
 			&mut conn,
 			"alertd",
+			CheckGrain::Application,
 			"cert_expiry",
 			CheckResult::Failed,
 			&ctx,
@@ -146,6 +159,7 @@ async fn apply_caps_at_ceiling_or_defaults_to_warning() {
 		let warned = CheckPolicy::apply(
 			&mut conn,
 			"alertd",
+			CheckGrain::Application,
 			"cert_expiry",
 			CheckResult::Warning,
 			&ctx,
@@ -158,6 +172,7 @@ async fn apply_caps_at_ceiling_or_defaults_to_warning() {
 		CheckPolicy::update(
 			&mut conn,
 			"alertd",
+			CheckGrain::Application,
 			"cert_expiry",
 			CheckResult::Passed,
 			false,
@@ -169,6 +184,7 @@ async fn apply_caps_at_ceiling_or_defaults_to_warning() {
 		let ignored = CheckPolicy::apply(
 			&mut conn,
 			"alertd",
+			CheckGrain::Application,
 			"cert_expiry",
 			CheckResult::Failed,
 			&ctx,
@@ -200,7 +216,7 @@ async fn pending_review_policy_hard_caps_at_warning() {
 		// or a check registered before review. A never-vetted check must not
 		// open incidents: pending review hard-caps the effective result at
 		// warning regardless of the stored ceiling.
-		CheckPolicy::upsert_default(&mut conn, "alertd", "disk_space")
+		CheckPolicy::upsert_default(&mut conn, "alertd", CheckGrain::Application, "disk_space")
 			.await
 			.expect("seed");
 		diesel::update(dsl::check_policies)
@@ -209,10 +225,16 @@ async fn pending_review_policy_hard_caps_at_warning() {
 			.await
 			.expect("force a failed ceiling while leaving reviewed_at null");
 
-		let pending =
-			CheckPolicy::apply(&mut conn, "alertd", "disk_space", CheckResult::Failed, &ctx)
-				.await
-				.expect("apply");
+		let pending = CheckPolicy::apply(
+			&mut conn,
+			"alertd",
+			CheckGrain::Application,
+			"disk_space",
+			CheckResult::Failed,
+			&ctx,
+		)
+		.await
+		.expect("apply");
 		assert_eq!(
 			pending.effective,
 			CheckResult::Warning,
@@ -224,6 +246,7 @@ async fn pending_review_policy_hard_caps_at_warning() {
 		CheckPolicy::update(
 			&mut conn,
 			"alertd",
+			CheckGrain::Application,
 			"disk_space",
 			CheckResult::Failed,
 			false,
@@ -232,10 +255,16 @@ async fn pending_review_policy_hard_caps_at_warning() {
 		)
 		.await
 		.expect("review");
-		let reviewed =
-			CheckPolicy::apply(&mut conn, "alertd", "disk_space", CheckResult::Failed, &ctx)
-				.await
-				.expect("apply after review");
+		let reviewed = CheckPolicy::apply(
+			&mut conn,
+			"alertd",
+			CheckGrain::Application,
+			"disk_space",
+			CheckResult::Failed,
+			&ctx,
+		)
+		.await
+		.expect("apply after review");
 		assert_eq!(
 			reviewed.effective,
 			CheckResult::Failed,
@@ -256,6 +285,7 @@ async fn register_marks_canopy_checks_already_reviewed() {
 		CheckPolicy::register(
 			&mut conn,
 			"canopy",
+			CheckGrain::Application,
 			"backup_stale",
 			CheckResult::Failed,
 			true,
@@ -264,7 +294,7 @@ async fn register_marks_canopy_checks_already_reviewed() {
 		.await
 		.expect("register");
 
-		let row = CheckPolicy::get(&mut conn, "canopy", "backup_stale")
+		let row = CheckPolicy::get(&mut conn, "canopy", CheckGrain::Application, "backup_stale")
 			.await
 			.expect("get")
 			.expect("row exists");
@@ -281,7 +311,7 @@ async fn register_marks_canopy_checks_already_reviewed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn escalates_only_sticks_at_a_failed_ceiling() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		CheckPolicy::upsert_default(&mut conn, "alertd", "disk_space")
+		CheckPolicy::upsert_default(&mut conn, "alertd", CheckGrain::Application, "disk_space")
 			.await
 			.expect("seed");
 
@@ -292,6 +322,7 @@ async fn escalates_only_sticks_at_a_failed_ceiling() {
 		let warned = CheckPolicy::update(
 			&mut conn,
 			"alertd",
+			CheckGrain::Application,
 			"disk_space",
 			CheckResult::Warning,
 			true,
@@ -309,6 +340,7 @@ async fn escalates_only_sticks_at_a_failed_ceiling() {
 		let failed = CheckPolicy::update(
 			&mut conn,
 			"alertd",
+			CheckGrain::Application,
 			"disk_space",
 			CheckResult::Failed,
 			true,
@@ -323,6 +355,7 @@ async fn escalates_only_sticks_at_a_failed_ceiling() {
 		CheckPolicy::register(
 			&mut conn,
 			"canopy",
+			CheckGrain::Application,
 			"warn_only",
 			CheckResult::Warning,
 			true,
@@ -330,10 +363,11 @@ async fn escalates_only_sticks_at_a_failed_ceiling() {
 		)
 		.await
 		.expect("register");
-		let registered = CheckPolicy::get(&mut conn, "canopy", "warn_only")
-			.await
-			.expect("get")
-			.expect("row exists");
+		let registered =
+			CheckPolicy::get(&mut conn, "canopy", CheckGrain::Application, "warn_only")
+				.await
+				.expect("get")
+				.expect("row exists");
 		assert!(
 			!registered.escalates,
 			"register drops escalates below a failed ceiling",
@@ -345,7 +379,7 @@ async fn escalates_only_sticks_at_a_failed_ceiling() {
 #[tokio::test(flavor = "multi_thread")]
 async fn update_stamps_review_metadata_even_on_no_op_save() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		CheckPolicy::upsert_default(&mut conn, "alertd", "noisy_check")
+		CheckPolicy::upsert_default(&mut conn, "alertd", CheckGrain::Application, "noisy_check")
 			.await
 			.expect("seed");
 
@@ -354,6 +388,7 @@ async fn update_stamps_review_metadata_even_on_no_op_save() {
 		let updated = CheckPolicy::update(
 			&mut conn,
 			"alertd",
+			CheckGrain::Application,
 			"noisy_check",
 			CheckResult::Warning,
 			false,
@@ -373,7 +408,7 @@ async fn update_stamps_review_metadata_even_on_no_op_save() {
 async fn list_orders_by_source_then_check_name() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		for (source, name) in [("alertd", "zeta"), ("alertd", "alpha"), ("seedling", "mu")] {
-			CheckPolicy::upsert_default(&mut conn, source, name)
+			CheckPolicy::upsert_default(&mut conn, source, CheckGrain::Application, name)
 				.await
 				.expect("seed");
 		}

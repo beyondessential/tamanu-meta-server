@@ -74,11 +74,18 @@ pub struct CheckDocArgs {
 	pub source: String,
 	/// The check's name.
 	pub check_name: String,
+	/// What the check asserts something about: `application`, `machine`,
+	/// `group`, or `canopy`. A name can be catalogued at more than one grain,
+	/// and those are different checks with their own policies. Omit it when
+	/// the name is used at one grain only.
+	pub grain: Option<String>,
 }
 
 #[derive(Serialize)]
 struct CheckDocOut {
 	source: String,
+	/// What this check asserts something about; part of its identity.
+	grain: String,
 	check_name: String,
 	ceiling: CheckResult,
 	escalates: bool,
@@ -617,17 +624,37 @@ impl CanopyMcp {
 	) -> Result<CallToolResult, McpError> {
 		use database::check_policies::CheckPolicy;
 		let mut conn = self.conn().await?;
-		let Some(policy) = CheckPolicy::get(&mut conn, &args.source, &args.check_name)
+		let mut matches = CheckPolicy::matching_name(&mut conn, &args.source, &args.check_name)
 			.await
-			.map_err(mcp_err)?
-		else {
-			return Ok(not_found(format!(
-				"no catalog entry for ({}, {}) — that source has never reported that check",
-				args.source, args.check_name
-			)));
+			.map_err(mcp_err)?;
+		if let Some(wanted) = args.grain.as_deref() {
+			matches.retain(|p| p.subject.label() == wanted);
+		}
+		let policy = match matches.len() {
+			0 => {
+				return Ok(not_found(format!(
+					"no catalog entry for ({}, {}) — that source has never reported that check",
+					args.source, args.check_name
+				)));
+			}
+			1 => matches.remove(0),
+			// The name covers two checks. Naming one is the caller's to do:
+			// they have their own ceilings and their own documentation, so
+			// picking one here would answer a question that was not asked.
+			_ => {
+				let grains: Vec<&str> = matches.iter().map(|p| p.subject.label()).collect();
+				return Ok(not_found(format!(
+					"({}, {}) is catalogued at more than one grain ({}) — \
+					 they are different checks; pass `grain` to name one",
+					args.source,
+					args.check_name,
+					grains.join(", "),
+				)));
+			}
 		};
 		ok_json(&CheckDocOut {
 			source: policy.source,
+			grain: policy.subject.label().to_owned(),
 			check_name: policy.check_name,
 			ceiling: policy.ceiling,
 			escalates: policy.escalates,

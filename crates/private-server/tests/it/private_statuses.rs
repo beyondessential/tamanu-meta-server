@@ -1431,7 +1431,7 @@ async fn check_detail_empty_database() {
 	commons_tests::server::run(async |_conn, _, private| {
 		let r = private
 			.post("/api/statuses/check_detail")
-			.json(&serde_json::json!({"source": "alertd", "check": "postgres"}))
+			.json(&serde_json::json!({"source": "alertd", "grain": "application", "check": "postgres"}))
 			.await;
 		r.assert_status_ok();
 		let data: CheckDetailResponse = r.json();
@@ -1469,7 +1469,7 @@ async fn check_detail_lists_servers_reporting_that_check_ordered_failed_first() 
 
 		let r = private
 			.post("/api/statuses/check_detail")
-			.json(&serde_json::json!({"source": "alertd", "check": "postgres"}))
+			.json(&serde_json::json!({"source": "alertd", "grain": "application", "check": "postgres"}))
 			.await;
 		r.assert_status_ok();
 		let data: CheckDetailResponse = r.json();
@@ -1541,7 +1541,7 @@ async fn check_detail_failing_since_comes_from_the_active_issue() {
 
 		let r = private
 			.post("/api/statuses/check_detail")
-			.json(&serde_json::json!({"source": "alertd", "check": "postgres"}))
+			.json(&serde_json::json!({"source": "alertd", "grain": "application", "check": "postgres"}))
 			.await;
 		r.assert_status_ok();
 		let data: CheckDetailResponse = r.json();
@@ -1595,7 +1595,7 @@ async fn check_detail_excludes_ungrouped_and_archived_servers() {
 
 		let r = private
 			.post("/api/statuses/check_detail")
-			.json(&serde_json::json!({"source": "alertd", "check": "postgres"}))
+			.json(&serde_json::json!({"source": "alertd", "grain": "application", "check": "postgres"}))
 			.await;
 		r.assert_status_ok();
 		let data: CheckDetailResponse = r.json();
@@ -1624,7 +1624,7 @@ async fn check_detail_returns_catalog_policy_and_ignores_non_matching_check() {
 		// The check this server is actually failing.
 		let r = private
 			.post("/api/statuses/check_detail")
-			.json(&serde_json::json!({"source": "alertd", "check": "postgres"}))
+			.json(&serde_json::json!({"source": "alertd", "grain": "application", "check": "postgres"}))
 			.await;
 		r.assert_status_ok();
 		let data: CheckDetailResponse = r.json();
@@ -1635,7 +1635,7 @@ async fn check_detail_returns_catalog_policy_and_ignores_non_matching_check() {
 		// catalog lookup still runs (and correctly finds nothing).
 		let r = private
 			.post("/api/statuses/check_detail")
-			.json(&serde_json::json!({"source": "alertd", "check": "unrelated_check"}))
+			.json(&serde_json::json!({"source": "alertd", "grain": "application", "check": "unrelated_check"}))
 			.await;
 		r.assert_status_ok();
 		let data: CheckDetailResponse = r.json();
