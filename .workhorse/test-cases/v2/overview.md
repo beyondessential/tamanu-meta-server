@@ -83,10 +83,10 @@ is a regression.
 - [x] `caddy_certs` files against the application while `caddy_version` files against the machine (verifies spec: STA)
 - [x] `ips` files against the machine while `ips_errors` files against the application (verifies spec: STA)
 - [x] A push is authorised against the machine the identity is bound to, not against any application (verifies spec: STA, DID)
-- [ ] A push naming a type the box does not yet run creates that application (verifies spec: FLT)
-- [ ] A push naming no type against a box running two applications is refused rather than attributed to one (verifies spec: STA)
-- [ ] A push naming no type against a box running none is refused (verifies spec: STA)
-- [ ] A push from an ignored source resolves its application without creating one (verifies spec: STA, CHK)
+- [x] A push naming a type the box does not yet run creates that application (verifies spec: FLT)
+- [x] A push naming no type against a box running two applications is refused rather than attributed to one (verifies spec: STA)
+- [x] A push naming no type against a box running none is refused (verifies spec: STA)
+- [x] A push from an ignored source resolves its application without creating one (verifies spec: STA, CHK)
 
 ## Figures
 

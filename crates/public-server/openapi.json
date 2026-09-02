@@ -875,8 +875,8 @@
         "tags": [
           "applications"
         ],
-        "summary": "Start device enrollment against a server.",
-        "description": "Validates the enrollment token against the given server and, if valid,\nissues a short-lived (5 minute) signed challenge bound to the server\nID, the token, and the caller's public key. The device must sign this\nchallenge and submit it to the completion endpoint to finish\nenrollment; the token itself is validated here but not yet consumed.\n\nThis endpoint is rate-limited per source IP and per target server; a\ntripped limit returns 429. Any other failure — an unknown or deleted\nserver, or an invalid or expired token — is surfaced as a generic 403,\ndeliberately not distinguishing which check failed.",
+        "summary": "Start device enrollment against a machine.",
+        "description": "Validates the enrollment token against the given machine and, if valid,\nissues a short-lived (5 minute) signed challenge bound to the machine\nID, the token, and the caller's public key. The device must sign this\nchallenge and submit it to the completion endpoint to finish\nenrollment; the token itself is validated here but not yet consumed.\n\nThis endpoint is rate-limited per source IP and per target machine; a\ntripped limit returns 429. Any other failure — an unknown or archived\nmachine, or an invalid or expired token — is surfaced as a generic 403,\ndeliberately not distinguishing which check failed.",
         "operationId": "register_begin",
         "requestBody": {
           "content": {
@@ -918,7 +918,7 @@
           "applications"
         ],
         "summary": "Complete device enrollment by presenting a signed challenge.",
-        "description": "Verifies the signature over the challenge transcript using the public\nkey supplied here, then binds the device to the server: an existing\ndevice re-enrolling with the same key is reused as-is; a device\nre-enrolling with a different key replaces the server's previous\ndevice (revoking that device's access); otherwise a new device\nidentity is created. On success the device is granted the server\nrole, the enrollment token is consumed, and the server is marked as\nregistered.\n\nEnrollment is refused if the presented public key is already bound to\na different live server. Like the start-enrollment endpoint, this one\nis rate-limited per source IP and per target server (429 on a tripped\nlimit) and reports every other kind of failure as a generic 403.",
+        "description": "Verifies the signature over the challenge transcript using the public\nkey supplied here, then binds the device to the machine: an existing\ndevice re-enrolling with the same key is reused as-is; a device\nre-enrolling with a different key replaces the machine's previous\ndevice (revoking that device's access); otherwise a new device\nidentity is created. On success the device is granted the machine\nrole, the enrollment token is consumed, and the machine is marked as\nregistered.\n\nEnrollment is refused if the presented public key is already bound to\na different live machine. Like the start-enrollment endpoint, this one\nis rate-limited per source IP and per target machine (429 on a tripped\nlimit) and reports every other kind of failure as a generic 403.",
         "operationId": "register_complete",
         "requestBody": {
           "content": {
@@ -1016,8 +1016,8 @@
         "tags": [
           "statuses"
         ],
-        "summary": "Submit a status heartbeat for a server.",
-        "description": "Records a periodic status push against the server identified in the\npath: overall self-reported health, a per-check breakdown, and any\nfree-form extra data. Each failed or warning check opens (or keeps\nopen) an issue at that check's operator-configured severity, and each\npassed check closes any issue it previously opened; the server's\ntracked software version is also updated from the payload.\n\nThe calling device must be the one enrolled for this exact server (or\nhold the admin role). The response carries only return-path\ninstructions: a `backup_now` list of backup types the server should\nback up immediately — devices should treat a non-empty list as a\nprompt to run those backups and report them afterwards — a\n`check_severities` map describing how canopy classifies each known\nhealthcheck for this server (`skip`/`warn`/`fail`), and the server's\neffective `tags` (as served by `GET /tags`). The stored status record\nis not echoed back.",
+        "summary": "Submit a status heartbeat for a machine.",
+        "description": "`server_id` in the path is the id the agent was enrolled with, which\nidentifies the machine it runs on. Canopy works out which application on\nthat machine the push describes from the push itself.\n\nRecords a periodic status push against that machine: overall\nself-reported health, a per-check breakdown, and any free-form extra\ndata. Machine-subject checks and detail file against the machine and the\nrest against its application. Each failed or warning check opens (or keeps\nopen) an issue at that check's operator-configured severity, and each\npassed check closes any issue it previously opened; the application's\ntracked software version is also updated from the payload.\n\nThe calling device must be the one enrolled for this exact machine (or\nhold the admin role). The response carries only return-path\ninstructions: a `backup_now` list of backup types the server should\nback up immediately — devices should treat a non-empty list as a\nprompt to run those backups and report them afterwards — a\n`check_severities` map describing how canopy classifies each known\nhealthcheck for this server (`skip`/`warn`/`fail`), and the server's\neffective `tags` (as served by `GET /tags`). The stored status record\nis not echoed back.",
         "operationId": "submit_status",
         "parameters": [
           {
@@ -1096,7 +1096,7 @@
           "statuses"
         ],
         "summary": "Fetch the effective healthcheck severity mapping for a server.",
-        "description": "Returns, for every healthcheck the `alertd` source reports, how that\ncheck is handled for this server: `skip` (the check is silenced for\nthis server — at server or group scope — or its policy ceiling means it\nnever alerts), `warn` (graded at most a warning), or `fail` (failures\ncount as failures). Keys are check names as reported in\n`health[].check` on status pushes. Only the static policy ceiling is\nreflected; operator-defined conditional rules are evaluated per push\nand not included here. The same mapping also rides along every\nstatus-push response as `check_severities`, scoped to the pushing\nsource.\n\nThe calling device must be the one enrolled for this exact server (or\nhold the admin role).",
+        "description": "Returns, for every healthcheck the `alertd` source reports, how that\ncheck is handled for this server: `skip` (the check is silenced for\nthis server — at server or group scope — or its policy ceiling means it\nnever alerts), `warn` (graded at most a warning), or `fail` (failures\ncount as failures). Keys are check names as reported in\n`health[].check` on status pushes. Only the static policy ceiling is\nreflected; operator-defined conditional rules are evaluated per push\nand not included here. The same mapping also rides along every\nstatus-push response as `check_severities`, scoped to the pushing\nsource.\n\n`server_id` in the path is the id the agent was enrolled with, which\nidentifies the machine it runs on.\n\nThe calling device must be the one enrolled for this exact machine (or\nhold the admin role).",
         "operationId": "check_severities",
         "parameters": [
           {
@@ -1697,7 +1697,7 @@
       },
       "BeginArgs": {
         "type": "object",
-        "description": "Request to start device enrollment against a server.",
+        "description": "Request to start device enrollment against a machine.",
         "required": [
           "server_id",
           "token"
@@ -1706,7 +1706,7 @@
           "server_id": {
             "type": "string",
             "format": "uuid",
-            "description": "ID of the server to enroll against."
+            "description": "ID of the machine to enroll against. Named `server_id` because that is\nthe name fielded agents send; the value has always identified the box."
           },
           "spki": {
             "type": [
@@ -1717,7 +1717,7 @@
           },
           "token": {
             "type": "string",
-            "description": "The enrollment token issued by an operator for this server."
+            "description": "The enrollment token issued by an operator for this machine."
           }
         }
       },
@@ -1735,7 +1735,7 @@
           },
           "nonce": {
             "type": "string",
-            "description": "Base64-standard-encoded 32-byte challenge nonce. Sign it, together\nwith the server ID, device public key, and channel-binding data if\nrequired, and submit the signature when completing enrollment."
+            "description": "Base64-standard-encoded 32-byte challenge nonce. Sign it, together\nwith the machine ID, device public key, and channel-binding data if\nrequired, and submit the signature when completing enrollment."
           }
         }
       },
@@ -1836,11 +1836,11 @@
           "server_id": {
             "type": "string",
             "format": "uuid",
-            "description": "ID of the server being enrolled against. Must match the value used\nwhen starting enrollment."
+            "description": "ID of the machine being enrolled. Must match the value used when\nstarting enrollment."
           },
           "signature": {
             "type": "string",
-            "description": "Base64-standard-encoded ASN.1 DER ECDSA (P-256, SHA-256) signature\nover the challenge transcript, proving possession of the device's\nprivate key. The transcript is the byte concatenation of: the raw\nchallenge nonce, the raw 16 bytes of the server ID, the DER SPKI of\nthe device public key, and — only when channel binding was flagged\nas required — the connection's TLS exported keying material."
+            "description": "Base64-standard-encoded ASN.1 DER ECDSA (P-256, SHA-256) signature\nover the challenge transcript, proving possession of the device's\nprivate key. The transcript is the byte concatenation of: the raw\nchallenge nonce, the raw 16 bytes of the machine ID, the DER SPKI of\nthe device public key, and — only when channel binding was flagged\nas required — the connection's TLS exported keying material."
           },
           "spki": {
             "type": [
@@ -1867,7 +1867,7 @@
           "server_id": {
             "type": "string",
             "format": "uuid",
-            "description": "The server the device is now enrolled against."
+            "description": "The machine the device is now enrolled against."
           }
         }
       },

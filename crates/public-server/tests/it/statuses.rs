@@ -3629,3 +3629,241 @@ async fn a_unified_push_from_a_fielded_agent_still_files_its_checks() {
 	)
 	.await
 }
+
+// -----------------------------------------------------------------
+// Which application a unified push is about.
+//
+// The id on the wire is the machine's, so Canopy has to work out which
+// workload on that box the push describes. It correlates on the type the
+// push names, falls back to the box's one application where it names none,
+// and refuses rather than guessing when neither answers.
+// spec: STA#transitional-unified-pushes, FLT#applications-come-from-reports
+// -----------------------------------------------------------------
+
+/// A bare box bound to the authenticated identity, carrying no applications.
+async fn insert_bare_machine(conn: &mut diesel_async::AsyncPgConnection, device_id: Uuid) -> Uuid {
+	let group_id = Uuid::new_v4();
+	sql_query("INSERT INTO server_groups (id, name) VALUES ($1, 'bare-group')")
+		.bind::<sql_types::Uuid, _>(group_id)
+		.execute(conn)
+		.await
+		.expect("insert group");
+	let machine_id = Uuid::new_v4();
+	sql_query("INSERT INTO machines (id, group_id, device_id) VALUES ($1, $2, $3)")
+		.bind::<sql_types::Uuid, _>(machine_id)
+		.bind::<sql_types::Uuid, _>(group_id)
+		.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(device_id))
+		.execute(conn)
+		.await
+		.expect("insert machine");
+	machine_id
+}
+
+#[derive(QueryableByName)]
+struct TypeRow {
+	#[diesel(sql_type = sql_types::Text)]
+	#[diesel(column_name = "type")]
+	r#type: String,
+}
+
+async fn application_types_on(
+	conn: &mut diesel_async::AsyncPgConnection,
+	machine_id: Uuid,
+) -> Vec<String> {
+	let rows: Vec<TypeRow> = sql_query(
+		"SELECT type FROM applications WHERE machine_id = $1 AND deleted_at IS NULL ORDER BY type",
+	)
+	.bind::<sql_types::Uuid, _>(machine_id)
+	.load(conn)
+	.await
+	.expect("load applications");
+	rows.into_iter().map(|r| r.r#type).collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn push_naming_a_type_creates_the_application_it_describes() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			let machine_id = insert_bare_machine(&mut conn, device_id).await;
+			assert!(application_types_on(&mut conn, machine_id).await.is_empty());
+
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"healthy": true,
+					"health": [{ "check": "db", "result": "passed" }],
+					"tamanuServerKind": "facility",
+				}))
+				.await
+				.assert_status_ok();
+
+			assert_eq!(
+				application_types_on(&mut conn, machine_id).await,
+				vec!["tamanu-facility".to_string()],
+				"a report is the only thing that creates an application"
+			);
+
+			// A second workload reporting from the same box is a second
+			// application, not a correction of the first.
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"healthy": true,
+					"health": [{ "check": "db", "result": "passed" }],
+					"tamanuServerKind": "central",
+				}))
+				.await
+				.assert_status_ok();
+
+			assert_eq!(
+				application_types_on(&mut conn, machine_id).await,
+				vec!["tamanu-central".to_string(), "tamanu-facility".to_string()]
+			);
+
+			// And reporting again as one of them adopts it rather than
+			// minting a third.
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"healthy": true,
+					"health": [{ "check": "db", "result": "passed" }],
+					"tamanuServerKind": "facility",
+				}))
+				.await
+				.assert_status_ok();
+
+			assert_eq!(application_types_on(&mut conn, machine_id).await.len(), 2);
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn push_naming_no_type_against_a_bare_box_is_refused() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			let machine_id = insert_bare_machine(&mut conn, device_id).await;
+
+			// Nothing in the push says what it is, and the box runs nothing
+			// Canopy could attribute it to.
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"healthy": true,
+					"health": [{ "check": "db", "result": "passed" }],
+				}))
+				.await
+				.assert_status_conflict();
+
+			assert!(
+				application_types_on(&mut conn, machine_id).await.is_empty(),
+				"a refused push creates nothing"
+			);
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn push_naming_no_type_against_a_two_workload_box_is_refused() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			let machine_id = insert_bare_machine(&mut conn, device_id).await;
+			sql_query(
+				"INSERT INTO applications (id, type, machine_id) \
+				 VALUES (gen_random_uuid(), 'tamanu-central', $1), \
+				        (gen_random_uuid(), 'tamanu-facility', $1)",
+			)
+			.bind::<sql_types::Uuid, _>(machine_id)
+			.execute(&mut conn)
+			.await
+			.expect("insert two applications");
+
+			// Attributing the box's whole picture to an arbitrary one of its
+			// workloads is the failure this card exists to stop.
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"healthy": true,
+					"health": [{ "check": "db", "result": "passed" }],
+				}))
+				.await
+				.assert_status_conflict();
+
+			assert_eq!(application_types_on(&mut conn, machine_id).await.len(), 2);
+
+			// Naming which one it is resolves it.
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"healthy": true,
+					"health": [{ "check": "db", "result": "passed" }],
+					"tamanuServerKind": "facility",
+				}))
+				.await
+				.assert_status_ok();
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ignored_source_push_creates_no_application() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			use commons_types::source::IngestMode;
+			use database::source_policies::SourcePolicy;
+
+			let machine_id = insert_bare_machine(&mut conn, device_id).await;
+			sql_query(
+				"INSERT INTO applications (id, type, machine_id) \
+				 VALUES (gen_random_uuid(), 'tamanu-central', $1)",
+			)
+			.bind::<sql_types::Uuid, _>(machine_id)
+			.execute(&mut conn)
+			.await
+			.expect("insert application");
+
+			SourcePolicy::set_ingest(&mut conn, "alertd", IngestMode::Ignore)
+				.await
+				.expect("set ignore");
+
+			// An ignored source records nowhere, so it reads without creating:
+			// a type it names that the box does not run resolves to the one
+			// application there rather than minting a second.
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"healthy": true,
+					"health": [{ "check": "db", "result": "passed" }],
+					"tamanuServerKind": "facility",
+				}))
+				.await
+				.assert_status_ok();
+
+			assert_eq!(
+				application_types_on(&mut conn, machine_id).await,
+				vec!["tamanu-central".to_string()]
+			);
+		},
+	)
+	.await
+}
