@@ -96,8 +96,11 @@ The recognised semantics are:
   An intent whose result depends on more than the snapshot keys `once` to that wider input as well, and may treat a failure as settled rather than retryable (see [Pre-upgrade migration testing](#pre-upgrade-migration-testing)).
 - **url** — the intent's health report carries a link to the running replica within its attached health data, which Canopy surfaces to operators.
 - **migrate** — the intent applies a Tamanu version's schema migrations to the replica it restores.
-  Canopy names a target version on each of the intent's worklist entries and withholds an entry from a server that has no candidate version.
+  Canopy names a target version on each of the intent's worklist entries and withholds an entry from a server it has no version to name: the server's candidate version, or for an intent carrying `build`, the version that build is owed for.
   `once` for such an intent is keyed to the snapshot and the target version together (see [Pre-upgrade migration testing](#pre-upgrade-migration-testing)).
+- **build** — the intent produces a reporting schema from the replica it restores and publishes it (see [RPT](reporting-schemas.md)).
+  It carries `migrate` alongside, since a schema is built at a version the replica has to be brought to, and Canopy dispatches it for the pairs of central server and version a covered group is owed a schema for rather than for the server's candidate.
+  `once` for such an intent is keyed to the server and the version alone, so a newer snapshot does not rebuild a schema the group already has, and a failed build settles that pair.
 - **redact** — the intent can de-identify the restored data before serving it.
   Canopy offers redaction as an option on each of the intent's replicas, supplies the masking manifest for the product being restored, and holds a redacting replica to the outcome of its redaction (see [Redaction](#redaction)).
 
@@ -252,15 +255,16 @@ That window is where the answer is still cheap: the fleet is not moving yet, and
 
 ### Dispatching a migration test
 
-`migrate` is a semantic an intent opts into, and an intent carrying it carries no other purpose.
+`migrate` is a semantic an intent opts into, and an intent carrying it neither verifies backups nor serves a queryable replica.
 It carries `check` alongside, so a single restore reports the replica's health and the migrations' outcome as two signals from one report.
 
-An intent carrying `migrate` is withheld from a server with no candidate version.
+An intent carrying `migrate` is withheld from a server it has no version to name.
 An intent that verifies backups therefore does not also migrate: it would go undispatched for every server without a candidate, leaving the backups of any non-Tamanu product, and of every deployment with no plan open, unverified.
 An intent that keeps a replica queryable does not migrate either: a migrated replica sits at a version its deployment is not running, so a declaration promoted to it would give an operator a schema that does not match production.
 
 A verifying intent and a migrating intent restore the same snapshot separately.
 A verifying intent restores once per snapshot, and a migrating intent's `once` is keyed to the snapshot and target version together, so it restores when a new candidate version appears rather than on every snapshot.
+An intent carrying `build` restores separately again, keyed to the pair it is owed rather than to the snapshot, so a schema is built when one is owed and not otherwise (see [RPT](reporting-schemas.md)).
 
 An entry for a `migrate` intent names the target version alongside the snapshot.
 A consumer obtains that version's migrations from its published artefacts, the same way a server being upgraded does, so naming the version is the whole reference it needs.

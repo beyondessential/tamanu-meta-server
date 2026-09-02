@@ -5,7 +5,7 @@ id: RPT
 # Reporting schemas
 
 A reporting schema is the set of database views a group's reports read from.
-Canopy decides which groups owe a reporting schema for which version, supplies what a build needs to produce one, holds the artefact that results, and grades whether what a group runs is the schema it should have.
+Canopy decides which groups owe a reporting schema for which version, supplies what a build needs to produce one, records the artefact that results, and grades whether what a group runs is the schema it should have.
 
 ## Why it exists
 
@@ -18,16 +18,17 @@ Nothing joins them, so each group's artefact is produced against a database nobo
 
 ## Actors
 
-A **schema builder** is first-party infrastructure that produces a reporting schema from a database and publishes the result.
-It holds no list of what to build: it asks Canopy what schemas are owed, builds them, and reports back.
+A **schema builder** is a restore consumer that produces a reporting schema from the replica it restores and publishes the result (see [RST](restore-replicas.md)).
+It holds no list of what to build: it advertises an intent carrying `build`, is dispatched the replicas that intent is owed, and reports each outcome as that replica's restore report.
 It is the only actor that needs to understand what the schema contains.
 
-An **operator** declares which groups are covered, and reads the currency of each.
+An **operator** declares which groups are covered, reads the currency of each, and asks for the builds the derivation does not produce on its own.
 
 Canopy owns which group owes a schema for which version, the database that build is entitled to, the artefact that results, and the grading of what a group actually runs.
 The builder owns how the schema is produced.
 
-Whether the schema builder is also the restore consumer that produced its source database, or a separate actor that asks for one, is an operational choice rather than a contract Canopy holds either way.
+The builder is the actor that holds the database rather than one asking another for it, so a build is dispatched, credentialled, and reported over the paths every other replica already uses, and no database is handed between actors.
+What runs the build inside that consumer stays the consumer's own business: the contract is the same whether it builds the schema itself or drives something else that does.
 
 ## What a build is entitled to
 
@@ -50,48 +51,52 @@ It is not offered to operators while it stands, being a database at a version it
 
 ## What is owed
 
-Canopy derives what is owed rather than an operator naming each pair of central server and version.
+Canopy derives what is owed rather than an operator naming each pair of central server and version, and an operator's request reaches the pairs the derivation does not.
 
 A central server owes a reporting schema for the version its group's open plan moves it to.
 A schema that does not exist by the time an upgrade lands is an outage of every report the group has.
 The plan is also what makes the build possible, since it is what has a replica restored and migrated to that version at all, so what is owed and what can be produced arrive together.
 
-Nothing is owed for the version a group already runs, because that version was a candidate once and its schema was built then.
-The steady state therefore needs no trigger of its own; a group whose current version predates the pipeline has none on file until its next upgrade produces one.
+Nothing is derived for the version a group already runs, because that version was a candidate once and its schema was built then.
+The steady state therefore needs no trigger of its own.
 
 Only a published version is buildable, for the same reason it is testable: a version's schema reaches a builder as its published artefacts, and an unpublished version has none to fetch.
 
-Only a group an operator has declared as covered is owed anything, so a group whose reports are maintained elsewhere accrues no findings for a schema nobody wants.
-Coverage is declared per group, expands over that group's central servers, is enabled or disabled, and is audited (see [ADM](../private-server/admin-access.md)).
+Only a group with an enabled build replica declared for it is owed anything, so a group whose reports are maintained elsewhere accrues no findings for a schema nobody wants.
+That declaration is what covers a group rather than a coverage of its own beside it: it already names the group, expands over the group's servers, is enabled or disabled, and is audited (see [RST](restore-replicas.md)).
+Only a central server draws an entry from it, since a schema is built from the configuration a central server holds.
 
 A build is owed once per pair of central server and version, and is settled by a successful build for that pair.
 A pair is reinstated when the version's own artefacts change, since a schema built from a superseded release of the same version is not the schema that version now describes.
 A change to a group's configuration does not reinstate a settled pair: the schema a group has is the one it asked for when it was built, and refreshing it is an operator's decision.
 
-## The worklist
+An operator may ask for a build of the version a central server currently runs, which owes that pair and is satisfied like any other.
+It is what a group whose version predates the pipeline gets its first schema from, what rebuilds one after a configuration change, and what clears a server graded behind with nothing else owed.
+A request names a version its server already runs, so the replica reaches it with no migrations to apply.
 
-A schema builder fetches what it is currently owed in one request, scoped to the calling builder.
-Canopy returns one entry per unsettled pair:
+## Dispatch
+
+A build is dispatched as a restore replica rather than through a worklist of its own (see [RST](restore-replicas.md)).
+An intent carrying `build` contributes an entry per unsettled pair among the covered groups' central servers, naming:
 
 - the **group** the schema is for, and the **central server** whose configuration it is built from;
-- the **version** to build for;
-- where the source database is to be found, or what the builder must ask for to obtain one;
+- the **version** to build for, which the replica is migrated to before the build reads it;
 - whether the source is required to be de-identified.
 
-The worklist carries no credentials.
+The snapshot to restore, the repo coordinates, and the intent's parameter values are the ones every replica's entry carries, and credentials are obtained per run as they are for any other restore.
 Entries are the latest state rather than a queue to drain, and a builder converges on them over time.
 
 ## What a build reports
 
-A builder reports the outcome of each build back to Canopy.
-A report carries:
+A build reports as its replica's restore report, which already names the group, the server, the snapshot it restored, and when it was observed.
+Beyond those it carries:
 
-- the **group**, **server**, and **version** it concerns;
+- the **version** it was built for;
 - the **outcome** — built, or failed — and, on failure, a description of what went wrong;
-- the **snapshot** the source database was restored from, where it was a restored replica, joining the schema to the data it came from;
-- a reference to the **published artefact**, where the build produced one;
-- **how much of the configuration was covered**: the number of configured surveys the schema addresses, and the number it could not;
-- when the build was observed.
+- a reference to each **artefact** the build published, of which the schema is one;
+- **how much of the configuration was covered**: the number of configured surveys the schema addresses, and the number it could not.
+
+The restore's health and the build's outcome stay separate signals out of the one report, as a migration test's already do: a healthy replica whose build failed reports a healthy restore and a failed build.
 
 Reports are retained indefinitely as an audit trail.
 
@@ -101,14 +106,22 @@ A reporting schema is published as an artefact of the version it was built for, 
 A reporting schema always names a group, so two groups on the same version have two of them and neither stands in for the other.
 
 A group's schema for a version supersedes any earlier one for the same pair, and the earlier ones remain addressable, since a group that has not applied the newest is running an older one and its currency has to be gradeable against something.
+Each carries a digest, so which of them a server has applied is a fact rather than an inference from a version string.
+
+It is published into the group's own object storage, under a prefix distinct from that group's backup repo, over a short-lived credential Canopy issues the builder for the run (see [BAK](backup.md)).
+A schema derived from a group's configuration therefore rests in that group's storage, and the credential is what confines a build to writing its own group's artefacts.
+Canopy records where it is as it does for any artefact and holds no copy of the file.
+
+A central server obtains its group's schema for the version it runs over its own credential, and applies it without an operator moving a file.
+Whatever applies it stamps the schema with the artefact it applied, which is what the server then reports and what currency is graded on.
 
 ## Currency
 
 Canopy grades a central server's reporting schema as current, behind, or unknown.
-It is current when the schema the server reports running is the artefact Canopy holds for the version it reports running, behind when the two differ, and unknown when the server reports no schema at all.
+It is current when the artefact the server reports having applied is the newest Canopy holds for its group and the version the server reports running, behind when it is an earlier artefact or one built for another version, and unknown when the server reports no schema at all.
 
-The schema a server is running is reported by the server as the version it was built for, alongside the other facts its sources report about it (see [STA](statuses.md)).
-Canopy does not read it out of the database, so a server that reports nothing is unknown rather than assumed bare.
+The schema a server is running is reported by the server as the artefact it applied, alongside the other facts its sources report about it (see [STA](statuses.md)).
+Canopy does not read it out of the database, so a server that reports nothing is unknown rather than assumed bare, and a schema applied by hand carries no artefact to report.
 
 Currency is presented per group, so whether a group's reports are running against the right schema is answered in one place.
 
@@ -120,11 +133,12 @@ Both leave its reports mismatched to the version it runs, and neither carries a 
 The check is a warning rather than a failure, and does not escalate: the servers are up and their reports return rows, and a schema written for the wrong version is for whoever maintains the reports rather than whoever is on call.
 
 A failed build raises the same check with its failure description, and settles the pair rather than retrying, since a build against a fixed version and configuration fails the same way every time.
+A settled pair is dispatched again by an operator asking for a build, which is the action every one of these checks exists to prompt.
 
 ## Out of scope
 
 - What a reporting schema contains, and what each view in it means.
 - How a build is run, where it runs, and what it costs.
 - The report definitions, documentation, and translations a build may produce alongside the schema. Canopy tracks them as published artefacts of the same version and group without interpreting them.
-- Applying a schema to a database, and the change control around doing so.
+- How a server applies the schema it obtains, and the change control around doing so.
 - Deciding when a group upgrades: an owed schema informs that decision without making it.
