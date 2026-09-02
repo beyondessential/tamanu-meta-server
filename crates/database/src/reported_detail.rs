@@ -54,22 +54,23 @@ pub struct ReportedDetail {
 }
 
 impl ReportedDetail {
-	/// Record `source`'s current detail for `server`, replacing what it
-	/// reported before. A push is the source's whole truth, so this is a
-	/// replace and not a merge; other sources' rows are untouched.
-	///
-	/// The version is the exception: a push that carries none keeps the last
-	/// one this source reported. An agent omits the version when it can't
-	/// read it — the application is down, or mid-upgrade — which says nothing
-	/// about what the server is installed to run, and blanking on it would
-	/// make a group's headline version flicker off exactly when an operator
-	/// is looking at it.
 	/// Record one source's push, splitting it by grain: the box's fields to
 	/// the machine, the rest to the application.
 	///
 	/// A host running two workloads reports its platform, memory and
-	/// filesystems once rather than once per workload. Reads are unaffected —
+	/// filesystems once rather than once per workload. Reads are unaffected:
 	/// [`Self::for_server`] merges the two back together.
+	///
+	/// Either side replaces what `source` reported before rather than merging
+	/// with it, a push being that source's whole truth. Other sources' rows
+	/// are untouched.
+	///
+	/// The version is the exception: a push that carries none keeps the last
+	/// one this source reported. An agent omits the version when it can't
+	/// read it — the application is down, or mid-upgrade — which says nothing
+	/// about what the application is installed to run, and blanking on it
+	/// would make a group's headline version flicker off exactly when an
+	/// operator is looking at it.
 	// spec: FIG
 	pub async fn record(
 		db: &mut AsyncPgConnection,

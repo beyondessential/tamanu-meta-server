@@ -117,6 +117,10 @@ const MACHINE_SUBJECT_DETAIL: &[&str] = &[
 	"osName",
 	"osTimezone",
 	"osVersion",
+	// The reporting agent's own schema version, on the same footing as its
+	// version: it describes the reporter on the box, not any workload, so a
+	// two-workload host stamps it once.
+	"reportingSchemaVersion",
 	"services",
 	"totalMemoryBytes",
 	"uptimeSecs",
@@ -170,6 +174,12 @@ mod tests {
 		assert_eq!(
 			CheckSubject::of_detail_field("tamanuVersion"),
 			CheckSubject::Application
+		);
+		// The agent's schema version travels with the agent, as its own
+		// version does, rather than with whatever it reports on.
+		assert_eq!(
+			CheckSubject::of_detail_field("reportingSchemaVersion"),
+			CheckSubject::Machine
 		);
 		// The box's clock and the application's configured zone are different
 		// facts and routinely differ.

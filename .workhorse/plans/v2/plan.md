@@ -29,7 +29,7 @@ Carried deferrals, each gated on a step above rather than on a vague later:
 
 - [x] Remove the `application_default_machine()` scaffolding default — done early, with the operator/enrolment surface
 - [x] Add `machine_id` to the `Application` struct — done with the operator/enrolment surface
-- [~] **Backup tables take the machine grain** — storage, models, handlers and checks moved; 7 e2e tests in `backups.spec.ts` still point at the old location. See the section below
+- [x] **Backup tables take the machine grain** — storage, models, handlers, checks and the panel's own page all moved. See the section below
 - [x] Separate "never reported" from "reported long ago" — `Status::latest_for_servers` looks back seven days for performance, so a target silent for longer returns no row and reads as never reported (grey) rather than unreachable (red). Pre-existing, and sharper now the states are three: the fix is a cheap "has this ever reported" fact rather than widening the scan -- verify that it does remain cheap, if the query is "somewhat more expensive" it will slow every single view that displays a status, and the /status page (which has all of them at once) will slow to a crawl. Done: reachability across every grain now grades on `ReportedDetail::last_reported_ats`, a primary-key read of the current-state projection, so it stays as cheap as the status window it replaces. See the subsection under "Retiring the graded reachability states".
 - [x] Carry the machine on `IssueData` — done with the fleet query interface, which is what presented machine checks first
 - [x] Link a machine's maintenance window to its detail page — done with the machine page; the fleet maintenance view links a machine target rather than rendering it as plain text
@@ -49,7 +49,7 @@ BAK has said since it was written that a backup is a machine's: a device request
 - The staleness and reconcile checks filed at `Scope::Application`. They file at `Scope::Machine`, which is what makes a shared box's late backup one finding.
 - `latest_success_by_machine_type_for_group` reached the machine by joining applications. That join is gone.
 
-**Outstanding: 7 e2e tests in `backups.spec.ts`.** The backup panel moved off the application page onto the machine's, per FLT ("the application page carries no backups"), and the group page's cross-link plus a few assertions still point at `/servers/{id}#backups`. Rust is green at 1288; typecheck, clippy and biome are clean.
+**The panel moved with the storage.** It sits on the machine's page rather than the application's, per FLT ("the application page carries no backups"), and the group page's cross-link and every e2e anchor follow it to `/machines/{id}#backups`.
 
 ## Terminology: W1's group / environment / instance
 
