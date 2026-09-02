@@ -22,6 +22,8 @@ Each item is a section below; the section carries the detail and the traps.
 - [x] **Migration** — `{product, kind}` becomes `{type}`
 - [x] **Frontend** — two detail pages, the group tree, the status-page bands
 - [x] **Routes** — deprecation aliases for every renamed path
+- [x] **The application type is an open set** — `Other(String)`, no default, no type precedence
+- [ ] **Check identity: the namespace** — a check is identified by namespace and name, not name alone. Design settled; the checklist is in that section
 
 Carried deferrals, each gated on a step above rather than on a vague later:
 
@@ -455,6 +457,22 @@ So, per entry from a structured source:
 ### The spec's phrasing needs correcting with this
 
 CHK already carries the substance — two types reporting the same name are two entries — but says a check is catalogued "as `<type>.<check>`", which reads as the name being concatenated in storage. It is not: the namespace is its own columns and `<type>.<check>` is how an entry presents. Line 99's "keyed by (source, check)" needs the namespace too. Both land with the implementation so spec and code move together.
+
+### Implementation
+
+Ordered so nothing is half-keyed at any point: the type exists before the columns, the columns and the fan-out land together, and the readers move before the writers stop agreeing with them.
+
+- [ ] **A `Namespace` type in `commons-types`, beside `CheckSubject`** — `Flat`, `Machine`, `Application(ApplicationType)`, with `from_columns`/`to_columns` mirroring `Scope`'s, and a `Namespace::of(source, check_name, application_type)` that delegates to `CheckSubject::of`. Its own name and its own doc comment saying what it is *not*: `CheckSubject` answers which half of a push a reading belongs to, `Namespace` answers which catalog entry it resolves to. Conflating them is the mistake this card made twice. `commons-types` already carries diesel derives (`ApplicationType`), so the column mapping can live with it
+- [ ] **One migration, sequenced internally** — `subject`/`application_type` on `check_policies` and `scoped_check_policies`; the CHECK enumerating the three shapes; the fan-out; then the three partial unique indexes on `check_policies` (created last, since the pre-fan-out rows would collide) and the reworked `scoped_check_policies` indexes. Backfill flat sources to `subject = NULL`, machine-subject names to `'machine'`, and application-subject names to one row per type observed in `issues`. `RAISE NOTICE` the count of dropped undrivable entries rather than dropping them silently
+- [ ] **`CheckPolicy` keyed by the namespace** — `live_cataloged_pairs` returns `HashSet<(String, Namespace, String)>`; `register`/upsert, `gone_quiet`'s ordering, and `decommission`'s fleet-wide sweep all take it. `decommission` is the one to watch: retiring `disk_free` must not retire another namespace's
+- [ ] **Ingest registers with the namespace** — `public-server/src/statuses.rs:546` and `:623` already compute `CheckSubject::of`; they now carry it into the catalog registration alongside the reporting application's type. This is where the migration's rule and the ingest rule are locked to the same function
+- [ ] **The catalog gates widen** — 7 `live_cataloged_pairs` loads and 8 membership tests across `issues.rs` (1523, 1624, 1741, 1914, 1952, 3758), `check_policies.rs:886`, `private-server/src/fns/statuses.rs:928`. `health_from_check_state` takes `(id, group_id, type)` triples; every caller already holds the type on its `ServerInfo`, so no caller gains a query. `source_freshness` is the exception and gets one `(id, type)` map query, paid in `reconcile_liveness`
+- [ ] **Scoped resolution matches on namespace** — fleet catalog → group → target still applies in order, with each step matching the filing's namespace. A group- or machine-scoped row on an application-subject check now covers one type, not all of them
+- [ ] **Private API and SPA** — the catalog list and detail carry the namespace; `/healthchecks/:source/:check` gains a segment, with a redirect from the two-segment form so a bookmarked check page still lands; an entry presents as `<type>.<check>` for an application namespace and the bare name otherwise. Regenerate `private-web/openapi.json` and `api-types.ts`
+- [ ] **CHK lines 62–63 and 99** — the namespace as data, `<type>.<check>` as presentation, and the catalog key gaining the namespace
+- [ ] **Tests** — two types reporting one name are two entries with independent ceilings; a machine-subject name from a structured source is one entry, not one per type; a silence on one namespace leaves the other's state alone; the fan-out preserves the review stamp while re-deriving `last_seen`; a namespace first reporting after migration registers pending review. Playwright coverage for the catalog and check-detail changes
+
+**The invariant the derivation rests on**, verified rather than assumed: every group- and global-scoped filing in the tree uses `CANOPY_SOURCE` (`backup/staleness.rs`, `jobs/backup/rotation.rs`, `jobs/backup/complete.rs`, `self_alerts.rs`), so a structured-source filing is always application- or machine-scoped and its namespace is always derivable. A structured source filing at group scope would break `issues` deriving, so if one ever appears it has to be caught here.
 
 ### The wire keeps the split shape
 
