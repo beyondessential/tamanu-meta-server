@@ -574,7 +574,13 @@ No route is deleted, and the step turned out to be pure addition: nothing on the
 
 **`/machines/self` is new; `/servers/self` is untouched.** The two answer different questions rather than the same one under two names, which is why they are two handlers rather than one with an alias. `/servers/self` asks which *application* the caller is and 409s on a box running two — the case the machine endpoint exists for. Its response keeps the shape it has always had, so a fielded agent is unaffected; the deprecation is in its description. DID said the two "reach the same answer", which was not true once written, and now says what they each do.
 
-That `server_id` had to keep meaning an application settled it: `POST /status/{server_id}` resolves an application, so an agent that read its id from `/servers/self` and pushes to it would break if the id changed meaning.
+**Corrected.** This step recorded that `server_id` had to keep meaning an application, on the grounds that `POST /status/{server_id}` resolves one and an agent that read its id from `/servers/self` would break if the meaning changed.
+That reasoning is void, and it is this card's named trap sprung.
+The migration gives every machine its application's id, so the value a fielded agent holds is identical under either meaning and nothing breaks when the meaning changes.
+Preserving the id is why the backfill was written that way.
+
+The wire's id is the machine's, as the working doc says: bestool identifies a box, reports that box's disk, memory, load and addresses, and enrols as a device that belongs to a box.
+The push path and the enrolment path both resolve an application from it, so both read the wrong grain.
 
 **The `server` role is renamed rather than aliased through the code.** `DeviceRole` is not on the public wire at all, so the variant became `Machine` outright, a migration rewrites the stored rows, and `FromStr`/serde accept `server` on input. The alias is on the input only, as planned. Two properties are pinned: a row still written as `server` reads as the machine role and authenticates — every device in the fleet was written that way, so that read is what stops the rename locking them out — and what Canopy stores and presents is `machine`.
 
@@ -686,15 +692,27 @@ The sections above tick off what landed. This one records what the specs on this
 
 None of it is visible today. Every machine came out of the migration 1:1 with an application, so each wrong reading agrees with the right one on the whole current fleet, and they only part company for the two-workload box the card exists to support.
 
+### The push and the enrolment resolve the wrong grain
+
+This is the root cause of the item below it, and the card's own named trap sprung.
+
+The id on the wire is the machine's. `POST /status/{server_id}` resolves it with `Application::get_by_id` and authorises on `applications.device_id`, which is one of the machine-ish columns the machine migration copied across and left in place. Enrolment does the same: `register_begin` requires an application to exist, the token is minted and found per application, and the device binds to an application before the machine is marked registered from `application.machine_id`.
+
+Both readings agree with the right one on the whole current fleet, because the migration gave every machine its application's id. They part company for a box that runs two workloads, which is the case the card exists for.
+
 ### Nothing creates an application
 
 `Application::create` has no production caller: only `bin/seed.rs` and tests. The operator flow that used to create one (`servers::create`, routed on main) became `machines::create`, which creates a machine alone, and FLT's replacement for it ("A report is the only thing that creates an application") was never built. So a new box can be enrolled and its workload cannot be registered at all.
 
 This is the one item that is a regression rather than an unbuilt addition, and it is why the fleet cannot grow past what the migration produced.
 
+The fix is the specced one rather than a new operator flow. Once the push resolves the machine it is addressed to, the applications on that box follow from what reports about it, which is what FLT describes. It does not wait on a new wire shape.
+
 ### The push keeps the unified shape
 
 `StatusPayload` is `source`, `healthy`, `health` and a flat `extra`. STA describes a source, a `machine` section and an `applications` section with per-application `detail`, and describes correlation by machine, key and type. Ingest does separate a unified push by subject, so the split rule is real and tested; what is missing is the shape on the wire and the correlation that comes with it.
+
+The explicit sections are a refinement, not a prerequisite for anything else here. A push is already addressed to a machine by its path and already names its reporter by `source`, so a box and the workloads reporting on it are both identifiable without them.
 
 ### The reachability check is filed at one grain
 
