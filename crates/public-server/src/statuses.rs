@@ -345,7 +345,8 @@ async fn create(
 	// an ungrouped server or one whose group has no `ready` backup config.
 	let backup_now = match server.group_id {
 		Some(group_id) if source == DEFAULT_SOURCE => {
-			backups_due_now_for_machine(&mut db, server_id, group_id, Timestamp::now()).await?
+			backups_due_now_for_machine(&mut db, server.machine_id, group_id, Timestamp::now())
+				.await?
 		}
 		_ => Vec::new(),
 	};
