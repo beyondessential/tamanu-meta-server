@@ -413,13 +413,9 @@ with a CHECK enumerating those three shapes, so a half-populated namespace canno
 
 Two tables get the columns. `check_policies` is the catalog, and `scoped_check_policies` overrides and silences entries in it, so both key on identity. `issues` derives.
 
-`check_policies`'s primary key `(source, check_name)` becomes three partial unique indexes, one per namespace shape, matching how `scoped_check_policies` already handles a nullable-column key:
+`check_policies`'s primary key `(source, check_name)` becomes a single unique index on `(source, subject, application_type, check_name)` declared `NULLS NOT DISTINCT`, so the three namespace shapes are all covered by one index and `NULL` collides with `NULL` the way the key needs it to. The table gains a surrogate `id`, because the key it was primary on no longer identifies a row.
 
-- `(source, check_name) WHERE subject IS NULL`
-- `(source, check_name) WHERE subject = 'machine'`
-- `(source, application_type, check_name) WHERE subject = 'application'`
-
-A single `UNIQUE NULLS NOT DISTINCT` would also work on PG 18, but the repo has no precedent for it and the partial indexes read the same as the neighbouring table.
+Three partial unique indexes, one per shape, were the plan and are not what shipped. `scoped_check_policies` settled it: its key already varies over four scopes, so per-shape partials there would be twelve indexes rather than four, and `NULLS NOT DISTINCT` is the only tractable way to write it. Once the table next door uses it the "no precedent in the repo" argument is spent, and one index reading the same way on both tables beats three on one and four on the other.
 
 ### Deriving the namespace costs nothing on the read paths
 

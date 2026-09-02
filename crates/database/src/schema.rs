@@ -297,7 +297,7 @@ diesel::table! {
 }
 
 diesel::table! {
-	check_policies (source, check_name) {
+	check_policies (id) {
 		source -> Text,
 		check_name -> Text,
 		ceiling -> Text,
@@ -312,6 +312,9 @@ diesel::table! {
 		last_seen -> Nullable<Timestamptz>,
 		decommissioned_at -> Nullable<Timestamptz>,
 		decommissioned_by -> Nullable<Text>,
+		subject -> Nullable<Text>,
+		application_type -> Nullable<Text>,
+		id -> Uuid,
 	}
 }
 
@@ -617,6 +620,8 @@ diesel::table! {
 		rules -> Nullable<Jsonb>,
 		created_by -> Nullable<Text>,
 		machine_id -> Nullable<Uuid>,
+		subject -> Nullable<Text>,
+		application_type -> Nullable<Text>,
 	}
 }
 

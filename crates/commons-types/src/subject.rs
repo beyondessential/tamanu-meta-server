@@ -204,4 +204,34 @@ mod tests {
 			assert_eq!(list.len(), sorted.len(), "{label}: one entry per name");
 		}
 	}
+
+	/// The check-namespace migration carries its own copy of the machine list,
+	/// because a migration runs once against the fleet as it was and freezing
+	/// the list is what makes it reproducible.
+	///
+	/// The two must agree *until it ships*, though: while it is still unapplied
+	/// anywhere, a name added or moved here and not there would namespace one
+	/// way at migration and the other way at the next report. Once it has run
+	/// in the field the copies are free to diverge, and this test comes out
+	/// with the migration's `VALUES` list frozen behind it.
+	#[test]
+	fn the_migration_snapshot_matches_the_subject_list() {
+		let sql = include_str!("../../../migrations/2026-09-02-080628-0000_check_namespace/up.sql");
+		let values = sql
+			.split_once("INSERT INTO machine_subject_checks (check_name) VALUES")
+			.expect("the migration no longer seeds machine_subject_checks")
+			.1
+			.split_once(';')
+			.expect("the seed has no terminator")
+			.0;
+
+		let snapshot: Vec<&str> = values.split('\'').skip(1).step_by(2).collect();
+
+		assert_eq!(
+			snapshot, MACHINE_SUBJECT_CHECKS,
+			"the migration's machine-check snapshot has drifted from the list \
+			 ingest uses, so an entry it creates and the next report of that \
+			 check would land in different namespaces"
+		);
+	}
 }
