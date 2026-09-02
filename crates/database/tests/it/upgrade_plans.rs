@@ -846,3 +846,120 @@ async fn only_dated_plans_that_still_stand_reach_the_calendar() {
 	})
 	.await
 }
+
+/// A group with two version-tracked members at different ranks and different
+/// versions. The production central carries the headline; the test facility
+/// sits behind it.
+async fn group_with_a_member_behind(conn: &mut AsyncPgConnection) -> Uuid {
+	let group: RowId =
+		sql_query("INSERT INTO server_groups (name) VALUES ('kirimati') RETURNING id")
+			.get_result(conn)
+			.await
+			.expect("group");
+
+	for (r#type, rank, running) in [
+		("tamanu-central", "production", "2.62.0"),
+		("tamanu-facility", "test", "2.58.0"),
+	] {
+		let host = format!("https://{}.example", Uuid::new_v4());
+		let app: AppRow = sql_query(
+			"WITH m AS (INSERT INTO machines (group_id) VALUES ($4) RETURNING id) INSERT INTO applications (host, type, rank, group_id, machine_id) SELECT $1, $2, $3, $4, m.id FROM m RETURNING id, machine_id",
+		)
+		.bind::<sql_types::Text, _>(host)
+		.bind::<sql_types::Text, _>(r#type)
+		.bind::<sql_types::Text, _>(rank)
+		.bind::<sql_types::Uuid, _>(group.id)
+		.get_result(conn)
+		.await
+		.expect("application");
+
+		let version: VersionStr = running.parse().expect("parse");
+		ReportedDetail::record(
+			conn,
+			app.id,
+			app.machine_id,
+			"test",
+			&serde_json::json!({}),
+			Some(&version),
+		)
+		.await
+		.expect("report");
+		sql_query(
+			"INSERT INTO statuses (server_id, version, healthy, health) VALUES ($1, $2, true, '[]'::jsonb)",
+		)
+		.bind::<sql_types::Uuid, _>(app.id)
+		.bind::<sql_types::Text, _>(running)
+		.execute(conn)
+		.await
+		.expect("status");
+	}
+
+	ServerGroup::recompute_version(conn, group.id)
+		.await
+		.expect("recompute");
+	group.id
+}
+
+/// A plan is measured against the version the group presents, not against
+/// whichever member happens to be furthest behind. Otherwise a group whose
+/// facility lags would accept a plan to go somewhere its central has already
+/// been.
+// spec: APP
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plan_measures_from_the_groups_headline_version() {
+	TestDb::run(|mut conn, _url| async move {
+		let group = group_with_a_member_behind(&mut conn).await;
+
+		use database::schema::server_groups::dsl;
+		use diesel::{ExpressionMethods, QueryDsl};
+		let headline: Option<String> = dsl::server_groups
+			.select(dsl::effective_version)
+			.filter(dsl::id.eq(group))
+			.first(&mut conn)
+			.await
+			.expect("headline");
+		assert_eq!(
+			headline.as_deref(),
+			Some("2.62.0"),
+			"the headline is the highest-ranked tracked member's version"
+		);
+
+		// Ahead of the lagging facility, behind the headline: not a plan.
+		let behind = publish(&mut conn, 61, 0).await;
+		assert!(
+			UpgradePlan::record(
+				&mut conn,
+				group,
+				behind.id,
+				PlannedWhen::default(),
+				None,
+				"a@example.com",
+			)
+			.await
+			.is_err(),
+			"a member being behind is not a reason to plan backwards"
+		);
+
+		// Ahead of the headline: a plan.
+		let ahead = publish(&mut conn, 63, 0).await;
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			ahead.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("record plan");
+		assert_eq!(
+			UpgradePlan::open_for_group(&mut conn, group)
+				.await
+				.expect("open")
+				.expect("there is one")
+				.target_version_id,
+			ahead.id,
+		);
+	})
+	.await
+}

@@ -1626,3 +1626,89 @@ async fn a_report_naming_both_machine_and_server_is_refused() {
 	)
 	.await;
 }
+
+/// A consumer that predates the worklist entry carrying the application sends a
+/// migration report without one. The box runs two workloads, so the sole-
+/// application shortcut does not apply and the finding is resolved from the
+/// machine and the version instead.
+// spec: RST#dispatching-a-migration-test
+#[tokio::test(flavor = "multi_thread")]
+async fn a_migration_report_omitting_the_application_resolves_it_from_machine_and_version() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let machine = make_server(&mut conn, group).await;
+
+			// A second workload on the same box, of a product with no upgrade
+			// train through Tamanu's migrations.
+			let second = Uuid::new_v4();
+			sql_query(
+				"INSERT INTO applications (id, host, type, group_id, machine_id) \
+				 VALUES ($1, $2, 'senaite', $3, $4)",
+			)
+			.bind::<sql_types::Uuid, _>(second)
+			.bind::<sql_types::Text, _>(format!("https://second-{second}.example.com"))
+			.bind::<sql_types::Uuid, _>(group)
+			.bind::<sql_types::Uuid, _>(machine)
+			.execute(&mut conn)
+			.await
+			.expect("second application");
+
+			make_success_run(&mut conn, device_id, group, machine, "snap-1").await;
+			report_version(&mut conn, machine, "2.62.0").await;
+			let planned = publish_version(&mut conn, 63, 2).await;
+			plan_upgrade(&mut conn, group, planned).await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
+			register_migrate_intent(&public, &cert).await;
+
+			let dispatched: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.await
+				.json();
+			let entry = &dispatched[0];
+
+			public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"replica_id": entry["replica_id"],
+					"group": group,
+					"machine_id": machine,
+					"type": "tamanu-postgres",
+					"intent": "verify",
+					"snapshot_id": entry["snapshot_id"],
+					"outcome": "success",
+					"replica_healthy": true,
+					"observed_at": "2026-07-30T00:00:00Z",
+					"migration": {
+						"target_version": entry["target_version"],
+						"total_elapsed_seconds": 60,
+						"data_bytes_before": 10,
+						"data_bytes_after": 10,
+						"timings": [],
+					},
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			assert_eq!(
+				database::migration_tests::verdict(&mut conn, machine, planned)
+					.await
+					.expect("verdict"),
+				database::migration_tests::Verdict::Passed,
+				"the finding lands on the workload whose candidate the version is",
+			);
+			assert_eq!(
+				database::migration_tests::verdict(&mut conn, second, planned)
+					.await
+					.expect("verdict"),
+				database::migration_tests::Verdict::NotTested,
+				"and not on the other workload sharing the box",
+			);
+		},
+	)
+	.await;
+}

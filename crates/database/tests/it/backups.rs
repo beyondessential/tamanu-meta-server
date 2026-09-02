@@ -2029,3 +2029,118 @@ async fn latest_success_selects_by_data_age_not_report_order() {
 	})
 	.await;
 }
+
+// --- participation follows the machine --------------------------------------
+
+/// Add another workload to a box that already carries one.
+async fn add_application(conn: &mut AsyncPgConnection, group_id: Uuid, machine_id: Uuid) {
+	let host = format!("http://test.invalid/{}", Uuid::new_v4());
+	sql_query(
+		"INSERT INTO applications (host, type, group_id, machine_id) \
+		 VALUES ($1, 'tamanu-facility', $2, $3)",
+	)
+	.bind::<sql_types::Text, _>(host)
+	.bind::<sql_types::Uuid, _>(group_id)
+	.bind::<sql_types::Uuid, _>(machine_id)
+	.execute(conn)
+	.await
+	.expect("insert application");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn capability_and_participation_follow_the_machine() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "kiritimati").await;
+		let machine_id = insert_server(&mut conn, group_id).await;
+		add_application(&mut conn, group_id, machine_id).await;
+
+		let pg = BackupType::TamanuPostgres;
+		let files = BackupType::Custom("tamanu-files".into());
+		MachineBackupCapability::register(&mut conn, machine_id, &pg, true)
+			.await
+			.unwrap();
+		MachineBackupCapability::register(&mut conn, machine_id, &files, false)
+			.await
+			.unwrap();
+
+		let caps = MachineBackupCapability::list_for_machine(&mut conn, machine_id)
+			.await
+			.unwrap();
+		assert_eq!(
+			caps.len(),
+			2,
+			"the box declares its own types, not one set per workload",
+		);
+
+		let enabled = MachineBackupCapability::enabled_types_for_group(&mut conn, group_id)
+			.await
+			.unwrap();
+		assert_eq!(
+			enabled,
+			vec![pg.clone()],
+			"a two-application box is one participant, so its enabled type appears once",
+		);
+
+		let mut declared = MachineBackupCapability::declared_types_for_group(&mut conn, group_id)
+			.await
+			.unwrap();
+		declared.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+		assert_eq!(
+			declared,
+			vec![files, pg],
+			"every declared type reaches the group exactly once",
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_request_resolves_identity_to_machine_to_group() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "rarotonga").await;
+
+		// A box carrying no workload at all: resolution must still land on it.
+		let machine_id = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
+			.bind::<sql_types::Uuid, _>(group_id)
+			.get_result::<RowId>(&mut conn)
+			.await
+			.expect("insert machine")
+			.id;
+		let device_id = insert_device(&mut conn).await;
+		database::Machine::bind_device(&mut conn, machine_id, device_id)
+			.await
+			.unwrap();
+
+		let resolved = database::Machine::get_by_device_id(&mut conn, device_id)
+			.await
+			.unwrap()
+			.expect("the identity resolves to the box it is enrolled as");
+		assert_eq!(resolved.id, machine_id);
+		assert_eq!(
+			resolved.group_id,
+			Some(group_id),
+			"the group comes from the machine, not from an application on it",
+		);
+
+		// The request enqueued against that machine is the one the box sees.
+		let pg = BackupType::TamanuPostgres;
+		BackupRequest::enqueue(&mut conn, machine_id, &pg, BackupPurpose::Backup, None)
+			.await
+			.unwrap();
+		let pending = BackupRequest::pending_for_machine(&mut conn, resolved.id)
+			.await
+			.unwrap();
+		assert_eq!(pending.len(), 1);
+
+		// An identity bound to no machine resolves to nothing, rather than to
+		// some application's box.
+		let stray = insert_device(&mut conn).await;
+		assert!(
+			database::Machine::get_by_device_id(&mut conn, stray)
+				.await
+				.unwrap()
+				.is_none(),
+		);
+	})
+	.await;
+}

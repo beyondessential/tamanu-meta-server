@@ -31,7 +31,7 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 - [x] A group's headline version comes from its highest-ranked version-tracked application (verifies spec: APP)
 - [x] A group whose applications are all of untracked types has no headline version (verifies spec: APP)
 - [x] A group of facilities still has a headline version; a central only wins a rank tie (verifies spec: APP)
-- [ ] An upgrade plan measures from the same headline version a group presents (verifies spec: APP)
+- [x] An upgrade plan measures from the same headline version a group presents (verifies spec: APP)
 
 ## Reachability
 
@@ -108,14 +108,14 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 
 - [x] A machine onboarded into an existing backup configuration is not stale on arrival (verifies spec: BKJ)
 - [x] Adding a second application to a machine does not restart that machine's backup staleness anchor (verifies spec: BKJ)
-- [ ] Backup capability and participation follow the machine, and a two-application box is one participant (verifies spec: BAK, BKO)
-- [ ] A device request resolves identity to machine to group, without reaching the applications on it (verifies spec: BAK)
+- [x] Backup capability and participation follow the machine, and a two-application box is one participant (verifies spec: BAK, BKO)
+- [x] A device request resolves identity to machine to group, without reaching the applications on it (verifies spec: BAK)
 - [x] A restore-replica declaration names a machine, and a whole-group declaration expands over machines (verifies spec: RST)
 - [x] `restore-verification` and `redaction` file at machine scope; `migration-test` files at application scope (verifies spec: RST)
 - [x] A migrate worklist entry names the machine's snapshot and the application whose candidate it carries (verifies spec: RST)
 
 - [x] A box running two workloads gets one replica of its one snapshot, not one per workload (verifies spec: RST)
-- [ ] A migration report that omits the application has it resolved from the machine and the version (verifies spec: RST)
+- [x] A migration report that omits the application has it resolved from the machine and the version (verifies spec: RST)
 
 ## Maintenance windows
 
@@ -124,7 +124,7 @@ Coverage the card owes. An unticked box is a scenario not yet covered.
 - [x] An application's detail page reports it as under maintenance when its machine's window holds (verifies spec: MNT)
 - [x] Declaring from an application's page opens the window over its machine (verifies spec: MNT)
 - [x] Windows predating the split are backfilled onto the machine their application ran on, leaving group windows alone (verifies spec: MNT)
-- [ ] A machine-scoped silence still applies only to the machine's own checks, not to the applications on it (verifies spec: CHK)
+- [x] A machine-scoped silence still applies only to the machine's own checks, not to the applications on it (verifies spec: CHK)
 - [ ] The fleet maintenance view links a machine target to its detail page (verifies spec: MNT)
 
 ## Names and certificates
