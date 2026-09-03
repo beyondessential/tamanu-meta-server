@@ -51,6 +51,11 @@ pub struct ReportedDetail {
 	/// When the push carrying this detail landed.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub reported_at: Timestamp,
+	/// When this source last carried a version. A push without one leaves it,
+	/// so the version is dated by when it was said rather than when the source
+	/// last spoke.
+	#[diesel(deserialize_as = jiff_diesel::NullableTimestamp, serialize_as = jiff_diesel::NullableTimestamp)]
+	pub version_reported_at: Option<Timestamp>,
 }
 
 impl ReportedDetail {
@@ -73,6 +78,7 @@ impl ReportedDetail {
 	) -> Result<()> {
 		use crate::schema::server_reported_detail::dsl;
 
+		let carried_at = version.map(|_| jiff_diesel::Timestamp::from(Timestamp::now()));
 		diesel::insert_into(dsl::server_reported_detail)
 			.values((
 				dsl::server_id.eq(server),
@@ -80,6 +86,7 @@ impl ReportedDetail {
 				dsl::extra.eq(extra),
 				dsl::version.eq(version),
 				dsl::reported_at.eq(diesel::dsl::now),
+				dsl::version_reported_at.eq(carried_at),
 			))
 			.on_conflict((dsl::server_id, dsl::source))
 			.do_update()
@@ -93,6 +100,11 @@ impl ReportedDetail {
 					"COALESCE(EXCLUDED.version, server_reported_detail.version)",
 				)),
 				dsl::reported_at.eq(diesel::dsl::now),
+				dsl::version_reported_at.eq(diesel::dsl::sql::<
+					diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>,
+				>(
+					"CASE WHEN EXCLUDED.version IS NULL THEN server_reported_detail.version_reported_at ELSE now() END",
+				)),
 			))
 			.execute(db)
 			.await
@@ -143,7 +155,7 @@ impl ReportedDetail {
 			.select(dsl::version)
 			.filter(dsl::server_id.eq(server))
 			.filter(dsl::version.is_not_null())
-			.order(dsl::reported_at.desc())
+			.order(version_time().desc())
 			.first(db)
 			.await
 			.optional()
@@ -172,7 +184,7 @@ impl ReportedDetail {
 			.filter(dsl::server_id.eq_any(server_ids))
 			.filter(dsl::version.is_not_null())
 			.distinct_on(dsl::server_id)
-			.order((dsl::server_id, dsl::reported_at.desc()))
+			.order((dsl::server_id, version_time().desc()))
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
@@ -244,4 +256,10 @@ impl ReportedDetail {
 			})
 			.collect()
 	}
+}
+
+/// When a row's version was carried. Rows written before the column existed
+/// date their version by the push that wrote them.
+fn version_time() -> diesel::expression::SqlLiteral<diesel::sql_types::Timestamptz> {
+	diesel::dsl::sql::<diesel::sql_types::Timestamptz>("COALESCE(version_reported_at, reported_at)")
 }

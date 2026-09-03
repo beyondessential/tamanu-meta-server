@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use commons_errors::Result;
 use commons_types::{
 	backup::{BackupType, RestoreIntent, RunOutcome},
-	server::{product::Product, rank::ServerRank},
+	server::product::Product,
 };
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -495,24 +495,13 @@ pub async fn verdicts_for_group(
 	verdicts(db, servers).await
 }
 
-/// Where every server in one of `group`'s environments stands against the
-/// version it would take next.
+/// Where each of `servers` stands against the version it would take next, for
+/// a caller that has already picked out an environment's servers.
 // spec: RST#verdicts
-pub async fn verdicts_for_environment(
+pub async fn verdicts(
 	db: &mut AsyncPgConnection,
-	group_id: Uuid,
-	rank: ServerRank,
+	servers: Vec<Server>,
 ) -> Result<Vec<GroupVerdict>> {
-	let mut servers = Vec::new();
-	for server in Server::list_live_in_group(db, group_id).await? {
-		if crate::server_groups::ServerGroup::environment_of(db, &server).await? == Some(rank) {
-			servers.push(server);
-		}
-	}
-	verdicts(db, servers).await
-}
-
-async fn verdicts(db: &mut AsyncPgConnection, servers: Vec<Server>) -> Result<Vec<GroupVerdict>> {
 	let mut out = Vec::new();
 
 	for server in servers {

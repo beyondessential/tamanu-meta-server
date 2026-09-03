@@ -111,6 +111,16 @@ pub async fn fleet(
 		.collect();
 	let mut attempts: HashMap<Uuid, Option<crate::fns::migration_tests::AttemptState>> =
 		HashMap::new();
+	let mut members: HashMap<Uuid, Vec<database::servers::Server>> = HashMap::new();
+	let headline = ServerGroup::highest_member_ranks(&mut conn, &ids).await?;
+	// Including drafts: a target yanked since the plan was recorded still has to
+	// render as the version the environment is going to.
+	let versions: HashMap<Uuid, String> =
+		database::versions::Version::get_all_including_drafts(&mut conn)
+			.await?
+			.into_iter()
+			.map(|version| (version.id, version.as_semver().to_string()))
+			.collect();
 
 	let mut environments = ServerGroup::environments(&mut conn, &ids).await?;
 	// A plan whose environment has no live server any more still says where
@@ -133,14 +143,9 @@ pub async fn fleet(
 	let mut out = Vec::new();
 	for env in environments {
 		let plan = open.remove(&(env.group_id, env.rank));
-		let target = match &plan {
-			Some(plan) => Some(
-				database::upgrade_plans::target_version_str(&mut conn, plan)
-					.await?
-					.to_string(),
-			),
-			None => None,
-		};
+		let target = plan
+			.as_ref()
+			.and_then(|plan| versions.get(&plan.target_version_id).cloned());
 		let late = plan
 			.as_ref()
 			.is_some_and(|plan| database::upgrade_plans::is_late(plan, today));
@@ -151,12 +156,22 @@ pub async fn fleet(
 		let verdict = match &plan {
 			None => None,
 			Some(_) => {
-				let per_server = database::migration_tests::verdicts_for_environment(
-					&mut conn,
-					env.group_id,
-					env.rank,
-				)
-				.await?;
+				if !members.contains_key(&env.group_id) {
+					let live =
+						database::servers::Server::list_live_in_group(&mut conn, env.group_id)
+							.await?;
+					members.insert(env.group_id, live);
+				}
+				// An unranked member belongs to the group's headline environment.
+				let servers: Vec<_> = members[&env.group_id]
+					.iter()
+					.filter(|server| {
+						server.rank.or_else(|| headline.get(&env.group_id).copied())
+							== Some(env.rank)
+					})
+					.cloned()
+					.collect();
+				let per_server = database::migration_tests::verdicts(&mut conn, servers).await?;
 				Some(roll_up(&per_server).to_owned())
 			}
 		};

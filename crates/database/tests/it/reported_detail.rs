@@ -528,3 +528,52 @@ async fn merge_by_server_keeps_servers_apart() {
 	})
 	.await
 }
+
+/// A source that pushes without a version keeps the one it last carried, and
+/// that push must not make its older version look newer than another source's.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_version_less_push_does_not_outrank_a_newer_version_from_another_source() {
+	commons_tests::db::TestDb::run(|mut conn, _url| async move {
+		let server = insert_server(&mut conn).await;
+		let old: commons_types::version::VersionStr = "2.60.0".parse().expect("parse");
+		let new: commons_types::version::VersionStr = "2.62.0".parse().expect("parse");
+		ReportedDetail::record(&mut conn, server, "alertd", &json!({}), Some(&old))
+			.await
+			.expect("alertd");
+		sql_query(
+			"UPDATE server_reported_detail SET reported_at = reported_at - interval '2 hours', \
+			 version_reported_at = version_reported_at - interval '2 hours' WHERE server_id = $1",
+		)
+		.bind::<sql_types::Uuid, _>(server)
+		.execute(&mut conn)
+		.await
+		.expect("age");
+		ReportedDetail::record(&mut conn, server, "tamanu", &json!({}), Some(&new))
+			.await
+			.expect("tamanu");
+		sql_query(
+			"UPDATE server_reported_detail SET reported_at = reported_at - interval '1 hour', \
+			 version_reported_at = version_reported_at - interval '1 hour' \
+			 WHERE server_id = $1 AND source = 'tamanu'",
+		)
+		.bind::<sql_types::Uuid, _>(server)
+		.execute(&mut conn)
+		.await
+		.expect("age");
+
+		// alertd speaks again, saying nothing about the version.
+		ReportedDetail::record(&mut conn, server, "alertd", &json!({}), None)
+			.await
+			.expect("alertd again");
+
+		assert_eq!(
+			ReportedDetail::last_version(&mut conn, server)
+				.await
+				.expect("last")
+				.map(|v| v.to_string()),
+			Some("2.62.0".to_string()),
+			"the newest version carried wins, not the newest source to speak"
+		);
+	})
+	.await
+}

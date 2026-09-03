@@ -91,6 +91,7 @@ Canopy presents planned upgrades across the fleet in one view, so the question "
 For each environment with an open plan it shows the group, the rank where it is not production, the target version, the version the environment is on now, the planned date and window where there are ones, and the pre-upgrade verdict for that target, so an operator sees both the intent and whether the environment's data survives it.
 The window carries its zone, abbreviated: whose midnight it is is the whole question a reader has.
 Where an attempt is under way it shows that too, since a restore takes hours and a verdict of not-yet-tested otherwise looks the same whether the pipeline is working or has stopped.
+An attempt is the group's rather than one environment's, since a restore is issued credentials for the group's backups without naming the server it will restore, so it shows on each of the group's environments that is set up for testing.
 Where nothing is declared to migrate the group's data it says so in place of the verdict, since a plan on a group with no such declaration is never dispatched and a reader would otherwise wait on a result that cannot arrive.
 Groups whose highest-ranked environment has no plan are shown too, behind a disclosure that counts them: an unplanned production several minors behind is what this view exists to surface, and the count surfaces it without the list crowding out what is moving.
 A clone or demo with no plan is not listed there, since most of them are never planned and listing them would bury the gap that matters.

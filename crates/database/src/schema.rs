@@ -635,6 +635,7 @@ diesel::table! {
 		extra -> Jsonb,
 		version -> Nullable<Text>,
 		reported_at -> Timestamptz,
+		version_reported_at -> Nullable<Timestamptz>,
 	}
 }
 
