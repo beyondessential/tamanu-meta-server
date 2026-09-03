@@ -528,6 +528,24 @@ impl MachineReportedDetail {
 			.map_err(AppError::from)
 	}
 
+	/// Every source's current detail for each of these machines.
+	///
+	/// The plural of [`Self::for_machine`], for a view showing many boxes at
+	/// once: it asks in one round trip and folds the rows per machine with
+	/// [`Self::merge_by_machine`], rather than once per box.
+	pub async fn for_machines(db: &mut AsyncPgConnection, ids: &[Uuid]) -> Result<Vec<Self>> {
+		use crate::schema::machine_reported_detail::dsl;
+		if ids.is_empty() {
+			return Ok(Vec::new());
+		}
+		dsl::machine_reported_detail
+			.select(Self::as_select())
+			.filter(dsl::machine_id.eq_any(ids))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	pub async fn all(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::schema::machine_reported_detail::dsl;
 		dsl::machine_reported_detail

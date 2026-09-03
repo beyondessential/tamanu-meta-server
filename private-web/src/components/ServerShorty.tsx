@@ -8,7 +8,7 @@ import {
 	type ShortStatus,
 } from "../types";
 import ApplicationTypeChip from "./ApplicationTypeChip";
-import ServerNameWithGroup from "./ServerNameWithGroup";
+import TargetName from "./TargetName";
 import ServerRankChip from "./ServerRankChip";
 import StatusDot from "./StatusDot";
 
@@ -28,6 +28,7 @@ export interface ServerInfo {
 export default function ServerShorty({
 	server,
 	current = false,
+	withGroup = true,
 }: {
 	server: ServerInfo;
 	/// Whether this row is the page the operator is already on. It is marked in
@@ -35,9 +36,18 @@ export default function ServerShorty({
 	/// of everything else, and its name doesn't link back to where they are.
 	/// spec: FLT
 	current?: boolean;
+	/// Whether to prefix the name with its group. Off inside a listing that is
+	/// already one group's.
+	withGroup?: boolean;
 }) {
 	const name = applicationName(server);
 	const unmonitored = server.is_monitored === false;
+	// The group is dropped where the caller is already inside one: a row in a
+	// group's own tree naming that group again says nothing.
+	const trail = [
+		...(withGroup && server.group_name ? [{ label: server.group_name }] : []),
+		{ label: name },
+	];
 	return (
 		<Stack
 			direction="row"
@@ -64,23 +74,17 @@ export default function ServerShorty({
 					color="text.secondary"
 					sx={{ fontWeight: 500 }}
 				>
-					<ServerNameWithGroup
-						groupName={server.group_name}
-						serverName={name}
-					/>
+					<TargetName parts={trail} />
 				</Typography>
 			) : (
 				<MuiLink
 					component={RouterLink}
-					to={`/servers/${server.id}`}
+					to={`/applications/${server.id}`}
 					underline="hover"
 					color="text.primary"
 					sx={{ fontWeight: 500 }}
 				>
-					<ServerNameWithGroup
-						groupName={server.group_name}
-						serverName={name}
-					/>
+					<TargetName parts={trail} />
 				</MuiLink>
 			)}
 			{server.rank && <ServerRankChip rank={server.rank} />}
