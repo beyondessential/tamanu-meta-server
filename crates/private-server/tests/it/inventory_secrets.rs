@@ -229,6 +229,27 @@ async fn a_name_is_a_tag_or_a_secret_and_never_both() {
 			}))
 			.await
 			.assert_status_bad_request();
+
+		// As is carrying the name in from another group.
+		let other = insert_group(&mut conn, "drifting", json!({})).await;
+		let mover = insert_ranked_server(
+			&mut conn,
+			other,
+			"drifting-central",
+			"central",
+			Some("production"),
+			None,
+			json!({ "salt": "in-the-clear" }),
+		)
+		.await;
+		private
+			.post("/api/servers/update")
+			.json(&json!({
+				"server_id": mover,
+				"data": { "group_id": group, "rank": "production" },
+			}))
+			.await
+			.assert_status_bad_request();
 	})
 	.await;
 }

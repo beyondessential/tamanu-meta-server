@@ -385,6 +385,18 @@ impl Server {
 	pub async fn restore(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Self> {
 		use crate::schema::servers::dsl;
 
+		let server = Self::get_by_id(db, server_id).await?;
+		crate::inventory_secret_variables::reject_secret_names(
+			db,
+			crate::inventory_secret_variables::TagScope::Server {
+				server_id,
+				group_id: server.group_id,
+				rank: server.rank.unwrap_or_default(),
+			},
+			&server.tags,
+		)
+		.await?;
+
 		diesel::update(dsl::servers.filter(dsl::id.eq(server_id)))
 			.set(dsl::deleted_at.eq(None::<jiff_diesel::Timestamp>))
 			.execute(db)
@@ -813,7 +825,17 @@ impl Server {
 
 		if let Some(tags) = &updates.tags {
 			crate::tags::reject_reserved_keys(tags)?;
-			// The scope the tags land in, which the same update may be moving.
+		}
+
+		// The tags and the scope they land in, either of which the update may
+		// be changing.
+		let moving = updates.group_id.is_some() || updates.rank.is_some();
+		let tags = match (&updates.tags, &old) {
+			(Some(tags), _) => Some(tags),
+			(None, Some(old)) if moving => Some(&old.tags),
+			_ => None,
+		};
+		if let Some(tags) = tags {
 			let group_id = match updates.group_id {
 				Some(group_id) => group_id,
 				None => old.as_ref().and_then(|server| server.group_id),
@@ -822,6 +844,14 @@ impl Server {
 				.rank
 				.or_else(|| old.as_ref().and_then(|server| server.rank))
 				.unwrap_or_default();
+			let tags = match group_id {
+				Some(group_id) => tags.merged_with(
+					&crate::server_groups::ServerGroup::get_by_id(db, group_id)
+						.await?
+						.tags,
+				),
+				None => tags.clone(),
+			};
 			crate::inventory_secret_variables::reject_secret_names(
 				db,
 				crate::inventory_secret_variables::TagScope::Server {
@@ -829,7 +859,7 @@ impl Server {
 					group_id,
 					rank,
 				},
-				tags,
+				&tags,
 			)
 			.await?;
 		}

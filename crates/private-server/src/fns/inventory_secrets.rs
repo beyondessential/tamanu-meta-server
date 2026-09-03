@@ -214,10 +214,11 @@ pub async fn remove(
 	Ok(Json(()))
 }
 
-fn secret_store(state: &AppState) -> Result<&BackupSecrets> {
-	state.kube.as_ref().ok_or_else(|| {
-		AppError::Upstream("secret store not configured; cannot hold a secret variable".into())
-	})
+pub(super) fn secret_store(state: &AppState) -> Result<&BackupSecrets> {
+	state
+		.kube
+		.as_ref()
+		.ok_or_else(|| AppError::Upstream("secret store not configured".into()))
 }
 
 /// The name is the key its value is stored under, so it is held to what a key
@@ -251,18 +252,12 @@ async fn reject_tag_of_that_name(
 					.filter(|server| server.rank.unwrap_or_default() == rank)
 					.any(|server| server.tags.0.contains_key(name))
 		}
-		SecretScope::Server { server_id } => {
-			let server = Server::get_by_id(conn, server_id).await?;
-			let group_tags = match server.group_id {
-				Some(group_id) => ServerGroup::get_by_id(conn, group_id)
-					.await?
-					.tags
-					.0
-					.contains_key(name),
-				None => false,
-			};
-			server.tags.0.contains_key(name) || group_tags
-		}
+		SecretScope::Server { server_id } => Server::get_by_id(conn, server_id)
+			.await?
+			.tags_merged_with_group(conn)
+			.await?
+			.0
+			.contains_key(name),
 	};
 
 	if carries {

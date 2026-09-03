@@ -15,17 +15,9 @@ import {
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
-import type { ServerRank } from "../types";
+import type { InventorySecretVariable, ServerRank } from "../types";
 import { SERVER_RANK_ORDER } from "../types";
-
-type SecretVariable = {
-	id: string;
-	name: string;
-	rank?: ServerRank | null;
-	server_id?: string | null;
-	set_by?: string | null;
-	updated_at: string;
-};
+import ServerKindChip from "./ServerKindChip";
 
 /// What a configuration run receives for each of this group's environments:
 /// the servers it would act on, the address each is reached at, and the
@@ -95,8 +87,7 @@ function EnvironmentInventory({
 		[groupId, tick],
 	);
 
-	const declared: SecretVariable[] =
-		secrets.status === "ok" ? (secrets.data as SecretVariable[]) : [];
+	const declared = secrets.status === "ok" ? secrets.data : [];
 	const environmentSecrets = declared.filter(
 		(variable) => variable.rank === rank && !variable.server_id,
 	);
@@ -166,7 +157,7 @@ function EnvironmentInventory({
 								sx={{ alignItems: "baseline", flexWrap: "wrap" }}
 							>
 								<Typography variant="subtitle2">{host.name}</Typography>
-								<Chip size="small" label={host.kind} />
+								<ServerKindChip kind={host.kind} />
 								<Typography
 									variant="body2"
 									color="text.secondary"
@@ -266,7 +257,7 @@ function Secrets({
 	scope,
 	onRemove,
 }: {
-	items: ReadonlyArray<SecretVariable>;
+	items: ReadonlyArray<InventorySecretVariable>;
 	scope?: Record<string, unknown>;
 	onRemove?: () => void;
 }) {

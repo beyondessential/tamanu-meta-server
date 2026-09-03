@@ -16,7 +16,7 @@ use axum::Json;
 use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
-use commons_servers::{backup_secrets::BackupSecrets, tailscale_auth::TailscaleAdmin};
+use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::{
 	Uuid,
 	server::{RESERVED_TAG_PREFIX, TagMap, kind::ServerKind, product::Product, rank::ServerRank},
@@ -368,9 +368,7 @@ async fn read_secrets(
 		return Ok(VarMap::default());
 	}
 
-	let kube: &BackupSecrets = state.kube.as_ref().ok_or_else(|| {
-		AppError::Upstream("secret store not configured; cannot serve secret variables".into())
-	})?;
+	let kube = super::inventory_secrets::secret_store(state)?;
 	let secret_name = super::inventory_secrets::secret_name(scope);
 	let held = kube.try_read_keys(&secret_name).await?.unwrap_or_default();
 
