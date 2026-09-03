@@ -227,6 +227,10 @@ For each catalogued check Canopy tracks when it was most recently reported on an
 A catalogued check not reported anywhere for seven days is surfaced to operators as a candidate for decommissioning.
 A catalogued check not reported anywhere for thirty days raises a Canopy-wide warning (see [SELF](../private-server/self-alerts.md)).
 
+Both are about a reporter falling silent, so neither counts a check nothing could report.
+A check whose namespace names an application type absent from the live fleet is left out of the candidate list and the warning: no report of it is possible, whatever an operator does, so it is an entry whose population has gone rather than a check that has.
+The machine and curated namespaces are never left out on this reasoning, their populations being every box and Canopy itself.
+
 Decommissioning is an operator action, never automatic: the candidate list and the Canopy-wide warning surface what has gone away, and an operator decides.
 A decommissioned check is retired fleet-wide: its state on every target is resolved, recording decommissioning as the reason, and it then contributes to nothing — not health, not incidents, not reachability.
 A source all of whose checks are decommissioned is no longer an expected source, so it drops out of the reachability signal.

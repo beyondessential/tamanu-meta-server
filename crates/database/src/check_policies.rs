@@ -441,9 +441,21 @@ impl CheckPolicy {
 	/// fleet-wide report is older than `cutoff`. Ordered by source then
 	/// name. Drives the operator "gone quiet" list and the stale-check
 	/// self-alert.
+	///
+	/// An entry no live application could report into is left out. A check is
+	/// identified by a namespace, and an application-subject namespace names a
+	/// type; if the fleet holds no live application of that type, nothing can
+	/// ever report that check again, whatever anyone does. That is not a check
+	/// that went away — it is an entry whose population went away, and telling
+	/// an operator to decommission it every day is asking them to tidy up after
+	/// a fleet change rather than reporting a reporter falling silent.
+	///
+	/// Machine-subject and curated entries are always kept: their populations
+	/// are every box and Canopy itself, neither of which empties.
+	// spec: CHK#liveness-and-decommissioning
 	pub async fn gone_quiet(db: &mut AsyncPgConnection, cutoff: Timestamp) -> Result<Vec<Self>> {
 		use crate::schema::check_policies::dsl;
-		dsl::check_policies
+		let quiet: Vec<Self> = dsl::check_policies
 			.select(Self::as_select())
 			.filter(dsl::decommissioned_at.is_null())
 			.filter(dsl::last_seen.is_not_null())
@@ -456,7 +468,30 @@ impl CheckPolicy {
 			))
 			.load(db)
 			.await
-			.map_err(AppError::from)
+			.map_err(AppError::from)?;
+
+		if quiet.is_empty() {
+			return Ok(quiet);
+		}
+
+		let live: std::collections::HashSet<commons_types::server::app_type::ApplicationType> =
+			crate::applications::Application::distinct_types(db)
+				.await?
+				.into_iter()
+				.collect();
+
+		Ok(quiet
+			.into_iter()
+			.filter(|entry| match entry.namespace() {
+				// A namespace that does not parse cannot be matched against
+				// the fleet, so it is kept and surfaced rather than hidden.
+				Err(_) => true,
+				Ok(ns) => match ns.application_type() {
+					Some(ty) => live.contains(ty),
+					None => true,
+				},
+			})
+			.collect())
 	}
 
 	/// Decommission a `(source, check)` fleet-wide: mark the catalog row,

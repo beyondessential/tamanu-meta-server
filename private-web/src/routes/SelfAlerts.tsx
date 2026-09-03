@@ -9,7 +9,9 @@ import {
 	Typography,
 } from "@mui/material";
 import { useState } from "react";
+import { Link as RouterLink } from "react-router-dom";
 import { useApi, useApiAction } from "../api";
+import { healthcheckSettingsPath } from "../types";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 function chipColor(result: string | null): "error" | "warning" | "info" | "default" {
@@ -24,6 +26,63 @@ function chipColor(result: string | null): "error" | "warning" | "info" | "defau
 		default:
 			return "info";
 	}
+}
+
+/// One check an alert named, as the alert's detail carries it.
+interface QuietCheck {
+	source: string;
+	check: string;
+	qualified_name: string;
+	subject: string | null;
+	application_type: string | null;
+}
+
+function quietChecks(detail: unknown): QuietCheck[] {
+	if (typeof detail !== "object" || detail === null) return [];
+	const checks = (detail as { checks?: unknown }).checks;
+	if (!Array.isArray(checks)) return [];
+	return checks.filter(
+		(c): c is QuietCheck =>
+			typeof c === "object" &&
+			c !== null &&
+			typeof (c as QuietCheck).source === "string" &&
+			typeof (c as QuietCheck).check === "string",
+	);
+}
+
+/// The checks an alert names, each linked to its own policy page.
+///
+/// The stale-healthcheck alert asks the operator to decommission what has gone
+/// away, and decommissioning lives on a check's policy page. Naming the checks
+/// in a sentence and leaving the operator to find them is what made the alert
+/// feel unresolvable: resolving it does nothing, because the condition is real
+/// until the checks are retired.
+/// spec: SELF#presentation
+function QuietChecks({ detail }: { detail: unknown }) {
+	const checks = quietChecks(detail);
+	if (checks.length === 0) return null;
+	return (
+		<Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
+			{checks.map((c) => (
+				<Chip
+					key={`${c.source}/${c.subject ?? ""}/${c.application_type ?? ""}/${c.check}`}
+					size="small"
+					variant="outlined"
+					clickable
+					component={RouterLink}
+					to={healthcheckSettingsPath(
+						c.source,
+						{
+							subject: c.subject,
+							application_type: c.application_type,
+						},
+						c.check,
+					)}
+					label={`${c.source}/${c.qualified_name}`}
+				/>
+			))}
+		</Box>
+	);
 }
 
 /// Canopy's alerts about its own operation — kept apart from fleet
@@ -100,6 +159,7 @@ export default function SelfAlerts() {
 							>
 								{a.message}
 							</Typography>
+							<QuietChecks detail={a.detail} />
 							<Typography variant="caption" color="text.secondary">
 								{a.ref} · first seen{" "}
 								{new Date(a.first_seen).toLocaleString()} · last activity{" "}

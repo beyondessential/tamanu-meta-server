@@ -15665,6 +15665,9 @@
             "type": "boolean",
             "description": "Whether the underlying condition is still ongoing. Becomes `false`\nonce the condition has cleared on its own, independently of whether\nan operator has resolved the alert."
           },
+          "detail": {
+            "description": "Whatever structured detail the condition attached, or `null` where it\nattached none. A message is for reading and this is for acting on: the\nstale-healthcheck alert, for one, lists the checks it names here so the\nsurface can link each to its own policy page."
+          },
           "effective_result": {
             "type": [
               "string",

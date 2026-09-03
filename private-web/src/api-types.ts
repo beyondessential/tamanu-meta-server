@@ -9046,6 +9046,13 @@ export interface components {
              *     an operator has resolved the alert.
              */
             active: boolean;
+            /**
+             * @description Whatever structured detail the condition attached, or `null` where it
+             *     attached none. A message is for reading and this is for acting on: the
+             *     stale-healthcheck alert, for one, lists the checks it names here so the
+             *     surface can link each to its own policy page.
+             */
+            detail?: unknown;
             /** @description What policy made of it — the result canopy acts on. */
             effective_result?: string | null;
             /**

@@ -34,6 +34,51 @@ test.describe("self-alerts", () => {
 		).toBeVisible();
 	});
 
+	/// The stale-healthcheck alert asks for a decommission, and decommissioning
+	/// lives on a check's own policy page. Resolving the alert does nothing
+	/// while the condition holds, so the alert has to lead somewhere an
+	/// operator can act — and it has to name the whole identity, since a bare
+	/// name can belong to several catalog entries.
+	///
+	/// spec: SELF#presentation
+	test("an alert naming checks links each one to its policy", async ({
+		page,
+		sql,
+	}) => {
+		await seedIssue(sql, {
+			source: "canopy",
+			ref: "stale-healthchecks",
+			severity: "warning",
+			description: "Healthchecks gone quiet",
+			message:
+				"1 healthcheck(s) unreported fleet-wide for 30 days: alertd/tamanu-central.db_version",
+			detail: {
+				checks: [
+					{
+						source: "alertd",
+						check: "db_version",
+						qualified_name: "tamanu-central.db_version",
+						subject: "application",
+						application_type: "tamanu-central",
+					},
+				],
+			},
+		});
+
+		await page.goto("/alerts");
+
+		const link = page.getByRole("link", {
+			name: "alertd/tamanu-central.db_version",
+		});
+		await expect(link).toBeVisible();
+		await link.click();
+
+		// The policy page for that one entry, namespace and all.
+		await expect(page).toHaveURL(
+			/\/settings\/healthchecks\/alertd\/application\.tamanu-central\/db_version$/,
+		);
+	});
+
 	test("self-alerts stay out of the fleet issue listing", async ({
 		page,
 		sql,
