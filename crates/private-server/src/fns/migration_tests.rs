@@ -82,15 +82,15 @@ pub async fn attempt_state(
 
 	let reports =
 		database::restore::BackupRestoreCheck::list_recent_for_group(conn, group_id, 50).await?;
-	// Member-server devices restore for their own purposes (clone refreshes,
+	// Member-box devices restore for their own purposes (clone refreshes,
 	// manual restores) and never report; only consumer issuances speak for the
-	// pipeline. Same filter as the restore-activity view.
-	let member_devices: Vec<Uuid> =
-		database::applications::Application::list_live_in_group(conn, group_id)
-			.await?
-			.into_iter()
-			.filter_map(|s| s.device_id)
-			.collect();
+	// pipeline. Same filter as the restore-activity view. An identity belongs to
+	// a box, so the members are the group's machines.
+	let member_devices: Vec<Uuid> = database::machines::Machine::list_for_group(conn, group_id)
+		.await?
+		.into_iter()
+		.filter_map(|m| m.device_id)
+		.collect();
 	let since =
 		crate::run_pairing::issuance_since(now, reports.iter().map(|c| c.reported_at).min());
 	let issuances: Vec<_> =

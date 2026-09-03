@@ -1,5 +1,7 @@
-//! Model-level tests for application archival and the enrolment-token
-//! lifecycle. A ticket admits a box, so it is minted against the machine.
+//! Model-level tests for archival and the enrolment-token lifecycle. A ticket
+//! admits a box, so it is minted against the machine, and the identity it
+//! binds is the box's: archiving the box releases it, archiving one workload
+//! on the box does not.
 
 use commons_types::server::{TagMap, app_type::ApplicationType};
 use database::{
@@ -20,7 +22,6 @@ fn new_server(host: &str, machine_id: Uuid) -> Application {
 		host: Some(UrlField(host.parse().unwrap())),
 		r#type: ApplicationType::TamanuCentral,
 		rank: None,
-		device_id: None,
 		machine_id,
 		group_id: None,
 		public_name: None,
@@ -42,9 +43,9 @@ fn new_server(host: &str, machine_id: Uuid) -> Application {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn soft_delete_releases_and_deactivates_device_and_hides_row() {
+async fn archiving_a_machine_releases_its_identity_and_takes_its_applications() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		// Application bound to a device with an active key.
+		// A box bound to a device with an active key, with a workload on it.
 		let device = Device::create(&mut conn, b"key-bytes-1".to_vec())
 			.await
 			.unwrap();
@@ -58,9 +59,73 @@ async fn soft_delete_releases_and_deactivates_device_and_hides_row() {
 		let machine = Machine::create(&mut conn, NewMachine::default())
 			.await
 			.unwrap();
-		let mut s = new_server("https://archive-me.example/", machine.id);
-		s.device_id = Some(device.id);
-		let server = Application::create(&mut conn, s).await.unwrap();
+		Machine::bind_device(&mut conn, machine.id, device.id)
+			.await
+			.unwrap();
+		let server = Application::create(
+			&mut conn,
+			new_server("https://archive-me.example/", machine.id),
+		)
+		.await
+		.unwrap();
+
+		Machine::archive(&mut conn, machine.id).await.unwrap();
+
+		// The box is archived and its identity released, so coming back means
+		// enrolling again.
+		let after = Machine::get_by_id(&mut conn, machine.id).await.unwrap();
+		assert!(after.deleted_at.is_some());
+		assert!(after.device_id.is_none(), "device released");
+		assert!(after.registered_at.is_none(), "enrolment cleared");
+
+		// The workload on it went with the box.
+		let app = Application::get_by_id(&mut conn, server.id).await.unwrap();
+		assert!(
+			app.deleted_at.is_some(),
+			"application archived with its box"
+		);
+
+		// Device demoted + key deactivated.
+		let keys = DeviceKey::find_by_device(&mut conn, device.id)
+			.await
+			.unwrap();
+		assert!(keys.is_empty(), "active keys gone (deactivated)");
+		// from_key (active-only) no longer resolves the device.
+		assert!(
+			Device::from_key(&mut conn, b"key-bytes-1")
+				.await
+				.unwrap()
+				.is_none()
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn archiving_an_application_hides_the_row_and_leaves_the_identity_alone() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		let device = Device::create(&mut conn, b"key-bytes-2".to_vec())
+			.await
+			.unwrap();
+		Device::trust(
+			&mut conn,
+			device.id,
+			commons_types::device::DeviceRole::Machine,
+		)
+		.await
+		.unwrap();
+		let machine = Machine::create(&mut conn, NewMachine::default())
+			.await
+			.unwrap();
+		Machine::bind_device(&mut conn, machine.id, device.id)
+			.await
+			.unwrap();
+		let server = Application::create(
+			&mut conn,
+			new_server("https://archive-me.example/", machine.id),
+		)
+		.await
+		.unwrap();
 
 		Application::soft_delete(&mut conn, server.id)
 			.await
@@ -77,19 +142,18 @@ async fn soft_delete_releases_and_deactivates_device_and_hides_row() {
 		);
 		let after = Application::get_by_id(&mut conn, server.id).await.unwrap();
 		assert!(after.deleted_at.is_some());
-		assert!(after.device_id.is_none(), "device released");
 
-		// Device demoted + key deactivated.
-		let keys = DeviceKey::find_by_device(&mut conn, device.id)
-			.await
-			.unwrap();
-		assert!(keys.is_empty(), "active keys gone (deactivated)");
-		// from_key (active-only) no longer resolves the device.
+		// Retiring one workload says nothing about the box it ran on: the
+		// identity stays bound and its key stays live, because the box may
+		// still be carrying other workloads.
+		let box_after = Machine::get_by_id(&mut conn, machine.id).await.unwrap();
+		assert_eq!(box_after.device_id, Some(device.id), "identity untouched");
 		assert!(
-			Device::from_key(&mut conn, b"key-bytes-1")
+			Device::from_key(&mut conn, b"key-bytes-2")
 				.await
 				.unwrap()
-				.is_none()
+				.is_some(),
+			"key still active"
 		);
 
 		// Recreating a server at the same host is allowed once archived.

@@ -1,6 +1,6 @@
 use axum::http::StatusCode;
 use commons_tests::diesel_async::SimpleAsyncConnection;
-use database::applications::Application;
+use database::{applications::Application, machines::Machine};
 use serde_json::json;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -255,10 +255,11 @@ async fn update_server_notes_and_tags() {
 	.await
 }
 
+/// Editing a workload says nothing about the box it runs on: the identity is
+/// the machine's, and the application update path never touches it.
 #[tokio::test(flavor = "multi_thread")]
-async fn update_server_preserves_device_id_when_not_provided() {
+async fn update_server_leaves_the_machine_identity_alone() {
 	commons_tests::server::run(async |mut conn, _, private| {
-		// Create a device and a server with that device_id
 		conn.batch_execute(
 			"INSERT INTO devices (id, role) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'server')"
@@ -267,8 +268,8 @@ async fn update_server_preserves_device_id_when_not_provided() {
 		.unwrap();
 
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb') RETURNING id) INSERT INTO applications (id, name, host, rank, type, device_id, machine_id) VALUES
-			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Device Application', 'https://device.example.com', 'production', 'tamanu-central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb')"
+			"WITH m AS (INSERT INTO machines (id, device_id) VALUES ('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
+			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'Device Application', 'https://device.example.com', 'production', 'tamanu-central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb')"
 		)
 		.await
 		.unwrap();
@@ -277,7 +278,6 @@ async fn update_server_preserves_device_id_when_not_provided() {
 			.await
 			.unwrap();
 
-		// Update server without providing device_id in the update data
 		let response = private
 			.post("/api/servers/update")
 			.json(&json!({
@@ -290,114 +290,23 @@ async fn update_server_preserves_device_id_when_not_provided() {
 			.await;
 		response.assert_status_ok();
 
-		// Verify the server still has the device_id
 		let server_info = Application::get_by_id(&mut conn, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb".parse().unwrap())
 			.await
 			.unwrap();
-
 		assert_eq!(server_info.name, Some("Updated Name".to_string()));
 		assert_eq!(
 			server_info.host.as_ref().unwrap().0.to_string(),
 			"https://updated.example.com/"
 		);
-		assert_eq!(server_info.device_id, Some("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".parse().unwrap()),
-			"Device ID should still be present when not provided in update");
-	})
-	.await
-}
 
-#[tokio::test(flavor = "multi_thread")]
-async fn update_server_clears_device_id_with_null() {
-	commons_tests::server::run(async |mut conn, _, private| {
-		// Create a device and a server with that device_id
-		conn.batch_execute(
-			"INSERT INTO devices (id, role) VALUES
-			('cccccccc-cccc-cccc-cccc-cccccccccccc', 'server')"
-		)
-		.await
-		.unwrap();
-
-		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('dddddddd-dddd-dddd-dddd-dddddddddddd') RETURNING id) INSERT INTO applications (id, name, host, rank, type, device_id, machine_id) VALUES
-			('dddddddd-dddd-dddd-dddd-dddddddddddd', 'Application With Device', 'https://withdevice.example.com', 'production', 'tamanu-central', 'cccccccc-cccc-cccc-cccc-cccccccccccc', 'dddddddd-dddd-dddd-dddd-dddddddddddd')"
-		)
-		.await
-		.unwrap();
-
-		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
+		let machine = Machine::get_by_id(&mut conn, "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb".parse().unwrap())
 			.await
 			.unwrap();
-
-		// Update server with device_id explicitly set to null
-		let response = private
-			.post("/api/servers/update")
-			.json(&json!({
-				"server_id": "dddddddd-dddd-dddd-dddd-dddddddddddd",
-				"data": {
-					"name": "Application Without Device",
-					"device_id": null
-				}
-			}))
-			.await;
-		response.assert_status_ok();
-
-		// Verify the server no longer has the device_id
-		let server_info = Application::get_by_id(&mut conn, "dddddddd-dddd-dddd-dddd-dddddddddddd".parse().unwrap())
-			.await
-			.unwrap();
-
-		assert_eq!(server_info.name, Some("Application Without Device".to_string()));
-		assert_eq!(server_info.device_id, None,
-			"Device ID should be cleared when explicitly set to null in update");
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn update_server_sets_new_device_id() {
-	commons_tests::server::run(async |mut conn, _, private| {
-		// Create two devices
-		conn.batch_execute(
-			"INSERT INTO devices (id, role) VALUES
-			('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', 'server'),
-			('ffffffff-ffff-ffff-ffff-ffffffffffff', 'server')"
-		)
-		.await
-		.unwrap();
-
-		// Create a server with the first device
-		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, name, host, rank, type, device_id, machine_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Original Application', 'https://original.example.com', 'production', 'tamanu-central', 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', '11111111-1111-1111-1111-111111111111')"
-		)
-		.await
-		.unwrap();
-
-		conn.batch_execute("INSERT INTO admins (email) VALUES ('admin@example.com')")
-			.await
-			.unwrap();
-
-		// Update server with a new device_id
-		let response = private
-			.post("/api/servers/update")
-			.json(&json!({
-				"server_id": "11111111-1111-1111-1111-111111111111",
-				"data": {
-					"name": "Updated Application",
-					"device_id": "ffffffff-ffff-ffff-ffff-ffffffffffff"
-				}
-			}))
-			.await;
-		response.assert_status_ok();
-
-		// Verify the server now has the new device_id
-		let server_info = Application::get_by_id(&mut conn, "11111111-1111-1111-1111-111111111111".parse().unwrap())
-			.await
-			.unwrap();
-
-		assert_eq!(server_info.name, Some("Updated Application".to_string()));
-		assert_eq!(server_info.device_id, Some("ffffffff-ffff-ffff-ffff-ffffffffffff".parse().unwrap()),
-			"Device ID should be updated to new value when provided in update");
+		assert_eq!(
+			machine.device_id,
+			Some("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".parse().unwrap()),
+			"the box keeps its identity across an application update"
+		);
 	})
 	.await
 }

@@ -109,6 +109,11 @@ is a regression.
 - [x] Enrolment binds a machine to an identity and creates no application (verifies spec: FLT, DTR)
 - [x] An unenrolled machine's page offers the setup instructions and mints the box's ticket (verifies spec: FLT)
 - [x] The identity that speaks for a box is presented on the machine, not on any application (verifies spec: DTR)
+- [x] Archiving a machine releases its identity, clears its enrolment, and archives the applications on it (verifies spec: FLT, DTR)
+- [x] Archiving one application leaves the box's identity bound and its key live (verifies spec: FLT, DTR)
+- [x] Editing an application leaves the box's identity alone (verifies spec: FLT)
+- [x] Merging two identities re-parents the machine bound to the one being merged away (verifies spec: DTR)
+- [x] A tailnet key-expiry finding files against the machine whose identity it is (verifies spec: DTR, CHK)
 
 ## Billing
 
@@ -194,6 +199,7 @@ cover the runtime half of that, which the spec diff cannot see.
 - [x] The machine form asks nothing about what runs on the box: no product, kind, rank, URL or public name
 - [x] One type chip replaces the product and kind chips wherever an application is listed
 - [x] The edit form shows an application's type rather than offering it
+- [x] The application's edit form offers no identity field: an identity is bound on the machine (verifies spec: FLT, DTR)
 - [x] The public-name field is offered only for a type eligible for public listing
 - [x] A group names a billing product only when its applications all run one software
 - [x] Creating a machine lands on that machine's own page

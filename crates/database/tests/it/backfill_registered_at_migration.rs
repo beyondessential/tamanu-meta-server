@@ -12,15 +12,22 @@ use uuid::Uuid;
 const MIGRATION_UP_HISTORICAL: &str =
 	include_str!("../../../../migrations/2026-06-03-150906-0000_backfill_registered_at/up.sql");
 
-/// The migration's own text, retargeted at the table's current name.
+/// The migration's own text, retargeted at the schema as it stands now.
 ///
-/// This replays historical SQL against the schema as it stands now, and
-/// `servers` has since been renamed to `applications`. Editing the migration
-/// itself is not an option — it has already run everywhere — so the rename is
-/// applied to the text here instead. `statuses.server_id` is left alone: that
-/// column keeps its name.
+/// This replays historical SQL against a schema that has moved on twice.
+/// `servers` has been renamed to `applications`, and the device has moved off
+/// the application onto the machine it runs on, so `s.device_id` becomes a
+/// lookup through `s.machine_id`. Editing the migration itself is not an
+/// option — it has already run everywhere — so both are applied to the text
+/// here instead. `statuses.server_id` is left alone: that column keeps its
+/// name.
 fn migration_up() -> String {
-	MIGRATION_UP_HISTORICAL.replace("UPDATE servers s", "UPDATE applications s")
+	MIGRATION_UP_HISTORICAL
+		.replace("UPDATE servers s", "UPDATE applications s")
+		.replace(
+			"s.device_id",
+			"(SELECT m.device_id FROM machines m WHERE m.id = s.machine_id)",
+		)
 }
 
 #[derive(diesel::QueryableByName)]
@@ -67,7 +74,7 @@ async fn matches_first_status(conn: &mut diesel_async::AsyncPgConnection, server
 #[tokio::test(flavor = "multi_thread")]
 async fn migration_backfills_enrolled_servers_only() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		// device_id is unique across applications — one device per server.
+		// The device belongs to the box, and a box carries at most one.
 		let device_a = Uuid::new_v4();
 		let device_c = Uuid::new_v4();
 		let device_e = Uuid::new_v4();
@@ -85,17 +92,18 @@ async fn migration_backfills_enrolled_servers_only() {
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role) VALUES \
 				('{device_a}', 'server'), ('{device_c}', 'server'), ('{device_e}', 'server'); \
-			 INSERT INTO machines (id) VALUES \
-				('{with_statuses}'), ('{device_gone}'), ('{device_only}'), \
-				('{unenrolled}'), ('{already_set}'); \
-			 INSERT INTO applications (id, host, type, device_id, registered_at, machine_id) VALUES \
-				('{with_statuses}', 'https://a.example.com', 'tamanu-central', '{device_a}', NULL, \
+			 INSERT INTO machines (id, device_id) VALUES \
+				('{with_statuses}', '{device_a}'), ('{device_gone}', NULL), \
+				('{device_only}', '{device_c}'), ('{unenrolled}', NULL), \
+				('{already_set}', '{device_e}'); \
+			 INSERT INTO applications (id, host, type, registered_at, machine_id) VALUES \
+				('{with_statuses}', 'https://a.example.com', 'tamanu-central', NULL, \
 				 '{with_statuses}'), \
-				('{device_gone}', 'https://b.example.com', 'tamanu-central', NULL, NULL, '{device_gone}'), \
-				('{device_only}', 'https://c.example.com', 'tamanu-central', '{device_c}', NULL, \
+				('{device_gone}', 'https://b.example.com', 'tamanu-central', NULL, '{device_gone}'), \
+				('{device_only}', 'https://c.example.com', 'tamanu-central', NULL, \
 				 '{device_only}'), \
-				('{unenrolled}', 'https://d.example.com', 'tamanu-central', NULL, NULL, '{unenrolled}'), \
-				('{already_set}', 'https://e.example.com', 'tamanu-central', '{device_e}', \
+				('{unenrolled}', 'https://d.example.com', 'tamanu-central', NULL, '{unenrolled}'), \
+				('{already_set}', 'https://e.example.com', 'tamanu-central', \
 				 '2026-01-01T00:00:00Z', '{already_set}'); \
 			 INSERT INTO statuses (server_id, healthy, health, extra, created_at) VALUES \
 				('{with_statuses}', true, '[]'::jsonb, '{{}}'::jsonb, NOW() - interval '3 hours'), \

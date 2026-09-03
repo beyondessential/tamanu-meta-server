@@ -45,17 +45,18 @@ async fn insert_tailnet_device(conn: &mut AsyncPgConnection) -> Uuid {
 async fn insert_server_for(conn: &mut AsyncPgConnection, device_id: Uuid, host: &str) -> Uuid {
 	let id = Uuid::new_v4();
 	conn.batch_execute(&format!(
-		"INSERT INTO machines (id) VALUES ('{id}'); \
-		 INSERT INTO applications (id, host, type, device_id, machine_id) \
-		 VALUES ('{id}', '{host}', 'tamanu-central', '{device_id}', '{id}');"
+		"INSERT INTO machines (id, device_id) VALUES ('{id}', '{device_id}'); \
+		 INSERT INTO applications (id, host, type, machine_id) \
+		 VALUES ('{id}', '{host}', 'tamanu-central', '{id}');"
 	))
 	.await
 	.expect("insert server");
 	id
 }
 
-async fn issue_for(conn: &mut AsyncPgConnection, server_id: Uuid) -> Option<Issue> {
-	Issue::list_by_source_ref(conn, TAILSCALE_SOURCE, KEY_EXPIRY_REF, &[server_id])
+/// The sweep speaks for the box, so its issue files at machine scope.
+async fn issue_for(conn: &mut AsyncPgConnection, machine_id: Uuid) -> Option<Issue> {
+	Issue::list_by_source_ref_for_machines(conn, TAILSCALE_SOURCE, KEY_EXPIRY_REF, &[machine_id])
 		.await
 		.expect("list issues")
 		.into_iter()

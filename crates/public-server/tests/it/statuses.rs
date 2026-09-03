@@ -234,8 +234,8 @@ async fn submit_status() {
 			let server_id = Uuid::new_v4();
 			sql_query(
 				r#"
-				WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, device_id, machine_id)
-				VALUES ($1, 'https://test.example.com', 'tamanu-facility', $2, $1)
+				WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, machine_id)
+				VALUES ($1, 'https://test.example.com', 'tamanu-facility', $1)
 			"#,
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -338,8 +338,8 @@ async fn submit_status_returns_effective_tags_matching_tags_endpoint() {
 			.await
 			.expect("insert group");
 			sql_query(
-				"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, device_id, group_id, rank, tags, machine_id) \
-				 VALUES ($1, 'https://tagged.example.com', 'tamanu-central', $2, $3, 'production', \
+				"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, group_id, rank, tags, machine_id) \
+				 VALUES ($1, 'https://tagged.example.com', 'tamanu-central', $3, 'production', \
 				 '{\"env\": \"server\"}'::jsonb, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -392,8 +392,8 @@ async fn submit_status_with_geolocation() {
 			let server_id = Uuid::new_v4();
 			sql_query(
 				r#"
-				WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, type, device_id, geolocation, machine_id)
-				VALUES ($1, 'https://test.example.com', 'tamanu-facility', $2, ARRAY[-41.2865, 174.7762], $1)
+				WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, geolocation, machine_id)
+				VALUES ($1, 'https://test.example.com', 'tamanu-facility', ARRAY[-41.2865, 174.7762], $1)
 			"#,
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -472,8 +472,8 @@ async fn submit_status_with_cloud() {
 			let server_id = Uuid::new_v4();
 			sql_query(
 				r#"
-				WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, type, device_id, cloud, machine_id)
-				VALUES ($1, 'https://cloud.example.com', 'tamanu-central', $2, true, $1)
+				WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, cloud, machine_id)
+				VALUES ($1, 'https://cloud.example.com', 'tamanu-central', true, $1)
 			"#,
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -553,8 +553,8 @@ async fn submit_status_with_geolocation_and_cloud() {
 			let server_id = Uuid::new_v4();
 			sql_query(
 				r#"
-				WITH m AS (INSERT INTO machines (id) VALUES ($1) RETURNING id) INSERT INTO applications (id, host, type, device_id, geolocation, cloud, machine_id)
-				VALUES ($1, 'https://full.example.com', 'tamanu-central', $2, ARRAY[40.7128, -74.0060], false, $1)
+				WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, geolocation, cloud, machine_id)
+				VALUES ($1, 'https://full.example.com', 'tamanu-central', ARRAY[40.7128, -74.0060], false, $1)
 			"#,
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -666,8 +666,8 @@ async fn insert_health_test_server(
 	let server_id = Uuid::new_v4();
 	sql_query(
 		r#"
-		WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, device_id, group_id, machine_id)
-		VALUES ($1, 'https://health.example.com', 'tamanu-central', $2, $3, $1)
+		WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id)
+		VALUES ($1, 'https://health.example.com', 'tamanu-central', $3, $1)
 	"#,
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
@@ -2577,8 +2577,8 @@ async fn seed_server_in_group(
 		.expect("insert group");
 	let server_id = Uuid::new_v4();
 	sql_query(
-		"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, device_id, group_id, machine_id) \
-		 VALUES ($1, 'https://srv.example.com', 'tamanu-central', $2, $3, $1)",
+		"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) \
+		 VALUES ($1, 'https://srv.example.com', 'tamanu-central', $3, $1)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(device_id))
@@ -3191,8 +3191,8 @@ async fn push_records_the_source_s_current_detail() {
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = Uuid::new_v4();
 			sql_query(
-				"WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, device_id, machine_id) \
-				 VALUES ($1, 'https://detail.example.com', 'tamanu-central', $2, $1)",
+				"WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, machine_id) \
+				 VALUES ($1, 'https://detail.example.com', 'tamanu-central', $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
 			.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(device_id))
@@ -3541,27 +3541,20 @@ async fn a_bare_check_name_is_catalogued_under_the_reporting_types_namespace() {
 		async |mut conn, cert, device_id, public, _| {
 			let central = insert_health_test_server(&mut conn, device_id).await;
 
-			// A second workload of another product on the same box, reporting
-			// the same bare check name.
-			let facility = Uuid::new_v4();
-			sql_query(
-				"INSERT INTO applications (id, host, type, group_id, machine_id) \
-				 SELECT $1, 'https://facility.example.com', 'tamanu-facility', group_id, machine_id \
-				 FROM applications WHERE id = $2",
-			)
-			.bind::<sql_types::Uuid, _>(facility)
-			.bind::<sql_types::Uuid, _>(central)
-			.execute(&mut conn)
-			.await
-			.expect("second application");
-
-			for id in [central, facility] {
+			// Two workloads of different products on the same box, each
+			// reporting the same bare check name. A push is addressed to the
+			// box and names which of its workloads it speaks for, so the
+			// second one comes into being by reporting.
+			for kind in ["central", "facility"] {
 				post_status(
 					&public,
 					&cert,
 					&mut conn,
-					id,
-					serde_json::json!({ "health": [ { "check": "disk", "result": "warning" } ] }),
+					central,
+					serde_json::json!({
+						"health": [ { "check": "disk", "result": "warning" } ],
+						"tamanuServerKind": kind,
+					}),
 				)
 				.await;
 			}

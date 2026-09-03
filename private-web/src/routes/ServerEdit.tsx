@@ -113,7 +113,6 @@ function EditForm({
 		Math.max(1, Math.round(info.alert_when_down_for / 60)).toString(),
 	);
 	const [groupId, setGroupId] = useState<string | null>(info.group_id);
-	const [deviceId, setDeviceId] = useState<string>(info.device_id ?? "");
 	const [cloud, setCloud] = useState<"" | "true" | "false">(
 		info.cloud == null ? "" : info.cloud ? "true" : "false",
 	);
@@ -132,7 +131,7 @@ function EditForm({
 		if (!groupId || !name.trim()) return; // name and group are required
 		const data: Record<string, unknown> = {
 			name: name.trim(),
-			// Empty string clears the URL (server identified by its device only).
+			// Empty string clears the URL (the box's tailnet name stands in).
 			host: host.trim(),
 			rank: rank === "" ? null : rank,
 			// Sent whether or not the field is currently offered: a public name
@@ -141,7 +140,6 @@ function EditForm({
 			// spec: APP#public-listing
 			public_name: publicName.trim() === "" ? null : publicName.trim(),
 			group_id: groupId,
-			device_id: deviceId.trim() === "" ? null : deviceId.trim(),
 			cloud: cloud === "" ? null : cloud === "true",
 			geolocation:
 				lat && lon
@@ -214,14 +212,6 @@ function EditForm({
 						</MenuItem>
 					))}
 				</TextField>
-				<TextField
-					label="Device ID"
-					placeholder="UUID"
-					value={deviceId}
-					onChange={(e) => setDeviceId(e.target.value)}
-					disabled={pending}
-				/>
-
 				<GroupControl
 					currentGroupId={groupId}
 					onChange={setGroupId}

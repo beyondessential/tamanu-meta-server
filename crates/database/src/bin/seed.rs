@@ -173,13 +173,10 @@ async fn seed(conn: &mut AsyncPgConnection) -> Result<()> {
 /// truncated children already cleared everything that referenced these rows.
 async fn clear(conn: &mut AsyncPgConnection) -> Result<()> {
 	conn.transaction::<_, AppError, _>(async |conn| {
-		// Release device references and drop every server except the nil meta
-		// server (inserted by a migration) BEFORE truncating `devices` — a
-		// TRUNCATE ... CASCADE would otherwise demand truncating `applications`
-		// wholesale (taking the nil row with it) to satisfy the FK.
-		diesel::sql_query("UPDATE applications SET device_id = NULL")
-			.execute(conn)
-			.await?;
+		// Drop every application except the nil meta row (inserted by a
+		// migration) BEFORE truncating `devices` — a TRUNCATE ... CASCADE
+		// would otherwise demand truncating `applications` wholesale (taking
+		// the nil row with it) to satisfy the FK.
 		diesel::sql_query(
 			"DELETE FROM applications WHERE id <> '00000000-0000-0000-0000-000000000000'",
 		)
@@ -628,7 +625,13 @@ async fn seed_servers(
 	// model. Each seeded application gets a machine of its own, 1:1, matching
 	// what the operator create flow does and what the split's backfill
 	// produced; `base_of` leaves `machine_id` unset for this to fill in.
-	async fn insert(conn: &mut AsyncPgConnection, server: Application) -> Result<Uuid> {
+	/// The identity, where the box has one, is bound to the machine: it speaks
+	/// for the box, not for the workload.
+	async fn insert(
+		conn: &mut AsyncPgConnection,
+		device_id: Option<Uuid>,
+		server: Application,
+	) -> Result<Uuid> {
 		let machine = Machine::create(
 			conn,
 			NewMachine {
@@ -639,6 +642,9 @@ async fn seed_servers(
 			},
 		)
 		.await?;
+		if let Some(device_id) = device_id {
+			Machine::bind_device(conn, machine.id, device_id).await?;
+		}
 		let created = Application::create(
 			conn,
 			Application {
@@ -661,7 +667,6 @@ async fn seed_servers(
 			host: Some(url(host)),
 			r#type,
 			rank: None,
-			device_id: None,
 			// Replaced by `insert`, which is the only path to the database.
 			machine_id: Uuid::nil(),
 			group_id: None,
@@ -688,10 +693,10 @@ async fn seed_servers(
 	// Registered, monitored, grouped, healthy production central.
 	let healthy_central = insert(
 		conn,
+		Some(devices.tailscale_server),
 		Application {
 			name: Some("Pacific Central".to_string()),
 			rank: Some(ServerRank::Production),
-			device_id: Some(devices.tailscale_server),
 			group_id: Some(groups.pacific),
 			public_name: Some("Pacific Central".to_string()),
 			cloud: Some(true),
@@ -713,10 +718,10 @@ async fn seed_servers(
 	// Registered, monitored, grouped facility — will carry an open incident.
 	let unhealthy_facility = insert(
 		conn,
+		Some(devices.mtls_server[0]),
 		Application {
 			name: Some("Suva Facility".to_string()),
 			rank: Some(ServerRank::Production),
-			device_id: Some(devices.mtls_server[0]),
 			group_id: Some(groups.pacific),
 			cloud: Some(false),
 			notes: "On-prem facility server at Suva hospital.".to_string(),
@@ -733,10 +738,10 @@ async fn seed_servers(
 	// Registered, monitored, grouped facility that is "down" (no recent status).
 	let down_facility = insert(
 		conn,
+		Some(devices.mtls_server[1]),
 		Application {
 			name: Some("Nadi Facility".to_string()),
 			rank: Some(ServerRank::Production),
-			device_id: Some(devices.mtls_server[1]),
 			group_id: Some(groups.pacific),
 			notes: "Has not reported in a while — exercises the down state.".to_string(),
 			tags: tags(&[("site", "nadi")]),
@@ -752,10 +757,10 @@ async fn seed_servers(
 	// Registered, monitored, grouped facility with warning-level health.
 	let warning_facility = insert(
 		conn,
+		Some(devices.mtls_server[2]),
 		Application {
 			name: Some("Goroka Facility".to_string()),
 			rank: Some(ServerRank::Clone),
-			device_id: Some(devices.mtls_server[2]),
 			group_id: Some(groups.highlands),
 			notes: "Clone environment in the highlands.".to_string(),
 			tags: tags(&[("site", "goroka")]),
@@ -771,6 +776,7 @@ async fn seed_servers(
 	// Registered but unmonitored demo server.
 	let demo_server = insert(
 		conn,
+		None,
 		Application {
 			name: Some("Demo Sandbox".to_string()),
 			rank: Some(ServerRank::Demo),
@@ -790,6 +796,7 @@ async fn seed_servers(
 	// Ungrouped registered server (test rank).
 	let ungrouped = insert(
 		conn,
+		None,
 		Application {
 			name: Some("Lab Test Application".to_string()),
 			rank: Some(ServerRank::Test),
@@ -806,6 +813,7 @@ async fn seed_servers(
 	// Pending enrollment WITH an active token (registered_at + device_id NULL).
 	let pending_with_token = insert(
 		conn,
+		None,
 		Application {
 			name: Some("New Lautoka Facility".to_string()),
 			rank: Some(ServerRank::Production),
@@ -823,6 +831,7 @@ async fn seed_servers(
 	// Pending enrollment with NO token yet (operator hasn't minted one).
 	let pending_no_token = insert(
 		conn,
+		None,
 		Application {
 			name: Some("New Mendi Facility".to_string()),
 			rank: Some(ServerRank::Production),
@@ -839,6 +848,7 @@ async fn seed_servers(
 	// An ungrouped, unranked pending server (drives the bare "set up" path).
 	insert(
 		conn,
+		None,
 		Application {
 			notes: "Bare pending server — no name, rank, or group yet.".to_string(),
 			..base(
@@ -854,6 +864,7 @@ async fn seed_servers(
 	// group the version rollup and billing attribution have to cope with.
 	let senaite_lims = insert(
 		conn,
+		None,
 		Application {
 			name: Some("Pacific LIMS".to_string()),
 			rank: Some(ServerRank::Production),
@@ -869,13 +880,15 @@ async fn seed_servers(
 	)
 	.await?;
 
-	// real archival path runs (releases device, deactivates keys).
+	// Archived box, inserted live so the real archival path runs: archiving the
+	// machine releases its identity, deactivates its keys, and takes the
+	// application on it down too.
 	let archived = insert(
 		conn,
+		Some(devices.releaser),
 		Application {
 			name: Some("Decommissioned Old Central".to_string()),
 			rank: Some(ServerRank::Production),
-			device_id: Some(devices.releaser), // any device; soft_delete releases it
 			group_id: Some(groups.demo),
 			notes: "Archived: kept for history, hidden from live listings.".to_string(),
 			registered_at: Some(now),
@@ -886,10 +899,11 @@ async fn seed_servers(
 		},
 	)
 	.await?;
-	Application::soft_delete(conn, archived).await?;
+	let archived_machine = Application::get_by_id(conn, archived).await?.machine_id;
+	Machine::archive(conn, archived_machine).await?;
 
-	// Re-assert the releaser role for the device listing (soft_delete revoked
-	// the device's credentials but kept its role).
+	// Re-assert the releaser role for the device listing (archival revoked the
+	// device's credentials but kept its role).
 	Device::trust(conn, devices.releaser, DeviceRole::Releaser).await?;
 
 	let _ = devices.tailscale_admin;

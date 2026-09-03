@@ -64,7 +64,6 @@ diesel::table! {
 		name -> Nullable<Text>,
 		rank -> Nullable<Text>,
 		host -> Nullable<Text>,
-		device_id -> Nullable<Uuid>,
 		cloud -> Nullable<Bool>,
 		geolocation -> Nullable<Array<Nullable<Float8>>>,
 		alert_when_down_for -> Interval,
@@ -829,7 +828,6 @@ diesel::table! {
 diesel::joinable!(application_certificates -> applications (application_id));
 diesel::joinable!(application_names -> applications (application_id));
 diesel::joinable!(application_reported_detail -> applications (application_id));
-diesel::joinable!(applications -> devices (device_id));
 diesel::joinable!(applications -> machines (machine_id));
 diesel::joinable!(artifacts -> devices (device_id));
 diesel::joinable!(artifacts -> versions (version_id));

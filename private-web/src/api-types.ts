@@ -4249,9 +4249,10 @@ export interface components {
             planned_zone?: string | null;
         };
         /**
-         * @description A single server in the fleet: the unit that reports status, files
-         *     issues, and is monitored for reachability. A server may belong to a
-         *     server group, and may or may not have a device enrolled against it yet.
+         * @description A single application in the fleet: the unit that reports status, files
+         *     issues, and is monitored for reachability. An application runs on a
+         *     machine and may belong to a server group. The identity that reports for
+         *     it belongs to the machine, not to the application.
          */
         Application: {
             /**
@@ -4275,15 +4276,12 @@ export interface components {
             cloud?: boolean | null;
             /**
              * Format: date-time
-             * @description When set, the server is archived: hidden from live listings and
-             *     monitoring, with its device unenrolled, but its history is retained.
+             * @description When set, the application is archived: hidden from live listings and
+             *     monitoring, but its history is retained. Retiring one workload says
+             *     nothing about the box it ran on, so the machine keeps its identity;
+             *     `Machine::archive` is what releases that.
              */
             deleted_at?: string | null;
-            /**
-             * Format: uuid
-             * @description The device enrolled against this server, if any.
-             */
-            device_id?: string | null;
             geolocation?: null | components["schemas"]["GeoPoint"];
             /**
              * Format: uuid
@@ -4359,9 +4357,10 @@ export interface components {
             rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: date-time
-             * @description When a device successfully completed enrollment for this server.
-             *     While `None`, the server is awaiting its first check-in and the UI
-             *     shows setup instructions.
+             * @description When this application first reported. Enrolment is the machine's, so
+             *     this is set by the report that brings the application into being, not
+             *     by anything the operator does. While `None`, the application is
+             *     awaiting its first check-in and the UI shows setup instructions.
              */
             registered_at?: string | null;
             /** @description Key/value tags for this server. */
@@ -7608,14 +7607,9 @@ export interface components {
                 /** @description Whether this server runs in a cloud environment, if known. */
                 cloud?: boolean | null;
                 /**
-                 * Format: uuid
-                 * @description The device currently bound to this server, if any.
-                 */
-                device_id?: string | null;
-                /**
                  * @description Effective URL for display: the stored `host`, or `https://{tailnet
-                 *     hostname}` when the server has no URL but is bound to a Tailscale
-                 *     device, else an empty string.
+                 *     hostname}` when the server has no URL but runs on a machine bound to a
+                 *     Tailscale device, else an empty string.
                  */
                 display_host: string;
                 geolocation?: null | components["schemas"]["GeoPoint"];
@@ -8990,9 +8984,9 @@ export interface components {
         };
         /**
          * @description Partial update to a server's fields. Only fields present in the request
-         *     are changed. For `device_id`, `group_id`, `public_name`, `cloud`, and
-         *     `geolocation`, sending an explicit `null` clears the field, while
-         *     omitting it leaves the current value unchanged.
+         *     are changed. For `group_id`, `public_name`, `cloud`, and `geolocation`,
+         *     sending an explicit `null` clears the field, while omitting it leaves the
+         *     current value unchanged.
          */
         ServerDataUpdate: {
             /**
@@ -9006,12 +9000,6 @@ export interface components {
              *     Omit to leave unchanged.
              */
             cloud?: boolean | null;
-            /**
-             * Format: uuid
-             * @description New device to bind to the server, or `null` to unbind. Omit to leave
-             *     unchanged.
-             */
-            device_id?: string | null;
             geolocation?: null | components["schemas"]["GeoPoint"];
             /**
              * Format: uuid
@@ -9306,14 +9294,9 @@ export interface components {
             /** @description Whether this server runs in a cloud environment, if known. */
             cloud?: boolean | null;
             /**
-             * Format: uuid
-             * @description The device currently bound to this server, if any.
-             */
-            device_id?: string | null;
-            /**
              * @description Effective URL for display: the stored `host`, or `https://{tailnet
-             *     hostname}` when the server has no URL but is bound to a Tailscale
-             *     device, else an empty string.
+             *     hostname}` when the server has no URL but runs on a machine bound to a
+             *     Tailscale device, else an empty string.
              */
             display_host: string;
             geolocation?: null | components["schemas"]["GeoPoint"];

@@ -8358,7 +8358,7 @@
       },
       "Application": {
         "type": "object",
-        "description": "A single server in the fleet: the unit that reports status, files\nissues, and is monitored for reachability. A server may belong to a\nserver group, and may or may not have a device enrolled against it yet.",
+        "description": "A single application in the fleet: the unit that reports status, files\nissues, and is monitored for reachability. An application runs on a\nmachine and may belong to a server group. The identity that reports for\nit belongs to the machine, not to the application.",
         "required": [
           "id",
           "type",
@@ -8394,15 +8394,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "When set, the server is archived: hidden from live listings and\nmonitoring, with its device unenrolled, but its history is retained."
-          },
-          "device_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The device enrolled against this server, if any."
+            "description": "When set, the application is archived: hidden from live listings and\nmonitoring, but its history is retained. Retiring one workload says\nnothing about the box it ran on, so the machine keeps its identity;\n`Machine::archive` is what releases that."
           },
           "geolocation": {
             "oneOf": [
@@ -8430,7 +8422,7 @@
               },
               {
                 "$ref": "#/components/schemas/UrlField",
-                "description": "The server's URL. Optional: a server may be identified solely by its\nenrolled device (e.g. a Tailscale node) rather than a URL. Not\nrequired to be unique. Responses that need a value to display even\nwhen this is unset fall back to another identifying field."
+                "description": "The application's URL. Optional: an application may be identified by\nits machine's tailnet name rather than a URL. Not required to be\nunique. Responses that need a value to display even when this is\nunset fall back to another identifying field."
               }
             ]
           },
@@ -8513,7 +8505,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "When a device successfully completed enrollment for this server.\nWhile `None`, the server is awaiting its first check-in and the UI\nshows setup instructions."
+            "description": "When this application first reported. Enrolment is the machine's, so\nthis is set by the report that brings the application into being, not\nby anything the operator does. While `None`, the application is\nawaiting its first check-in and the UI shows setup instructions."
           },
           "tags": {
             "$ref": "#/components/schemas/TagMap",
@@ -13559,17 +13551,9 @@
                   ],
                   "description": "Whether this server runs in a cloud environment, if known."
                 },
-                "device_id": {
-                  "type": [
-                    "string",
-                    "null"
-                  ],
-                  "format": "uuid",
-                  "description": "The device currently bound to this server, if any."
-                },
                 "display_host": {
                   "type": "string",
-                  "description": "Effective URL for display: the stored `host`, or `https://{tailnet\nhostname}` when the server has no URL but is bound to a Tailscale\ndevice, else an empty string."
+                  "description": "Effective URL for display: the stored `host`, or `https://{tailnet\nhostname}` when the server has no URL but runs on a machine bound to a\nTailscale device, else an empty string."
                 },
                 "geolocation": {
                   "oneOf": [
@@ -15667,7 +15651,7 @@
       },
       "ServerDataUpdate": {
         "type": "object",
-        "description": "Partial update to a server's fields. Only fields present in the request\nare changed. For `device_id`, `group_id`, `public_name`, `cloud`, and\n`geolocation`, sending an explicit `null` clears the field, while\nomitting it leaves the current value unchanged.",
+        "description": "Partial update to a server's fields. Only fields present in the request\nare changed. For `group_id`, `public_name`, `cloud`, and `geolocation`,\nsending an explicit `null` clears the field, while omitting it leaves the\ncurrent value unchanged.",
         "properties": {
           "alert_when_down_for": {
             "type": [
@@ -15683,14 +15667,6 @@
               "null"
             ],
             "description": "Whether the server runs in a cloud environment, or `null` to clear.\nOmit to leave unchanged."
-          },
-          "device_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "New device to bind to the server, or `null` to unbind. Omit to leave\nunchanged."
           },
           "geolocation": {
             "oneOf": [
@@ -16183,17 +16159,9 @@
             ],
             "description": "Whether this server runs in a cloud environment, if known."
           },
-          "device_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid",
-            "description": "The device currently bound to this server, if any."
-          },
           "display_host": {
             "type": "string",
-            "description": "Effective URL for display: the stored `host`, or `https://{tailnet\nhostname}` when the server has no URL but is bound to a Tailscale\ndevice, else an empty string."
+            "description": "Effective URL for display: the stored `host`, or `https://{tailnet\nhostname}` when the server has no URL but runs on a machine bound to a\nTailscale device, else an empty string."
           },
           "geolocation": {
             "oneOf": [

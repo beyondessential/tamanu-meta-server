@@ -515,21 +515,42 @@ impl Machine {
 	/// Archive a machine and, with it, the applications on it — a box going
 	/// away takes its workloads with it. Archival is not deletion: the records
 	/// and their history remain.
+	///
+	/// Releases the box's identity: the device is unbound and its credentials
+	/// revoked, so a machine coming back has to come back through enrolment.
+	/// Idempotent.
 	// spec: FLT#archival
 	pub async fn archive(db: &mut AsyncPgConnection, machine_id: Uuid) -> Result<()> {
-		let now = jiff_diesel::Timestamp::from(Timestamp::now());
-		diesel::update(crate::schema::machines::table)
-			.filter(crate::schema::machines::id.eq(machine_id))
-			.filter(crate::schema::machines::deleted_at.is_null())
-			.set(crate::schema::machines::deleted_at.eq(Some(now)))
-			.execute(db)
-			.await?;
-		diesel::update(crate::schema::applications::table)
-			.filter(crate::schema::applications::machine_id.eq(machine_id))
-			.filter(crate::schema::applications::deleted_at.is_null())
-			.set(crate::schema::applications::deleted_at.eq(Some(now)))
-			.execute(db)
-			.await?;
-		Ok(())
+		use diesel_async::AsyncConnection;
+
+		db.transaction::<_, AppError, _>(async |conn| {
+			let machine = Self::get_by_id_for_update(conn, machine_id).await?;
+			if machine.deleted_at.is_some() {
+				return Ok(());
+			}
+
+			if let Some(device_id) = machine.device_id {
+				crate::devices::Device::revoke(conn, device_id).await?;
+			}
+
+			let now = jiff_diesel::Timestamp::from(Timestamp::now());
+			diesel::update(crate::schema::machines::table)
+				.filter(crate::schema::machines::id.eq(machine_id))
+				.set((
+					crate::schema::machines::deleted_at.eq(Some(now)),
+					crate::schema::machines::device_id.eq(None::<Uuid>),
+					crate::schema::machines::registered_at.eq(None::<jiff_diesel::Timestamp>),
+				))
+				.execute(conn)
+				.await?;
+			diesel::update(crate::schema::applications::table)
+				.filter(crate::schema::applications::machine_id.eq(machine_id))
+				.filter(crate::schema::applications::deleted_at.is_null())
+				.set(crate::schema::applications::deleted_at.eq(Some(now)))
+				.execute(conn)
+				.await?;
+			Ok(())
+		})
+		.await
 	}
 }

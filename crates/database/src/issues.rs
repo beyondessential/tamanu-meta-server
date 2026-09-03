@@ -3803,6 +3803,31 @@ impl Issue {
 			.map_err(AppError::from)
 	}
 
+	/// Like [`Self::list_by_source_ref`], but keyed by machine rather than by
+	/// application. Drives sweeps whose subject is the box.
+	pub async fn list_by_source_ref_for_machines(
+		db: &mut AsyncPgConnection,
+		source: &str,
+		ref_: &str,
+		machine_ids: &[Uuid],
+	) -> Result<Vec<Self>> {
+		use crate::schema::issues::dsl;
+		if machine_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+		dsl::issues
+			.select(Self::as_select())
+			.filter(
+				dsl::source
+					.eq(source)
+					.and(dsl::ref_.eq(ref_))
+					.and(dsl::machine_id.eq_any(machine_ids)),
+			)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// Like [`Self::list_by_source_ref`], but matching any of several refs
 	/// at once. Used by the staleness sweep, whose per-source check refs
 	/// are only known at runtime.

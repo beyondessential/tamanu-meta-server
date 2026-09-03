@@ -33,6 +33,7 @@ Carried deferrals, each gated on a step above rather than on a vague later:
 - [x] Separate "never reported" from "reported long ago" — `Status::latest_for_servers` looks back seven days for performance, so a target silent for longer returns no row and reads as never reported (grey) rather than unreachable (red). Pre-existing, and sharper now the states are three: the fix is a cheap "has this ever reported" fact rather than widening the scan -- verify that it does remain cheap, if the query is "somewhat more expensive" it will slow every single view that displays a status, and the /status page (which has all of them at once) will slow to a crawl. Done: reachability across every grain now grades on `ReportedDetail::last_reported_ats`, a primary-key read of the current-state projection, so it stays as cheap as the status window it replaces. See the subsection under "Retiring the graded reachability states".
 - [x] Carry the machine on `IssueData` — done with the fleet query interface, which is what presented machine checks first
 - [x] Link a machine's maintenance window to its detail page — done with the machine page; the fleet maintenance view links a machine target rather than rendering it as plain text
+- [x] **Drop `applications.device_id`** — the identity is the box's, so the column that let an application look like it had one of its own is gone. See the section below
 
 ## Backups take the machine grain
 
@@ -125,7 +126,7 @@ Migration `2026-08-26-124937-0000_add_machines`. The `machines` table, a 1:1 bac
 
 The backfill keeps `machine.id == application.id` for pre-split rows, so the two are trivially correlatable while the split is half-landed; they diverge the moment a second application joins a machine.
 
-**Additive on `applications` by design.** `device_id`, `cloud`, `geolocation` and `registered_at` are copied onto the machine and left in place, so nothing that reads them breaks while the grain is wired up. Dropping them is a later step, once every reader has moved. `group_id` stays for good as the denormalisation the trigger keeps honest.
+**Additive on `applications` by design.** `device_id`, `cloud`, `geolocation` and `registered_at` are copied onto the machine and left in place, so nothing that reads them breaks while the grain is wired up. Dropping them is a later step, once every reader has moved. `device_id` has since been dropped; see the section below. `group_id` stays for good as the denormalisation the trigger keeps honest.
 
 **`notes` and `tags` are not copied.** An operator wrote them against the thing they were managing, which becomes the application. Duplicating them would mean two copies of one note drifting apart and a policy rule matching a tag twice. A machine starts with neither.
 
@@ -693,6 +694,20 @@ Under `.workhorse/design/mockups/v2/`:
 
 Card W1 settles deployment/group/rank terminology, which is why the group tables keep their names here. Cards L2 and N1 turn on the same machine/application axis from bestool's side. K1 wants the cluster/identity separation this resolves.
 
+## Dropping `applications.device_id`
+
+Migration `2026-09-03-000215-0000_drop_application_device_id`. The column, its partial unique index and the `servers_device` index go; the down migration restores it from `machines.device_id`, giving the device to the oldest live application on each box, which is the best a reversal can do once several workloads share one identity.
+
+The column had already stopped meaning anything: enrolment writes the machine, the push resolves the machine, and every reader that wanted to know who reports for a box went through `applications.machine_id` to `machines.device_id`. What was left was a second place to write the same fact, and a shape that says an application has an identity of its own.
+
+**Three consequences taken rather than papered over:**
+
+- **`Application::soft_delete` no longer revokes an identity.** Retiring one workload says nothing about the box it ran on, which may still be carrying others. `Machine::archive` is what releases the identity, and it does so transactionally: it revokes the device, clears `device_id` and `registered_at`, and archives the applications on the box. Clearing `registered_at` is new, and is what makes a box coming back an enrolment rather than a resumption.
+- **`Device::merge_into` re-parents `machines.device_id`.** It rewrote the application's copy and left the machine's behind, so merging two identities would have orphaned the box's binding. Latent until now because nothing read the machine's copy.
+- **The tailnet key-expiry sweep files at `Scope::Machine`.** Key expiry is a fact about the box's identity, so it was filing against whichever application happened to hold the device. `Issue::list_by_source_ref_for_machines` is the machine-grained read that goes with it.
+
+The private API drops `ServerInfo.device_id` and `ServerDataUpdate.device_id`, and the SPA's server edit form drops the Device ID field. That is the private API's to do — it ships with the SPA. The public wire is untouched: `crates/public-server/openapi.json` is unchanged by this step, and the `device_id` properties on it all denote the calling identity's own id, never an application's.
+
 ## Specced and not built
 
 The sections above tick off what landed. This one records what the specs on this branch describe and the code does not do, because a ticked plan beside a spec that overstates the system is how the gap stayed invisible.
@@ -711,7 +726,7 @@ The id on the wire is the machine's, and both readings now take it that way.
 
 An ignored source reads without creating, since it records nowhere.
 
-Enrolment is the machine's outright — see the enrolment section above. `applications.device_id` is vestigial now that every reader resolves through the machine, so dropping the column is unblocked.
+Enrolment is the machine's outright — see the enrolment section above, and the column that made an application look like it had an identity of its own is gone.
 
 ### The push keeps the unified shape
 

@@ -29,8 +29,7 @@ use database::pg_duration::PgDuration;
 use database::restore::{self, RedactionGapReason};
 use database::{
 	BackupRestoreCheck, NewRestoreReplica, RestoreConsumerCapability, RestoreReplica,
-	RestoreReplicaUpdate, applications::Application, backups::BackupCredentialIssuance,
-	devices::Device,
+	RestoreReplicaUpdate, backups::BackupCredentialIssuance, devices::Device, machines::Machine,
 };
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -591,13 +590,14 @@ pub async fn checks(
 	let checks =
 		BackupRestoreCheck::list_recent_for_group(&mut conn, group_id, RECENT_CHECKS_LIMIT).await?;
 
-	// Member-server devices run *manual* restores, tracked in the backup panel;
+	// Member-box devices run *manual* restores, tracked in the backup panel;
 	// this table is for restore *consumers*, so their issuances are the ones we
-	// pair here (the complement of the backup panel's member-device filter).
-	let member_devices: HashSet<Uuid> = Application::list_live_in_group(&mut conn, group_id)
+	// pair here (the complement of the backup panel's member-device filter). An
+	// identity belongs to a box, so the members are the group's machines.
+	let member_devices: HashSet<Uuid> = Machine::list_for_group(&mut conn, group_id)
 		.await?
 		.into_iter()
-		.filter_map(|s| s.device_id)
+		.filter_map(|m| m.device_id)
 		.collect();
 
 	let issuance_since =

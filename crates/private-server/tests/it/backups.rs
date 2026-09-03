@@ -605,8 +605,8 @@ async fn stats_includes_runs_and_pending_requests() {
 		let run_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'machine');
-			 WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ('{machine_id}', '{group_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, device_id, machine_id) VALUES \
-				('{machine_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{device_id}', '{machine_id}');
+			 WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ('{machine_id}', '{group_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{machine_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{machine_id}');
 			 INSERT INTO backup_repo_stats (group_id, snapshot_count, source_count, logical_bytes, physical_bytes, bucket_bytes, bucket_bytes_observed_at) \
 				VALUES ('{group_id}', 12, 3, 1000, 800, 2000, now() - interval '1 day');
 			 INSERT INTO backup_runs (id, device_id, group_id, machine_id, type, purpose, outcome, bytes_uploaded) \
@@ -697,8 +697,8 @@ async fn stats_restore_run_resolves_snapshot_size_from_the_producing_backup() {
 		// producing backup immediately, not wait for the backfill.
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'machine');
-			 WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ('{machine_id}', '{group_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, device_id, machine_id) VALUES \
-				('{machine_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{device_id}', '{machine_id}');
+			 WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ('{machine_id}', '{group_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{machine_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{machine_id}');
 			 INSERT INTO backup_runs (id, device_id, group_id, machine_id, type, purpose, outcome, \
 				bytes_uploaded, snapshot_id, reported_at) \
 				VALUES ('{backup_run_id}', '{device_id}', '{group_id}', '{machine_id}', 'tamanu-postgres', \
@@ -746,8 +746,8 @@ async fn group_schedules_reports_next_run_from_last_success_plus_interval() {
 		let machine_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'machine');
-			 WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ('{machine_id}', '{group_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, device_id, machine_id) VALUES \
-				('{machine_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{device_id}', '{machine_id}');
+			 WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ('{machine_id}', '{group_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{machine_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{machine_id}');
 			 INSERT INTO machine_backup_capabilities (machine_id, type, enabled) VALUES \
 				('{machine_id}', 'tamanu-postgres', true);
 			 -- A 1h scheduled interval and a successful backup at a known time.

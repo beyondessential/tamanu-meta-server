@@ -30,7 +30,6 @@ fn server(r#type: ApplicationType, rank: Option<ServerRank>, machine_id: Uuid) -
 		)),
 		r#type,
 		rank,
-		device_id: None,
 		machine_id,
 		group_id: None,
 		public_name: None,

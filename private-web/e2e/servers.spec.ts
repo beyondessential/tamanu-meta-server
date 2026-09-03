@@ -2,6 +2,7 @@ import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
 	seedApplicationReport,
+	seedDevice,
 	seedServer,
 	seedServerGroup,
 	seedVersion,
@@ -152,6 +153,20 @@ test.describe("server edit page", () => {
 			[server.id],
 		);
 		expect(rows[0]!.name).toBe("edit-save-renamed");
+	});
+
+	// The identity belongs to the box, so it is offered on the machine's form
+	// and nowhere else. An application editing it would be editing the box's.
+	test("offers no identity field", async ({ page, sql }) => {
+		const device = await seedDevice(sql);
+		const server = await seedServer(sql, {
+			name: "edit-no-identity",
+			deviceId: device.id,
+		});
+
+		await page.goto(`/servers/${server.id}/edit`);
+		await expect(page.getByLabel(/^Name(\s*\*)?$/i)).toHaveValue(server.name);
+		await expect(page.getByLabel(/device/i)).toHaveCount(0);
 	});
 });
 

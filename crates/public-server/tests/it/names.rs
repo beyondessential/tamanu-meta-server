@@ -55,9 +55,8 @@ async fn entitled(
 
 	let server = Uuid::new_v4();
 	conn.batch_execute(&format!(
-		"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ('{server}', '{group}', '{device_id}') RETURNING id) INSERT INTO applications (id, name, host, type, group_id, device_id, may_manage_dns, may_manage_tls, machine_id) \
-		 VALUES ('{server}', 'crt', 'https://{server}.example.invalid', 'tamanu-central', '{group}', \
-		 '{device_id}', {dns}, {tls}, '{server}')"
+		"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ('{server}', '{group}', '{device_id}') RETURNING id) INSERT INTO applications (id, name, host, type, group_id, may_manage_dns, may_manage_tls, machine_id) \
+		 VALUES ('{server}', 'crt', 'https://{server}.example.invalid', 'tamanu-central', '{group}', {dns}, {tls}, '{server}')"
 	))
 	.await
 	.expect("insert server");
@@ -701,7 +700,13 @@ async fn the_push_response_carries_the_whole_entitlements_answer() {
 			let pushed = public
 				.post(&format!("/status/{first}"))
 				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
-				.json(&serde_json::json!({"source": "alertd", "health": []}))
+				// Two workloads on the box, so the push has to say which of them
+				// it speaks for.
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"health": [],
+					"tamanuServerKind": "central",
+				}))
 				.await;
 			pushed.assert_status_ok();
 			let pushed: serde_json::Value = pushed.json();

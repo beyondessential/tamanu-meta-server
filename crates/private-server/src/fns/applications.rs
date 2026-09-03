@@ -93,11 +93,9 @@ pub struct ServerInfo {
 	/// The server's stored URL, if any. May be absent for device-only applications.
 	pub host: Option<String>,
 	/// Effective URL for display: the stored `host`, or `https://{tailnet
-	/// hostname}` when the server has no URL but is bound to a Tailscale
-	/// device, else an empty string.
+	/// hostname}` when the server has no URL but runs on a machine bound to a
+	/// Tailscale device, else an empty string.
 	pub display_host: String,
-	/// The device currently bound to this server, if any.
-	pub device_id: Option<Uuid>,
 	/// The group this server belongs to, if any.
 	pub group_id: Option<Uuid>,
 	/// Display name of the group this server belongs to, included directly so
@@ -193,9 +191,9 @@ pub struct ServerLastStatusData {
 }
 
 /// Partial update to a server's fields. Only fields present in the request
-/// are changed. For `device_id`, `group_id`, `public_name`, `cloud`, and
-/// `geolocation`, sending an explicit `null` clears the field, while
-/// omitting it leaves the current value unchanged.
+/// are changed. For `group_id`, `public_name`, `cloud`, and `geolocation`,
+/// sending an explicit `null` clears the field, while omitting it leaves the
+/// current value unchanged.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
 pub struct ServerDataUpdate {
 	/// New name for the server. Omit to leave unchanged.
@@ -208,14 +206,6 @@ pub struct ServerDataUpdate {
 	/// unchanged.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub host: Option<String>,
-	/// New device to bind to the server, or `null` to unbind. Omit to leave
-	/// unchanged.
-	#[serde(
-		default,
-		deserialize_with = "deserialize_some",
-		skip_serializing_if = "Option::is_none"
-	)]
-	pub device_id: Option<Option<Uuid>>,
 	/// New group for the server, or `null` to remove it from its group.
 	/// Omit to leave unchanged.
 	#[serde(
@@ -290,9 +280,9 @@ pub(super) fn server_to_info(s: Application) -> ServerInfo {
 		rank: s.rank,
 		host: s.host.as_ref().map(|h| h.0.to_string()),
 		// Default the display host to the raw host; `fill_display_hosts` later
-		// supplies the tailnet fallback for hostless, device-bound applications.
+		// supplies the tailnet fallback for hostless applications whose box has
+		// a tailnet identity.
 		display_host: s.host.as_ref().map(|h| h.0.to_string()).unwrap_or_default(),
-		device_id: s.device_id,
 		group_id: s.group_id,
 		group_name: None,
 		public_name: s.public_name,
@@ -373,19 +363,31 @@ pub(super) async fn fill_display_hosts(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	infos: &mut [ServerInfo],
 ) -> Result<()> {
+	// The identity is the box's, so the fallback name comes from the machine
+	// the application runs on.
 	let needy: Vec<Uuid> = infos
 		.iter()
 		.filter(|i| i.host.is_none())
-		.filter_map(|i| i.device_id)
+		.map(|i| i.machine_id)
 		.collect();
 	if needy.is_empty() {
 		return Ok(());
 	}
-	let names = Device::tailscale_names_by_ids(conn, &needy).await?;
+	let devices_by_machine: std::collections::HashMap<Uuid, Uuid> =
+		database::machines::Machine::get_many(conn, &needy)
+			.await?
+			.into_iter()
+			.filter_map(|m| m.device_id.map(|d| (m.id, d)))
+			.collect();
+	let device_ids: Vec<Uuid> = devices_by_machine.values().copied().collect();
+	if device_ids.is_empty() {
+		return Ok(());
+	}
+	let names = Device::tailscale_names_by_ids(conn, &device_ids).await?;
 	for info in infos.iter_mut() {
 		if info.host.is_none()
-			&& let Some(dev) = info.device_id
-			&& let Some(name) = names.get(&dev)
+			&& let Some(dev) = devices_by_machine.get(&info.machine_id)
+			&& let Some(name) = names.get(dev)
 		{
 			info.display_host = format!("https://{name}");
 		}
@@ -613,7 +615,11 @@ pub async fn get_detail(
 	let db = state.db.clone();
 	let mut conn = db.get().await?;
 	let server = Application::get_by_id(&mut conn, args.server_id).await?;
-	let device_id = server.device_id;
+	// The identity belongs to the box, so the device this application reports
+	// through is its machine's.
+	let device_id = database::machines::Machine::get_by_id(&mut conn, server.machine_id)
+		.await?
+		.device_id;
 
 	let (group, status, latest_version) = {
 		let mut conn_group = db.get().await?;
@@ -899,7 +905,6 @@ pub async fn update(
 			Some(s) => Some(Some(Application::canonicalize_host(&s)?)),
 			None => None,
 		},
-		device_id: args.data.device_id,
 		// Deliberately absent: the group came from the machine above.
 		group_id: None,
 		public_name: args.data.public_name,

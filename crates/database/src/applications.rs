@@ -30,9 +30,10 @@ async fn recompute_groups(
 	Ok(())
 }
 
-/// A single server in the fleet: the unit that reports status, files
-/// issues, and is monitored for reachability. A server may belong to a
-/// server group, and may or may not have a device enrolled against it yet.
+/// A single application in the fleet: the unit that reports status, files
+/// issues, and is monitored for reachability. An application runs on a
+/// machine and may belong to a server group. The identity that reports for
+/// it belongs to the machine, not to the application.
 #[derive(
 	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, utoipa::ToSchema,
 )]
@@ -46,10 +47,10 @@ pub struct Application {
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub name: Option<String>,
 
-	/// The server's URL. Optional: a server may be identified solely by its
-	/// enrolled device (e.g. a Tailscale node) rather than a URL. Not
-	/// required to be unique. Responses that need a value to display even
-	/// when this is unset fall back to another identifying field.
+	/// The application's URL. Optional: an application may be identified by
+	/// its machine's tailnet name rather than a URL. Not required to be
+	/// unique. Responses that need a value to display even when this is
+	/// unset fall back to another identifying field.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	#[diesel(treat_none_as_default_value = false)]
 	pub host: Option<UrlField>,
@@ -63,9 +64,6 @@ pub struct Application {
 	/// The server's environment tier, for example production, test, or dev.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub rank: Option<ServerRank>,
-	/// The device enrolled against this server, if any.
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub device_id: Option<Uuid>,
 	/// The machine this application runs on. An application runs on exactly
 	/// one; a machine hosts any number.
 	// spec: FLT#cardinality
@@ -109,8 +107,10 @@ pub struct Application {
 	/// Key/value tags for this server.
 	#[serde(default)]
 	pub tags: TagMap,
-	/// When set, the server is archived: hidden from live listings and
-	/// monitoring, with its device unenrolled, but its history is retained.
+	/// When set, the application is archived: hidden from live listings and
+	/// monitoring, but its history is retained. Retiring one workload says
+	/// nothing about the box it ran on, so the machine keeps its identity;
+	/// `Machine::archive` is what releases that.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	#[diesel(
 		deserialize_as = jiff_diesel::NullableTimestamp,
@@ -118,9 +118,10 @@ pub struct Application {
 		treat_none_as_default_value = false
 	)]
 	pub deleted_at: Option<Timestamp>,
-	/// When a device successfully completed enrollment for this server.
-	/// While `None`, the server is awaiting its first check-in and the UI
-	/// shows setup instructions.
+	/// When this application first reported. Enrolment is the machine's, so
+	/// this is set by the report that brings the application into being, not
+	/// by anything the operator does. While `None`, the application is
+	/// awaiting its first check-in and the UI shows setup instructions.
 	#[serde(skip_serializing_if = "Option::is_none")]
 	#[diesel(
 		deserialize_as = jiff_diesel::NullableTimestamp,
@@ -291,8 +292,8 @@ impl Application {
 	}
 
 	/// Operator-driven insert. The caller pre-builds the row (id, defaults,
-	/// optional URL, optional pre-bound `device_id` for the Tailscale case).
-	/// URLs are no longer unique, so there is no collision check.
+	/// optional URL). URLs are no longer unique, so there is no collision
+	/// check.
 	pub async fn create(db: &mut AsyncPgConnection, server: Application) -> Result<Self> {
 		use crate::schema::applications;
 
@@ -349,7 +350,6 @@ impl Application {
 				host: None,
 				r#type: r#type.clone(),
 				rank: None,
-				device_id: None,
 				machine_id: machine.id,
 				group_id: machine.group_id,
 				public_name: None,
@@ -372,10 +372,12 @@ impl Application {
 		.await
 	}
 
-	/// Archive a server: hide it from live listings and monitoring while
-	/// retaining its history. Releases its device (clears `device_id` and
-	/// revokes the device's credentials) so the box can only return through the
-	/// gated enrollment flow. Idempotent.
+	/// Archive an application: hide it from live listings and monitoring while
+	/// retaining its history. Idempotent.
+	///
+	/// The box's identity is left alone. An identity speaks for the machine,
+	/// and retiring one workload says nothing about the others on it or about
+	/// the box itself; [`crate::machines::Machine::archive`] is what revokes.
 	pub async fn soft_delete(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<()> {
 		use crate::schema::applications::dsl;
 		use diesel_async::AsyncConnection;
@@ -393,16 +395,11 @@ impl Application {
 				return Ok(());
 			}
 
-			if let Some(device_id) = server.device_id {
-				crate::devices::Device::revoke(conn, device_id).await?;
-			}
-
 			diesel::update(dsl::applications.filter(dsl::id.eq(server_id)))
 				.set((
 					dsl::deleted_at
 						.eq(jiff_diesel::NullableTimestamp::from(Some(Timestamp::now()))),
 					dsl::registered_at.eq(None::<jiff_diesel::Timestamp>),
-					dsl::device_id.eq(None::<Uuid>),
 				))
 				.execute(conn)
 				.await
@@ -416,7 +413,8 @@ impl Application {
 		.await
 	}
 
-	/// Un-archive a server. Does not rebind a device — the box must re-enroll.
+	/// Un-archive an application. Says nothing about its machine's identity,
+	/// which archiving the application did not touch.
 	pub async fn restore(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Self> {
 		use crate::schema::applications::dsl;
 
@@ -974,7 +972,6 @@ fn test_server_serialization() {
 		r#type: ApplicationType::TamanuCentral,
 		rank: Some(ServerRank::Production),
 		host: Some(UrlField("https://example.com/".parse().unwrap())),
-		device_id: Some(Uuid::nil()),
 		machine_id: Uuid::nil(),
 		group_id: None,
 		public_name: Some("Test Application".to_string()),
@@ -1003,7 +1000,6 @@ fn test_server_serialization() {
   "host": "https://example.com",
   "type": "tamanu-central",
   "rank": "production",
-  "device_id": "00000000-0000-0000-0000-000000000000",
   "machine_id": "00000000-0000-0000-0000-000000000000",
   "public_name": "Test Application",
   "is_monitored": true,
@@ -1018,7 +1014,7 @@ fn test_server_serialization() {
 
 /// Fields to update on an existing server. Only the fields present are
 /// changed; omitted fields are left as-is. For the fields that are
-/// themselves optional (`host`, `device_id`, `group_id`, `public_name`,
+/// themselves optional (`host`, `group_id`, `public_name`,
 /// `cloud`, `geolocation`), sending an explicit `null` clears the value,
 /// while omitting the field entirely leaves it unchanged.
 #[derive(Debug, Deserialize, AsChangeset, utoipa::ToSchema)]
@@ -1035,8 +1031,6 @@ pub struct PartialServer {
 	pub rank: Option<ServerRank>,
 	/// New URL for the server, or `null` to clear it.
 	pub host: Option<Option<UrlField>>,
-	/// New enrolled device for the server, or `null` to unenroll it.
-	pub device_id: Option<Option<Uuid>>,
 	/// New server group for the server, or `null` to remove it from its
 	/// current group.
 	pub group_id: Option<Option<Uuid>>,

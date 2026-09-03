@@ -776,8 +776,8 @@ async fn get_detail_with_device() {
 			"INSERT INTO devices (id, role) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'server');
 
-			WITH m AS (INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, name, host, rank, type, device_id, machine_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Device Application', 'https://device.example.com', 'production', 'tamanu-central', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '11111111-1111-1111-1111-111111111111');
+			WITH m AS (INSERT INTO machines (id, device_id) VALUES ('11111111-1111-1111-1111-111111111111', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa') RETURNING id) INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'Device Application', 'https://device.example.com', 'production', 'tamanu-central', '11111111-1111-1111-1111-111111111111');
 
 			INSERT INTO device_connections (device_id, ip, user_agent) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', '192.168.1.100', 'Tamanu/1.0.0 Node.js/18.20.5')"
@@ -1237,8 +1237,8 @@ async fn snapshot_prefers_payload_node_version_over_user_agent() {
 			"INSERT INTO devices (id, role) VALUES
 			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', 'server');
 
-			WITH m AS (INSERT INTO machines (id) VALUES ('20000000-0000-0000-0000-000000000010') RETURNING id) INSERT INTO applications (id, host, type, device_id, machine_id) VALUES
-			('20000000-0000-0000-0000-000000000010', 'https://node.example.com', 'tamanu-central', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '20000000-0000-0000-0000-000000000010');
+			WITH m AS (INSERT INTO machines (id, device_id) VALUES ('20000000-0000-0000-0000-000000000010', 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
+			('20000000-0000-0000-0000-000000000010', 'https://node.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000010');
 
 			INSERT INTO device_connections (device_id, ip, user_agent) VALUES
 			('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', '192.168.1.10', 'Tamanu/1.0.0 Node.js/18.20.5');
@@ -1276,8 +1276,8 @@ async fn snapshot_node_version_falls_back_to_user_agent() {
 			"INSERT INTO devices (id, role) VALUES
 			('cccccccc-cccc-cccc-cccc-cccccccccccc', 'server');
 
-			WITH m AS (INSERT INTO machines (id) VALUES ('20000000-0000-0000-0000-000000000011') RETURNING id) INSERT INTO applications (id, host, type, device_id, machine_id) VALUES
-			('20000000-0000-0000-0000-000000000011', 'https://node2.example.com', 'tamanu-central', 'cccccccc-cccc-cccc-cccc-cccccccccccc', '20000000-0000-0000-0000-000000000011');
+			WITH m AS (INSERT INTO machines (id, device_id) VALUES ('20000000-0000-0000-0000-000000000011', 'cccccccc-cccc-cccc-cccc-cccccccccccc') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
+			('20000000-0000-0000-0000-000000000011', 'https://node2.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000011');
 
 			INSERT INTO device_connections (device_id, ip, user_agent) VALUES
 			('cccccccc-cccc-cccc-cccc-cccccccccccc', '192.168.1.11', 'Tamanu/1.0.0 Node.js/18.20.5');

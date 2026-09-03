@@ -286,19 +286,19 @@ async fn key_deactivation_works() {
 			use diesel::{sql_query, sql_types};
 			use diesel_async::RunQueryDsl;
 			let server_id = uuid::Uuid::parse_str("77777777-7777-7777-7777-777777777777").unwrap();
-			sql_query("INSERT INTO machines (id) VALUES ($1)")
+			sql_query("INSERT INTO machines (id, device_id) VALUES ($1, $2)")
 				.bind::<sql_types::Uuid, _>(server_id)
+				.bind::<sql_types::Uuid, _>(device_id)
 				.execute(&mut conn)
 				.await
 				.expect("insert machine");
 			sql_query(
 				r#"
-				INSERT INTO applications (id, host, type, device_id, machine_id)
-				VALUES ($1, 'https://test.example.com', 'tamanu-facility', $2, $1)
+				INSERT INTO applications (id, host, type, machine_id)
+				VALUES ($1, 'https://test.example.com', 'tamanu-facility', $1)
 			"#,
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
-			.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(device_id))
 			.execute(&mut conn)
 			.await
 			.expect("insert server");
@@ -402,8 +402,8 @@ async fn key_rotation_scenario() {
 			let server_id = uuid::Uuid::parse_str("99999999-9999-9999-9999-999999999999").unwrap();
 			sql_query(
 				r#"
-				WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, device_id, machine_id)
-				VALUES ($1, 'https://rotation-test.com', 'tamanu-facility', $2, $1)
+				WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, machine_id)
+				VALUES ($1, 'https://rotation-test.com', 'tamanu-facility', $1)
 			"#,
 			)
 			.bind::<sql_types::Uuid, _>(server_id)

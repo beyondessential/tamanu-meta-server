@@ -258,9 +258,9 @@ impl Device {
 	///
 	/// - Both source and target hold a tailscale identity. The
 	///   operator must `detach_tailscale` on one side first.
-	/// - Both source and target are attached to a server
-	///   (`applications.device_id`). The operator must clear one
-	///   `applications.device_id` first; otherwise the unique constraint
+	/// - Both source and target are bound to a machine
+	///   (`machines.device_id`). The operator must clear one
+	///   `machines.device_id` first; otherwise the unique constraint
 	///   would fail during the rewrite.
 	///
 	/// Target wins for `role` and for `tailscale_*` (if it already
@@ -272,7 +272,7 @@ impl Device {
 		target_id: Uuid,
 	) -> Result<()> {
 		use crate::schema::{
-			applications, artifacts, device_connections, device_keys, devices, issues, statuses,
+			artifacts, device_connections, device_keys, devices, issues, machines, statuses,
 			versions,
 		};
 
@@ -301,20 +301,20 @@ impl Device {
 				return Err(AppError::DeviceMergeConflict);
 			}
 
-			// Conflict: both attached to a (possibly different) server.
-			let source_server_count: i64 = applications::table
-				.filter(applications::device_id.eq(source_id))
+			// Conflict: both bound to a (possibly different) machine.
+			let source_machine_count: i64 = machines::table
+				.filter(machines::device_id.eq(source_id))
 				.count()
 				.get_result(conn)
 				.await
 				.map_err(AppError::from)?;
-			let target_server_count: i64 = applications::table
-				.filter(applications::device_id.eq(target_id))
+			let target_machine_count: i64 = machines::table
+				.filter(machines::device_id.eq(target_id))
 				.count()
 				.get_result(conn)
 				.await
 				.map_err(AppError::from)?;
-			if source_server_count > 0 && target_server_count > 0 {
+			if source_machine_count > 0 && target_machine_count > 0 {
 				return Err(AppError::DeviceMergeConflict);
 			}
 
@@ -383,11 +383,11 @@ impl Device {
 				.await
 				.map_err(AppError::from)?;
 
-			// applications.device_id is UNIQUE. We already ruled out the
-			// both-attached case above; here the only writers are
-			// source-attached (rewrite to target) or neither (no-op).
-			diesel::update(applications::table.filter(applications::device_id.eq(source_id)))
-				.set(applications::device_id.eq(target_id))
+			// machines.device_id is UNIQUE. We already ruled out the
+			// both-bound case above; here the only writers are source-bound
+			// (rewrite to target) or neither (no-op).
+			diesel::update(machines::table.filter(machines::device_id.eq(source_id)))
+				.set(machines::device_id.eq(target_id))
 				.execute(conn)
 				.await
 				.map_err(AppError::from)?;
@@ -1058,23 +1058,28 @@ impl Device {
 		Self::get_with_info(db, device.id).await.map(Some)
 	}
 
-	/// Every `(device, attached_server_id, node_id)` triple for devices
-	/// that have a Tailscale node id and at least one attached server.
-	/// Drives the key-expiry sweep: the tailnet carries plenty of nodes
-	/// that aren't canopy-managed applications (operator laptops, other
-	/// infra, …), and the sweep deliberately ignores those — it's
-	/// scoped to the headless devices canopy actually runs.
-	pub async fn list_tailnet_attached_with_server(
+	/// Every `(device, machine_id, node_id)` triple for devices that have a
+	/// Tailscale node id and are bound to a machine. Drives the key-expiry
+	/// sweep: the tailnet carries plenty of nodes that aren't canopy-managed
+	/// boxes (operator laptops, other infra, …), and the sweep deliberately
+	/// ignores those — it's scoped to the headless devices canopy actually
+	/// runs.
+	///
+	/// The machine is the subject: a node's key expiring is a fact about the
+	/// box, not about any one workload on it.
+	// spec: DTR
+	pub async fn list_tailnet_bound_machines(
 		db: &mut AsyncPgConnection,
 	) -> Result<Vec<(Self, Uuid, String)>> {
-		use crate::schema::{applications, devices};
+		use crate::schema::{devices, machines};
 
 		let rows: Vec<(Self, Uuid, String)> = devices::table
-			.inner_join(applications::table.on(applications::device_id.eq(devices::id.nullable())))
+			.inner_join(machines::table.on(machines::device_id.eq(devices::id.nullable())))
 			.filter(devices::tailscale_node_id.is_not_null())
+			.filter(machines::deleted_at.is_null())
 			.select((
 				Self::as_select(),
-				applications::id,
+				machines::id,
 				devices::tailscale_node_id.assume_not_null(),
 			))
 			.load(db)
