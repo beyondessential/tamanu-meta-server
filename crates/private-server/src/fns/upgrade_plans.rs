@@ -39,8 +39,8 @@ pub struct PlannedUpgrade {
 	pub group_id: Uuid,
 	/// Its name, so the view reads without a second lookup.
 	pub group_name: String,
-	/// The rank of the environment this concerns: the group's servers at that
-	/// rank.
+	/// The rank of the environment this concerns: the group's applications at
+	/// that rank.
 	pub rank: ServerRank,
 	/// Whether this is the group's highest-ranked environment, the one the
 	/// group's own version is read from.

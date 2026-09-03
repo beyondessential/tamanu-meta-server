@@ -1,5 +1,5 @@
-//! Where each environment is going: the version a group's servers at one rank
-//! intend to move to, and optionally when.
+//! Where each environment is going: the version a group's applications at one
+//! rank intend to move to, and optionally when.
 //!
 //! A plan is a statement of intent. Nothing here performs or schedules an
 //! upgrade; the date is presentational and Canopy decides a plan is met by
@@ -24,8 +24,8 @@ pub struct UpgradePlan {
 	pub id: Uuid,
 	/// The group whose environment intends to move.
 	pub group_id: Uuid,
-	/// The rank of the environment that intends to move: the group's servers at
-	/// that rank.
+	/// The rank of the environment that intends to move: the group's
+	/// applications at that rank.
 	pub rank: ServerRank,
 	/// The version it intends to move to.
 	pub target_version_id: Uuid,

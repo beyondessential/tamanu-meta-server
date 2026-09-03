@@ -8018,8 +8018,8 @@ export interface components {
             late: boolean;
             plan?: null | components["schemas"]["UpgradePlan"];
             /**
-             * @description The rank of the environment this concerns: the group's servers at that
-             *     rank.
+             * @description The rank of the environment this concerns: the group's applications at
+             *     that rank.
              */
             rank: components["schemas"]["ServerRank"];
             /** @description The plan's target as semver. */
@@ -10396,8 +10396,8 @@ export interface components {
             /** @description The IANA zone the planned time is a wall clock in. */
             planned_zone?: string | null;
             /**
-             * @description The rank of the environment that intends to move: the group's servers at
-             *     that rank.
+             * @description The rank of the environment that intends to move: the group's
+             *     applications at that rank.
              */
             rank: components["schemas"]["ServerRank"];
             /** @description When a newer plan replaced this one. */

@@ -77,8 +77,8 @@ export default function Upgrades() {
 	}
 
 	const planned = fleet.data.filter((row) => row.plan);
-	// The gap this list is for: a production behind the newest version with
-	// nothing recorded. A clone going unplanned, or a site already current, is not.
+	// The gap this list is for: a group's headline environment, behind the
+	// newest version, with nothing recorded.
 	const unplanned = fleet.data.filter(
 		(row) => !row.plan && row.headline && (row.behind ?? 0) > 0,
 	);

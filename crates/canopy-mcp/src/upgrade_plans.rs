@@ -30,7 +30,7 @@ struct PlanList {
 	environments_without_a_plan: Vec<EnvironmentRef>,
 }
 
-/// One of a group's environments: its servers at one rank.
+/// One of a group's environments: its applications at one rank.
 #[derive(Serialize)]
 struct EnvironmentRef {
 	group_id: Uuid,
@@ -45,7 +45,7 @@ struct EnvironmentRef {
 struct OpenPlan {
 	group_id: Uuid,
 	group_name: String,
-	/// The environment the plan is for: the group's servers at this rank.
+	/// The environment the plan is for: the group's applications at this rank.
 	rank: ServerRank,
 	current_version: Option<VersionStr>,
 	target_version: String,
@@ -75,7 +75,7 @@ struct PlanHistory {
 
 #[derive(Serialize)]
 struct HistoricPlan {
-	/// The environment the plan was for: the group's servers at this rank.
+	/// The environment the plan was for: the group's applications at this rank.
 	rank: ServerRank,
 	target_version: String,
 	outcome: PlanOutcome,

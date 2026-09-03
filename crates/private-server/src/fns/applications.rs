@@ -777,8 +777,7 @@ pub async fn get_detail(
 				.is_some();
 		}
 		if !open && let Some(gid) = server.group_id {
-			// The environment is the machine's, since a window covers the box:
-			// a production workload alongside a demo one is a production box.
+			// A window covers the box, so the rank is the machine's rather than this application's.
 			let rank = database::machines::Machine::rank(&mut conn, server.machine_id).await?;
 			if let Some(rank) = rank {
 				open = MaintenanceWindow::open_for(&mut conn, Scope::Group(gid), Some(rank))
