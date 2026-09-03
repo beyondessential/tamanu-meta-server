@@ -10,7 +10,7 @@ How device reports arrive is the status contract (see [STA](../public-server/sta
 
 ## Targets
 
-Every check is scoped to exactly one target: an application, a machine, a server group, or Canopy as a whole.
+Every check is scoped to exactly one target: an application, a machine, a group, or Canopy as a whole.
 
 Application checks and machine checks both come from sources reporting on them, and from Canopy's own determinations such as reachability.
 What separates them is what the check asserts something about: whether the software is serving, or whether the box it runs on has room on its disk (see [FLT](../servers/overview.md)).
