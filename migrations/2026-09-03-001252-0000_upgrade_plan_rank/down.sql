@@ -24,4 +24,6 @@ CREATE UNIQUE INDEX upgrade_plans_one_open_per_group
 	ON upgrade_plans (group_id)
 	WHERE met_at IS NULL AND superseded_at IS NULL AND withdrawn_at IS NULL;
 
-ALTER TABLE upgrade_plans DROP COLUMN rank;
+ALTER TABLE upgrade_plans
+	DROP CONSTRAINT IF EXISTS upgrade_plans_rank_check,
+	DROP COLUMN rank;
