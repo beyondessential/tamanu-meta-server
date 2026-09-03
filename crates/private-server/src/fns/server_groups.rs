@@ -284,10 +284,7 @@ pub async fn tree_members(
 	let machine_ids: Vec<Uuid> = boxes.iter().map(|m| m.id).collect();
 	let machine_health = database::issues::machine_health_from_check_state(
 		conn,
-		&boxes
-			.iter()
-			.map(|m| (m.id, m.group_id))
-			.collect::<Vec<_>>(),
+		&boxes.iter().map(|m| (m.id, m.group_id)).collect::<Vec<_>>(),
 	)
 	.await?;
 	let machine_reports =

@@ -32,7 +32,7 @@ test.describe("server detail incidents link", () => {
 			message: "postgres is down",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		const link = page.getByRole("link", { name: "Active issues" });
 		await expect(link).toBeVisible();
 		await expect(link).toHaveAttribute(
@@ -55,7 +55,7 @@ test.describe("server detail incidents link", () => {
 			groupId: group.id,
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		const link = page.getByRole("link", { name: "Past issues" });
 		await expect(link).toBeVisible();
 		await expect(link).toHaveAttribute(
@@ -73,7 +73,7 @@ test.describe("server detail incidents link", () => {
 			groupId: null,
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		// No group to filter by, so no group query parameter — and certainly
 		// not the server id standing in for one.
 		const link = page.getByRole("link", { name: "Past issues" });

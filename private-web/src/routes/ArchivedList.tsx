@@ -22,7 +22,7 @@ export default function ArchivedList() {
 	usePageTitle("Archived");
 	const admin = useIsAdmin() === true;
 	const groups = useApi("server_groups", "list_archived", {}, []);
-	const servers = useApi("servers", "list_archived", {}, []);
+	const servers = useApi("applications", "list_archived", {}, []);
 
 	if (
 		groups.status === "loading" ||
@@ -153,7 +153,7 @@ function ArchivedServerRow({
 	admin: boolean;
 	onRestored: () => void;
 }) {
-	const action = useApiAction("servers", "restore");
+	const action = useApiAction("applications", "restore");
 	const onRestore = async () => {
 		try {
 			await action.call({ server_id: server.id });

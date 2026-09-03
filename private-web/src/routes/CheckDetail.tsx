@@ -374,7 +374,7 @@ function AttentionList({
 												label={
 													<MuiLink
 														component={RouterLink}
-														to={`/servers/${server.server_id}`}
+														to={`/applications/${server.server_id}`}
 														underline="hover"
 													>
 														{server.server_name}

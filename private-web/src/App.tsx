@@ -8,7 +8,7 @@ import {
 	Typography,
 } from "@mui/material";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
-import { NavLink, Navigate, Route, Routes } from "react-router-dom";
+import { NavLink, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { useApi } from "./api";
 import AdminProbeBanner from "./components/AdminProbeBanner";
 import { AdminProvider } from "./hooks/useIsAdmin";
@@ -59,6 +59,15 @@ import Versions from "./routes/Versions";
 interface NavItem {
 	label: string;
 	to: string;
+}
+
+/// Send an old `/servers/:id` link to the application it now names.
+///
+/// Replaces rather than pushes, so the back button goes where the operator came
+/// from instead of bouncing off the redirect.
+function LegacyApplication({ edit = false }: { edit?: boolean }) {
+	const { id = "" } = useParams<{ id: string }>();
+	return <Navigate to={`/applications/${id}${edit ? "/edit" : ""}`} replace />;
 }
 
 const BASE_NAV: NavItem[] = [
@@ -218,9 +227,22 @@ export default function App() {
 						path="/groups/:id/machines/new"
 						element={<MachineCreate />}
 					/>
-					<Route path="/servers/:id" element={<ServerDetail />} />
+					<Route path="/applications/:id" element={<ServerDetail />} />
+					<Route
+						path="/applications/:id/edit"
+						element={<ServerEdit />}
+					/>
 					<Route path="/machines/:id" element={<MachineDetail />} />
-					<Route path="/servers/:id/edit" element={<ServerEdit />} />
+					{/* The old prefix. `servers` named the box and the workload
+					    at once, and each has its own word now — but a link into
+					    Canopy outlives the rename, so the old one still lands.
+					    Below the `/servers` index routes, which are the fleet's
+					    and are not going anywhere. */}
+					<Route path="/servers/:id" element={<LegacyApplication />} />
+					<Route
+						path="/servers/:id/edit"
+						element={<LegacyApplication edit />}
+					/>
 					<Route path="/groups/new" element={<GroupEdit />} />
 					<Route path="/groups/:id" element={<GroupDetail />} />
 					<Route path="/groups/:id/edit" element={<GroupEdit />} />

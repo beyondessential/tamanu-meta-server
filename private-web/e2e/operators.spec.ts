@@ -66,7 +66,7 @@ test.describe("operator presence", () => {
 			health: EXTERNAL_USERS_HEALTH,
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 
 		// Deduped headline: alice's two sessions count once.
 		await expect(
@@ -96,7 +96,7 @@ test.describe("operator presence", () => {
 			createdAt: "NOW() - INTERVAL '45 minutes'",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 
 		// The sessions still show in the checks table (last known data)…
 		await expect(page.getByText("bob@example.com")).toBeVisible();
@@ -339,7 +339,7 @@ test.describe("operator presence", () => {
 			groupId: group.id,
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 
 		// The Group section below also links to the group; the new link
 		// lives in the page's h1.

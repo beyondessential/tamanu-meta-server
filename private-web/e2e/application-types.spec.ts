@@ -38,7 +38,7 @@ test.describe("application types", () => {
 			extra: { bestoolVersion: "2.10.5" },
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 
 		// It presents as the sentence case of its type, by the same rule as
 		// every other type.
@@ -66,7 +66,7 @@ test.describe("application types", () => {
 		});
 		await seedStatus(sql, { serverId: server.id, version: "2.34.1" });
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 
 		// Graded: the version links into the catalogue and carries its distance
 		// from the latest release.
@@ -88,7 +88,7 @@ test.describe("application types", () => {
 			extra: { pgVersion: "PostgreSQL 16.2", bestoolVersion: "2.10.5" },
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 
 		// One chip carries what it is. There is no separate role chip: SENAITE
 		// instances hold no role relative to each other, so the software alone
@@ -120,7 +120,7 @@ test.describe("application types", () => {
 		// Reported, but carrying no version — the agent couldn't read it.
 		await seedStatus(sql, { serverId: server.id, version: null });
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 
 		// There *is* a version to learn here, so the indicator says so.
 		await expect(page.getByText("unknown")).toBeVisible();
@@ -194,11 +194,11 @@ test.describe("application types", () => {
 
 		// A central is what the mobile app lists, so its edit form offers the
 		// public name.
-		await page.goto(`/servers/${central.id}/edit`);
+		await page.goto(`/applications/${central.id}/edit`);
 		await expect(page.getByLabel("Name in Tamanu Mobile app")).toBeVisible();
 
 		// A facility sits behind someone else's NAT and is nobody's to look up.
-		await page.goto(`/servers/${facility.id}/edit`);
+		await page.goto(`/applications/${facility.id}/edit`);
 		await expect(page.getByLabel("Name in Tamanu Mobile app")).toHaveCount(0);
 	});
 
@@ -252,7 +252,7 @@ test.describe("application types", () => {
 		// Tamanu's release numbering.
 		await seedStatus(sql, { serverId: server.id, version: "1.8.0" });
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 
 		// The version it reports is presented...
 		await expect(page.getByText("1.8.0")).toBeVisible();
@@ -321,7 +321,7 @@ test.describe("application types", () => {
 			groupId: group.id,
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		await expect(
 			page.getByRole("heading", { name: /Tamanu central/ }),
 		).toBeVisible();
@@ -349,7 +349,7 @@ test.describe("application types", () => {
 		});
 		await seedStatus(sql, { serverId: server.id, version: "2.34.1" });
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		await expect(
 			page.getByRole("heading", { name: /Fiji central/ }),
 		).toBeVisible();

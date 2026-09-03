@@ -51,7 +51,7 @@ test.describe("self-alerts", () => {
 			page.getByText("sts:GetCallerIdentity failed"),
 		).not.toBeVisible();
 		// And no link to the hidden nil-server page anywhere.
-		await expect(page.locator(`a[href="/servers/${NIL}"]`)).toHaveCount(0);
+		await expect(page.locator(`a[href="/applications/${NIL}"]`)).toHaveCount(0);
 	});
 
 	test("resolve clears the banner", async ({ page, sql }) => {

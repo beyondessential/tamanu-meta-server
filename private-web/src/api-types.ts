@@ -67,6 +67,185 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/applications/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive (soft-delete) a server.
+         * @description Releases and demotes its device. Archived applications no longer appear in
+         *     regular listings but can be restored later.
+         */
+        post: operations["delete"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/get_detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get full detail for a server.
+         * @description Returns the server's record, its bound device (if any), its most recent
+         *     status report, current reachability/health, its group (if any) together
+         *     with the group's whole membership for the tree the page ends with, and the
+         *     group's billing labels.
+         *     Returns 404 if no server exists with that id.
+         */
+        post: operations["get_detail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/get_info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get a server's basic record.
+         * @description Returns identity, classification, and configuration for a single server,
+         *     including its group name where applicable. Does not include current
+         *     reachability/health or device/group detail — use the detail endpoint for
+         *     that. Returns 404 if no server exists with that id.
+         */
+        post: operations["get_info"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/get_name": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get a server's display name.
+         * @description Returns the server's name if set, else its stored host, else its id —
+         *     always a non-empty string suitable for display. Returns 404 if no server
+         *     exists with that id.
+         */
+        post: operations["get_name"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/list_archived": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List archived (soft-deleted) applications.
+         * @description Each entry has `archived: true` and includes current reachability/health.
+         *     Archived applications can be brought back with the restore endpoint.
+         */
+        post: operations["list_archived"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/list_some": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List applications, optionally filtered by kind, paginated.
+         * @description Returns a page of applications plus the total matching count. Entries include
+         *     their group name where applicable, but not current reachability/health —
+         *     use the detail endpoint for that.
+         */
+        post: operations["list_some"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Un-archive a server.
+         * @description Restores a previously archived server to regular listings. Its machine
+         *     must re-enroll afterwards to rebind a device. Restoring a server that
+         *     isn't archived has no effect.
+         */
+        post: operations["restore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/applications/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update a server's fields.
+         * @description Applies a partial update — only the fields present in `data` are
+         *     changed. Moving a previously-ungrouped server into a group, or toggling
+         *     `is_monitored`, re-evaluates the server's open issues so incidents catch
+         *     up with the new state. Returns 400 if the update is rejected (e.g. an
+         *     invalid host value, or a role the target product doesn't define).
+         */
+        post: operations["server_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/backups/allow_restore": {
         parameters: {
             query?: never;
@@ -3147,185 +3326,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/servers/delete": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Archive (soft-delete) a server.
-         * @description Releases and demotes its device. Archived applications no longer appear in
-         *     regular listings but can be restored later.
-         */
-        post: operations["delete"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/servers/get_detail": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Get full detail for a server.
-         * @description Returns the server's record, its bound device (if any), its most recent
-         *     status report, current reachability/health, its group (if any) together
-         *     with the group's whole membership for the tree the page ends with, and the
-         *     group's billing labels.
-         *     Returns 404 if no server exists with that id.
-         */
-        post: operations["get_detail"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/servers/get_info": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Get a server's basic record.
-         * @description Returns identity, classification, and configuration for a single server,
-         *     including its group name where applicable. Does not include current
-         *     reachability/health or device/group detail — use the detail endpoint for
-         *     that. Returns 404 if no server exists with that id.
-         */
-        post: operations["get_info"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/servers/get_name": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Get a server's display name.
-         * @description Returns the server's name if set, else its stored host, else its id —
-         *     always a non-empty string suitable for display. Returns 404 if no server
-         *     exists with that id.
-         */
-        post: operations["get_name"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/servers/list_archived": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * List archived (soft-deleted) applications.
-         * @description Each entry has `archived: true` and includes current reachability/health.
-         *     Archived applications can be brought back with the restore endpoint.
-         */
-        post: operations["list_archived"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/servers/list_some": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * List applications, optionally filtered by kind, paginated.
-         * @description Returns a page of applications plus the total matching count. Entries include
-         *     their group name where applicable, but not current reachability/health —
-         *     use the detail endpoint for that.
-         */
-        post: operations["list_some"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/servers/restore": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Un-archive a server.
-         * @description Restores a previously archived server to regular listings. Its machine
-         *     must re-enroll afterwards to rebind a device. Restoring a server that
-         *     isn't archived has no effect.
-         */
-        post: operations["restore"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/servers/update": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Update a server's fields.
-         * @description Applies a partial update — only the fields present in `data` are
-         *     changed. Moving a previously-ungrouped server into a group, or toggling
-         *     `is_monitored`, re-evaluates the server's open issues so incidents catch
-         *     up with the new state. Returns 400 if the update is rejected (e.g. an
-         *     invalid host value, or a role the target product doesn't define).
-         */
-        post: operations["server_update"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/silenced_refs/list_for_group": {
         parameters: {
             query?: never;
@@ -3712,7 +3712,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/statuses/server_grouped_ids": {
+    "/api/statuses/group_ids": {
         parameters: {
             query?: never;
             header?: never;
@@ -3722,13 +3722,17 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List server group ids, bucketed by rank.
-         * @description Each group is bucketed under the highest rank held by any of its member
-         *     applications (production outranks clone, which outranks demo, then test,
-         *     then dev). Groups whose members are all unranked are omitted entirely.
-         *     Within each rank bucket, groups are ordered alphabetically by name.
+         * List the server group ids the status page shows, ordered by name.
+         * @description Alphabetical, because the card carries its own ranks: a rank row per rank,
+         *     each labelled. Ordering the cards by rank as well would sort the page by
+         *     something already written on every card, and leave an operator looking for
+         *     one group scanning for where its rank happens to start. A name is what they
+         *     know it by.
+         *
+         *     A group with no ranked member at all is omitted, as it always has been:
+         *     nothing in it has a place in the fleet's promotion order yet.
          */
-        post: operations["server_grouped_ids"];
+        post: operations["group_ids"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5977,15 +5981,37 @@ export interface components {
              */
             server_group_id: string;
         };
-        /** @description One of a group's machines, as an operator picks it out of a list. */
+        /**
+         * @description One of a group's machines, as an operator picks it out of a list.
+         *
+         *     Carries the box's own state as well as its name, because the group tree
+         *     draws each machine as an enclosure around the applications on it and an
+         *     enclosure with nothing to say is a decoration. A box whose own checks are
+         *     failing while its workloads are fine is a state only this can show.
+         */
         GroupMachine: {
+            /**
+             * @description The box's own health, from the checks filed against it. What the
+             *     applications on it make of their own checks is each application's.
+             */
+            health: components["schemas"]["HealthState"];
             /**
              * Format: uuid
              * @description Unique identifier of the machine.
              */
             id: string;
+            /** @description Whether a maintenance window suspends this box, its own or its group's. */
+            maintained: boolean;
             /** @description The operator-assigned name, where it has one. */
             name?: string | null;
+            /**
+             * @description The platform the box reports, where it reports one. The one machine
+             *     figure the tree shows: it is what distinguishes two otherwise
+             *     identical rows.
+             */
+            platform?: string | null;
+            /** @description Whether the box is reachable, judged against its own threshold. */
+            up: components["schemas"]["ShortStatus"];
         };
         /** @description Request body identifying a server group to look up silences for. */
         GroupScopeArgs: {
@@ -9166,6 +9192,15 @@ export interface components {
             health: components["schemas"]["HealthState"];
             last_status?: null | components["schemas"]["ServerLastStatusData"];
             /**
+             * @description The name of the box this application runs on, where it has one.
+             *
+             *     The page names its machine in the heading, so it needs the name and not
+             *     only the id `server.machine_id` carries — and it needs it whether or
+             *     not the application is grouped, which is why it is not read out of
+             *     `group_machines`.
+             */
+            machine_name?: string | null;
+            /**
              * @description Whether a maintenance window suspends this server, its own or its
              *     group's: its checks are recorded and shown, and raise nothing.
              */
@@ -10592,6 +10627,232 @@ export interface operations {
                 };
             };
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerIdOnlyArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    get_detail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerDetailData"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    get_info: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerInfo"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    get_name: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string;
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    list_archived: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": unknown;
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerInfo"][];
+                };
+            };
+        };
+    };
+    list_some: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerListArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ServerInfo"];
+                };
+            };
+        };
+    };
+    restore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerIdOnlyArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    server_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerUpdateArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -14741,232 +15002,6 @@ export interface operations {
             };
         };
     };
-    delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ServerIdOnlyArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    get_detail: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ServerIdArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ServerDetailData"];
-                };
-            };
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    get_info: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ServerIdArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ServerInfo"];
-                };
-            };
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    get_name: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ServerIdArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": string;
-                };
-            };
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    list_archived: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": unknown;
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ServerInfo"][];
-                };
-            };
-        };
-    };
-    list_some: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ServerListArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Page_ServerInfo"];
-                };
-            };
-        };
-    };
-    restore: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ServerIdOnlyArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    server_update: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ServerUpdateArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
     list_for_group: {
         parameters: {
             query?: never;
@@ -15410,7 +15445,7 @@ export interface operations {
             };
         };
     };
-    server_grouped_ids: {
+    group_ids: {
         parameters: {
             query?: never;
             header?: never;
@@ -15419,15 +15454,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Application group IDs grouped by highest-ranked member's rank. */
+            /** @description Application group IDs, ordered by group name. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string[];
-                    };
+                    "application/json": string[];
                 };
             };
             500: {

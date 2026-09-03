@@ -4,7 +4,6 @@ import {
 	Button,
 	Card,
 	CardContent,
-	Chip,
 	LinearProgress,
 	Link as MuiLink,
 	Stack,
@@ -32,7 +31,6 @@ import {
 	type AggregatedOperator,
 	type FacilityServerStatus,
 	type ServerGroupCard,
-	SERVER_RANK_ORDER,
 	aggregateOperators,
 	compareServersByRankThenType,
 	groupServersByRank,
@@ -155,26 +153,22 @@ function GroupCards({
 	tick: number;
 	openIncidentGroups: Map<string, IncidentLoudness>;
 }) {
-	const grouped = useApi(
-		"statuses",
-		"server_grouped_ids",
-		{},
-		[tick],
-	);
+	const groups = useApi("statuses", "group_ids", {}, [tick]);
 
-	if (grouped.status === "loading" || grouped.status === "idle") {
+	if (groups.status === "loading" || groups.status === "idle") {
 		return <LinearProgress />;
 	}
-	if (grouped.status === "error") {
-		return <Alert severity="error">{grouped.error.message}</Alert>;
+	if (groups.status === "error") {
+		return <Alert severity="error">{groups.error.message}</Alert>;
 	}
 
-	// One grid, not a section per rank. Each card carries its own ranks in its
-	// dot strip, so a heading above it names again what the card already says,
-	// and the section breaks cost a row of reflow apiece. Rank still orders the
-	// cards — production leads — it just no longer divides them.
+	// One grid, alphabetical. Each card carries its own ranks in its dot strip,
+	// so sectioning or ordering by rank sorts the page by something already
+	// written on every card — and leaves an operator looking for one group
+	// scanning for where its rank happens to start. A name is what they know it
+	// by, so a name is what the page is in order of.
 	// spec: CHK#presentation
-	const ids = SERVER_RANK_ORDER.flatMap((rank) => grouped.data[rank] ?? []);
+	const ids = groups.data;
 
 	if (ids.length === 0) {
 		return (
@@ -188,11 +182,13 @@ function GroupCards({
 		<Box
 			sx={{
 				display: "grid",
-				// The banded card reads at a narrower measure than the old one
-				// did: its name band ellipsises and its dot strip wraps, so the
-				// column can be sized to fit more of the fleet on a screen.
 				gridTemplateColumns: "repeat(auto-fill, minmax(16em, 1fr))",
 				gap: 1.5,
+				// One step down for the whole grid. Everything inside a card is
+				// sized in em from here — type, padding, dots, enclosures — so
+				// this is the single knob for how dense the page is, and 16em
+				// columns shrink with it.
+				fontSize: "0.9rem",
 			}}
 		>
 			{ids.map((id) => (
@@ -323,16 +319,17 @@ function GroupCard({
 					alignItems: "baseline",
 					justifyContent: "space-between",
 					gap: 1,
-					px: "10px",
-					py: "8px",
+					px: "0.625em",
+					py: "0.5em",
 					borderBottom: 1,
 					borderColor: "divider",
 				}}
 			>
 				<Typography
-					variant="subtitle1"
 					component="h3"
 					sx={{
+						fontSize: "0.9375em",
+						fontWeight: 400,
 						overflow: "hidden",
 						textOverflow: "ellipsis",
 						whiteSpace: "nowrap",
@@ -355,80 +352,90 @@ function GroupCard({
 
 			{hasStatusBand && (
 				<Box
+					data-testid="status-band"
 					sx={{
 						display: "flex",
 						alignItems: "stretch",
 						borderTop: 1,
 						borderColor: "divider",
-						fontSize: "0.6875rem",
+						fontSize: "0.6875em",
 					}}
 				>
 					{operators.length > 0 && (
-						<Box
-							sx={{
-								display: "flex",
-								alignItems: "center",
-								gap: 0.5,
-								px: 1,
-								py: 0.5,
-								bgcolor: "action.hover",
-								color: "text.secondary",
-								// Only when something sits beside it; the segment
-								// squares off the card's bottom edge otherwise.
-								...(openIncident !== null
-									? { borderRight: 1, borderColor: "divider" }
-									: { flex: 1 }),
-							}}
-						>
-							<OperatorCountChip operators={operators} />
-						</Box>
+						<OperatorSegment operators={operators} />
 					)}
-					{openIncident !== null && (
-						<Box
-							sx={{
-								flex: 1,
-								display: "flex",
-								alignItems: "center",
-								justifyContent: "flex-end",
-								px: 1,
-								py: 0.5,
-								bgcolor: "action.hover",
-								color: "text.secondary",
-							}}
-						>
-							<IncidentMark loudness={openIncident} />
-						</Box>
-					)}
+					{/* Always present once the band is, empty or not: the
+					    incident segment is what fills the band to the card's
+					    edge, and a segment that came and went would leave the
+					    operator count floating on some cards and not others. */}
+					<IncidentSegment loudness={openIncident} />
 				</Box>
 			)}
 		</Box>
 	);
 }
 
-/// What an open incident on this group reads as, which is not the same as how
-/// loud it is: a held one is not yet in Slack, and a recovering one has had its
-/// failures clear and is waiting out the linger window.
-function IncidentMark({ loudness }: { loudness: IncidentLoudness }) {
-	if (loudness === "loud") {
-		return <Chip label="incident" color="error" size="small" />;
-	}
-	if (loudness === "held") {
-		return (
-			<Tooltip title="Open incident; Slack notice is still inside the per-group cooldown window">
-				<Chip label="incident (held)" color="warning" size="small" />
-			</Tooltip>
-		);
-	}
-	return (
-		<Tooltip title="Open incident whose failures have all recovered; it closes if they stay quiet through the linger window">
-			<Chip label="incident (recovering)" color="info" size="small" />
-		</Tooltip>
+/// The incident segment: right-aligned in whatever the operator segment leaves
+/// it, and filled with the incident's own colour rather than holding a chip.
+///
+/// The segment is the mark. A chip inside a band would be a second border
+/// inside a border, at a size that reads as a control rather than a state, and
+/// the band's whole job is to be legible in a card 16em wide.
+///
+/// What it says is not how loud the incident is: a held one is not yet in
+/// Slack, and a recovering one has had its failures clear and is waiting out
+/// the linger window.
+/// spec: CHK#presentation
+function IncidentSegment({ loudness }: { loudness: IncidentLoudness | null }) {
+	const segment = (
+		<Box
+			data-testid="incident-segment"
+			data-loudness={loudness ?? "none"}
+			sx={{
+				flex: 1,
+				display: "flex",
+				alignItems: "center",
+				justifyContent: "flex-end",
+				px: 1,
+				py: 0.5,
+				bgcolor: loudness ? `${TONE[loudness]}.main` : "action.hover",
+				color: loudness ? "common.white" : "text.secondary",
+			}}
+		>
+			{loudness ? LABEL[loudness] : ""}
+		</Box>
 	);
+	if (!loudness) return segment;
+	return <Tooltip title={EXPLANATION[loudness]}>{segment}</Tooltip>;
 }
 
-/// Compact "people are in here" marker on a group card: person icon +
-/// distinct operator count, tooltip naming who's on which box.
-function OperatorCountChip({
+const TONE: Record<IncidentLoudness, "error" | "warning" | "info"> = {
+	loud: "error",
+	held: "warning",
+	lingering: "info",
+};
+
+// One word each. "incident (recovering)" does not fit a 16em card, and the
+// state is the word that matters — that there is an incident is said by the
+// segment being coloured at all.
+const LABEL: Record<IncidentLoudness, string> = {
+	loud: "incident",
+	held: "held",
+	lingering: "recovering",
+};
+
+const EXPLANATION: Record<IncidentLoudness, string> = {
+	loud: "Open incident",
+	held: "Open incident; Slack notice is still inside the per-group cooldown window",
+	lingering:
+		"Open incident whose failures have all recovered; it closes if they stay quiet through the linger window",
+};
+
+/// "People are in here": person icon and the distinct operator count, tooltip
+/// naming who is on which box.
+///
+/// Its own width, with a rule between it and the incident segment beside it.
+function OperatorSegment({
 	operators,
 }: {
 	operators: AggregatedOperator[];
@@ -445,12 +452,24 @@ function OperatorCountChip({
 				</Box>
 			}
 		>
-			<Chip
-				icon={<PersonIcon />}
-				label={operators.length}
-				size="small"
-				variant="outlined"
-			/>
+			<Box
+				data-testid="operator-segment"
+				sx={{
+					display: "flex",
+					alignItems: "center",
+					gap: 0.375,
+					px: 1,
+					py: 0.5,
+					borderRight: 1,
+					borderColor: "divider",
+					bgcolor: "action.hover",
+					color: "text.secondary",
+					flexShrink: 0,
+				}}
+			>
+				<PersonIcon sx={{ fontSize: "1.1em" }} />
+				{operators.length}
+			</Box>
 		</Tooltip>
 	);
 }
@@ -467,10 +486,12 @@ function OperatorCountChip({
 // same column grid wherever the line breaks fall. Spacing comes from the
 // container's `gap`, not per-dot margins (StatusDot's inline right-margin is
 // neutralised).
+const DIVIDER_LIGHT = "rgba(0, 0, 0, 0.06)";
+
 const dotCellSx = {
 	display: "inline-flex",
-	width: "1em",
-	height: "1em",
+	width: "0.85em",
+	height: "0.85em",
 	alignItems: "center",
 	justifyContent: "center",
 	flex: "none",
@@ -515,12 +536,14 @@ export function RankedDotStrip({ members }: { members: FacilityServerStatus[] })
 						flexWrap: "wrap",
 						alignItems: "center",
 						gap: "0.4em",
-						px: "10px",
-						py: "7px",
-						// A rule lighter than the card's own borders, so the rank
-						// break reads as subordinate to the card structure.
+						px: "0.625em",
+						py: "0.4375em",
+						// Lighter than the card's own borders, so the rank break
+						// reads as subordinate to the card structure. `divider`
+						// is the card's border, so it cannot also be the rule
+						// inside it.
 						...(index > 0
-							? { borderTop: 1, borderColor: "divider" }
+							? { borderTop: 1, borderColor: DIVIDER_LIGHT }
 							: {}),
 						// The rank spelled out behind its own row, faint enough to
 						// read only when looked for. It replaces the triangle that
@@ -529,10 +552,10 @@ export function RankedDotStrip({ members }: { members: FacilityServerStatus[] })
 						"&::after": {
 							content: "attr(data-rank)",
 							position: "absolute",
-							right: "8px",
+							right: "0.5em",
 							top: "50%",
 							transform: "translateY(-50%)",
-							fontSize: "0.9375rem",
+							fontSize: "0.9375em",
 							fontWeight: 500,
 							letterSpacing: "0.06em",
 							textTransform: "uppercase",

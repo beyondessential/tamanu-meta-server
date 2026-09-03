@@ -31,7 +31,7 @@ test.describe("server detail health indicator", () => {
 			health: [{ check: "database", healthy: false, message: "connection refused" }],
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 
 		// Healthy chip lives in the InfoSection header.
 		await expect(page.getByText("Unhealthy", { exact: true })).toBeVisible();
@@ -55,7 +55,7 @@ test.describe("server detail health indicator", () => {
 			health: [],
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 
 		await expect(page.getByText("Healthy", { exact: true })).toBeVisible();
 	});
@@ -88,7 +88,7 @@ test.describe("server detail checks table", () => {
 			],
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 
 		// Both check names are listed somewhere in the page.
 		await expect(page.getByText("almost-broken")).toBeVisible();
@@ -122,7 +122,7 @@ test.describe("server detail checks table", () => {
 			severity: "warning",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 
 		// Both sources' checks render in the one consolidated table, each
 		// linked and labelled with the source it came from.
@@ -164,7 +164,7 @@ test.describe("server detail checks table", () => {
 			documentation: "## Description\n\nSeedling's unrelated disk check.",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		await page
 			.getByRole("button", { name: "Documentation for postgres" })
 			.click();
@@ -211,7 +211,7 @@ test.describe("server detail checks table", () => {
 			],
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 
 		const failed = page.getByText("z-fails");
 		const passed = page.getByText("m-passes");
@@ -258,7 +258,7 @@ test.describe("silenced healthchecks", () => {
 			ref: "health/a-silenced",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 
 		// Headline rollup ignores the silenced failure.
 		await expect(page.getByText("Healthy", { exact: true })).toBeVisible();
@@ -319,7 +319,7 @@ test.describe("silenced healthchecks", () => {
 			ref: "health/database",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 
 		await expect(page.getByText("Healthy", { exact: true })).toBeVisible();
 		await expect(

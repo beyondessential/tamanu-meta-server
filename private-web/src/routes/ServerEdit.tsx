@@ -39,7 +39,7 @@ export default function ServerEdit() {
 	const { id = "" } = useParams<{ id: string }>();
 	usePageTitle("Edit server");
 	const info = useApi(
-		"servers",
+		"applications",
 		"get_info",
 		{ server_id: id },
 		[id],
@@ -123,7 +123,7 @@ function EditForm({
 	machineReachabilitySilenced: boolean;
 }) {
 	const navigate = useNavigate();
-	const action = useApiAction("servers", "update");
+	const action = useApiAction("applications", "update");
 	const silence = useApiAction("silenced_refs", "silence_server");
 	const unsilence = useApiAction("silenced_refs", "unsilence_server");
 	const silenceMachine = useApiAction("silenced_refs", "silence_machine");
@@ -237,7 +237,7 @@ function EditForm({
 					? unsilenceMachine.call(ref)
 					: silenceMachine.call(ref));
 			}
-			navigate(`/servers/${info.id}`);
+			navigate(`/applications/${info.id}`);
 		} catch {
 			/* surfaced via the actions' errors */
 		}
@@ -443,7 +443,7 @@ function EditForm({
 						type="button"
 						variant="outlined"
 						color="error"
-						onClick={() => navigate(`/servers/${info.id}`)}
+						onClick={() => navigate(`/applications/${info.id}`)}
 						disabled={pending}
 					>
 						Cancel

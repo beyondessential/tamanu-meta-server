@@ -96,7 +96,12 @@ test.describe("machine detail", () => {
 		await expect(
 			page.getByTestId("applications-on-box").getByText("Applications (0)"),
 		).toBeVisible();
-		await expect(page.getByText(/nothing reported on this box yet/i)).toBeVisible();
+		// A box created a minute ago carrying nothing is its normal condition,
+		// not a count of zero and not an error.
+		await expect(page.getByText("not yet reporting")).toBeVisible();
+		await expect(
+			page.getByText(/applications appear here as the machine reports them/i),
+		).toBeVisible();
 	});
 
 	/// Enrolment admits the box, so the setup instructions live on the machine
@@ -168,7 +173,7 @@ test.describe("machine detail", () => {
 			groupId: group.id,
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		await page.getByRole("link", { name: "This box" }).click();
 		await expect(page).toHaveURL(new RegExp(`/machines/${server.machineId}$`));
 
@@ -176,7 +181,7 @@ test.describe("machine detail", () => {
 			.getByTestId("applications-on-box")
 			.getByRole("link", { name: "round-trip-app" })
 			.click();
-		await expect(page).toHaveURL(new RegExp(`/servers/${server.id}$`));
+		await expect(page).toHaveURL(new RegExp(`/applications/${server.id}$`));
 	});
 
 	/// Backups are taken of a box and an identity speaks for a box, so both are
@@ -198,7 +203,7 @@ test.describe("machine detail", () => {
 			deviceId: device.id,
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		await expect(page.getByRole("heading", { name: "grain-app" })).toBeVisible();
 		await expect(
 			page.getByRole("heading", { name: "Backups" }),
@@ -239,7 +244,7 @@ test.describe("machine detail", () => {
 		// own href: `seedServer` names the box after the workload, so the two
 		// links share a label.
 		await expect(
-			page.locator(`a[href="/servers/${server.id}"]`),
+			page.locator(`a[href="/applications/${server.id}"]`),
 		).toBeVisible();
 
 		await page.getByRole("link", { name: "tree-empty-box" }).click();
@@ -348,7 +353,7 @@ test.describe("machine detail", () => {
 			message: "Behind the release train",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 
 		// Both are here, and only the box's is marked as the box's.
 		await expect(page.getByText("disk_free")).toBeVisible();
@@ -383,7 +388,7 @@ test.describe("machine detail", () => {
 			message: "Disk nearly full",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 
 		// The scopes offered are the box's, not the workload's: this check is
 		// filed against the box.

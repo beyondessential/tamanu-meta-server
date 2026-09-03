@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 
 use axum::Json;
 use axum::extract::State;
@@ -99,7 +99,7 @@ pub struct ServerStatusData {
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(summary))
-		.routes(routes!(server_grouped_ids))
+		.routes(routes!(group_ids))
 		.routes(routes!(group_details))
 		.routes(routes!(snapshot))
 		.routes(routes!(check_detail))
@@ -145,46 +145,42 @@ pub async fn summary(State(state): State<AppState>) -> Result<Json<SummaryData>>
 	}))
 }
 
-/// List server group ids, bucketed by rank.
+/// List the server group ids the status page shows, ordered by name.
 ///
-/// Each group is bucketed under the highest rank held by any of its member
-/// applications (production outranks clone, which outranks demo, then test,
-/// then dev). Groups whose members are all unranked are omitted entirely.
-/// Within each rank bucket, groups are ordered alphabetically by name.
+/// Alphabetical, because the card carries its own ranks: a rank row per rank,
+/// each labelled. Ordering the cards by rank as well would sort the page by
+/// something already written on every card, and leave an operator looking for
+/// one group scanning for where its rank happens to start. A name is what they
+/// know it by.
+///
+/// A group with no ranked member at all is omitted, as it always has been:
+/// nothing in it has a place in the fleet's promotion order yet.
+// spec: CHK#presentation
 #[utoipa::path(
 	post,
-	path = "/server_grouped_ids",
+	path = "/group_ids",
 	tag = "statuses",
 	responses(
-		(status = 200, description = "Application group IDs grouped by highest-ranked member's rank.", body = BTreeMap<ServerRank, Vec<Uuid>>),
+		(status = 200, description = "Application group IDs, ordered by group name.", body = Vec<Uuid>),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
-pub async fn server_grouped_ids(
-	State(state): State<AppState>,
-) -> Result<Json<BTreeMap<ServerRank, Vec<Uuid>>>> {
+pub async fn group_ids(State(state): State<AppState>) -> Result<Json<Vec<Uuid>>> {
 	let mut conn = state.db_read.get().await?;
 	let groups = ServerGroup::list_all(&mut conn).await?;
 	if groups.is_empty() {
-		return Ok(Json(BTreeMap::new()));
+		return Ok(Json(Vec::new()));
 	}
-	let group_ids: Vec<Uuid> = groups.iter().map(|g| g.id).collect();
-	let top_rank = ServerGroup::highest_member_ranks(&mut conn, &group_ids).await?;
+	let all: Vec<Uuid> = groups.iter().map(|g| g.id).collect();
+	let top_rank = ServerGroup::highest_member_ranks(&mut conn, &all).await?;
 
-	let mut by_rank: BTreeMap<ServerRank, Vec<(String, Uuid)>> = BTreeMap::new();
-	for g in groups {
-		if let Some(rank) = top_rank.get(&g.id) {
-			by_rank.entry(*rank).or_default().push((g.name, g.id));
-		}
-	}
-	let map: BTreeMap<ServerRank, Vec<Uuid>> = by_rank
+	let mut ranked: Vec<(String, Uuid)> = groups
 		.into_iter()
-		.map(|(rank, mut list)| {
-			list.sort_by(|a, b| a.0.cmp(&b.0));
-			(rank, list.into_iter().map(|(_, id)| id).collect())
-		})
+		.filter(|g| top_rank.contains_key(&g.id))
+		.map(|g| (g.name, g.id))
 		.collect();
-	Ok(Json(map))
+	ranked.sort_by(|a, b| a.0.cmp(&b.0));
+	Ok(Json(ranked.into_iter().map(|(_, id)| id).collect()))
 }
 
 /// Identifies the server group whose status details to fetch.

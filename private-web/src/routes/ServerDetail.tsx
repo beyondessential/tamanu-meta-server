@@ -21,6 +21,7 @@ import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
 import { useState } from "react";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import ActionButton from "../components/ActionButton";
+import ActiveIncidentCard from "../components/ActiveIncidentCard";
 import { ChecksTable, HealthIndicator } from "../components/ChecksTable";
 import IncidentsLink from "../components/IncidentsLink";
 import ManualEventButton from "../components/ManualEventButton";
@@ -57,7 +58,7 @@ import {
 export default function ServerDetail() {
 	const { id = "" } = useParams<{ id: string }>();
 	const detail = useApi(
-		"servers",
+		"applications",
 		"get_detail",
 		{ server_id: id },
 		[id],
@@ -82,6 +83,12 @@ export default function ServerDetail() {
 	);
 	const hasOpenIncident =
 		openIncidents.status === "ok" && openIncidents.data.length > 0;
+	// The group's open incident, called out above the page rather than left to
+	// a coloured button in the action row.
+	const openIncident =
+		openIncidents.status === "ok" && openIncidents.data.length > 0
+			? openIncidents.data[0]
+			: null;
 	usePageTitle(
 		detail.status === "ok"
 			? applicationName(detail.data.server)
@@ -109,6 +116,12 @@ export default function ServerDetail() {
 				onEventSubmitted={bumpRefresh}
 				onArchived={() => detail.reload()}
 			/>
+			{openIncident && (
+				<ActiveIncidentCard
+					incident={openIncident}
+					groupName={data.group?.name ?? null}
+				/>
+			)}
 			{archived ? (
 				<ArchivedBanner
 					serverId={data.server.id}
@@ -267,7 +280,7 @@ function Header({
 					/>
 				)}
 				<IncidentsLink
-					serverId={data.server.id}
+					applicationId={data.server.id}
 					groupId={data.group?.id ?? null}
 					refreshKey={refreshTick}
 				/>
@@ -314,7 +327,7 @@ function DeleteServerButton({
 	onArchived: () => void;
 }) {
 	const navigate = useNavigate();
-	const action = useApiAction("servers", "delete");
+	const action = useApiAction("applications", "delete");
 	const [open, setOpen] = useState(false);
 
 	const onConfirm = async () => {
@@ -379,7 +392,7 @@ function ArchivedBanner({
 	isAdmin: boolean;
 	onRestored: () => void;
 }) {
-	const action = useApiAction("servers", "restore");
+	const action = useApiAction("applications", "restore");
 	const onRestore = async () => {
 		try {
 			await action.call({ server_id: serverId });

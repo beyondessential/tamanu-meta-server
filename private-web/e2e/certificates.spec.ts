@@ -24,7 +24,7 @@ test.describe("server names and certificates", () => {
 		sql,
 	}) => {
 		const server = await seedServer(sql, { name: "plain" });
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		// Wait for the page proper before asserting an absence, or the assertion
 		// would pass against a page that simply had not loaded.
 		await expect(
@@ -62,7 +62,7 @@ test.describe("server names and certificates", () => {
 			lastError: "route53 refused the change",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		const panel = page
 			.getByRole("heading", { name: "Names and certificates" })
 			.locator("xpath=ancestor::div[contains(@class,'MuiPaper-root')][1]");
@@ -103,7 +103,7 @@ test.describe("server names and certificates", () => {
 			expiresInDays: 80,
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		const panel = page
 			.getByRole("heading", { name: "Names and certificates" })
 			.locator("xpath=ancestor::div[contains(@class,'MuiPaper-root')][1]");
@@ -144,7 +144,7 @@ test.describe("server names and certificates", () => {
 			expiresInDays: 2,
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		const panel = page
 			.getByRole("heading", { name: "Names and certificates" })
 			.locator("xpath=ancestor::div[contains(@class,'MuiPaper-root')][1]");
@@ -175,7 +175,7 @@ test.describe("server names and certificates", () => {
 			lastError: "the authority did not validate the name",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		const panel = page
 			.getByRole("heading", { name: "Names and certificates" })
 			.locator("xpath=ancestor::div[contains(@class,'MuiPaper-root')][1]");
@@ -201,7 +201,7 @@ test.describe("server names and certificates", () => {
 			mayManageTls: true,
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		const picker = page.getByLabel("Certificate lifetime");
 		await expect(picker).toBeVisible();
 		// The default is the authority's own, which is its longest-lived: a short
@@ -245,7 +245,7 @@ test.describe("server names and certificates", () => {
 			name: "a.fiji.tamanu.app",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		await page.getByRole("button", { name: "Pause" }).click();
 		await page
 			.getByLabel("Reason")
@@ -290,7 +290,7 @@ test.describe("server names and certificates", () => {
 			name: "leaked.fiji.tamanu.app",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		await page.getByRole("button", { name: "Revoke" }).click();
 
 		await expect(

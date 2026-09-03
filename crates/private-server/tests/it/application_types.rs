@@ -99,7 +99,7 @@ async fn detail_billing_labels_are_the_servers_own() {
 			.to_string();
 
 		let response = private
-			.post("/api/servers/get_detail")
+			.post("/api/applications/get_detail")
 			.json(&json!({ "server_id": lims_id }))
 			.await;
 		response.assert_status_ok();

@@ -32,7 +32,7 @@ async fn a_blank_url_clears_it_rather_than_storing_an_empty_one() {
 		let id = seed(&mut conn, "https://original.example.com").await;
 
 		private
-			.post("/api/servers/update")
+			.post("/api/applications/update")
 			.json(&json!({ "server_id": id, "data": { "host": "  " } }))
 			.await
 			.assert_status_ok();
@@ -52,7 +52,7 @@ async fn a_schemeless_url_is_read_as_https() {
 		let id = seed(&mut conn, "").await;
 
 		private
-			.post("/api/servers/update")
+			.post("/api/applications/update")
 			.json(&json!({ "server_id": id, "data": { "host": "foo.example.com" } }))
 			.await
 			.assert_status_ok();

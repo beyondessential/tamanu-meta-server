@@ -144,7 +144,7 @@ function applicationRow(application: FleetServerDetailData): Row {
 		id: application.server_id,
 		name: application.server_name || application.server_id,
 		machineId: application.machine_id,
-		href: `/servers/${application.server_id}`,
+		href: `/applications/${application.server_id}`,
 		type: application.type,
 		detail: (application.detail ?? {}) as Record<string, unknown>,
 		checks: (application.checks ?? {}) as Row["checks"],

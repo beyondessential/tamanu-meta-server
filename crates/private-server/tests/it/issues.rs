@@ -226,7 +226,7 @@ async fn assigning_group_opens_pending_incident() {
 
 		// Assign the server to a group: open issue should now have an incident.
 		let resp = private
-			.post("/api/servers/update")
+			.post("/api/applications/update")
 			.json(&serde_json::json!({
 				"server_id": server_id,
 				"data": { "group_id": group_id }
@@ -832,7 +832,7 @@ async fn enabling_monitoring_opens_pending_incident() {
 
 		// Flip monitoring on: the open issue should be promoted.
 		let resp = private
-			.post("/api/servers/update")
+			.post("/api/applications/update")
 			.json(&serde_json::json!({
 				"server_id": server_id,
 				"data": { "is_monitored": true },
@@ -869,7 +869,7 @@ async fn disabling_monitoring_removes_open_contribution() {
 
 		// Flip monitoring off: the lone contributor leaves, incident closes.
 		let resp = private
-			.post("/api/servers/update")
+			.post("/api/applications/update")
 			.json(&serde_json::json!({
 				"server_id": server_id,
 				"data": { "is_monitored": false },

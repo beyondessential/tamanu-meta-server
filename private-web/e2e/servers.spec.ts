@@ -59,7 +59,7 @@ test.describe("server detail page", () => {
 			groupId: group.id,
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 
 		// The page renders two h1s (app bar "Canopy" + page heading);
 		// scope to the heading whose accessible name includes the server
@@ -80,7 +80,7 @@ test.describe("server detail page", () => {
 	});
 
 	test("nonexistent UUID surfaces an error alert", async ({ page }) => {
-		await page.goto("/servers/00000000-0000-0000-0000-000000000000");
+		await page.goto("/applications/00000000-0000-0000-0000-000000000000");
 		await expect(page.getByRole("alert")).toBeVisible();
 	});
 });
@@ -99,7 +99,7 @@ test.describe("server edit page", () => {
 			type: "tamanu-central",
 		});
 
-		await page.goto(`/servers/${server.id}/edit`);
+		await page.goto(`/applications/${server.id}/edit`);
 
 		// The label carries a required-field asterisk ("Name *"), and the central
 		// edit form also has a "Name in Tamanu Mobile app" field — so match "Name"
@@ -118,14 +118,14 @@ test.describe("server edit page", () => {
 			groupId: group.id,
 		});
 
-		await page.goto(`/servers/${server.id}/edit`);
+		await page.goto(`/applications/${server.id}/edit`);
 
 		const nameField = page.getByLabel(/^Name(\s*\*)?$/i);
 		await nameField.fill("edit-save-renamed");
 		await page.getByRole("button", { name: /^save$/i }).click();
 
 		// Save navigates to the detail page.
-		await page.waitForURL(`**/servers/${server.id}`);
+		await page.waitForURL(`**/applications/${server.id}`);
 
 		const rows = await sql.query<{ name: string }>(
 			"SELECT name FROM applications WHERE id = $1",
@@ -143,7 +143,7 @@ test.describe("server edit page", () => {
 			deviceId: device.id,
 		});
 
-		await page.goto(`/servers/${server.id}/edit`);
+		await page.goto(`/applications/${server.id}/edit`);
 		await expect(page.getByLabel(/^Name(\s*\*)?$/i)).toHaveValue(server.name);
 		await expect(page.getByLabel(/device/i)).toHaveCount(0);
 	});
@@ -298,7 +298,7 @@ test.describe("server create → setup → archive flow", () => {
 			name: "flow-server",
 			groupId: group.id,
 		});
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		await expect(
 			page.getByRole("heading", { level: 1, name: /flow-server/ }),
 		).toBeVisible();

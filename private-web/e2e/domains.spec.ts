@@ -147,13 +147,13 @@ test.describe("server name-management permissions", () => {
 		// Nothing granted: the row says nothing worth a line. "Not permitted" on
 		// every server in the fleet advertises a feature a deployment without DNS
 		// zones does not have.
-		await page.goto(`/servers/${plain.id}`);
+		await page.goto(`/applications/${plain.id}`);
 		await expect(
 			page.getByRole("heading", { level: 1, name: /unpermitted/ }),
 		).toBeVisible();
 		await expect(page.getByText("Name management")).toHaveCount(0);
 
-		await page.goto(`/servers/${granted.id}`);
+		await page.goto(`/applications/${granted.id}`);
 		await expect(page.getByText("Name management")).toBeVisible();
 		await expect(page.getByText("DNS and TLS")).toBeVisible();
 	});
@@ -165,7 +165,7 @@ test.describe("server name-management permissions", () => {
 		const group = await seedServerGroup(sql, { name: "domainless" });
 		const server = await seedServer(sql, { name: "central", groupId: group.id });
 
-		await page.goto(`/servers/${server.id}/edit`);
+		await page.goto(`/applications/${server.id}/edit`);
 		await expect(
 			page.getByRole("heading", { name: "Edit server" }),
 		).toBeVisible();
@@ -194,7 +194,7 @@ test.describe("server name-management permissions", () => {
 			name: "grantee",
 			groupId: group.id,
 		});
-		await page.goto(`/servers/${server.id}/edit`);
+		await page.goto(`/applications/${server.id}/edit`);
 
 		// The domain the group controls is named, so an operator can see what the
 		// grant would cover.
@@ -208,7 +208,7 @@ test.describe("server name-management permissions", () => {
 		await expect(page.getByText("DNS only")).toBeVisible();
 
 		// And the other grant is independent of it.
-		await page.goto(`/servers/${server.id}/edit`);
+		await page.goto(`/applications/${server.id}/edit`);
 		await expect(
 			page.getByLabel("May manage its own DNS records"),
 		).toBeChecked();
@@ -240,7 +240,7 @@ test.describe("server name-management permissions", () => {
 			}),
 		);
 
-		await page.goto(`/servers/${server.id}/edit`);
+		await page.goto(`/applications/${server.id}/edit`);
 		await expect(
 			page.getByRole("heading", { name: "Edit server" }),
 		).toBeVisible();
@@ -269,7 +269,7 @@ test.describe("server name-management permissions", () => {
 			}),
 		);
 
-		await page.goto(`/servers/${server.id}/edit`);
+		await page.goto(`/applications/${server.id}/edit`);
 		// Hiding it would strand a grant with no way to withdraw it.
 		const dns = page.getByLabel("May manage its own DNS records");
 		await expect(dns).toBeChecked();

@@ -41,7 +41,7 @@ test.describe("maintenance windows", () => {
 			declaredBy: "daniel@bes.au",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		const section = page.getByTestId("maintenance-section");
 		await expect(section).toContainText("Under maintenance, ending");
 		await expect(section).toContainText("Upgrading to 2.62");
@@ -61,7 +61,7 @@ test.describe("maintenance windows", () => {
 		});
 		await seedStatus(sql, { serverId: server.id, healthy: true });
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		await page.getByRole("button", { name: "Declare maintenance" }).click();
 		await page.getByLabel("What's being done").fill("Swapping the disk");
 		await page.getByRole("button", { name: "Declare", exact: true }).click();
@@ -78,7 +78,7 @@ test.describe("maintenance windows", () => {
 		await seedStatus(sql, { serverId: server.id, healthy: true });
 		await seedMaintenanceWindow(sql, { machineId: server.machineId, note: "Rebooting" });
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		await page.getByRole("button", { name: "Lift" }).click();
 
 		await expect(
@@ -102,7 +102,7 @@ test.describe("maintenance windows", () => {
 			note: "Cutting over the database",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		const covering = page.getByTestId("covering-group-window");
 		await expect(covering).toContainText("Under maintenance, ending");
 		await expect(covering).toContainText("Cutting over the database");
@@ -133,7 +133,7 @@ test.describe("maintenance windows", () => {
 			note: "Rebooted",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		await expect(page.getByTestId("maintenance-marker")).toContainText(
 			"Maintenance just ended",
 		);
@@ -209,7 +209,7 @@ test.describe("maintenance windows", () => {
 			note: "Rebooting",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		await page.getByRole("button", { name: "Amend" }).click();
 		await expect(
 			page.getByRole("heading", { name: /Amend maintenance/ }),
@@ -353,7 +353,7 @@ test.describe("maintenance windows", () => {
 			note: "Cutting over the database",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/applications/${server.id}`);
 		await expect(
 			page.getByTestId("check-maintenance-skip"),
 		).toContainText("skipped: under maintenance");

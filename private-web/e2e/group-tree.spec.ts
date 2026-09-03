@@ -50,7 +50,7 @@ test.describe("the group's tree on the detail pages", () => {
 	}) => {
 		const { shared, centralId, facilityId, solo } = await seedTree(sql);
 
-		await page.goto(`/servers/${centralId}`);
+		await page.goto(`/applications/${centralId}`);
 
 		const tree = page.getByTestId("group-tree");
 		await expect(tree).toBeVisible();
@@ -64,13 +64,13 @@ test.describe("the group's tree on the detail pages", () => {
 
 		// The workload sharing its box, and the one on the other box, are named
 		// and linked.
-		await expect(tree.locator(`a[href="/servers/${facilityId}"]`)).toBeVisible();
-		await expect(tree.locator(`a[href="/servers/${solo.id}"]`)).toBeVisible();
+		await expect(tree.locator(`a[href="/applications/${facilityId}"]`)).toBeVisible();
+		await expect(tree.locator(`a[href="/applications/${solo.id}"]`)).toBeVisible();
 
 		// This page is in the tree, but marked in place rather than linking back
 		// to where the operator already is.
 		await expect(tree.getByText("central-on-shared")).toBeVisible();
-		await expect(tree.locator(`a[href="/servers/${centralId}"]`)).toHaveCount(0);
+		await expect(tree.locator(`a[href="/applications/${centralId}"]`)).toHaveCount(0);
 	});
 
 	test("the machine page ends with the same tree, marking itself in place", async ({
@@ -85,9 +85,9 @@ test.describe("the group's tree on the detail pages", () => {
 		await expect(tree).toBeVisible();
 
 		// Both workloads on this box, and the workload on the other one.
-		await expect(tree.locator(`a[href="/servers/${centralId}"]`)).toBeVisible();
-		await expect(tree.locator(`a[href="/servers/${facilityId}"]`)).toBeVisible();
-		await expect(tree.locator(`a[href="/servers/${solo.id}"]`)).toBeVisible();
+		await expect(tree.locator(`a[href="/applications/${centralId}"]`)).toBeVisible();
+		await expect(tree.locator(`a[href="/applications/${facilityId}"]`)).toBeVisible();
+		await expect(tree.locator(`a[href="/applications/${solo.id}"]`)).toBeVisible();
 
 		// The other box links; this one is named without linking back.
 		await expect(
@@ -110,7 +110,7 @@ test.describe("the group's tree on the detail pages", () => {
 	}) => {
 		const { shared, centralId } = await seedTree(sql);
 
-		await page.goto(`/servers/${centralId}`);
+		await page.goto(`/applications/${centralId}`);
 		await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 		await expect(
 			page

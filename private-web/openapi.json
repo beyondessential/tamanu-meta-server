@@ -163,6 +163,322 @@
         ]
       }
     },
+    "/api/applications/delete": {
+      "post": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Archive (soft-delete) a server.",
+        "description": "Releases and demotes its device. Archived applications no longer appear in\nregular listings but can be restored later.",
+        "operationId": "delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdOnlyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/applications/get_detail": {
+      "post": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Get full detail for a server.",
+        "description": "Returns the server's record, its bound device (if any), its most recent\nstatus report, current reachability/health, its group (if any) together\nwith the group's whole membership for the tree the page ends with, and the\ngroup's billing labels.\nReturns 404 if no server exists with that id.",
+        "operationId": "get_detail",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerDetailData"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/applications/get_info": {
+      "post": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Get a server's basic record.",
+        "description": "Returns identity, classification, and configuration for a single server,\nincluding its group name where applicable. Does not include current\nreachability/health or device/group detail — use the detail endpoint for\nthat. Returns 404 if no server exists with that id.",
+        "operationId": "get_info",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/applications/get_name": {
+      "post": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Get a server's display name.",
+        "description": "Returns the server's name if set, else its stored host, else its id —\nalways a non-empty string suitable for display. Returns 404 if no server\nexists with that id.",
+        "operationId": "get_name",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/applications/list_archived": {
+      "post": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "List archived (soft-deleted) applications.",
+        "description": "Each entry has `archived: true` and includes current reachability/health.\nArchived applications can be brought back with the restore endpoint.",
+        "operationId": "list_archived",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServerInfo"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/applications/list_some": {
+      "post": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "List applications, optionally filtered by kind, paginated.",
+        "description": "Returns a page of applications plus the total matching count. Entries include\ntheir group name where applicable, but not current reachability/health —\nuse the detail endpoint for that.",
+        "operationId": "list_some",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerListArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ServerInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/applications/restore": {
+      "post": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Un-archive a server.",
+        "description": "Restores a previously archived server to regular listings. Its machine\nmust re-enroll afterwards to rebind a device. Restoring a server that\nisn't archived has no effect.",
+        "operationId": "restore",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdOnlyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/applications/update": {
+      "post": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Update a server's fields.",
+        "description": "Applies a partial update — only the fields present in `data` are\nchanged. Moving a previously-ungrouped server into a group, or toggling\n`is_monitored`, re-evaluates the server's open issues so incidents catch\nup with the new state. Returns 400 if the update is rejected (e.g. an\ninvalid host value, or a role the target product doesn't define).",
+        "operationId": "server_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerUpdateArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
     "/api/backups/allow_restore": {
       "post": {
         "tags": [
@@ -6266,322 +6582,6 @@
         ]
       }
     },
-    "/api/servers/delete": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "Archive (soft-delete) a server.",
-        "description": "Releases and demotes its device. Archived applications no longer appear in\nregular listings but can be restored later.",
-        "operationId": "delete",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerIdOnlyArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": ""
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/servers/get_detail": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "Get full detail for a server.",
-        "description": "Returns the server's record, its bound device (if any), its most recent\nstatus report, current reachability/health, its group (if any) together\nwith the group's whole membership for the tree the page ends with, and the\ngroup's billing labels.\nReturns 404 if no server exists with that id.",
-        "operationId": "get_detail",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ServerDetailData"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/servers/get_info": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "Get a server's basic record.",
-        "description": "Returns identity, classification, and configuration for a single server,\nincluding its group name where applicable. Does not include current\nreachability/health or device/group detail — use the detail endpoint for\nthat. Returns 404 if no server exists with that id.",
-        "operationId": "get_info",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ServerInfo"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/servers/get_name": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "Get a server's display name.",
-        "description": "Returns the server's name if set, else its stored host, else its id —\nalways a non-empty string suitable for display. Returns 404 if no server\nexists with that id.",
-        "operationId": "get_name",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/servers/list_archived": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "List archived (soft-deleted) applications.",
-        "description": "Each entry has `archived: true` and includes current reachability/health.\nArchived applications can be brought back with the restore endpoint.",
-        "operationId": "list_archived",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {}
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ServerInfo"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/servers/list_some": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "List applications, optionally filtered by kind, paginated.",
-        "description": "Returns a page of applications plus the total matching count. Entries include\ntheir group name where applicable, but not current reachability/health —\nuse the detail endpoint for that.",
-        "operationId": "list_some",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerListArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Page_ServerInfo"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/servers/restore": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "Un-archive a server.",
-        "description": "Restores a previously archived server to regular listings. Its machine\nmust re-enroll afterwards to rebind a device. Restoring a server that\nisn't archived has no effect.",
-        "operationId": "restore",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerIdOnlyArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": ""
-          },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/servers/update": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "Update a server's fields.",
-        "description": "Applies a partial update — only the fields present in `data` are\nchanged. Moving a previously-ungrouped server into a group, or toggling\n`is_monitored`, re-evaluates the server's open issues so incidents catch\nup with the new state. Returns 400 if the update is rejected (e.g. an\ninvalid host value, or a role the target product doesn't define).",
-        "operationId": "server_update",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerUpdateArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": ""
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
     "/api/silenced_refs/list_for_group": {
       "post": {
         "tags": [
@@ -7225,38 +7225,24 @@
         }
       }
     },
-    "/api/statuses/server_grouped_ids": {
+    "/api/statuses/group_ids": {
       "post": {
         "tags": [
           "statuses"
         ],
-        "summary": "List server group ids, bucketed by rank.",
-        "description": "Each group is bucketed under the highest rank held by any of its member\napplications (production outranks clone, which outranks demo, then test,\nthen dev). Groups whose members are all unranked are omitted entirely.\nWithin each rank bucket, groups are ordered alphabetically by name.",
-        "operationId": "server_grouped_ids",
+        "summary": "List the server group ids the status page shows, ordered by name.",
+        "description": "Alphabetical, because the card carries its own ranks: a rank row per rank,\neach labelled. Ordering the cards by rank as well would sort the page by\nsomething already written on every card, and leave an operator looking for\none group scanning for where its rank happens to start. A name is what they\nknow it by.\n\nA group with no ranked member at all is omitted, as it always has been:\nnothing in it has a place in the fleet's promotion order yet.",
+        "operationId": "group_ids",
         "responses": {
           "200": {
-            "description": "Application group IDs grouped by highest-ranked member's rank.",
+            "description": "Application group IDs, ordered by group name.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "format": "uuid"
-                    }
-                  },
-                  "propertyNames": {
+                  "type": "array",
+                  "items": {
                     "type": "string",
-                    "description": "The environment tier of a server, from `production` down to `dev`.",
-                    "enum": [
-                      "production",
-                      "clone",
-                      "demo",
-                      "test",
-                      "dev"
-                    ]
+                    "format": "uuid"
                   }
                 }
               }
@@ -10975,15 +10961,26 @@
       },
       "GroupMachine": {
         "type": "object",
-        "description": "One of a group's machines, as an operator picks it out of a list.",
+        "description": "One of a group's machines, as an operator picks it out of a list.\n\nCarries the box's own state as well as its name, because the group tree\ndraws each machine as an enclosure around the applications on it and an\nenclosure with nothing to say is a decoration. A box whose own checks are\nfailing while its workloads are fine is a state only this can show.",
         "required": [
-          "id"
+          "id",
+          "up",
+          "health",
+          "maintained"
         ],
         "properties": {
+          "health": {
+            "$ref": "#/components/schemas/HealthState",
+            "description": "The box's own health, from the checks filed against it. What the\napplications on it make of their own checks is each application's."
+          },
           "id": {
             "type": "string",
             "format": "uuid",
             "description": "Unique identifier of the machine."
+          },
+          "maintained": {
+            "type": "boolean",
+            "description": "Whether a maintenance window suspends this box, its own or its group's."
           },
           "name": {
             "type": [
@@ -10991,6 +10988,17 @@
               "null"
             ],
             "description": "The operator-assigned name, where it has one."
+          },
+          "platform": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The platform the box reports, where it reports one. The one machine\nfigure the tree shows: it is what distinguishes two otherwise\nidentical rows."
+          },
+          "up": {
+            "$ref": "#/components/schemas/ShortStatus",
+            "description": "Whether the box is reachable, judged against its own threshold."
           }
         }
       },
@@ -15923,6 +15931,13 @@
                 "description": "The server's most recently reported status, if it has ever reported one."
               }
             ]
+          },
+          "machine_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name of the box this application runs on, where it has one.\n\nThe page names its machine in the heading, so it needs the name and not\nonly the id `server.machine_id` carries — and it needs it whether or\nnot the application is grouped, which is why it is not read out of\n`group_machines`."
           },
           "maintained": {
             "type": "boolean",

@@ -105,14 +105,14 @@ test.describe("the reachability alerting switch, on both forms", () => {
 			ref: "reachability",
 		});
 
-		await page.goto(`/servers/${server.id}/edit`);
+		await page.goto(`/applications/${server.id}/edit`);
 		// The switch reads the silence, so the form doesn't quietly write the
 		// operator's earlier decision away on the next unrelated save.
 		await expect(page.getByLabel(SWITCH)).not.toBeChecked();
 
 		await page.getByLabel(SWITCH).check();
 		await page.getByRole("button", { name: /^save$/i }).click();
-		await page.waitForURL(`**/servers/${server.id}`);
+		await page.waitForURL(`**/applications/${server.id}`);
 
 		expect(await reachabilitySilences(sql, server.id)).toBe(0);
 	});
@@ -131,11 +131,11 @@ test.describe("the reachability alerting switch, on both forms", () => {
 		});
 		await seedStatus(sql, { serverId: server.id, healthy: true });
 
-		await page.goto(`/servers/${server.id}/edit`);
+		await page.goto(`/applications/${server.id}/edit`);
 		await expect(page.getByLabel(SWITCH)).toBeChecked();
 		await page.getByLabel(SWITCH).uncheck();
 		await page.getByRole("button", { name: /^save$/i }).click();
-		await page.waitForURL(`**/servers/${server.id}`);
+		await page.waitForURL(`**/applications/${server.id}`);
 
 		expect(await reachabilitySilences(sql, server.id)).toBe(1);
 		// And the check itself now shows as silenced, so the two surfaces agree.
@@ -153,11 +153,11 @@ test.describe("the reachability alerting switch, on both forms", () => {
 			groupId: group.id,
 		});
 
-		await page.goto(`/servers/${server.id}/edit`);
+		await page.goto(`/applications/${server.id}/edit`);
 		await expect(page.getByLabel(BOX_SWITCH)).toBeChecked();
 		await page.getByLabel(BOX_SWITCH).uncheck();
 		await page.getByRole("button", { name: /^save$/i }).click();
-		await page.waitForURL(`**/servers/${server.id}`);
+		await page.waitForURL(`**/applications/${server.id}`);
 
 		// The box is quiet, and the application it carries is not: each grain
 		// has its own reachability and its own switch.
@@ -185,11 +185,11 @@ test.describe("the reachability alerting switch, on both forms", () => {
 			groupId: group.id,
 		});
 
-		await page.goto(`/servers/${server.id}/edit`);
+		await page.goto(`/applications/${server.id}/edit`);
 		await expect(page.getByLabel(SWITCH)).toBeChecked();
 		await page.getByLabel(SWITCH).uncheck();
 		await page.getByRole("button", { name: /^save$/i }).click();
-		await page.waitForURL(`**/servers/${server.id}`);
+		await page.waitForURL(`**/applications/${server.id}`);
 
 		expect(await reachabilitySilences(sql, server.id)).toBe(1);
 		expect(await machineReachabilitySilences(sql, server.machineId)).toBe(0);
@@ -210,10 +210,10 @@ test.describe("the reachability alerting switch, on both forms", () => {
 			ref: "reachability",
 		});
 
-		await page.goto(`/servers/${server.id}/edit`);
+		await page.goto(`/applications/${server.id}/edit`);
 		await page.getByLabel(/^Name(\s*\*)?$/i).fill("leave-me-be-renamed");
 		await page.getByRole("button", { name: /^save$/i }).click();
-		await page.waitForURL(`**/servers/${server.id}`);
+		await page.waitForURL(`**/applications/${server.id}`);
 
 		expect(await reachabilitySilences(sql, server.id)).toBe(1);
 	});

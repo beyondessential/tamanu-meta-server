@@ -31,7 +31,12 @@ test.describe("status page", () => {
 		await expect(page.getByText(/no server groups configured/i)).toBeVisible();
 	});
 
-	test("groups by rank bucket and links to each group's detail page", async ({
+	/// One grid, alphabetical. Each card carries its own ranks in its dot strip,
+	/// so ordering the page by rank as well sorts it by something already
+	/// written on every card.
+	///
+	/// spec: CHK#presentation
+	test("orders cards by name rather than by rank, and links each to its group", async ({
 		page,
 		sql,
 	}) => {
@@ -55,13 +60,13 @@ test.describe("status page", () => {
 
 		await page.goto("/status");
 
-		// Rank section headings.
+		// No rank sections: the rank reads off each card's own rows.
 		await expect(
 			page.getByRole("heading", { name: "production", exact: true }),
-		).toBeVisible();
+		).toHaveCount(0);
 		await expect(
 			page.getByRole("heading", { name: "demo", exact: true }),
-		).toBeVisible();
+		).toHaveCount(0);
 
 		// Group names render as h3 inside each card.
 		await expect(
@@ -75,6 +80,18 @@ test.describe("status page", () => {
 		await expect(
 			page.locator(`a[href="/groups/${prodGroup.id}"]`),
 		).toBeVisible();
+
+		// Alphabetical, so demo-cluster leads prod-cluster despite ranking
+		// below it.
+		const cards = page.locator('a[href^="/groups/"]');
+		await expect(cards.first()).toHaveAttribute(
+			"href",
+			`/groups/${demoGroup.id}`,
+		);
+		await expect(cards.last()).toHaveAttribute(
+			"href",
+			`/groups/${prodGroup.id}`,
+		);
 	});
 
 	test("dot strips wrap and align across a spread of group sizes", async ({
