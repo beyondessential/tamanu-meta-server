@@ -47,7 +47,7 @@ What resolution hides is a fact about how a version was published and an operato
 
 A caller whose credential is bound to a server has that server's group, where the server has one.
 It never names a group and is answered for its own alone, so a server cannot ask what another group is offered.
-A caller carrying no group of its own names the group it asks about and is answered for a group it is authorised for: an operator for any group, and a restore consumer for the groups its enabled declarations cover (see [RST](../public-server/restore-replicas.md)).
+A caller carrying no group of its own names the group it asks about and is answered for a group it is authorised for: an operator for any group, and a component that produces or applies a group's artifacts for that group, as defined with those artifacts.
 A read carrying no identity, or naming no group, is answered with the unscoped artifacts alone, so giving an artifact a group narrows who is offered it rather than widening what an open path serves.
 A group-scoped artifact's existence is disclosed only to a caller it is offered to: a caller that names or guesses one it is not offered is answered as though it did not exist, so which groups hold one is not enumerable through the artifact surface.
 Canopy passes a group-scoped artifact's bytes only to a caller it is offered to.
@@ -58,8 +58,8 @@ A registration names the version or range, the type, the platform, the location,
 The group is named on the registration rather than inferred from the caller.
 
 A releaser device registers unscoped artifacts, and carries no authorisation for any group.
-A restore consumer registers artifacts scoped to a group only under an enabled declaration for that group whose intent publishes artifacts (see [RST](../public-server/restore-replicas.md)), and a consumer whose declarations only restore registers nothing.
 An operator registers either.
+A component that produces a group-scoped artifact registers it for that group under an authorisation defined with that artifact, and is authorised for no other.
 A registration naming a group the caller is not authorised for is refused.
 Credentials for writing into a group's storage are issued on the same authorisation, so a caller that may not register for a group cannot publish into it either.
 
