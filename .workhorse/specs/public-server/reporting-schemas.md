@@ -95,6 +95,8 @@ Entries are the latest state rather than a queue to drain, and a builder converg
 
 A build publishes what it produced as artefacts of the version it built for, scoped to the group it built from (see [ART](../platform/artifacts.md)): the **reporting schema** itself, the **report definitions** that read from it, the **documentation** describing its views, and the **analytics metadata** derived beside them.
 Canopy records each and interprets only the schema, which is the one a server applies and the one currency is graded on.
+Each is registered under the type a server or operator asks for it by, `reporting-schema`, `report-definitions`, `reporting-docs`, and `analytics-metadata`, on the platform `any`, since none of them is specific to one.
+Each names the build report that produced it, which carries the snapshot it was built from, the server whose configuration it read, and when (see [What a build reports](#what-a-build-reports)).
 
 Publishing is part of the build rather than a step taken afterwards: the builder publishes and registers what it produced in the run it reports, so a schema that exists is one a server can already fetch.
 
