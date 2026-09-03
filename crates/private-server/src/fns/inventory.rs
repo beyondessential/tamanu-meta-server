@@ -24,14 +24,20 @@ use commons_types::{
 use database::{
 	Device,
 	inventory_secret_variables::{InventorySecretVariable, SecretScope},
+	maintenance_windows::MaintenanceWindow,
 	server_groups::ServerGroup,
 	servers::Server,
 };
+use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
 use crate::state::AppState;
+
+/// How long after someone else sets a secret variable a run on the
+/// environment is held off. The same for every environment.
+const SETTINGS_RECENCY: SignedDuration = SignedDuration::from_mins(10);
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new().routes(routes!(for_group))
@@ -178,9 +184,11 @@ async fn resolve_group(
 ///
 /// Refuses a group Canopy does not have, one that has been archived, one
 /// holding several environments with no rank named, a rank with no live
-/// server to configure, and a secret variable whose value cannot be read,
-/// saying which it was: a refusal is a decision to respect, and a caller has to
-/// be able to tell it from Canopy being unreachable.
+/// server to configure, an environment someone else has work under way on (a
+/// maintenance window they declared, or a secret variable they set moments
+/// ago), and a secret variable whose value cannot be read, saying which it
+/// was: a refusal is a decision to respect, and a caller has to be able to
+/// tell it from Canopy being unreachable.
 ///
 /// Requires admin access, the inventory carrying the secret variables' values.
 #[utoipa::path(
@@ -194,7 +202,7 @@ async fn resolve_group(
 		(status = 200, body = InventoryView),
 		(status = 400, description = "Neither or both of the group arguments", body = ProblemDetailsSchema),
 		(status = 404, description = "No such server group", body = ProblemDetailsSchema),
-		(status = 409, description = "Archived, empty, ambiguously named, or spanning environments", body = ProblemDetailsSchema),
+		(status = 409, description = "Archived, empty, ambiguously named, spanning environments, or under someone else's work", body = ProblemDetailsSchema),
 		(status = 502, description = "A secret variable could not be read", body = ProblemDetailsSchema),
 	),
 )]
@@ -263,19 +271,48 @@ pub async fn for_group(
 	let tailnet = Device::tailscale_names_by_ids(&mut conn, &device_ids).await?;
 
 	let server_ids: Vec<Uuid> = servers.iter().map(|server| server.id).collect();
+	let now = Timestamp::now();
+	let login = admin.0.login.as_str();
+
+	let windows = MaintenanceWindow::open_over(&mut conn, group.id, &server_ids).await?;
+	if let Some(window) = windows.iter().find(|window| {
+		window.holds_at(now)
+			&& window
+				.declared_by
+				.as_deref()
+				.is_some_and(|who| who != login)
+	}) {
+		return Err(AppError::Conflict(under_maintenance(
+			&group, &servers, window,
+		)));
+	}
+
+	let environment_declared =
+		InventorySecretVariable::list_for_environment(&mut conn, group.id, rank).await?;
+	let server_declared = InventorySecretVariable::list_for_servers(&mut conn, &server_ids).await?;
+	if let Some(variable) = environment_declared
+		.iter()
+		.chain(server_declared.iter())
+		.find(|variable| {
+			variable.set_by.as_deref().is_some_and(|who| who != login)
+				&& variable.updated_at > now - SETTINGS_RECENCY
+		}) {
+		return Err(AppError::Conflict(recently_changed(
+			&group, &servers, variable,
+		)));
+	}
+
 	let environment_secrets = read_secrets(
 		&state,
 		SecretScope::Environment {
 			group_id: group.id,
 			rank,
 		},
-		&InventorySecretVariable::list_for_environment(&mut conn, group.id, rank).await?,
+		&environment_declared,
 	)
 	.await?;
 	let mut server_secrets: BTreeMap<Uuid, VarMap> = BTreeMap::new();
-	for (server_id, declared) in
-		by_server(InventorySecretVariable::list_for_servers(&mut conn, &server_ids).await?)
-	{
+	for (server_id, declared) in by_server(server_declared) {
 		let read = read_secrets(&state, SecretScope::Server { server_id }, &declared).await?;
 		server_secrets.insert(server_id, read);
 	}
@@ -340,6 +377,49 @@ pub async fn for_group(
 		secret_vars: environment_secret_names,
 		hosts,
 	}))
+}
+
+fn under_maintenance(
+	group: &ServerGroup,
+	servers: &[Server],
+	window: &MaintenanceWindow,
+) -> String {
+	let who = window.declared_by.as_deref().unwrap_or("an operator");
+	let note = window
+		.note
+		.as_deref()
+		.map(|note| format!("; {note}"))
+		.unwrap_or_default();
+	format!(
+		"{} is under maintenance declared by {who} until {}{note}",
+		target(group, servers, window.server_id),
+		window.expected_end.strftime("%Y-%m-%d %H:%M UTC"),
+	)
+}
+
+fn recently_changed(
+	group: &ServerGroup,
+	servers: &[Server],
+	variable: &InventorySecretVariable,
+) -> String {
+	let who = variable.set_by.as_deref().unwrap_or("an operator");
+	format!(
+		"secret variable {:?} on {} was set by {who} at {}; their change may still be under way",
+		variable.name,
+		target(group, servers, variable.server_id),
+		variable.updated_at.strftime("%Y-%m-%d %H:%M UTC"),
+	)
+}
+
+fn target(group: &ServerGroup, servers: &[Server], server_id: Option<Uuid>) -> String {
+	match server_id.and_then(|id| servers.iter().find(|server| server.id == id)) {
+		Some(server) => format!(
+			"server {:?} in group {:?}",
+			server.name.clone().unwrap_or_default(),
+			group.name
+		),
+		None => format!("server group {:?}", group.name),
+	}
 }
 
 fn by_server(

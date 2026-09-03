@@ -523,3 +523,311 @@ async fn refuses_a_request_naming_both_a_group_and_an_identifier() {
 	})
 	.await
 }
+
+async fn declare_window(
+	conn: &mut AsyncPgConnection,
+	column: &str,
+	target: Uuid,
+	declared_by: &str,
+	expected_end: &str,
+) {
+	conn.batch_execute(&format!(
+		"INSERT INTO maintenance_windows ({column}, expected_end, declared_by)
+		 VALUES ('{target}', {expected_end}, '{declared_by}')"
+	))
+	.await
+	.expect("declare window");
+}
+
+/// A window someone else declared over the group is their work under way: the
+/// run is refused and told who holds it.
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_under_a_window_someone_else_declared() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-busy", json!({})).await;
+		insert_server(
+			&mut conn,
+			group,
+			"kamaka-busy-central",
+			"central",
+			None,
+			json!({}),
+		)
+		.await;
+		declare_window(
+			&mut conn,
+			"server_group_id",
+			group,
+			"someone@else",
+			"now() + interval '1 hour'",
+		)
+		.await;
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka-busy" }))
+			.await;
+		response.assert_status_conflict();
+		let detail = response.text();
+		assert!(detail.contains("someone@else"), "{detail}");
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn serves_under_the_readers_own_window() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-mine", json!({})).await;
+		insert_server(
+			&mut conn,
+			group,
+			"kamaka-mine-central",
+			"central",
+			None,
+			json!({}),
+		)
+		.await;
+		declare_window(
+			&mut conn,
+			"server_group_id",
+			group,
+			"admin@localhost",
+			"now() + interval '1 hour'",
+		)
+		.await;
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka-mine" }))
+			.await;
+		response.assert_status_ok();
+	})
+	.await
+}
+
+/// A run acts on the environment as a whole, so a window over one member
+/// refuses all of it.
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_under_a_window_over_a_member() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-member", json!({})).await;
+		let central = insert_server(
+			&mut conn,
+			group,
+			"kamaka-member-central",
+			"central",
+			None,
+			json!({}),
+		)
+		.await;
+		insert_server(
+			&mut conn,
+			group,
+			"kamaka-member-facility",
+			"facility",
+			None,
+			json!({}),
+		)
+		.await;
+		declare_window(
+			&mut conn,
+			"server_id",
+			central,
+			"someone@else",
+			"now() + interval '1 hour'",
+		)
+		.await;
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka-member" }))
+			.await;
+		response.assert_status_conflict();
+		assert!(response.text().contains("kamaka-member-central"));
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ignores_a_window_over_a_server_at_another_rank() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-ranks", json!({})).await;
+		insert_ranked_server(
+			&mut conn,
+			group,
+			"kamaka-prod-central",
+			"central",
+			Some("production"),
+			None,
+			json!({}),
+		)
+		.await;
+		let demo = insert_ranked_server(
+			&mut conn,
+			group,
+			"kamaka-demo-central",
+			"central",
+			Some("demo"),
+			None,
+			json!({}),
+		)
+		.await;
+		declare_window(
+			&mut conn,
+			"server_id",
+			demo,
+			"someone@else",
+			"now() + interval '1 hour'",
+		)
+		.await;
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka-ranks", "rank": "production" }))
+			.await;
+		response.assert_status_ok();
+	})
+	.await
+}
+
+/// A window past its expected end has stopped holding whether or not the sweep
+/// has stamped it yet.
+#[tokio::test(flavor = "multi_thread")]
+async fn serves_once_a_window_has_passed_its_end() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-done", json!({})).await;
+		insert_server(
+			&mut conn,
+			group,
+			"kamaka-done-central",
+			"central",
+			None,
+			json!({}),
+		)
+		.await;
+		declare_window(
+			&mut conn,
+			"server_group_id",
+			group,
+			"someone@else",
+			"now() - interval '1 minute'",
+		)
+		.await;
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka-done" }))
+			.await;
+		response.assert_status_ok();
+	})
+	.await
+}
+
+/// A secret variable someone else set moments ago is their change still under
+/// way, and the refusal names it before any value is read.
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_after_someone_else_set_a_secret_variable() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-fresh", json!({})).await;
+		insert_server(
+			&mut conn,
+			group,
+			"kamaka-fresh-central",
+			"central",
+			None,
+			json!({}),
+		)
+		.await;
+		conn.batch_execute(&format!(
+			"INSERT INTO inventory_secret_variables (server_group_id, rank, name, set_by)
+			 VALUES ('{group}', 'dev', 'salt', 'someone@else')"
+		))
+		.await
+		.expect("declare secret");
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka-fresh" }))
+			.await;
+		response.assert_status_conflict();
+		let detail = response.text();
+		assert!(
+			detail.contains("salt") && detail.contains("someone@else"),
+			"{detail}"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn serves_the_readers_own_fresh_secret_variable() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-own", json!({})).await;
+		insert_server(
+			&mut conn,
+			group,
+			"kamaka-own-central",
+			"central",
+			None,
+			json!({}),
+		)
+		.await;
+		private
+			.post("/api/inventory_secrets/set")
+			.json(&json!({
+				"server_group_id": group,
+				"rank": "dev",
+				"name": "salt",
+				"value": "pepper",
+			}))
+			.await
+			.assert_status_success();
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka-own" }))
+			.await;
+		response.assert_status_ok();
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn serves_once_someone_elses_secret_change_has_aged() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-aged", json!({})).await;
+		insert_server(
+			&mut conn,
+			group,
+			"kamaka-aged-central",
+			"central",
+			None,
+			json!({}),
+		)
+		.await;
+		private
+			.post("/api/inventory_secrets/set")
+			.json(&json!({
+				"server_group_id": group,
+				"rank": "dev",
+				"name": "salt",
+				"value": "pepper",
+			}))
+			.await
+			.assert_status_success();
+		conn.batch_execute(&format!(
+			"UPDATE inventory_secret_variables
+			 SET set_by = 'someone@else', updated_at = now() - interval '1 hour'
+			 WHERE server_group_id = '{group}'"
+		))
+		.await
+		.expect("age the change");
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka-aged" }))
+			.await;
+		response.assert_status_ok();
+	})
+	.await
+}

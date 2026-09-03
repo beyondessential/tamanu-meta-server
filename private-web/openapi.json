@@ -4057,7 +4057,7 @@
           "inventory"
         ],
         "summary": "Serve one environment's inventory.",
-        "description": "Refuses a group Canopy does not have, one that has been archived, one\nholding several environments with no rank named, a rank with no live\nserver to configure, and a secret variable whose value cannot be read,\nsaying which it was: a refusal is a decision to respect, and a caller has to\nbe able to tell it from Canopy being unreachable.\n\nRequires admin access, the inventory carrying the secret variables' values.",
+        "description": "Refuses a group Canopy does not have, one that has been archived, one\nholding several environments with no rank named, a rank with no live\nserver to configure, an environment someone else has work under way on (a\nmaintenance window they declared, or a secret variable they set moments\nago), and a secret variable whose value cannot be read, saying which it\nwas: a refusal is a decision to respect, and a caller has to be able to\ntell it from Canopy being unreachable.\n\nRequires admin access, the inventory carrying the secret variables' values.",
         "operationId": "inventory_for_group",
         "requestBody": {
           "content": {
@@ -4101,7 +4101,7 @@
             }
           },
           "409": {
-            "description": "Archived, empty, ambiguously named, or spanning environments",
+            "description": "Archived, empty, ambiguously named, spanning environments, or under someone else's work",
             "content": {
               "application/json": {
                 "schema": {

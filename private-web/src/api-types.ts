@@ -2055,9 +2055,11 @@ export interface paths {
          * Serve one environment's inventory.
          * @description Refuses a group Canopy does not have, one that has been archived, one
          *     holding several environments with no rank named, a rank with no live
-         *     server to configure, and a secret variable whose value cannot be read,
-         *     saying which it was: a refusal is a decision to respect, and a caller has to
-         *     be able to tell it from Canopy being unreachable.
+         *     server to configure, an environment someone else has work under way on (a
+         *     maintenance window they declared, or a secret variable they set moments
+         *     ago), and a secret variable whose value cannot be read, saying which it
+         *     was: a refusal is a decision to respect, and a caller has to be able to
+         *     tell it from Canopy being unreachable.
          *
          *     Requires admin access, the inventory carrying the secret variables' values.
          */
@@ -12721,7 +12723,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
-            /** @description Archived, empty, ambiguously named, or spanning environments */
+            /** @description Archived, empty, ambiguously named, spanning environments, or under someone else's work */
             409: {
                 headers: {
                     [name: string]: unknown;
