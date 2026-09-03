@@ -217,6 +217,30 @@ cancels the superseded run and the surviving one judges the corrected PR. Left a
 alternative is dropping the manifest version from `check-generated`, which is the one thing
 holding the version invariant.
 
+## Build steps
+
+- [ ] `info.version` in `crates/public-server/src/openapi.rs` carries `0.0.0`, matching what
+      is published, so release-plz computes its first bump from the same number under either
+      reading of where it reads the current version from
+- [ ] The codegen stamps `version` in `crates/canopy-api/Cargo.toml` from the document's
+      `info.version`, touching only the `[package]` version and leaving the rest of the
+      manifest alone
+- [ ] The generated source records the document it came from, as APIC requires: its version
+      and a digest, so a document that moved without the version moving with it can be told
+      from one that did not
+- [ ] `check-generated` covers `crates/canopy-api/Cargo.toml`, which is what stops the
+      manifest version being edited by hand
+- [ ] `just semver-checks` runs `cargo-semver-checks` against the published baseline, and a
+      CI job runs it
+- [ ] `release-plz.toml` — `release_always = false`, semver checks on, tag name for a
+      workspace member
+- [ ] `.github/workflows/release.yml` — a `release-pr` job under the PAT that propagates the
+      version into `openapi.rs` and regenerates, and a `release` job that publishes through
+      trusted publishing in the `release` environment
+- [ ] `cd.yml` becomes a reusable workflow the release job calls, and stops triggering on
+      pushes to `main`
+- [ ] `just check`, `just lint`, `just fmt-check`, and the generated-files checks pass
+
 ## Open
 
 - **Getting the first real release to `1.0.0`.** release-plz computes the next version from

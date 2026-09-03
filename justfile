@@ -191,11 +191,20 @@ check-generated:
     cargo run --quiet --bin public-openapi-dump > crates/public-server/openapi.json
     cargo run --quiet --bin private-openapi-dump > private-web/openapi.json
     cargo run --quiet -p canopy-api-codegen
-    if ! git diff --quiet -- crates/public-server/openapi.json private-web/openapi.json crates/canopy-api/src/generated.rs; then
+    if ! git diff --quiet -- crates/public-server/openapi.json private-web/openapi.json crates/canopy-api/src/generated.rs crates/canopy-api/Cargo.toml; then
         echo "generated files are out of date; run 'just gen-openapi && just gen-api' and commit the result" >&2
-        git --no-pager diff --stat -- crates/public-server/openapi.json private-web/openapi.json crates/canopy-api/src/generated.rs >&2
+        git --no-pager diff --stat -- crates/public-server/openapi.json private-web/openapi.json crates/canopy-api/src/generated.rs crates/canopy-api/Cargo.toml >&2
         exit 1
     fi
+
+# Check the published API client is not a semver-breaking change against what is
+# on crates.io, which is how `.workhorse/specs/platform/api-compatibility.md`
+# defines a compatible change to the public API. The version in the crate's
+# manifest (stamped from the document's info.version) is what decides how much
+# change is permitted: cargo-semver-checks reads the bump against the published
+# baseline, so a coordinated break passes once info.version raises the major.
+semver-checks:
+    cargo semver-checks --package bes-canopy-api
 
 # Clean build artifacts
 clean:
