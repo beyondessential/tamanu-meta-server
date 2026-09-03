@@ -328,9 +328,14 @@ impl MaintenanceWindow {
 			return Ok(false);
 		}
 		let cutoff = jiff_diesel::Timestamp::from(Timestamp::now() - SETTLE);
+		// A server's stored rank predates the canonical spellings, so `live`
+		// and `prod` are still production and must fall under a production
+		// window.
 		let server_rank = servers::table
 			.filter(servers::id.nullable().eq(server_id))
-			.select(servers::rank)
+			.select(diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Text>>(
+				"CASE lower(servers.rank) WHEN 'live' THEN 'production' WHEN 'prod' THEN 'production' WHEN 'staging' THEN 'clone' ELSE lower(servers.rank) END",
+			))
 			.single_value();
 		let found: Option<Uuid> = dsl::maintenance_windows
 			.select(dsl::id)

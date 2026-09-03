@@ -221,8 +221,8 @@ export default function Upgrades() {
 				subject="groups with no plan"
 				caption={
 					unplanned.length === 1
-						? "1 group gets no pre-upgrade testing until a plan says where it is going"
-						: `${unplanned.length} groups get no pre-upgrade testing until a plan says where they are going`
+						? "1 group is behind with no plan, so it gets no pre-upgrade testing"
+						: `${unplanned.length} groups are behind with no plan, so they get no pre-upgrade testing`
 				}
 				testId="unplanned-upgrades"
 			>

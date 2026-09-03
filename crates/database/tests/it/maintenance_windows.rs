@@ -749,3 +749,38 @@ async fn an_environment_window_covers_only_its_rank() {
 	})
 	.await
 }
+
+/// Ranks were spelled `live` and `prod` before the canonical set, and such a
+/// server is production: a production window must still cover it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_legacy_rank_spelling_falls_under_its_environment_window() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let legacy = insert_ranked_server(&mut conn, group_id, "live").await;
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			Some(ServerRank::Production),
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare");
+
+		file_check(
+			&mut conn,
+			filing(legacy, "reachability", CheckResult::Failed),
+		)
+		.await
+		.expect("file check");
+		assert_eq!(
+			state_for(&mut conn, legacy, "reachability")
+				.await
+				.effective_result,
+			Some(CheckResult::Skipped),
+			"a server stored as live is under its group's production window"
+		);
+	})
+	.await
+}
