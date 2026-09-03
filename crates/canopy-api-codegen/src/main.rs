@@ -116,69 +116,6 @@ fn stamp(text: &str, version: &str) -> Result<String, String> {
 	))
 }
 
-#[cfg(test)]
-mod tests {
-	use super::stamp;
-
-	const MANIFEST: &str = "\
-[package]
-publish = true
-name = \"bes-canopy-api\"
-version = \"0.0.0\"
-edition = \"2024\"
-
-[dependencies]
-serde_json = \"1.0.150\"
-version = \"not-a-real-key\"
-";
-
-	#[test]
-	fn stamps_the_package_version() {
-		let out = stamp(MANIFEST, "1.2.3").unwrap();
-		assert!(out.contains("version = \"1.2.3\"\nedition"));
-	}
-
-	#[test]
-	fn leaves_dependency_versions_alone() {
-		let out = stamp(MANIFEST, "1.2.3").unwrap();
-		assert!(out.contains("serde_json = \"1.0.150\""));
-		// A `version` key in a later table is not the package's version, even
-		// though it matches the same pattern.
-		assert!(out.contains("version = \"not-a-real-key\""));
-	}
-
-	#[test]
-	fn is_idempotent() {
-		let once = stamp(MANIFEST, "1.2.3").unwrap();
-		assert_eq!(stamp(&once, "1.2.3").unwrap(), once);
-	}
-
-	#[test]
-	fn stamping_the_same_version_changes_nothing() {
-		assert_eq!(stamp(MANIFEST, "0.0.0").unwrap(), MANIFEST);
-	}
-
-	#[test]
-	fn refuses_a_manifest_with_no_package_version() {
-		let err = stamp("[package]\nname = \"x\"\n", "1.0.0").unwrap_err();
-		assert!(err.contains("declares no version"), "{err}");
-	}
-
-	#[test]
-	fn refuses_a_manifest_with_no_package_section() {
-		let err = stamp("[workspace]\nmembers = []\n", "1.0.0").unwrap_err();
-		assert!(err.contains("no [package] section"), "{err}");
-	}
-
-	#[test]
-	fn a_package_section_at_the_end_of_the_file_is_still_found() {
-		let text = "[dependencies]\nserde = \"1\"\n\n[package]\nversion = \"0.0.0\"\n";
-		let out = stamp(text, "2.0.0").unwrap();
-		assert!(out.contains("[package]\nversion = \"2.0.0\""), "{out}");
-		assert!(out.contains("serde = \"1\""), "{out}");
-	}
-}
-
 fn generate(input: &PathBuf) -> Result<(String, String), String> {
 	let text = fs::read_to_string(input).map_err(|err| err.to_string())?;
 	let spec: Value = serde_json::from_str(&text).map_err(|err| err.to_string())?;
@@ -625,4 +562,67 @@ fn type_name(reference: &str) -> String {
 		.next()
 		.expect("a reference is non-empty")
 		.to_owned()
+}
+
+#[cfg(test)]
+mod tests {
+	use super::stamp;
+
+	const MANIFEST: &str = "\
+[package]
+publish = true
+name = \"bes-canopy-api\"
+version = \"0.0.0\"
+edition = \"2024\"
+
+[dependencies]
+serde_json = \"1.0.150\"
+version = \"not-a-real-key\"
+";
+
+	#[test]
+	fn stamps_the_package_version() {
+		let out = stamp(MANIFEST, "1.2.3").unwrap();
+		assert!(out.contains("version = \"1.2.3\"\nedition"));
+	}
+
+	#[test]
+	fn leaves_dependency_versions_alone() {
+		let out = stamp(MANIFEST, "1.2.3").unwrap();
+		assert!(out.contains("serde_json = \"1.0.150\""));
+		// A `version` key in a later table is not the package's version, even
+		// though it matches the same pattern.
+		assert!(out.contains("version = \"not-a-real-key\""));
+	}
+
+	#[test]
+	fn is_idempotent() {
+		let once = stamp(MANIFEST, "1.2.3").unwrap();
+		assert_eq!(stamp(&once, "1.2.3").unwrap(), once);
+	}
+
+	#[test]
+	fn stamping_the_same_version_changes_nothing() {
+		assert_eq!(stamp(MANIFEST, "0.0.0").unwrap(), MANIFEST);
+	}
+
+	#[test]
+	fn refuses_a_manifest_with_no_package_version() {
+		let err = stamp("[package]\nname = \"x\"\n", "1.0.0").unwrap_err();
+		assert!(err.contains("declares no version"), "{err}");
+	}
+
+	#[test]
+	fn refuses_a_manifest_with_no_package_section() {
+		let err = stamp("[workspace]\nmembers = []\n", "1.0.0").unwrap_err();
+		assert!(err.contains("no [package] section"), "{err}");
+	}
+
+	#[test]
+	fn a_package_section_at_the_end_of_the_file_is_still_found() {
+		let text = "[dependencies]\nserde = \"1\"\n\n[package]\nversion = \"0.0.0\"\n";
+		let out = stamp(text, "2.0.0").unwrap();
+		assert!(out.contains("[package]\nversion = \"2.0.0\""), "{out}");
+		assert!(out.contains("serde = \"1\""), "{out}");
+	}
 }

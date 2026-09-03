@@ -239,7 +239,7 @@ holding the version invariant.
       trusted publishing in the `release` environment
 - [x] `cd.yml` becomes a reusable workflow the release job calls, and stops triggering on
       pushes to `main`
-- [ ] `just check`, `just lint`, `just fmt-check`, and the generated-files checks pass
+- [x] `just check`, `just lint`, `just fmt-check`, and the generated-files checks pass
 
 ## What counts as a release, for the deploy
 
