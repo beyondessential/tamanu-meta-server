@@ -34,6 +34,13 @@ CREATE TABLE machine_reported_detail (
 
 -- Move the box's fields off each application's row and onto its machine's.
 --
+-- `extra` is whatever a reporter pushed, and nothing has ever constrained it
+-- to an object. A row holding a scalar, an array or a JSON null has no fields
+-- to attribute to the box, so it contributes nothing here and stays whole on
+-- the application below. That is what `split_by_grain` does in Rust, and the
+-- guard sits inside the argument rather than in a WHERE clause because the
+-- lateral is evaluated per row before any restriction applies.
+--
 -- A machine may host several applications, each with a row for the same
 -- source, so the insert coalesces: last writer per `(machine, source)` wins,
 -- which is the same rule the merged read applies anyway. With today's 1:1 that
@@ -46,7 +53,9 @@ SELECT
 	MAX(d.reported_at)
 FROM application_reported_detail d
 JOIN applications a ON a.id = d.application_id
-CROSS JOIN LATERAL jsonb_each(d.extra) AS e(key, value)
+CROSS JOIN LATERAL jsonb_each(
+	CASE WHEN jsonb_typeof(d.extra) = 'object' THEN d.extra ELSE '{}'::jsonb END
+) AS e(key, value)
 WHERE e.key IN (
 	'arch', 'bestoolVersion', 'cpuCores', 'filesystems', 'hostname',
 	'instanceTags', 'ipv4', 'ipv6', 'kernel', 'lanIps', 'munin', 'nat64',
@@ -65,4 +74,5 @@ UPDATE application_reported_detail SET extra = extra
 	- 'instanceTags' - 'ipv4' - 'ipv6' - 'kernel' - 'lanIps' - 'munin' - 'nat64'
 	- 'osKind' - 'osName' - 'osTimezone' - 'osVersion' - 'services'
 	- 'totalMemoryBytes' - 'uptimeSecs' - 'virtualisation' - 'virtualised'
-	- 'wanIpv4' - 'wanIpv6';
+	- 'wanIpv4' - 'wanIpv6'
+	WHERE jsonb_typeof(extra) = 'object';

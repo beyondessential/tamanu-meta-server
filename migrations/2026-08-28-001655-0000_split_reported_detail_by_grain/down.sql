@@ -8,7 +8,8 @@
 UPDATE application_reported_detail d
 SET extra = m.extra || d.extra
 FROM applications a, machine_reported_detail m
-WHERE a.id = d.application_id AND m.machine_id = a.machine_id AND m.source = d.source;
+WHERE a.id = d.application_id AND m.machine_id = a.machine_id AND m.source = d.source
+  AND jsonb_typeof(d.extra) = 'object';
 
 DROP TABLE machine_reported_detail;
 

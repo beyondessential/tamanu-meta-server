@@ -272,3 +272,82 @@ async fn a_migrated_application_carries_no_reporter_key() {
 	})
 	.await;
 }
+
+/// `extra` is whatever a reporter pushed and has never been constrained to an
+/// object, so a fielded database holds rows carrying a scalar, an array or a
+/// JSON null. Splitting the detail by grain reads the keys of each row, and a
+/// row with no keys to read must pass through rather than stop the run: this
+/// is the shape that failed a production deploy.
+// spec: FIG
+#[tokio::test(flavor = "multi_thread")]
+async fn detail_that_is_not_an_object_survives_the_split() {
+	commons_tests::db::TestDb::run(async |mut conn, url| {
+		revert_the_split(&url).await;
+
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, product, kind) \
+			 VALUES ('88888888-8888-8888-8888-888888888888', 'odd-box', \
+			         'https://odd.invalid/', 'tamanu', 'central');
+
+			 INSERT INTO server_reported_detail (server_id, source, extra) \
+			 VALUES \
+			   ('88888888-8888-8888-8888-888888888888', 'alertd', \
+			    '{\"osName\": \"Ubuntu\", \"pgVersion\": \"16.3\"}'::jsonb), \
+			   ('88888888-8888-8888-8888-888888888888', 'scalar', \
+			    '\"not an object\"'::jsonb), \
+			   ('88888888-8888-8888-8888-888888888888', 'listy', \
+			    '[1, 2, 3]'::jsonb), \
+			   ('88888888-8888-8888-8888-888888888888', 'nully', \
+			    'null'::jsonb)",
+		)
+		.await
+		.expect("seed detail of assorted shapes");
+
+		apply_the_split(&url).await;
+
+		#[derive(Debug, diesel::QueryableByName)]
+		struct Detail {
+			#[diesel(sql_type = sql_types::Text)]
+			source: String,
+			#[diesel(sql_type = sql_types::Jsonb)]
+			extra: serde_json::Value,
+		}
+
+		let machine: Vec<Detail> =
+			diesel::sql_query("SELECT source, extra FROM machine_reported_detail ORDER BY source")
+				.load(&mut conn)
+				.await
+				.expect("the box's detail");
+		assert_eq!(
+			machine.len(),
+			1,
+			"only the one object row had a field to give the box: {machine:?}",
+		);
+		assert_eq!(machine[0].source, "alertd");
+		assert_eq!(machine[0].extra, serde_json::json!({"osName": "Ubuntu"}));
+
+		let application: Vec<Detail> = diesel::sql_query(
+			"SELECT source, extra FROM application_reported_detail ORDER BY source",
+		)
+		.load(&mut conn)
+		.await
+		.expect("the workload's detail");
+		let by_source: std::collections::HashMap<&str, &serde_json::Value> = application
+			.iter()
+			.map(|d| (d.source.as_str(), &d.extra))
+			.collect();
+		assert_eq!(
+			by_source.get("alertd"),
+			Some(&&serde_json::json!({"pgVersion": "16.3"})),
+			"the box's field left the workload's row and the workload's stayed",
+		);
+		assert_eq!(
+			by_source.get("scalar"),
+			Some(&&serde_json::json!("not an object")),
+			"a scalar stays whole with the workload rather than being dropped",
+		);
+		assert_eq!(by_source.get("listy"), Some(&&serde_json::json!([1, 2, 3])));
+		assert_eq!(by_source.get("nully"), Some(&&serde_json::json!(null)));
+	})
+	.await;
+}
