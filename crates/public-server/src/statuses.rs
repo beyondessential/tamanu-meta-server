@@ -82,9 +82,35 @@ pub struct StatusPayload {
 	/// skipped results open nothing and close prior issues.
 	pub health: Vec<HealthCheck>,
 
+	/// The machine's own health checks and detail: what the box is, rather
+	/// than what runs on it.
+	///
+	/// Sending this puts the push in the current format, and Canopy takes the
+	/// separation as given. A push without it is a transitional unified push,
+	/// which Canopy separates into the two grains itself from `health` and the
+	/// flat body.
+	pub machine: Option<TargetReport>,
+
+	/// The applications the reporter found on the machine, each with its own
+	/// health checks and detail, keyed by a key the reporter chooses.
+	///
+	/// The key must be unique among the applications on that machine and must
+	/// identify the same application across this reporter's pushes; what it is
+	/// derived from is the reporter's own business. Canopy correlates on the
+	/// machine, the key and the type together, and never discloses its own
+	/// identifier for an application.
+	///
+	/// Only read alongside `machine`. An application named here that Canopy
+	/// does not already hold is created.
+	pub applications: Option<BTreeMap<String, ApplicationReport>>,
+
 	/// Free-form additional data (uptime, database version, timezone,
 	/// hostname, etc.). Stored verbatim and surfaced as raw JSON in the
 	/// status view.
+	///
+	/// Transitional, and read only on a push with no `machine` section: the
+	/// current format carries every reported field inside a `detail` object on
+	/// the target it belongs to.
 	///
 	/// A `tamanuVersion` field here is used as the server's tracked version
 	/// (compared against the published version catalog), superseding the
@@ -94,6 +120,40 @@ pub struct StatusPayload {
 	#[serde(flatten)]
 	#[schema(additional_properties = true, value_type = Object)]
 	pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+/// One target's material within a push: its health checks and its detail.
+///
+/// A machine and an application are described the same way, so the two grains
+/// read alike and a reporter builds one shape for both.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct TargetReport {
+	/// This target's checks. Absent and empty mean the same thing — the source
+	/// currently has no checks for this target — which recovers every check it
+	/// previously reported for it.
+	pub health: Option<Vec<HealthCheck>>,
+	/// Everything the reporter has to say about this target beyond its checks.
+	/// Recorded verbatim against the target it was attached to.
+	#[schema(additional_properties = true, value_type = Object)]
+	pub detail: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+/// One application within a push, as the reporter found it.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ApplicationReport {
+	/// What this application is: the software and the role it plays together,
+	/// for example `tamanu-central`. Required, and part of how Canopy
+	/// correlates the report to its own record — a different type under a key
+	/// already in use means the reporter has stopped reporting one application
+	/// and started reporting another.
+	pub r#type: String,
+	/// This application's checks. Reported bare; Canopy qualifies them with
+	/// the application's type when cataloguing them.
+	pub health: Option<Vec<HealthCheck>>,
+	/// Everything the reporter has to say about this application beyond its
+	/// checks, including its `tamanuVersion`.
+	#[schema(additional_properties = true, value_type = Object)]
+	pub detail: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// One health-check result within a status push.
@@ -175,7 +235,41 @@ pub struct StatusResponse {
 	/// labels. Identical to what the standalone `GET /tags` endpoint
 	/// returns — see that endpoint for the full contract. Clients that
 	/// predate this field can safely ignore it.
+	///
+	/// On a push in the current format this is the machine's, the push being
+	/// the machine's; each application's own are under `applications`.
 	pub tags: TagMap,
+
+	/// Canopy's answer about the machine. Present only for a push in the
+	/// current format: a transitional unified push is answered by the flat
+	/// fields above and nothing else, so the response a fielded reporter sees
+	/// is the one it already saw.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub machine: Option<TargetResponse>,
+
+	/// Canopy's answer about each application the push described, keyed by the
+	/// key the reporter named it with. Present only for a push in the current
+	/// format.
+	///
+	/// A key Canopy holds no application for is absent rather than empty,
+	/// which is what a source whose pushes are ignored sees: nothing was
+	/// created for it to be told about.
+	#[serde(skip_serializing_if = "Option::is_none")]
+	pub applications: Option<BTreeMap<String, TargetResponse>>,
+}
+
+/// What Canopy answers about one target the push described.
+// spec: STA#response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TargetResponse {
+	/// This target's effective tags, on the same terms as the top-level
+	/// `tags`.
+	pub tags: TagMap,
+	/// How every check this reporter can file against this target is graded,
+	/// on the same terms as the top-level `check_severities`. Keyed by bare
+	/// check name, so a machine check and an application check of the same
+	/// name are each answered under the target they belong to.
+	pub check_severities: BTreeMap<String, CheckSeverity>,
 }
 
 pub fn routes() -> OpenApiRouter<AppState> {
@@ -317,24 +411,35 @@ async fn create(
 	}
 
 	let raw = body.map(|j| j.0).unwrap_or(serde_json::Value::Null);
-	let (source, healthy, health, extra) = split_health_from_extra(raw)?;
-
-	// The server version canopy tracks (and compares against the published
-	// version catalog) is the Tamanu version. Prefer the payload's
-	// `tamanuVersion` extra; fall back to the legacy `X-Version` header for
-	// reporters that predate carrying it in the body. Either may be absent.
-	let version = resolve_version(&extra, current_version.map(|v| v.0));
+	let ParsedPush {
+		source,
+		healthy,
+		body,
+	} = parse_push(raw)?;
 
 	// Legacy format (no `health` array): Tamanu's direct reporting. It
 	// becomes a heartbeat from the `tamanu` source — a single `tasks`
-	// check that always passes on receipt — and flows through the normal
+	// check that always passes on receipt — and flows through the unified
 	// path from here, so it records state, registers its catalog entry,
 	// and participates in source staleness like any source.
-	let (source, health) = match health {
-		Some(health) => (source, health),
-		None => (
+	let (source, ingest) = match body {
+		PushBody::Split {
+			machine,
+			applications,
+		} => (
+			source,
+			Ingest::Split {
+				machine,
+				applications,
+			},
+		),
+		PushBody::Unified { health, extra } => (source, Ingest::Unified { health, extra }),
+		PushBody::Legacy { extra } => (
 			LEGACY_SOURCE.to_string(),
-			serde_json::json!([{ "check": LEGACY_CHECK, "result": "passed" }]),
+			Ingest::Unified {
+				health: serde_json::json!([{ "check": LEGACY_CHECK, "result": "passed" }]),
+				extra,
+			},
 		),
 	};
 
@@ -350,91 +455,297 @@ async fn create(
 		commons_types::source::IngestMode::Deny => return Err(AppError::IngestDenied(source)),
 	};
 
-	// Which application this unified push is about. Resolved under a lock on
-	// the machine row, because a push that finds no application for what it
-	// describes creates one and two arriving together for one box would
-	// otherwise each see nothing and each create. An ignored source records
-	// nowhere, so it reads without creating.
+	// Which applications this push is about, resolved under a lock on the
+	// machine row: a push that finds no application for what it describes
+	// creates one, and two arriving together for one box would otherwise each
+	// see nothing and each create. An ignored source records nowhere, so it
+	// reads without creating.
 	// spec: FLT#applications-come-from-reports
-	let server = db
+	let resolved = db
 		.transaction::<_, AppError, _>(async |conn| {
 			if record {
 				Machine::get_by_id_for_update(conn, machine.id).await?;
 			}
-			resolve_unified_application(conn, &machine, &extra, record).await
+			match ingest {
+				Ingest::Split {
+					machine: machine_report,
+					applications,
+				} => {
+					let mut resolved = Vec::new();
+					for (key, reported) in applications {
+						// An ignored source resolves nothing new, so a key it
+						// names that Canopy holds nothing for drops out here
+						// rather than standing up a record.
+						let Some(application) = Application::from_report_key(
+							conn,
+							&machine,
+							&key,
+							&reported.r#type,
+							record,
+						)
+						.await?
+						else {
+							continue;
+						};
+						resolved.push((key, application, reported.report));
+					}
+					Ok(ResolvedPush::Split {
+						machine: machine_report,
+						applications: resolved,
+					})
+				}
+				Ingest::Unified { health, extra } => Ok(ResolvedPush::Unified {
+					application: resolve_unified_application(conn, &machine, &extra, record)
+						.await?,
+					health,
+					extra,
+				}),
+			}
 		})
 		.await?;
-	let server_id = server.as_ref().map(|s| s.id);
 
-	// The effective tags of whatever this push is about: stored tags overlaid
-	// on the group's, plus the synthetic `canopy:*` tags and, for an
+	// The effective tags of each target the push describes: stored tags
+	// overlaid on the group's, plus the synthetic `canopy:*` tags and, for an
 	// application, the computed `billing.*` labels. Computed once and used for
 	// both grading (per CHK, rules evaluate against the effective tags, so a
-	// rule can predicate on any of them) and the device response. JSON-wrapped
-	// so the rule evaluator compares uniformly with extras.
+	// rule can predicate on any of them) and the device response.
 	//
-	// A push with no application is the box's, so it grades and answers
-	// against the box's own tags rather than borrowing a workload's.
-	let effective_tags = match &server {
-		Some(server) => crate::tags::effective_tags_for_server(&mut db, server).await?,
-		None => crate::tags::effective_tags_for_machine(&mut db, &machine).await?,
-	};
-	let tags: std::collections::HashMap<String, serde_json::Value> = effective_tags
-		.0
-		.iter()
-		.map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
-		.collect();
-
-	// Only the recording is conditional on ingest mode; everything else —
-	// backup instructions, tags, severities computed below — is returned
-	// regardless, so an ignored reporter keeps working.
-	if record {
-		// Insert + file events atomically. NewEvent::save itself opens
-		// a transaction; diesel-async nests it as a SAVEPOINT.
-		db.transaction::<_, AppError, _>(async |conn| {
-			let status = NewStatus {
-				machine_id: machine.id,
-				server_id,
-				device_id: Some(id),
-				version,
-				extra,
-				healthy,
-				health,
-				source: source.clone(),
+	// The flat `tags` and `check_severities` a split push is answered with are
+	// the machine's, the push being addressed to the machine and its per-target
+	// answers riding in `machine` and `applications`.
+	let (effective_tags, check_severities, machine_response, application_responses) = match resolved
+	{
+		ResolvedPush::Split {
+			machine: machine_report,
+			applications,
+		} => {
+			let machine_tags = crate::tags::effective_tags_for_machine(&mut db, &machine).await?;
+			let mut apps = Vec::new();
+			for (key, application, report) in applications {
+				let tags = crate::tags::effective_tags_for_server(&mut db, &application).await?;
+				apps.push((key, application, report, tags));
 			}
-			.save(conn)
-			.await?;
 
-			// This source's current server-wide detail, replacing what it
-			// last reported. The push is the source's whole truth, the same
-			// rule its checks follow just below.
-			// spec: FIG#sourcing
-			database::reported_detail::ReportedDetail::record(
-				conn,
+			if record {
+				// Insert + file events atomically. NewEvent::save itself opens
+				// a transaction; diesel-async nests it as a SAVEPOINT.
+				//
+				// One status row per target the push described, because that
+				// is the grain everything downstream reads a push back at:
+				// reachability, the last-seen sample behind a check, and a
+				// group's quiet members all ask what a given target last said.
+				// spec: STA#push
+				db.transaction::<_, AppError, _>(async |conn| {
+					let status = NewStatus {
+						machine_id: machine.id,
+						server_id: None,
+						device_id: Some(id),
+						// The version Canopy tracks is an application's, so a
+						// machine row carries none.
+						version: None,
+						extra: machine_report.detail,
+						healthy,
+						health: machine_report.health,
+						source: source.clone(),
+					}
+					.save(conn)
+					.await?;
+					database::reported_detail::MachineReportedDetail::record(
+						conn,
+						machine.id,
+						&status.source,
+						&status.extra,
+					)
+					.await?;
+					file_health_events(
+						conn,
+						None,
+						machine.id,
+						machine.group_id,
+						None,
+						Some(id),
+						&status,
+						&json_tags(&machine_tags),
+						SubjectSplit::AsGiven,
+					)
+					.await?;
+
+					for (_, application, report, tags) in &apps {
+						// Each application's own version, from its own detail.
+						// The `X-Version` header names one application and a
+						// split push may describe several, so it has no
+						// meaning here and is not consulted.
+						let version = resolve_version(&report.detail, None);
+						let status = NewStatus {
+							machine_id: machine.id,
+							server_id: Some(application.id),
+							device_id: Some(id),
+							version,
+							extra: report.detail.clone(),
+							healthy,
+							health: report.health.clone(),
+							source: source.clone(),
+						}
+						.save(conn)
+						.await?;
+						database::reported_detail::ReportedDetail::record_for_application(
+							conn,
+							application.id,
+							&status.source,
+							&status.extra,
+							status.version.as_ref(),
+						)
+						.await?;
+						file_health_events(
+							conn,
+							Some(application.id),
+							machine.id,
+							application.group_id,
+							Some(&application.r#type),
+							Some(id),
+							&status,
+							&json_tags(tags),
+							SubjectSplit::AsGiven,
+						)
+						.await?;
+					}
+
+					Ok(())
+				})
+				.await?;
+			}
+
+			// Computed after the transaction so checks first seen on this very
+			// push (upserted into the catalog above) are already in the map.
+			let machine_severities = effective_check_severities(
+				&mut db,
+				None,
+				machine.id,
+				machine.group_id,
+				None,
+				&source,
+			)
+			.await?;
+			let mut responses = BTreeMap::new();
+			for (key, application, _, tags) in apps {
+				let check_severities = effective_check_severities(
+					&mut db,
+					Some(application.id),
+					machine.id,
+					application.group_id,
+					Some(&application.r#type),
+					&source,
+				)
+				.await?;
+				responses.insert(
+					key,
+					TargetResponse {
+						tags,
+						check_severities,
+					},
+				);
+			}
+
+			(
+				machine_tags.clone(),
+				machine_severities.clone(),
+				Some(TargetResponse {
+					tags: machine_tags,
+					check_severities: machine_severities,
+				}),
+				Some(responses),
+			)
+		}
+		ResolvedPush::Unified {
+			application,
+			health,
+			extra,
+		} => {
+			// The server version canopy tracks (and compares against the
+			// published version catalog) is the Tamanu version. Prefer the
+			// payload's `tamanuVersion` extra; fall back to the legacy
+			// `X-Version` header for reporters that predate carrying it in the
+			// body. Either may be absent.
+			let version = resolve_version(&extra, current_version.map(|v| v.0));
+			let server_id = application.as_ref().map(|s| s.id);
+			let group_id = application
+				.as_ref()
+				.map_or(machine.group_id, |s| s.group_id);
+
+			// A push with no application is the box's, so it grades and
+			// answers against the box's own tags rather than borrowing a
+			// workload's.
+			let effective_tags = match &application {
+				Some(application) => {
+					crate::tags::effective_tags_for_server(&mut db, application).await?
+				}
+				None => crate::tags::effective_tags_for_machine(&mut db, &machine).await?,
+			};
+			let tags = json_tags(&effective_tags);
+
+			// Only the recording is conditional on ingest mode; everything
+			// else — backup instructions, tags, severities computed below — is
+			// returned regardless, so an ignored reporter keeps working.
+			if record {
+				db.transaction::<_, AppError, _>(async |conn| {
+					let status = NewStatus {
+						machine_id: machine.id,
+						server_id,
+						device_id: Some(id),
+						version,
+						extra,
+						healthy,
+						health,
+						source: source.clone(),
+					}
+					.save(conn)
+					.await?;
+
+					// This source's current server-wide detail, replacing what
+					// it last reported. The push is the source's whole truth,
+					// the same rule its checks follow just below.
+					// spec: FIG#sourcing
+					database::reported_detail::ReportedDetail::record(
+						conn,
+						server_id,
+						machine.id,
+						&status.source,
+						&status.extra,
+						status.version.as_ref(),
+					)
+					.await?;
+
+					file_health_events(
+						conn,
+						server_id,
+						machine.id,
+						group_id,
+						application.as_ref().map(|s| &s.r#type),
+						Some(id),
+						&status,
+						&tags,
+						SubjectSplit::BySubject,
+					)
+					.await?;
+
+					Ok(())
+				})
+				.await?;
+			}
+
+			let check_severities = effective_check_severities(
+				&mut db,
 				server_id,
 				machine.id,
-				&status.source,
-				&status.extra,
-				status.version.as_ref(),
+				group_id,
+				application.as_ref().map(|s| &s.r#type),
+				&source,
 			)
 			.await?;
 
-			file_health_events(
-				conn,
-				server_id,
-				machine.id,
-				server.as_ref().map_or(machine.group_id, |s| s.group_id),
-				server.as_ref().map(|s| &s.r#type),
-				Some(id),
-				&status,
-				&tags,
-			)
-			.await?;
-
-			Ok(())
-		})
-		.await?;
-	}
+			(effective_tags, check_severities, None, None)
+		}
+	};
 
 	// Tell the device which backup types to run now (operator one-offs +
 	// schedule-due), riding the heartbeat response. Only alertd runs
@@ -448,18 +759,6 @@ async fn create(
 		_ => Vec::new(),
 	};
 
-	// Computed after the transaction so checks first seen on this very push
-	// (upserted into the catalog above) are already in the map.
-	let check_severities = effective_check_severities(
-		&mut db,
-		server_id,
-		machine.id,
-		server.as_ref().map_or(machine.group_id, |s| s.group_id),
-		server.as_ref().map(|s| &s.r#type),
-		&source,
-	)
-	.await?;
-
 	// A server-wide fact, like the tags: every source gets it, so an agent
 	// reporting status learns of a new domain or grant without a second call.
 	// spec: CRT#what-a-server-may-act-on
@@ -470,7 +769,47 @@ async fn create(
 		check_severities,
 		names,
 		tags: effective_tags,
+		machine: machine_response,
+		applications: application_responses,
 	}))
+}
+
+/// What the push carries once its shape is known and a legacy body has been
+/// turned into the heartbeat it stands for.
+enum Ingest {
+	Split {
+		machine: TargetReportBody,
+		applications: BTreeMap<String, ApplicationReportBody>,
+	},
+	Unified {
+		health: serde_json::Value,
+		extra: serde_json::Value,
+	},
+}
+
+/// The push with each target it names resolved to the record Canopy holds.
+enum ResolvedPush {
+	Split {
+		machine: TargetReportBody,
+		applications: Vec<(String, Application, TargetReportBody)>,
+	},
+	/// A unified push, and whichever single application Canopy worked out it
+	/// was about. `None` is a box Canopy holds no application for, whose push
+	/// is the machine's in full.
+	Unified {
+		application: Option<Application>,
+		health: serde_json::Value,
+		extra: serde_json::Value,
+	},
+}
+
+/// Effective tags in the form the policy rule evaluator compares against:
+/// JSON-wrapped, so a rule compares them uniformly with reported detail.
+fn json_tags(tags: &TagMap) -> std::collections::HashMap<String, serde_json::Value> {
+	tags.0
+		.iter()
+		.map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+		.collect()
 }
 
 /// Fetch the effective healthcheck severity mapping for a server.
@@ -595,6 +934,18 @@ fn resolve_version(extra: &serde_json::Value, header: Option<VersionStr>) -> Opt
 		.or(header)
 }
 
+/// How a push's checks map onto the two grains.
+// spec: STA#transitional-unified-pushes
+#[derive(Debug, Clone, Copy)]
+enum SubjectSplit {
+	/// A unified push, carrying both grains' checks in one set: each check's
+	/// own subject says which grain it belongs to.
+	BySubject,
+	/// A split push, where the reporter separated the grains itself: every
+	/// check in this filing belongs to the target it was filed under.
+	AsGiven,
+}
+
 /// Per-push event filing. Warning/failed checks land at
 /// `(status, health/<check>)`; recoveries close those issues. Broken
 /// checks (`result: broken` — the check itself errored, not the
@@ -626,17 +977,29 @@ async fn file_health_events(
 	device_id: Option<Uuid>,
 	status: &Status,
 	tags: &std::collections::HashMap<String, serde_json::Value>,
+	subject: SubjectSplit,
 ) -> Result<()> {
 	let curr_check_results = collect_check_results(&status.health);
 	let occurred_at = Some(status.created_at);
 
-	// Which grain a check on this push belongs to. Where the push names an
-	// application, its subject decides. Where it names none, there is no
-	// second grain to belong to: a box Canopy holds no application for reports
-	// about itself, so the whole push is the box's, down to a check whose name
-	// is not in the machine set.
+	// Which grain a check on this push belongs to.
+	//
+	// On a unified push the check's own subject decides, Canopy having to
+	// separate the grains itself. Where such a push names no application there
+	// is no second grain to belong to: a box Canopy holds no application for
+	// reports about itself, so the whole push is the box's, down to a check
+	// whose name is not in the machine set.
+	//
+	// On a split push the reporter already separated them, so the target this
+	// filing is for is the answer whatever the check is named. A machine check
+	// name reported under an application is that application's check, which is
+	// what lets a reporter carry a check Canopy does not recognise as
+	// machine-subject.
 	// spec: STA#transitional-unified-pushes
-	let on_machine = |check: &str| server_id.is_none() || CheckSubject::of(check).is_machine();
+	let on_machine = |check: &str| match subject {
+		SubjectSplit::BySubject => server_id.is_none() || CheckSubject::of(check).is_machine(),
+		SubjectSplit::AsGiven => server_id.is_none(),
+	};
 	let namespace_of = |check: &str| match application_type {
 		Some(ty) if !on_machine(check) => Namespace::for_application(&status.source, check, ty),
 		_ => Namespace::for_machine(&status.source, check),
@@ -719,21 +1082,31 @@ async fn file_health_events(
 			})
 			.collect()
 	};
+	//
+	// Only the grains this filing speaks for are consulted. A split push's
+	// application filing says nothing about the machine's checks, so reading
+	// the machine's open issues here would close every one of them as
+	// unmentioned.
+	let handles_machine = server_id.is_none() || matches!(subject, SubjectSplit::BySubject);
 	let previously_active = match server_id {
 		Some(server_id) => strip(
 			Issue::active_refs_with_prefix(conn, server_id, &status.source, &health_prefix).await?,
 		),
 		None => Default::default(),
 	};
-	let previously_active_on_machine = strip(
-		Issue::active_refs_with_prefix_for_machine(
-			conn,
-			machine_id,
-			&status.source,
-			&health_prefix,
+	let previously_active_on_machine = if handles_machine {
+		strip(
+			Issue::active_refs_with_prefix_for_machine(
+				conn,
+				machine_id,
+				&status.source,
+				&health_prefix,
+			)
+			.await?,
 		)
-		.await?,
-	);
+	} else {
+		Default::default()
+	};
 
 	// File every check in the push — passing ones included, so the state
 	// row records the current result and when it was last reported. An
@@ -987,12 +1360,50 @@ fn per_check_description(entry: &serde_json::Map<String, serde_json::Value>) -> 
 	(!lines.is_empty()).then(|| lines.join("\n"))
 }
 
-/// Pulls the reserved `source`, `healthy`, and `health` keys out of the
-/// incoming status body and returns them alongside the rest of the payload
-/// (`extra`). Validates types per the contract:
+/// One target's material, as parsed off the wire: its checks and its detail.
+struct TargetReportBody {
+	health: serde_json::Value,
+	detail: serde_json::Value,
+}
+
+/// One reported application: what the reporter says it is, and its material.
+struct ApplicationReportBody {
+	r#type: ApplicationType,
+	report: TargetReportBody,
+}
+
+/// What a push carries, once its shape is known.
+// spec: STA#transitional-unified-pushes
+enum PushBody {
+	/// The current format: the reporter separated the machine's material from
+	/// each application's, and named each application by a key of its own.
+	Split {
+		machine: TargetReportBody,
+		applications: BTreeMap<String, ApplicationReportBody>,
+	},
+	/// The transitional unified format: one set of checks and one flat body,
+	/// describing a box assumed to run a single application. Canopy separates
+	/// the two grains itself.
+	Unified {
+		health: serde_json::Value,
+		extra: serde_json::Value,
+	},
+	/// A legacy Tamanu direct report: no health field at all.
+	Legacy { extra: serde_json::Value },
+}
+
+/// A parsed push: the fields common to every shape, and the shape itself.
+struct ParsedPush {
+	source: String,
+	healthy: bool,
+	body: PushBody,
+}
+
+/// Pulls the reserved keys out of the incoming status body and decides which
+/// shape it is in. Validates types per the contract:
 ///
-/// - missing or `null` body → `source = alertd`, `healthy = true`,
-///   `health = []`, `extra = {}`
+/// - missing or `null` body → `source = alertd`, `healthy = true`, a legacy
+///   report with `extra = {}`
 /// - `source` absent ⇒ `alertd` (transitional — the field will become
 ///   mandatory); present must be a non-empty string and not one of the
 ///   reserved names (`canopy`, `manual`)
@@ -1000,16 +1411,21 @@ fn per_check_description(entry: &serde_json::Map<String, serde_json::Value>) -> 
 ///   what stops every legacy server from false-positiving unhealthy on
 ///   the day we deploy)
 /// - `healthy` present must be a bool
-/// - `health` if present must be an array of objects, each with
-///   `check: non-empty string` and **exactly one** of
-///   `result: "passed" | "warning" | "failed" | "broken" | "skipped"`
-///   (current bestool) or `healthy: bool` (legacy). An unrecognised
-///   `result` string is a 400 — canopy ships before any bestool that
-///   adds enum values. Other fields on each entry are passed through
-///   verbatim.
-fn split_health_from_extra(
-	raw: serde_json::Value,
-) -> Result<(String, bool, Option<serde_json::Value>, serde_json::Value)> {
+/// - a `machine` key puts the push in the current format: `machine` and each
+///   value of `applications` must be an object with an optional `health` array
+///   and an optional `detail` object, and each application must name a
+///   `type`. Any other top-level key is ignored, the format having no place
+///   for one.
+/// - otherwise a `health` key makes it a unified push and its absence makes it
+///   a legacy one; the rest of the body is that push's flat detail.
+///
+/// A `health` array, wherever it appears, must be an array of objects, each
+/// with `check: non-empty string` and **exactly one** of
+/// `result: "passed" | "warning" | "failed" | "broken" | "skipped"`
+/// (current bestool) or `healthy: bool` (legacy). An unrecognised `result`
+/// string is a 400 — canopy ships before any bestool that adds enum values.
+/// Other fields on each entry are passed through verbatim.
+fn parse_push(raw: serde_json::Value) -> Result<ParsedPush> {
 	let mut obj = match raw {
 		serde_json::Value::Null => serde_json::Map::new(),
 		serde_json::Value::Object(m) => m,
@@ -1044,65 +1460,157 @@ fn split_health_from_extra(
 		Some(_) => return Err(AppError::BadRequest("`healthy` must be a boolean".into())),
 	};
 
-	// A push without a `health` key is the legacy Tamanu direct-report
-	// format; the caller transforms it into the tamanu/tasks heartbeat.
-	let Some(health_value) = obj.remove("health") else {
-		return Ok((source, healthy, None, serde_json::Value::Object(obj)));
+	// A `machine` section is what says the reporter separated the grains
+	// itself. Its presence, not its contents: a box with nothing to say about
+	// itself still says which shape it speaks.
+	let body = if let Some(machine) = obj.remove("machine") {
+		let machine = parse_target_report(machine, "machine")?;
+		let applications = match obj.remove("applications") {
+			None => BTreeMap::new(),
+			Some(serde_json::Value::Object(map)) => {
+				let mut out = BTreeMap::new();
+				for (key, value) in map {
+					if key.is_empty() {
+						return Err(AppError::BadRequest(
+							"`applications` keys must be non-empty strings".into(),
+						));
+					}
+					let path = format!("applications.{key}");
+					let mut value = match value {
+						serde_json::Value::Object(v) => v,
+						_ => {
+							return Err(AppError::BadRequest(format!(
+								"`{path}` must be an object"
+							)));
+						}
+					};
+					let r#type = match value.remove("type") {
+						Some(serde_json::Value::String(t)) => {
+							t.parse::<ApplicationType>().map_err(|_| {
+								AppError::BadRequest(format!(
+									"`{path}.type` must be a lowercase dashed slug",
+								))
+							})?
+						}
+						_ => {
+							return Err(AppError::BadRequest(format!(
+								"`{path}.type` must be a non-empty string",
+							)));
+						}
+					};
+					let report = parse_target_report(serde_json::Value::Object(value), &path)?;
+					out.insert(key, ApplicationReportBody { r#type, report });
+				}
+				out
+			}
+			Some(_) => {
+				return Err(AppError::BadRequest(
+					"`applications` must be an object".into(),
+				));
+			}
+		};
+		PushBody::Split {
+			machine,
+			applications,
+		}
+	} else {
+		match obj.remove("health") {
+			Some(health) => PushBody::Unified {
+				health: parse_health(health, "health")?,
+				extra: serde_json::Value::Object(obj),
+			},
+			// A push without a `health` key is the legacy Tamanu
+			// direct-report format; the caller transforms it into the
+			// tamanu/tasks heartbeat.
+			None => PushBody::Legacy {
+				extra: serde_json::Value::Object(obj),
+			},
+		}
 	};
-	let health_arr = match health_value {
+
+	Ok(ParsedPush {
+		source,
+		healthy,
+		body,
+	})
+}
+
+/// One target's `health` and `detail`, each optional and each defaulting to
+/// the empty form: a reporter with nothing to say about a target still says so
+/// by naming it, and an absent `health` recovers what it last reported exactly
+/// as an empty one does.
+fn parse_target_report(value: serde_json::Value, path: &str) -> Result<TargetReportBody> {
+	let mut obj = match value {
+		serde_json::Value::Object(m) => m,
+		_ => return Err(AppError::BadRequest(format!("`{path}` must be an object"))),
+	};
+	let health = match obj.remove("health") {
+		None => serde_json::Value::Array(Vec::new()),
+		Some(health) => parse_health(health, &format!("{path}.health"))?,
+	};
+	let detail = match obj.remove("detail") {
+		None => serde_json::Value::Object(serde_json::Map::new()),
+		Some(detail @ serde_json::Value::Object(_)) => detail,
+		Some(_) => {
+			return Err(AppError::BadRequest(format!(
+				"`{path}.detail` must be an object",
+			)));
+		}
+	};
+	Ok(TargetReportBody { health, detail })
+}
+
+/// Validate one `health` array, wherever in the payload it sits. `path` names
+/// it for the error message, so a reporter is told which target it got wrong.
+fn parse_health(value: serde_json::Value, path: &str) -> Result<serde_json::Value> {
+	let health_arr = match value {
 		serde_json::Value::Array(a) => a,
-		_ => return Err(AppError::BadRequest("`health` must be an array".into())),
+		_ => return Err(AppError::BadRequest(format!("`{path}` must be an array"))),
 	};
 	for (idx, entry) in health_arr.iter().enumerate() {
 		let Some(entry_obj) = entry.as_object() else {
 			return Err(AppError::BadRequest(format!(
-				"`health[{idx}]` must be an object",
+				"`{path}[{idx}]` must be an object",
 			)));
 		};
 		match entry_obj.get("check") {
 			Some(serde_json::Value::String(s)) if !s.is_empty() => {}
 			Some(_) | None => {
 				return Err(AppError::BadRequest(format!(
-					"`health[{idx}].check` must be a non-empty string",
+					"`{path}[{idx}].check` must be a non-empty string",
 				)));
 			}
 		}
 		match (entry_obj.get("result"), entry_obj.get("healthy")) {
 			(Some(_), Some(_)) => {
 				return Err(AppError::BadRequest(format!(
-					"`health[{idx}]` must not have both `result` and `healthy`",
+					"`{path}[{idx}]` must not have both `result` and `healthy`",
 				)));
 			}
 			(Some(serde_json::Value::String(s)), None) => {
 				if s.parse::<CheckResult>().is_err() {
 					return Err(AppError::BadRequest(format!(
-						"`health[{idx}].result` must be one of passed, warning, failed, broken, skipped",
+						"`{path}[{idx}].result` must be one of passed, warning, failed, broken, skipped",
 					)));
 				}
 			}
 			(Some(_), None) => {
 				return Err(AppError::BadRequest(format!(
-					"`health[{idx}].result` must be a string",
+					"`{path}[{idx}].result` must be a string",
 				)));
 			}
 			(None, Some(serde_json::Value::Bool(_))) => {}
 			(None, Some(_)) => {
 				return Err(AppError::BadRequest(format!(
-					"`health[{idx}].healthy` must be a boolean",
+					"`{path}[{idx}].healthy` must be a boolean",
 				)));
 			}
 			(None, None) => {
 				return Err(AppError::BadRequest(format!(
-					"`health[{idx}]` must have a `result` (or legacy `healthy`)",
+					"`{path}[{idx}]` must have a `result` (or legacy `healthy`)",
 				)));
 			}
 		}
 	}
-
-	Ok((
-		source,
-		healthy,
-		Some(serde_json::Value::Array(health_arr)),
-		serde_json::Value::Object(obj),
-	))
+	Ok(serde_json::Value::Array(health_arr))
 }

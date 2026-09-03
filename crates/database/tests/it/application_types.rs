@@ -31,6 +31,7 @@ fn server(r#type: ApplicationType, rank: Option<ServerRank>, machine_id: Uuid) -
 		r#type,
 		rank,
 		machine_id,
+		reported_key: None,
 		group_id: None,
 		public_name: None,
 		cloud: None,

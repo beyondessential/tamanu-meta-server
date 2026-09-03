@@ -669,6 +669,7 @@ async fn seed_servers(
 			rank: None,
 			// Replaced by `insert`, which is the only path to the database.
 			machine_id: Uuid::nil(),
+			reported_key: None,
 			group_id: None,
 			public_name: None,
 			cloud: None,

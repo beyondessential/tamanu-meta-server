@@ -30,6 +30,7 @@ fn new_server(host: &str, machine_id: Uuid) -> Application {
 		r#type: ApplicationType::TamanuCentral,
 		rank: None,
 		machine_id,
+		reported_key: None,
 		group_id: None,
 		public_name: None,
 		cloud: None,

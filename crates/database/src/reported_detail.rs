@@ -89,7 +89,24 @@ impl ReportedDetail {
 		};
 		let (machine_extra, application_extra) = split_by_grain(extra);
 		MachineReportedDetail::record(db, machine, source, &machine_extra).await?;
-		let extra = &application_extra;
+		Self::record_for_application(db, server, source, &application_extra, version).await
+	}
+
+	/// Record one source's detail for one application, the reporter having
+	/// separated the grains itself.
+	///
+	/// No split to do: a split-shape push says which grain each field belongs
+	/// to, so what arrives here is the application's and the machine's went to
+	/// [`MachineReportedDetail::record`] directly. The replace and version
+	/// rules are [`Self::record`]'s.
+	// spec: FIG#sourcing
+	pub async fn record_for_application(
+		db: &mut AsyncPgConnection,
+		server: Uuid,
+		source: &str,
+		extra: &serde_json::Value,
+		version: Option<&VersionStr>,
+	) -> Result<()> {
 		use crate::schema::application_reported_detail::dsl;
 
 		diesel::insert_into(dsl::application_reported_detail)

@@ -1538,6 +1538,34 @@
           }
         }
       },
+      "ApplicationReport": {
+        "type": "object",
+        "description": "One application within a push, as the reporter found it.",
+        "required": [
+          "type",
+          "detail"
+        ],
+        "properties": {
+          "detail": {
+            "type": "object",
+            "description": "Everything the reporter has to say about this application beyond its\nchecks, including its `tamanuVersion`."
+          },
+          "health": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/HealthCheck"
+            },
+            "description": "This application's checks. Reported bare; Canopy qualifies them with\nthe application's type when cataloguing them."
+          },
+          "type": {
+            "type": "string",
+            "description": "What this application is: the software and the role it plays together,\nfor example `tamanu-central`. Required, and part of how Canopy\ncorrelates the report to its own record — a different type under a key\nalready in use means the reporter has stopped reporting one application\nand started reporting another."
+          }
+        }
+      },
       "ApplicationType": {
         "type": "string",
         "description": "What an application is: the software and the role it plays, as a slug. The set is open — a report carrying a type Canopy does not know creates an application of that type, which simply carries no per-type capabilities.",
@@ -2752,7 +2780,7 @@
         "allOf": [
           {
             "type": "object",
-            "description": "Free-form additional data (uptime, database version, timezone,\nhostname, etc.). Stored verbatim and surfaced as raw JSON in the\nstatus view.\n\nA `tamanuVersion` field here is used as the server's tracked version\n(compared against the published version catalog), superseding the\nlegacy `X-Version` request header. If both are present,\n`tamanuVersion` wins; if neither is, the status is recorded without a\nversion."
+            "description": "Free-form additional data (uptime, database version, timezone,\nhostname, etc.). Stored verbatim and surfaced as raw JSON in the\nstatus view.\n\nTransitional, and read only on a push with no `machine` section: the\ncurrent format carries every reported field inside a `detail` object on\nthe target it belongs to.\n\nA `tamanuVersion` field here is used as the server's tracked version\n(compared against the published version catalog), superseding the\nlegacy `X-Version` request header. If both are present,\n`tamanuVersion` wins; if neither is, the status is recorded without a\nversion."
           },
           {
             "type": "object",
@@ -2760,6 +2788,19 @@
               "health"
             ],
             "properties": {
+              "applications": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "The applications the reporter found on the machine, each with its own\nhealth checks and detail, keyed by a key the reporter chooses.\n\nThe key must be unique among the applications on that machine and must\nidentify the same application across this reporter's pushes; what it is\nderived from is the reporter's own business. Canopy correlates on the\nmachine, the key and the type together, and never discloses its own\nidentifier for an application.\n\nOnly read alongside `machine`. An application named here that Canopy\ndoes not already hold is created.",
+                "additionalProperties": {
+                  "$ref": "#/components/schemas/ApplicationReport"
+                },
+                "propertyNames": {
+                  "type": "string"
+                }
+              },
               "health": {
                 "type": "array",
                 "items": {
@@ -2773,6 +2814,17 @@
                   "null"
                 ],
                 "description": "Overall self-reported health of the server. **Absent means `true`**,\nso senders that predate this field are never treated as unhealthy by\nomission. Recorded for historical analysis and display, but **not\nconsulted for incident or severity decisions** — those are derived\nfrom the per-check results in `health`, with each check's severity\ncontrolled by an operator-managed catalog."
+              },
+              "machine": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/TargetReport",
+                    "description": "The machine's own health checks and detail: what the box is, rather\nthan what runs on it.\n\nSending this puts the push in the current format, and Canopy takes the\nseparation as given. A push without it is a transitional unified push,\nwhich Canopy separates into the two grains itself from `health` and the\nflat body."
+                  }
+                ]
               },
               "source": {
                 "type": [
@@ -2796,6 +2848,19 @@
           "tags"
         ],
         "properties": {
+          "applications": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Canopy's answer about each application the push described, keyed by the\nkey the reporter named it with. Present only for a push in the current\nformat.\n\nA key Canopy holds no application for is absent rather than empty,\nwhich is what a source whose pushes are ignored sees: nothing was\ncreated for it to be told about.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/TargetResponse"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
           "backup_now": {
             "type": "array",
             "items": {
@@ -2813,13 +2878,24 @@
               "type": "string"
             }
           },
+          "machine": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TargetResponse",
+                "description": "Canopy's answer about the machine. Present only for a push in the\ncurrent format: a transitional unified push is answered by the flat\nfields above and nothing else, so the response a fielded reporter sees\nis the one it already saw."
+              }
+            ]
+          },
           "names": {
             "$ref": "#/components/schemas/Entitlements",
             "description": "What this server is entitled to do with names: the domains its group\ncontrols, the grants it holds, whether it is paused, and the names and\ncertificates it already has. A server-wide fact, so returned to every\nsource — an agent already reporting status learns of a new domain or a\nnewly granted permission without asking separately. Identical to what\n`GET /names/entitlements` returns. Clients that predate this field can\nsafely ignore it."
           },
           "tags": {
             "$ref": "#/components/schemas/TagMap",
-            "description": "The server's effective tags: its own tags overlaid on its group's,\nplus the synthetic read-only `canopy:` tags and effective `billing.*`\nlabels. Identical to what the standalone `GET /tags` endpoint\nreturns — see that endpoint for the full contract. Clients that\npredate this field can safely ignore it."
+            "description": "The server's effective tags: its own tags overlaid on its group's,\nplus the synthetic read-only `canopy:` tags and effective `billing.*`\nlabels. Identical to what the standalone `GET /tags` endpoint\nreturns — see that endpoint for the full contract. Clients that\npredate this field can safely ignore it.\n\nOn a push in the current format this is the machine's, the push being\nthe machine's; each application's own are under `applications`."
           }
         }
       },
@@ -2828,6 +2904,53 @@
         "description": "Free-form key/value tags, as a JSON object whose values are all strings.",
         "additionalProperties": {
           "type": "string"
+        }
+      },
+      "TargetReport": {
+        "type": "object",
+        "description": "One target's material within a push: its health checks and its detail.\n\nA machine and an application are described the same way, so the two grains\nread alike and a reporter builds one shape for both.",
+        "required": [
+          "detail"
+        ],
+        "properties": {
+          "detail": {
+            "type": "object",
+            "description": "Everything the reporter has to say about this target beyond its checks.\nRecorded verbatim against the target it was attached to."
+          },
+          "health": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/HealthCheck"
+            },
+            "description": "This target's checks. Absent and empty mean the same thing — the source\ncurrently has no checks for this target — which recovers every check it\npreviously reported for it."
+          }
+        }
+      },
+      "TargetResponse": {
+        "type": "object",
+        "description": "What Canopy answers about one target the push described.",
+        "required": [
+          "tags",
+          "check_severities"
+        ],
+        "properties": {
+          "check_severities": {
+            "type": "object",
+            "description": "How every check this reporter can file against this target is graded,\non the same terms as the top-level `check_severities`. Keyed by bare\ncheck name, so a machine check and an application check of the same\nname are each answered under the target they belong to.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CheckSeverity"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "tags": {
+            "$ref": "#/components/schemas/TagMap",
+            "description": "This target's effective tags, on the same terms as the top-level\n`tags`."
+          }
         }
       },
       "UrlField": {

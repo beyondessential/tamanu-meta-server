@@ -83,6 +83,7 @@ diesel::table! {
 		machine_id -> Uuid,
 		#[sql_name = "type"]
 		type_ -> Text,
+		reported_key -> Nullable<Text>,
 	}
 }
 

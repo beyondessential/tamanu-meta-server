@@ -68,6 +68,21 @@ pub struct Application {
 	/// one; a machine hosts any number.
 	// spec: FLT#cardinality
 	pub machine_id: Uuid,
+	/// The key the reporter that found this application named it by.
+	///
+	/// A reporter cannot know what Canopy calls the applications on a machine,
+	/// so it chooses a key of its own and Canopy correlates on it. The key is
+	/// the reporter's, so it is unique within a machine rather than across the
+	/// fleet, and it is never disclosed the other way: Canopy's own identifier
+	/// for an application stays internal.
+	///
+	/// `None` on an application Canopy created from a transitional unified
+	/// push, which has no key to give. The first split-shape push that names
+	/// such an application by type claims it.
+	// spec: STA#identifying-an-application
+	#[serde(skip_serializing_if = "Option::is_none")]
+	#[diesel(treat_none_as_default_value = false)]
+	pub reported_key: Option<String>,
 	/// The server group this server belongs to, if any.
 	///
 	/// A denormalisation of the machine's group: an operator sets the group on
@@ -342,6 +357,109 @@ impl Application {
 			return Ok(existing);
 		}
 
+		Self::adopt(db, machine, r#type, None).await
+	}
+
+	/// The application a reporter's key names, created if Canopy does not hold
+	/// it.
+	///
+	/// Correlation is on the machine, the key and the type together. A key
+	/// Canopy already holds for this machine answers, as long as it still
+	/// names an application of the reported type: a reporter that reports a
+	/// different type under a key it was already using has stopped reporting
+	/// one application and started reporting another, so the record it used to
+	/// name gives the key up and stays as the application it is.
+	///
+	/// A key Canopy does not hold claims an unclaimed application of that type
+	/// on the machine before creating one. That is what carries a box across
+	/// the cutover: its applications came from unified pushes, which had no key
+	/// to give them, and the first split-shape push naming one by type takes it
+	/// over rather than standing up a duplicate beside it.
+	///
+	/// Concurrent reports for one box are serialised by the caller on the
+	/// machine row (see [`crate::machines::Machine::get_by_id_for_update`]),
+	/// so two arriving together cannot both create.
+	///
+	/// `create` is false for a source Canopy is ignoring, which reads what the
+	/// key names without creating, claiming, or releasing anything. It answers
+	/// `None` where a recording push would have created, an ignored reporter
+	/// being told about the applications Canopy holds and no more.
+	// spec: STA#identifying-an-application
+	pub async fn from_report_key(
+		db: &mut AsyncPgConnection,
+		machine: &crate::machines::Machine,
+		key: &str,
+		r#type: &ApplicationType,
+		create: bool,
+	) -> Result<Option<Self>> {
+		use crate::schema::applications::dsl;
+
+		let live = dsl::applications
+			.filter(dsl::machine_id.eq(machine.id))
+			.filter(dsl::deleted_at.is_null());
+
+		if let Some(held) = live
+			.clone()
+			.select(Self::as_select())
+			.filter(dsl::reported_key.eq(key))
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)?
+		{
+			if &held.r#type == r#type {
+				return Ok(Some(held));
+			}
+			if !create {
+				return Ok(None);
+			}
+			diesel::update(dsl::applications.filter(dsl::id.eq(held.id)))
+				.set(dsl::reported_key.eq(None::<String>))
+				.execute(db)
+				.await
+				.map_err(AppError::from)?;
+		}
+
+		if let Some(unclaimed) = live
+			.select(Self::as_select())
+			.filter(dsl::type_.eq(r#type.to_string()))
+			.filter(dsl::reported_key.is_null())
+			.first(db)
+			.await
+			.optional()
+			.map_err(AppError::from)?
+		{
+			if !create {
+				return Ok(Some(unclaimed));
+			}
+			return diesel::update(dsl::applications.filter(dsl::id.eq(unclaimed.id)))
+				.set(dsl::reported_key.eq(key))
+				.returning(Self::as_select())
+				.get_result(db)
+				.await
+				.map(Some)
+				.map_err(AppError::from);
+		}
+
+		if !create {
+			return Ok(None);
+		}
+
+		Self::adopt(db, machine, r#type, Some(key.to_owned()))
+			.await
+			.map(Some)
+	}
+
+	/// Stand up the application a report describes. Everything about the new
+	/// record beyond what the report said is left for an operator: it takes
+	/// its machine's group, because which deployment a box belongs to is the
+	/// one fact the box cannot know, and nothing else.
+	async fn adopt(
+		db: &mut AsyncPgConnection,
+		machine: &crate::machines::Machine,
+		r#type: &ApplicationType,
+		key: Option<String>,
+	) -> Result<Self> {
 		Self::create(
 			db,
 			Self {
@@ -351,6 +469,7 @@ impl Application {
 				r#type: r#type.clone(),
 				rank: None,
 				machine_id: machine.id,
+				reported_key: key,
 				group_id: machine.group_id,
 				public_name: None,
 				cloud: machine.cloud,
@@ -973,6 +1092,7 @@ fn test_server_serialization() {
 		rank: Some(ServerRank::Production),
 		host: Some(UrlField("https://example.com/".parse().unwrap())),
 		machine_id: Uuid::nil(),
+		reported_key: None,
 		group_id: None,
 		public_name: Some("Test Application".to_string()),
 		cloud: None,

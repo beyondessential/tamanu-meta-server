@@ -4363,6 +4363,20 @@ export interface components {
              *     awaiting its first check-in and the UI shows setup instructions.
              */
             registered_at?: string | null;
+            /**
+             * @description The key the reporter that found this application named it by.
+             *
+             *     A reporter cannot know what Canopy calls the applications on a machine,
+             *     so it chooses a key of its own and Canopy correlates on it. The key is
+             *     the reporter's, so it is unique within a machine rather than across the
+             *     fleet, and it is never disclosed the other way: Canopy's own identifier
+             *     for an application stays internal.
+             *
+             *     `None` on an application Canopy created from a transitional unified
+             *     push, which has no key to give. The first split-shape push that names
+             *     such an application by type claims it.
+             */
+            reported_key?: string | null;
             /** @description Key/value tags for this server. */
             tags?: components["schemas"]["TagMap"];
             /**

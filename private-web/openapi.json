@@ -8507,6 +8507,13 @@
             "format": "date-time",
             "description": "When this application first reported. Enrolment is the machine's, so\nthis is set by the report that brings the application into being, not\nby anything the operator does. While `None`, the application is\nawaiting its first check-in and the UI shows setup instructions."
           },
+          "reported_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The key the reporter that found this application named it by.\n\nA reporter cannot know what Canopy calls the applications on a machine,\nso it chooses a key of its own and Canopy correlates on it. The key is\nthe reporter's, so it is unique within a machine rather than across the\nfleet, and it is never disclosed the other way: Canopy's own identifier\nfor an application stays internal.\n\n`None` on an application Canopy created from a transitional unified\npush, which has no key to give. The first split-shape push that names\nsuch an application by type claims it."
+          },
           "tags": {
             "$ref": "#/components/schemas/TagMap",
             "description": "Key/value tags for this server."

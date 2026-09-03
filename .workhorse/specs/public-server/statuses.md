@@ -26,7 +26,8 @@ Per the check-state model, the push is the source's whole truth for each target 
 The source's ingest mode (see [CHK](../monitoring/checks.md), "Source policy") gates the push: an `allow` source is ingested as above; an `ignore` source's push is accepted but recorded nowhere, its checks and detail discarded; a `deny` source's push is rejected.
 Gating is per source, so other sources on the same machine are unaffected.
 
-Every ingested push is recorded in full as the machine's status history, held as described by the history-storage rules (see [HST](../platform/history-storage.md)).
+Every ingested push is recorded in full as status history, held as described by the history-storage rules (see [HST](../platform/history-storage.md)).
+A push is recorded once per target it describes, each record carrying that target's own checks and detail, so what a target last reported is answerable for that target alone.
 
 ## Health and detail
 
@@ -58,7 +59,10 @@ What a reporter derives its keys from is the reporter's own business.
 Canopy correlates a reported application to its own record by the machine, the key and the type together, and never discloses its own identifier to the reporter.
 Because the type is part of that correlation, a reporter that reports a different type under a key it was already using has stopped reporting one application and started reporting another, and Canopy treats it as exactly that.
 
-An application in a push that Canopy does not already hold is created (see [FLT](../servers/overview.md), "Applications come from reports").
+A key Canopy does not hold claims an application of that type on the machine that no key names yet.
+That is what carries a machine across the cutover: applications Canopy created from unified pushes have no key, and the first push naming one by type takes it over rather than standing a duplicate up beside it.
+
+An application in a push that Canopy holds nothing to correlate to is created (see [FLT](../servers/overview.md), "Applications come from reports").
 
 ## Transitional unified pushes
 
@@ -96,4 +100,5 @@ The response to a push carries only what the pushing source needs; a source is s
 - Each check in the push is answered with the policy applied to it (see [CHK](../monitoring/checks.md), "Policy"), so a source sees how its reports are graded and can stop running checks whose policy is `skipped`.
 - Whether a backup should start now is returned only to the source that runs backups (`alertd`).
 - The effective tags of the machine and of each application described are returned to every source, so an agent can read the classification Canopy holds for what it reports on.
+  A source is answered about each target under the same key it named that target by, so it can tell which answer is about what.
 - The names each application on the machine is entitled to act on are likewise returned to every source, so an agent learns of a new domain or a newly granted permission from a push it was making anyway (see [CRT](certificates.md), "What an application may act on").
