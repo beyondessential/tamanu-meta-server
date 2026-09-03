@@ -4,14 +4,14 @@
 
 use commons_types::dns::ManagedZone;
 use commons_types::status::CheckResult;
+use database::application_certificates::ApplicationCertificate;
 use database::certificate_alerts::{
 	ADDRESS_REF, CANOPY_SOURCE, EXPIRY_REF, ISSUANCE_REF, STUCK_AFTER_ATTEMPTS,
 };
 use database::diesel_async::AsyncPgConnection;
 use database::issues::Issue;
 use database::self_alerts::{self, FORGOTTEN_PAUSE_REF};
-use database::server_certificates::ServerCertificate;
-use database::{ServerGroupDomain, ServerName};
+use database::{ApplicationName, ServerGroupDomain};
 use diesel::{sql_query, sql_types};
 use diesel_async::RunQueryDsl;
 use jiff::{SignedDuration, Timestamp};
@@ -43,14 +43,23 @@ async fn entitled_server(conn: &mut AsyncPgConnection, domain: &str) -> Uuid {
 		.await
 		.expect("claim domain");
 
+	let machine = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
+		.bind::<sql_types::Uuid, _>(group)
+		.get_result::<RowId>(conn)
+		.await
+		.expect("insert machine")
+		.id;
+
 	let host = format!("https://{}.example.invalid", Uuid::new_v4());
 	sql_query(
-		"INSERT INTO servers (name, host, kind, group_id, may_manage_dns, may_manage_tls) \
-		 VALUES ($1, $2, 'central', $3, true, true) RETURNING id",
+		"INSERT INTO applications \
+		 (name, host, type, group_id, may_manage_dns, may_manage_tls, machine_id) \
+		 VALUES ($1, $2, 'tamanu-central', $3, true, true, $4) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>("entitled")
 	.bind::<sql_types::Text, _>(host)
 	.bind::<sql_types::Uuid, _>(group)
+	.bind::<sql_types::Uuid, _>(machine)
 	.get_result::<RowId>(conn)
 	.await
 	.expect("insert server")
@@ -67,7 +76,7 @@ async fn issue_aged(
 ) {
 	let issued_at = Timestamp::now() - elapsed;
 	let not_after = issued_at + lifetime;
-	ServerCertificate::record_issued(
+	ApplicationCertificate::record_issued(
 		conn,
 		id,
 		"-----BEGIN CERTIFICATE-----\n",
@@ -82,11 +91,11 @@ async fn issue_aged(
 	// derived from issuance, so it moves with it — otherwise a certificate could
 	// be five-sixths through its life with a renewal date still in the future,
 	// which nothing in production produces.
-	sql_query("UPDATE server_certificates SET issued_at = $2, renew_after = $3 WHERE id = $1")
+	sql_query("UPDATE application_certificates SET issued_at = $2, renew_after = $3 WHERE id = $1")
 		.bind::<sql_types::Uuid, _>(id)
 		.bind::<sql_types::Timestamptz, _>(jiff_diesel::Timestamp::from(issued_at))
 		.bind::<sql_types::Timestamptz, _>(jiff_diesel::Timestamp::from(
-			database::server_certificates::default_renew_after(issued_at, not_after),
+			database::application_certificates::default_renew_after(issued_at, not_after),
 		))
 		.execute(conn)
 		.await
@@ -108,7 +117,7 @@ async fn a_certificate_past_renewal_warns_and_one_nearly_gone_fails() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
 		let cert =
-			ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
 				.await
 				.expect("request");
 
@@ -161,7 +170,7 @@ async fn a_renewed_certificate_closes_the_alert_it_raised() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
 		let cert =
-			ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
 				.await
 				.expect("request");
 		issue_aged(
@@ -209,7 +218,7 @@ async fn one_check_per_server_covers_every_certificate_of_its() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
 		for (name, key) in [("a.fiji.tamanu.app", KEY_A), ("b.fiji.tamanu.app", KEY_B)] {
-			let cert = ServerCertificate::request(&mut conn, server, name, key, b"csr")
+			let cert = ApplicationCertificate::request(&mut conn, server, name, key, b"csr")
 				.await
 				.expect("request");
 			issue_aged(
@@ -245,7 +254,7 @@ async fn a_name_the_server_lost_raises_nothing_however_far_past_expiry() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
 		let cert =
-			ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
 				.await
 				.expect("request");
 		issue_aged(
@@ -283,12 +292,12 @@ async fn a_first_issuance_that_keeps_failing_is_reported_separately() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
 		let cert =
-			ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
 				.await
 				.expect("request");
 
 		for _ in 0..STUCK_AFTER_ATTEMPTS {
-			ServerCertificate::record_failure(&mut conn, cert.id, "the zone would not answer")
+			ApplicationCertificate::record_failure(&mut conn, cert.id, "the zone would not answer")
 				.await
 				.expect("record failure");
 		}
@@ -319,10 +328,10 @@ async fn a_few_failed_attempts_are_waited_out_rather_than_reported() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
 		let cert =
-			ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
 				.await
 				.expect("request");
-		ServerCertificate::record_failure(&mut conn, cert.id, "not visible yet")
+		ApplicationCertificate::record_failure(&mut conn, cert.id, "not visible yet")
 			.await
 			.expect("record failure");
 
@@ -342,11 +351,11 @@ async fn an_issuance_that_finally_succeeds_closes_its_alert() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
 		let cert =
-			ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
 				.await
 				.expect("request");
 		for _ in 0..STUCK_AFTER_ATTEMPTS {
-			ServerCertificate::record_failure(&mut conn, cert.id, "no")
+			ApplicationCertificate::record_failure(&mut conn, cert.id, "no")
 				.await
 				.expect("record failure");
 		}
@@ -388,7 +397,7 @@ async fn records_that_could_not_be_published_are_reported_and_then_closed() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
 		let addr: IpAddr = "192.0.2.1".parse().expect("address");
-		let row = ServerName::register(&mut conn, server, "a.fiji.tamanu.app", &[addr])
+		let row = ApplicationName::register(&mut conn, server, "a.fiji.tamanu.app", &[addr])
 			.await
 			.expect("register");
 
@@ -401,7 +410,7 @@ async fn records_that_could_not_be_published_are_reported_and_then_closed() {
 			0
 		);
 
-		ServerName::record_publish_error(&mut conn, row.id, "route53 refused the change")
+		ApplicationName::record_publish_error(&mut conn, row.id, "route53 refused the change")
 			.await
 			.expect("record error");
 		database::certificate_alerts::sweep_address_records(&mut conn)
@@ -418,7 +427,7 @@ async fn records_that_could_not_be_published_are_reported_and_then_closed() {
 			issue.message
 		);
 
-		ServerName::record_published(&mut conn, row.id, &[addr])
+		ApplicationName::record_published(&mut conn, row.id, &[addr])
 			.await
 			.expect("record published");
 		database::certificate_alerts::sweep_address_records(&mut conn)
@@ -442,7 +451,7 @@ async fn a_certificate_lapsing_under_a_pause_is_canopys_to_report() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
 		let cert =
-			ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
 				.await
 				.expect("request");
 		issue_aged(
@@ -452,7 +461,7 @@ async fn a_certificate_lapsing_under_a_pause_is_canopys_to_report() {
 			SignedDuration::from_hours(85 * 24),
 		)
 		.await;
-		database::servers::Server::pause_name_management(
+		database::applications::Application::pause_name_management(
 			&mut conn,
 			server,
 			Some("operator@example.test"),
@@ -476,7 +485,10 @@ async fn a_certificate_lapsing_under_a_pause_is_canopys_to_report() {
 			.expect("raised");
 		assert_eq!(raised.observed_result, Some(CheckResult::Warning));
 		assert_eq!(raised.r#ref, FORGOTTEN_PAUSE_REF);
-		assert!(raised.server_id.is_none(), "canopy-wide, not per-server");
+		assert!(
+			raised.application_id.is_none(),
+			"canopy-wide, not per-server"
+		);
 		assert!(
 			raised.message.contains("a.fiji.tamanu.app")
 				&& raised.message.contains("suspected key leak"),
@@ -492,7 +504,7 @@ async fn a_certificate_expired_under_a_pause_is_a_fault_rather_than_a_nudge() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
 		let cert =
-			ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
 				.await
 				.expect("request");
 		issue_aged(
@@ -502,9 +514,14 @@ async fn a_certificate_expired_under_a_pause_is_a_fault_rather_than_a_nudge() {
 			SignedDuration::from_hours(100 * 24),
 		)
 		.await;
-		database::servers::Server::pause_name_management(&mut conn, server, None, "investigating")
-			.await
-			.expect("pause");
+		database::applications::Application::pause_name_management(
+			&mut conn,
+			server,
+			None,
+			"investigating",
+		)
+		.await
+		.expect("pause");
 
 		let raised = self_alerts::sweep_forgotten_pauses(&mut conn)
 			.await
@@ -521,7 +538,7 @@ async fn lifting_the_pause_recovers_the_self_alert() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
 		let cert =
-			ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
 				.await
 				.expect("request");
 		issue_aged(
@@ -531,15 +548,20 @@ async fn lifting_the_pause_recovers_the_self_alert() {
 			SignedDuration::from_hours(85 * 24),
 		)
 		.await;
-		database::servers::Server::pause_name_management(&mut conn, server, None, "investigating")
-			.await
-			.expect("pause");
+		database::applications::Application::pause_name_management(
+			&mut conn,
+			server,
+			None,
+			"investigating",
+		)
+		.await
+		.expect("pause");
 		self_alerts::sweep_forgotten_pauses(&mut conn)
 			.await
 			.expect("sweep")
 			.expect("raised");
 
-		database::servers::Server::resume_name_management(&mut conn, server)
+		database::applications::Application::resume_name_management(&mut conn, server)
 			.await
 			.expect("resume");
 		self_alerts::sweep_forgotten_pauses(&mut conn)
@@ -572,7 +594,7 @@ async fn a_pause_over_a_healthy_certificate_raises_nothing() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
 		let cert =
-			ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
 				.await
 				.expect("request");
 		issue_aged(
@@ -582,9 +604,14 @@ async fn a_pause_over_a_healthy_certificate_raises_nothing() {
 			SignedDuration::from_hours(1),
 		)
 		.await;
-		database::servers::Server::pause_name_management(&mut conn, server, None, "brief look")
-			.await
-			.expect("pause");
+		database::applications::Application::pause_name_management(
+			&mut conn,
+			server,
+			None,
+			"brief look",
+		)
+		.await
+		.expect("pause");
 
 		assert!(
 			self_alerts::sweep_forgotten_pauses(&mut conn)
@@ -602,7 +629,7 @@ async fn a_name_the_server_lost_does_not_count_against_a_pause() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
 		let cert =
-			ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
 				.await
 				.expect("request");
 		issue_aged(
@@ -612,9 +639,14 @@ async fn a_name_the_server_lost_does_not_count_against_a_pause() {
 			SignedDuration::from_hours(120 * 24),
 		)
 		.await;
-		database::servers::Server::pause_name_management(&mut conn, server, None, "investigating")
-			.await
-			.expect("pause");
+		database::applications::Application::pause_name_management(
+			&mut conn,
+			server,
+			None,
+			"investigating",
+		)
+		.await
+		.expect("pause");
 
 		let claim = ServerGroupDomain::controlling(&mut conn, "a.fiji.tamanu.app")
 			.await

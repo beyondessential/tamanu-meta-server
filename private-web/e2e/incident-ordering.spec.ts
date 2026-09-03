@@ -24,7 +24,7 @@ test.describe("incident timeline ordering", () => {
 		const group = await seedServerGroup(sql, { name: "ordering-group" });
 		const server = await seedServer(sql, {
 			name: "ordering-server",
-			kind: "central",
+			type: "tamanu-central",
 			rank: "production",
 			groupId: group.id,
 		});

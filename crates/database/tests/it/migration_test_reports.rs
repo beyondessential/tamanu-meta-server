@@ -28,14 +28,25 @@ async fn insert_group(conn: &mut AsyncPgConnection) -> Uuid {
 	row.id
 }
 
-async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uuid {
-	let row: RowId = sql_query("INSERT INTO servers (host, group_id) VALUES ($1, $2) RETURNING id")
-		.bind::<sql_types::Text, _>("https://central.kamaka.example")
+/// A machine and the one application on it, as `(machine, application)`. A
+/// report is about the machine's snapshot; the test is about the application's
+/// candidate version.
+async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> (Uuid, Uuid) {
+	let machine: RowId = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
 		.bind::<sql_types::Uuid, _>(group_id)
 		.get_result(conn)
 		.await
-		.expect("server");
-	row.id
+		.expect("machine");
+	let row: RowId = sql_query(
+		"INSERT INTO applications (type, host, group_id, machine_id) VALUES ('tamanu-central', $1, $2, $3) RETURNING id",
+	)
+	.bind::<sql_types::Text, _>("https://central.kamaka.example")
+	.bind::<sql_types::Uuid, _>(group_id)
+	.bind::<sql_types::Uuid, _>(machine.id)
+	.get_result(conn)
+	.await
+	.expect("server");
+	(machine.id, row.id)
 }
 
 async fn insert_consumer(conn: &mut AsyncPgConnection) -> Uuid {
@@ -62,13 +73,18 @@ async fn insert_version(conn: &mut AsyncPgConnection, minor: i32) -> Version {
 		.expect("version")
 }
 
-fn report(consumer: Uuid, group: Uuid, server: Uuid, outcome: RunOutcome) -> NewBackupRestoreCheck {
+fn report(
+	consumer: Uuid,
+	group: Uuid,
+	machine: Uuid,
+	outcome: RunOutcome,
+) -> NewBackupRestoreCheck {
 	NewBackupRestoreCheck {
 		replica_id: None,
 		replica_name: None,
 		consumer_device_id: consumer,
 		group_id: group,
-		server_id: Some(server),
+		machine_id: Some(machine),
 		r#type: BackupType::TamanuPostgres,
 		intent: RestoreIntent::from("migration-test"),
 		snapshot_id: Some("snap-x".into()),
@@ -100,13 +116,14 @@ async fn a_passing_test_records_timings_in_order() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn).await;
-		let server = insert_server(&mut conn, group).await;
+		let (machine, server) = insert_server(&mut conn, group).await;
 		let target = insert_version(&mut conn, 63).await;
 
 		let check_id = MigrationTest::record(
 			&mut conn,
-			report(consumer, group, server, RunOutcome::Success),
+			report(consumer, group, machine, RunOutcome::Success),
 			NewMigrationTest {
+				application_id: server,
 				target_version_id: target.id,
 				total_elapsed: secs(900),
 				failed_migration: None,
@@ -122,7 +139,7 @@ async fn a_passing_test_records_timings_in_order() {
 		.expect("record");
 
 		assert_eq!(
-			verdict(&mut conn, server, target.id)
+			verdict(&mut conn, machine, target.id)
 				.await
 				.expect("verdict"),
 			Verdict::Passed
@@ -151,13 +168,14 @@ async fn a_named_failing_migration_is_a_failed_verdict() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn).await;
-		let server = insert_server(&mut conn, group).await;
+		let (machine, server) = insert_server(&mut conn, group).await;
 		let target = insert_version(&mut conn, 63).await;
 
 		MigrationTest::record(
 			&mut conn,
-			report(consumer, group, server, RunOutcome::Failure),
+			report(consumer, group, machine, RunOutcome::Failure),
 			NewMigrationTest {
+				application_id: server,
 				target_version_id: target.id,
 				total_elapsed: secs(45),
 				failed_migration: Some("backfillNoteTypeIds".into()),
@@ -170,7 +188,7 @@ async fn a_named_failing_migration_is_a_failed_verdict() {
 		.expect("record");
 
 		assert_eq!(
-			verdict(&mut conn, server, target.id)
+			verdict(&mut conn, machine, target.id)
 				.await
 				.expect("verdict"),
 			Verdict::Failed
@@ -184,7 +202,7 @@ async fn an_untested_pair_and_an_untested_version() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn).await;
-		let server = insert_server(&mut conn, group).await;
+		let (machine, server) = insert_server(&mut conn, group).await;
 		let tested = insert_version(&mut conn, 63).await;
 		let untested = insert_version(&mut conn, 64).await;
 
@@ -198,8 +216,9 @@ async fn an_untested_pair_and_an_untested_version() {
 
 		MigrationTest::record(
 			&mut conn,
-			report(consumer, group, server, RunOutcome::Success),
+			report(consumer, group, machine, RunOutcome::Success),
 			NewMigrationTest {
+				application_id: server,
 				target_version_id: tested.id,
 				total_elapsed: secs(10),
 				failed_migration: None,
@@ -244,7 +263,7 @@ async fn migration_check(conn: &mut AsyncPgConnection, server: Uuid) -> Option<F
 	sql_query(
 		"SELECT i.observed_result AS observed, i.effective_result AS effective, i.escalates
 		 FROM issues i
-		 WHERE i.server_id = $1 AND i.ref = 'migration-test' AND i.active = true",
+		 WHERE i.application_id = $1 AND i.ref = 'migration-test' AND i.active = true",
 	)
 	.bind::<sql_types::Uuid, _>(server)
 	.get_result(conn)
@@ -261,7 +280,7 @@ async fn unresolved_issues_for(conn: &mut AsyncPgConnection, server: Uuid) -> i6
 	}
 	sql_query(
 		"SELECT count(*) AS count FROM version_known_issues
-		 WHERE server_id = $1 AND resolved_at IS NULL",
+		 WHERE application_id = $1 AND resolved_at IS NULL",
 	)
 	.bind::<sql_types::Uuid, _>(server)
 	.get_result::<Count>(conn)
@@ -275,13 +294,14 @@ async fn a_failure_warns_on_the_server_and_holds_the_version_back() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn).await;
-		let server = insert_server(&mut conn, group).await;
+		let (machine, server) = insert_server(&mut conn, group).await;
 		let target = insert_version(&mut conn, 63).await;
 
 		MigrationTest::record(
 			&mut conn,
-			report(consumer, group, server, RunOutcome::Success),
+			report(consumer, group, machine, RunOutcome::Success),
 			NewMigrationTest {
+				application_id: server,
 				target_version_id: target.id,
 				total_elapsed: secs(45),
 				failed_migration: Some("backfillNoteTypeIds".into()),
@@ -324,16 +344,17 @@ async fn tomorrows_snapshot_does_not_file_the_issue_twice() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn).await;
-		let server = insert_server(&mut conn, group).await;
+		let (machine, server) = insert_server(&mut conn, group).await;
 		let target = insert_version(&mut conn, 63).await;
 
 		for snapshot in ["snap-1", "snap-2"] {
-			let mut failing = report(consumer, group, server, RunOutcome::Success);
+			let mut failing = report(consumer, group, machine, RunOutcome::Success);
 			failing.snapshot_id = Some(snapshot.into());
 			MigrationTest::record(
 				&mut conn,
 				failing,
 				NewMigrationTest {
+					application_id: server,
 					target_version_id: target.id,
 					total_elapsed: secs(45),
 					failed_migration: Some("backfillNoteTypeIds".into()),
@@ -360,15 +381,16 @@ async fn a_later_pass_recovers_the_check() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn).await;
-		let server = insert_server(&mut conn, group).await;
+		let (machine, server) = insert_server(&mut conn, group).await;
 		let target = insert_version(&mut conn, 63).await;
 
-		let mut failing = report(consumer, group, server, RunOutcome::Success);
+		let mut failing = report(consumer, group, machine, RunOutcome::Success);
 		failing.snapshot_id = Some("snap-1".into());
 		MigrationTest::record(
 			&mut conn,
 			failing,
 			NewMigrationTest {
+				application_id: server,
 				target_version_id: target.id,
 				total_elapsed: secs(45),
 				failed_migration: Some("backfillNoteTypeIds".into()),
@@ -381,12 +403,13 @@ async fn a_later_pass_recovers_the_check() {
 		.expect("record failure");
 		assert!(migration_check(&mut conn, server).await.is_some());
 
-		let mut passing = report(consumer, group, server, RunOutcome::Success);
+		let mut passing = report(consumer, group, machine, RunOutcome::Success);
 		passing.snapshot_id = Some("snap-2".into());
 		MigrationTest::record(
 			&mut conn,
 			passing,
 			NewMigrationTest {
+				application_id: server,
 				target_version_id: target.id,
 				total_elapsed: secs(50),
 				failed_migration: None,
@@ -437,23 +460,26 @@ async fn declare_migrate(
 }
 
 /// A successful backup run, which is the snapshot a migration test would use.
+///
+/// Takes the *machine*: a run captures a box's data.
+// spec: BAK
 async fn record_snapshot(
 	conn: &mut AsyncPgConnection,
 	consumer: Uuid,
 	group: Uuid,
-	server: Uuid,
+	machine: Uuid,
 	snapshot: &str,
 	age_seconds: i64,
 ) {
 	sql_query(
 		"INSERT INTO backup_runs
-		 (id, device_id, group_id, server_id, type, purpose, outcome, snapshot_id, reported_at)
+		 (id, device_id, group_id, machine_id, type, purpose, outcome, snapshot_id, reported_at)
 		 VALUES (gen_random_uuid(), $1, $2, $3, 'tamanu-postgres', 'backup', 'success', $4,
 		         NOW() - make_interval(secs => $5))",
 	)
 	.bind::<sql_types::Uuid, _>(consumer)
 	.bind::<sql_types::Uuid, _>(group)
-	.bind::<sql_types::Uuid, _>(server)
+	.bind::<sql_types::Uuid, _>(machine)
 	.bind::<sql_types::Text, _>(snapshot)
 	.bind::<sql_types::Double, _>(age_seconds as f64)
 	.execute(conn)
@@ -479,11 +505,11 @@ async fn an_untried_candidate_goes_overdue_and_a_tested_one_does_not() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn).await;
-		let server = insert_server(&mut conn, group).await;
+		let (machine, server) = insert_server(&mut conn, group).await;
 		let target = insert_version(&mut conn, 63).await;
 		plan_upgrade(&mut conn, group, &target).await;
 		declare_migrate(&mut conn, consumer, group, 3600).await;
-		record_snapshot(&mut conn, consumer, group, server, "snap-old", 7200).await;
+		record_snapshot(&mut conn, consumer, group, machine, "snap-old", 7200).await;
 
 		let filed = database::restore::sweep_restore_checks(&mut conn)
 			.await
@@ -496,12 +522,13 @@ async fn an_untried_candidate_goes_overdue_and_a_tested_one_does_not() {
 		assert!(!check.escalates);
 
 		// Once it has a verdict for that snapshot, it is no longer overdue.
-		let mut passing = report(consumer, group, server, RunOutcome::Success);
+		let mut passing = report(consumer, group, machine, RunOutcome::Success);
 		passing.snapshot_id = Some("snap-old".into());
 		MigrationTest::record(
 			&mut conn,
 			passing,
 			NewMigrationTest {
+				application_id: server,
 				target_version_id: target.id,
 				total_elapsed: secs(10),
 				failed_migration: None,
@@ -529,8 +556,8 @@ async fn a_group_shows_where_each_server_stands() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn).await;
-		let tested = insert_server(&mut conn, group).await;
-		let untested = insert_server(&mut conn, group).await;
+		let (tested, tested_app) = insert_server(&mut conn, group).await;
+		let (_untested, untested_app) = insert_server(&mut conn, group).await;
 		let target = insert_version(&mut conn, 63).await;
 		plan_upgrade(&mut conn, group, &target).await;
 
@@ -540,6 +567,7 @@ async fn a_group_shows_where_each_server_stands() {
 			&mut conn,
 			failing,
 			NewMigrationTest {
+				application_id: tested_app,
 				target_version_id: target.id,
 				total_elapsed: secs(3600),
 				failed_migration: Some("backfillNoteTypeIds".into()),
@@ -559,7 +587,7 @@ async fn a_group_shows_where_each_server_stands() {
 		let by_server: std::collections::HashMap<Uuid, _> =
 			verdicts.into_iter().map(|v| (v.server_id, v)).collect();
 
-		let failed = &by_server[&tested];
+		let failed = &by_server[&tested_app];
 		assert_eq!(failed.verdict, database::migration_tests::Verdict::Failed);
 		assert_eq!(failed.target_version, "2.63.0");
 		let latest = failed.latest.as_ref().expect("a test was reported");
@@ -574,7 +602,7 @@ async fn a_group_shows_where_each_server_stands() {
 			"growth is readable from the verdict"
 		);
 
-		let pending = &by_server[&untested];
+		let pending = &by_server[&untested_app];
 		assert_eq!(
 			pending.verdict,
 			database::migration_tests::Verdict::NotTested
@@ -588,7 +616,7 @@ async fn restore_check(conn: &mut AsyncPgConnection, server: Uuid) -> Option<Fil
 	sql_query(
 		"SELECT i.observed_result AS observed, i.effective_result AS effective, i.escalates
 		 FROM issues i
-		 WHERE i.server_id = $1 AND i.ref = 'restore-verification' AND i.active = true",
+		 WHERE i.application_id = $1 AND i.ref = 'restore-verification' AND i.active = true",
 	)
 	.bind::<sql_types::Uuid, _>(server)
 	.get_result(conn)
@@ -606,14 +634,15 @@ async fn one_report_keeps_backup_health_and_version_readiness_apart() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn).await;
-		let server = insert_server(&mut conn, group).await;
+		let (machine, server) = insert_server(&mut conn, group).await;
 		let target = insert_version(&mut conn, 63).await;
 
 		// The restore succeeded into a healthy replica; the migrations then failed.
 		MigrationTest::record(
 			&mut conn,
-			report(consumer, group, server, RunOutcome::Success),
+			report(consumer, group, machine, RunOutcome::Success),
 			NewMigrationTest {
+				application_id: server,
 				target_version_id: target.id,
 				total_elapsed: secs(45),
 				failed_migration: Some("backfillNoteTypeIds".into()),
@@ -652,13 +681,14 @@ async fn a_failed_restore_leaves_the_version_unjudged() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn).await;
-		let server = insert_server(&mut conn, group).await;
+		let (machine, server) = insert_server(&mut conn, group).await;
 		let target = insert_version(&mut conn, 63).await;
 
 		MigrationTest::record(
 			&mut conn,
-			report(consumer, group, server, RunOutcome::Failure),
+			report(consumer, group, machine, RunOutcome::Failure),
 			NewMigrationTest {
+				application_id: server,
 				target_version_id: target.id,
 				total_elapsed: secs(0),
 				failed_migration: None,
@@ -671,7 +701,7 @@ async fn a_failed_restore_leaves_the_version_unjudged() {
 		.expect("record");
 
 		assert_eq!(
-			database::migration_tests::verdict(&mut conn, server, target.id)
+			database::migration_tests::verdict(&mut conn, machine, target.id)
 				.await
 				.expect("verdict"),
 			database::migration_tests::Verdict::NotTested,
@@ -694,10 +724,10 @@ async fn a_verdict_with_no_declaration_still_surfaces() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn).await;
-		let server = insert_server(&mut conn, group).await;
+		let (machine, server) = insert_server(&mut conn, group).await;
 		let target = insert_version(&mut conn, 63).await;
 
-		let unlinked = report(consumer, group, server, RunOutcome::Success);
+		let unlinked = report(consumer, group, machine, RunOutcome::Success);
 		assert!(
 			unlinked.replica_id.is_none(),
 			"nothing links it to a replica"
@@ -706,6 +736,7 @@ async fn a_verdict_with_no_declaration_still_surfaces() {
 			&mut conn,
 			unlinked,
 			NewMigrationTest {
+				application_id: server,
 				target_version_id: target.id,
 				total_elapsed: secs(45),
 				failed_migration: Some("backfillNoteTypeIds".into()),

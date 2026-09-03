@@ -22,8 +22,8 @@ async fn tags_endpoint_returns_group_tags_when_server_has_none() {
 			.await
 			.unwrap();
 			sql_query(
-				"INSERT INTO servers (id, host, kind, device_id, group_id) \
-				 VALUES ($1, 'https://t.example.com', 'central', $2, $3)",
+				"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) \
+				 VALUES ($1, 'https://t.example.com', 'tamanu-central', $3, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
 			.bind::<sql_types::Uuid, _>(device_id)
@@ -45,7 +45,7 @@ async fn tags_endpoint_returns_group_tags_when_server_has_none() {
 	.await
 }
 
-/// Server tags win on key collision; non-colliding group keys carry through.
+/// Application tags win on key collision; non-colliding group keys carry through.
 #[tokio::test(flavor = "multi_thread")]
 async fn tags_endpoint_overlays_server_tags_onto_group() {
 	commons_tests::server::run_with_device_auth(
@@ -62,8 +62,8 @@ async fn tags_endpoint_overlays_server_tags_onto_group() {
 			.await
 			.unwrap();
 			sql_query(
-				"INSERT INTO servers (id, host, kind, device_id, group_id, tags) \
-				 VALUES ($1, 'https://o.example.com', 'central', $2, $3, '{\"env\": \"server\", \"region\": \"au\"}'::jsonb)",
+				"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, group_id, tags, machine_id) \
+				 VALUES ($1, 'https://o.example.com', 'tamanu-central', $3, '{\"env\": \"server\", \"region\": \"au\"}'::jsonb, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
 			.bind::<sql_types::Uuid, _>(device_id)
@@ -78,11 +78,11 @@ async fn tags_endpoint_overlays_server_tags_onto_group() {
 				.await;
 			response.assert_status_ok();
 			let tags: HashMap<String, String> = response.json();
-			// Server overrides on the colliding key.
+			// Application overrides on the colliding key.
 			assert_eq!(tags.get("env"), Some(&"server".to_string()));
 			// Group's non-colliding key carries through.
 			assert_eq!(tags.get("tier"), Some(&"1".to_string()));
-			// Server's exclusive key is present.
+			// Application's exclusive key is present.
 			assert_eq!(tags.get("region"), Some(&"au".to_string()));
 		},
 	)
@@ -97,8 +97,8 @@ async fn tags_endpoint_returns_server_tags_when_ungrouped() {
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = Uuid::new_v4();
 			sql_query(
-				"INSERT INTO servers (id, host, kind, device_id, tags) \
-				 VALUES ($1, 'https://lone.example.com', 'central', $2, '{\"role\": \"primary\"}'::jsonb)",
+				"WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, tags, machine_id) \
+				 VALUES ($1, 'https://lone.example.com', 'tamanu-central', '{\"role\": \"primary\"}'::jsonb, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
 			.bind::<sql_types::Uuid, _>(device_id)
@@ -115,13 +115,19 @@ async fn tags_endpoint_returns_server_tags_when_ungrouped() {
 			assert_eq!(tags.get("role"), Some(&"primary".to_string()));
 			// Synthetic product and kind tags are always present; ungrouped, so
 			// no group tags.
+			assert_eq!(
+				tags.get("canopy:type"),
+				Some(&"tamanu-central".to_string())
+			);
+			// Both halves of the pair the type replaced, so a rule written
+			// against the earlier names keeps matching.
 			assert_eq!(tags.get("canopy:product"), Some(&"tamanu".to_string()));
 			assert_eq!(tags.get("canopy:kind"), Some(&"central".to_string()));
 			assert_eq!(tags.get("canopy:group-id"), None);
 			assert_eq!(tags.get("canopy:group-name"), None);
 			// No rank set on this server, so no synthetic rank tag.
 			assert_eq!(tags.get("canopy:rank"), None);
-			assert_eq!(tags.len(), 3);
+			assert_eq!(tags.len(), 4);
 		},
 	)
 	.await
@@ -142,8 +148,8 @@ async fn tags_endpoint_includes_synthetic_server_attributes() {
 				.await
 				.unwrap();
 			sql_query(
-				"INSERT INTO servers (id, host, kind, rank, device_id, group_id) \
-				 VALUES ($1, 'https://s.example.com', 'facility', 'production', $2, $3)",
+				"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, rank, group_id, machine_id) \
+				 VALUES ($1, 'https://s.example.com', 'tamanu-facility', 'production', $3, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
 			.bind::<sql_types::Uuid, _>(device_id)
@@ -191,8 +197,8 @@ async fn tags_endpoint_includes_effective_billing_labels() {
 			.await
 			.unwrap();
 			sql_query(
-				"INSERT INTO servers (id, host, kind, rank, device_id, group_id) \
-				 VALUES ($1, 'https://b.example.com', 'central', 'production', $2, $3)",
+				"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, rank, group_id, machine_id) \
+				 VALUES ($1, 'https://b.example.com', 'tamanu-central', 'production', $3, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
 			.bind::<sql_types::Uuid, _>(device_id)
@@ -238,9 +244,9 @@ async fn tags_endpoint_server_billing_tags_win() {
 			.await
 			.unwrap();
 			sql_query(
-				"INSERT INTO servers (id, host, kind, rank, device_id, group_id, tags) \
-				 VALUES ($1, 'https://ov.example.com', 'central', 'production', $2, $3, \
-				 '{\"billing.product\": \"pgro\", \"billing.deployment\": \"custom-dep\", \"billing.stage\": \"staging\"}'::jsonb)",
+				"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, rank, group_id, tags, machine_id) \
+				 VALUES ($1, 'https://ov.example.com', 'tamanu-central', 'production', $3, \
+				 '{\"billing.product\": \"pgro\", \"billing.deployment\": \"custom-dep\", \"billing.stage\": \"staging\"}'::jsonb, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
 			.bind::<sql_types::Uuid, _>(device_id)
@@ -255,7 +261,7 @@ async fn tags_endpoint_server_billing_tags_win() {
 				.await;
 			response.assert_status_ok();
 			let tags: HashMap<String, String> = response.json();
-			// Server tags win over the group tags and the computed rank default.
+			// Application tags win over the group tags and the computed rank default.
 			assert_eq!(tags.get("billing.product"), Some(&"pgro".to_string()));
 			assert_eq!(tags.get("billing.deployment"), Some(&"custom-dep".to_string()));
 			assert_eq!(tags.get("billing.stage"), Some(&"staging".to_string()));
@@ -283,8 +289,8 @@ async fn tags_endpoint_group_billing_tags_win_over_defaults() {
 			.await
 			.unwrap();
 			sql_query(
-				"INSERT INTO servers (id, host, kind, rank, device_id, group_id) \
-				 VALUES ($1, 'https://gs.example.com', 'central', 'production', $2, $3)",
+				"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, rank, group_id, machine_id) \
+				 VALUES ($1, 'https://gs.example.com', 'tamanu-central', 'production', $3, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
 			.bind::<sql_types::Uuid, _>(device_id)
@@ -324,8 +330,8 @@ async fn tags_endpoint_billing_stage_is_per_server_rank() {
 				.unwrap();
 			// A higher-ranked (production) sibling in the same group.
 			sql_query(
-				"INSERT INTO servers (id, host, kind, rank, group_id) \
-				 VALUES ($1, 'https://prod.example.com', 'central', 'production', $2)",
+				"WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, rank, group_id, machine_id) \
+				 VALUES ($1, 'https://prod.example.com', 'tamanu-central', 'production', $2, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(prod_id)
 			.bind::<sql_types::Uuid, _>(group_id)
@@ -334,8 +340,8 @@ async fn tags_endpoint_billing_stage_is_per_server_rank() {
 			.unwrap();
 			// The requesting server is a clone.
 			sql_query(
-				"INSERT INTO servers (id, host, kind, rank, device_id, group_id) \
-				 VALUES ($1, 'https://clone.example.com', 'central', 'clone', $2, $3)",
+				"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, rank, group_id, machine_id) \
+				 VALUES ($1, 'https://clone.example.com', 'tamanu-central', 'clone', $3, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(clone_id)
 			.bind::<sql_types::Uuid, _>(device_id)
@@ -372,8 +378,8 @@ async fn tags_endpoint_no_billing_stage_when_server_unranked() {
 				.await
 				.unwrap();
 			sql_query(
-				"INSERT INTO servers (id, host, kind, device_id, group_id) \
-				 VALUES ($1, 'https://ur.example.com', 'central', $2, $3)",
+				"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) \
+				 VALUES ($1, 'https://ur.example.com', 'tamanu-central', $3, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
 			.bind::<sql_types::Uuid, _>(device_id)
@@ -404,8 +410,8 @@ async fn tags_endpoint_no_billing_labels_when_ungrouped() {
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = Uuid::new_v4();
 			sql_query(
-				"INSERT INTO servers (id, host, kind, device_id) \
-				 VALUES ($1, 'https://nb.example.com', 'central', $2)",
+				"WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, machine_id) \
+				 VALUES ($1, 'https://nb.example.com', 'tamanu-central', $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
 			.bind::<sql_types::Uuid, _>(device_id)
@@ -464,8 +470,8 @@ async fn tags_endpoint_billing_product_is_the_servers_own() {
 				.unwrap();
 			// A Tamanu member alongside it, so the group genuinely spans products.
 			sql_query(
-				"INSERT INTO servers (id, host, kind, rank, group_id) \
-				 VALUES ($1, 'https://central.example.com', 'central', 'production', $2)",
+				"WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, rank, group_id, machine_id) \
+				 VALUES ($1, 'https://central.example.com', 'tamanu-central', 'production', $2, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(Uuid::new_v4())
 			.bind::<sql_types::Uuid, _>(group_id)
@@ -473,8 +479,8 @@ async fn tags_endpoint_billing_product_is_the_servers_own() {
 			.await
 			.unwrap();
 			sql_query(
-				"INSERT INTO servers (id, host, product, kind, rank, device_id, group_id) \
-				 VALUES ($1, 'https://lims.example.com', 'senaite', 'standalone', 'clone', $2, $3)",
+				"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, rank, group_id, machine_id) \
+				 VALUES ($1, 'https://lims.example.com', 'senaite', 'clone', $3, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
 			.bind::<sql_types::Uuid, _>(device_id)
@@ -509,8 +515,8 @@ async fn tags_endpoint_ungrouped_server_has_no_billing_product() {
 		"server",
 		async |mut conn, cert, device_id, public, _| {
 			sql_query(
-				"INSERT INTO servers (id, host, product, kind, device_id) \
-				 VALUES ($1, 'https://lone-lims.example.com', 'senaite', 'standalone', $2)",
+				"WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, machine_id) \
+				 VALUES ($1, 'https://lone-lims.example.com', 'senaite', $1)",
 			)
 			.bind::<sql_types::Uuid, _>(Uuid::new_v4())
 			.bind::<sql_types::Uuid, _>(device_id)

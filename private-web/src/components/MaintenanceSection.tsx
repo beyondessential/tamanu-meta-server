@@ -34,11 +34,11 @@ export default function MaintenanceSection({
 }: {
 	/** DOM id, so a banner elsewhere on the page can link here. */
 	anchor?: string;
-	scope: "server" | "group";
+	scope: "machine" | "group";
 	id: string;
 	targetLabel?: string;
-	/** For a server, its group: a group's window covers every server in it,
-	 * so the server is under maintenance without having a window of its own.
+	/** For a machine, its group: a group's window covers every machine in it,
+	 * so the machine is under maintenance without having a window of its own.
 	 * Its own surface has to say so. */
 	groupId?: string | null;
 	groupName?: string | null;
@@ -54,7 +54,7 @@ export default function MaintenanceSection({
 	const result = useApi(
 		"maintenance",
 		"for_target",
-		scope === "server" ? { server_id: id } : { server_group_id: id },
+		scope === "machine" ? { machine_id: id } : { server_group_id: id },
 		[id, tick],
 	);
 	const covering = useApi(
@@ -110,7 +110,7 @@ export default function MaintenanceSection({
 					<Typography variant="body2">
 						Under maintenance, ending{" "}
 						<TimeAgo timestamp={fromGroup.expected_end} />, as part of{" "}
-						<MuiLink component={RouterLink} to={`/groups/${groupId}`}>
+						<MuiLink component={RouterLink} to={`/fleet/groups/${groupId}`}>
 							{groupName ?? "its group"}
 						</MuiLink>
 						. Amend or lift it there.
@@ -156,8 +156,8 @@ export default function MaintenanceSection({
 					<Typography variant="body2">
 						Under maintenance, ending <TimeAgo timestamp={open.expected_end} />.
 
-						Checks are recorded and shown; nothing on this{" "}
-						{scope === "server" ? "server" : "group"} alerts.
+						Checks are still recorded and shown. Nothing on this{" "}
+						{scope === "machine" ? "machine" : "group"} alerts.
 					</Typography>
 					{open.note && (
 						<Typography variant="body2" sx={{ mt: 0.5, fontStyle: "italic" }}>

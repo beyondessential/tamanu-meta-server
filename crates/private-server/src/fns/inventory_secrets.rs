@@ -1,4 +1,4 @@
-//! Managing the secret variables an environment or a server carries.
+//! Managing the secret variables an environment or an application carries.
 //!
 //! The name and who set it are recorded in the database; the value goes to
 //! canopy's secret store and is served back only as part of an inventory (see
@@ -14,9 +14,9 @@ use commons_servers::{
 };
 use commons_types::{Uuid, server::rank::ServerRank};
 use database::{
+	applications::Application,
 	inventory_secret_variables::{InventorySecretVariable, SecretScope},
 	server_groups::ServerGroup,
-	servers::Server,
 };
 use serde::Deserialize;
 use utoipa::ToSchema;
@@ -36,11 +36,13 @@ pub fn secret_name(scope: SecretScope) -> String {
 		SecretScope::Environment { group_id, rank } => {
 			format!("inventory-vars-{group_id}-{rank}")
 		}
-		SecretScope::Server { server_id } => format!("inventory-vars-server-{server_id}"),
+		SecretScope::Application { application_id } => {
+			format!("inventory-vars-application-{application_id}")
+		}
 	}
 }
 
-/// Which scope a request addresses: an environment, or one server.
+/// Which scope a request addresses: an environment, or one application.
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 pub struct ScopeArgs {
 	/// Identifier of the server group, with `rank`, for an environment-scoped
@@ -50,21 +52,21 @@ pub struct ScopeArgs {
 	/// Rank of the environment, alongside `server_group_id`.
 	#[serde(default)]
 	pub rank: Option<ServerRank>,
-	/// Identifier of the server, for a server-scoped variable.
+	/// Identifier of the application, for an application-scoped variable.
 	#[serde(default)]
-	pub server_id: Option<Uuid>,
+	pub application_id: Option<Uuid>,
 }
 
 impl ScopeArgs {
 	fn scope(&self) -> Result<SecretScope> {
-		match (self.server_group_id, self.rank, self.server_id) {
+		match (self.server_group_id, self.rank, self.application_id) {
 			(Some(group_id), Some(rank), None) => Ok(SecretScope::Environment { group_id, rank }),
-			(None, None, Some(server_id)) => Ok(SecretScope::Server { server_id }),
+			(None, None, Some(application_id)) => Ok(SecretScope::Application { application_id }),
 			(Some(_), None, None) => Err(AppError::BadRequest(
 				"an environment-scoped variable needs the rank as well as the group".into(),
 			)),
 			_ => Err(AppError::BadRequest(
-				"give either server_group_id with rank, or server_id".into(),
+				"give either server_group_id with rank, or application_id".into(),
 			)),
 		}
 	}
@@ -141,7 +143,7 @@ pub async fn for_group(
 	responses(
 		(status = 200, body = InventorySecretVariable),
 		(status = 400, description = "Bad scope, bad name, or a tag of that name", body = ProblemDetailsSchema),
-		(status = 404, description = "No such server group or server", body = ProblemDetailsSchema),
+		(status = 404, description = "No such server group or application", body = ProblemDetailsSchema),
 		(status = 502, description = "The secret store is unavailable", body = ProblemDetailsSchema),
 	),
 )]
@@ -245,14 +247,14 @@ async fn reject_tag_of_that_name(
 	let carries = match scope {
 		SecretScope::Environment { group_id, rank } => {
 			let group = ServerGroup::get_by_id(conn, group_id).await?;
-			let members = Server::list_live_in_group(conn, group_id).await?;
+			let members = Application::list_live_in_group(conn, group_id).await?;
 			group.tags.0.contains_key(name)
 				|| members
 					.iter()
-					.filter(|server| server.rank.unwrap_or_default() == rank)
-					.any(|server| server.tags.0.contains_key(name))
+					.filter(|application| application.rank.unwrap_or_default() == rank)
+					.any(|application| application.tags.0.contains_key(name))
 		}
-		SecretScope::Server { server_id } => Server::get_by_id(conn, server_id)
+		SecretScope::Application { application_id } => Application::get_by_id(conn, application_id)
 			.await?
 			.tags_merged_with_group(conn)
 			.await?

@@ -33,7 +33,7 @@ export default function IssuesSection({
 		scope === "device" ? "list_for_device" : "list_for_server",
 		scope === "device"
 			? { device_id: id, active_only: !showAll }
-			: { server_id: id, active_only: !showAll },
+			: { application_id: id, active_only: !showAll },
 		[scope, id, showAll, refreshKey],
 	);
 	const notify = onChanged ?? result.reload;

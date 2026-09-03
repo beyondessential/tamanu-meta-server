@@ -3,14 +3,14 @@ import { resetSeededTables, seedServer, seedServerGroup } from "./seed";
 
 // The inventory a configuration run would receive, presented on the group
 // page: one panel per environment, the group's variables once, and each
-// server's own variables under it.
+// application's own variables under it.
 // spec: INV#presentation
 test.describe("group inventory", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
 	});
 
-	test("shows one panel per environment, with each server's address", async ({
+	test("shows one panel per environment, with each application's address", async ({
 		page,
 		sql,
 	}) => {
@@ -21,7 +21,7 @@ test.describe("group inventory", () => {
 		await seedServer(sql, {
 			name: "kamaka-prod-central",
 			host: "https://central.kamaka.e2e.invalid",
-			kind: "central",
+			type: "tamanu-central",
 			rank: "production",
 			groupId: group.id,
 			tags: { ansible_user: "ubuntu" },
@@ -29,13 +29,13 @@ test.describe("group inventory", () => {
 		await seedServer(sql, {
 			name: "kamaka-demo-central",
 			host: "https://central.demo.kamaka.e2e.invalid",
-			kind: "central",
+			type: "tamanu-central",
 			rank: "demo",
 			groupId: group.id,
 			tags: {},
 		});
 
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 
 		const inventory = page.getByTestId("group-inventory");
 		const production = inventory.getByTestId("environment-production");
@@ -44,55 +44,58 @@ test.describe("group inventory", () => {
 		await expect(demo).toBeVisible();
 
 		// The group's values are shown once per environment rather than repeated
-		// under every server.
+		// under every application.
 		await expect(
 			production.getByText("timezone = Pacific/Auckland").first(),
 		).toBeVisible();
 		await expect(production.getByText("ansible_user = ubuntu")).toBeVisible();
 
-		// Each environment carries only its own servers, and the address falls
-		// back to the recorded host where no device is bound.
-		await expect(production.getByTestId("inventory-server")).toHaveCount(1);
+		// Each environment carries only its own applications, and the address
+		// falls back to the recorded host where no device is bound to the box.
+		await expect(production.getByTestId("inventory-application")).toHaveCount(1);
 		await expect(
 			production.getByText("kamaka-prod-central", { exact: true }),
 		).toBeVisible();
 		await expect(
 			production.getByText("central.kamaka.e2e.invalid", { exact: true }),
 		).toBeVisible();
-		await expect(demo.getByTestId("inventory-server")).toHaveCount(1);
+		await expect(demo.getByTestId("inventory-application")).toHaveCount(1);
 		await expect(
 			demo.getByText("kamaka-demo-central", { exact: true }),
 		).toBeVisible();
 	});
 
-	test("marks a server that overrides a group value", async ({ page, sql }) => {
+	test("marks an application that overrides a group value", async ({
+		page,
+		sql,
+	}) => {
 		const group = await seedServerGroup(sql, {
 			name: "drifting",
 			tags: { elastic_agent_enabled: "false" },
 		});
 		await seedServer(sql, {
 			name: "drifting-prod-central",
-			kind: "central",
+			type: "tamanu-central",
 			rank: "production",
 			groupId: group.id,
 			tags: { elastic_agent_enabled: "true" },
 		});
 		await seedServer(sql, {
 			name: "drifting-prod-facility",
-			kind: "facility",
+			type: "tamanu-facility",
 			rank: "production",
 			groupId: group.id,
 			tags: {},
 		});
 
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 
 		const production = page
 			.getByTestId("group-inventory")
 			.getByTestId("environment-production");
 
-		// The group's value and the server's override are both shown, and only
-		// the override is marked as one.
+		// The group's value and the application's override are both shown, and
+		// only the override is marked as one.
 		await expect(
 			production.getByText("elastic_agent_enabled = false"),
 		).toBeVisible();
@@ -100,8 +103,8 @@ test.describe("group inventory", () => {
 			"elastic_agent_enabled = true",
 		);
 
-		// A server setting nothing of its own says so, rather than showing the
-		// group's values again as if it set them.
+		// An application setting nothing of its own says so, rather than showing
+		// the group's values again as if it set them.
 		await expect(production.getByText("Sets nothing of its own")).toBeVisible();
 	});
 
@@ -112,13 +115,13 @@ test.describe("group inventory", () => {
 		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
 		await seedServer(sql, {
 			name: "kamaka-prod-central",
-			kind: "central",
+			type: "tamanu-central",
 			rank: "production",
 			groupId: group.id,
 			tags: {},
 		});
 
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 		const production = page
 			.getByTestId("group-inventory")
 			.getByTestId("environment-production");

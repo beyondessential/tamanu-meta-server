@@ -18,51 +18,63 @@ pub(crate) async fn insert_group(conn: &mut AsyncPgConnection, name: &str, tags:
 	id
 }
 
-pub(crate) async fn insert_server(
+pub(crate) async fn insert_application(
 	conn: &mut AsyncPgConnection,
 	group: Uuid,
 	name: &str,
-	kind: &str,
+	r#type: &str,
 	host: Option<&str>,
 	tags: Value,
 ) -> Uuid {
-	insert_ranked_server(conn, group, name, kind, None, host, tags).await
+	insert_ranked_application(conn, group, name, r#type, None, host, tags).await
 }
 
-pub(crate) async fn insert_ranked_server(
+/// An application on a machine of its own, in a group. Seeded directly: a type
+/// is reported rather than entered, so no operator flow creates one.
+pub(crate) async fn insert_ranked_application(
 	conn: &mut AsyncPgConnection,
 	group: Uuid,
 	name: &str,
-	kind: &str,
+	r#type: &str,
 	rank: Option<&str>,
 	host: Option<&str>,
 	tags: Value,
 ) -> Uuid {
 	let id = Uuid::new_v4();
+	let machine = Uuid::new_v4();
+	let ty = r#type;
 	let host = host.map_or("NULL".to_string(), |h| format!("'{h}'"));
 	let rank = rank.map_or("NULL".to_string(), |r| format!("'{r}'"));
 	conn.batch_execute(&format!(
-		"INSERT INTO servers (id, name, kind, rank, host, group_id, tags)
-		 VALUES ('{id}', '{name}', '{kind}', {rank}, {host}, '{group}', '{tags}')"
+		"INSERT INTO machines (id, name, group_id) VALUES ('{machine}', '{name}', '{group}');
+		 INSERT INTO applications (id, name, type, rank, host, group_id, machine_id, tags)
+		 VALUES ('{id}', '{name}', '{ty}', {rank}, {host}, '{group}', '{machine}', '{tags}')"
 	))
 	.await
-	.expect("insert server");
+	.expect("insert application");
 	id
 }
 
-pub(crate) async fn bind_device(conn: &mut AsyncPgConnection, server: Uuid, tailscale_name: &str) {
+/// The identity speaks for the box, so the device binds to the machine the
+/// application runs on.
+pub(crate) async fn bind_device(
+	conn: &mut AsyncPgConnection,
+	application: Uuid,
+	tailscale_name: &str,
+) {
 	let device = Uuid::new_v4();
 	conn.batch_execute(&format!(
 		"INSERT INTO devices (id, role, tailscale_node_name)
 		 VALUES ('{device}', 'server', '{tailscale_name}');
-		 UPDATE servers SET device_id = '{device}' WHERE id = '{server}'"
+		 UPDATE machines SET device_id = '{device}'
+		 WHERE id = (SELECT machine_id FROM applications WHERE id = '{application}')"
 	))
 	.await
 	.expect("bind device");
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn serves_an_environments_servers_and_variables() {
+async fn serves_an_environments_applications_and_variables() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(
 			&mut conn,
@@ -74,11 +86,11 @@ async fn serves_an_environments_servers_and_variables() {
 			}),
 		)
 		.await;
-		let central = insert_server(
+		let central = insert_application(
 			&mut conn,
 			group,
 			"kamaka-prod-central",
-			"central",
+			"tamanu-central",
 			None,
 			json!({
 				"public_hostname": "central.kamaka.example",
@@ -89,13 +101,13 @@ async fn serves_an_environments_servers_and_variables() {
 		)
 		.await;
 		bind_device(&mut conn, central, "kamaka-prod-central").await;
-		insert_server(
+		insert_application(
 			&mut conn,
 			group,
 			"kamaka-prod-facility",
-			"facility",
+			"tamanu-facility",
 			Some("https://facility.kamaka.example/"),
-			json!({ "canopy:kind": "spoofed" }),
+			json!({ "canopy:type": "spoofed" }),
 		)
 		.await;
 
@@ -117,10 +129,9 @@ async fn serves_an_environments_servers_and_variables() {
 		assert_eq!(hosts.len(), 2);
 
 		// A bound device's tailnet name is the address, and the group's values
-		// carry down except where the host sets its own.
+		// carry down except where the application sets its own.
 		assert_eq!(hosts[0]["name"], "kamaka-prod-central");
-		assert_eq!(hosts[0]["kind"], "central");
-		assert_eq!(hosts[0]["product"], "tamanu");
+		assert_eq!(hosts[0]["type"], "tamanu-central");
 		assert_eq!(hosts[0]["address"], "kamaka-prod-central");
 		assert_eq!(hosts[0]["vars"]["timezone"], "Pacific/Auckland");
 		assert_eq!(hosts[0]["vars"]["elastic_agent_enabled"], json!(true));
@@ -130,16 +141,55 @@ async fn serves_an_environments_servers_and_variables() {
 		);
 		assert_eq!(hosts[0]["vars"]["ansible_port"], "2222");
 
-		// What the server sets itself is served apart from what it inherits, so
-		// a value can be traced to where it is set.
+		// What the application sets itself is served apart from what it
+		// inherits, so a value can be traced to where it is set.
 		assert_eq!(hosts[0]["own_vars"]["elastic_agent_enabled"], json!(true));
 		assert!(hosts[0]["own_vars"].get("timezone").is_none());
 
-		// No device, so the address is the recorded host as a bare name, and a
-		// stored tag in the reserved namespace is not served as a variable.
+		// No device on the box, so the address is the recorded host as a bare
+		// name, and a stored tag in the reserved namespace is not served as a
+		// variable.
 		assert_eq!(hosts[1]["address"], "facility.kamaka.example");
-		assert!(hosts[1]["vars"].get("canopy:kind").is_none());
+		assert!(hosts[1]["vars"].get("canopy:type").is_none());
 		assert_eq!(hosts[1]["vars"]["timezone"], "Pacific/Auckland");
+	})
+	.await
+}
+
+/// Rank is an application's, so two workloads on one box sit in two
+/// environments and are configured apart.
+#[tokio::test(flavor = "multi_thread")]
+async fn splits_a_shared_box_by_the_rank_of_each_application() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-shared", json!({})).await;
+		let machine = Uuid::new_v4();
+		let device = Uuid::new_v4();
+		let production = Uuid::new_v4();
+		let demo = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO devices (id, role, tailscale_node_name)
+			 VALUES ('{device}', 'server', 'kamaka-shared-box');
+			 INSERT INTO machines (id, name, group_id, device_id)
+			 VALUES ('{machine}', 'kamaka-shared-box', '{group}', '{device}');
+			 INSERT INTO applications (id, name, type, rank, group_id, machine_id)
+			 VALUES ('{production}', 'kamaka-central', 'tamanu-central', 'production', '{group}', '{machine}'),
+			        ('{demo}', 'kamaka-demo-central', 'tamanu-central', 'demo', '{group}', '{machine}')"
+		))
+		.await
+		.expect("seed a shared box");
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "server_group_id": group, "rank": "production" }))
+			.await;
+		response.assert_status_ok();
+		let body: Value = response.json();
+		let hosts = body["hosts"].as_array().expect("hosts");
+		assert_eq!(hosts.len(), 1);
+		assert_eq!(hosts[0]["name"], "kamaka-central");
+		// Both workloads are reached at the box's address.
+		assert_eq!(hosts[0]["address"], "kamaka-shared-box");
+		assert_eq!(hosts[0]["machine_id"], machine.to_string());
 	})
 	.await
 }
@@ -148,21 +198,21 @@ async fn serves_an_environments_servers_and_variables() {
 async fn serves_the_environment_at_the_rank_asked_for() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "kamaka", json!({})).await;
-		insert_ranked_server(
+		insert_ranked_application(
 			&mut conn,
 			group,
 			"kamaka-prod-central",
-			"central",
+			"tamanu-central",
 			Some("production"),
 			None,
 			json!({}),
 		)
 		.await;
-		insert_ranked_server(
+		insert_ranked_application(
 			&mut conn,
 			group,
 			"kamaka-demo-central",
-			"central",
+			"tamanu-central",
 			Some("demo"),
 			None,
 			json!({}),
@@ -170,8 +220,8 @@ async fn serves_the_environment_at_the_rank_asked_for() {
 		.await;
 
 		// A group spanning two environments cannot be served as one: a run
-		// configuring the demo servers alongside the production ones is never
-		// what was meant.
+		// configuring the demo applications alongside the production ones is
+		// never what was meant.
 		let response = private
 			.post("/api/inventory/for_group")
 			.json(&json!({ "group": "kamaka" }))
@@ -189,7 +239,7 @@ async fn serves_the_environment_at_the_rank_asked_for() {
 		assert_eq!(hosts.len(), 1);
 		assert_eq!(hosts[0]["name"], "kamaka-prod-central");
 
-		// A rank the group holds no live server at is refused, rather than
+		// A rank the group holds no live application at is refused, rather than
 		// answered with an empty inventory.
 		let response = private
 			.post("/api/inventory/for_group")
@@ -204,11 +254,11 @@ async fn serves_the_environment_at_the_rank_asked_for() {
 async fn serves_an_environment_asked_for_by_identifier() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "drifting-demo", json!({})).await;
-		insert_server(
+		insert_application(
 			&mut conn,
 			group,
 			"drifting-demo-central",
-			"central",
+			"tamanu-central",
 			None,
 			json!({}),
 		)
@@ -226,17 +276,17 @@ async fn serves_an_environment_asked_for_by_identifier() {
 	.await
 }
 
-/// The address falls back to the recorded host when the bound device has no
-/// tailnet name of its own.
+/// The address falls back to the recorded host when the device bound to the box
+/// has no tailnet name of its own.
 #[tokio::test(flavor = "multi_thread")]
 async fn falls_back_to_the_recorded_host_for_a_nameless_device() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "kamaka-nameless", json!({})).await;
-		let server = insert_server(
+		let application = insert_application(
 			&mut conn,
 			group,
 			"kamaka-nameless-central",
-			"central",
+			"tamanu-central",
 			Some("https://central.kamaka.example/"),
 			json!({}),
 		)
@@ -244,7 +294,8 @@ async fn falls_back_to_the_recorded_host_for_a_nameless_device() {
 		let device = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role) VALUES ('{device}', 'server');
-			 UPDATE servers SET device_id = '{device}' WHERE id = '{server}'"
+			 UPDATE machines SET device_id = '{device}'
+			 WHERE id = (SELECT machine_id FROM applications WHERE id = '{application}')"
 		))
 		.await
 		.expect("bind device");
@@ -260,35 +311,35 @@ async fn falls_back_to_the_recorded_host_for_a_nameless_device() {
 	.await
 }
 
-/// An archived server is not something to configure, so it leaves the
+/// An archived application is not something to configure, so it leaves the
 /// inventory without the group leaving it.
 #[tokio::test(flavor = "multi_thread")]
-async fn leaves_out_an_archived_server() {
+async fn leaves_out_an_archived_application() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "kamaka-archived", json!({})).await;
-		insert_server(
+		insert_application(
 			&mut conn,
 			group,
 			"kamaka-archived-central",
-			"central",
+			"tamanu-central",
 			None,
 			json!({}),
 		)
 		.await;
-		let gone = insert_server(
+		let gone = insert_application(
 			&mut conn,
 			group,
 			"kamaka-archived-facility",
-			"facility",
+			"tamanu-facility",
 			None,
 			json!({}),
 		)
 		.await;
 		conn.batch_execute(&format!(
-			"UPDATE servers SET deleted_at = now() WHERE id = '{gone}'"
+			"UPDATE applications SET deleted_at = now() WHERE id = '{gone}'"
 		))
 		.await
-		.expect("archive server");
+		.expect("archive application");
 
 		let response = private
 			.post("/api/inventory/for_group")
@@ -303,27 +354,29 @@ async fn leaves_out_an_archived_server() {
 	.await
 }
 
-/// A server in no group is in no inventory: it has no group whose tags would
-/// configure it and no environment to belong to.
+/// An application in no group is in no inventory: it has no group whose tags
+/// would configure it and no environment to belong to.
 #[tokio::test(flavor = "multi_thread")]
-async fn leaves_out_a_server_belonging_to_no_group() {
+async fn leaves_out_an_application_belonging_to_no_group() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "kamaka-lonely", json!({})).await;
-		insert_server(
+		insert_application(
 			&mut conn,
 			group,
 			"kamaka-lonely-central",
-			"central",
+			"tamanu-central",
 			None,
 			json!({}),
 		)
 		.await;
 		let loose = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, name, kind) VALUES ('{loose}', 'kamaka-loose', 'central')"
+			"INSERT INTO machines (id) VALUES ('{loose}');
+			 INSERT INTO applications (id, name, type, machine_id)
+			 VALUES ('{loose}', 'kamaka-loose', 'tamanu-central', '{loose}')"
 		))
 		.await
-		.expect("insert ungrouped server");
+		.expect("insert ungrouped application");
 
 		let response = private
 			.post("/api/inventory/for_group")
@@ -340,27 +393,27 @@ async fn leaves_out_a_server_belonging_to_no_group() {
 	.await
 }
 
-/// Canopy's own placeholder server is not something to configure, and its
+/// Canopy's own placeholder application is not something to configure, and its
 /// recorded host is a loopback address a run would take literally.
 #[tokio::test(flavor = "multi_thread")]
-async fn leaves_out_the_meta_server() {
+async fn leaves_out_the_meta_application() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "kamaka-meta", json!({})).await;
-		insert_server(
+		insert_application(
 			&mut conn,
 			group,
 			"kamaka-meta-central",
-			"central",
+			"tamanu-central",
 			None,
 			json!({}),
 		)
 		.await;
 		conn.batch_execute(&format!(
-			"UPDATE servers SET group_id = '{group}' WHERE id = '{}'",
+			"UPDATE applications SET group_id = '{group}' WHERE id = '{}'",
 			Uuid::nil()
 		))
 		.await
-		.expect("group the meta server");
+		.expect("group the meta application");
 
 		let response = private
 			.post("/api/inventory/for_group")
@@ -383,11 +436,11 @@ async fn leaves_out_the_meta_server() {
 async fn serves_a_malformed_json_tag_as_text() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "kamaka-malformed", json!({})).await;
-		insert_server(
+		insert_application(
 			&mut conn,
 			group,
 			"kamaka-malformed-central",
-			"central",
+			"tamanu-central",
 			None,
 			json!({ "tamanu_caddy_extra_hostnames": "[\"sync.kamaka.example\"" }),
 		)
@@ -423,11 +476,11 @@ async fn refuses_a_group_canopy_does_not_have() {
 async fn refuses_an_archived_group() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "kamaka-clone", json!({})).await;
-		insert_server(
+		insert_application(
 			&mut conn,
 			group,
 			"kamaka-clone-central",
-			"central",
+			"tamanu-central",
 			None,
 			json!({}),
 		)
@@ -461,6 +514,30 @@ async fn refuses_a_group_with_nothing_to_configure() {
 	.await
 }
 
+/// A box added and not yet reporting carries no application, so there is
+/// nothing at that rank to configure and the request is refused rather than
+/// answered with an empty inventory.
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_a_group_holding_only_a_machine_awaiting_check_in() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-bare", json!({})).await;
+		let machine = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (id, name, group_id)
+			 VALUES ('{machine}', 'kamaka-bare-box', '{group}')"
+		))
+		.await
+		.expect("insert machine");
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "server_group_id": group }))
+			.await;
+		response.assert_status_conflict();
+	})
+	.await
+}
+
 /// Names aren't unique, and serving one of two groups that answer to the same
 /// name would configure the wrong fleet.
 #[tokio::test(flavor = "multi_thread")]
@@ -468,11 +545,11 @@ async fn refuses_a_name_that_answers_for_two_groups() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		for _ in 0..2 {
 			let group = insert_group(&mut conn, "twice-prod", json!({})).await;
-			insert_server(
+			insert_application(
 				&mut conn,
 				group,
 				"twice-prod-central",
-				"central",
+				"tamanu-central",
 				None,
 				json!({}),
 			)
@@ -505,11 +582,11 @@ async fn refuses_a_request_naming_neither_a_group_nor_an_identifier() {
 async fn refuses_a_request_naming_both_a_group_and_an_identifier() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "kamaka-both", json!({})).await;
-		insert_server(
+		insert_application(
 			&mut conn,
 			group,
 			"kamaka-both-central",
-			"central",
+			"tamanu-central",
 			None,
 			json!({}),
 		)

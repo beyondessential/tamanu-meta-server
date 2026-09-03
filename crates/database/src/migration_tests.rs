@@ -1,4 +1,4 @@
-//! Which versions Canopy asks to be migration-tested against which servers,
+//! Which versions Canopy asks to be migration-tested against which applications,
 //! and what came back.
 //!
 //! Candidacy here is the version axis only. Whether a server has a snapshot to
@@ -7,10 +7,7 @@
 use std::collections::HashMap;
 
 use commons_errors::Result;
-use commons_types::{
-	backup::{BackupType, RestoreIntent, RunOutcome},
-	server::product::Product,
-};
+use commons_types::backup::{BackupType, RestoreIntent, RunOutcome};
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
@@ -18,9 +15,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-	backup::refs, pg_duration::PgDuration, restore::BackupRestoreCheck,
-	restore::NewBackupRestoreCheck, servers::Server, version_known_issues::VersionKnownIssue,
-	versions::Version,
+	applications::Application, backup::refs, pg_duration::PgDuration, restore::BackupRestoreCheck,
+	restore::NewBackupRestoreCheck, version_known_issues::VersionKnownIssue, versions::Version,
 };
 
 /// A version a server could upgrade to, so one to test against that server's
@@ -37,11 +33,17 @@ pub struct Candidate {
 /// with no plan has no candidate: a restore costs hours, and it is only worth
 /// spending on a version a deployment has said it intends to apply.
 ///
-/// Tamanu servers only: the migrations under test are Tamanu's, so no other
+/// Tamanu applications only: the migrations under test are Tamanu's, so no other
 /// product's server has an upgrade path through them.
 // spec: RST#candidate-versions
-pub async fn candidate_for(db: &mut AsyncPgConnection, server: &Server) -> Result<Option<Version>> {
-	if server.product != Product::Tamanu {
+pub async fn candidate_for(
+	db: &mut AsyncPgConnection,
+	server: &Application,
+) -> Result<Option<Version>> {
+	// The migrations under test are Tamanu's, so only Tamanu has candidates —
+	// a central and a facility alike, both being upgraded along the same train.
+	// spec: RST#candidate-versions
+	if server.r#type.software() != "tamanu" {
 		return Ok(None);
 	}
 
@@ -57,7 +59,7 @@ pub async fn candidate_for(db: &mut AsyncPgConnection, server: &Server) -> Resul
 pub async fn candidates(db: &mut AsyncPgConnection) -> Result<Vec<Candidate>> {
 	let mut candidates = Vec::new();
 
-	for server in Server::get_all(db, 0, None).await? {
+	for server in Application::get_all(db, 0, None).await? {
 		if let Some(version) = candidate_for(db, &server).await? {
 			candidates.push(Candidate {
 				server_id: server.id,
@@ -96,6 +98,11 @@ pub struct MigrationTest {
 /// fields.
 #[derive(Debug, Clone)]
 pub struct NewMigrationTest {
+	/// The application whose candidate version was tried. The report names the
+	/// machine whose snapshot was restored; this names the workload the version
+	/// belongs to, which a box running two of them could not otherwise recover.
+	// spec: RST#candidate-versions
+	pub application_id: Uuid,
 	pub target_version_id: Uuid,
 	pub total_elapsed: PgDuration,
 	pub failed_migration: Option<String>,
@@ -139,7 +146,7 @@ pub struct LatestTest {
 	pub data_bytes_after: i64,
 }
 
-/// Where one of a group's servers stands against the version it would take
+/// Where one of a group's applications stands against the version it would take
 /// next.
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct GroupVerdict {
@@ -173,7 +180,7 @@ impl MigrationTest {
 		report: NewBackupRestoreCheck,
 		test: NewMigrationTest,
 	) -> Result<i64> {
-		let server_id = report.server_id;
+		let application_id = test.application_id;
 		let target_version_id = test.target_version_id;
 		let failed_migration = test.failed_migration.clone();
 
@@ -191,6 +198,7 @@ impl MigrationTest {
 		diesel::insert_into(crate::schema::migration_tests::table)
 			.values((
 				crate::schema::migration_tests::check_id.eq(check_id),
+				crate::schema::migration_tests::application_id.eq(Some(test.application_id)),
 				crate::schema::migration_tests::target_version_id.eq(test.target_version_id),
 				crate::schema::migration_tests::total_elapsed.eq(test.total_elapsed),
 				crate::schema::migration_tests::failed_migration.eq(test.failed_migration),
@@ -220,17 +228,16 @@ impl MigrationTest {
 				.await?;
 		}
 
-		// A report with no server is recorded but has nobody to hold the finding
-		// against, matching how restore-health treats one.
-		if let Some(server_id) = server_id {
-			file_outcome(
-				db,
-				server_id,
-				target_version_id,
-				failed_migration.as_deref(),
-			)
-			.await?;
-		}
+		// The finding is held against the application whose candidate this was:
+		// a version is an application's, so a box hosting two workloads carries
+		// it against whichever of them the version was tested for.
+		file_outcome(
+			db,
+			application_id,
+			target_version_id,
+			failed_migration.as_deref(),
+		)
+		.await?;
 
 		Ok(check_id)
 	}
@@ -252,12 +259,15 @@ impl MigrationTest {
 	}
 }
 
-/// The most recent test of `server` against `version`, with the report context
-/// that says when it was and what it ran against.
+/// The most recent test of `machine`'s data against `version`, with the report
+/// context that says when it was and what it ran against.
+///
+/// The machine, because the data under test is the snapshot a machine backed
+/// up; the version carries which application's candidate it was.
 // spec: RST#verdicts
 pub async fn latest_test(
 	db: &mut AsyncPgConnection,
-	server_id: Uuid,
+	machine_id: Uuid,
 	target_version_id: Uuid,
 ) -> Result<Option<LatestTest>> {
 	use crate::schema::{backup_restore_checks, migration_tests};
@@ -274,7 +284,7 @@ pub async fn latest_test(
 			migration_tests::data_bytes_after,
 		))
 		.filter(migration_tests::target_version_id.eq(target_version_id))
-		.filter(backup_restore_checks::server_id.eq(server_id))
+		.filter(backup_restore_checks::machine_id.eq(machine_id))
 		.order(backup_restore_checks::reported_at.desc())
 		.first(db)
 		.await
@@ -294,17 +304,17 @@ pub async fn latest_test(
 	}))
 }
 
-/// Where `server` stands against `version`, from its most recent test.
+/// Where `machine`'s data stands against `version`, from its most recent test.
 ///
 /// A pass means every migration applied. Anything else is a failure, including
 /// a report whose restore never got as far as migrating.
 // spec: RST#verdicts
 pub async fn verdict(
 	db: &mut AsyncPgConnection,
-	server_id: Uuid,
+	machine_id: Uuid,
 	target_version_id: Uuid,
 ) -> Result<Verdict> {
-	Ok(latest_test(db, server_id, target_version_id)
+	Ok(latest_test(db, machine_id, target_version_id)
 		.await?
 		.map_or(Verdict::NotTested, |test| test.verdict))
 }
@@ -317,7 +327,7 @@ pub async fn verdict(
 // spec: RST#dispatching-a-migration-test
 pub async fn has_verdict(
 	db: &mut AsyncPgConnection,
-	server_id: Uuid,
+	machine_id: Uuid,
 	snapshot_id: &str,
 	target_version_id: Uuid,
 ) -> Result<bool> {
@@ -327,7 +337,7 @@ pub async fn has_verdict(
 		.inner_join(backup_restore_checks::table)
 		.select(migration_tests::check_id)
 		.filter(migration_tests::target_version_id.eq(target_version_id))
-		.filter(backup_restore_checks::server_id.eq(server_id))
+		.filter(backup_restore_checks::machine_id.eq(machine_id))
 		.filter(backup_restore_checks::snapshot_id.eq(snapshot_id))
 		.first(db)
 		.await
@@ -339,6 +349,11 @@ pub async fn has_verdict(
 /// The latest recorded verdict for one replica key.
 #[derive(Debug, Clone)]
 pub struct KeyVerdict {
+	/// The application whose candidate was tried. The `migration-test` check is
+	/// filed against it, because the version under test is that application's.
+	/// `None` for a test recorded before tests carried the application.
+	// spec: RST#alerting
+	pub application_id: Option<Uuid>,
 	/// The version whose migrations were tried, as semver.
 	pub target_version: String,
 	/// The migration that failed, when one did.
@@ -350,7 +365,7 @@ pub struct KeyVerdict {
 	pub verdict: Verdict,
 }
 
-/// The latest verdict per `(server, type, intent, name)` across the fleet.
+/// The latest verdict per `(machine, type, intent, name)` across the fleet.
 ///
 /// The `migration-test` check is derived from these as well as from
 /// declarations: a failed migration is a fact about a candidate version
@@ -371,13 +386,14 @@ pub async fn latest_verdict_by_key(
 		Option<String>,
 		Option<String>,
 		RunOutcome,
+		Option<Uuid>,
 	);
 
 	let rows: Vec<Row> = tests::table
 		.inner_join(checks::table)
 		.inner_join(versions::table)
 		.select((
-			checks::server_id,
+			checks::machine_id,
 			checks::type_,
 			checks::intent,
 			checks::replica_name,
@@ -385,10 +401,11 @@ pub async fn latest_verdict_by_key(
 			tests::failed_migration,
 			checks::snapshot_id,
 			checks::outcome,
+			tests::application_id,
 		))
-		.filter(checks::server_id.is_not_null())
+		.filter(checks::machine_id.is_not_null())
 		.distinct_on((
-			checks::server_id,
+			checks::machine_id,
 			checks::type_,
 			checks::intent,
 			checks::replica_name,
@@ -397,7 +414,7 @@ pub async fn latest_verdict_by_key(
 		// `DISTINCT ON`/`ORDER BY` agreement for tuples up to five elements, and
 		// the four key columns plus these two would be six.
 		.order_by((
-			checks::server_id,
+			checks::machine_id,
 			checks::type_,
 			checks::intent,
 			checks::replica_name,
@@ -412,7 +429,7 @@ pub async fn latest_verdict_by_key(
 		.into_iter()
 		.filter_map(
 			|(
-				server_id,
+				machine_id,
 				r#type,
 				intent,
 				replica_name,
@@ -420,16 +437,18 @@ pub async fn latest_verdict_by_key(
 				failed_migration,
 				snapshot_id,
 				outcome,
+				application_id,
 			)| {
 				let verdict = match (outcome, &failed_migration) {
 					(RunOutcome::Success, None) => Verdict::Passed,
 					_ => Verdict::Failed,
 				};
 				let (major, minor, patch) = version;
-				server_id.map(|sid| {
+				machine_id.map(|mid| {
 					(
-						(sid, r#type, intent, replica_name),
+						(mid, r#type, intent, replica_name),
 						KeyVerdict {
+							application_id,
 							target_version: format!("{major}.{minor}.{patch}"),
 							failed_migration,
 							snapshot_id,
@@ -454,7 +473,7 @@ pub async fn latest_verdict_by_key(
 /// [`latest_verdict_by_key`]).
 async fn file_outcome(
 	db: &mut AsyncPgConnection,
-	server_id: Uuid,
+	application_id: Uuid,
 	target_version_id: Uuid,
 	failed_migration: Option<&str>,
 ) -> Result<()> {
@@ -463,13 +482,13 @@ async fn file_outcome(
 	};
 	let version = Version::get_by_id(db, target_version_id).await?;
 	let affected = (version.major, version.minor, version.patch);
-	if !VersionKnownIssue::unresolved_for_server(db, affected, server_id).await? {
+	if !VersionKnownIssue::unresolved_for_server(db, affected, application_id).await? {
 		VersionKnownIssue::add(
 			db,
 			affected,
 			refs::MIGRATION_TEST,
-			&format!("Migration {migration} failed against server {server_id}'s data."),
-			Some(server_id),
+			&format!("Migration {migration} failed against {application_id}'s data."),
+			Some(application_id),
 		)
 		.await?;
 	}
@@ -489,11 +508,11 @@ pub async fn verdicts_for_group(
 ) -> Result<Vec<GroupVerdict>> {
 	let mut out = Vec::new();
 
-	for server in Server::list_live_in_group(db, group_id).await? {
+	for server in Application::list_live_in_group(db, group_id).await? {
 		let Some(version) = candidate_for(db, &server).await? else {
 			continue;
 		};
-		let latest = latest_test(db, server.id, version.id).await?;
+		let latest = latest_test(db, server.machine_id, version.id).await?;
 
 		out.push(GroupVerdict {
 			server_id: server.id,

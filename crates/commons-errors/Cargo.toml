@@ -13,7 +13,7 @@ authors = [
 [dependencies]
 axum = { workspace = true, features = ["json", "macros"] }
 diesel.workspace = true
-diesel-async.workspace = true
+diesel-async = { workspace = true, features = ["pool"] }
 http.workspace = true
 miette.workspace = true
 mobc.workspace = true

@@ -42,9 +42,13 @@ pub struct RestoreReplica {
 	pub consumer_device_id: Uuid,
 	/// The server group this declaration applies to.
 	pub group_id: Uuid,
-	/// The specific server this declaration covers. `None` means every
-	/// server currently in the group.
-	pub server_id: Option<Uuid>,
+	/// The specific machine this declaration covers. `None` means every
+	/// machine currently in the group.
+	///
+	/// The machine rather than an application on it: what gets restored is a
+	/// snapshot, and a snapshot is what a machine backed up.
+	// spec: RST#declared-replicas
+	pub machine_id: Option<Uuid>,
 	/// The backup type this declaration covers (e.g. a database snapshot
 	/// type). Any type name the consumer advertises support for is
 	/// accepted.
@@ -95,7 +99,7 @@ pub struct RestoreReplica {
 pub struct NewRestoreReplica {
 	pub consumer_device_id: Uuid,
 	pub group_id: Uuid,
-	pub server_id: Option<Uuid>,
+	pub machine_id: Option<Uuid>,
 	#[diesel(column_name = type_)]
 	pub r#type: BackupType,
 	pub intent: RestoreIntent,
@@ -107,13 +111,13 @@ pub struct NewRestoreReplica {
 }
 
 /// The full new state of a declaration, including its scope. Every field is
-/// always set (there is no partial-update shorthand); `server_id: None` means
-/// "every server in the group".
+/// always set (there is no partial-update shorthand); `machine_id: None` means
+/// "every machine in the group".
 #[derive(Debug, Clone)]
 pub struct RestoreReplicaUpdate {
 	pub consumer_device_id: Uuid,
 	pub group_id: Uuid,
-	pub server_id: Option<Uuid>,
+	pub machine_id: Option<Uuid>,
 	pub r#type: BackupType,
 	pub intent: RestoreIntent,
 	pub name: String,
@@ -250,7 +254,7 @@ impl RestoreReplica {
 			.set((
 				dsl::consumer_device_id.eq(update.consumer_device_id),
 				dsl::group_id.eq(update.group_id),
-				dsl::server_id.eq(update.server_id),
+				dsl::machine_id.eq(update.machine_id),
 				dsl::type_.eq(update.r#type),
 				dsl::intent.eq(update.intent),
 				dsl::name.eq(name),
@@ -495,9 +499,9 @@ pub enum RedactionGapReason {
 // spec: RST#the-masking-manifest
 pub async fn redaction_gap_for(
 	db: &mut AsyncPgConnection,
-	server: &crate::servers::Server,
+	server: &crate::applications::Application,
 ) -> Result<Option<(RedactionGapReason, Option<String>)>> {
-	let Some(manifest) = server.product.caps().redaction else {
+	let Some(manifest) = server.r#type.caps().redaction else {
 		return Ok(Some((RedactionGapReason::ProductHasNoManifest, None)));
 	};
 
@@ -553,8 +557,9 @@ pub struct BackupRestoreCheck {
 	pub consumer_device_id: Uuid,
 	/// The server group this report belongs to.
 	pub group_id: Uuid,
-	/// The server this report is about, if any.
-	pub server_id: Option<Uuid>,
+	/// The machine whose snapshot this report is about, if any.
+	// spec: RST#restore-health-reporting
+	pub machine_id: Option<Uuid>,
 	/// The backup type this report covers.
 	#[diesel(column_name = type_)]
 	#[schema(value_type = String)]
@@ -629,7 +634,7 @@ pub struct NewBackupRestoreCheck {
 	pub replica_name: Option<String>,
 	pub consumer_device_id: Uuid,
 	pub group_id: Uuid,
-	pub server_id: Option<Uuid>,
+	pub machine_id: Option<Uuid>,
 	#[diesel(column_name = type_)]
 	pub r#type: BackupType,
 	pub intent: RestoreIntent,
@@ -778,13 +783,13 @@ impl BackupRestoreCheck {
 		use crate::schema::backup_restore_checks::dsl;
 		let rows: Vec<Self> = dsl::backup_restore_checks
 			.select(Self::as_select())
-			.filter(dsl::server_id.is_not_null())
-			.distinct_on((dsl::server_id, dsl::type_, dsl::intent, dsl::replica_name))
+			.filter(dsl::machine_id.is_not_null())
+			.distinct_on((dsl::machine_id, dsl::type_, dsl::intent, dsl::replica_name))
 			// The recency tiebreak is one raw fragment because diesel only proves
 			// `DISTINCT ON`/`ORDER BY` agreement for tuples up to five elements,
 			// and the four key columns plus these two would be six.
 			.order_by((
-				dsl::server_id,
+				dsl::machine_id,
 				dsl::type_,
 				dsl::intent,
 				dsl::replica_name,
@@ -795,10 +800,10 @@ impl BackupRestoreCheck {
 		Ok(rows
 			.into_iter()
 			.filter_map(|r| {
-				r.server_id.map(|sid| {
+				r.machine_id.map(|mid| {
 					(
 						(
-							sid,
+							mid,
 							r.r#type.clone(),
 							r.intent.clone(),
 							r.replica_name.clone(),
@@ -820,12 +825,12 @@ impl BackupRestoreCheck {
 		let rows: Vec<Self> = dsl::backup_restore_checks
 			.select(Self::as_select())
 			.filter(dsl::group_id.eq(group_id))
-			.filter(dsl::server_id.is_not_null())
+			.filter(dsl::machine_id.is_not_null())
 			.filter(dsl::outcome.eq(RunOutcome::Success))
 			.filter(dsl::replica_healthy.eq(true))
-			.distinct_on((dsl::server_id, dsl::type_, dsl::intent, dsl::replica_name))
+			.distinct_on((dsl::machine_id, dsl::type_, dsl::intent, dsl::replica_name))
 			.order_by((
-				dsl::server_id,
+				dsl::machine_id,
 				dsl::type_,
 				dsl::intent,
 				dsl::replica_name,
@@ -836,10 +841,10 @@ impl BackupRestoreCheck {
 		Ok(rows
 			.into_iter()
 			.filter_map(|r| {
-				r.server_id.map(|sid| {
+				r.machine_id.map(|mid| {
 					(
 						(
-							sid,
+							mid,
 							r.r#type.clone(),
 							r.intent.clone(),
 							r.replica_name.clone(),
@@ -864,13 +869,13 @@ impl BackupRestoreCheck {
 		let rows: Vec<Self> = dsl::backup_restore_checks
 			.select(Self::as_select())
 			.filter(dsl::group_id.eq(group_id))
-			.filter(dsl::server_id.is_not_null())
+			.filter(dsl::machine_id.is_not_null())
 			.filter(dsl::snapshot_id.is_not_null())
 			.filter(dsl::outcome.eq(RunOutcome::Success))
 			.filter(dsl::replica_healthy.eq(true))
-			.distinct_on((dsl::server_id, dsl::type_, dsl::intent, dsl::replica_name))
+			.distinct_on((dsl::machine_id, dsl::type_, dsl::intent, dsl::replica_name))
 			.order_by((
-				dsl::server_id,
+				dsl::machine_id,
 				dsl::type_,
 				dsl::intent,
 				dsl::replica_name,
@@ -880,9 +885,9 @@ impl BackupRestoreCheck {
 			.await?;
 		Ok(rows
 			.into_iter()
-			.filter_map(|r| match (r.server_id, r.snapshot_id) {
-				(Some(sid), Some(snap)) => Some((
-					(sid, r.r#type.clone(), r.intent.clone(), r.replica_name),
+			.filter_map(|r| match (r.machine_id, r.snapshot_id) {
+				(Some(mid), Some(snap)) => Some((
+					(mid, r.r#type.clone(), r.intent.clone(), r.replica_name),
 					snap,
 				)),
 				_ => None,
@@ -891,12 +896,16 @@ impl BackupRestoreCheck {
 	}
 }
 
-/// One replica key: a named `(type, intent)` replica on one server. Every
-/// dimension bar the server is an open-ended string, so the set of keys is
+/// One replica key: a named `(type, intent)` replica on one machine. Every
+/// dimension bar the machine is an open-ended string, so the set of keys is
 /// discovered, never enumerated.
 ///
+/// The machine, because what a replica restores is a snapshot and a snapshot is
+/// what a machine backed up. A box running two workloads has one replica per
+/// declaration, not one per workload.
+///
 /// The name is part of the key because an operator may declare several replicas
-/// of one `(group, type, intent, server)` and tell them apart by name; without
+/// of one `(group, type, intent, machine)` and tell them apart by name; without
 /// it two of them would grade as one instance and their reports would overwrite
 /// each other. It is `None` only for a report that named no declaration.
 pub type ReplicaKey = (Uuid, BackupType, RestoreIntent, Option<String>);
@@ -925,11 +934,11 @@ struct KeyWork {
 }
 
 /// The instances one server's three restore checks are filed from.
+/// A machine's instances of the two checks that are the machine's own.
 #[derive(Default)]
-struct ServerInstances {
+struct MachineInstances {
 	verification: Vec<CheckInstance>,
 	redaction: Vec<CheckInstance>,
-	migration: Vec<CheckInstance>,
 }
 
 /// The restore checks' sole filer: re-derive every server's
@@ -1004,7 +1013,7 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 		HashMap::new();
 
 	let mut work: HashMap<ReplicaKey, KeyWork> = HashMap::new();
-	let mut servers: HashMap<Uuid, crate::servers::Server> = HashMap::new();
+	let mut machines: HashMap<Uuid, crate::machines::Machine> = HashMap::new();
 
 	for d in &declarations {
 		let capabilities = match capability_cache.entry(d.consumer_device_id) {
@@ -1022,14 +1031,19 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 		let once = descriptor.is_some_and(|desc| desc.has_semantic(semantics::ONCE));
 		let migrates = descriptor.is_some_and(|desc| desc.has_semantic(semantics::MIGRATE));
 
-		let covered_servers: Vec<crate::servers::Server> = match d.server_id {
-			Some(sid) => match crate::servers::Server::get_by_id(db, sid).await.ok() {
-				Some(s) if s.group_id == Some(d.group_id) && s.deleted_at.is_none() => vec![s],
+		// A declaration covers machines: a whole-group one expands over every
+		// machine in the group, a targeted one over the single machine it
+		// names. Expanding over applications gave a two-workload box two
+		// replicas of the one snapshot.
+		// spec: RST#declared-replicas
+		let covered_machines: Vec<crate::machines::Machine> = match d.machine_id {
+			Some(mid) => match crate::machines::Machine::get_by_id(db, mid).await.ok() {
+				Some(m) if m.group_id == Some(d.group_id) && m.deleted_at.is_none() => vec![m],
 				_ => vec![],
 			},
-			None => crate::servers::Server::list_live_in_group(db, d.group_id).await?,
+			None => crate::machines::Machine::list_for_group(db, d.group_id).await?,
 		};
-		if covered_servers.is_empty() {
+		if covered_machines.is_empty() {
 			continue;
 		}
 
@@ -1042,14 +1056,14 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 			);
 			latest_snapshot_cache.insert(
 				d.group_id,
-				BackupRun::latest_success_by_server_type_for_group(db, d.group_id).await?,
+				BackupRun::latest_success_by_machine_type_for_group(db, d.group_id).await?,
 			);
 		}
 
-		for server in covered_servers {
-			let sid = server.id;
+		for machine in covered_machines {
+			let mid = machine.id;
 			let key = (
-				sid,
+				mid,
 				d.r#type.clone(),
 				d.intent.clone(),
 				Some(d.name.clone()),
@@ -1059,7 +1073,7 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 			// whether the candidate version has been tried against the latest
 			// snapshot, not whether the replica restored.
 			let untried = if migrates && checks {
-				untried_candidate(db, d, &server, &latest_snapshot_cache[&d.group_id], now).await?
+				untried_candidate(db, d, &machine, &latest_snapshot_cache[&d.group_id], now).await?
 			} else {
 				None
 			};
@@ -1078,7 +1092,7 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 				_ => false,
 			};
 
-			servers.entry(sid).or_insert(server);
+			machines.entry(mid).or_insert(machine);
 			let w = work.entry(key).or_default();
 			w.declared = true;
 			w.reports_count = true;
@@ -1102,7 +1116,7 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 		if work.contains_key(key) || !declared.contains(&declaration) {
 			continue;
 		}
-		if live_server(db, &mut servers, key.0).await?.is_none() {
+		if live_machine(db, &mut machines, key.0).await?.is_none() {
 			continue;
 		}
 		work.entry(key.clone()).or_default().reports_count = true;
@@ -1113,7 +1127,7 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 		if work.contains_key(key) {
 			continue;
 		}
-		if live_server(db, &mut servers, key.0).await?.is_none() {
+		if live_machine(db, &mut machines, key.0).await?.is_none() {
 			continue;
 		}
 		work.entry(key.clone()).or_default();
@@ -1131,11 +1145,18 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 		)
 	});
 
-	let mut per_server: HashMap<Uuid, ServerInstances> = HashMap::new();
-	let mut server_order: Vec<Uuid> = Vec::new();
+	// The two grains part here. Restore-verification and redaction are the
+	// machine's: what failed to restore is the box's backup. Migration-test is
+	// the application's: the version under test is that workload's, so a box
+	// hosting two carries the finding against whichever of them it was for.
+	// spec: RST#alerting
+	let mut per_machine: HashMap<Uuid, MachineInstances> = HashMap::new();
+	let mut machine_order: Vec<Uuid> = Vec::new();
+	let mut per_application: HashMap<Uuid, Vec<CheckInstance>> = HashMap::new();
+	let mut application_order: Vec<Uuid> = Vec::new();
 	for key in keys {
 		let w = &work[&key];
-		let (sid, r#type, intent, declared_as) = (key.0, &key.1, &key.2, &key.3);
+		let (mid, r#type, intent, declared_as) = (key.0, &key.1, &key.2, &key.3);
 		let label = match declared_as {
 			Some(name) => format!("{name} ({type} / {intent})"),
 			None => format!("{type} / {intent}"),
@@ -1145,9 +1166,9 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 		} else {
 			None
 		};
-		let instances = per_server.entry(sid).or_insert_with(|| {
-			server_order.push(sid);
-			ServerInstances::default()
+		let instances = per_machine.entry(mid).or_insert_with(|| {
+			machine_order.push(mid);
+			MachineInstances::default()
 		});
 
 		// A declaration for something other than migrating is a replica whose
@@ -1160,62 +1181,113 @@ pub async fn sweep_restore_checks(db: &mut AsyncPgConnection) -> Result<usize> {
 		if let Some(instance) = redaction_instance(&key, &label, latest) {
 			instances.redaction.push(instance);
 		}
-		if let Some(instance) = migration_instance(&key, &label, w, latest_verdicts.get(&key)) {
-			instances.migration.push(instance);
+
+		let verdict = latest_verdicts.get(&key);
+		if let Some(instance) = migration_instance(&key, &label, w, verdict) {
+			// The application the version belongs to: the verdict's own where
+			// there is one, else the sole application on the box. A machine
+			// running several with nothing recorded has no application the
+			// finding can be attributed to, so it is not filed rather than
+			// filed against a guess.
+			let owner = match verdict.and_then(|v| v.application_id) {
+				Some(aid) => Some(aid),
+				None => match live_machine(db, &mut machines, mid).await? {
+					Some(machine) => {
+						let on_box = machine.applications(db).await?;
+						match on_box.as_slice() {
+							[only] => Some(only.id),
+							_ => None,
+						}
+					}
+					None => None,
+				},
+			};
+			if let Some(aid) = owner {
+				per_application.entry(aid).or_insert_with(|| {
+					application_order.push(aid);
+					Vec::new()
+				});
+				per_application
+					.get_mut(&aid)
+					.expect("just entered")
+					.push(instance);
+			}
 		}
 	}
 
-	// Servers whose checks are open but which derived nothing this pass: their
-	// last replica is gone, and a server nobody visits is a check left open with
-	// nothing that could ever clear it.
-	for sid in crate::backup::staleness::servers_with_open_checks(
+	// Targets whose checks are open but which derived nothing this pass: their
+	// last replica is gone, and a target nobody visits is a check left open with
+	// nothing that could ever clear it. Each grain is revisited on its own
+	// columns, since a machine check's issue is on `machine_id`.
+	for mid in crate::backup::staleness::machines_with_open_checks(
 		db,
-		&[
-			refs::RESTORE_VERIFICATION,
-			refs::REDACTION,
-			refs::MIGRATION_TEST,
-		],
+		&[refs::RESTORE_VERIFICATION, refs::REDACTION],
 	)
 	.await?
 	{
-		if per_server.contains_key(&sid) || live_server(db, &mut servers, sid).await?.is_none() {
+		if per_machine.contains_key(&mid) || live_machine(db, &mut machines, mid).await?.is_none() {
 			continue;
 		}
-		per_server.insert(sid, ServerInstances::default());
-		server_order.push(sid);
+		per_machine.insert(mid, MachineInstances::default());
+		machine_order.push(mid);
+	}
+	for aid in
+		crate::backup::staleness::servers_with_open_checks(db, &[refs::MIGRATION_TEST]).await?
+	{
+		if per_application.contains_key(&aid) {
+			continue;
+		}
+		let live = crate::applications::Application::get_by_id(db, aid)
+			.await
+			.ok()
+			.filter(|a| a.deleted_at.is_none())
+			.is_some();
+		if !live {
+			continue;
+		}
+		per_application.insert(aid, Vec::new());
+		application_order.push(aid);
 	}
 
 	let mut degraded = 0usize;
-	for sid in server_order {
-		let found = per_server.remove(&sid).expect("entered with its server");
-		let label = crate::backup::staleness::server_label(
-			servers.get(&sid).expect("cached when the key was derived"),
-		);
-		degraded += file_verification(db, sid, &label, found.verification).await?;
-		degraded += file_redaction(db, sid, &label, found.redaction).await?;
-		degraded += file_migration(db, sid, &label, found.migration).await?;
+	for mid in machine_order {
+		let found = per_machine.remove(&mid).expect("entered with its machine");
+		let label = match live_machine(db, &mut machines, mid).await? {
+			Some(machine) => crate::backup::staleness::machine_label(machine),
+			None => continue,
+		};
+		degraded += file_verification(db, mid, &label, found.verification).await?;
+		degraded += file_redaction(db, mid, &label, found.redaction).await?;
+	}
+	for aid in application_order {
+		let instances = per_application.remove(&aid).expect("entered with its app");
+		let Ok(application) = crate::applications::Application::get_by_id(db, aid).await else {
+			continue;
+		};
+		let label = crate::backup::staleness::server_label(&application);
+		degraded += file_migration(db, aid, &label, instances).await?;
 	}
 
 	Ok(degraded)
 }
 
-/// A live server by id, cached across the sweep. `None` when it is gone or
+/// A live machine by id, cached across the sweep. `None` when it is gone or
 /// soft-deleted, in which case its keys are not worth deriving: nothing holds a
-/// check against a server that isn't there.
-async fn live_server<'a>(
+/// check against a machine that isn't there.
+async fn live_machine<'a>(
 	db: &mut AsyncPgConnection,
-	cache: &'a mut HashMap<Uuid, crate::servers::Server>,
-	server_id: Uuid,
-) -> Result<Option<&'a crate::servers::Server>> {
-	if let Entry::Vacant(e) = cache.entry(server_id) {
-		match crate::servers::Server::get_by_id(db, server_id).await {
-			Ok(server) if server.deleted_at.is_none() => {
-				e.insert(server);
+	cache: &'a mut HashMap<Uuid, crate::machines::Machine>,
+	machine_id: Uuid,
+) -> Result<Option<&'a crate::machines::Machine>> {
+	if let Entry::Vacant(e) = cache.entry(machine_id) {
+		match crate::machines::Machine::get_by_id(db, machine_id).await {
+			Ok(machine) if machine.deleted_at.is_none() => {
+				e.insert(machine);
 			}
 			_ => return Ok(None),
 		}
 	}
-	Ok(cache.get(&server_id))
+	Ok(cache.get(&machine_id))
 }
 
 /// Whether one replica key has gone past its bound, per its intent's semantics.
@@ -1262,26 +1334,38 @@ fn is_overdue(
 /// [`crate::migration_tests::latest_verdict_by_key`] instead, so it is not this
 /// path's business.
 // spec: RST#alerting
+/// The machine's snapshot and the candidate of an application on it: the pair a
+/// migration test is about. Where a box hosts several workloads with
+/// candidates, the first in the machine's own order is the one asked about, and
+/// the others follow on later sweeps as their tests settle.
+// spec: RST#candidate-versions
 async fn untried_candidate(
 	db: &mut AsyncPgConnection,
 	declaration: &RestoreReplica,
-	server: &crate::servers::Server,
+	machine: &crate::machines::Machine,
 	snapshots: &HashMap<(Uuid, BackupType), BackupRun>,
 	now: Timestamp,
 ) -> Result<Option<(String, String)>> {
 	let Some(bound) = declaration.overdue_after else {
 		return Ok(None);
 	};
-	let Some(version) = crate::migration_tests::candidate_for(db, server).await? else {
-		return Ok(None);
-	};
-	let Some(run) = snapshots.get(&(server.id, declaration.r#type.clone())) else {
+	let Some(run) = snapshots.get(&(machine.id, declaration.r#type.clone())) else {
 		return Ok(None);
 	};
 	let Some(snapshot_id) = run.snapshot_id.as_ref() else {
 		return Ok(None);
 	};
-	if crate::migration_tests::has_verdict(db, server.id, snapshot_id, version.id).await? {
+	let mut candidate = None;
+	for application in machine.applications(db).await? {
+		if let Some(version) = crate::migration_tests::candidate_for(db, &application).await? {
+			candidate = Some(version);
+			break;
+		}
+	}
+	let Some(version) = candidate else {
+		return Ok(None);
+	};
+	if crate::migration_tests::has_verdict(db, machine.id, snapshot_id, version.id).await? {
 		return Ok(None);
 	}
 	// Measured from when the snapshot landed, which is when it became available
@@ -1464,14 +1548,14 @@ fn migration_instance(
 
 async fn file_verification(
 	db: &mut AsyncPgConnection,
-	server_id: Uuid,
+	machine_id: Uuid,
 	label: &str,
 	instances: Vec<CheckInstance>,
 ) -> Result<usize> {
 	let total = instances.len();
 	file_restore_check(
 		db,
-		server_id,
+		Scope::Machine(machine_id),
 		RestoreCheck {
 			r#ref: refs::RESTORE_VERIFICATION,
 			documentation: refs::RESTORE_VERIFICATION_DOC,
@@ -1498,14 +1582,14 @@ async fn file_verification(
 
 async fn file_redaction(
 	db: &mut AsyncPgConnection,
-	server_id: Uuid,
+	machine_id: Uuid,
 	label: &str,
 	instances: Vec<CheckInstance>,
 ) -> Result<usize> {
 	let total = instances.len();
 	file_restore_check(
 		db,
-		server_id,
+		Scope::Machine(machine_id),
 		RestoreCheck {
 			r#ref: refs::REDACTION,
 			documentation: refs::REDACTION_DOC,
@@ -1532,14 +1616,14 @@ async fn file_redaction(
 
 async fn file_migration(
 	db: &mut AsyncPgConnection,
-	server_id: Uuid,
+	application_id: Uuid,
 	label: &str,
 	instances: Vec<CheckInstance>,
 ) -> Result<usize> {
 	let total = instances.len();
 	file_restore_check(
 		db,
-		server_id,
+		Scope::Application(application_id),
 		RestoreCheck {
 			r#ref: refs::MIGRATION_TEST,
 			documentation: refs::MIGRATION_TEST_DOC,
@@ -1585,7 +1669,7 @@ struct RestoreCheck<'a> {
 /// than left open with nothing that could ever clear it.
 async fn file_restore_check(
 	db: &mut AsyncPgConnection,
-	server_id: Uuid,
+	scope: Scope,
 	check: RestoreCheck<'_>,
 	instances: Vec<CheckInstance>,
 	message: &(dyn Fn(&[GradedInstance]) -> String + Sync),
@@ -1597,9 +1681,19 @@ async fn file_restore_check(
 		gone,
 	} = check;
 	let any_degraded = instances.iter().any(|i| i.observed != CheckResult::Passed);
-	if !any_degraded
-		&& !crate::backup::staleness::open_server_issue_active(db, server_id, r#ref).await?
-	{
+	// The gate reads the column the check's own grain files on: a machine
+	// check's issue is on `machine_id`, so asking after an application id would
+	// never find it and the recovery would never be filed.
+	let already_open = match scope {
+		Scope::Machine(mid) => {
+			crate::backup::staleness::open_machine_issue_active(db, mid, r#ref).await?
+		}
+		Scope::Application(aid) => {
+			crate::backup::staleness::open_server_issue_active(db, aid, r#ref).await?
+		}
+		_ => unreachable!("restore checks file at machine or application scope only"),
+	};
+	if !any_degraded && !already_open {
 		return Ok(0);
 	}
 
@@ -1608,7 +1702,7 @@ async fn file_restore_check(
 			db,
 			crate::issues::CheckFiling {
 				source: crate::statuses::CANOPY_SOURCE,
-				scope: Scope::Server(server_id),
+				scope,
 				device_id: None,
 				check: r#ref,
 				observed: CheckResult::Passed,
@@ -1626,7 +1720,7 @@ async fn file_restore_check(
 			db,
 			InstancedCheckFiling {
 				source: crate::statuses::CANOPY_SOURCE,
-				scope: Scope::Server(server_id),
+				scope,
 				device_id: None,
 				check: r#ref,
 				title: Some(title),

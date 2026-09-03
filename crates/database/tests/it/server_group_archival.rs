@@ -2,11 +2,11 @@
 //! all "gone" (no status in 7 days), can be archived — the latter cascades,
 //! archiving those members too; a group with a recently-reporting server is
 //! refused. Restore cascades back. Archived groups drop out of live listings.
-//! Also covers `Server::list_archived`.
+//! Also covers `Application::list_archived`.
 
 use commons_tests::db::TestDb;
+use database::applications::Application;
 use database::server_groups::ServerGroup;
-use database::servers::Server;
 use diesel::{sql_query, sql_types};
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
@@ -38,8 +38,7 @@ async fn insert_server(
 	}
 	let host = format!("http://test.invalid/{}", Uuid::new_v4());
 	let row: RowId = sql_query(
-		"INSERT INTO servers (host, kind, group_id, deleted_at)
-		 VALUES ($1, 'central', $2, CASE WHEN $3 THEN now() ELSE NULL END) RETURNING id",
+		"WITH m AS (INSERT INTO machines (group_id) VALUES ($2) RETURNING id) INSERT INTO applications (host, type, group_id, deleted_at, machine_id) SELECT $1, 'tamanu-central', $2, CASE WHEN $3 THEN now() ELSE NULL END, m.id FROM m RETURNING id",
 	)
 	.bind::<sql_types::Text, _>(host)
 	.bind::<sql_types::Uuid, _>(group_id)
@@ -85,7 +84,7 @@ async fn archiving_a_group_with_a_recent_server_is_refused() {
 				.is_none(),
 		);
 		assert!(
-			Server::get_by_id(&mut conn, server)
+			Application::get_by_id(&mut conn, server)
 				.await
 				.unwrap()
 				.deleted_at
@@ -114,7 +113,7 @@ async fn archiving_an_all_gone_group_cascades_and_restore_reverses() {
 			"group archived",
 		);
 		assert!(
-			Server::get_by_id(&mut conn, a)
+			Application::get_by_id(&mut conn, a)
 				.await
 				.unwrap()
 				.deleted_at
@@ -122,7 +121,7 @@ async fn archiving_an_all_gone_group_cascades_and_restore_reverses() {
 			"member a cascade-archived",
 		);
 		assert!(
-			Server::get_by_id(&mut conn, b)
+			Application::get_by_id(&mut conn, b)
 				.await
 				.unwrap()
 				.deleted_at
@@ -148,7 +147,7 @@ async fn archiving_an_all_gone_group_cascades_and_restore_reverses() {
 			"group restored",
 		);
 		assert!(
-			Server::get_by_id(&mut conn, a)
+			Application::get_by_id(&mut conn, a)
 				.await
 				.unwrap()
 				.deleted_at
@@ -156,7 +155,7 @@ async fn archiving_an_all_gone_group_cascades_and_restore_reverses() {
 			"member a restored",
 		);
 		assert!(
-			Server::get_by_id(&mut conn, b)
+			Application::get_by_id(&mut conn, b)
 				.await
 				.unwrap()
 				.deleted_at
@@ -174,7 +173,7 @@ async fn server_list_archived_only_returns_archived() {
 		let live = insert_server(&mut conn, group, false).await;
 		let archived = insert_server(&mut conn, group, true).await;
 
-		let archived_ids: Vec<Uuid> = Server::list_archived(&mut conn)
+		let archived_ids: Vec<Uuid> = Application::list_archived(&mut conn)
 			.await
 			.unwrap()
 			.into_iter()
@@ -186,7 +185,7 @@ async fn server_list_archived_only_returns_archived() {
 			"live server not in archived list"
 		);
 
-		let live_ids: Vec<Uuid> = Server::get_all(&mut conn, 0, None)
+		let live_ids: Vec<Uuid> = Application::get_all(&mut conn, 0, None)
 			.await
 			.unwrap()
 			.into_iter()
@@ -236,7 +235,7 @@ async fn restore_leaves_individually_archived_members_archived() {
 
 		ServerGroup::soft_delete(&mut conn, group).await.unwrap();
 		assert!(
-			Server::get_by_id(&mut conn, cascaded)
+			Application::get_by_id(&mut conn, cascaded)
 				.await
 				.unwrap()
 				.deleted_at
@@ -247,7 +246,7 @@ async fn restore_leaves_individually_archived_members_archived() {
 		ServerGroup::restore(&mut conn, group).await.unwrap();
 
 		assert!(
-			Server::get_by_id(&mut conn, cascaded)
+			Application::get_by_id(&mut conn, cascaded)
 				.await
 				.unwrap()
 				.deleted_at
@@ -255,7 +254,7 @@ async fn restore_leaves_individually_archived_members_archived() {
 			"the cascade-archived member comes back",
 		);
 		assert!(
-			Server::get_by_id(&mut conn, retired)
+			Application::get_by_id(&mut conn, retired)
 				.await
 				.unwrap()
 				.deleted_at
@@ -277,7 +276,7 @@ async fn restoring_a_live_group_does_not_resurrect_its_archived_members() {
 		ServerGroup::restore(&mut conn, group).await.unwrap();
 
 		assert!(
-			Server::get_by_id(&mut conn, retired)
+			Application::get_by_id(&mut conn, retired)
 				.await
 				.unwrap()
 				.deleted_at

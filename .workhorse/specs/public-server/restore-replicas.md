@@ -13,8 +13,8 @@ A replica restored from real data is also the substrate for testing a Tamanu ver
 This spec covers *managed* restore replicas only: the standing replicas Canopy decides should exist and keeps current, the restore-health signal they produce, and the pre-upgrade migration testing they carry.
 
 It does not cover an operator restoring a backup by hand.
-An operator performing disaster recovery or an ad-hoc restore selects a specific snapshot for a specific server and restores it through that server's own device tooling and credentials — the existing per-server restore path, unchanged by this spec.
-That path is operator-driven and server-scoped: the operator chooses what to restore and where, and Canopy only issues the read-only credentials and snapshot information for that one server.
+An operator performing disaster recovery or an ad-hoc restore selects a specific snapshot for a specific machine and restores it through that machine's own device tooling and credentials — the operator-driven per-machine restore path.
+That path is operator-driven and machine-scoped: the operator chooses what to restore and where, and Canopy only issues the read-only credentials and snapshot information for that one machine.
 Managed replicas are the opposite mode: Canopy chooses what should be restored, continuously, with no operator selecting each one.
 The two modes share Canopy's read-only credential issuance and snapshot authority; they differ in who decides what gets restored.
 
@@ -22,7 +22,7 @@ The two modes share Canopy's read-only credential issuance and snapshot authorit
 
 A backup is only as good as its last successful restore.
 Producing snapshots (a device backed up) and confirming they landed in the repo (a snapshot exists) are weaker guarantees than actually restoring one into a live database.
-Canopy already knows every group, every server, every backup type, and the latest snapshot for each — so it is the natural authority on *what should be restored*.
+Canopy already knows every group, every machine, every backup type, and the latest snapshot for each — so it is the natural authority on *what should be restored*.
 Centralising that decision in Canopy eliminates the long-lived AWS keys a restore consumer would otherwise hold, makes the restore consumer a stateless executor of Canopy's intent, and closes the lifecycle loop end-to-end: produced, persisted, restorable.
 
 ## Actors
@@ -33,7 +33,7 @@ It owns only the mechanics of restoration — how a replica is provisioned, wher
 
 An **operator** declares, through Canopy, which replicas should exist and why.
 
-Canopy owns the *what* and the *why* (which group, which server, which type, to what end, how fresh) and the *authority* (which snapshot, which credentials, is it restorable).
+Canopy owns the *what* and the *why* (which group, which machine, which type, to what end, how fresh) and the *authority* (which snapshot, which credentials, is it restorable).
 The consumer owns the *how*.
 This boundary is load-bearing: Canopy never models a consumer's runtime placement, and a consumer never decides on its own what to restore.
 
@@ -41,12 +41,12 @@ This boundary is load-bearing: Canopy never models a consumer's runtime placemen
 
 A restore consumer authenticates as a single device holding the `backup-restore` role.
 The role is generic: any future restore consumer uses the same role with its own declared replicas.
-A `backup-restore` device has no implicit server and no implicit group; it is not a member of any group it reads.
+A `backup-restore` device has no implicit machine and no implicit group; it is not a member of any group it reads.
 
 The role is read-only by contract, enforced at the API:
 
 - A `backup-restore` caller requesting backup (write) credentials is rejected.
-  The read-only guarantee is server-enforced, so a compromised consumer cannot pivot to writing or poisoning a repo.
+  The read-only guarantee is enforced by Canopy rather than trusted to the caller, so a compromised consumer cannot pivot to writing or poisoning a repo.
 - A `backup-restore` caller may obtain credentials and the worklist only for a `(group, type)` it has been authorised for.
 
 Authorization is the set of declared replicas (below): a consumer is authorised for exactly the `(group, type)` pairs that appear in its enabled replica declarations.
@@ -96,7 +96,7 @@ The recognised semantics are:
   An intent whose result depends on more than the snapshot keys `once` to that wider input as well, and may treat a failure as settled rather than retryable (see [Pre-upgrade migration testing](#pre-upgrade-migration-testing)).
 - **url** — the intent's health report carries a link to the running replica within its attached health data, which Canopy surfaces to operators.
 - **migrate** — the intent applies a Tamanu version's schema migrations to the replica it restores.
-  Canopy names a target version on each of the intent's worklist entries and withholds an entry from a server that has no candidate version.
+  Canopy names a target version on each of the intent's worklist entries and withholds an entry where no application on the machine has a candidate version.
   `once` for such an intent is keyed to the snapshot and the target version together (see [Pre-upgrade migration testing](#pre-upgrade-migration-testing)).
 - **redact** — the intent can de-identify the restored data before serving it.
   Canopy offers redaction as an option on each of the intent's replicas, supplies the masking manifest for the product being restored, and holds a redacting replica to the outcome of its redaction (see [Redaction](#redaction)).
@@ -120,7 +120,7 @@ Each declaration carries:
 
 - the **group** whose repo holds the backups;
 - the **type** of backup to restore;
-- a **server** within the group, or all servers in the group when none is named;
+- a **machine** within the group, or all machines in the group when none is named;
 - an **intent** the chosen consumer advertises;
 - a human-readable **name**, distinct from every other declaration assigned to the same consumer;
 - **parameter values** for the intent's schema, defaulted where the schema provides one;
@@ -131,49 +131,49 @@ Each declaration carries:
 A declaration's intent must be one the chosen consumer advertises (see [Consumer capabilities](#consumer-capabilities)); a declaration whose intent is unadvertised is a gap, surfaced to the operator and never dispatched.
 
 The name identifies the replica to the consumer that maintains it and to the operator reading the list, so a consumer's declarations must not share one.
-It is the only thing a declaration is unique on: an operator may declare as many replicas of one group, type, intent, and server as they have uses for — a raw one alongside a redacted one, a nightly one alongside a weekly one — and Canopy tells them apart by name alone.
+It is the only thing a declaration is unique on: an operator may declare as many replicas of one group, type, intent, and machine as they have uses for — a raw one alongside a redacted one, a nightly one alongside a weekly one — and Canopy tells them apart by name alone.
 A declaration that reuses a name already assigned to that consumer is refused rather than accepted as an ambiguous pair.
 
 The name is part of a replica's identity rather than a label on it, so each named replica is dispatched, reported on, and alerted on separately.
-A whole-group declaration and a server-specific one that both cover a server are two of that server's replicas, and each gets its own worklist entry.
-A report identifies the declaration it came from, and Canopy records that declaration's name alongside the group, server, type, and intent it already keeps, so the report goes on naming its replica once the declaration is retired.
-Naming a declaration is required of every report, because several replicas can share a group, server, type, and intent, and a report that named none could not be attributed to one of them.
+A whole-group declaration and a machine-specific one that both cover a machine are two of that machine's replicas, and each gets its own worklist entry.
+A report identifies the declaration it came from, and Canopy records that declaration's name alongside the group, machine, type, and intent it already keeps, so the report goes on naming its replica once the declaration is retired.
+Naming a declaration is required of every report, because several replicas can share a group, machine, type, and intent, and a report that named none could not be attributed to one of them.
 The declaration must still exist and belong to the reporting consumer; a report naming a retired declaration is refused, since a replica nothing declares any more is not one Canopy tracks and a finding recorded against it could never recover.
 
-A declaration scoped to a whole group expands to one replica per current server in that group.
-Servers joining or leaving a group change what the consumer is asked to maintain, with no per-server operator action.
+A declaration scoped to a whole group expands to one replica per current machine in that group.
+Machines joining or leaving a group change what the consumer is asked to maintain, with no per-machine operator action.
 
 Declarations are managed through the operator interface (create, edit, enable/disable, delete) and are audited.
 Deleting a declaration stops the consumer being asked to maintain that replica and revokes its authorization for that `(group, type)` if no other declaration covers it; recorded restore-health history is retained.
-The reports it collected survive the deletion, keeping the group, server, type, and intent they concern but no longer naming a declaration, so a declaration that has been reported on is no harder to retire than one that never was.
+The reports it collected survive the deletion, keeping the group, machine, type, and intent they concern but no longer naming a declaration, so a declaration that has been reported on is no harder to retire than one that never was.
 
 ## The worklist
 
 A restore consumer fetches its complete desired state from Canopy in one request, scoped to the calling consumer.
-Canopy expands the consumer's enabled declarations — those whose intent the consumer currently advertises — against the current servers and the latest known snapshot for each, and returns one entry per concrete replica the consumer should currently act on:
+Canopy expands the consumer's enabled declarations — those whose intent the consumer currently advertises — against the current machines and the latest known snapshot for each, and returns one entry per concrete replica the consumer should currently act on:
 
-- the declaration's identifier, group, server, type, intent, name, and overdue bound;
+- the declaration's identifier, group, machine, type, intent, name, and overdue bound;
 - the resolved **parameter values** for the replica, one per parameter the intent advertises (unset parameters resolved to their default, or JSON `null` when they have none);
-- the **snapshot to restore**: the snapshot identifier and its timestamp, or empty when no successful backup is yet known for that server and type;
+- the **snapshot to restore**: the snapshot identifier and its timestamp, or empty when no successful backup is yet known for that machine and type;
 - the repo coordinates needed to locate the backups (storage, bucket, prefix, region).
 
 The worklist does not carry credentials or the repo password.
 The consumer reconciles the worklist against what it is actually running — creating, refreshing, and tearing down replicas to match — and is responsible for converging on the desired state over time.
 
-An intent carrying `once` contributes an entry only while the latest snapshot for its `(server, type)` has no healthy report; once that snapshot is verified the entry is omitted until a newer snapshot exists.
+An intent carrying `once` contributes an entry only while the latest snapshot for its `(machine, type)` has no healthy report; once that snapshot is verified the entry is omitted until a newer snapshot exists.
 An intent without `once` always contributes an entry naming the latest snapshot.
 
 ### Latest state, not a queue
 
-Each entry names the *latest* snapshot for its `(server, type)`, not a backlog to drain.
+Each entry names the *latest* snapshot for its `(machine, type)`, not a backlog to drain.
 A consumer restores on its own cadence and skips the intermediate snapshots produced since its last restore; restoring less often than backups are produced is expected, not a failure.
 A restore can take far longer than the interval between backups — the data is slow to download and restore, and a persistent replica may be held up while its workload runs.
 A `once` intent verifies each snapshot at most once and is not asked to restore again until a newer snapshot exists, so its work follows the backup cadence rather than the clock; an intent without `once` is always pointed at the latest snapshot and refreshes on its own cadence.
 
 ### Snapshot authority
 
-The snapshot Canopy hands out for a `(server, type)` is the snapshot identifier of that server's most recent successful backup run of that type.
-This is the same snapshot the operator interface shows as the server's latest.
+The snapshot Canopy hands out for a `(machine, type)` is the snapshot identifier of that machine's most recent successful backup run of that type.
+This is the same snapshot the operator interface shows as the machine's latest.
 Canopy's independent repo inventory corroborates the snapshot's existence and timestamp; it is not currently the source of the identifier.
 
 ## Credentials
@@ -196,7 +196,7 @@ The 1-hour lifetime of an issued credential does not bound restore duration: a c
 A consumer reports the outcome of each replica back to Canopy.
 A report carries:
 
-- the declaration, group, server, and type it concerns;
+- the declaration, group, machine, and type it concerns;
 - the **snapshot** that was restored, joining the report to the produced-and-persisted record for that snapshot;
 - the **outcome** — restored-and-healthy, or failed — and, on failure, an error description;
 - whether the restored database came up healthy, and its Postgres major version;
@@ -216,7 +216,7 @@ Reports are retained indefinitely as an audit trail.
 
 Canopy derives each restore's duration from the interval between its first credential issuance and its report.
 A restore for which credentials were issued but no report has arrived is shown as in progress while the credentials remain valid, otherwise as a restore whose outcome is unknown; this surfaces in-flight and terminated-without-report restores in the operator view, including those under intents that produce no health report.
-The derivation covers consumers only: a device belonging to one of the group's servers takes restore credentials for its own purposes (a clone refresh, an operator's manual restore) and never reports, so its issuances derive no restore activity.
+The derivation covers consumers only: a device belonging to one of the group's machines takes restore credentials for its own purposes (a clone refresh, an operator's manual restore) and never reports, so its issuances derive no restore activity.
 
 ## Pre-upgrade migration testing
 
@@ -224,17 +224,21 @@ An intent carrying the `migrate` semantic applies a Tamanu version's schema migr
 
 An upgrade applies schema migrations to the live database with the deployment down for the duration.
 A migration that fails against real data, and one that succeeds but runs far longer than the window allowed for, are both properties of that deployment's data rather than of the migration alone, so neither shows against a small or synthetic database.
-Canopy knows the version each server reports running and the upgrade path it would be served, and already holds the authority over replicas made from real backups, so it is where the question can be posed ahead of the window.
+Canopy knows the version each application reports running and the upgrade path it would be served, and already holds the authority over replicas made from real backups, so it is where the question can be posed ahead of the window.
 
 ### Candidate versions
 
-Canopy decides which versions are tested against which servers, rather than an operator naming each pair.
+A candidate is a property of an application, because a version is what an application runs (see [FIG](../private-server/figures.md)).
+The data the candidate is tested against is a property of a machine, because a snapshot is what a machine backed up.
+A migration test therefore restores the snapshot of the machine an application runs on and applies that application's candidate version's migrations to it.
 
-A server's candidate is the version its group's open plan moves it to (see [UPG](../private-server/upgrade-plans.md)).
-A group with no open plan has no candidate, so none of its servers are tested.
+Canopy decides which versions are tested against which applications, rather than an operator naming each pair.
+
+An application's candidate is the version its group's open plan moves it to (see [UPG](../private-server/upgrade-plans.md)).
+A group with no open plan has no candidate, so none of its applications are tested.
 
 Recording a plan is what asks for the testing.
-A run costs hours of a consumer's capacity per server, and which minor a deployment moves to is not something Canopy can derive, so aiming at whatever is newest would spend that capacity on versions nobody has decided to take.
+A run costs hours of a consumer's capacity per replica, and which minor a group moves to is not something Canopy can derive, so aiming at whatever is newest would spend that capacity on versions nobody has decided to take.
 A deployment that wants its data tested says where it is going, and gets an answer about the version it will actually apply.
 
 One candidate, not one per version along the path.
@@ -242,10 +246,10 @@ Migrations are applied to the restored snapshot in sequence, so a run targeting 
 Where a chain does break, the failing migration named in the report identifies the step without a second run.
 
 Only a published version is a candidate, because a version's migrations reach a consumer as its published artefacts, and an unpublished version has none to fetch.
-Publication is what makes a version testable and what makes it reachable by a server, so the two arrive together.
+Publication is what makes a version testable and what makes it reachable by an application, so the two arrive together.
 
-Only a server running Tamanu has candidates, because the migrations under test are Tamanu's and no other product's server has an upgrade path through them.
-A server with no successful backup of a restorable type has no candidates either, because there is nothing to restore and migrate.
+Only an application running Tamanu has candidates, because the migrations under test are Tamanu's and no other type has an upgrade path through them.
+An application whose machine has no successful backup of a restorable type has no candidates either, because there is nothing to restore and migrate.
 
 Testing therefore sits between a version being available and a deployment being told to take it.
 That window is where the answer is still cheap: the fleet is not moving yet, and a version found to break a deployment's data can be held back before anyone schedules its upgrade.
@@ -255,17 +259,18 @@ That window is where the answer is still cheap: the fleet is not moving yet, and
 `migrate` is a semantic an intent opts into, and an intent carrying it carries no other purpose.
 It carries `check` alongside, so a single restore reports the replica's health and the migrations' outcome as two signals from one report.
 
-An intent carrying `migrate` is withheld from a server with no candidate version.
-An intent that verifies backups therefore does not also migrate: it would go undispatched for every server without a candidate, leaving the backups of any non-Tamanu product, and of every deployment with no plan open, unverified.
+An intent carrying `migrate` is withheld where no application has a candidate version.
+An intent that verifies backups therefore does not also migrate: it would go undispatched for every machine without a candidate, leaving the backups of any non-Tamanu application, and of every group with no plan open, unverified.
 An intent that keeps a replica queryable does not migrate either: a migrated replica sits at a version its deployment is not running, so a declaration promoted to it would give an operator a schema that does not match production.
 
 A verifying intent and a migrating intent restore the same snapshot separately.
 A verifying intent restores once per snapshot, and a migrating intent's `once` is keyed to the snapshot and target version together, so it restores when a new candidate version appears rather than on every snapshot.
 
-An entry for a `migrate` intent names the target version alongside the snapshot.
-A consumer obtains that version's migrations from its published artefacts, the same way a server being upgraded does, so naming the version is the whole reference it needs.
+An entry for a `migrate` intent names the target version alongside the snapshot, and the application whose candidate it is.
+A report echoes that application back, so the finding lands on the workload the version belongs to rather than being re-derived; a consumer that does not send it has it resolved from the machine and the version.
+A consumer obtains that version's migrations from its published artefacts, the same way an application being upgraded does, so naming the version is the whole reference it needs.
 
-A server with no candidate version contributes no entry, whatever its declaration says.
+A machine none of whose applications has a candidate version contributes no entry, whatever its declaration says.
 There is nothing to migrate to, and an entry naming no version would ask a consumer to restore a database for no reason.
 
 `once` is keyed to the pair of snapshot and target version: an entry is omitted once that pair has a verdict, and reinstated when either a newer snapshot or a new candidate version appears.
@@ -295,8 +300,8 @@ Growth is also a second reason a window overruns, since the write volume that pr
 
 ### Verdicts
 
-Canopy derives a verdict for each candidate pair of server and version: not yet tested, passed, or failed.
-Verdicts are presented per group, as the set of versions tested against that group's servers, so whether a version is safe for a deployment is answered in one place instead of by assembling reports.
+Canopy derives a verdict for each candidate pair of application and version: not yet tested, passed, or failed.
+Verdicts are presented per group, as the set of versions tested against that group's applications, so whether a version is safe for a group is answered in one place instead of by assembling reports.
 
 A verdict names the snapshot it was reached against and when that was, because a pass against a month-old snapshot is a weaker statement than one against last night's.
 A newer test of the same pair supersedes the previous verdict, and the superseded reports remain.
@@ -310,7 +315,7 @@ Folding the attempt into the verdict would overwrite the answer with the activit
 
 ### Version readiness
 
-A failed migration test marks its target version as carrying a known issue, which removes that version from those considered ready to roll out, and records the server and the failing migration so whoever picks it up knows which deployment's data provoked it.
+A failed migration test marks its target version as carrying a known issue, which removes that version from those considered ready to roll out, and records the application and the failing migration so whoever picks it up knows whose data provoked it.
 This is the gate an operator-filed known issue uses, so a failure found automatically and one found by hand have the same effect on a rollout.
 Clearing the issue is an operator action, and a later passing test does not clear it, because whether the resolution is a change to the migration, a change to the data, or an accepted limitation is a judgement.
 
@@ -328,18 +333,19 @@ Whether a replica redacts is therefore answered by its declaration alone, which 
 
 ### The masking manifest
 
-What to mask is a property of the product being restored (see [APP](../servers/products.md)) rather than a choice the operator makes per replica.
+What to mask is a property of the product being restored (see [APP](../servers/application-types.md)) rather than a choice the operator makes per replica.
 A *masking manifest* names the columns to mask and how each is masked, and a product Canopy can redact publishes one per version.
 
 Canopy holds, for each such product, the location of its manifests as a template naming the version, together with the query that reads a deployment's own version out of the restored data.
 Canopy resolves these settings into the worklist entry as it is dispatched, so a change to where a product publishes its manifests reaches every redacting replica without an operator revisiting a declaration.
-The consumer resolves the version against the data it restored — the version of the snapshot, which is not necessarily the version the server reports running now — and fetches the manifest for it.
+The consumer resolves the version against the data it restored — the version of the snapshot, which is not necessarily the version the application reports running now — and fetches the manifest for it.
 
-A redacting declaration contributes no worklist entry for a server whose product has no manifest, and that server surfaces as a gap on the declaration.
+A redacting declaration contributes no worklist entry for a machine none of whose applications has a type with a manifest, and each such application surfaces as a gap on the declaration.
 A replica that cannot be redacted is not restored at all: an unredacted replica standing in for a redacted one is worse than no replica.
 
 Canopy corroborates a product's manifest template against the published artefacts it already holds per version.
-A redacting declaration covering servers whose versions have no published manifest is a gap, surfaced before a restore is attempted rather than discovered when one fails.
+A redacting declaration covering an application whose version has no published manifest is a gap, surfaced before a restore is attempted rather than discovered when one fails.
+The manifest is resolved through the applications on the machine being restored, since what to mask is a property of the product in the snapshot rather than of the box that took it.
 
 ### What a redaction reports
 
@@ -361,19 +367,20 @@ Each replica's redaction outcome is presented alongside its restore health, so a
 
 ## Alerting
 
-A failed or overdue restore-health report raises a restore-verification check on the affected server, subject to the same monitoring and incident gates as any other of that server's checks.
+A failed or overdue restore-health report raises a restore-verification check on the affected machine, subject to the same monitoring and incident gates as any other of that machine's checks.
+It is a machine check because what failed to restore is the machine's backup, so it presents on every application on that machine as the machine's own (see [CHK](../monitoring/checks.md)).
 
-A server has one restore-verification check however many replicas it has.
+A machine has one restore-verification check however many replicas it has.
 Each replica is an instance of that check, graded on its own and carrying its type, its intent, its declared name, and the snapshot in the check's detail (see [CHK](../monitoring/checks.md)), so a rule or silence written for one replica applies to only that replica.
 The detail names the replica by its type and intent together as well as separately, since a rule matches one variable at a time and a silence for a single replica has to pin both.
-Two replicas of one type and intent on one server are two instances, told apart by their names, so one of them failing leaves its siblings' results untouched.
+Two replicas of one type and intent on one machine are two instances, told apart by their names, so one of them failing leaves its siblings' results untouched.
 The check reflects the most urgent of them, names the ones in trouble, and recovers when none is left degraded.
 
 A replica's state is the worse of what its latest report said and whether it has gone past its overdue bound; these are one judgement about the replica, not two competing ones.
-Canopy re-derives a server's replicas on the same periodic sweep that decides overdue, from the declarations covering the server and from the reports it holds about it.
-A declaration covering the server names one of its replicas whatever its consumer currently advertises: an intent that stops being advertised is a gap, and a finding standing against a replica does not go away because the consumer that reported it stopped offering to.
-A replica the server has a report for is one of its replicas too, for as long as a declaration still asks for that replica somewhere in the server's group — which is what a consumer needs in order to report on it at all.
-So a report about a server its declaration does not name still surfaces against that server, and a replica nothing declares any more stops being one of the server's instances and needs no separate recovery: nothing can report on it again, so a finding held against it could never recover.
+Canopy re-derives a machine's replicas on the same periodic sweep that decides overdue, from the declarations covering the machine and from the reports it holds about it.
+A declaration covering the machine names one of its replicas whatever its consumer currently advertises: an intent that stops being advertised is a gap, and a finding standing against a replica does not go away because the consumer that reported it stopped offering to.
+A replica the machine has a report for is one of its replicas too, for as long as a declaration still asks for that replica somewhere in the machine's group — which is what a consumer needs in order to report on it at all.
+So a report about a machine its declaration does not name still surfaces against that machine, and a replica nothing declares any more stops being one of the machine's instances and needs no separate recovery: nothing can report on it again, so a finding held against it could never recover.
 A report's effect appears on the next sweep rather than the instant it lands, which is immaterial for a warning that pages nobody.
 
 A replica is also overdue — raising the same check on a periodic sweep, rather than waiting for a report that never arrives — when it has not met its intent's health expectation within the declaration's overdue bound.
@@ -381,19 +388,20 @@ For an intent carrying `once`, the expectation is measured against the latest sn
 For an intent without `once`, it is measured against wall-clock time since the last healthy report.
 Overdue applies only to intents carrying `check`.
 
-A failed migration test raises a migration-test check on the affected server, under the same gates, because that server is on the upgrade path to the version that failed.
-It is one check per server with its replicas as instances, as restore-verification is, and carries the target version in the detail rather than the name.
-A server has one candidate at a time, so there is no second version whose result the first could mask, and a name per version would spawn a catalog policy per release.
+A failed migration test raises a migration-test check on the affected application, under the same gates, because that application is on the upgrade path to the version that failed.
+It is an application check rather than a machine one because the version under test is the application's, so a box hosting two workloads carries a finding against whichever of them the version was tested for.
+It is one check per application with its replicas as instances, as restore-verification is, and carries the target version in the detail rather than the name.
+An application has one candidate at a time, so there is no second version whose result the first could mask, and a name per version would spawn a catalog policy per release.
 A replica whose candidate has not been tried within its overdue bound degrades the same check: untested and failed are both "this version is not known good against this deployment's data".
 A recorded verdict raises the check whatever declares that replica now, and a later verdict is what supersedes it: what a version's migrations did to a deployment's data is a fact about the version, not something a declaration has to keep asking about for it to remain true.
 
 The check is a warning rather than a failure, and does not escalate.
-Nothing is wrong with the live server: it is running the version it always was, serving patients, and the finding is about a version it has not taken yet.
+Nothing is wrong with the live application: it is running the version it always was, serving patients, and the finding is about a version it has not taken yet.
 Treating it as a failure would open an incident against a healthy deployment and put a migration problem in front of whoever is on call for outages, when the people who need it are the ones deciding whether that version ships.
 The version's readiness is where the finding does its work.
 
-A redaction that did not fully apply raises a redaction check on the affected server, under the same gates.
-It is one check per server with its redacting replicas as instances, as restore-verification is, each carrying the redaction outcome, the manifest version, and the counts of masked and skipped columns in the check's detail.
+A redaction that did not fully apply raises a redaction check on the affected machine, under the same gates.
+It is one check per machine with its redacting replicas as instances, as restore-verification is, each carrying the redaction outcome, the manifest version, and the counts of masked and skipped columns in the check's detail.
 A replica is an instance of it only once it has reported a redaction outcome: a declaration that redacts but has produced no replica yet has nothing unmasked to report.
 An instance recovers when the replica's next report redacts fully, and the check when none of them is left degraded.
 
@@ -408,5 +416,5 @@ That is for whoever gave out the replica to act on, not for whoever is on call f
 - Producing reporting schemas, or any other artefact, from a migrated replica.
 - The contents of a masking manifest, and what each masking it names does to a value.
 - Deciding or scheduling when a deployment upgrades: verdicts inform that decision without making it.
-- Scoping object-storage credentials below the granularity of a group's repo: one repo holds all of a group's servers' snapshots, so credentials are necessarily group-wide while targeting and reporting are per-server.
+- Scoping object-storage credentials below the granularity of a group's repo: one repo holds all of a group's machines' snapshots, so credentials are necessarily group-wide while targeting and reporting are per-machine.
 - Longer-lived or non-chained credentials: a consumer refreshes within a restore, so the per-issuance lifetime is not a constraint.

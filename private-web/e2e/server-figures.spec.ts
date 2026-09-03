@@ -1,5 +1,11 @@
 import { expect, test } from "./test-fixtures";
-import { resetSeededTables, seedServer, seedStatus } from "./seed";
+import {
+	resetSeededTables,
+	seedDevice,
+	seedDeviceConnection,
+	seedServer,
+	seedStatus,
+} from "./seed";
 
 const BESTOOL_EXTRA = {
 	bestoolVersion: "2.10.5",
@@ -31,7 +37,7 @@ test.describe("reported server figures", () => {
 			extra: { uptimeSecs: 6038594 },
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 
 		await expect(page.getByText("bestool", { exact: true })).toBeVisible();
 		await expect(page.getByText("2.10.5", { exact: true })).toBeVisible();
@@ -50,7 +56,7 @@ test.describe("reported server figures", () => {
 			extra: { uptimeSecs: 42 },
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 
 		await expect(
 			page.getByRole("heading", { level: 1, name: /no-bestool/ }),
@@ -64,7 +70,7 @@ test.describe("reported server figures", () => {
 	}) => {
 		const server = await seedServer(sql, {
 			name: "snapshot-bestool",
-			kind: "central",
+			type: "tamanu-central",
 		});
 		await seedStatus(sql, {
 			serverId: server.id,
@@ -93,5 +99,42 @@ test.describe("reported server figures", () => {
 		).toBeVisible();
 		await expect(page.getByText("bestool", { exact: true })).toBeVisible();
 		await expect(page.getByText("2.10.5", { exact: true })).toBeVisible();
+	});
+
+	test("reads the runtime off the machine's identity when a push doesn't name one", async ({
+		page,
+		sql,
+	}) => {
+		// The identity that belongs to the box, and a second one that files a
+		// push on its behalf. What the box runs is the first one's; the second
+		// is only that push's provenance.
+		const box = await seedDevice(sql, { role: "machine" });
+		await seedDeviceConnection(sql, {
+			deviceId: box.id,
+			userAgent: "bestool/2.10.5 Node.js/22.3.0",
+		});
+		const filer = await seedDevice(sql, { role: "relay" });
+		await seedDeviceConnection(sql, {
+			deviceId: filer.id,
+			userAgent: "bestool/2.10.5 Node.js/14.21.3",
+		});
+
+		const server = await seedServer(sql, {
+			name: "runtime-from-identity",
+			deviceId: box.id,
+		});
+		await seedStatus(sql, {
+			serverId: server.id,
+			deviceId: filer.id,
+			source: "alertd",
+			// No `nodeVersion`, so the figure has to come from elsewhere.
+			extra: { bestoolVersion: "2.10.5" },
+		});
+
+		await page.goto(`/fleet/applications/${server.id}`);
+
+		await expect(page.getByText("Node.js", { exact: true })).toBeVisible();
+		await expect(page.getByText("22.3.0", { exact: true })).toBeVisible();
+		await expect(page.getByText("14.21.3", { exact: true })).toHaveCount(0);
 	});
 });

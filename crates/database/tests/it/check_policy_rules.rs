@@ -3,6 +3,7 @@
 //! truth for "given a status push, what effective result does this check
 //! grade to?"
 
+use crate::helpers::app_ns;
 use commons_types::status::CheckResult;
 use database::check_policies::{CheckPolicy, EvaluationContext, IfLadder};
 use serde_json::json;
@@ -262,7 +263,7 @@ fn first_match_wins() {
 #[tokio::test(flavor = "multi_thread")]
 async fn apply_uses_rules_or_falls_back_to_ceiling() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		CheckPolicy::upsert_default(&mut conn, "alertd", "tamanu_service")
+		CheckPolicy::upsert_default(&mut conn, "alertd", &app_ns(), "tamanu_service")
 			.await
 			.expect("seed");
 
@@ -270,9 +271,16 @@ async fn apply_uses_rules_or_falls_back_to_ceiling() {
 			{"in_range": [{"var": "status.bestoolVersion"}, ">=2.4.0 <2.5.4"]}, "warning"
 		]}))
 		.unwrap();
-		CheckPolicy::update_rules(&mut conn, "alertd", "tamanu_service", Some(&ladder), "ops")
-			.await
-			.expect("save rules");
+		CheckPolicy::update_rules(
+			&mut conn,
+			"alertd",
+			&app_ns(),
+			"tamanu_service",
+			Some(&ladder),
+			"ops",
+		)
+		.await
+		.expect("save rules");
 
 		// Bestool inside the range → ladder fires → warning.
 		let mut status = serde_json::Map::new();
@@ -282,6 +290,7 @@ async fn apply_uses_rules_or_falls_back_to_ceiling() {
 		let graded = CheckPolicy::apply(
 			&mut conn,
 			"alertd",
+			&app_ns(),
 			"tamanu_service",
 			CheckResult::Failed,
 			&empty_ctx(&check, &status, &tags),
@@ -295,6 +304,7 @@ async fn apply_uses_rules_or_falls_back_to_ceiling() {
 		let graded = CheckPolicy::apply(
 			&mut conn,
 			"alertd",
+			&app_ns(),
 			"tamanu_service",
 			CheckResult::Failed,
 			&empty_ctx(&check, &status, &tags),
@@ -307,6 +317,7 @@ async fn apply_uses_rules_or_falls_back_to_ceiling() {
 		CheckPolicy::update(
 			&mut conn,
 			"alertd",
+			&app_ns(),
 			"tamanu_service",
 			CheckResult::Failed,
 			false,
@@ -319,6 +330,7 @@ async fn apply_uses_rules_or_falls_back_to_ceiling() {
 		let graded = CheckPolicy::apply(
 			&mut conn,
 			"alertd",
+			&app_ns(),
 			"tamanu_service",
 			CheckResult::Failed,
 			&empty_ctx(&check, &status, &tags),
@@ -337,12 +349,13 @@ async fn apply_uses_rules_or_falls_back_to_ceiling() {
 #[tokio::test(flavor = "multi_thread")]
 async fn apply_rules_transform_in_both_directions() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		CheckPolicy::upsert_default(&mut conn, "alertd", "queue_depth")
+		CheckPolicy::upsert_default(&mut conn, "alertd", &app_ns(), "queue_depth")
 			.await
 			.expect("seed");
 		CheckPolicy::update(
 			&mut conn,
 			"alertd",
+			&app_ns(),
 			"queue_depth",
 			CheckResult::Failed,
 			true,
@@ -362,6 +375,7 @@ async fn apply_rules_transform_in_both_directions() {
 		let graded = CheckPolicy::apply(
 			&mut conn,
 			"alertd",
+			&app_ns(),
 			"queue_depth",
 			CheckResult::Warning,
 			&empty_ctx(&check, &status, &tags),
@@ -376,12 +390,20 @@ async fn apply_rules_transform_in_both_directions() {
 			{"==": [{"var": "check.result"}, "warning"]}, "passed"
 		]}))
 		.unwrap();
-		CheckPolicy::update_rules(&mut conn, "alertd", "queue_depth", Some(&ladder), "ops")
-			.await
-			.expect("save rules");
+		CheckPolicy::update_rules(
+			&mut conn,
+			"alertd",
+			&app_ns(),
+			"queue_depth",
+			Some(&ladder),
+			"ops",
+		)
+		.await
+		.expect("save rules");
 		let graded = CheckPolicy::apply(
 			&mut conn,
 			"alertd",
+			&app_ns(),
 			"queue_depth",
 			CheckResult::Warning,
 			&empty_ctx(&check, &status, &tags),
@@ -397,6 +419,7 @@ async fn apply_rules_transform_in_both_directions() {
 		let graded = CheckPolicy::apply(
 			&mut conn,
 			"alertd",
+			&app_ns(),
 			"queue_depth",
 			CheckResult::Failed,
 			&empty_ctx(&failed_check, &status, &tags),
@@ -411,14 +434,22 @@ async fn apply_rules_transform_in_both_directions() {
 			{"==": [{"var": "check.result"}, "passed"]}, "warning"
 		]}))
 		.unwrap();
-		CheckPolicy::update_rules(&mut conn, "alertd", "queue_depth", Some(&ladder), "ops")
-			.await
-			.expect("save rules");
+		CheckPolicy::update_rules(
+			&mut conn,
+			"alertd",
+			&app_ns(),
+			"queue_depth",
+			Some(&ladder),
+			"ops",
+		)
+		.await
+		.expect("save rules");
 		let mut passed_check = serde_json::Map::new();
 		passed_check.insert("result".into(), json!("passed"));
 		let graded = CheckPolicy::apply(
 			&mut conn,
 			"alertd",
+			&app_ns(),
 			"queue_depth",
 			CheckResult::Passed,
 			&empty_ctx(&passed_check, &status, &tags),
@@ -437,7 +468,7 @@ async fn apply_falls_back_when_rules_are_malformed() {
 	use diesel_async::RunQueryDsl;
 
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		CheckPolicy::upsert_default(&mut conn, "alertd", "tamanu_service")
+		CheckPolicy::upsert_default(&mut conn, "alertd", &app_ns(), "tamanu_service")
 			.await
 			.expect("seed");
 		// Manually inject garbage into the rules column.
@@ -455,6 +486,7 @@ async fn apply_falls_back_when_rules_are_malformed() {
 		let graded = CheckPolicy::apply(
 			&mut conn,
 			"alertd",
+			&app_ns(),
 			"tamanu_service",
 			CheckResult::Failed,
 			&empty_ctx(&check, &status, &tags),
@@ -471,22 +503,29 @@ async fn apply_falls_back_when_rules_are_malformed() {
 #[tokio::test(flavor = "multi_thread")]
 async fn update_rules_clears_column_when_passed_none() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		CheckPolicy::upsert_default(&mut conn, "alertd", "disk_space")
+		CheckPolicy::upsert_default(&mut conn, "alertd", &app_ns(), "disk_space")
 			.await
 			.expect("seed");
 		let ladder: IfLadder = serde_json::from_value(json!({"if": [
 			{">": [{"var": "check.used_pct"}, 95]}, "failed"
 		]}))
 		.unwrap();
-		let saved =
-			CheckPolicy::update_rules(&mut conn, "alertd", "disk_space", Some(&ladder), "ops")
-				.await
-				.expect("save");
+		let saved = CheckPolicy::update_rules(
+			&mut conn,
+			"alertd",
+			&app_ns(),
+			"disk_space",
+			Some(&ladder),
+			"ops",
+		)
+		.await
+		.expect("save");
 		assert!(saved.rules.is_some(), "rules should be populated");
 
-		let cleared = CheckPolicy::update_rules(&mut conn, "alertd", "disk_space", None, "ops")
-			.await
-			.expect("clear");
+		let cleared =
+			CheckPolicy::update_rules(&mut conn, "alertd", &app_ns(), "disk_space", None, "ops")
+				.await
+				.expect("clear");
 		assert!(cleared.rules.is_none(), "rules should be cleared by None");
 	})
 	.await

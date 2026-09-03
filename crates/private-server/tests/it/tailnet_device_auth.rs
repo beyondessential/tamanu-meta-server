@@ -10,8 +10,9 @@ async fn provision_server(
 ) -> Uuid {
 	let server_id = Uuid::new_v4();
 	conn.batch_execute(&format!(
-		"INSERT INTO servers (id, host, kind, device_id) \
-		 VALUES ('{server_id}', 'https://test.example.com', 'central', '{device_id}');"
+		"INSERT INTO machines (id, device_id) VALUES ('{server_id}', '{device_id}'); \
+		 INSERT INTO applications (id, host, type, machine_id) \
+		 VALUES ('{server_id}', 'https://test.example.com', 'tamanu-central', '{server_id}');"
 	))
 	.await
 	.expect("insert server");

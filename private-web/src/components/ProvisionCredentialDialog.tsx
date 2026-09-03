@@ -20,7 +20,7 @@ import { useApiAction } from "../api";
 import type { DeviceRole, ProvisionedCredential } from "../types";
 
 const TRUSTABLE_ROLES: DeviceRole[] = [
-	"server",
+	"machine",
 	"releaser",
 	"admin",
 	"backup-restore",
@@ -50,7 +50,7 @@ export default function ProvisionCredentialDialog({
 	onProvisioned?: (result: ProvisionedCredential) => void;
 }) {
 	const action = useApiAction("devices", "provision_credential");
-	const [role, setRole] = useState<DeviceRole>(fixedRole ?? "server");
+	const [role, setRole] = useState<DeviceRole>(fixedRole ?? "machine");
 	const [keyName, setKeyName] = useState("");
 	const [result, setResult] = useState<ProvisionedCredential | null>(null);
 	const [downloaded, setDownloaded] = useState(false);
@@ -62,7 +62,7 @@ export default function ProvisionCredentialDialog({
 		setResult(null);
 		setDownloaded(false);
 		setKeyName("");
-		setRole(fixedRole ?? "server");
+		setRole(fixedRole ?? "machine");
 		action.reset();
 	};
 

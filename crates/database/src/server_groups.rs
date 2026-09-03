@@ -1,8 +1,8 @@
-//! Server groups: a flat unit grouping several servers together for the
+//! Application groups: a flat unit grouping several applications together for the
 //! purposes of incident roll-up, shared tags, and shared operator notes.
 
 use commons_errors::{AppError, Result};
-use commons_types::server::{TagMap, kind::ServerKind, product::Product, rank::ServerRank};
+use commons_types::server::{TagMap, app_type::ApplicationType, rank::ServerRank};
 use commons_types::version::VersionStr;
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -10,8 +10,8 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::applications::Application;
 use crate::pg_duration::PgDuration;
-use crate::servers::Server;
 use crate::statuses::Status;
 
 /// Ordering key for a server's rank — lower is higher priority. Used to pick a
@@ -28,17 +28,9 @@ pub fn rank_priority(rank: Option<ServerRank>) -> u8 {
 	}
 }
 
-/// Ordering key for a server's kind — lower is higher priority. Central servers
+/// Ordering key for a server's kind — lower is higher priority. Central applications
 /// are the headline of a group; facility ties below them, standalone last.
 // spec: APP#versions
-pub fn kind_priority(kind: ServerKind) -> u8 {
-	match kind {
-		ServerKind::Central => 0,
-		ServerKind::Facility => 1,
-		ServerKind::Standalone => 2,
-	}
-}
-
 fn higher_rank(a: ServerRank, b: ServerRank) -> ServerRank {
 	if rank_priority(Some(a)) <= rank_priority(Some(b)) {
 		a
@@ -47,7 +39,7 @@ fn higher_rank(a: ServerRank, b: ServerRank) -> ServerRank {
 	}
 }
 
-/// A group of servers managed together: incidents roll up across the group,
+/// A group of applications managed together: incidents roll up across the group,
 /// members share tags, and the group carries its own notes and
 /// notification settings.
 #[derive(
@@ -82,7 +74,7 @@ pub struct ServerGroup {
 	/// The id of the group's canonical member server (the one whose version
 	/// is reflected in `effective_version`), chosen by highest rank then
 	/// highest kind. `None` when the group has no members.
-	pub version_server_id: Option<Uuid>,
+	pub version_application_id: Option<Uuid>,
 	/// The version reported by the group's canonical member server. `None`
 	/// if the group has no members or that member hasn't reported a
 	/// version yet.
@@ -178,8 +170,8 @@ impl ServerGroup {
 	}
 
 	/// Groups carrying this exact name, archived ones included, so a caller
-	/// resolving a deployment by name can tell an archived group from one
-	/// that does not exist. Names aren't unique, so this can return several.
+	/// resolving a group by name can tell an archived group from one that does
+	/// not exist. Names aren't unique, so this can return several.
 	pub async fn find_by_name(db: &mut AsyncPgConnection, name: &str) -> Result<Vec<Self>> {
 		use crate::schema::server_groups::dsl;
 		dsl::server_groups
@@ -257,35 +249,43 @@ impl ServerGroup {
 	/// if *every* live member is **gone** (no status in the last 7 days — the
 	/// same notion the UI shows): in that case the archive **cascades**, also
 	/// archiving those members. If any live member reported recently, it refuses
-	/// (409) — you don't bulk-archive a group with active servers.
+	/// (409) — you don't bulk-archive a group with active applications.
 	pub async fn soft_delete(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<()> {
-		use crate::schema::{server_groups::dsl, servers};
+		use crate::schema::{applications, server_groups::dsl};
 		use diesel_async::AsyncConnection;
 
 		let archived_at = Timestamp::now();
 		db.transaction::<_, AppError, _>(async |conn| {
-			let member_ids: Vec<Uuid> = servers::table
-				.select(servers::id)
-				.filter(servers::group_id.eq(group_id))
-				.filter(servers::deleted_at.is_null())
+			let member_ids: Vec<Uuid> = applications::table
+				.select(applications::id)
+				.filter(applications::group_id.eq(group_id))
+				.filter(applications::deleted_at.is_null())
 				.load(conn)
 				.await
 				.map_err(AppError::from)?;
 
 			if !member_ids.is_empty() {
-				// A member is "gone" iff it's absent from `latest_for_servers`
+				// A member is quiet iff it's absent from `latest_for_servers`
 				// (no status in the last 7 days). Allow the cascade only when
-				// every live member is gone; any recent reporter blocks it.
+				// every live member is quiet; any recent reporter blocks it.
+				//
+				// This is deliberately the windowed question and not
+				// reachability: a member that last reported months ago is
+				// unreachable rather than never heard from, and archiving it
+				// is still the right call. The card carries the same fact as
+				// `all_members_quiet` so the button offered matches what this
+				// allows.
 				let recent = Status::latest_for_servers(conn, &member_ids).await?;
 				if !recent.is_empty() {
 					return Err(AppError::Conflict(format!(
 						"group {group_id} has {} server(s) that reported within the last \
-						 week; only a group whose servers are all gone can be archived",
+						 week; only a group whose applications have all gone quiet can be \
+						 archived",
 						recent.len(),
 					)));
 				}
 				for id in &member_ids {
-					Server::soft_delete(conn, *id).await?;
+					Application::soft_delete(conn, *id).await?;
 				}
 
 				// Stamp the whole cascade with the group's own archival time.
@@ -293,9 +293,9 @@ impl ServerGroup {
 				// ago, so every one of them was archived by *this* cascade —
 				// and matching timestamps is what lets `restore` tell them
 				// from a server an operator had already archived on its own.
-				diesel::update(servers::table.filter(servers::id.eq_any(&member_ids)))
+				diesel::update(applications::table.filter(applications::id.eq_any(&member_ids)))
 					.set(
-						servers::deleted_at
+						applications::deleted_at
 							.eq(jiff_diesel::NullableTimestamp::from(Some(archived_at))),
 					)
 					.execute(conn)
@@ -325,7 +325,7 @@ impl ServerGroup {
 	/// identified by `deleted_at` matching the group's, which `soft_delete`
 	/// stamps across the set it archives.
 	pub async fn restore(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<()> {
-		use crate::schema::{server_groups::dsl, servers};
+		use crate::schema::{applications, server_groups::dsl};
 		use diesel_async::AsyncConnection;
 
 		db.transaction::<_, AppError, _>(async |conn| {
@@ -341,17 +341,19 @@ impl ServerGroup {
 			// its archived members would be the same resurrection by another
 			// route.
 			let archived_members: Vec<Uuid> = match archived_at {
-				Some(at) => servers::table
-					.select(servers::id)
-					.filter(servers::group_id.eq(group_id))
-					.filter(servers::deleted_at.eq(jiff_diesel::NullableTimestamp::from(Some(at))))
+				Some(at) => applications::table
+					.select(applications::id)
+					.filter(applications::group_id.eq(group_id))
+					.filter(
+						applications::deleted_at.eq(jiff_diesel::NullableTimestamp::from(Some(at))),
+					)
 					.load(conn)
 					.await
 					.map_err(AppError::from)?,
 				None => Vec::new(),
 			};
 			for id in &archived_members {
-				Server::restore(conn, *id).await?;
+				Application::restore(conn, *id).await?;
 			}
 
 			diesel::update(dsl::server_groups.filter(dsl::id.eq(group_id)))
@@ -364,16 +366,62 @@ impl ServerGroup {
 		.await
 	}
 
-	pub async fn list_servers(&self, db: &mut AsyncPgConnection) -> Result<Vec<Server>> {
-		use crate::schema::servers::dsl;
-		dsl::servers
-			.select(Server::as_select())
+	pub async fn list_servers(&self, db: &mut AsyncPgConnection) -> Result<Vec<Application>> {
+		use crate::schema::applications::dsl;
+		dsl::applications
+			.select(Application::as_select())
 			.filter(dsl::group_id.eq(self.id))
 			.filter(dsl::deleted_at.is_null())
 			.order(dsl::name.asc())
 			.load(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// For each group id, the software its live members all run, when they
+	/// agree on one. A group whose members span two is absent from the map.
+	///
+	/// Attribution is by software rather than by type: a central and a facility
+	/// of one deployment are both Tamanu, so a group holding the pair still has
+	/// one product to attribute its shared cost to.
+	// spec: APP#billing-attribution
+	pub async fn sole_member_software(
+		db: &mut AsyncPgConnection,
+		group_ids: &[Uuid],
+	) -> Result<std::collections::HashMap<Uuid, String>> {
+		use crate::schema::applications::dsl;
+		use std::collections::HashMap;
+
+		if group_ids.is_empty() {
+			return Ok(HashMap::new());
+		}
+		let rows: Vec<(Uuid, String)> = dsl::applications
+			.select((dsl::group_id.assume_not_null(), dsl::type_))
+			.filter(dsl::group_id.eq_any(group_ids))
+			.filter(dsl::deleted_at.is_null())
+			.load(db)
+			.await?;
+
+		// Two passes rather than one: a group has to be *removed* once a
+		// second software shows up, which a running "first wins" insert can't
+		// express.
+		let mut seen: HashMap<Uuid, Vec<String>> = HashMap::new();
+		for (gid, r#type) in rows {
+			let Ok(r#type) = r#type.parse::<ApplicationType>() else {
+				continue;
+			};
+			let software = seen.entry(gid).or_default();
+			if !software.iter().any(|s| s == r#type.software()) {
+				software.push(r#type.software().to_owned());
+			}
+		}
+		Ok(seen
+			.into_iter()
+			.filter_map(|(gid, mut software)| match software.as_mut_slice() {
+				[sole] => Some((gid, std::mem::take(sole))),
+				_ => None,
+			})
+			.collect())
 	}
 
 	/// For each group id, the rank of its highest-ranked member. Used by the
@@ -383,13 +431,13 @@ impl ServerGroup {
 		db: &mut AsyncPgConnection,
 		group_ids: &[Uuid],
 	) -> Result<std::collections::HashMap<Uuid, commons_types::server::rank::ServerRank>> {
-		use crate::schema::servers::dsl;
+		use crate::schema::applications::dsl;
 		use std::collections::HashMap;
 
 		if group_ids.is_empty() {
 			return Ok(HashMap::new());
 		}
-		let rows: Vec<(Uuid, Option<String>)> = dsl::servers
+		let rows: Vec<(Uuid, Option<String>)> = dsl::applications
 			.select((dsl::group_id.assume_not_null(), dsl::rank))
 			.filter(dsl::group_id.eq_any(group_ids))
 			.filter(dsl::deleted_at.is_null())
@@ -413,61 +461,15 @@ impl ServerGroup {
 		Ok(out)
 	}
 
-	/// The product each group's live members agree on, keyed by group id.
-	///
-	/// A group whose members span products is absent from the map, as is one
-	/// with no live members: in both cases there is no single product to
-	/// attribute the group's shared resources to, and naming one of several
-	/// would attribute its cost to the wrong place.
-	// spec: APP#billing-attribution
-	pub async fn sole_member_products(
-		db: &mut AsyncPgConnection,
-		group_ids: &[Uuid],
-	) -> Result<std::collections::HashMap<Uuid, Product>> {
-		use crate::schema::servers::dsl;
-		use std::collections::HashMap;
-
-		if group_ids.is_empty() {
-			return Ok(HashMap::new());
-		}
-		let rows: Vec<(Uuid, String)> = dsl::servers
-			.select((dsl::group_id.assume_not_null(), dsl::product))
-			.filter(dsl::group_id.eq_any(group_ids))
-			.filter(dsl::deleted_at.is_null())
-			.load(db)
-			.await?;
-
-		// Two passes rather than one: a group has to be *removed* once a
-		// second product shows up, which a running "first wins" insert can't
-		// express.
-		let mut seen: HashMap<Uuid, Vec<Product>> = HashMap::new();
-		for (gid, product) in rows {
-			let Ok(product) = product.parse::<Product>() else {
-				continue;
-			};
-			let products = seen.entry(gid).or_default();
-			if !products.contains(&product) {
-				products.push(product);
-			}
-		}
-		Ok(seen
-			.into_iter()
-			.filter_map(|(gid, products)| match products.as_slice() {
-				[sole] => Some((gid, *sole)),
-				_ => None,
-			})
-			.collect())
-	}
-
-	/// Count of live (non-archived) servers in each group, keyed by group id.
+	/// Count of live (non-archived) applications in each group, keyed by group id.
 	/// Groups with no live members are absent (callers default to 0).
 	pub async fn live_server_counts(
 		db: &mut AsyncPgConnection,
 	) -> Result<std::collections::HashMap<Uuid, i64>> {
-		use crate::schema::servers::dsl;
+		use crate::schema::applications::dsl;
 		use std::collections::HashMap;
 
-		let group_ids: Vec<Uuid> = dsl::servers
+		let group_ids: Vec<Uuid> = dsl::applications
 			.select(dsl::group_id.assume_not_null())
 			.filter(dsl::group_id.is_not_null())
 			.filter(dsl::deleted_at.is_null())
@@ -492,43 +494,46 @@ impl ServerGroup {
 	pub async fn recompute_version(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<()> {
 		use crate::schema::server_groups::dsl;
 
-		let members: Vec<Server> = {
-			use crate::schema::servers::dsl as servers_dsl;
-			servers_dsl::servers
-				.select(Server::as_select())
+		let members: Vec<Application> = {
+			use crate::schema::applications::dsl as servers_dsl;
+			servers_dsl::applications
+				.select(Application::as_select())
 				.filter(servers_dsl::group_id.eq(group_id))
 				.filter(servers_dsl::deleted_at.is_null())
 				.load(db)
 				.await?
 		};
 
-		// Only a member whose product canopy holds a release train for can
-		// speak for the group's version. A group of products canopy doesn't
-		// track has no headline version rather than one that means nothing.
-		// spec: APP#versions
+		// A deployment's version is its central's version, so the headline
+		// names that outright: the `tamanu-central` on the group's
+		// highest-ranked machine. Saying it directly is clearer than a
+		// precedence order over types that happens to put centrals first, and
+		// it leaves types a flat set with no ordering to maintain as new ones
+		// appear.
+		//
+		// There is no fallback. A group with no central has no headline
+		// version, because a deployment's version is a thing its central has
+		// and nothing else stands in for it.
+		// spec: APP#capabilities
 		let canonical = members
-			.into_iter()
-			.filter(|s| s.product.tracks_versions())
-			.min_by(|a, b| {
-				(rank_priority(a.rank), kind_priority(a.kind), a.id).cmp(&(
-					rank_priority(b.rank),
-					kind_priority(b.kind),
-					b.id,
-				))
-			});
+			.iter()
+			.filter(|s| s.r#type == ApplicationType::TamanuCentral)
+			.min_by_key(|s| (rank_priority(s.rank), s.id))
+			.map(|s| s.id);
 
-		let (version_server_id, effective_version) = match canonical {
+		let (version_application_id, effective_version) = match canonical {
 			None => (None, None),
-			Some(server) => {
+			Some(application_id) => {
 				let version =
-					crate::reported_detail::ReportedDetail::last_version(db, server.id).await?;
-				(Some(server.id), version)
+					crate::reported_detail::ReportedDetail::last_version(db, application_id)
+						.await?;
+				(Some(application_id), version)
 			}
 		};
 
 		diesel::update(dsl::server_groups.filter(dsl::id.eq(group_id)))
 			.set((
-				dsl::version_server_id.eq(version_server_id),
+				dsl::version_application_id.eq(version_application_id),
 				dsl::effective_version.eq(effective_version),
 			))
 			.execute(db)

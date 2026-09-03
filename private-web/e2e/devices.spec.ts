@@ -27,7 +27,7 @@ test.describe("devices list", () => {
 		page,
 		sql,
 	}) => {
-		const server = await seedDevice(sql, { role: "server" });
+		const server = await seedDevice(sql, { role: "machine" });
 		await seedDeviceKey(sql, {
 			deviceId: server.id,
 			name: "server-cert",
@@ -53,7 +53,7 @@ test.describe("device detail page", () => {
 	});
 
 	test("renders the role for a seeded device", async ({ page, sql }) => {
-		const device = await seedDevice(sql, { role: "server" });
+		const device = await seedDevice(sql, { role: "machine" });
 		await seedDeviceKey(sql, {
 			deviceId: device.id,
 			name: "detail-cert",

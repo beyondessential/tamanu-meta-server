@@ -18,7 +18,7 @@ struct RowId {
 
 async fn insert_server(conn: &mut diesel_async::AsyncPgConnection) -> Uuid {
 	let row: RowId =
-		sql_query("INSERT INTO servers (host) VALUES ('http://rollup.invalid/') RETURNING id")
+		sql_query("WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (type, host, machine_id) SELECT 'tamanu-central', 'http://rollup.invalid/', m.id FROM m RETURNING id")
 			.get_result(conn)
 			.await
 			.expect("insert server");
@@ -28,7 +28,7 @@ async fn insert_server(conn: &mut diesel_async::AsyncPgConnection) -> Uuid {
 fn failed_filing(server_id: Uuid, check: &str) -> CheckFiling<'_> {
 	CheckFiling {
 		source: "alertd",
-		scope: Scope::Server(server_id),
+		scope: Scope::Application(server_id),
 		device_id: None,
 		check,
 		observed: CheckResult::Failed,

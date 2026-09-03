@@ -1,10 +1,10 @@
-//! Operator-facing environment inventory: a group's live servers at one rank,
-//! the address each is reached at, and the variables that configure them.
+//! Operator-facing environment inventory: a group's live applications at one
+//! rank, the address each is reached at, and the variables that configure them.
 //!
-//! Assembled from what Canopy already holds — group membership, rank, product
-//! and kind, the bound device's tailnet name, and the server/group tag merge —
-//! so configuration tooling reads the fleet from here rather than from a file
-//! kept in step by hand.
+//! Assembled from what Canopy already holds (group membership, rank,
+//! application type, the tailnet name of the device bound to each application's
+//! machine, and the application/group tag merge), so configuration tooling
+//! reads the fleet from here rather than from a file kept in step by hand.
 //!
 //! It carries the secret variables too (see [`super::inventory_secrets`]), which
 //! is why it is served to an administrator alone.
@@ -19,13 +19,14 @@ use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
 use commons_types::{
 	Uuid,
-	server::{RESERVED_TAG_PREFIX, TagMap, kind::ServerKind, product::Product, rank::ServerRank},
+	server::{RESERVED_TAG_PREFIX, TagMap, app_type::ApplicationType, rank::ServerRank},
 };
 use database::{
 	Device,
+	applications::Application,
 	inventory_secret_variables::{InventorySecretVariable, SecretScope},
+	machines::Machine,
 	server_groups::ServerGroup,
-	servers::Server,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -49,31 +50,33 @@ pub struct InventoryArgs {
 	#[serde(default)]
 	pub group: Option<String>,
 	/// Rank of the environment within the group. Required only where the
-	/// group's live servers span more than one rank.
+	/// group's live applications span more than one rank.
 	#[serde(default)]
 	pub rank: Option<ServerRank>,
 }
 
-/// One server in an environment.
+/// One application in an environment.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct InventoryHost {
-	/// Identifier of the server.
+	/// Identifier of the application.
 	pub id: Uuid,
-	/// The server's name within its group, falling back to its host and then
-	/// its identifier, so a member always has something to be addressed as.
+	/// The application's name within its group, falling back to its host and
+	/// then its identifier, so a member always has something to be addressed
+	/// as.
 	pub name: String,
-	/// The application this server runs.
-	pub product: Product,
-	/// The server's role within its product's topology.
-	pub kind: ServerKind,
-	/// The address to reach the server at: its bound device's tailnet name, or
-	/// its recorded host where no device is bound. Null when Canopy holds
-	/// neither, in which case a variable has to supply it.
+	/// What the application is: the software and the role it plays together.
+	pub r#type: ApplicationType,
+	/// Identifier of the machine the application runs on.
+	pub machine_id: Uuid,
+	/// The address to reach the application at: the tailnet name of the device
+	/// bound to its machine, or its own recorded host where no device is bound.
+	/// Null when Canopy holds neither, in which case a variable has to supply
+	/// it.
 	pub address: Option<String>,
-	/// The server's effective variables: its own tags over its group's, with
-	/// the reserved read-only tags left out. This is what a run acts on.
+	/// The application's effective variables: its own tags over its group's,
+	/// with the reserved read-only tags left out. This is what a run acts on.
 	pub vars: VarMap,
-	/// The variables the server sets itself, so a value inherited from the
+	/// The variables the application sets itself, so a value inherited from the
 	/// group can be told from one set here even where the two agree.
 	pub own_vars: VarMap,
 	/// Which of `vars` are secret, so a caller can keep them out of anything it
@@ -81,8 +84,8 @@ pub struct InventoryHost {
 	pub secret_vars: Vec<String>,
 }
 
-/// An environment's inventory: its servers and the variables that configure
-/// them.
+/// An environment's inventory: its applications and the variables that
+/// configure them.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct InventoryView {
 	/// Identifier of the server group the inventory covers.
@@ -91,12 +94,13 @@ pub struct InventoryView {
 	pub group: String,
 	/// Rank of the environment served.
 	pub rank: ServerRank,
-	/// Variables belonging to the environment rather than to any one server.
-	/// Every server carries these too, under its own overrides.
+	/// Variables belonging to the environment rather than to any one
+	/// application. Every application carries these too, under its own
+	/// overrides.
 	pub vars: VarMap,
 	/// Which of `vars` are secret.
 	pub secret_vars: Vec<String>,
-	/// The environment's servers, ordered by name.
+	/// The environment's applications, ordered by name.
 	pub hosts: Vec<InventoryHost>,
 }
 
@@ -178,7 +182,7 @@ async fn resolve_group(
 ///
 /// Refuses a group Canopy does not have, one that has been archived, one
 /// holding several environments with no rank named, a rank with no live
-/// server to configure, and a secret variable whose value cannot be read,
+/// application to configure, and a secret variable whose value cannot be read,
 /// saying which it was: a refusal is a decision to respect, and a caller has to
 /// be able to tell it from Canopy being unreachable.
 ///
@@ -214,7 +218,7 @@ pub async fn for_group(
 		)));
 	}
 
-	let members = Server::list_live_in_group(&mut conn, group.id).await?;
+	let members = Application::list_live_in_group(&mut conn, group.id).await?;
 	if members.is_empty() {
 		return Err(AppError::Conflict(format!(
 			"server group {:?} has no live members",
@@ -222,11 +226,11 @@ pub async fn for_group(
 		)));
 	}
 
-	// A server carrying no rank is at ServerRank's own default, so every live
-	// server belongs to exactly one of its group's environments.
+	// An application carrying no rank is at ServerRank's own default, so every
+	// live application belongs to exactly one of its group's environments.
 	let ranks: BTreeSet<ServerRank> = members
 		.iter()
-		.map(|server| server.rank.unwrap_or_default())
+		.map(|application| application.rank.unwrap_or_default())
 		.collect();
 	let rank = match args_rank {
 		Some(rank) => rank,
@@ -245,24 +249,35 @@ pub async fn for_group(
 		None => ranks.into_iter().next().unwrap_or_default(),
 	};
 
-	let servers: Vec<Server> = members
+	let applications: Vec<Application> = members
 		.into_iter()
-		.filter(|server| server.rank.unwrap_or_default() == rank)
+		.filter(|application| application.rank.unwrap_or_default() == rank)
 		.collect();
-	if servers.is_empty() {
+	if applications.is_empty() {
 		return Err(AppError::Conflict(format!(
-			"server group {:?} has no live server at rank {rank}",
+			"server group {:?} has no live application at rank {rank}",
 			group.name
 		)));
 	}
 
-	let device_ids: Vec<Uuid> = servers
+	// The identity speaks for the box, so an application's address comes from
+	// the device bound to the machine it runs on.
+	let machine_ids: Vec<Uuid> = applications
 		.iter()
-		.filter_map(|server| server.device_id)
+		.map(|application| application.machine_id)
 		.collect();
+	let devices_by_machine: BTreeMap<Uuid, Uuid> = Machine::get_many(&mut conn, &machine_ids)
+		.await?
+		.into_iter()
+		.filter_map(|machine| machine.device_id.map(|device| (machine.id, device)))
+		.collect();
+	let device_ids: Vec<Uuid> = devices_by_machine.values().copied().collect();
 	let tailnet = Device::tailscale_names_by_ids(&mut conn, &device_ids).await?;
 
-	let server_ids: Vec<Uuid> = servers.iter().map(|server| server.id).collect();
+	let application_ids: Vec<Uuid> = applications
+		.iter()
+		.map(|application| application.id)
+		.collect();
 	let environment_secrets = read_secrets(
 		&state,
 		SecretScope::Environment {
@@ -272,12 +287,17 @@ pub async fn for_group(
 		&InventorySecretVariable::list_for_environment(&mut conn, group.id, rank).await?,
 	)
 	.await?;
-	let mut server_secrets: BTreeMap<Uuid, VarMap> = BTreeMap::new();
-	for (server_id, declared) in
-		by_server(InventorySecretVariable::list_for_servers(&mut conn, &server_ids).await?)
-	{
-		let read = read_secrets(&state, SecretScope::Server { server_id }, &declared).await?;
-		server_secrets.insert(server_id, read);
+	let mut application_secrets: BTreeMap<Uuid, VarMap> = BTreeMap::new();
+	for (application_id, declared) in by_application(
+		InventorySecretVariable::list_for_applications(&mut conn, &application_ids).await?,
+	) {
+		let read = read_secrets(
+			&state,
+			SecretScope::Application { application_id },
+			&declared,
+		)
+		.await?;
+		application_secrets.insert(application_id, read);
 	}
 
 	tracing::info!(
@@ -285,7 +305,7 @@ pub async fn for_group(
 		group = %group.name,
 		%rank,
 		secrets = environment_secrets.0.len()
-			+ server_secrets.values().map(|vars| vars.0.len()).sum::<usize>(),
+			+ application_secrets.values().map(|vars| vars.0.len()).sum::<usize>(),
 		"inventory served"
 	);
 
@@ -293,39 +313,41 @@ pub async fn for_group(
 	let environment_secret_names: Vec<String> = environment_secrets.0.keys().cloned().collect();
 	environment_vars.0.extend(environment_secrets.0);
 
-	let mut hosts: Vec<InventoryHost> = servers
+	let mut hosts: Vec<InventoryHost> = applications
 		.into_iter()
-		.map(|server| {
-			let host = server
+		.map(|application| {
+			let host = application
 				.host
 				.as_ref()
 				.and_then(|host| host.0.host_str().map(str::to_owned));
-			let address = server
-				.device_id
-				.and_then(|device| tailnet.get(&device).cloned())
+			let address = devices_by_machine
+				.get(&application.machine_id)
+				.and_then(|device| tailnet.get(device).cloned())
 				.or_else(|| host.clone());
-			let own_secrets = server_secrets.remove(&server.id).unwrap_or_default();
+			let own_secrets = application_secrets
+				.remove(&application.id)
+				.unwrap_or_default();
 			let mut secret_vars = environment_secret_names.clone();
 			secret_vars.extend(own_secrets.0.keys().cloned());
 			secret_vars.sort();
 			secret_vars.dedup();
 
-			let mut own_vars = vars(&server.tags);
+			let mut own_vars = vars(&application.tags);
 			own_vars.0.extend(own_secrets.0);
 			let mut effective = environment_vars.0.clone();
 			effective.extend(own_vars.0.iter().map(|(k, v)| (k.clone(), v.clone())));
 			InventoryHost {
-				name: server
+				name: application
 					.name
 					.clone()
 					.or(host)
-					.unwrap_or_else(|| server.id.to_string()),
+					.unwrap_or_else(|| application.id.to_string()),
 				vars: VarMap(effective),
 				own_vars,
 				secret_vars,
-				id: server.id,
-				product: server.product,
-				kind: server.kind,
+				id: application.id,
+				r#type: application.r#type,
+				machine_id: application.machine_id,
 				address,
 			}
 		})
@@ -342,13 +364,13 @@ pub async fn for_group(
 	}))
 }
 
-fn by_server(
+fn by_application(
 	declared: Vec<InventorySecretVariable>,
 ) -> BTreeMap<Uuid, Vec<InventorySecretVariable>> {
 	let mut out: BTreeMap<Uuid, Vec<InventorySecretVariable>> = BTreeMap::new();
 	for var in declared {
-		if let Some(server_id) = var.server_id {
-			out.entry(server_id).or_default().push(var);
+		if let Some(application_id) = var.application_id {
+			out.entry(application_id).or_default().push(var);
 		}
 	}
 	out

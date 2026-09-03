@@ -18,8 +18,14 @@ pub enum DeviceRole {
 	Admin,
 	/// May publish release versions and register their artifacts.
 	Releaser,
-	/// Acts as a monitored server: submits statuses and events, runs backups.
-	Server,
+	/// Acts as a monitored box: submits statuses and events, runs backups.
+	///
+	/// An identity belongs to a machine rather than to the software on it, so
+	/// this is a box's role. Accepted as `server` on input, which is what an
+	/// agent deployed before the rename sends.
+	// spec: DTR
+	#[serde(alias = "server")]
+	Machine,
 	/// May run managed restores of backups onto replica servers.
 	#[serde(rename = "backup-restore")]
 	BackupRestore,
@@ -36,7 +42,12 @@ impl std::str::FromStr for DeviceRole {
 		match s.to_ascii_lowercase().as_ref() {
 			"admin" => Ok(Self::Admin),
 			"releaser" => Ok(Self::Releaser),
-			"server" => Ok(Self::Server),
+			// `server` is the name this role had when a box and the software on
+			// it were one record. Accepted so an agent deployed before the
+			// rename keeps enrolling; what Canopy stores and presents is
+			// `machine`, so the two do not both travel through the code.
+			// spec: DTR
+			"machine" | "server" => Ok(Self::Machine),
 			"backup-restore" => Ok(Self::BackupRestore),
 			_ => Err(DeviceRoleFromStringError),
 		}
@@ -56,7 +67,7 @@ impl std::fmt::Display for DeviceRole {
 		let s = match self {
 			DeviceRole::Admin => "admin",
 			DeviceRole::Releaser => "releaser",
-			DeviceRole::Server => "server",
+			DeviceRole::Machine => "machine",
 			DeviceRole::BackupRestore => "backup-restore",
 		};
 		write!(f, "{}", s)
@@ -87,5 +98,41 @@ where
 	fn to_sql<'b>(&'b self, out: &mut Output<'b, '_, diesel::pg::Pg>) -> serialize::Result {
 		let v = String::from(*self);
 		<String as ToSql<Text, diesel::pg::Pg>>::to_sql(&v, &mut out.reborrow())
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	/// `server` was this role's name when a box and the software on it were one
+	/// record. It is accepted on input so an agent deployed before the rename
+	/// keeps enrolling, and a row written before it still reads.
+	// spec: DTR
+	#[test]
+	fn server_is_accepted_as_the_machine_role() {
+		assert_eq!("server".parse::<DeviceRole>().unwrap(), DeviceRole::Machine);
+		assert_eq!(
+			"machine".parse::<DeviceRole>().unwrap(),
+			DeviceRole::Machine
+		);
+		assert_eq!("SERVER".parse::<DeviceRole>().unwrap(), DeviceRole::Machine);
+		assert_eq!(
+			serde_json::from_str::<DeviceRole>("\"server\"").unwrap(),
+			DeviceRole::Machine
+		);
+	}
+
+	/// The alias is on the input only: what Canopy stores and presents is the
+	/// machine role, so the two do not both travel through the code.
+	// spec: DTR
+	#[test]
+	fn the_machine_role_is_only_ever_written_as_machine() {
+		assert_eq!(DeviceRole::Machine.to_string(), "machine");
+		assert_eq!(String::from(DeviceRole::Machine), "machine");
+		assert_eq!(
+			serde_json::to_string(&DeviceRole::Machine).unwrap(),
+			"\"machine\""
+		);
 	}
 }

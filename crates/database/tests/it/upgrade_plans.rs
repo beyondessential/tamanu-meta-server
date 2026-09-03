@@ -4,10 +4,10 @@
 use commons_tests::db::TestDb;
 use commons_types::version::{VersionStatus, VersionStr};
 use database::{
+	applications::Application,
 	migration_tests::candidate_for,
 	reported_detail::ReportedDetail,
 	server_groups::ServerGroup,
-	servers::Server,
 	upgrade_plans::{PlannedWhen, UpgradePlan, close_met_plans, is_late, planned_target},
 	versions::{NewVersion, Version},
 };
@@ -20,6 +20,16 @@ use uuid::Uuid;
 struct RowId {
 	#[diesel(sql_type = sql_types::Uuid)]
 	id: Uuid,
+}
+
+/// An application and the machine it sits on: reported detail splits by grain,
+/// so recording a push names both.
+#[derive(diesel::QueryableByName)]
+struct AppRow {
+	#[diesel(sql_type = sql_types::Uuid)]
+	id: Uuid,
+	#[diesel(sql_type = sql_types::Uuid)]
+	machine_id: Uuid,
 }
 
 async fn publish(conn: &mut AsyncPgConnection, minor: i32, patch: i32) -> Version {
@@ -40,13 +50,13 @@ async fn publish(conn: &mut AsyncPgConnection, minor: i32, patch: i32) -> Versio
 
 /// A group with one server reporting `running`, and the group's cached
 /// effective version recomputed through the real path.
-async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Server) {
+async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Application) {
 	let group: RowId = sql_query("INSERT INTO server_groups (name) VALUES ('kamaka') RETURNING id")
 		.get_result(conn)
 		.await
 		.expect("group");
-	let server: RowId = sql_query(
-		"INSERT INTO servers (host, kind, group_id) VALUES ($1, 'central', $2) RETURNING id",
+	let server: AppRow = sql_query(
+		"WITH m AS (INSERT INTO machines (group_id) VALUES ($2) RETURNING id) INSERT INTO applications (host, type, group_id, machine_id) SELECT $1, 'tamanu-central', $2, m.id FROM m RETURNING id, machine_id",
 	)
 	.bind::<sql_types::Text, _>("https://central.kamaka.example")
 	.bind::<sql_types::Uuid, _>(group.id)
@@ -57,7 +67,8 @@ async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Se
 	let version: VersionStr = running.parse().expect("parse");
 	ReportedDetail::record(
 		conn,
-		server.id,
+		Some(server.id),
+		server.machine_id,
 		"test",
 		&serde_json::json!({}),
 		Some(&version),
@@ -76,7 +87,7 @@ async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Se
 		.await
 		.expect("recompute");
 
-	let server = Server::get_by_id(conn, server.id)
+	let server = Application::get_by_id(conn, server.id)
 		.await
 		.expect("get server");
 	(group.id, server)
@@ -831,6 +842,123 @@ async fn only_dated_plans_that_still_stand_reach_the_calendar() {
 				.expect("dated")
 				.is_empty(),
 			"a plan with no day has nowhere to sit on a calendar"
+		);
+	})
+	.await
+}
+
+/// A group with two version-tracked members at different ranks and different
+/// versions. The production central carries the headline; the test facility
+/// sits behind it.
+async fn group_with_a_member_behind(conn: &mut AsyncPgConnection) -> Uuid {
+	let group: RowId =
+		sql_query("INSERT INTO server_groups (name) VALUES ('kirimati') RETURNING id")
+			.get_result(conn)
+			.await
+			.expect("group");
+
+	for (r#type, rank, running) in [
+		("tamanu-central", "production", "2.62.0"),
+		("tamanu-facility", "test", "2.58.0"),
+	] {
+		let host = format!("https://{}.example", Uuid::new_v4());
+		let app: AppRow = sql_query(
+			"WITH m AS (INSERT INTO machines (group_id) VALUES ($4) RETURNING id) INSERT INTO applications (host, type, rank, group_id, machine_id) SELECT $1, $2, $3, $4, m.id FROM m RETURNING id, machine_id",
+		)
+		.bind::<sql_types::Text, _>(host)
+		.bind::<sql_types::Text, _>(r#type)
+		.bind::<sql_types::Text, _>(rank)
+		.bind::<sql_types::Uuid, _>(group.id)
+		.get_result(conn)
+		.await
+		.expect("application");
+
+		let version: VersionStr = running.parse().expect("parse");
+		ReportedDetail::record(
+			conn,
+			Some(app.id),
+			app.machine_id,
+			"test",
+			&serde_json::json!({}),
+			Some(&version),
+		)
+		.await
+		.expect("report");
+		sql_query(
+			"INSERT INTO statuses (server_id, version, healthy, health) VALUES ($1, $2, true, '[]'::jsonb)",
+		)
+		.bind::<sql_types::Uuid, _>(app.id)
+		.bind::<sql_types::Text, _>(running)
+		.execute(conn)
+		.await
+		.expect("status");
+	}
+
+	ServerGroup::recompute_version(conn, group.id)
+		.await
+		.expect("recompute");
+	group.id
+}
+
+/// A plan is measured against the version the group presents, not against
+/// whichever member happens to be furthest behind. Otherwise a group whose
+/// facility lags would accept a plan to go somewhere its central has already
+/// been.
+// spec: APP
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plan_measures_from_the_groups_headline_version() {
+	TestDb::run(|mut conn, _url| async move {
+		let group = group_with_a_member_behind(&mut conn).await;
+
+		use database::schema::server_groups::dsl;
+		use diesel::{ExpressionMethods, QueryDsl};
+		let headline: Option<String> = dsl::server_groups
+			.select(dsl::effective_version)
+			.filter(dsl::id.eq(group))
+			.first(&mut conn)
+			.await
+			.expect("headline");
+		assert_eq!(
+			headline.as_deref(),
+			Some("2.62.0"),
+			"the headline is the highest-ranked tracked member's version"
+		);
+
+		// Ahead of the lagging facility, behind the headline: not a plan.
+		let behind = publish(&mut conn, 61, 0).await;
+		assert!(
+			UpgradePlan::record(
+				&mut conn,
+				group,
+				behind.id,
+				PlannedWhen::default(),
+				None,
+				"a@example.com",
+			)
+			.await
+			.is_err(),
+			"a member being behind is not a reason to plan backwards"
+		);
+
+		// Ahead of the headline: a plan.
+		let ahead = publish(&mut conn, 63, 0).await;
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			ahead.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("record plan");
+		assert_eq!(
+			UpgradePlan::open_for_group(&mut conn, group)
+				.await
+				.expect("open")
+				.expect("there is one")
+				.target_version_id,
+			ahead.id,
 		);
 	})
 	.await
