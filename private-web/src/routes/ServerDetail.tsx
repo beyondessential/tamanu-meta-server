@@ -42,7 +42,7 @@ import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { humanSeconds } from "../lib/humanDuration";
-import ServerNameWithGroup from "../components/ServerNameWithGroup";
+import TargetName from "../components/TargetName";
 import {
 	applicationName,
 	type ConsolidatedChecks,
@@ -230,11 +230,25 @@ function Header({
 			>
 				{data.server.rank && <ServerRankChip rank={data.server.rank} />}
 				<ApplicationTypeChip type={data.server.type} />
+				{/* Group, then box, then workload: the trail an operator
+				    would walk to get here, and the box is a link because it
+				    is the hop the split made necessary. */}
+				{/* spec: FLT#navigating-the-two-grains */}
 				<Typography variant="h4" component="h1" sx={{ ml: 1 }}>
-					<ServerNameWithGroup
-						groupName={data.server.group_name}
-						groupId={data.server.group_id}
-						serverName={applicationName(data.server)}
+					<TargetName
+						parts={[
+							{
+								label: data.server.group_name ?? "",
+								to: data.server.group_id
+									? `/groups/${data.server.group_id}`
+									: null,
+							},
+							{
+								label: data.machine_name ?? "",
+								to: `/machines/${data.server.machine_id}`,
+							},
+							{ label: applicationName(data.server) },
+						]}
 					/>
 				</Typography>
 			</Stack>
@@ -266,7 +280,7 @@ function Header({
 							action
 						/>
 						<ActionButton
-							to={`/servers/${data.server.id}/edit`}
+							to={`/applications/${data.server.id}/edit`}
 							icon={<EditIcon />}
 							label="Edit"
 							color="primary"

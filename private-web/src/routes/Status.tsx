@@ -169,13 +169,14 @@ function GroupCards({
 		return <Alert severity="error">{grouped.error.message}</Alert>;
 	}
 
-	const sections = SERVER_RANK_ORDER.flatMap((rank) => {
-		const ids = grouped.data[rank];
-		if (!ids || ids.length === 0) return [];
-		return [{ rank, ids }];
-	});
+	// One grid, not a section per rank. Each card carries its own ranks in its
+	// dot strip, so a heading above it names again what the card already says,
+	// and the section breaks cost a row of reflow apiece. Rank still orders the
+	// cards — production leads — it just no longer divides them.
+	// spec: CHK#presentation
+	const ids = SERVER_RANK_ORDER.flatMap((rank) => grouped.data[rank] ?? []);
 
-	if (sections.length === 0) {
+	if (ids.length === 0) {
 		return (
 			<Alert severity="info">
 				No server groups configured. Create one via the Servers page.
@@ -184,35 +185,25 @@ function GroupCards({
 	}
 
 	return (
-		<Stack spacing={3}>
-			{sections.map(({ rank, ids }) => (
-				<Box key={rank}>
-					<Typography
-						variant="h5"
-						component="h2"
-						sx={{ textTransform: "capitalize", mb: 1 }}
-					>
-						{rank}
-					</Typography>
-					<Box
-						sx={{
-							display: "grid",
-							gridTemplateColumns: "repeat(auto-fill, minmax(18em, 1fr))",
-							gap: 1.5,
-						}}
-					>
-						{ids.map((id) => (
-							<GroupCardLoader
-								key={id}
-								groupId={id}
-								tick={tick}
-								openIncident={openIncidentGroups.get(id) ?? null}
-							/>
-						))}
-					</Box>
-				</Box>
+		<Box
+			sx={{
+				display: "grid",
+				// The banded card reads at a narrower measure than the old one
+				// did: its name band ellipsises and its dot strip wraps, so the
+				// column can be sized to fit more of the fleet on a screen.
+				gridTemplateColumns: "repeat(auto-fill, minmax(16em, 1fr))",
+				gap: 1.5,
+			}}
+		>
+			{ids.map((id) => (
+				<GroupCardLoader
+					key={id}
+					groupId={id}
+					tick={tick}
+					openIncident={openIncidentGroups.get(id) ?? null}
+				/>
 			))}
-		</Stack>
+		</Box>
 	);
 }
 

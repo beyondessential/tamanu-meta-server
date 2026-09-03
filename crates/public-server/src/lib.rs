@@ -37,6 +37,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.nest("/certificates", names::certificate_routes())
 		.nest("/names", names::routes())
 		.nest("/machines", machines::routes())
+		.nest("/applications", applications::alias_routes())
 		.nest(
 			"/servers",
 			// Enrolment is the machine's, but fielded agents call it here.
