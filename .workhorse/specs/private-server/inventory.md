@@ -76,15 +76,25 @@ Canopy observes such a change where it records who made it, which is a secret va
 The inventory is refused while a secret variable set by someone other than the reader is newer than a recency period, the same for every environment, and the refusal names the variable, who set it, and when.
 The reader's own changes hold nothing, setting a value and then running on it being the usual order of things.
 
+## Planned upgrades
+
+A run says what it intends: to configure the environment as it stands, or to upgrade it.
+A run naming no intent is configuring.
+
+An upgrade of a production environment is refused unless its group has an open upgrade plan (see [UPG](upgrade-plans.md)), and the refusal says the deployment has no plan and that recording one is what permits the run.
+The plan is the permission and its day is not: which night a deployment moves is often settled after the plan is recorded, and a run held to a typed date would block a person rather than a collision.
+A configuration run needs no plan, a plan recording a version move and nothing else.
+An environment at any other rank is served either way, a plan being for where a deployment's real users are.
+
 ## Refusal
 
-Canopy either serves an inventory or refuses it, and a refusal names why: a group it does not have, a name answering for more than one group, an archived group, a group holding several environments with no rank named, a rank with no live server to configure, an environment someone else has work under way on, and a secret variable whose value cannot be read.
+Canopy either serves an inventory or refuses it, and a refusal names why: a group it does not have, a name answering for more than one group, an archived group, a group holding several environments with no rank named, a rank with no live server to configure, an environment someone else has work under way on, an upgrade of a production environment with no plan recorded, and a secret variable whose value cannot be read.
 Serving the rest of that last one would hand a run a member that looks configured and is missing a value.
 A refusal is distinguishable from a failure to answer at all, the two meaning opposite things: Canopy declining is a decision to respect, while Canopy being unreachable is the absence of one.
 
 ## Authorisation
 
-An inventory carries secret values, so it is served to an administrator (see [ADM](admin-access.md)), and each read is logged with the identity that asked for it.
+An inventory carries secret values, so it is served to an administrator (see [ADM](admin-access.md)), and each read is logged with the identity that asked for it and the intent it declared.
 A run reads the inventory as the administrator running it, with no separate credential to distribute.
 
 What it is assembled from stays as readable as it was: any operator Canopy authenticates reads an environment's servers, groups, and tags, and sees which secret names are set without their values.
@@ -101,4 +111,4 @@ While a window someone else declared holds over the environment, the presentatio
 - Performing a configuration run, scheduling one, or triggering one.
 - The inventory format of any particular configuration-management tool: Canopy serves the environment's shape, and the caller renders it.
 - Authoring plain variables anywhere other than the tags an operator already sets.
-- Refusing a run for want of an upgrade plan (see [UPG](upgrade-plans.md)).
+- Checking that an upgrade run moves the deployment to the version its plan names: Canopy learns what a deployment runs from the deployment, after the fact (see [UPG](upgrade-plans.md), "When a plan is met").
