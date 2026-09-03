@@ -58,9 +58,10 @@ for pushing an extra commit into the release PR: take the PR from the action's `
    PR is therefore internally consistent and `check-generated` would be green on it, instead
    of the document going stale the moment a release lands.
 
-Doing it in-job rather than in a separate workflow matters because of the token rule below:
-a workflow watching for the release PR would never fire, since release-plz opened that PR
-with `GITHUB_TOKEN`.
+It stays in-job rather than becoming a separate workflow watching the release PR. With the
+PAT below that separate workflow would in fact fire, so the reason is not that it cannot
+work: it is that the PR would then be observably wrong between being opened and being
+corrected, with CI racing the fix. In-job, the propagation is part of producing the PR.
 
 The loop is stable across releases: the manifest release-plz reads was itself written from
 `openapi.rs`, so it computes against the right baseline every time.
@@ -100,14 +101,28 @@ manual publish.
 The stub is built in a scratch directory rather than by momentarily flipping this repo's
 crate, so the repo never holds a `0.0.0` state and nothing has to be reverted afterwards.
 
-With the name reserved, the trusted publisher is configured on crates.io against the repo,
-the release workflow's filename, and a GitHub environment, and CI publishes tokenlessly from
-then on. release-plz does the OIDC exchange itself, so `rust-lang/crates-io-auth-action` is
-not needed and `CARGO_REGISTRY_TOKEN` goes unset; the release job just needs
-`id-token: write` alongside its `contents: write` and `pull-requests: read`.
+With the name reserved, the trusted publisher is configured on crates.io and CI publishes
+tokenlessly from then on. release-plz does the OIDC exchange itself, so
+`rust-lang/crates-io-auth-action` is not needed and `CARGO_REGISTRY_TOKEN` goes unset; the
+release job just needs `id-token: write` alongside its `contents: write` and
+`pull-requests: read`.
 
-Deciding the workflow filename and environment name is part of this, since both are baked
-into the crates.io trusted-publisher configuration and changing them later means editing it.
+The configuration binds the owner, the repository, the workflow filename, and optionally a
+GitHub Actions environment. The workflow is `release.yml`, and the environment is `release`,
+which is the name the RFC's own example uses.
+
+`release` rather than `prod` because the boundary covers both of a release's destinations,
+crates.io and the cluster, and publishing a crate is not a deployment. Naming it after one
+destination would send anyone looking for where the publish is gated to the wrong place, and
+it leaves `prod` free for the deploy side if a staging environment ever wants the
+distinction.
+
+The environment earns its place through branch restriction and secret scoping rather than
+approvals: a token cannot be obtained for a run outside it, so a publish cannot be driven
+from a branch, and the PAT plus the deploy's existing credentials have a scoped home. No
+required reviewers to begin with, since merging the release PR is already the human decision
+and a second approval would only add a step. Reviewers can be added later without touching
+the crates.io configuration.
 
 ## Everything moves behind the release
 
@@ -142,15 +157,35 @@ The release-plz quickstart uses `dtolnay/rust-toolchain` and `actions/checkout@v
 installs the toolchain inline with rustup and pins actions to full versions
 (`actions/checkout@v7.0.1`). The new workflows match the repo, not the quickstart.
 
+## A PAT, so the release PR is checked
+
+release-plz runs under a PAT rather than `GITHUB_TOKEN`, passed to both `actions/checkout`
+and the release-plz step, so the release PR it opens triggers CI. That matters more here
+than it usually would: the release PR is the one place carrying a regenerated
+`openapi.json`, `generated.rs`, and manifest that no CI run has ever seen, and merging it is
+what publishes and deploys.
+
+A PAT makes its owner the author of the release PR and its commits, so a machine user is
+worth having rather than attributing releases to whoever created the token. A GitHub App
+would avoid that, at the cost of App setup; the PAT is the lighter route and the choice is
+reversible without touching crates.io.
+
+The PAT does not change how the deploy is triggered. Outputs still drive that, because it is
+ordering within one workflow rather than a cross-workflow event, and it needs no credential.
+
+### The release PR is briefly inconsistent, and that is tolerable
+
+release-plz opens the PR with the manifest bumped and `openapi.rs` untouched, which is a
+state `check-generated` fails, and the propagation commit lands moments later. So CI can
+start against a state that is wrong by construction.
+
+`ci.yml`'s concurrency group already sets `cancel-in-progress: true`, so the propagation push
+cancels the superseded run and the surviving one judges the corrected PR. Left as is: the
+alternative is dropping the manifest version from `check-generated`, which is the one thing
+holding the version invariant.
+
 ## Open
 
-- **Whether CI runs on the release PR.** With `GITHUB_TOKEN` it does not, so the release PR
-  would merge unchecked. That matters more than usual here, because the release PR is the
-  one place carrying a regenerated `openapi.json`, `generated.rs`, and manifest that no CI
-  run has ever seen, and merging it is what publishes and deploys. Running CI on it needs a
-  GitHub App token or a PAT passed to both `actions/checkout` and the release-plz step; a
-  GitHub App keeps the author as a bot and stays scoped and revocable. The alternative is to
-  accept it and rely on `cargo publish`'s own verification after merge.
 - **Getting the first real release to `1.0.0`.** release-plz computes the next version from
   the current manifest version via the `next_version` crate, so from a published `0.0.0` it
   gives a `0.x`; and with `release_always = false` the first release still has to come
