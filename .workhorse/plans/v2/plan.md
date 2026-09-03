@@ -690,6 +690,14 @@ Under `.workhorse/design/mockups/v2/`:
 - `push-wire-shapes.html` — unified against split, the discriminator, the split rule.
 - `machine-navigation-options.html` — superseded; kept as the record of options considered.
 
+## Two boundaries the split moved and the code did not follow
+
+Both were found by CI failing on assertions that passed locally, and both are the same shape: a predicate that read "no application and no group" and meant "canopy-wide" before a machine grain existed.
+
+**The self-alert listing.** `database::self_alerts::list` selected on `application_id IS NULL AND server_group_id IS NULL`, which is `Scope::Global` only while machines cannot be filed against. With the machine grain it also matches every machine-subject check, so a box's `disk_free` was served to the operator UI as one of Canopy's own problems and rendered in the persistent self-alert banner on every page. The filter now reads all three columns null, matching `Scope::Global`'s own definition in `Scope::from_columns`. SELF gained the boundary statement it was missing: only Canopy's own conditions appear on that surface.
+
+**One `h1` per page.** The app bar's brand was `component="h1"` while all twenty-odd routes also declare their title `component="h1"`, so every page carried two. The brand is a link home, not the page's heading, and is now a `span`; the page title is the page's one `h1`. Two e2e locators that reach for `heading, level: 1` without a name were passing only by winning a race against the detail fetch.
+
 ## Adjacent
 
 Card W1 settles deployment/group/rank terminology, which is why the group tables keep their names here. Cards L2 and N1 turn on the same machine/application axis from bestool's side. K1 wants the cluster/identity separation this resolves.

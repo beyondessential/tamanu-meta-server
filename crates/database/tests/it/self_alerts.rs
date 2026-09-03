@@ -231,6 +231,52 @@ async fn self_alert_issues_are_excluded_from_the_fleet_listing() {
 	.await
 }
 
+/// A box's own checks are the box's business, not canopy's. They file with
+/// no application and no group, which is the same shape a canopy-wide alert
+/// has, so the self-alert listing reads the machine too. Otherwise every
+/// box-subject check turns up in the operator's self-alert banner as one of
+/// canopy's own problems.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_machines_issues_are_not_self_alerts() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		#[derive(diesel::QueryableByName)]
+		struct RowId {
+			#[diesel(sql_type = diesel::sql_types::Uuid)]
+			id: uuid::Uuid,
+		}
+		let machine: RowId = diesel::sql_query("INSERT INTO machines DEFAULT VALUES RETURNING id")
+			.get_result(&mut conn)
+			.await
+			.expect("insert machine");
+
+		database::issues::file_check(
+			&mut conn,
+			database::issues::CheckFiling {
+				source: "alertd",
+				scope: database::issues::Scope::Machine(machine.id),
+				device_id: None,
+				check: "disk_free",
+				observed: CheckResult::Failed,
+				title: None,
+				message: "disk nearly full",
+				detail: None,
+				default_ceiling: CheckResult::Failed,
+				default_escalates: false,
+				documentation: None,
+			},
+		)
+		.await
+		.expect("file machine check");
+
+		let alerts = self_alerts::list(&mut conn, 50).await.expect("alerts");
+		assert!(
+			alerts.is_empty(),
+			"a box's own check is not one of canopy's self-alerts: {alerts:?}"
+		);
+	})
+	.await
+}
+
 // --- Fleet-wide check-liveness self-alert (STALE_CHECKS_REF) ---
 
 async fn insert_server(conn: &mut diesel_async::AsyncPgConnection) -> uuid::Uuid {

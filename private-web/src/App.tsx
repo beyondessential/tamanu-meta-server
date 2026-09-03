@@ -130,7 +130,7 @@ export default function App() {
 							aria-hidden
 							sx={{ height: 24, width: 24 }}
 						/>
-						<Typography variant="h6" component="h1">
+						<Typography variant="h6" component="span">
 							Canopy
 						</Typography>
 					</Box>

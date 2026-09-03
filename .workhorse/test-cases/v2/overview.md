@@ -68,6 +68,7 @@ plan's "Specced and not built" section says which is which.
 - [x] Decommissioning one namespace's check leaves the same name in another namespace live (verifies spec: CHK)
 - [x] A machine's monitoring switch does not silence the applications on it (verifies spec: CHK)
 - [x] A machine-scoped issue does not collide with a canopy-wide issue on the same `(source, ref)` (verifies spec: CHK)
+- [x] A machine's check stays out of the self-alert surface and its banner (verifies spec: SELF)
 
 ## Status pushes
 
