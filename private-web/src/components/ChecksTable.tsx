@@ -124,13 +124,20 @@ export function ChecksTable(props: {
 	checks: ConsolidatedChecks;
 	operators: OperatorPresence[];
 	target: CheckTarget;
+	/** The box under an application, whose checks the list also carries. Leave
+	 * unset on a machine's own table, where the target is already the box. */
+	machineId?: string | null;
 	groupId: string | null;
 	maintained: boolean;
 	refreshTick: number;
 	onSilenced: () => void;
 }) {
-	// Both hooks always run — hooks cannot be called conditionally — and the
-	// one that is not this table's grain is asked for nothing.
+	// An application's list carries its box's checks too, so both grains'
+	// silences are read: a machine check is silenced on the machine wherever it
+	// is presented from.
+	// spec: CHK#a-machines-checks-present-on-its-applications
+	const machineId =
+		props.target.kind === "machine" ? props.target.id : (props.machineId ?? "");
 	const applicationApi = useApi(
 		"silenced_refs",
 		"list_for_server",
@@ -140,17 +147,22 @@ export function ChecksTable(props: {
 	const machineApi = useApi(
 		"silenced_refs",
 		"list_for_machine",
-		{ machine_id: props.target.kind === "machine" ? props.target.id : "" },
-		[props.target.kind, props.target.id, props.refreshTick],
+		{ machine_id: machineId },
+		[machineId, props.refreshTick],
 	);
-	const ownApi = props.target.kind === "application" ? applicationApi : machineApi;
-	const ownSilences: Silence[] = ownApi.status === "ok" ? ownApi.data : [];
+	const applicationSilences: Silence[] =
+		applicationApi.status === "ok" ? applicationApi.data : [];
+	const machineSilences: Silence[] =
+		machineApi.status === "ok" ? machineApi.data : [];
+	const ownSilences =
+		props.target.kind === "application" ? applicationSilences : machineSilences;
 	if (props.groupId) {
 		return (
 			<ChecksTableGrouped
 				{...props}
 				groupId={props.groupId}
 				ownSilences={ownSilences}
+				machineSilences={machineSilences}
 			/>
 		);
 	}
@@ -158,6 +170,7 @@ export function ChecksTable(props: {
 		<ChecksTableBody
 			{...props}
 			ownSilences={ownSilences}
+			machineSilences={machineSilences}
 			groupSilences={[]}
 		/>
 	);
@@ -167,11 +180,13 @@ function ChecksTableGrouped(props: {
 	checks: ConsolidatedChecks;
 	operators: OperatorPresence[];
 	target: CheckTarget;
+	machineId?: string | null;
 	groupId: string;
 	maintained: boolean;
 	refreshTick: number;
 	onSilenced: () => void;
 	ownSilences: Silence[];
+	machineSilences: Silence[];
 }) {
 	const groupApi = useApi(
 		"silenced_refs",
@@ -187,19 +202,23 @@ function ChecksTableBody({
 	checks,
 	operators,
 	target,
+	machineId,
 	groupId,
 	maintained,
 	onSilenced,
 	ownSilences,
+	machineSilences,
 	groupSilences,
 }: {
 	checks: ConsolidatedChecks;
 	operators: OperatorPresence[];
 	target: CheckTarget;
+	machineId?: string | null;
 	groupId: string | null;
 	maintained: boolean;
 	onSilenced: () => void;
 	ownSilences: Silence[];
+	machineSilences: Silence[];
 	groupSilences: ServerGroupSilencedRef[];
 }) {
 	const entries = checks.checks;
@@ -215,13 +234,26 @@ function ChecksTableBody({
 			</Typography>
 			<Stack spacing={1} sx={{ mt: 0.5 }}>
 				{visible.map((entry) => {
+					// A machine check in an application's list is the box's,
+					// one filing seen from each workload on it. Its silence
+					// control acts on the machine, so the row's target is the
+					// box rather than the table's.
+					// spec: CHK#a-machines-checks-present-on-its-applications
+					const fromMachine =
+						target.kind === "application" &&
+						entry.subject === "machine" &&
+						!!machineId;
+					const rowTarget: CheckTarget = fromMachine
+						? { kind: "machine", id: machineId as string }
+						: target;
+					const rowOwnSilences = fromMachine ? machineSilences : ownSilences;
 					// Match the silence refs to this entry's own source — a
 					// silence on another source's same-named check is a
 					// different check, and canopy's own checks are silenced
 					// at a bare ref rather than under `health/`.
 					const refName = silenceRef(entry.source, entry.check);
 					const ownSilence =
-						ownSilences.find(
+						rowOwnSilences.find(
 							(s) => s.source === entry.source && s.ref === refName,
 						) ?? null;
 					// A group covers several application types, so its silences
@@ -236,10 +268,11 @@ function ChecksTableBody({
 						) ?? null;
 					return (
 						<CheckRow
-							key={`${entry.source}:${entry.check}`}
+							key={`${entry.subject}:${entry.source}:${entry.check}`}
 							entry={entry}
 							operators={operators}
-							target={target}
+							target={rowTarget}
+							fromMachine={fromMachine}
 							groupId={groupId}
 							maintained={maintained}
 							onSilenced={onSilenced}
@@ -275,6 +308,7 @@ function CheckRow({
 	entry,
 	operators,
 	target,
+	fromMachine,
 	groupId,
 	maintained,
 	onSilenced,
@@ -284,6 +318,8 @@ function CheckRow({
 	entry: ConsolidatedCheck;
 	operators: OperatorPresence[];
 	target: CheckTarget;
+	/** True when this row is the box's check shown on an application. */
+	fromMachine: boolean;
 	groupId: string | null;
 	maintained: boolean;
 	onSilenced: () => void;
@@ -349,6 +385,7 @@ function CheckRow({
 						namespace={entry.namespace}
 						check={entry.check}
 					/>
+					{fromMachine && <MachineCheckChip />}
 					<SilencedChip
 						targetKind={target.kind}
 						ownSilence={ownSilence}
@@ -467,6 +504,23 @@ function MaintenanceSkipChip() {
 				icon={<BuildOutlinedIcon />}
 				label="skipped: under maintenance"
 				data-testid="check-maintenance-skip"
+			/>
+		</Tooltip>
+	);
+}
+
+/** Marks a row as the box's rather than the workload's. An application's list
+ * carries both, and which grain a check speaks for decides where it is
+ * silenced and what a failure implicates.
+ * spec: CHK#a-machines-checks-present-on-its-applications */
+function MachineCheckChip() {
+	return (
+		<Tooltip title="Filed against the machine this runs on, and shared with every application on it.">
+			<Chip
+				size="small"
+				variant="outlined"
+				label="machine"
+				data-testid="check-machine-subject"
 			/>
 		</Tooltip>
 	);

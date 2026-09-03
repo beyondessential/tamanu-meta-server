@@ -662,6 +662,41 @@ impl Status {
 			.map_err(AppError::from)
 	}
 
+	/// Each source's most recent machine-scoped status for `machine` at or
+	/// before `at`, the machine-grain counterpart of
+	/// [`Self::latest_per_source_at`].
+	///
+	/// Only rows the box filed for itself count, so a workload's own report
+	/// carried on the same machine is not read back as the box's. A reporter
+	/// still pushing the unified shape files no such row at all; its machine
+	/// checks are recognised by subject in the application's rows instead.
+	// spec: CHK#a-machines-checks-present-on-its-applications
+	pub async fn machine_latest_per_source_at(
+		db: &mut AsyncPgConnection,
+		machine: Uuid,
+		at: Option<Timestamp>,
+	) -> Result<Vec<Status>> {
+		use crate::schema::statuses::dsl::*;
+
+		let cutoff = at.unwrap_or_else(Timestamp::now);
+		let floor = cutoff.checked_sub(GRACE_LOOKBACK).unwrap_or(Timestamp::MIN);
+		statuses
+			.select(Status::as_select())
+			.filter(
+				machine_id
+					.eq(machine)
+					.and(server_id.is_null())
+					.and(id.ne(Uuid::nil()))
+					.and(created_at.le(jiff_diesel::Timestamp::from(cutoff)))
+					.and(created_at.ge(jiff_diesel::Timestamp::from(floor))),
+			)
+			.distinct_on(source)
+			.order((source, created_at.desc()))
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// The machine-grain equivalent of [`Self::latest_for_servers`]: when each
 	/// box last had a status row recorded against it, whatever it described.
 	pub async fn latest_for_machines(

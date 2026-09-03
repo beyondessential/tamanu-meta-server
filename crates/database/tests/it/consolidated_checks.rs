@@ -320,3 +320,140 @@ async fn decommissioning_reachability_removes_it() {
 	})
 	.await
 }
+
+/// The machine `insert_server` put the application on.
+async fn machine_of(conn: &mut diesel_async::AsyncPgConnection, application: Uuid) -> Uuid {
+	let row: RowId = sql_query("SELECT machine_id AS id FROM applications WHERE id = $1")
+		.bind::<sql_types::Uuid, _>(application)
+		.get_result(conn)
+		.await
+		.expect("machine of application");
+	row.id
+}
+
+fn machine_filing<'a>(
+	machine_id: Uuid,
+	source: &'a str,
+	check: &'a str,
+	observed: CheckResult,
+) -> CheckFiling<'a> {
+	CheckFiling {
+		scope: Scope::Machine(machine_id),
+		..filing(machine_id, source, check, observed)
+	}
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_application_presents_its_machines_checks_as_the_machines() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		// An operator triaging an application sees the box's checks among its
+		// own, marked as the box's so it's clear the fact is shared with every
+		// workload on it.
+		CheckPolicy::seed_own_checks(&mut conn)
+			.await
+			.expect("seed canopy's own checks");
+		let server_id = insert_server(&mut conn).await;
+		let machine_id = machine_of(&mut conn, server_id).await;
+
+		file_check(
+			&mut conn,
+			filing(server_id, "tamanu", "tasks", CheckResult::Warning),
+		)
+		.await
+		.expect("file the application's");
+		file_check(
+			&mut conn,
+			machine_filing(machine_id, "alertd", "disk_free", CheckResult::Failed),
+		)
+		.await
+		.expect("file the machine's");
+		// The box has gone quiet in its own right. That already reaches the
+		// application as its own unreachability, so the box's must not appear
+		// a second time under the application.
+		file_check(
+			&mut conn,
+			machine_filing(
+				machine_id,
+				CANOPY_SOURCE,
+				REACHABILITY_REF,
+				CheckResult::Failed,
+			),
+		)
+		.await
+		.expect("file the machine's reachability");
+
+		let consolidated = consolidated_checks_latest(&mut conn, server_id, None)
+			.await
+			.expect("consolidated");
+
+		let by_check: std::collections::HashMap<&str, &commons_types::status::ConsolidatedCheck> =
+			consolidated
+				.checks
+				.iter()
+				.map(|c| (c.check.as_str(), c))
+				.collect();
+
+		let own = by_check.get("tasks").expect("the application's own check");
+		assert_eq!(
+			own.subject,
+			commons_types::subject::CheckSubject::Application
+		);
+		let boxs = by_check.get("disk_free").expect("the machine's check");
+		assert_eq!(boxs.subject, commons_types::subject::CheckSubject::Machine);
+		assert_eq!(boxs.effective, CheckResult::Failed);
+
+		// Exactly one reachability, the application's own, unaffected by the
+		// box's.
+		let reachabilities: Vec<_> = consolidated
+			.checks
+			.iter()
+			.filter(|c| c.source == CANOPY_SOURCE && c.check == REACHABILITY_REF)
+			.collect();
+		assert_eq!(
+			reachabilities.len(),
+			1,
+			"one reachability, the application's"
+		);
+		assert_eq!(
+			reachabilities[0].subject,
+			commons_types::subject::CheckSubject::Application
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_applications_rollup_takes_in_its_machines_checks() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		// Nothing wrong with the application itself: the only thing failing is
+		// the box under it, and that is enough to grade the application down.
+		let server_id = insert_server(&mut conn).await;
+		let machine_id = machine_of(&mut conn, server_id).await;
+		file_check(
+			&mut conn,
+			filing(server_id, "tamanu", "tasks", CheckResult::Passed),
+		)
+		.await
+		.expect("file the application's");
+		file_check(
+			&mut conn,
+			machine_filing(machine_id, "alertd", "disk_free", CheckResult::Failed),
+		)
+		.await
+		.expect("file the machine's");
+
+		let health = database::issues::health_from_check_state(&mut conn, &[(server_id, None)])
+			.await
+			.expect("rollup");
+		assert_eq!(
+			health.get(&server_id).copied(),
+			Some(HealthState::Unhealthy)
+		);
+
+		let consolidated = consolidated_checks_latest(&mut conn, server_id, None)
+			.await
+			.expect("consolidated");
+		assert_eq!(consolidated.health_state, HealthState::Unhealthy);
+	})
+	.await
+}

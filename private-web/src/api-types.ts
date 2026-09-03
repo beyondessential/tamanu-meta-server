@@ -5247,6 +5247,11 @@ export interface components {
          * @enum {string}
          */
         CheckResult: "passed" | "warning" | "failed" | "broken" | "skipped";
+        /**
+         * @description The grain a check's result belongs to.
+         * @enum {string}
+         */
+        CheckSubject: "machine" | "application";
         /** @description Identifies a server group's schedule override for a backup type. */
         ClearScheduleArgs: {
             /**
@@ -5311,6 +5316,15 @@ export interface components {
             silenced: boolean;
             /** @description The source that reports this check. */
             source: string;
+            /**
+             * @description Which grain this check is filed against.
+             *
+             *     An application presents its machine's checks among its own, and this is
+             *     what marks them: a `machine` entry in an application's list is the
+             *     box's, one filing seen from each workload the box carries rather than a
+             *     copy per workload.
+             */
+            subject: components["schemas"]["CheckSubject"];
         };
         /**
          * @description A server's checks across every source, graded and classified as one —

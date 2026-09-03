@@ -20,6 +20,7 @@ use database::{
 	check_policies::CheckPolicy,
 	devices::DeviceConnection,
 	issues::Issue,
+	machines::Machine,
 	reported_detail::ReportedDetail,
 	server_groups::ServerGroup,
 	statuses::{MergedDetail, Status},
@@ -887,9 +888,18 @@ async fn consolidated_checks_at(
 	at: Option<Timestamp>,
 ) -> commons_errors::Result<SnapshotState> {
 	use commons_types::status::{CheckResult, ConsolidatedCheck, ConsolidatedChecks, HealthState};
+	use commons_types::subject::CheckSubject;
 	use database::check_policies::{CheckPolicy, EvaluationContext, ScopedCheckPolicy};
 
 	let statuses = Status::latest_per_source_at(conn, server.id, at).await?;
+	// The box's own reports. A split push files the machine's checks at machine
+	// scope rather than on any workload, so they are only here; a reporter
+	// still pushing the unified shape files none of these rows and its machine
+	// checks are recognised by subject in the application's own. Either shape
+	// reconstructs the same list.
+	// spec: CHK#a-machines-checks-present-on-its-applications
+	let machine = Machine::get_by_id(conn, server.machine_id).await?;
+	let machine_statuses = Status::machine_latest_per_source_at(conn, machine.id, at).await?;
 
 	// The figures come from the same set of statuses the checks do, so the
 	// snapshot presents each figure as of `at` from whichever source last
@@ -910,13 +920,16 @@ async fn consolidated_checks_at(
 	}
 
 	// Tags for rule evaluation, as private-server's other rule-eval sites
-	// resolve them.
-	let tag_map = server.tags_merged_with_group(conn).await?;
-	let tags: std::collections::HashMap<String, serde_json::Value> = tag_map
-		.0
-		.into_iter()
-		.map(|(k, v)| (k, serde_json::Value::String(v)))
-		.collect();
+	// resolve them. Each grain grades against its own: a rule predicating on a
+	// tag reads the box's tags for the box's checks.
+	let tags_for = |map: commons_types::server::TagMap| -> std::collections::HashMap<String, serde_json::Value> {
+		map.0
+			.into_iter()
+			.map(|(k, v)| (k, serde_json::Value::String(v)))
+			.collect()
+	};
+	let tags = tags_for(server.tags_merged_with_group(conn).await?);
+	let machine_tags = tags_for(machine.tags_merged_with_group(conn).await?);
 	// Only present checks backed by a live catalog row, matching the live
 	// consolidated view: this drops decommissioned checks and orphaned
 	// check-states (a source's catalog rows removed out from under its
@@ -926,9 +939,9 @@ async fn consolidated_checks_at(
 	// dozens of checks, and re-querying the catalog and the scoped chain for
 	// each one turned this reconstruction into a few hundred round-trips.
 	let grading = CheckPolicy::grading_table(conn).await?;
-	// Reconstructs an application's own checks from its status history, so
-	// only the application and group chains bear on it. Amalgamating its
-	// machine's checks into this view is the detail-page step's job.
+	// One chain per grain. An application's checks are graded through the
+	// application and group chains; the box's through its own and its group's,
+	// which need not be the same group.
 	let chains = ScopedCheckPolicy::chains_for_scope(
 		conn,
 		database::check_policies::FilingScope {
@@ -939,17 +952,39 @@ async fn consolidated_checks_at(
 		},
 	)
 	.await?;
+	let machine_chains = ScopedCheckPolicy::chains_for_scope(
+		conn,
+		database::check_policies::FilingScope {
+			machine_id: Some(machine.id),
+			group_id: machine.group_id,
+			covering_machine: Some(machine.id),
+			..Default::default()
+		},
+	)
+	.await?;
 
 	let mut checks: Vec<ConsolidatedCheck> = Vec::new();
-	for status in &statuses {
+	for (status, from_machine_row) in statuses
+		.iter()
+		.map(|s| (s, false))
+		.chain(machine_statuses.iter().map(|s| (s, true)))
+	{
 		let Some(arr) = status.health.as_array() else {
 			continue;
 		};
-		let silenced = database::silenced_refs::silenced_health_checks_for_server(
+		let application_silenced = database::silenced_refs::silenced_health_checks_for_server(
 			conn,
 			Some(server.id),
 			server.machine_id,
 			server.group_id,
+			&status.source,
+		)
+		.await?;
+		let machine_silenced = database::silenced_refs::silenced_health_checks_for_server(
+			conn,
+			None,
+			machine.id,
+			machine.group_id,
 			&status.source,
 		)
 		.await?;
@@ -959,6 +994,15 @@ async fn consolidated_checks_at(
 			let Some(obj) = raw.as_object() else { continue };
 			let Some(name) = obj.get("check").and_then(|v| v.as_str()) else {
 				continue;
+			};
+			// What this reading asserts about. A row the box filed is the
+			// box's whatever it names; on a unified push the name decides,
+			// which is the same rule ingestion applies.
+			// spec: STA
+			let subject = if from_machine_row {
+				CheckSubject::Machine
+			} else {
+				CheckSubject::of(name)
 			};
 			// Which catalog entry this reading belongs to follows the
 			// reporting application's type, the same as it does on ingest: a
@@ -984,13 +1028,22 @@ async fn consolidated_checks_at(
 			let ctx = EvaluationContext {
 				status_extra: &status_extra,
 				check_extra: &check_extra,
-				tags: &tags,
+				tags: if subject.is_machine() {
+					&machine_tags
+				} else {
+					&tags
+				},
 			};
 			let key = (status.source.clone(), namespace.clone(), name.to_string());
 			let fleet = CheckPolicy::grade(grading.get(&key), &status.source, name, observed, &ctx);
+			let scoped = if subject.is_machine() {
+				&machine_chains
+			} else {
+				&chains
+			};
 			let graded = CheckPolicy::chain_scoped(
 				fleet,
-				chains.get(&key).map_or(&[][..], Vec::as_slice),
+				scoped.get(&key).map_or(&[][..], Vec::as_slice),
 				&ctx,
 			);
 			// The check's own detail fields, verbatim.
@@ -998,6 +1051,11 @@ async fn consolidated_checks_at(
 			detail.remove("check");
 			detail.remove("healthy");
 			detail.remove("result");
+			let silenced = if subject.is_machine() {
+				&machine_silenced
+			} else {
+				&application_silenced
+			};
 			checks.push(ConsolidatedCheck {
 				silenced: silenced.contains(name),
 				qualified_name: namespace.qualified_name(name),
@@ -1007,6 +1065,7 @@ async fn consolidated_checks_at(
 				observed: Some(observed),
 				effective: graded.effective,
 				detail: serde_json::Value::Object(detail),
+				subject,
 			});
 		}
 	}

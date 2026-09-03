@@ -1453,6 +1453,15 @@ fn instance_detail(
 	}))
 }
 
+/// Whether a `(source, check)` pair is Canopy's own reachability determination.
+///
+/// Reachability is the one check every grain determines for itself, so it is
+/// the one check an application does not take from its machine.
+// spec: CHK#reachability
+fn is_reachability(source: &str, check: &str) -> bool {
+	source == crate::statuses::CANOPY_SOURCE && check == crate::statuses::REACHABILITY_REF
+}
+
 /// One rollup input row: `(application_id, source, check_name, effective_result)`.
 type HealthCheckRow = (Option<Uuid>, String, Option<String>, Option<String>);
 
@@ -1582,10 +1591,53 @@ pub async fn health_from_check_state(
 		contributing.entry(application_id).or_default().push(result);
 	}
 
-	Ok(contributing
+	let mut health: HashMap<Uuid, HealthState> = contributing
 		.into_iter()
 		.map(|(application_id, results)| (application_id, HealthState::from_results(results)))
-		.collect())
+		.collect();
+
+	// An application's contributing checks include its machine's, so a box
+	// whose disk is filling makes every application on it degraded.
+	//
+	// The two rollups combine by taking the worse of the pair, which is the
+	// same answer as classifying the union: `HealthState::from_results` is the
+	// worst result over its input, and worst-of is associative. So the box's
+	// checks are graded once for the box and read from each application on it,
+	// rather than counted once per workload.
+	// spec: CHK#health-rollup
+	let machine_of = Application::machines_by_id(conn, &server_ids).await?;
+	let mut machine_groups: Vec<(Uuid, Option<Uuid>)> = Vec::new();
+	if !machine_of.is_empty() {
+		let machine_ids: Vec<Uuid> = {
+			let mut ids: Vec<Uuid> = machine_of.values().copied().collect();
+			ids.sort_unstable();
+			ids.dedup();
+			ids
+		};
+		// A machine carries its own group, which is the group its silences are
+		// read against; an application's need not be the same one.
+		let rows: Vec<(Uuid, Option<Uuid>)> = crate::schema::machines::table
+			.select((
+				crate::schema::machines::id,
+				crate::schema::machines::group_id,
+			))
+			.filter(crate::schema::machines::id.eq_any(&machine_ids))
+			.load(conn)
+			.await?;
+		machine_groups = rows;
+	}
+	let machine_health = machine_health_rollup(conn, &machine_groups, false).await?;
+	for (application_id, machine_id) in machine_of {
+		let Some(from_machine) = machine_health.get(&machine_id).copied() else {
+			continue;
+		};
+		health
+			.entry(application_id)
+			.and_modify(|held| *held = held.worse_of(from_machine))
+			.or_insert(from_machine);
+	}
+
+	Ok(health)
 }
 
 /// The same rollup for machines, from the checks filed at machine scope.
@@ -1599,6 +1651,23 @@ pub async fn health_from_check_state(
 pub async fn machine_health_from_check_state(
 	conn: &mut AsyncPgConnection,
 	machines: &[(Uuid, Option<Uuid>)],
+) -> Result<std::collections::HashMap<Uuid, commons_types::status::HealthState>> {
+	machine_health_rollup(conn, machines, true).await
+}
+
+/// The machine rollup, with a say over whether the box's own reachability
+/// counts.
+///
+/// It counts when the box is being graded, and does not when an application on
+/// it is: each grain has its own reachability, and a box that goes quiet has
+/// already made every application on it unreachable on its own account. Adding
+/// the box's to theirs would say the same thing twice from the one silence
+/// control. See CHK, "A machine's checks present on its applications".
+// spec: CHK#a-machines-checks-present-on-its-applications
+async fn machine_health_rollup(
+	conn: &mut AsyncPgConnection,
+	machines: &[(Uuid, Option<Uuid>)],
+	include_reachability: bool,
 ) -> Result<std::collections::HashMap<Uuid, commons_types::status::HealthState>> {
 	use crate::schema::{issues, scoped_check_policies};
 	use commons_types::status::HealthState;
@@ -1663,6 +1732,9 @@ pub async fn machine_health_from_check_state(
 			continue;
 		};
 		let key = (machine_id, source, check_name);
+		if !include_reachability && is_reachability(&key.1, &key.2) {
+			continue;
+		}
 		// A machine's checks are in the machine namespace or a curated source's
 		// flat one; no application type bears on either.
 		if !crate::check_policies::CheckPolicy::live_for(&cataloged, &key.1, &key.2, None) {
@@ -1904,11 +1976,8 @@ async fn consolidated_checks_for(
 	target: Scope,
 	group_id: Option<Uuid>,
 ) -> Result<commons_types::status::ConsolidatedChecks> {
-	use crate::schema::{issues, scoped_check_policies};
-	use commons_types::status::{ConsolidatedCheck, ConsolidatedChecks};
-	use std::collections::HashSet;
+	use commons_types::status::ConsolidatedChecks;
 
-	let (target_application, target_machine, _) = target.to_columns();
 	let target_id = match target {
 		Scope::Application(id) | Scope::Machine(id) => id,
 		// A group or canopy-wide rollup is a different question, answered by
@@ -1933,6 +2002,78 @@ async fn consolidated_checks_for(
 			.unwrap_or_default(),
 	};
 
+	// A check-state only presents if a live catalog policy backs it: this
+	// excludes decommissioned checks and orphaned check-states (no catalog
+	// row at all — invisible in settings and unmanageable, so never a
+	// phantom failure here). See `live_cataloged_pairs`. Read once and shared
+	// across both grains, the catalog being fleet-wide.
+	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_pairs(conn).await?;
+
+	let mut checks = checks_at_scope(conn, target, group_id, &cataloged, true).await?;
+
+	// An operator triaging an application sees every check bearing on it, its
+	// own and its host's, in one list. The box's checks are read from where
+	// they were filed rather than copied per workload, so two applications on
+	// one box present one filing twice rather than two filings.
+	//
+	// Reachability is left behind: each grain determines its own, and the box
+	// going quiet has already made every application on it unreachable in its
+	// own right.
+	// spec: CHK#a-machines-checks-present-on-its-applications
+	if let Scope::Application(id) = target {
+		let machine_id = Application::get_by_id(conn, id).await?.machine_id;
+		let machine = crate::machines::Machine::get_by_id(conn, machine_id).await?;
+		checks.extend(
+			checks_at_scope(
+				conn,
+				Scope::Machine(machine_id),
+				machine.group_id,
+				&cataloged,
+				false,
+			)
+			.await?,
+		);
+	}
+
+	checks.sort_by(|a, b| {
+		a.effective
+			.urgency_rank()
+			.cmp(&b.effective.urgency_rank())
+			.then_with(|| a.source.cmp(&b.source))
+			.then_with(|| a.check.cmp(&b.check))
+	});
+
+	Ok(ConsolidatedChecks {
+		health_state,
+		checks,
+	})
+}
+
+/// The checks filed against one target, graded and ready to present, without
+/// the rollup: what a target contributes to a consolidated view, whether it is
+/// the target being read or the machine under one.
+///
+/// `include_reachability` fills in a passing reachability where the target has
+/// no state row for it. That belongs to the grain being read and not to a
+/// machine seen from an application on it.
+async fn checks_at_scope(
+	conn: &mut AsyncPgConnection,
+	target: Scope,
+	group_id: Option<Uuid>,
+	cataloged: &std::collections::HashSet<(String, Namespace, String)>,
+	include_reachability: bool,
+) -> Result<Vec<commons_types::status::ConsolidatedCheck>> {
+	use crate::schema::{issues, scoped_check_policies};
+	use commons_types::status::ConsolidatedCheck;
+	use commons_types::subject::CheckSubject;
+	use std::collections::HashSet;
+
+	let (target_application, target_machine, _) = target.to_columns();
+	let subject = match target {
+		Scope::Machine(_) => CheckSubject::Machine,
+		_ => CheckSubject::Application,
+	};
+
 	let rows: Vec<ConsolidatedRow> = issues::table
 		.select((
 			issues::source,
@@ -1948,11 +2089,6 @@ async fn consolidated_checks_for(
 		.load(conn)
 		.await?;
 
-	// A check-state only presents if a live catalog policy backs it: this
-	// excludes decommissioned checks and orphaned check-states (no catalog
-	// row at all — invisible in settings and unmanageable, so never a
-	// phantom failure here). See `live_cataloged_pairs`.
-	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_pairs(conn).await?;
 	// Only an application has a type; a machine's checks are in the machine
 	// namespace or a curated source's flat one.
 	let application_type = match target_application {
@@ -1994,8 +2130,11 @@ async fn consolidated_checks_for(
 		.into_iter()
 		.filter_map(|(source, check_name, observed, effective, detail)| {
 			let check = check_name?;
+			if !include_reachability && is_reachability(&source, &check) {
+				return None;
+			}
 			let namespace = Namespace::of(&source, &check, application_type.as_ref())?;
-			if !crate::check_policies::CheckPolicy::live_in(&cataloged, &source, &namespace, &check)
+			if !crate::check_policies::CheckPolicy::live_in(cataloged, &source, &namespace, &check)
 			{
 				return None;
 			}
@@ -2022,6 +2161,7 @@ async fn consolidated_checks_for(
 				check,
 				effective,
 				detail: detail.unwrap_or_else(|| serde_json::json!({})),
+				subject,
 			})
 		})
 		.collect();
@@ -2037,12 +2177,13 @@ async fn consolidated_checks_for(
 		crate::statuses::CANOPY_SOURCE.to_string(),
 		crate::statuses::REACHABILITY_REF.to_string(),
 	);
-	if crate::check_policies::CheckPolicy::live_for(
-		&cataloged,
-		&reachability.0,
-		&reachability.1,
-		application_type.as_ref(),
-	) && !checks
+	if include_reachability
+		&& crate::check_policies::CheckPolicy::live_for(
+			cataloged,
+			&reachability.0,
+			&reachability.1,
+			application_type.as_ref(),
+		) && !checks
 		.iter()
 		.any(|c| c.source == reachability.0 && c.check == reachability.1)
 	{
@@ -2065,21 +2206,11 @@ async fn consolidated_checks_for(
 				CheckResult::Passed
 			},
 			detail: serde_json::json!({}),
+			subject,
 		});
 	}
 
-	checks.sort_by(|a, b| {
-		a.effective
-			.urgency_rank()
-			.cmp(&b.effective.urgency_rank())
-			.then_with(|| a.source.cmp(&b.source))
-			.then_with(|| a.check.cmp(&b.check))
-	});
-
-	Ok(ConsolidatedChecks {
-		health_state,
-		checks,
-	})
+	Ok(checks)
 }
 
 impl Issue {

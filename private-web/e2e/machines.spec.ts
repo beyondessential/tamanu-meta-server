@@ -7,6 +7,7 @@ import {
 	seedMachineReport,
 	seedServer,
 	seedServerGroup,
+	seedStatus,
 } from "./seed";
 
 /// The machine's own page: the box, what it reports about itself, and the
@@ -265,7 +266,102 @@ test.describe("machine detail", () => {
 		await expect(
 			page.getByText("issues with these refs on this machine"),
 		).toBeVisible();
-		// And the popover now offers to lift it rather than to set it.
+		// A successful write closes the popover, so reopen it to read back what
+		// it recorded. The trigger's label is the signal that the silence has
+		// landed: it reads "Manage" only once the row knows it is silenced.
+		await page
+			.getByRole("button", { name: "Manage silence for disk_free" })
+			.click();
+		// And it now offers to lift the silence rather than to set it.
 		await expect(page.getByText("Silenced for this machine")).toBeVisible();
+	});
+
+	/// An operator triaging a workload sees everything bearing on it, the box's
+	/// checks among its own, each marked as the box's.
+	///
+	/// spec: CHK#a-machines-checks-present-on-its-applications
+	test("an application lists its box's checks, marked as the box's", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "shared-check-group" });
+		const server = await seedServer(sql, {
+			name: "workload-a",
+			groupId: group.id,
+		});
+		// Reporting, and healthy on its own account: the box's disk is the only
+		// thing wrong, so the rollup below is the machine's showing through.
+		await seedStatus(sql, { serverId: server.id, healthy: true, health: [] });
+		// One fact about the box, one about the workload on it.
+		await seedIssue(sql, {
+			machineId: server.machineId,
+			source: "alertd",
+			ref: "health/disk_free",
+			message: "Disk nearly full",
+		});
+		await seedIssue(sql, {
+			serverId: server.id,
+			source: "alertd",
+			ref: "health/tamanu_version",
+			severity: "warning",
+			message: "Behind the release train",
+		});
+
+		await page.goto(`/servers/${server.id}`);
+
+		// Both are here, and only the box's is marked as the box's.
+		await expect(page.getByText("disk_free")).toBeVisible();
+		await expect(page.getByText("tamanu_version")).toBeVisible();
+		await expect(
+			page.getByTestId("check-machine-subject"),
+		).toHaveCount(1);
+
+		// The box's disk makes the workload on it degraded, the application's
+		// contributing checks including its machine's.
+		// spec: CHK#health-rollup
+		await expect(page.getByText("Unhealthy", { exact: true })).toBeVisible();
+	});
+
+	/// The box's check is the box's wherever it is presented from, so silencing
+	/// it on a workload silences it on the box.
+	///
+	/// spec: CHK#a-machines-checks-present-on-its-applications
+	test("silencing a box's check from an application silences it on the box", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "cross-silence-group" });
+		const server = await seedServer(sql, {
+			name: "workload-b",
+			groupId: group.id,
+		});
+		await seedIssue(sql, {
+			machineId: server.machineId,
+			source: "alertd",
+			ref: "health/disk_free",
+			message: "Disk nearly full",
+		});
+
+		await page.goto(`/servers/${server.id}`);
+
+		// The scopes offered are the box's, not the workload's: this check is
+		// filed against the box.
+		await page.getByRole("button", { name: "Silence disk_free" }).click();
+		await expect(
+			page.getByRole("button", { name: "For this machine" }),
+		).toBeVisible();
+		await page.getByRole("button", { name: "For this machine" }).click();
+
+		// The row reads back as silenced here first: the write has landed and
+		// the application has refetched the box's silences.
+		await expect(
+			page.getByRole("button", { name: "Manage silence for disk_free" }),
+		).toBeVisible();
+
+		// And it lands on the box, where the same check now reads as silenced.
+		await page.goto(`/machines/${server.machineId}`);
+		await expect(
+			page.getByRole("button", { name: "Manage silence for disk_free" }),
+		).toBeVisible();
 	});
 });

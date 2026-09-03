@@ -18,7 +18,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The grain a check's result belongs to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum CheckSubject {
 	/// The box: its disk, memory, clock, addresses, agent.

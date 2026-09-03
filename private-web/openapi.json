@@ -9805,6 +9805,14 @@
           "skipped"
         ]
       },
+      "CheckSubject": {
+        "type": "string",
+        "description": "The grain a check's result belongs to.",
+        "enum": [
+          "machine",
+          "application"
+        ]
+      },
       "ClearScheduleArgs": {
         "type": "object",
         "description": "Identifies a server group's schedule override for a backup type.",
@@ -9868,6 +9876,7 @@
           "qualified_name",
           "effective",
           "silenced",
+          "subject",
           "detail"
         ],
         "properties": {
@@ -9905,6 +9914,10 @@
           "source": {
             "type": "string",
             "description": "The source that reports this check."
+          },
+          "subject": {
+            "$ref": "#/components/schemas/CheckSubject",
+            "description": "Which grain this check is filed against.\n\nAn application presents its machine's checks among its own, and this is\nwhat marks them: a `machine` entry in an application's list is the\nbox's, one filing seen from each workload the box carries rather than a\ncopy per workload."
           }
         }
       },

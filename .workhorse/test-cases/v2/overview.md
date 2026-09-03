@@ -56,11 +56,11 @@ is a regression.
 
 ## Checks
 
-- [ ] Every machine check presents on every application on that machine, marked as the machine's (verifies spec: CHK)
+- [x] Every machine check presents on every application on that machine, marked as the machine's (verifies spec: CHK)
 - [x] A degraded machine check contributes one issue at machine scope, not one per application (verifies spec: CHK)
 - [x] A machine-scoped and an application-scoped issue in one group join the same incident (verifies spec: INC)
 - [x] A silence on a machine check quiets it on every application presenting it (verifies spec: CHK)
-- [ ] An application's health rollup counts its machine's checks (verifies spec: CHK)
+- [x] An application's health rollup counts its machine's checks (verifies spec: CHK)
 - [x] An application check is catalogued as `<type>.<check>`; two types reporting one name are two entries (verifies spec: CHK)
 - [x] A machine check is catalogued under its bare name (verifies spec: CHK)
 - [x] A curated source's check is catalogued by name alone, even when that name is a machine one (verifies spec: CHK)

@@ -3,6 +3,7 @@ use std::fmt::Display;
 use serde::{Deserialize, Serialize};
 
 use crate::namespace::NamespaceRef;
+use crate::subject::CheckSubject;
 
 /// How a server should treat one of its healthchecks, distilled from
 /// canopy's operator-side configuration (the policy catalog and the
@@ -482,6 +483,14 @@ pub struct ConsolidatedCheck {
 	pub effective: CheckResult,
 	/// Whether this check is silenced at server or group scope.
 	pub silenced: bool,
+	/// Which grain this check is filed against.
+	///
+	/// An application presents its machine's checks among its own, and this is
+	/// what marks them: a `machine` entry in an application's list is the
+	/// box's, one filing seen from each workload the box carries rather than a
+	/// copy per workload.
+	// spec: CHK#a-machines-checks-present-on-its-applications
+	pub subject: CheckSubject,
 	/// The detail the source attached to the check (its extra fields), as an
 	/// object. Empty object when the check carried none.
 	#[schema(value_type = Object)]
@@ -499,6 +508,29 @@ pub struct ConsolidatedChecks {
 }
 
 impl HealthState {
+	/// The worse of two rollups.
+	///
+	/// Rolling two sets up separately and taking the worse of the pair gives
+	/// the same answer as classifying their union, because a rollup is the
+	/// worst result over its input and worst-of is associative. That is what
+	/// lets an application take in its machine's health without the box's
+	/// checks being graded once per workload on it.
+	// spec: CHK#health-rollup
+	pub fn worse_of(self, other: Self) -> Self {
+		fn severity(state: HealthState) -> u8 {
+			match state {
+				HealthState::Healthy => 0,
+				HealthState::Warning => 1,
+				HealthState::Unhealthy => 2,
+			}
+		}
+		if severity(other) > severity(self) {
+			other
+		} else {
+			self
+		}
+	}
+
 	/// Roll a set of effective check results into a server health state:
 	/// any failure ⇒ unhealthy; otherwise any warning or brokenness ⇒
 	/// warning; otherwise healthy. Passed and skipped results don't count.
