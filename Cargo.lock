@@ -1426,7 +1426,7 @@ dependencies = [
 
 [[package]]
 name = "canopy-mcp"
-version = "6.6.6"
+version = "1.0.0"
 dependencies = [
  "commons-types",
  "database",
@@ -1709,7 +1709,7 @@ dependencies = [
 
 [[package]]
 name = "commons-errors"
-version = "6.6.6"
+version = "1.0.0"
 dependencies = [
  "axum",
  "diesel",
@@ -1728,7 +1728,7 @@ dependencies = [
 
 [[package]]
 name = "commons-servers"
-version = "6.6.6"
+version = "1.0.0"
 dependencies = [
  "age",
  "aws-config",
@@ -1768,7 +1768,7 @@ dependencies = [
 
 [[package]]
 name = "commons-tests"
-version = "6.6.6"
+version = "1.0.0"
 dependencies = [
  "axum",
  "axum-client-ip",
@@ -1797,7 +1797,7 @@ dependencies = [
 
 [[package]]
 name = "commons-types"
-version = "6.6.6"
+version = "1.0.0"
 dependencies = [
  "base64 0.23.1",
  "commons-errors",
@@ -2211,7 +2211,7 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 
 [[package]]
 name = "database"
-version = "6.6.6"
+version = "1.0.0"
 dependencies = [
  "base64 0.23.1",
  "bestool-postgres",
@@ -3979,7 +3979,7 @@ dependencies = [
 
 [[package]]
 name = "jobs"
-version = "6.6.6"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "aws-config",
@@ -4966,7 +4966,7 @@ dependencies = [
 
 [[package]]
 name = "private-server"
-version = "6.6.6"
+version = "1.0.0"
 dependencies = [
  "age",
  "algae-cli",
@@ -5086,7 +5086,7 @@ dependencies = [
 
 [[package]]
 name = "public-server"
-version = "6.6.6"
+version = "1.0.0"
 dependencies = [
  "aws-config",
  "aws-sdk-sts",

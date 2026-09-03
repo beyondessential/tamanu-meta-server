@@ -231,13 +231,13 @@ holding the version invariant.
 - [x] `check-generated` covers `crates/canopy-api/Cargo.toml`, which is what stops the
       manifest version being edited by hand
 - [x] `just semver-checks` runs `cargo-semver-checks` against the published baseline
-- [ ] A CI job runs it
-- [ ] `release-plz.toml` — `release_always = false`, semver checks on, tag name for a
+- [x] A CI job runs it
+- [x] `release-plz.toml` — `release_always = false`, semver checks on, tag name for a
       workspace member
-- [ ] `.github/workflows/release.yml` — a `release-pr` job under the PAT that propagates the
+- [x] `.github/workflows/release.yml` — a `release-pr` job under the PAT that propagates the
       version into `openapi.rs` and regenerates, and a `release` job that publishes through
       trusted publishing in the `release` environment
-- [ ] `cd.yml` becomes a reusable workflow the release job calls, and stops triggering on
+- [x] `cd.yml` becomes a reusable workflow the release job calls, and stops triggering on
       pushes to `main`
 - [ ] `just check`, `just lint`, `just fmt-check`, and the generated-files checks pass
 
@@ -265,15 +265,44 @@ release, and the crate publishes only when its own version moved.
 
 Which packages carry the second track is the open question below.
 
+### Canopy's track is all nine crates, at one version
+
+Every crate the deployed binaries are built from is in a `canopy` version group, taking one
+number: `public-server`, `private-server`, `canopy-mcp`, `database`, `jobs`, and the four
+`commons-*`. They are `git_only`, so their version comes from tags rather than from a
+registry none of them is in, and `publish = false` because `git_only` and publishing are
+mutually exclusive.
+
+Two crates are managed by neither track. `canopy-api-codegen` is a build tool, and what it
+emits lands in `crates/canopy-api`, so a change to it moves the published crate through that
+crate's own track and needs no version of its own. `canopy-utoipa-axum` is a vendored fork
+carrying upstream's version — and it had no `publish` key at all, so it was publishable by
+default; it is now `publish = false`, since a vendored fork is not ours to publish under
+that name.
+
+Narrowing the group to just the two servers was tempting and is wrong. release-plz attributes
+a commit to a crate by the files it touches, so a change confined to `crates/database`
+belongs to `database`; with `database` unmanaged, nothing would move and nothing would
+deploy. The group has to cover everything the binaries are built from.
+
+The nine start at `1.0.0`, replacing the frozen `6.6.6`, so canopy's first release is 1.0.0.
+The API client keeps its own series and stays at `0.0.0` until release-plz raises it.
+
+Tags carry their package (`public-server-v1.0.0`, `bes-canopy-api-v0.1.0`) because two
+series would otherwise collide on a bare version. That does mean nine tags per canopy
+release, which is cosmetic and can be narrowed later. Changelogs are off by default and on
+for two: the client's beside the crate, and canopy's at the repository root.
+
+### The deploy is gated on canopy's version, not on any release
+
+`releases_created` is too broad, because a release of the client alone moves nothing that
+runs in the cluster. The release job instead pulls `public-server`'s released version out of
+release-plz's `releases` output, and the deploy runs only when that is non-empty, tagging the
+image with it. So a server change deploys without publishing, a client-only change publishes
+without deploying, and an API change does both.
+
 ## Open
 
-- **Which packages carry canopy's own release track.** `public-server` and `private-server`
-  are what the container runs, so versioning those two as a group would catch everything
-  that reaches production: a change to `database` or a `commons-*` crate moves their
-  lockfile dependencies, which release-plz counts as a change. They would be `git_only`,
-  taking their version from tags rather than the registry, since nothing publishes them.
-  That means giving them real versions in place of the frozen `6.6.6` the workspace carries
-  today, which is a decision rather than a detail.
 - **Getting the first real release to `1.0.0`.** release-plz computes the next version from
   the current manifest version via the `next_version` crate, so from a published `0.0.0` it
   gives a `0.x`; and with `release_always = false` the first release still has to come
