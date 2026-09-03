@@ -892,3 +892,10 @@ The title says which thing the page is about, and whether that thing is well is 
 
 One affordance goes with the flat sibling list: it carried an admin-only manual-event button per sibling, and the tree has never had one.
 The group page's tree did not offer it either, so an admin filing an event against a neighbouring workload now goes to that workload's own page, one click further than before.
+
+**Done since the audit: the fleet listing loses its ungrouped tab.**
+Every machine is created in a group and every application takes its machine's, so nothing can be ungrouped and the listing had nothing left to list.
+The fleet now offers Groups, Archived and Figures, and the FLT spec records that a group is a complete index of the fleet.
+
+The `list_ungrouped` private endpoint and the `UngroupedServersList` route go with it, as does `Application::count_ungrouped`, which only the tab's badge used.
+`Application::list_ungrouped` stays: the recovery snapshot sweeps up everything so nothing is left out of the record, whether or not the fleet listing offers a way to reach it.

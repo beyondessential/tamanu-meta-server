@@ -6502,41 +6502,6 @@
         }
       }
     },
-    "/api/servers/list_ungrouped": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "List applications that don't belong to any group.",
-        "description": "Returns a page of ungrouped applications, each with current\nreachability/health, plus the total count of ungrouped applications.",
-        "operationId": "list_ungrouped",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {}
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Page_ServerInfo"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
     "/api/servers/restore": {
       "post": {
         "tags": [

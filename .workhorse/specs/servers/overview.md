@@ -92,6 +92,9 @@ It is distinct from the DNS names an application serves at: two applications on 
 
 ## Navigating the two grains
 
+The fleet is browsed by group, and its listing offers the groups, the archived records, and the fleet's figures.
+Every machine sits in a group and every application takes its machine's, so a group is a complete index of the fleet.
+
 Each grain has a page of its own, and each names the other, so an operator moves between a box and the software on it without a search.
 
 A machine's page presents what the box reports about itself — its platform, its processors, its memory, its clock, how long it has been up — together with the machine's own health, the checks filed against it, and the applications running on it.

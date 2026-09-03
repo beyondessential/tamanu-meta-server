@@ -52,7 +52,6 @@ import FleetFigures from "./routes/FleetFigures";
 import Servers from "./routes/Servers";
 import Settings from "./routes/Settings";
 import Sql from "./routes/Sql";
-import UngroupedServersList from "./routes/UngroupedServersList";
 import VersionDetail from "./routes/VersionDetail";
 import Upgrades from "./routes/Upgrades";
 import Versions from "./routes/Versions";
@@ -212,7 +211,6 @@ export default function App() {
 					<Route path="/versions/:version" element={<VersionDetail />} />
 					<Route path="/servers" element={<Servers />}>
 						<Route index element={<GroupsList />} />
-						<Route path="ungrouped" element={<UngroupedServersList />} />
 						<Route path="archived" element={<ArchivedList />} />
 						<Route path="figures" element={<FleetFigures />} />
 					</Route>

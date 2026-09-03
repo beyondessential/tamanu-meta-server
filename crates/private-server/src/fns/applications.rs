@@ -418,7 +418,6 @@ fn server_to_info_with_group(
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(list_some))
-		.routes(routes!(list_ungrouped))
 		.routes(routes!(list_archived))
 		.routes(routes!(get_name))
 		.routes(routes!(get_info))
@@ -473,33 +472,6 @@ pub async fn list_some(
 		.into_iter()
 		.map(|s| server_to_info_with_group(s, &group_names))
 		.collect();
-	fill_display_hosts(&mut conn, &mut items).await?;
-	Ok(Json(Page { items, total }))
-}
-
-/// List applications that don't belong to any group.
-///
-/// Returns a page of ungrouped applications, each with current
-/// reachability/health, plus the total count of ungrouped applications.
-#[utoipa::path(
-	post,
-	path = "/list_ungrouped",
-	tag = "applications",
-	security(("tailscale-admin" = [])),
-	responses(
-		(status = 200, body = Page<ServerInfo>),
-	),
-)]
-pub async fn list_ungrouped(
-	State(state): State<AppState>,
-	_admin: TailscaleAdmin,
-	_body: Json<serde_json::Value>,
-) -> Result<Json<Page<ServerInfo>>> {
-	let mut conn = state.db.get().await?;
-	let total = Application::count_ungrouped(&mut conn).await?;
-	let applications = Application::list_ungrouped(&mut conn).await?;
-	let mut items: Vec<ServerInfo> = applications.into_iter().map(server_to_info).collect();
-	decorate_with_status(&mut conn, &mut items).await?;
 	fill_display_hosts(&mut conn, &mut items).await?;
 	Ok(Json(Page { items, total }))
 }

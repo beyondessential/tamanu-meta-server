@@ -231,4 +231,4 @@ cover the runtime half of that, which the spec diff cannot see.
 - [x] A group card's dots are rank rows of machine enclosures rather than one flat strip
 - [x] Rank rows carry the rank spelled out behind their applications
 - [x] A group card is three bands, and a quiet one is two: the status band is omitted with neither operator nor incident
-- [ ] The fleet listing has no ungrouped tab
+- [x] The fleet listing has no ungrouped tab

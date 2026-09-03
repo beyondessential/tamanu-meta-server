@@ -13,7 +13,7 @@ test.describe("servers list page", () => {
 		await resetSeededTables(sql);
 	});
 
-	test("renders the groups/ungrouped tabs and the seeded group row", async ({
+	test("renders the fleet tabs and the seeded group row", async ({
 		page,
 		sql,
 	}) => {
@@ -29,40 +29,19 @@ test.describe("servers list page", () => {
 		await expect(
 			page.getByRole("tab", { name: "Groups" }),
 		).toHaveAttribute("aria-selected", "true");
-		await expect(
-			page.getByRole("tab", { name: "Ungrouped" }),
-		).toBeVisible();
+		await expect(page.getByRole("tab", { name: "Archived" })).toBeVisible();
+		await expect(page.getByRole("tab", { name: "Figures" })).toBeVisible();
+
+		// The fleet is browsed by group, and every machine is in one, so there
+		// is no ungrouped listing to offer.
+		// spec: FLT
+		await expect(page.getByRole("tab", { name: "Ungrouped" })).toHaveCount(0);
+		await expect(page.getByRole("tab")).toHaveCount(3);
 
 		// The group's name shows as a link to its detail page.
 		await expect(
 			page.getByRole("link", { name: group.name }),
 		).toHaveAttribute("href", `/groups/${group.id}`);
-	});
-
-	test("ungrouped tab switches the URL and lists servers without a group", async ({
-		page,
-		sql,
-	}) => {
-		const group = await seedServerGroup(sql, { name: "the-group" });
-		const grouped = await seedServer(sql, {
-			name: "is-grouped",
-			groupId: group.id,
-		});
-		const orphan = await seedServer(sql, {
-			name: "no-group",
-			groupId: null,
-		});
-
-		await page.goto("/servers");
-		await page.getByRole("tab", { name: "Ungrouped" }).click();
-		await expect(page).toHaveURL(/\/servers\/ungrouped$/);
-
-		await expect(
-			page.getByRole("link", { name: new RegExp(orphan.name) }),
-		).toBeVisible();
-		await expect(
-			page.getByRole("link", { name: new RegExp(grouped.name) }),
-		).not.toBeVisible();
 	});
 });
 

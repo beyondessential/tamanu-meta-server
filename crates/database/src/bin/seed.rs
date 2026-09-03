@@ -802,7 +802,7 @@ async fn seed_servers(
 			name: Some("Lab Test Application".to_string()),
 			rank: Some(ServerRank::Test),
 			is_monitored: true,
-			notes: "Ungrouped — appears under the Ungrouped tab.".to_string(),
+			notes: "Ungrouped — reachable by id, not from the fleet listing.".to_string(),
 			..base(
 				"https://lab-test.example.com/",
 				ApplicationType::TamanuCentral,

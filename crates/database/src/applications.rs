@@ -817,7 +817,9 @@ impl Application {
 			.map_err(AppError::from)
 	}
 
-	/// All applications without a group, ordered by name. Used by the Ungrouped UI tab.
+	/// All applications without a group, ordered by name. The fleet is browsed by
+	/// group and has no ungrouped listing; this is for the recovery snapshot, which
+	/// sweeps up everything so nothing is left out of the record.
 	pub async fn list_ungrouped(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::schema::applications::dsl::*;
 		applications
@@ -829,19 +831,6 @@ impl Application {
 			.load(db)
 			.await
 			.map_err(AppError::from)
-	}
-
-	pub async fn count_ungrouped(db: &mut AsyncPgConnection) -> Result<u64> {
-		use crate::schema::applications::dsl::*;
-		applications
-			.count()
-			.filter(group_id.is_null())
-			.filter(id.ne(Uuid::nil()))
-			.filter(deleted_at.is_null())
-			.get_result(db)
-			.await
-			.map_err(AppError::from)
-			.map(|n: i64| n.try_into().unwrap_or_default())
 	}
 
 	/// Bulk-fetch `(name, host)` for a set of server ids — used by the

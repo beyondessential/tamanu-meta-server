@@ -3280,27 +3280,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/servers/list_ungrouped": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * List applications that don't belong to any group.
-         * @description Returns a page of ungrouped applications, each with current
-         *     reachability/health, plus the total count of ungrouped applications.
-         */
-        post: operations["list_ungrouped"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/servers/restore": {
         parameters: {
             query?: never;
@@ -14855,29 +14834,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ServerListArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Page_ServerInfo"];
-                };
-            };
-        };
-    };
-    list_ungrouped: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": unknown;
             };
         };
         responses: {
