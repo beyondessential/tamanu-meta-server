@@ -17,10 +17,13 @@ async fn record_then_the_fleet_view_shows_it() {
 			INSERT INTO server_groups (id, name) VALUES
 				('cccccccc-0000-0000-0000-000000000001', 'kamaka'),
 				('cccccccc-0000-0000-0000-000000000002', 'no-plan');
-			INSERT INTO servers (id, host, kind, rank, group_id) VALUES
-				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'central', 'production', 'cccccccc-0000-0000-0000-000000000001'),
-				('cccccccc-0000-0000-0000-0000000000a2', 'https://no-plan.example', 'central', 'production', 'cccccccc-0000-0000-0000-000000000002');
-			INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES
+			INSERT INTO machines (id, group_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'cccccccc-0000-0000-0000-000000000001'),
+				('cccccccc-0000-0000-0000-0000000000a2', 'cccccccc-0000-0000-0000-000000000002');
+			INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'tamanu-central', 'production', 'cccccccc-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-0000000000a1'),
+				('cccccccc-0000-0000-0000-0000000000a2', 'https://no-plan.example', 'tamanu-central', 'production', 'cccccccc-0000-0000-0000-000000000002', 'cccccccc-0000-0000-0000-0000000000a2');
+			INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES
 				('cccccccc-0000-0000-0000-0000000000a1', 'test', '{}'::jsonb, '2.60.0'),
 				('cccccccc-0000-0000-0000-0000000000a2', 'test', '{}'::jsonb, '2.60.0');",
 		)
@@ -83,9 +86,11 @@ async fn a_target_behind_the_group_is_refused() {
 				('cccccccc-0000-0000-0000-0000000000f1', 2, 61, 0, 'x', 'published');
 			INSERT INTO server_groups (id, name) VALUES
 				('cccccccc-0000-0000-0000-000000000001', 'ahead');
-			INSERT INTO servers (id, host, kind, rank, group_id) VALUES
-				('cccccccc-0000-0000-0000-0000000000a1', 'https://ahead.example', 'central', 'production', 'cccccccc-0000-0000-0000-000000000001');
-			INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES
+			INSERT INTO machines (id, group_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'cccccccc-0000-0000-0000-000000000001');
+			INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'https://ahead.example', 'tamanu-central', 'production', 'cccccccc-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-0000000000a1');
+			INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES
 				('cccccccc-0000-0000-0000-0000000000a1', 'test', '{}'::jsonb, '2.62.0');",
 		)
 		.await
@@ -114,9 +119,11 @@ async fn a_plan_nothing_will_test_says_so() {
 				('cccccccc-0000-0000-0000-0000000000f1', 2, 61, 0, 'x', 'published');
 			INSERT INTO server_groups (id, name) VALUES
 				('cccccccc-0000-0000-0000-000000000001', 'kamaka');
-			INSERT INTO servers (id, host, kind, rank, group_id) VALUES
-				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'central', 'production', 'cccccccc-0000-0000-0000-000000000001');
-			INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES
+			INSERT INTO machines (id, group_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'cccccccc-0000-0000-0000-000000000001');
+			INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'tamanu-central', 'production', 'cccccccc-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-0000000000a1');
+			INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES
 				('cccccccc-0000-0000-0000-0000000000a1', 'test', '{}'::jsonb, '2.60.0');
 			INSERT INTO devices (id, role) VALUES
 				('cccccccc-0000-0000-0000-0000000000d0', 'backup-restore');
@@ -194,9 +201,11 @@ async fn an_attempt_in_flight_shows_beside_the_verdict() {
 				('cccccccc-0000-0000-0000-0000000000f1', 2, 61, 0, 'x', 'published');
 			INSERT INTO server_groups (id, name) VALUES
 				('cccccccc-0000-0000-0000-000000000001', 'kamaka');
-			INSERT INTO servers (id, host, kind, rank, group_id) VALUES
-				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'central', 'production', 'cccccccc-0000-0000-0000-000000000001');
-			INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES
+			INSERT INTO machines (id, group_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'cccccccc-0000-0000-0000-000000000001');
+			INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'tamanu-central', 'production', 'cccccccc-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-0000000000a1');
+			INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES
 				('cccccccc-0000-0000-0000-0000000000a1', 'test', '{}'::jsonb, '2.60.0');
 			INSERT INTO devices (id, role) VALUES
 				('cccccccc-0000-0000-0000-0000000000d0', 'backup-restore');
@@ -265,9 +274,11 @@ async fn a_member_servers_own_restore_is_not_an_attempt() {
 				('cccccccc-0000-0000-0000-0000000000f1', 2, 61, 0, 'x', 'published');
 			INSERT INTO server_groups (id, name) VALUES
 				('cccccccc-0000-0000-0000-000000000001', 'kamaka');
-			INSERT INTO servers (id, host, kind, rank, group_id) VALUES
-				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'central', 'production', 'cccccccc-0000-0000-0000-000000000001');
-			INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES
+			INSERT INTO machines (id, group_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'cccccccc-0000-0000-0000-000000000001');
+			INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'tamanu-central', 'production', 'cccccccc-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-0000000000a1');
+			INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES
 				('cccccccc-0000-0000-0000-0000000000a1', 'test', '{}'::jsonb, '2.60.0');
 			INSERT INTO devices (id, role) VALUES
 				('cccccccc-0000-0000-0000-0000000000d0', 'backup-restore'),
@@ -346,9 +357,11 @@ async fn amend_changes_the_date_and_note_without_replacing_the_plan() {
 				('cccccccc-0000-0000-0000-0000000000f1', 2, 61, 0, 'x', 'published');
 			INSERT INTO server_groups (id, name) VALUES
 				('cccccccc-0000-0000-0000-000000000001', 'kamaka');
-			INSERT INTO servers (id, host, kind, rank, group_id) VALUES
-				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'central', 'production', 'cccccccc-0000-0000-0000-000000000001');
-			INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES
+			INSERT INTO machines (id, group_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'cccccccc-0000-0000-0000-000000000001');
+			INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'tamanu-central', 'production', 'cccccccc-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-0000000000a1');
+			INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES
 				('cccccccc-0000-0000-0000-0000000000a1', 'test', '{}'::jsonb, '2.60.0');",
 		)
 		.await
@@ -413,9 +426,11 @@ async fn amending_a_withdrawn_plan_is_refused() {
 				('cccccccc-0000-0000-0000-0000000000f2', 2, 63, 0, 'x', 'published');
 			INSERT INTO server_groups (id, name) VALUES
 				('cccccccc-0000-0000-0000-000000000001', 'kamaka');
-			INSERT INTO servers (id, host, kind, rank, group_id) VALUES
-				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'central', 'production', 'cccccccc-0000-0000-0000-000000000001');
-			INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES
+			INSERT INTO machines (id, group_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'cccccccc-0000-0000-0000-000000000001');
+			INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'tamanu-central', 'production', 'cccccccc-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-0000000000a1');
+			INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES
 				('cccccccc-0000-0000-0000-0000000000a1', 'test', '{}'::jsonb, '2.60.0');",
 		)
 		.await
@@ -460,9 +475,11 @@ async fn the_history_view_shows_a_withdrawn_plan_beside_a_replaced_one() {
 				('cccccccc-0000-0000-0000-0000000000f2', 2, 63, 0, 'x', 'published');
 			INSERT INTO server_groups (id, name) VALUES
 				('cccccccc-0000-0000-0000-000000000001', 'kamaka');
-			INSERT INTO servers (id, host, kind, rank, group_id) VALUES
-				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'central', 'production', 'cccccccc-0000-0000-0000-000000000001');
-			INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES
+			INSERT INTO machines (id, group_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'cccccccc-0000-0000-0000-000000000001');
+			INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'tamanu-central', 'production', 'cccccccc-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-0000000000a1');
+			INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES
 				('cccccccc-0000-0000-0000-0000000000a1', 'test', '{}'::jsonb, '2.60.0');",
 		)
 		.await
@@ -554,9 +571,11 @@ async fn every_version_ahead_is_offered_however_far_behind_the_group_is() {
 			"INSERT INTO versions (major, minor, patch, changelog, status) VALUES {};
 			INSERT INTO server_groups (id, name) VALUES
 				('cccccccc-0000-0000-0000-000000000001', 'kamaka');
-			INSERT INTO servers (id, host, kind, rank, group_id) VALUES
-				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'central', 'production', 'cccccccc-0000-0000-0000-000000000001');
-			INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES
+			INSERT INTO machines (id, group_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'cccccccc-0000-0000-0000-000000000001');
+			INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'tamanu-central', 'production', 'cccccccc-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-0000000000a1');
+			INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES
 				('cccccccc-0000-0000-0000-0000000000a1', 'test', '{{}}'::jsonb, '2.53.0');",
 			rows.join(", ")
 		))
@@ -591,9 +610,11 @@ async fn a_target_under_an_open_known_issue_is_offered_but_flagged() {
 				(2, 62, 0, 'x', 'published');
 			INSERT INTO server_groups (id, name) VALUES
 				('cccccccc-0000-0000-0000-000000000001', 'kamaka');
-			INSERT INTO servers (id, host, kind, rank, group_id) VALUES
-				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'central', 'production', 'cccccccc-0000-0000-0000-000000000001');
-			INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES
+			INSERT INTO machines (id, group_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'cccccccc-0000-0000-0000-000000000001');
+			INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'tamanu-central', 'production', 'cccccccc-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-0000000000a1');
+			INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES
 				('cccccccc-0000-0000-0000-0000000000a1', 'test', '{}'::jsonb, '2.60.0');
 			INSERT INTO version_known_issues (author, description, min_major, min_minor, min_patch)
 				VALUES ('someone@example.com', 'breaks on upgrade', 2, 61, 1);",
@@ -637,10 +658,13 @@ async fn each_environment_is_planned_apart() {
 				('cccccccc-0000-0000-0000-0000000000f2', 2, 63, 0, 'x', 'published');
 			INSERT INTO server_groups (id, name) VALUES
 				('cccccccc-0000-0000-0000-000000000001', 'kamaka');
-			INSERT INTO servers (id, host, kind, rank, group_id) VALUES
-				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'central', 'production', 'cccccccc-0000-0000-0000-000000000001'),
-				('cccccccc-0000-0000-0000-0000000000a2', 'https://clone.kamaka.example', 'central', 'clone', 'cccccccc-0000-0000-0000-000000000001');
-			INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES
+			INSERT INTO machines (id, group_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'cccccccc-0000-0000-0000-000000000001'),
+				('cccccccc-0000-0000-0000-0000000000a2', 'cccccccc-0000-0000-0000-000000000001');
+			INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES
+				('cccccccc-0000-0000-0000-0000000000a1', 'https://kamaka.example', 'tamanu-central', 'production', 'cccccccc-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-0000000000a1'),
+				('cccccccc-0000-0000-0000-0000000000a2', 'https://clone.kamaka.example', 'tamanu-central', 'clone', 'cccccccc-0000-0000-0000-000000000001', 'cccccccc-0000-0000-0000-0000000000a2');
+			INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES
 				('cccccccc-0000-0000-0000-0000000000a1', 'test', '{}'::jsonb, '2.60.0'),
 				('cccccccc-0000-0000-0000-0000000000a2', 'test', '{}'::jsonb, '2.62.0');",
 		)

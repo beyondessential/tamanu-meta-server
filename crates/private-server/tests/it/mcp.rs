@@ -1115,9 +1115,9 @@ async fn upgrade_plans_list_the_open_ones_and_keep_the_withdrawn_in_history() {
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES \
 				('44444444-4444-4444-4444-444444444444', 'Drifting'); \
-			 INSERT INTO servers (id, host, kind, rank, group_id) VALUES \
-				('44444444-4444-4444-4444-4444444444a1', 'https://drifting', 'central', 'production', '44444444-4444-4444-4444-444444444444'); \
-			 INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES \
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('44444444-4444-4444-4444-4444444444a1', '44444444-4444-4444-4444-444444444444') RETURNING id) INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES \
+				('44444444-4444-4444-4444-4444444444a1', 'https://drifting', 'tamanu-central', 'production', '44444444-4444-4444-4444-444444444444', '44444444-4444-4444-4444-4444444444a1'); \
+			 INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES \
 				('44444444-4444-4444-4444-4444444444a1', 'test', '{{}}'::jsonb, '2.34.1'); \
 			 INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES \
 				('55555555-5555-5555-5555-555555555555', 2, 36, 0, 'x', 'published'), \
