@@ -99,8 +99,19 @@ pub struct Status {
 	/// When this status was received.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub created_at: Timestamp,
-	/// The server this status was reported for.
-	pub server_id: Uuid,
+	/// The machine this status was reported for.
+	///
+	/// A push describes a box and the applications on it, so this is what it
+	/// is recorded against. `None` on rows written before the split, whose
+	/// machine is their application's.
+	pub machine_id: Option<Uuid>,
+	/// The application this status was reported for, where the push named
+	/// one.
+	///
+	/// `None` for a push from a box that runs no application Canopy holds:
+	/// the whole report is the box's, and there is nothing to attribute an
+	/// application's half of it to.
+	pub server_id: Option<Uuid>,
 	/// The device that submitted this status, or `null` for a status not
 	/// attributable to one.
 	pub device_id: Option<Uuid>,
@@ -127,7 +138,8 @@ pub struct Status {
 #[diesel(table_name = crate::schema::statuses)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct NewStatus {
-	pub server_id: Uuid,
+	pub machine_id: Uuid,
+	pub server_id: Option<Uuid>,
 	pub device_id: Option<Uuid>,
 	pub version: Option<VersionStr>,
 	pub extra: serde_json::Value,
@@ -209,7 +221,7 @@ impl Status {
 		let statuses = Self::latest_for_servers(db, &server_ids).await?;
 		let status_map: HashMap<Uuid, Timestamp> = statuses
 			.into_iter()
-			.map(|s| (s.server_id, s.created_at))
+			.filter_map(|s| Some((s.server_id?, s.created_at)))
 			.chain(last_reported)
 			.fold(HashMap::new(), |mut acc, (id, at)| {
 				acc.entry(id)

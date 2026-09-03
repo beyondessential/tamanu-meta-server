@@ -70,7 +70,7 @@ async fn a_version_less_report_keeps_the_last_version() {
 
 		ReportedDetail::record(
 			&mut conn,
-			server,
+			Some(server),
 			m_server,
 			"alertd",
 			&json!({}),
@@ -80,7 +80,7 @@ async fn a_version_less_report_keeps_the_last_version() {
 		.unwrap();
 		ReportedDetail::record(
 			&mut conn,
-			server,
+			Some(server),
 			m_server,
 			"alertd",
 			&json!({"uptimeSecs": 42}),
@@ -101,7 +101,7 @@ async fn a_version_less_report_keeps_the_last_version() {
 		// An explicit later version still supersedes it.
 		ReportedDetail::record(
 			&mut conn,
-			server,
+			Some(server),
 			m_server,
 			"alertd",
 			&json!({}),
@@ -131,7 +131,7 @@ async fn last_version_is_not_bounded_by_a_lookback() {
 		let m_server = machine_of(&mut conn, server).await;
 		ReportedDetail::record(
 			&mut conn,
-			server,
+			Some(server),
 			m_server,
 			"alertd",
 			&json!({}),
@@ -164,7 +164,7 @@ async fn production_versions_counts_reporting_servers_once() {
 		let m_server = machine_of(&mut conn, server).await;
 		ReportedDetail::record(
 			&mut conn,
-			server,
+			Some(server),
 			m_server,
 			"alertd",
 			&json!({}),
@@ -177,7 +177,7 @@ async fn production_versions_counts_reporting_servers_once() {
 		age_report(&mut conn, server, "2 hours").await;
 		ReportedDetail::record(
 			&mut conn,
-			server,
+			Some(server),
 			m_server,
 			"tamanu",
 			&json!({"uptimeSecs": 42}),
@@ -212,7 +212,7 @@ async fn production_versions_excludes_the_quiet_and_the_unranked() {
 			let machine = machine_of(&mut conn, server).await;
 			ReportedDetail::record(
 				&mut conn,
-				server,
+				Some(server),
 				machine,
 				"alertd",
 				&json!({}),
@@ -250,7 +250,7 @@ async fn a_report_replaces_its_own_source_only() {
 
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
 			m_server_id,
 			"alertd",
 			&json!({"bestoolVersion": "2.9.1", "pgVersion": "PostgreSQL 16.3 on x86_64"}),
@@ -260,7 +260,7 @@ async fn a_report_replaces_its_own_source_only() {
 		.expect("record alertd");
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
 			m_server_id,
 			"tamanu",
 			&json!({"uptimeSecs": 42}),
@@ -272,7 +272,7 @@ async fn a_report_replaces_its_own_source_only() {
 		// alertd reports again, dropping pgVersion from its payload.
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
 			m_server_id,
 			"alertd",
 			&json!({"bestoolVersion": "2.10.5"}),
@@ -325,7 +325,7 @@ async fn figures_resolve_per_field_newest_first() {
 
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
 			m_server_id,
 			"alertd",
 			&json!({"pgVersion": "PostgreSQL 16.3 (Visual C++ build 1940), 64-bit", "nodeVersion": "20.11.0"}),
@@ -344,7 +344,7 @@ async fn figures_resolve_per_field_newest_first() {
 		.expect("age alertd's report");
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
 			m_server_id,
 			"tamanu",
 			&json!({"uptimeSecs": 42}),
@@ -381,7 +381,7 @@ async fn munin_flag_holds_indefinitely() {
 
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
 			m_server_id,
 			"alertd",
 			&json!({"munin": true}),
@@ -407,7 +407,7 @@ async fn munin_flag_holds_indefinitely() {
 		// A source that reports nothing about munin leaves it alone...
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
 			m_server_id,
 			"tamanu",
 			&json!({"uptimeSecs": 42}),
@@ -420,7 +420,7 @@ async fn munin_flag_holds_indefinitely() {
 		// ...but an explicit later false overrides it.
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
 			m_server_id,
 			"alertd",
 			&json!({"munin": false}),
@@ -443,7 +443,7 @@ async fn reported_detail_is_deleted_with_its_server() {
 		let m_server_id = machine_of(&mut conn, server_id).await;
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
 			m_server_id,
 			"alertd",
 			&json!({"munin": true}),
@@ -484,7 +484,7 @@ async fn platform_prefers_the_reported_operating_system() {
 		// Only a PostgreSQL banner: the family is all it can give.
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
 			m_server_id,
 			"alertd",
 			&json!({"pgVersion": "PostgreSQL 16.3 (Visual C++ build 1940), 64-bit"}),
@@ -498,7 +498,7 @@ async fn platform_prefers_the_reported_operating_system() {
 		// it. Values are as the fleet actually reports them.
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
 			m_server_id,
 			"alertd",
 			&json!({"osName": "Windows", "osVersion": "10 (17763)"}),
@@ -514,7 +514,7 @@ async fn platform_prefers_the_reported_operating_system() {
 
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
 			m_server_id,
 			"alertd",
 			&json!({"osName": "Ubuntu", "osVersion": "24.04"}),
@@ -527,7 +527,7 @@ async fn platform_prefers_the_reported_operating_system() {
 		// A name without a version stands alone.
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
 			m_server_id,
 			"alertd",
 			&json!({"osName": "Debian GNU/Linux"}),
@@ -555,7 +555,7 @@ async fn merge_by_server_keeps_servers_apart() {
 
 		ReportedDetail::record(
 			&mut conn,
-			one,
+			Some(one),
 			m_one,
 			"alertd",
 			&json!({"bestoolVersion": "2.10.5"}),
@@ -565,7 +565,7 @@ async fn merge_by_server_keeps_servers_apart() {
 		.unwrap();
 		ReportedDetail::record(
 			&mut conn,
-			two,
+			Some(two),
 			m_two,
 			"alertd",
 			&json!({"bestoolVersion": "2.4.7"}),
@@ -615,7 +615,7 @@ async fn detail_is_stored_at_the_grain_it_describes() {
 
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
 			machine_id,
 			"alertd",
 			&json!({
@@ -695,7 +695,7 @@ async fn one_box_reports_its_platform_once_for_both_workloads() {
 		for app in [first, second] {
 			ReportedDetail::record(
 				&mut conn,
-				app,
+				Some(app),
 				machine_id,
 				"alertd",
 				&json!({"osName": "Debian"}),

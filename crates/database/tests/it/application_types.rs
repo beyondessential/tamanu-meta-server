@@ -166,7 +166,7 @@ async fn mixed_group_headline_version_comes_from_the_tamanu_member() {
 
 		ReportedDetail::record(
 			&mut conn,
-			central.id,
+			Some(central.id),
 			central.machine_id,
 			"alertd",
 			&serde_json::json!({}),
@@ -259,7 +259,7 @@ async fn only_a_central_speaks_for_the_group() {
 		for (app, version) in [(&facility, "2.30.0"), (&central, "2.34.1")] {
 			ReportedDetail::record(
 				&mut conn,
-				app.id,
+				Some(app.id),
 				app.machine_id,
 				"alertd",
 				&serde_json::json!({}),
@@ -308,7 +308,7 @@ async fn production_versions_skip_untracked_types() {
 
 		ReportedDetail::record(
 			&mut conn,
-			tamanu.id,
+			Some(tamanu.id),
 			tamanu.machine_id,
 			"alertd",
 			&serde_json::json!({}),
@@ -320,7 +320,7 @@ async fn production_versions_skip_untracked_types() {
 		// otherwise land in the fleet's release count as a branch of its own.
 		ReportedDetail::record(
 			&mut conn,
-			canopy.id,
+			Some(canopy.id),
 			canopy.machine_id,
 			"alertd",
 			&serde_json::json!({}),

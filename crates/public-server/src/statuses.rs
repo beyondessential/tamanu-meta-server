@@ -200,42 +200,48 @@ fn reported_application_type(extra: &serde_json::Value) -> Option<ApplicationTyp
 	}
 }
 
-/// The application a unified push is about.
+/// The application a unified push is about, where it is about one.
 ///
-/// A unified push describes one application, the format having no way to say
-/// otherwise, so the answer is one record. Where the push names its type
-/// Canopy correlates on it and adopts what it does not already hold; where it
-/// does not, the machine's own record answers, which it can as long as there
-/// is exactly one to answer with.
+/// A unified push describes at most one application, the format having no way
+/// to say otherwise. Where the push names its type Canopy correlates on it and
+/// adopts what it does not already hold; where it does not, the machine's own
+/// record answers, which it can as long as there is exactly one to answer
+/// with.
 ///
-/// Refusing rather than guessing is the point of the last arm. Every machine
-/// in the fleet came out of the split holding exactly one application, so a
-/// machine that has none or has several and a reporter that will not say which
-/// is a genuinely new situation, and attributing a box's whole picture to an
-/// arbitrary one of its workloads is the failure this card exists to stop.
+/// `None` is a real answer, not a failure: the fleet holds boxes that run no
+/// application Canopy models, and one reports its disk, memory and uptime like
+/// any other. Such a push is the box's in full, so it files at machine scope
+/// and records as machine detail, and nothing is attributed to a workload that
+/// is not there.
+///
+/// Refusing rather than guessing is what is left of the last arm. A box
+/// running several workloads and a reporter that will not say which one it
+/// speaks for is a genuinely new situation, and attributing a box's whole
+/// picture to an arbitrary one of its workloads is the failure this card
+/// exists to stop.
 // spec: STA#transitional-unified-pushes
 async fn resolve_unified_application(
 	db: &mut AsyncPgConnection,
 	machine: &Machine,
 	extra: &serde_json::Value,
 	create: bool,
-) -> Result<Application> {
+) -> Result<Option<Application>> {
 	if create && let Some(r#type) = reported_application_type(extra) {
-		return Application::from_report(db, machine, &r#type).await;
+		return Application::from_report(db, machine, &r#type)
+			.await
+			.map(Some);
 	}
 
 	let applications = machine.applications(db).await?;
 	if let Some(r#type) = reported_application_type(extra)
 		&& let Some(found) = applications.iter().find(|a| a.r#type == r#type)
 	{
-		return Ok(found.clone());
+		return Ok(Some(found.clone()));
 	}
 
 	match applications.as_slice() {
-		[only] => Ok(only.clone()),
-		[] => Err(AppError::Conflict(
-			"this push names no application Canopy holds, and the machine has none".into(),
-		)),
+		[only] => Ok(Some(only.clone())),
+		[] => Ok(None),
 		_ => Err(AppError::Conflict(
 			"this push names no application Canopy holds, and the machine has several".into(),
 		)),
@@ -358,15 +364,21 @@ async fn create(
 			resolve_unified_application(conn, &machine, &extra, record).await
 		})
 		.await?;
-	let server_id = server.id;
+	let server_id = server.as_ref().map(|s| s.id);
 
-	// The server's effective tags: stored server+group tags plus the
-	// synthetic `canopy:*` tags and computed `billing.*` labels. Computed
-	// once and used for both grading (per CHK, rules evaluate against the
-	// effective tags, so a rule can predicate on any of them) and the
-	// device response. JSON-wrapped so the rule evaluator compares
-	// uniformly with extras.
-	let effective_tags = crate::tags::effective_tags_for_server(&mut db, &server).await?;
+	// The effective tags of whatever this push is about: stored tags overlaid
+	// on the group's, plus the synthetic `canopy:*` tags and, for an
+	// application, the computed `billing.*` labels. Computed once and used for
+	// both grading (per CHK, rules evaluate against the effective tags, so a
+	// rule can predicate on any of them) and the device response. JSON-wrapped
+	// so the rule evaluator compares uniformly with extras.
+	//
+	// A push with no application is the box's, so it grades and answers
+	// against the box's own tags rather than borrowing a workload's.
+	let effective_tags = match &server {
+		Some(server) => crate::tags::effective_tags_for_server(&mut db, server).await?,
+		None => crate::tags::effective_tags_for_machine(&mut db, &machine).await?,
+	};
 	let tags: std::collections::HashMap<String, serde_json::Value> = effective_tags
 		.0
 		.iter()
@@ -381,6 +393,7 @@ async fn create(
 		// a transaction; diesel-async nests it as a SAVEPOINT.
 		db.transaction::<_, AppError, _>(async |conn| {
 			let status = NewStatus {
+				machine_id: machine.id,
 				server_id,
 				device_id: Some(id),
 				version,
@@ -410,8 +423,8 @@ async fn create(
 				conn,
 				server_id,
 				machine.id,
-				server.group_id,
-				&server.r#type,
+				server.as_ref().map_or(machine.group_id, |s| s.group_id),
+				server.as_ref().map(|s| &s.r#type),
 				Some(id),
 				&status,
 				&tags,
@@ -441,8 +454,8 @@ async fn create(
 		&mut db,
 		server_id,
 		machine.id,
-		server.group_id,
-		&server.r#type,
+		server.as_ref().map_or(machine.group_id, |s| s.group_id),
+		server.as_ref().map(|s| &s.r#type),
 		&source,
 	)
 	.await?;
@@ -450,7 +463,7 @@ async fn create(
 	// A server-wide fact, like the tags: every source gets it, so an agent
 	// reporting status learns of a new domain or grant without a second call.
 	// spec: CRT#what-a-server-may-act-on
-	let names = crate::names::entitlements_for(&mut db, &server, &dns_zones).await?;
+	let names = crate::names::entitlements_for(&mut db, &machine, &dns_zones).await?;
 
 	Ok(Json(StatusResponse {
 		backup_now,
@@ -512,16 +525,17 @@ async fn check_severities(
 	// The read has no payload to name an application with, so it answers for
 	// the machine's own, exactly as a unified push with no type does. A
 	// response shaped for one application cannot answer for a box running
-	// several, so it says so rather than picking one.
+	// several, so it says so rather than picking one; a box with no
+	// application answers for itself.
 	let server =
 		resolve_unified_application(&mut db, &machine, &serde_json::Value::Null, false).await?;
 
 	let map = effective_check_severities(
 		&mut db,
-		server.id,
+		server.as_ref().map(|s| s.id),
 		machine.id,
-		server.group_id,
-		&server.r#type,
+		server.as_ref().map_or(machine.group_id, |s| s.group_id),
+		server.as_ref().map(|s| &s.r#type),
 		DEFAULT_SOURCE,
 	)
 	.await?;
@@ -538,18 +552,19 @@ async fn check_severities(
 /// mapped ahead of time.
 async fn effective_check_severities(
 	db: &mut AsyncPgConnection,
-	server_id: Uuid,
+	server_id: Option<Uuid>,
 	machine_id: Uuid,
 	group_id: Option<Uuid>,
-	application_type: &ApplicationType,
+	application_type: Option<&ApplicationType>,
 	source: &str,
 ) -> Result<BTreeMap<String, CheckSeverity>> {
 	// Keyed by bare check name, because that is what the reporter sends and
 	// reads back. The catalog is narrowed to the namespaces this reporter can
 	// file into, so another application type's same-named check is not in here
-	// to collide with.
+	// to collide with. A box with no application can file into the machine's
+	// namespace only.
 	let mut map: BTreeMap<String, CheckSeverity> =
-		CheckPolicy::ceiling_map_for_source(db, source, Some(application_type))
+		CheckPolicy::ceiling_map_for_source(db, source, application_type)
 			.await?
 			.into_iter()
 			.map(|(name, ceiling)| (name, ceiling.into()))
@@ -604,16 +619,28 @@ fn resolve_version(extra: &serde_json::Value, header: Option<VersionStr>) -> Opt
 #[allow(clippy::too_many_arguments)]
 async fn file_health_events(
 	conn: &mut AsyncPgConnection,
-	server_id: Uuid,
+	server_id: Option<Uuid>,
 	machine_id: Uuid,
 	group_id: Option<Uuid>,
-	application_type: &ApplicationType,
+	application_type: Option<&ApplicationType>,
 	device_id: Option<Uuid>,
 	status: &Status,
 	tags: &std::collections::HashMap<String, serde_json::Value>,
 ) -> Result<()> {
 	let curr_check_results = collect_check_results(&status.health);
 	let occurred_at = Some(status.created_at);
+
+	// Which grain a check on this push belongs to. Where the push names an
+	// application, its subject decides. Where it names none, there is no
+	// second grain to belong to: a box Canopy holds no application for reports
+	// about itself, so the whole push is the box's, down to a check whose name
+	// is not in the machine set.
+	// spec: STA#transitional-unified-pushes
+	let on_machine = |check: &str| server_id.is_none() || CheckSubject::of(check).is_machine();
+	let namespace_of = |check: &str| match application_type {
+		Some(ty) if !on_machine(check) => Namespace::for_application(&status.source, check, ty),
+		_ => Namespace::for_machine(&status.source, check),
+	};
 
 	// Upsert a catalog row for every check name seen on this push,
 	// whatever its result. New checks land at the default warning
@@ -622,7 +649,7 @@ async fn file_health_events(
 	// source put it in, so a machine check on a Tamanu push is the
 	// box's entry and not one Tamanu owns.
 	for check_name in curr_check_results.keys() {
-		let namespace = Namespace::for_application(&status.source, check_name, application_type);
+		let namespace = namespace_of(check_name);
 		CheckPolicy::upsert_default(conn, &status.source, &namespace, check_name).await?;
 	}
 
@@ -649,8 +676,8 @@ async fn file_health_events(
 			check_extra: &check_extra,
 			tags,
 		};
-		let subject = CheckSubject::of(check);
-		let namespace = Namespace::for_application(&status.source, check, application_type);
+		let on_machine = on_machine(check);
+		let namespace = namespace_of(check);
 		let graded = CheckPolicy::apply_scoped(
 			conn,
 			&status.source,
@@ -664,8 +691,8 @@ async fn file_health_events(
 				// graded against the box's tags and silenced by the box's
 				// policy.
 				// spec: STA
-				application_id: (!subject.is_machine()).then_some(server_id),
-				machine_id: subject.is_machine().then_some(machine_id),
+				application_id: (!on_machine).then_some(server_id).flatten(),
+				machine_id: on_machine.then_some(machine_id),
 				group_id,
 				// Both grains are covered by the window over the box: taking
 				// it down stops its machine checks and its workloads alike.
@@ -692,9 +719,12 @@ async fn file_health_events(
 			})
 			.collect()
 	};
-	let previously_active = strip(
-		Issue::active_refs_with_prefix(conn, server_id, &status.source, &health_prefix).await?,
-	);
+	let previously_active = match server_id {
+		Some(server_id) => strip(
+			Issue::active_refs_with_prefix(conn, server_id, &status.source, &health_prefix).await?,
+		),
+		None => Default::default(),
+	};
 	let previously_active_on_machine = strip(
 		Issue::active_refs_with_prefix_for_machine(
 			conn,
@@ -728,8 +758,8 @@ async fn file_health_events(
 			.filter(|(_, g)| matches!(g.effective, CheckResult::Passed | CheckResult::Skipped)),
 	);
 	for (check, graded) in filing_order {
-		let subject = CheckSubject::of(check);
-		let was_active = if subject.is_machine() {
+		let on_machine = on_machine(check);
+		let was_active = if on_machine {
 			previously_active_on_machine.contains(*check)
 		} else {
 			previously_active.contains(*check)
@@ -750,16 +780,31 @@ async fn file_health_events(
 				None,
 			),
 			CheckResult::Broken => {
-				let retained = Issue::list_by_source_ref(
-					conn,
-					&status.source,
-					&format!("{HEALTH_REF}/{check}"),
-					&[server_id],
-				)
-				.await?
-				.into_iter()
-				.next()
-				.filter(|i| i.active && i.effective_result == Some(CheckResult::Failed));
+				// Read at the grain this check files at: a machine check's
+				// open failure is the box's issue, and looking for it among
+				// the application's would never find it.
+				let r#ref = format!("{HEALTH_REF}/{check}");
+				let prior = if on_machine {
+					Issue::list_by_source_ref_for_machines(
+						conn,
+						&status.source,
+						&r#ref,
+						&[machine_id],
+					)
+					.await?
+				} else {
+					match server_id {
+						Some(server_id) => {
+							Issue::list_by_source_ref(conn, &status.source, &r#ref, &[server_id])
+								.await?
+						}
+						None => Vec::new(),
+					}
+				};
+				let retained = prior
+					.into_iter()
+					.next()
+					.filter(|i| i.active && i.effective_result == Some(CheckResult::Failed));
 				let (effective, escalates) = match retained {
 					Some(prior) => (CheckResult::Failed, prior.escalates),
 					None => (CheckResult::Broken, graded.escalates),
@@ -807,7 +852,7 @@ async fn file_health_events(
 		let message = message
 			.or_else(|| per_check_description(entry))
 			.unwrap_or_default();
-		if subject.is_machine() {
+		if on_machine {
 			// A degraded machine check is one issue at machine scope however
 			// many applications run on the box. Incident evaluation happens
 			// inside this call rather than through the deferred queue, which
@@ -824,7 +869,9 @@ async fn file_health_events(
 				Some(&stamp),
 			)
 			.await?;
-		} else {
+		} else if let Some(server_id) = server_id {
+			// Always bound here: a push with no application has no check that
+			// is not the machine's.
 			NewEvent {
 				source: status.source.clone(),
 				r#ref,
@@ -874,7 +921,7 @@ async fn file_health_events(
 				Some(&stamp),
 			)
 			.await?;
-		} else {
+		} else if let Some(server_id) = server_id {
 			NewEvent {
 				source: status.source.clone(),
 				r#ref,
@@ -893,7 +940,9 @@ async fn file_health_events(
 	// the per-group `server_groups` lock — is handed to the reeval worker so
 	// concurrent check-ins never convoy on that lock. Only grouped applications
 	// participate in incidents.
-	if group_id.is_some() {
+	if let Some(server_id) = server_id
+		&& group_id.is_some()
+	{
 		database::issues::enqueue_incident_reeval(conn, server_id).await?;
 	}
 

@@ -960,7 +960,7 @@
           "applications"
         ],
         "summary": "Report the calling device's own identity.",
-        "description": "Deprecated in favour of `GET /machines/self`. This asks which *application*\nthe caller is, which a box running more than one cannot answer; the machine\nendpoint asks which box it is and answers for any of them.\n\nResolves the caller from its device certificate and returns the server\nit is enrolled as together with its own device ID — the same pair\nreturned when the device completed enrollment. A device authenticates\nentirely from its certificate, so it never needs these IDs to make\ncalls; this endpoint lets one that has lost track of them recover them.\n\n- **401**: the request has no client certificate, or the certificate\n  doesn't match a known device.\n- **409**: the calling device is attached to more than one server, which\n  should not normally happen; contact support if you see this.\n- **412**: the device is registered but has not yet been attached to a\n  server.",
+        "description": "Deprecated in favour of `GET /machines/self`, which says what runs on the box\nas well as which box it is.\n\nResolves the caller from its device certificate and returns the box it is\nenrolled as together with its own device ID — the same pair returned when the\ndevice completed enrollment. A device authenticates entirely from its\ncertificate, so it never needs these IDs to make calls; this endpoint lets\none that has lost track of them recover them.\n\nThe id answered is the box's, not any workload's: an identity belongs to a\nbox, so the answer stays the same however many applications run on it.\n\n- **401**: the request has no client certificate, or the certificate\n  doesn't match a known device.\n- **409**: retained for callers that handle it; no longer raised, since an\n  identity is enrolled as at most one box.\n- **412**: the device is registered but has not yet been attached to a\n  box.",
         "operationId": "server_self",
         "responses": {
           "200": {
@@ -1490,7 +1490,7 @@
         "type": "object",
         "description": "What one application on the asking machine may act on.",
         "required": [
-          "application_id",
+          "type",
           "may_manage_dns",
           "may_manage_tls",
           "paused",
@@ -1499,11 +1499,6 @@
           "certificates"
         ],
         "properties": {
-          "application_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "The application these entitlements belong to."
-          },
           "certificates": {
             "type": "array",
             "items": {
@@ -1536,8 +1531,19 @@
               "type": "string"
             },
             "description": "The names it has registered addresses for."
+          },
+          "type": {
+            "$ref": "#/components/schemas/ApplicationType",
+            "description": "The type of application these entitlements belong to.\n\nA reporter correlates an entry to a workload it runs by the machine it\nasked as and this type. Canopy's own identifier for the application is\ninternal and never on the wire."
           }
         }
+      },
+      "ApplicationType": {
+        "type": "string",
+        "description": "What an application is: the software and the role it plays, as a slug. The set is open — a report carrying a type Canopy does not know creates an application of that type, which simply carries no per-type capabilities.",
+        "examples": [
+          "tamanu-central"
+        ]
       },
       "Artifact": {
         "type": "object",
@@ -2089,10 +2095,9 @@
           "applications": {
             "type": "array",
             "items": {
-              "type": "string",
-              "format": "uuid"
+              "$ref": "#/components/schemas/ApplicationType"
             },
-            "description": "The applications Canopy currently holds for that machine. Empty for a\nbox that has enrolled but not yet reported what runs on it, which is\nawaiting a report rather than an error."
+            "description": "The types of application Canopy currently holds for that machine. Empty\nfor a box that has enrolled but not yet reported what runs on it, which\nis awaiting a report rather than an error.\n\nA workload is named by its type, which is what the reporter itself said\nit was. Canopy's own identifier for an application is internal and never\non the wire."
           },
           "device_id": {
             "type": "string",
@@ -2116,13 +2121,12 @@
           "timings"
         ],
         "properties": {
-          "application_id": {
+          "application_type": {
             "type": [
               "string",
               "null"
             ],
-            "format": "uuid",
-            "description": "The application whose candidate version was tried, echoed from the\nworklist entry's `application_id`. Omitted by a consumer that predates\nthe entry carrying it, in which case Canopy derives it from the machine\nand the version."
+            "description": "The type of application whose candidate version was tried, echoed from\nthe worklist entry's `application_type`. Omitted by a consumer that\npredates the entry carrying it, in which case Canopy derives the\napplication from the machine and the version."
           },
           "data_bytes_after": {
             "type": "integer",
@@ -2709,7 +2713,7 @@
           "server_id": {
             "type": "string",
             "format": "uuid",
-            "description": "The server the calling device is enrolled as."
+            "description": "The box the calling device is enrolled as. This is the id a device\npushes status against, and the one `GET /machines/self` calls\n`machine_id`."
           }
         }
       },
@@ -3110,13 +3114,12 @@
           "region"
         ],
         "properties": {
-          "application_id": {
+          "application_type": {
             "type": [
               "string",
               "null"
             ],
-            "format": "uuid",
-            "description": "For a `migrate` entry, the application whose candidate version is under\ntest. Absent on any other entry.\n\nA snapshot is a machine's and a candidate version is an application's, so\na migration test names both: it restores the machine's data and applies\nthat application's next version's migrations to it."
+            "description": "For a `migrate` entry, the type of application whose candidate version is\nunder test. Absent on any other entry.\n\nA snapshot is a machine's and a candidate version is an application's, so\na migration test names both: it restores the machine's data and applies\nthat application's next version's migrations to it. The workload is named\nby its type, which is what the reporter itself said it was; Canopy's own\nidentifier for an application is internal and never on the wire."
           },
           "bucket": {
             "type": "string",

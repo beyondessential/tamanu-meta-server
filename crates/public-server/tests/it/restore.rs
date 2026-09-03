@@ -1458,8 +1458,10 @@ async fn a_two_workload_box_gets_one_replica_not_one_per_workload() {
 }
 
 /// The one place the grains genuinely interleave: a migrate entry names the
-/// machine whose snapshot it restores *and* the application whose candidate it
-/// carries, because a snapshot is a box's and a version is a workload's.
+/// machine whose snapshot it restores *and* the type of application whose
+/// candidate it carries, because a snapshot is a box's and a version is a
+/// workload's. The workload is named by its type, Canopy's own identifier for
+/// an application being internal and never on the wire.
 // spec: RST#dispatching-a-migration-test
 #[tokio::test(flavor = "multi_thread")]
 async fn a_migrate_entry_names_both_the_machine_and_the_candidates_application() {
@@ -1490,8 +1492,7 @@ async fn a_migrate_entry_names_both_the_machine_and_the_candidates_application()
 				"the data under test is the box's snapshot"
 			);
 			assert_eq!(
-				entry["application_id"],
-				machine.to_string(),
+				entry["application_type"], "tamanu-central",
 				"and the version under test is the workload's candidate"
 			);
 			assert_eq!(entry["snapshot_id"], "snap-1");

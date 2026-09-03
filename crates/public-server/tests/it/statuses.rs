@@ -276,7 +276,7 @@ async fn submit_status() {
 						"registered_names": [],
 						"certificates": [],
 						"applications": [{
-							"application_id": server_id,
+							"type": "tamanu-facility",
 							"may_manage_dns": false,
 							"may_manage_tls": false,
 							"paused": false,
@@ -3794,8 +3794,12 @@ async fn push_naming_a_type_creates_the_application_it_describes() {
 	.await
 }
 
+/// The fleet holds boxes that run nothing Canopy models, and their agents push
+/// the same unified shape as everyone else. There is no second grain for such a
+/// push to split into, so it is the box's in full.
+// spec: STA#transitional-unified-pushes
 #[tokio::test(flavor = "multi_thread")]
-async fn push_naming_no_type_against_a_bare_box_is_refused() {
+async fn a_push_from_a_bare_box_is_the_machines_in_full() {
 	commons_tests::server::run_with_device_auth(
 		"machine",
 		async |mut conn, cert, device_id, public, _| {
@@ -3809,14 +3813,61 @@ async fn push_naming_no_type_against_a_bare_box_is_refused() {
 				.json(&serde_json::json!({
 					"source": "alertd",
 					"healthy": true,
-					"health": [{ "check": "db", "result": "passed" }],
+					"health": [
+						{ "check": "db", "result": "warning" },
+						{ "check": "disk_free", "result": "passed" },
+					],
+					"uptimeSecs": 4321,
+					"timezone": "Pacific/Auckland",
 				}))
 				.await
-				.assert_status_conflict();
+				.assert_status_ok();
 
 			assert!(
 				application_types_on(&mut conn, machine_id).await.is_empty(),
-				"a refused push creates nothing"
+				"a box with no workload gets no invented one"
+			);
+
+			// Both checks file at machine scope, including the one whose name
+			// is an application's anywhere else: there is no application here
+			// for it to belong to.
+			for check in ["db", "disk_free"] {
+				let issue: IssueRow = sql_query(
+					r#"
+					SELECT escalates, active, message, description,
+						(resolved_at IS NOT NULL) AS is_resolved,
+						observed_result, effective_result
+					FROM issues
+					WHERE machine_id = $1 AND application_id IS NULL
+					  AND source = 'alertd' AND ref = $2
+				"#,
+				)
+				.bind::<sql_types::Uuid, _>(machine_id)
+				.bind::<sql_types::Text, _>(format!("health/{check}"))
+				.get_result(&mut conn)
+				.await
+				.unwrap_or_else(|e| panic!("{check} files against the machine: {e}"));
+				assert_eq!(issue.active, check == "db");
+			}
+
+			// Detail has nowhere else to go either, so all of it is the box's.
+			let machine: ExtraOnly = sql_query(
+				"SELECT extra FROM machine_reported_detail \
+				 WHERE machine_id = $1 AND source = 'alertd'",
+			)
+			.bind::<sql_types::Uuid, _>(machine_id)
+			.get_result(&mut conn)
+			.await
+			.expect("machine detail recorded");
+			assert_eq!(machine.extra["uptimeSecs"], 4321);
+			assert_eq!(machine.extra["timezone"], "Pacific/Auckland");
+
+			assert!(
+				sql_query("SELECT extra FROM application_reported_detail")
+					.get_result::<ExtraOnly>(&mut conn)
+					.await
+					.is_err(),
+				"no application, so no application detail"
 			);
 		},
 	)

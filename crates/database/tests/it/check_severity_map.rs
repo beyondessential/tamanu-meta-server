@@ -172,7 +172,7 @@ async fn silenced_checks_combine_scopes_and_stay_per_source() {
 
 		let checks = silenced_health_checks_for_server(
 			&mut conn,
-			server_id,
+			Some(server_id),
 			m_server_id,
 			Some(group_id),
 			"alertd",
@@ -185,10 +185,15 @@ async fn silenced_checks_combine_scopes_and_stay_per_source() {
 		);
 
 		// Ungrouped lookup only sees the server-scope silences.
-		let checks =
-			silenced_health_checks_for_server(&mut conn, server_id, m_server_id, None, "alertd")
-				.await
-				.expect("checks without group");
+		let checks = silenced_health_checks_for_server(
+			&mut conn,
+			Some(server_id),
+			m_server_id,
+			None,
+			"alertd",
+		)
+		.await
+		.expect("checks without group");
 		assert_eq!(checks.into_iter().collect::<Vec<_>>(), vec!["flaky"]);
 	})
 	.await

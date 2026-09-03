@@ -61,8 +61,10 @@ fn check_to_ref(source: &str, check: &str) -> String {
 /// check needs one, and where it comes from follows the scope: an
 /// application-scoped silence reads it off the application, a group-scoped one
 /// takes it from the operator (who silenced the check while looking at one),
-/// and a machine-scoped one has none — a machine never files an application's
-/// check, so there is nothing at that scope to silence.
+/// and a machine-scoped one has none. A machine-scoped silence never reaches
+/// here: a box Canopy holds no application for files everything as its own, so
+/// every check at that scope is in the machine namespace whatever its name,
+/// and [`Namespace::for_machine`] answers without needing a type.
 fn namespace_for(
 	source: &str,
 	check: &str,
@@ -166,6 +168,7 @@ pub async fn is_silenced(
 	// The event's own scope, when it has one below the group.
 	let namespace = match scope {
 		Scope::Application(id) => namespace_for(source, check, Some(&type_of(db, id).await?))?,
+		Scope::Machine(_) => Namespace::for_machine(source, check),
 		_ => namespace_for(source, check, None)?,
 	};
 	if matches!(scope, Scope::Application(_) | Scope::Machine(_))
@@ -193,7 +196,7 @@ pub async fn is_silenced(
 /// rollup.
 pub async fn silenced_health_checks_for_server(
 	db: &mut AsyncPgConnection,
-	application_id: Uuid,
+	application_id: Option<Uuid>,
 	machine_id: Uuid,
 	group_id: Option<Uuid>,
 	source: &str,
@@ -210,7 +213,14 @@ pub async fn silenced_health_checks_for_server(
 	// machine's, its own application type's, and the flat one a curated source
 	// uses. Without that, silencing one application type's check would silence
 	// its namesake on every other type in the group.
-	let application_type = type_of(db, application_id).await?.to_string();
+	//
+	// A box Canopy holds no application for files everything as the machine's,
+	// so there is no type to narrow by and no application scope to read: it
+	// gets the machine's silences and its group's unqualified ones.
+	let application_type = match application_id {
+		Some(id) => Some(type_of(db, id).await?.to_string()),
+		None => None,
+	};
 	let rows: Vec<String> = dsl::scoped_check_policies
 		.select(dsl::check_name)
 		.filter(dsl::ceiling.eq("skipped"))
@@ -221,11 +231,13 @@ pub async fn silenced_health_checks_for_server(
 				.or(dsl::subject.is_not_distinct_from(commons_types::namespace::SUBJECT_MACHINE))
 				.or(dsl::subject
 					.is_not_distinct_from(commons_types::namespace::SUBJECT_APPLICATION)
-					.and(dsl::application_type.is_not_distinct_from(application_type))),
+					.and(dsl::application_type.is_not_distinct_from(application_type))
+					.and(dsl::application_type.is_not_null())),
 		)
 		.filter(
 			dsl::application_id
-				.eq(application_id)
+				.is_not_distinct_from(application_id)
+				.and(dsl::application_id.is_not_null())
 				.or(dsl::machine_id.eq(machine_id))
 				.or(dsl::server_group_id
 					.is_not_distinct_from(group_id)
@@ -396,7 +408,7 @@ impl MachineSilencedRef {
 		created_by: Option<&str>,
 	) -> Result<Self> {
 		let check = ref_to_check(r#ref);
-		let namespace = namespace_for(source, check, None)?;
+		let namespace = Namespace::for_machine(source, check);
 		let policy = ScopedCheckPolicy::silence(
 			db,
 			Scope::Machine(machine_id),
@@ -419,7 +431,7 @@ impl MachineSilencedRef {
 		r#ref: &str,
 	) -> Result<()> {
 		let check = ref_to_check(r#ref);
-		let namespace = namespace_for(source, check, None)?;
+		let namespace = Namespace::for_machine(source, check);
 		ScopedCheckPolicy::unsilence(db, Scope::Machine(machine_id), source, &namespace, check)
 			.await?;
 		reevaluate_open_issues_for_machine_ref(db, machine_id, source, r#ref).await?;

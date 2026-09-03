@@ -232,7 +232,7 @@ pub async fn group_details(
 	let status_map: HashMap<Uuid, Status> = Status::latest_for_servers(&mut conn, &server_ids)
 		.await?
 		.into_iter()
-		.map(|s| (s.server_id, s))
+		.filter_map(|s| Some((s.server_id?, s)))
 		.collect();
 	// The archive affordance asks the same question `ServerGroup::soft_delete`
 	// enforces: has every member been quiet for longer than the status window.
@@ -808,7 +808,9 @@ pub async fn snapshot(
 	Ok(Json(Some(StatusSnapshotData {
 		id: status.id,
 		created_at: status.created_at,
-		server_id: status.server_id,
+		// The row was selected by this application, so it is the one the push
+		// was read for, whether or not the push also carried a machine.
+		server_id: args.server_id,
 		device_id: status.device_id,
 		r#type: server.r#type.clone(),
 		// A product with no application version presents none, as against the
@@ -945,7 +947,7 @@ async fn consolidated_checks_at(
 		};
 		let silenced = database::silenced_refs::silenced_health_checks_for_server(
 			conn,
-			server.id,
+			Some(server.id),
 			server.machine_id,
 			server.group_id,
 			&status.source,

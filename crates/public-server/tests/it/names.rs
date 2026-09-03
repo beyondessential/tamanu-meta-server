@@ -622,16 +622,18 @@ async fn entitlements_carry_one_entry_per_application_on_the_machine() {
 			// agent that has not learned the plural shape keeps working.
 			let one = ask(&public).await;
 			assert_eq!(one["applications"].as_array().unwrap().len(), 1);
-			assert_eq!(one["applications"][0]["application_id"], first.to_string());
+			assert_eq!(one["applications"][0]["type"], "tamanu-central");
 			assert_eq!(one["may_manage_dns"], true);
 			assert_eq!(one["domains"][0], "fiji.tamanu.app");
 
-			// A second workload, without the grants, on the same box.
+			// A second workload, without the grants, on the same box. The
+			// entry names its type, which is what a reporter correlates on:
+			// Canopy's own id for a workload never goes on the wire.
 			let second = Uuid::new_v4();
 			conn.batch_execute(&format!(
 				"INSERT INTO applications \
 				   (id, name, host, type, group_id, may_manage_dns, may_manage_tls, machine_id) \
-				 SELECT '{second}', 'ent-2', 'https://{second}.example.invalid', 'tamanu-central', \
+				 SELECT '{second}', 'ent-2', 'https://{second}.example.invalid', 'tamanu-facility', \
 				        group_id, false, false, machine_id \
 				 FROM applications WHERE id = '{first}'"
 			))
@@ -645,13 +647,13 @@ async fn entitlements_carry_one_entry_per_application_on_the_machine() {
 				.iter()
 				.map(|e| {
 					(
-						e["application_id"].as_str().unwrap(),
+						e["type"].as_str().unwrap(),
 						e["may_manage_dns"].as_bool().unwrap(),
 					)
 				})
 				.collect();
-			assert!(grants[first.to_string().as_str()]);
-			assert!(!grants[second.to_string().as_str()]);
+			assert!(grants["tamanu-central"]);
+			assert!(!grants["tamanu-facility"]);
 
 			assert_eq!(
 				two["may_manage_dns"], false,

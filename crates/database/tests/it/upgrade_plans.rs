@@ -67,7 +67,7 @@ async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Ap
 	let version: VersionStr = running.parse().expect("parse");
 	ReportedDetail::record(
 		conn,
-		server.id,
+		Some(server.id),
 		server.machine_id,
 		"test",
 		&serde_json::json!({}),
@@ -876,7 +876,7 @@ async fn group_with_a_member_behind(conn: &mut AsyncPgConnection) -> Uuid {
 		let version: VersionStr = running.parse().expect("parse");
 		ReportedDetail::record(
 			conn,
-			app.id,
+			Some(app.id),
 			app.machine_id,
 			"test",
 			&serde_json::json!({}),

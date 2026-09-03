@@ -122,6 +122,16 @@ impl Namespace {
 			.unwrap_or_else(|| Self::Application(application_type.clone()))
 	}
 
+	/// The namespace of a check on a push that names no application.
+	///
+	/// Total for the same reason [`Self::for_application`] is, from the other
+	/// side. A box Canopy holds no application for reports about itself, so
+	/// every check on such a push is the box's, including one whose name is
+	/// not in the machine set: there is no application for it to belong to.
+	pub fn for_machine(source: &str, check_name: &str) -> Self {
+		Self::of(source, check_name, None).unwrap_or(Self::Machine)
+	}
+
 	/// The `(subject, application_type)` storage columns for this namespace.
 	pub fn to_columns(&self) -> (Option<&'static str>, Option<String>) {
 		match self {

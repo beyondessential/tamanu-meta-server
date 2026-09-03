@@ -722,7 +722,10 @@ The id on the wire is the machine's, and both readings now take it that way.
 
 - Where the push names its type, Canopy correlates on it. `tamanuServerKind` is the only field a unified push carries that says what the reporter is, and role plus software is what a type is, so it maps through the same collapse the split's own backfill used. A push that names a type Canopy does not already hold for that box creates the application, which is FLT's "a report is the only thing that creates an application" and the reason the fleet can grow past what the migration produced.
 - Where it does not, the machine's own record answers, as long as there is exactly one to answer with.
-- Where there is none or several, the push is a 409. Refusing rather than guessing is the point: attributing a box's whole picture to an arbitrary one of its workloads is the failure this card exists to stop, and every machine came out of the split holding exactly one application, so either case is genuinely new.
+- Where the box holds none, the push is the box's in full: every check files at machine scope, every check's namespace is the machine's whatever its name, and all detail records as machine detail. The fleet holds a box with no Tamanu on it, and its agent pushes the same unified shape as everyone else, so there is no second grain for such a push to split into.
+- Where the box holds several and the push names none of them, the push is a 409. Refusing rather than guessing is the point: attributing a box's whole picture to an arbitrary one of its workloads is the failure this card exists to stop, and every machine came out of the split holding exactly one application, so the case is genuinely new.
+
+The "none" arm reaches further than ingest. A machine-scoped silence has no application type to name, so `Namespace::for_machine` answers for it rather than the partial `namespace_for`, which asks for a type and fails without one. That was the last 500 on a bare-box push.
 
 An ignored source reads without creating, since it records nowhere.
 
@@ -730,9 +733,11 @@ Enrolment is the machine's outright — see the enrolment section above, and the
 
 ### The push keeps the unified shape
 
-`StatusPayload` is `source`, `healthy`, `health` and a flat `extra`. STA describes a source, a `machine` section and an `applications` section with per-application `detail`, and describes correlation by machine, key and type. Ingest does separate a unified push by subject, so the split rule is real and tested; what is missing is the shape on the wire and the correlation that comes with it.
+`StatusPayload` is `source`, `healthy`, `health` and a flat `extra`. STA describes a source, a `machine` section and an `applications` section with per-application `detail`, and describes correlation by machine, key and type. Ingest does separate a unified push by subject and does resolve which application a unified push is about, so the split rule and the transitional correlation are both real and tested; what is missing is the explicit shape on the wire.
 
 The explicit sections are a refinement, not a prerequisite for anything else here. A push is already addressed to a machine by its path and already names its reporter by `source`, so a box and the workloads reporting on it are both identifiable without them.
+
+Adding them needs a reported key on `applications`, which the table has no column for: it carries `machine_id` and `type` and nothing the reporter chose. Until it does, type is the correlator everywhere on the wire, which is exactly what a box running two of one type cannot express.
 
 ### The reachability check is filed at one grain
 

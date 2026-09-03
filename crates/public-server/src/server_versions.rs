@@ -199,7 +199,7 @@ async fn server_versions_page(
 	let mut server_infos: Vec<ServerVersionInfo> = Vec::new();
 	for (id, name, host, down_after) in applications {
 		let host = host.unwrap_or_default(); // filtered to non-null above
-		let status = statuses.iter().find(|s| s.server_id == id);
+		let status = statuses.iter().find(|s| s.server_id == Some(id));
 
 		let version = status.and_then(|s| s.version.clone());
 		let up = ShortStatus::grade(

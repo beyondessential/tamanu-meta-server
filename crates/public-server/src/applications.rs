@@ -89,7 +89,9 @@ pub async fn list(State(db): State<Db>) -> Result<Json<Vec<PublicServer>>> {
 /// The calling device's own identity, as assigned at enrollment.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct SelfResponse {
-	/// The server the calling device is enrolled as.
+	/// The box the calling device is enrolled as. This is the id a device
+	/// pushes status against, and the one `GET /machines/self` calls
+	/// `machine_id`.
 	pub server_id: Uuid,
 	/// The calling device's own identity.
 	pub device_id: Uuid,
@@ -97,22 +99,24 @@ pub struct SelfResponse {
 
 /// Report the calling device's own identity.
 ///
-/// Deprecated in favour of `GET /machines/self`. This asks which *application*
-/// the caller is, which a box running more than one cannot answer; the machine
-/// endpoint asks which box it is and answers for any of them.
+/// Deprecated in favour of `GET /machines/self`, which says what runs on the box
+/// as well as which box it is.
 ///
-/// Resolves the caller from its device certificate and returns the server
-/// it is enrolled as together with its own device ID — the same pair
-/// returned when the device completed enrollment. A device authenticates
-/// entirely from its certificate, so it never needs these IDs to make
-/// calls; this endpoint lets one that has lost track of them recover them.
+/// Resolves the caller from its device certificate and returns the box it is
+/// enrolled as together with its own device ID — the same pair returned when the
+/// device completed enrollment. A device authenticates entirely from its
+/// certificate, so it never needs these IDs to make calls; this endpoint lets
+/// one that has lost track of them recover them.
+///
+/// The id answered is the box's, not any workload's: an identity belongs to a
+/// box, so the answer stays the same however many applications run on it.
 ///
 /// - **401**: the request has no client certificate, or the certificate
 ///   doesn't match a known device.
-/// - **409**: the calling device is attached to more than one server, which
-///   should not normally happen; contact support if you see this.
+/// - **409**: retained for callers that handle it; no longer raised, since an
+///   identity is enrolled as at most one box.
 /// - **412**: the device is registered but has not yet been attached to a
-///   server.
+///   box.
 // spec: DID
 #[utoipa::path(
 	get,
@@ -133,16 +137,11 @@ pub async fn self_identity(
 ) -> Result<Json<SelfResponse>> {
 	let mut conn = db.get().await?;
 	let device_id = device.0.0.id;
-	let mut applications = Application::get_by_device_id(&mut conn, device_id).await?;
-	if applications.len() > 1 {
-		return Err(AppError::Conflict(format!(
-			"device {device_id} is attached to {} applications; expected at most one",
-			applications.len(),
-		)));
-	}
-	let server = applications.pop().ok_or(AppError::DeviceHasNoServer)?;
+	let machine = database::machines::Machine::get_by_device_id(&mut conn, device_id)
+		.await?
+		.ok_or(AppError::DeviceHasNoServer)?;
 	Ok(Json(SelfResponse {
-		server_id: server.id,
+		server_id: machine.id,
 		device_id,
 	}))
 }

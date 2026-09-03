@@ -147,7 +147,7 @@ impl CanopyMcp {
 		let on_version: std::collections::HashSet<Uuid> = statuses
 			.iter()
 			.filter(|s| s.version.as_ref().map(|v| v.to_string()) == Some(target.clone()))
-			.map(|s| s.server_id)
+			.filter_map(|s| s.server_id)
 			.collect();
 		let adopting_servers: Vec<ServerRef> = applications
 			.iter()

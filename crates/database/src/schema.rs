@@ -751,13 +751,14 @@ diesel::table! {
 	statuses (id, created_at) {
 		id -> Uuid,
 		created_at -> Timestamptz,
-		server_id -> Uuid,
+		server_id -> Nullable<Uuid>,
 		version -> Nullable<Text>,
 		extra -> Jsonb,
 		device_id -> Nullable<Uuid>,
 		healthy -> Bool,
 		health -> Jsonb,
 		source -> Text,
+		machine_id -> Nullable<Uuid>,
 	}
 }
 
@@ -890,6 +891,7 @@ diesel::joinable!(slack_outbox -> incidents (incident_id));
 diesel::joinable!(slack_outbox -> issues (issue_id));
 diesel::joinable!(statuses -> applications (server_id));
 diesel::joinable!(statuses -> devices (device_id));
+diesel::joinable!(statuses -> machines (machine_id));
 diesel::joinable!(upgrade_plans -> server_groups (group_id));
 diesel::joinable!(upgrade_plans -> versions (target_version_id));
 diesel::joinable!(version_known_issues -> applications (application_id));

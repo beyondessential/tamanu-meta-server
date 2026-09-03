@@ -21,6 +21,7 @@ use commons_servers::csr::validate_csr;
 use commons_servers::device_auth::ServerDevice;
 use commons_types::Uuid;
 use commons_types::dns::{ManagedZone, is_within, match_zone, normalize_domain};
+use commons_types::server::app_type::ApplicationType;
 use database::application_certificates::OrderState;
 use database::diesel_async::AsyncPgConnection;
 use database::{
@@ -212,8 +213,13 @@ pub struct Entitlements {
 /// What one application on the asking machine may act on.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ApplicationEntitlements {
-	/// The application these entitlements belong to.
-	pub application_id: Uuid,
+	/// The type of application these entitlements belong to.
+	///
+	/// A reporter correlates an entry to a workload it runs by the machine it
+	/// asked as and this type. Canopy's own identifier for the application is
+	/// internal and never on the wire.
+	// spec: STA#push
+	pub r#type: ApplicationType,
 	/// Whether this application may manage its own DNS records.
 	pub may_manage_dns: bool,
 	/// Whether this application may obtain its own TLS certificates.
@@ -291,14 +297,14 @@ pub async fn entitlements(
 	ServerDevice(auth): ServerDevice,
 ) -> Result<Json<Entitlements>> {
 	let mut conn = state.db.get().await?;
-	let server = Application::live_by_device_id(&mut conn, auth.0.id)
+	// An identity belongs to a box, so the answer is the box's: every workload
+	// on it, whether that is one, several, or none.
+	let machine = database::machines::Machine::get_by_device_id(&mut conn, auth.0.id)
 		.await?
-		.into_iter()
-		.next()
 		.ok_or(AppError::DeviceHasNoServer)?;
 
 	Ok(Json(
-		entitlements_for(&mut conn, &server, &state.dns_zones).await?,
+		entitlements_for(&mut conn, &machine, &state.dns_zones).await?,
 	))
 }
 
@@ -311,36 +317,31 @@ pub async fn entitlements(
 // spec: CRT#what-an-application-may-act-on
 pub async fn entitlements_for(
 	conn: &mut AsyncPgConnection,
-	server: &Application,
+	machine: &database::machines::Machine,
 	zones: &[ManagedZone],
 ) -> Result<Entitlements> {
-	let machine = database::machines::Machine::get_by_id(conn, server.machine_id).await?;
 	let mut applications = Vec::new();
 	for application in machine.applications(conn).await? {
 		applications.push(one_applications_entitlements(conn, &application, zones).await?);
 	}
-	let flat = if let [only] = applications.as_slice() {
-		only.clone()
-	} else {
-		// Several workloads on one box: no single set of flat fields is the
-		// answer, so the list is.
-		ApplicationEntitlements {
-			application_id: server.id,
-			may_manage_dns: false,
-			may_manage_tls: false,
-			paused: false,
-			domains: Vec::new(),
-			registered_names: Vec::new(),
-			certificates: Vec::new(),
-		}
+	// A box running exactly one workload is described by the flat fields, which
+	// is what every reporter in the field reads. Running none or several, no
+	// single set of them is the answer, so they stay at their defaults and the
+	// list is.
+	let flat = match applications.as_slice() {
+		[only] => Some(only.clone()),
+		_ => None,
 	};
 	Ok(Entitlements {
-		may_manage_dns: flat.may_manage_dns,
-		may_manage_tls: flat.may_manage_tls,
-		paused: flat.paused,
-		domains: flat.domains,
-		registered_names: flat.registered_names,
-		certificates: flat.certificates,
+		may_manage_dns: flat.as_ref().is_some_and(|f| f.may_manage_dns),
+		may_manage_tls: flat.as_ref().is_some_and(|f| f.may_manage_tls),
+		paused: flat.as_ref().is_some_and(|f| f.paused),
+		domains: flat.as_ref().map(|f| f.domains.clone()).unwrap_or_default(),
+		registered_names: flat
+			.as_ref()
+			.map(|f| f.registered_names.clone())
+			.unwrap_or_default(),
+		certificates: flat.map(|f| f.certificates).unwrap_or_default(),
 		applications,
 	})
 }
@@ -376,7 +377,7 @@ async fn one_applications_entitlements(
 		.collect();
 
 	Ok(ApplicationEntitlements {
-		application_id: server.id,
+		r#type: server.r#type.clone(),
 		may_manage_dns: server.may_manage_dns,
 		may_manage_tls: server.may_manage_tls,
 		paused: server.name_management_paused(),

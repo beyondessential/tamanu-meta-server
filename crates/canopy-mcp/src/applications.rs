@@ -186,7 +186,10 @@ impl CanopyMcp {
 		let statuses = Status::latest_for_servers(&mut conn, &ids)
 			.await
 			.map_err(mcp_err)?;
-		let st_by: HashMap<Uuid, &Status> = statuses.iter().map(|s| (s.server_id, s)).collect();
+		let st_by: HashMap<Uuid, &Status> = statuses
+			.iter()
+			.filter_map(|s| Some((s.server_id?, s)))
+			.collect();
 
 		// `version` is documented as retained even when long offline, and
 		// `get_server` implements that through `ReportedDetail::last_version`.

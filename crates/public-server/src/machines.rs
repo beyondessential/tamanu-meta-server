@@ -11,6 +11,7 @@ use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::device_auth::ServerDevice;
 use commons_types::Uuid;
+use commons_types::server::app_type::ApplicationType;
 use database::{Db, machines::Machine};
 use serde::Serialize;
 use utoipa::ToSchema;
@@ -28,10 +29,15 @@ pub struct MachineSelfResponse {
 	pub device_id: Uuid,
 	/// The machine this identity is enrolled as.
 	pub machine_id: Uuid,
-	/// The applications Canopy currently holds for that machine. Empty for a
-	/// box that has enrolled but not yet reported what runs on it, which is
-	/// awaiting a report rather than an error.
-	pub applications: Vec<Uuid>,
+	/// The types of application Canopy currently holds for that machine. Empty
+	/// for a box that has enrolled but not yet reported what runs on it, which
+	/// is awaiting a report rather than an error.
+	///
+	/// A workload is named by its type, which is what the reporter itself said
+	/// it was. Canopy's own identifier for an application is internal and never
+	/// on the wire.
+	// spec: DID#query
+	pub applications: Vec<ApplicationType>,
 }
 
 /// Report the calling machine's own identity.
@@ -73,7 +79,7 @@ pub async fn self_identity(
 		.applications(&mut conn)
 		.await?
 		.into_iter()
-		.map(|a| a.id)
+		.map(|a| a.r#type)
 		.collect();
 	Ok(Json(MachineSelfResponse {
 		device_id,

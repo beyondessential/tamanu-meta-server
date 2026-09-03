@@ -315,8 +315,10 @@ pub(super) async fn decorate_with_status(
 	}
 	let ids: Vec<Uuid> = infos.iter().map(|i| i.id).collect();
 	let statuses = Status::latest_for_servers(conn, &ids).await?;
-	let by_server: std::collections::HashMap<Uuid, &Status> =
-		statuses.iter().map(|s| (s.server_id, s)).collect();
+	let by_server: std::collections::HashMap<Uuid, &Status> = statuses
+		.iter()
+		.filter_map(|s| Some((s.server_id?, s)))
+		.collect();
 	// Reachability is graded on this rather than on the status window, so an
 	// application quiet for longer than the window reads as unreachable rather
 	// than as never heard from.

@@ -72,7 +72,7 @@ async fn self_endpoint_401_without_certificate() {
 struct MachineSelfResponse {
 	device_id: Uuid,
 	machine_id: Uuid,
-	applications: Vec<Uuid>,
+	applications: Vec<String>,
 }
 
 /// A box asks which box it is, and is told what runs on it. Two workloads on
@@ -92,10 +92,13 @@ async fn machine_self_answers_for_a_box_running_two_applications() {
 				.execute(&mut conn)
 				.await
 				.unwrap();
-			for host in ["https://central.example", "https://facility.example"] {
+			for (host, r#type) in [
+				("https://central.example", "tamanu-central"),
+				("https://facility.example", "tamanu-facility"),
+			] {
 				sql_query("INSERT INTO applications (host, type, machine_id) VALUES ($1, $2, $3)")
 					.bind::<sql_types::Text, _>(host)
-					.bind::<sql_types::Text, _>("tamanu-central")
+					.bind::<sql_types::Text, _>(r#type)
 					.bind::<sql_types::Uuid, _>(machine_id)
 					.execute(&mut conn)
 					.await
@@ -110,10 +113,12 @@ async fn machine_self_answers_for_a_box_running_two_applications() {
 			let body: MachineSelfResponse = response.json();
 			assert_eq!(body.machine_id, machine_id);
 			assert_eq!(body.device_id, device_id);
+			let mut types = body.applications.clone();
+			types.sort();
 			assert_eq!(
-				body.applications.len(),
-				2,
-				"both workloads on the box are named"
+				types,
+				vec!["tamanu-central".to_string(), "tamanu-facility".to_string()],
+				"both workloads on the box are named, by the type each reported"
 			);
 		},
 	)

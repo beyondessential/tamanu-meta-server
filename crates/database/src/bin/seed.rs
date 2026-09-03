@@ -985,11 +985,16 @@ async fn seed_statuses(
 		health: serde_json::Value,
 		extra: serde_json::Value,
 	) -> Result<()> {
+		// A push is the box's, so the row names the machine. The seed names its
+		// boxes by the application on them, and each seeded application has a
+		// machine of its own, so the machine is read back off the application.
+		let machine_id = Application::get_by_id(conn, server_id).await?.machine_id;
 		diesel::insert_into(statuses::table)
 			.values(Status {
 				id: Uuid::new_v4(),
 				created_at,
-				server_id,
+				machine_id: Some(machine_id),
+				server_id: Some(server_id),
 				device_id,
 				version,
 				extra,

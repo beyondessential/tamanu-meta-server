@@ -2,7 +2,7 @@ use axum::{Json, extract::State};
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::{backup_jobs::BillingLabels, device_auth::ServerDevice};
-use commons_types::server::TagMap;
+use commons_types::server::{RESERVED_TAG_PREFIX, TagMap};
 use database::{
 	Db, applications::Application, diesel_async::AsyncPgConnection, server_groups::ServerGroup,
 };
@@ -69,6 +69,32 @@ pub async fn get_self(device: ServerDevice, State(db): State<Db>) -> Result<Json
 	}
 	let server = applications.pop().ok_or(AppError::DeviceHasNoServer)?;
 	Ok(Json(effective_tags_for_server(&mut conn, &server).await?))
+}
+
+/// The device-facing effective tag set for a box Canopy holds no application
+/// for: its own tags overlaid on its group's, plus the group's synthetic
+/// `canopy:` tags.
+///
+/// The type, product, kind and rank tags are an application's, and so are the
+/// billing labels, which attribute a workload to a deployment. A box with no
+/// workload has none of them rather than a made-up default.
+// spec: FLT#what-each-carries
+pub async fn effective_tags_for_machine(
+	conn: &mut AsyncPgConnection,
+	machine: &database::machines::Machine,
+) -> Result<TagMap> {
+	let mut merged = machine.tags_merged_with_group(conn).await?;
+	if let Some(group_id) = machine.group_id {
+		let group = ServerGroup::get_by_id(conn, group_id).await?;
+		merged.0.insert(
+			format!("{RESERVED_TAG_PREFIX}group-id"),
+			group.id.to_string(),
+		);
+		merged
+			.0
+			.insert(format!("{RESERVED_TAG_PREFIX}group-name"), group.name);
+	}
+	Ok(merged)
 }
 
 /// The device-facing effective tag set for a server: its own tags overlaid

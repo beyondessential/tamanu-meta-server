@@ -85,16 +85,28 @@ async fn combines_server_and_group_scopes() {
 
 		// Application scope and group scope combine for the grouped server.
 		assert_eq!(
-			silenced_health_checks_for_server(&mut conn, grouped, m_grouped, Some(group), "alertd")
-				.await
-				.unwrap(),
+			silenced_health_checks_for_server(
+				&mut conn,
+				Some(grouped),
+				m_grouped,
+				Some(group),
+				"alertd"
+			)
+			.await
+			.unwrap(),
 			checks(&["postgres", "uploads"]),
 		);
 		// The ungrouped server only sees its own silences.
 		assert_eq!(
-			silenced_health_checks_for_server(&mut conn, ungrouped, m_ungrouped, None, "alertd")
-				.await
-				.unwrap(),
+			silenced_health_checks_for_server(
+				&mut conn,
+				Some(ungrouped),
+				m_ungrouped,
+				None,
+				"alertd"
+			)
+			.await
+			.unwrap(),
 			checks(&["disk"]),
 		);
 		// A group member with no server-scope silence still inherits the
@@ -102,7 +114,7 @@ async fn combines_server_and_group_scopes() {
 		assert_eq!(
 			silenced_health_checks_for_server(
 				&mut conn,
-				unsilenced,
+				Some(unsilenced),
 				m_unsilenced,
 				Some(group),
 				"alertd"
@@ -135,14 +147,14 @@ async fn scoped_to_the_reporting_source() {
 			.unwrap();
 
 		assert_eq!(
-			silenced_health_checks_for_server(&mut conn, server, m_server, None, "alertd")
+			silenced_health_checks_for_server(&mut conn, Some(server), m_server, None, "alertd")
 				.await
 				.unwrap(),
 			checks(&["disk"]),
 			"only alertd's own silence applies to alertd's checks",
 		);
 		assert_eq!(
-			silenced_health_checks_for_server(&mut conn, server, m_server, None, "seedling")
+			silenced_health_checks_for_server(&mut conn, Some(server), m_server, None, "seedling")
 				.await
 				.unwrap(),
 			checks(&["postgres"]),
@@ -162,7 +174,7 @@ async fn unsilencing_removes_the_check() {
 			.await
 			.unwrap();
 		assert_eq!(
-			silenced_health_checks_for_server(&mut conn, server, m_server, None, "alertd")
+			silenced_health_checks_for_server(&mut conn, Some(server), m_server, None, "alertd")
 				.await
 				.unwrap(),
 			checks(&["postgres"]),
@@ -172,7 +184,7 @@ async fn unsilencing_removes_the_check() {
 			.await
 			.unwrap();
 		assert_eq!(
-			silenced_health_checks_for_server(&mut conn, server, m_server, None, "alertd")
+			silenced_health_checks_for_server(&mut conn, Some(server), m_server, None, "alertd")
 				.await
 				.unwrap(),
 			BTreeSet::new(),

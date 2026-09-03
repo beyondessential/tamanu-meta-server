@@ -696,7 +696,16 @@ pub async fn sample(
 			sample: None,
 		}));
 	};
-	let server = Application::get_by_id(&mut conn, status.server_id).await?;
+	// A push from a box Canopy holds no application for is the box's in full,
+	// so the sample's context is the box's: its tags, its name, and no host.
+	let server = match status.server_id {
+		Some(id) => Some(Application::get_by_id(&mut conn, id).await?),
+		None => None,
+	};
+	let machine = match status.machine_id {
+		Some(id) => Some(database::machines::Machine::get_by_id(&mut conn, id).await?),
+		None => None,
+	};
 
 	// Top-level extras — the column is always an object after our
 	// ingestion path strips reserved keys.
@@ -732,7 +741,11 @@ pub async fn sample(
 		})
 		.unwrap_or_default();
 
-	let tag_map = server.tags_merged_with_group(&mut conn).await?;
+	let tag_map = match (&server, &machine) {
+		(Some(server), _) => server.tags_merged_with_group(&mut conn).await?,
+		(None, Some(machine)) => machine.tags_merged_with_group(&mut conn).await?,
+		(None, None) => Default::default(),
+	};
 	let tags: HashMap<String, String> = tag_map.0.into_iter().collect();
 
 	Ok(Json(HealthcheckSampleResponse {
@@ -742,11 +755,13 @@ pub async fn sample(
 			check_extra,
 			tags,
 			server_host: server
-				.host
 				.as_ref()
+				.and_then(|s| s.host.as_ref())
 				.map(|h| h.0.to_string())
 				.unwrap_or_default(),
-			server_name: server.name,
+			server_name: server
+				.and_then(|s| s.name)
+				.or_else(|| machine.and_then(|m| m.name)),
 			seen_at: status.created_at,
 		}),
 	}))

@@ -111,10 +111,15 @@ async fn one_machine_silence_is_read_the_same_everywhere() {
 		assert_eq!(entry.effective.to_string(), "skipped");
 
 		// 2. The reporting source is told not to run it.
-		let told =
-			silenced_health_checks_for_server(&mut conn, application, machine, Some(group), SOURCE)
-				.await
-				.expect("agent-facing set");
+		let told = silenced_health_checks_for_server(
+			&mut conn,
+			Some(application),
+			machine,
+			Some(group),
+			SOURCE,
+		)
+		.await
+		.expect("agent-facing set");
 		assert!(
 			told.contains(CHECK),
 			"the agent is told to skip it: {told:?}"

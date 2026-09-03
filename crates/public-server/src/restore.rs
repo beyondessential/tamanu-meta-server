@@ -22,7 +22,7 @@ use commons_types::backup::{
 	BackupPurpose, BackupType, IntentDescriptor, ParamValues, RedactionOutcome, RestoreIntent,
 	RunOutcome, redaction_params, resolve_params, semantics,
 };
-use commons_types::server::app_type::RedactionManifest;
+use commons_types::server::app_type::{ApplicationType, RedactionManifest};
 use database::{
 	Db,
 	backups::{BackupRun, NewBackupCredentialIssuance, ServerGroupBackupConfig},
@@ -126,15 +126,18 @@ pub struct WorklistEntry {
 	#[deprecated(note = "use `machine_id`")]
 	#[schema(deprecated)]
 	pub server_id: Uuid,
-	/// For a `migrate` entry, the application whose candidate version is under
-	/// test. Absent on any other entry.
+	/// For a `migrate` entry, the type of application whose candidate version is
+	/// under test. Absent on any other entry.
 	///
 	/// A snapshot is a machine's and a candidate version is an application's, so
 	/// a migration test names both: it restores the machine's data and applies
-	/// that application's next version's migrations to it.
+	/// that application's next version's migrations to it. The workload is named
+	/// by its type, which is what the reporter itself said it was; Canopy's own
+	/// identifier for an application is internal and never on the wire.
 	// spec: RST#candidate-versions
 	#[serde(skip_serializing_if = "Option::is_none")]
-	pub application_id: Option<Uuid>,
+	#[schema(value_type = Option<String>)]
+	pub application_type: Option<ApplicationType>,
 	/// The backup type to restore (e.g. `tamanu-postgres`).
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
@@ -312,7 +315,7 @@ async fn worklist(
 					if let Some(version) =
 						migration_tests::candidate_for(&mut conn, application).await?
 					{
-						found = Some((application.id, version.id, version.as_semver()));
+						found = Some((application.r#type.clone(), version.id, version.as_semver()));
 						break;
 					}
 				}
@@ -380,7 +383,7 @@ async fn worklist(
 				group_id: d.group_id,
 				machine_id: machine.id,
 				server_id: machine.id,
-				application_id: target.as_ref().map(|(aid, _, _)| *aid),
+				application_type: target.as_ref().map(|(ty, _, _)| ty.clone()),
 				r#type: d.r#type.clone(),
 				intent: d.intent.clone(),
 				name: d.name.clone(),
@@ -725,11 +728,12 @@ pub struct MigrationArgs {
 	/// older consumers that report the identifier; omit it when `target_version`
 	/// is sent.
 	pub target_version_id: Option<Uuid>,
-	/// The application whose candidate version was tried, echoed from the
-	/// worklist entry's `application_id`. Omitted by a consumer that predates
-	/// the entry carrying it, in which case Canopy derives it from the machine
-	/// and the version.
-	pub application_id: Option<Uuid>,
+	/// The type of application whose candidate version was tried, echoed from
+	/// the worklist entry's `application_type`. Omitted by a consumer that
+	/// predates the entry carrying it, in which case Canopy derives the
+	/// application from the machine and the version.
+	#[schema(value_type = Option<String>)]
+	pub application_type: Option<ApplicationType>,
 	/// Whole seconds the whole migration run took.
 	pub total_elapsed_seconds: i64,
 	/// The migration that failed, when one did.
@@ -908,10 +912,10 @@ async fn resolve_migration_target(
 ///
 /// The version under test is an application's candidate while the data is the
 /// machine's snapshot, so the report has to say which workload on the box it
-/// was for. A consumer echoes the `application_id` from its worklist entry; one
-/// that predates the entry carrying it gets the application derived — the one on
-/// the machine whose candidate is that version, or the sole application where a
-/// box runs only one.
+/// was for. A consumer echoes the `application_type` from its worklist entry;
+/// one that predates the entry carrying it gets the application derived — the
+/// one on the machine whose candidate is that version, or the sole application
+/// where a box runs only one.
 // spec: RST#candidate-versions
 async fn resolve_migration_application(
 	conn: &mut AsyncPgConnection,
@@ -919,11 +923,13 @@ async fn resolve_migration_application(
 	machine_id: Uuid,
 	target_version_id: Uuid,
 ) -> Result<Uuid> {
-	if let Some(application_id) = migration.application_id {
-		return Ok(application_id);
-	}
 	let machine = database::machines::Machine::get_by_id(conn, machine_id).await?;
 	let on_box = machine.applications(conn).await?;
+	if let Some(named) = &migration.application_type
+		&& let Some(application) = on_box.iter().find(|a| &a.r#type == named)
+	{
+		return Ok(application.id);
+	}
 	if let [only] = on_box.as_slice() {
 		return Ok(only.id);
 	}

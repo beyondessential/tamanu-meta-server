@@ -40,7 +40,7 @@ async fn seed(conn: &mut AsyncPgConnection) -> (Uuid, Version) {
 	let running: VersionStr = "2.60.0".parse().expect("parse");
 	ReportedDetail::record(
 		conn,
-		SERVER.parse().expect("uuid"),
+		Some(SERVER.parse().expect("uuid")),
 		// The fixture gives the box the same id as the application on it.
 		SERVER.parse().expect("uuid"),
 		"test",

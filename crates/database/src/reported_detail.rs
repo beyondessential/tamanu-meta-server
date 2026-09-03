@@ -71,15 +71,22 @@ impl ReportedDetail {
 	/// about what the application is installed to run, and blanking on it
 	/// would make a group's headline version flicker off exactly when an
 	/// operator is looking at it.
+	///
+	/// `server` is `None` for a push from a box Canopy holds no application
+	/// for. There is no second grain to split into, so the whole push is the
+	/// machine's rather than half of it being dropped.
 	// spec: FIG
 	pub async fn record(
 		db: &mut AsyncPgConnection,
-		server: Uuid,
+		server: Option<Uuid>,
 		machine: Uuid,
 		source: &str,
 		extra: &serde_json::Value,
 		version: Option<&VersionStr>,
 	) -> Result<()> {
+		let Some(server) = server else {
+			return MachineReportedDetail::record(db, machine, source, extra).await;
+		};
 		let (machine_extra, application_extra) = split_by_grain(extra);
 		MachineReportedDetail::record(db, machine, source, &machine_extra).await?;
 		let extra = &application_extra;

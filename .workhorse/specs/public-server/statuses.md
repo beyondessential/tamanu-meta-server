@@ -72,7 +72,17 @@ An empty set of health checks is a different thing: the reporter is describing t
 Canopy holds the list of check names and detail fields that are machine-subject in order to do that separation.
 Everything not on that list is application-subject, so a check or field Canopy does not recognise is filed against the application, which is where an unrecognised one has always gone.
 
-A unified push describes one application, the format having no way to say otherwise.
+A unified push describes at most one application, the format having no way to say otherwise, and Canopy works out which one from the push itself.
+
+The only thing a unified push says about what its reporter is, is the role its Tamanu application plays.
+Where it says that, Canopy correlates on the type that role and its software make, and adopts an application of that type the machine does not already hold.
+Where it does not, the machine's own record answers, which it can as long as it holds exactly one application.
+
+A machine holding no application at all is a real case rather than a failure, because the fleet holds boxes running nothing Canopy models and their reporters push the same shape as everyone else.
+Such a push is the machine's in full: every check in it files against the machine, every check is identified in the machine's namespace whatever its name, and all of its detail is recorded as machine detail.
+
+A push that names no application Canopy holds for a machine that holds several is refused.
+Attributing a machine's whole picture to an arbitrary one of the applications on it is the thing separating the two grains exists to prevent.
 
 ## Legacy pushes
 
