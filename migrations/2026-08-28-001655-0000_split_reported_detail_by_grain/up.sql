@@ -32,6 +32,14 @@ CREATE TABLE machine_reported_detail (
 	PRIMARY KEY (machine_id, source)
 );
 
+-- `extra` is `NOT NULL`, which does not make it an object: JSON `null` is a
+-- value, so `NOT NULL` admits it and the backfill's `COALESCE(extra, '{}')`
+-- never saw it. Rows carrying it exist. Both statements below need an object —
+-- `jsonb_each` refuses a non-object, and so does each `-` key delete — so
+-- flatten anything that isn't one to the empty object it already means.
+UPDATE application_reported_detail SET extra = '{}'::jsonb
+WHERE jsonb_typeof(extra) <> 'object';
+
 -- Move the box's fields off each application's row and onto its machine's.
 --
 -- A machine may host several applications, each with a row for the same
