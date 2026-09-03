@@ -174,6 +174,33 @@ that the server imports its wire types from a published crate, it leaks `databas
 versioning model rests on. The Rust types are already correct and only the generator is
 thin, so the generator is the cheaper place to fix.
 
+## Build steps
+
+- [x] `crates/canopy-api-codegen`: workspace member, not published, binary that reads
+      `crates/public-server/openapi.json` and writes `crates/canopy-api/src/generated.rs`
+- [x] Port the typify schema emission: wrap `components.schemas` into a JSON Schema root,
+      emit wire types, keep `#[non_exhaustive]` plus a builder on named-field structs
+- [x] Timestamps by declared format, not by string substitution: `format: date-time`
+      becomes a timestamp type, and `CredentialProcessOutput.Expiration` gains that format
+      in `openapi.rs` so it needs no special case
+- [x] Secrets from a declared list of schema properties, validated against the document so
+      a renamed field fails generation rather than silently unwrapping
+- [x] Open `allOf` (a typed member beside a free-form member) emits the typed struct with a
+      map field for the further keys, so `StatusPayload` and `HealthCheck` are typed
+  - [x] typify 0.7 drops `additionalProperties` from a schema that also has declared
+        properties, so the catch-all field is injected into the emitted AST, and
+        generation fails if a folded schema does not receive one
+- [x] `additionalProperties` with a declared value type emits a map of that type, so
+      `/bestool/snippets` and `/status/{server_id}/check-severities` are typed
+- [x] Emit one method per operation over `http::Method`, names derived from the path with
+      the verb disambiguating a path served by several verbs
+- [x] `crates/canopy-api`: package `bes-canopy-api`, hand-written `CanopyTransport`,
+      `CanopyClient<T>`, error type, `Redacted`, and the committed generated source
+- [x] No HTTP client dependency: `http` and `bytes` only for the wire, gzip for bodies
+- [x] `just gen-api` beside `gen-openapi`, and a CI check that regenerating leaves no diff
+- [x] Assert no operation generates an untyped JSON body or response
+- [x] `just check`, `just lint`, `just fmt-check`, `just test-package bes-canopy-api`
+
 ## Specs and repo docs
 
 [APIC](../../specs/platform/api-client-crate.md) covers the published crate: generated in

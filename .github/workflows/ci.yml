@@ -169,6 +169,28 @@ jobs:
           retention-days: 5
           if-no-files-found: ignore
 
+  generated:
+    name: Generated files
+    runs-on: ubuntu-latest
+    # The committed OpenAPI documents and the generated API client must be what
+    # the current code produces. Regenerating needs no database and no network:
+    # the documents come from compile-time annotations and the client comes from
+    # the committed public document.
+    steps:
+      - name: Free up space
+        run: sudo rm -rf /opt/hostedtoolcache /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup || true
+      - uses: actions/checkout@v7.0.1
+      - name: Configure toolchain
+        run: |
+          rustup toolchain install --profile minimal --no-self-update stable
+          rustup default stable
+      - uses: taiki-e/install-action@v2.86.1
+        with:
+          tool: just
+      - uses: Swatinem/rust-cache@v2
+      - run: just check-generated
+      - run: just check-api-deps
+
   # Dummy job to have a stable name for PR requirements
   tests-pass:
     if: always() # always run even if dependencies fail
@@ -178,6 +200,7 @@ jobs:
       - clippy
       - fmt
       - e2e
+      - generated
     runs-on: ubuntu-latest
     steps:
       - uses: re-actors/alls-green@release/v1

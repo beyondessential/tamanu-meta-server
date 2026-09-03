@@ -162,6 +162,41 @@ gen-openapi:
     cargo run --quiet --bin public-openapi-dump > crates/public-server/openapi.json
     cd private-web && npm run gen:api-types
 
+# Regenerate the published API client (crates/canopy-api) from the public
+# server's OpenAPI document. Run this after `gen-openapi` whenever the public
+# API changes; the generated source is committed alongside the document.
+gen-api:
+    cargo run --quiet -p canopy-api-codegen
+
+# Check the published API client depends on no HTTP client: how a request
+# reaches canopy is its consumer's to decide, so the crate carries the wire
+# types and the call plumbing but no transport.
+check-api-deps:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    deps=$(cargo tree -p bes-canopy-api --edges normal --prefix none | awk '{print $1}' | sort -u)
+    for forbidden in reqwest hyper h2 rustls native-tls curl isahc ureq; do
+        if grep -qx "$forbidden" <<<"$deps"; then
+            echo "bes-canopy-api must not depend on $forbidden: the transport is the consumer's" >&2
+            exit 1
+        fi
+    done
+
+# Check the committed OpenAPI document and API client are what the current code
+# generates. CI runs this; a diff means `just gen-openapi && just gen-api`
+# wasn't run (or wasn't committed).
+check-generated:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo run --quiet --bin public-openapi-dump > crates/public-server/openapi.json
+    cargo run --quiet --bin private-openapi-dump > private-web/openapi.json
+    cargo run --quiet -p canopy-api-codegen
+    if ! git diff --quiet -- crates/public-server/openapi.json private-web/openapi.json crates/canopy-api/src/generated.rs; then
+        echo "generated files are out of date; run 'just gen-openapi && just gen-api' and commit the result" >&2
+        git --no-pager diff --stat -- crates/public-server/openapi.json private-web/openapi.json crates/canopy-api/src/generated.rs >&2
+        exit 1
+    fi
+
 # Clean build artifacts
 clean:
     cargo clean
