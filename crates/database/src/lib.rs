@@ -6,6 +6,9 @@ use diesel_async::{
 };
 
 pub mod admins;
+pub mod application_certificates;
+pub mod application_names;
+pub mod applications;
 pub mod artifacts;
 pub mod backup;
 pub mod backups;
@@ -16,6 +19,9 @@ pub mod chrome_releases;
 pub mod devices;
 pub mod inventory_secret_variables;
 pub mod issues;
+pub mod machine_enrollment_challenges;
+pub mod machine_enrollment_tokens;
+pub mod machines;
 pub mod maintenance_windows;
 pub mod mcp_tokens;
 pub mod migration_tests;
@@ -27,13 +33,8 @@ pub mod reported_detail;
 pub mod restore;
 pub mod schema;
 pub mod self_alerts;
-pub mod server_certificates;
 pub mod server_domains;
-pub mod server_enrollment_challenges;
-pub mod server_enrollment_tokens;
 pub mod server_groups;
-pub mod server_names;
-pub mod servers;
 pub mod silenced_refs;
 pub mod slack_outbox;
 pub mod source_policies;
@@ -48,13 +49,15 @@ pub mod version_known_issues;
 pub mod versions;
 pub mod views;
 
+pub use application_certificates::{ApplicationCertificate, OrderState, RevocationReason, Risk};
+pub use application_names::ApplicationName;
 pub use backups::{
 	BackupCredentialIssuance, BackupMaintenanceRun, BackupMaintenanceRunFilters,
 	BackupRecoveryVerification, BackupRepoObservedSnapshot, BackupRepoSnapshot, BackupRepoStats,
 	BackupRequest, BackupRun, BackupRunFilters, BackupRunProgress, BackupTypeDefault,
-	MaintenanceOutcomeFilter, NewBackupCredentialIssuance, NewBackupRun, NewBackupRunProgress,
-	NewBackupTypeDefault, NewObservedSnapshot, NewServerGroupBackupConfig,
-	NewServerGroupBackupSchedule, RetentionPolicy, ServerBackupCapability, ServerGroupBackupConfig,
+	MachineBackupCapability, MaintenanceOutcomeFilter, NewBackupCredentialIssuance, NewBackupRun,
+	NewBackupRunProgress, NewBackupTypeDefault, NewObservedSnapshot, NewServerGroupBackupConfig,
+	NewServerGroupBackupSchedule, RetentionPolicy, ServerGroupBackupConfig,
 	ServerGroupBackupSchedule,
 };
 pub use bestool_snippets::{BestoolSnippet, NewBestoolSnippet};
@@ -63,14 +66,13 @@ pub use commons_types::backup::{
 	RunOutcome,
 };
 pub use devices::{Device, DeviceConnection, DeviceKey, DeviceWithInfo};
+pub use machines::{Machine, MachineUpdate, NewMachine};
 pub use recovery_vault::RecoveryVaultWrite;
 pub use restore::{
 	BackupRestoreCheck, NewBackupRestoreCheck, NewRestoreReplica, RestoreConsumerCapability,
 	RestoreReplica, RestoreReplicaUpdate,
 };
-pub use server_certificates::{OrderState, RevocationReason, Risk, ServerCertificate};
 pub use server_domains::ServerGroupDomain;
-pub use server_names::ServerName;
 
 pub type Db = Pool<AsyncPgConnection>;
 
@@ -104,7 +106,7 @@ pub fn init_ro_to(url: &str) -> Db {
 	)
 }
 
-// Bound the pool. Every pod that links this crate (the two servers plus each
+// Bound the pool. Every pod that links this crate (the two applications plus each
 // job) runs its own pool against the same backend; mobc's defaults
 // (max_open=10, idle and lifetimes uncapped) let the fleet's aggregate demand
 // exceed the server's max_connections and pin backends indefinitely. Size per

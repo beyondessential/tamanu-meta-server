@@ -1,4 +1,4 @@
-//! Where each deployment is going: the version a group intends to move to, and
+//! Where each group is going: the version it intends to move to, and
 //! optionally when.
 //!
 //! A plan is a statement of intent. Nothing here performs or schedules an
@@ -119,7 +119,7 @@ impl UpgradePlan {
 	/// Record where a group is going, retiring any plan it already had.
 	///
 	/// The target must be published and ahead of what the group runs: a plan to
-	/// move somewhere the deployment has already been is not a plan.
+	/// move somewhere the group has already been is not a plan.
 	// spec: UPG#a-plan
 	pub async fn record(
 		db: &mut AsyncPgConnection,
@@ -261,7 +261,7 @@ impl UpgradePlan {
 	/// Plans that belong on a calendar: those with a day, still open or since
 	/// met.
 	///
-	/// A replaced or withdrawn plan is not where the deployment is going, so it
+	/// A replaced or withdrawn plan is not where the group is going, so it
 	/// leaves the calendar; a met one stays as the record of what landed.
 	// spec: UPG#the-calendar-feed
 	pub async fn dated(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
@@ -281,7 +281,7 @@ impl UpgradePlan {
 	/// Amend an open plan's date and note.
 	///
 	/// The same plan better described, so it is not superseded and does not
-	/// enter the history as a second plan. Changing where a deployment is going
+	/// enter the history as a second plan. Changing where a group is going
 	/// is a replacement instead, so the target is not amendable here.
 	// spec: UPG#a-plan
 	pub async fn amend(
@@ -315,9 +315,9 @@ impl UpgradePlan {
 			.ok_or_else(|| AppError::BadRequest("only an open plan can be amended".into()))
 	}
 
-	/// Withdraw a plan: the deployment is no longer going there.
+	/// Withdraw a plan: the group is no longer going there.
 	///
-	/// The plan is retained. Where a deployment was going and the fact that it
+	/// The plan is retained. Where a group was going and the fact that it
 	/// stopped going there is what the history exists to record, and a withdrawn
 	/// plan reads differently from one that was met.
 	// spec: UPG#a-plan
@@ -355,7 +355,7 @@ pub enum PlanOutcome {
 	Met,
 	/// A later plan took its place.
 	Replaced,
-	/// An operator said the deployment is no longer going there.
+	/// An operator said the group is no longer going there.
 	Withdrawn,
 }
 
@@ -387,7 +387,7 @@ pub fn ended_at(plan: &UpgradePlan) -> Option<Timestamp> {
 /// Close every open plan whose group has reached its target, returning how many
 /// were closed.
 ///
-/// Reaching a version past the target closes the plan too: a deployment that
+/// Reaching a version past the target closes the plan too: a group that
 /// jumped further has done the upgrade and then some, and holding the plan open
 /// would report it as outstanding.
 // spec: UPG#when-a-plan-is-met
@@ -422,7 +422,7 @@ pub async fn close_met_plans(db: &mut AsyncPgConnection) -> Result<usize> {
 /// The version `group` plans to move to, if it has an open plan.
 ///
 /// This is what pre-upgrade testing targets in preference to the newest
-/// published version, so a deployment deliberately moving to an older minor is
+/// published version, so a group deliberately moving to an older minor is
 /// held against that minor instead.
 // spec: UPG#what-reads-a-plan
 pub async fn planned_target(db: &mut AsyncPgConnection, group_id: Uuid) -> Result<Option<Version>> {

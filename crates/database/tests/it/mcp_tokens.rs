@@ -169,7 +169,7 @@ async fn expiry_sweep_files_one_self_alert_and_recovers() {
 			panic!("exactly one self-alert, got: {alerts:?}");
 		};
 		assert!(issue.active);
-		assert_eq!(issue.server_id, None);
+		assert_eq!(issue.application_id, None);
 		assert_eq!(issue.server_group_id, None);
 		assert!(issue.server_group_id.is_none());
 		assert!(issue.message.contains("claude"), "{}", issue.message);

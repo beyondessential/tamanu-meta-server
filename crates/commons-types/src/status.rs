@@ -2,6 +2,9 @@ use std::fmt::Display;
 
 use serde::{Deserialize, Serialize};
 
+use crate::namespace::NamespaceRef;
+use crate::subject::CheckSubject;
+
 /// How a server should treat one of its healthchecks, distilled from
 /// canopy's operator-side configuration (the policy catalog and the
 /// silences) into a three-level device-facing vocabulary.
@@ -41,23 +44,54 @@ impl Display for CheckSeverity {
 	}
 }
 
-/// Reachability of a server, based on how recently it last reported a status update.
+/// Reachability of a target, from how recently it last reported.
+///
+/// Three states and no degrees between them: a target is reachable,
+/// unreachable, or has never reported. How long it has been quiet is measured
+/// against that target's own configured threshold rather than any fixed one, so
+/// a target that reports every few minutes and one that reports hourly are
+/// each judged on what is normal for them.
+// spec: CHK#reachability
 #[derive(
 	Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum ShortStatus {
-	/// The server reported within the last two minutes; it is online and reachable.
+	/// Something is currently reporting about the target: its last report is
+	/// within its own down threshold.
 	Up,
-	/// The server has not reported in over thirty minutes; treated as unreachable.
+	/// Nothing is reporting about the target any more — it is unreachable.
 	Down,
-	/// The server last reported between ten and thirty minutes ago.
-	Away,
-	/// The server last reported between two and ten minutes ago — a brief gap that may not indicate a real problem.
-	Blip,
-	/// No status has ever been reported for this server.
+	/// No status has ever been reported for this target.
 	#[default]
 	Gone,
+}
+
+impl ShortStatus {
+	/// Grade a target from when it last reported and its own down threshold.
+	///
+	/// `last_reported_at` is when anything last reported about the target,
+	/// however long ago, so `None` means never — not merely nothing recent.
+	/// Sourcing it from a windowed read of status history makes a target
+	/// quiet for longer than the window read as never heard from, which is
+	/// the state that outranks every other on every surface.
+	///
+	/// Every grain grades the same way. Which threshold applies is the
+	/// target's own, which is why the models call this rather than each
+	/// caller reaching for a clock of its own.
+	// spec: CHK#reachability
+	pub fn grade(
+		last_reported_at: Option<jiff::Timestamp>,
+		down_after: jiff::SignedDuration,
+	) -> Self {
+		last_reported_at.map_or(Self::Gone, |at| {
+			if at.duration_since(jiff::Timestamp::now()).abs() >= down_after {
+				Self::Down
+			} else {
+				Self::Up
+			}
+		})
+	}
 }
 
 impl Display for ShortStatus {
@@ -65,8 +99,6 @@ impl Display for ShortStatus {
 		match self {
 			ShortStatus::Up => write!(f, "up"),
 			ShortStatus::Down => write!(f, "down"),
-			ShortStatus::Away => write!(f, "away"),
-			ShortStatus::Blip => write!(f, "blip"),
 			ShortStatus::Gone => write!(f, "gone"),
 		}
 	}
@@ -202,21 +234,35 @@ pub struct OperatorPresence {
 
 /// Distil a status row's `health[]` into the set of identified operators.
 ///
-/// Finds the `external_users` entry and collects its `users[]` sessions
-/// that carry a `tailscale` login, deduplicating by login (keeping the
-/// earliest `connected_since`). Display fields are left unfilled — looking
-/// up the `tailscale_users` cache is the private-server's job. Lenient on
-/// shape: malformed entries and sessions are skipped.
+/// Finds the `external_users` entry and reads its sessions. Lenient on shape:
+/// a malformed entry yields nobody rather than an error.
 pub fn operators_from_health(health: &serde_json::Value) -> Vec<OperatorPresence> {
-	let Some(users) = health
+	let Some(entry) = health
 		.as_array()
 		.into_iter()
 		.flatten()
 		.filter_map(|e| e.as_object())
 		.find(|e| e.get("check").and_then(|v| v.as_str()) == Some("external_users"))
-		.and_then(|e| e.get("users"))
-		.and_then(|u| u.as_array())
 	else {
+		return Vec::new();
+	};
+	operators_from_sessions(entry.get("users"))
+}
+
+/// Distil the `users[]` of an `external_users` check into identified
+/// operators.
+///
+/// The sessions are the same whichever way the check is read — out of a
+/// status row's `health[]` or out of the detail on a stored check state — so
+/// both go through here and a person reads the same in either place.
+///
+/// Collects the sessions carrying a `tailscale` login, deduplicating by login
+/// and keeping the earliest `connected_since`. Display fields are left
+/// unfilled: looking up the `tailscale_users` cache is the private-server's
+/// job. Lenient on shape, so a malformed session is skipped rather than
+/// losing the rest.
+pub fn operators_from_sessions(users: Option<&serde_json::Value>) -> Vec<OperatorPresence> {
+	let Some(users) = users.and_then(|u| u.as_array()) else {
 		return Vec::new();
 	};
 
@@ -398,6 +444,91 @@ mod tests {
 			}
 		}
 	}
+
+	/// A person is logged in to a box, so the sessions read are the box's.
+	mod consolidated_operators {
+		use crate::status::{CheckResult, ConsolidatedCheck, ConsolidatedChecks, HealthState};
+		use crate::subject::CheckSubject;
+
+		fn check(subject: CheckSubject, name: &str, logins: &[&str]) -> ConsolidatedCheck {
+			let users: Vec<serde_json::Value> = logins
+				.iter()
+				.map(|l| serde_json::json!({"tailscale": l}))
+				.collect();
+			ConsolidatedCheck {
+				source: "alertd".into(),
+				check: name.into(),
+				namespace: (&crate::namespace::Namespace::for_machine("alertd", name)).into(),
+				qualified_name: name.into(),
+				observed: Some(CheckResult::Passed),
+				effective: CheckResult::Passed,
+				silenced: false,
+				subject,
+				detail: serde_json::json!({ "users": users }),
+			}
+		}
+
+		fn checks(checks: Vec<ConsolidatedCheck>) -> ConsolidatedChecks {
+			ConsolidatedChecks {
+				health_state: HealthState::Healthy,
+				checks,
+			}
+		}
+
+		#[test]
+		fn reads_the_machines_sessions() {
+			let c = checks(vec![check(
+				CheckSubject::Machine,
+				"external_users",
+				&["alice@example.com", "bob@example.com"],
+			)]);
+			let ops = c.operators();
+			assert_eq!(ops.len(), 2);
+			assert_eq!(ops[0].login, "alice@example.com");
+		}
+
+		/// A workload reporting sessions about itself is not who is on the
+		/// box, so it does not answer the question.
+		#[test]
+		fn ignores_an_applications_own_sessions() {
+			let c = checks(vec![check(
+				CheckSubject::Application,
+				"external_users",
+				&["mallory@example.com"],
+			)]);
+			assert_eq!(c.operators(), Vec::new());
+		}
+
+		/// Where both are present the box's is the one that counts.
+		#[test]
+		fn prefers_the_machines_over_an_applications() {
+			let c = checks(vec![
+				check(
+					CheckSubject::Application,
+					"external_users",
+					&["mallory@example.com"],
+				),
+				check(
+					CheckSubject::Machine,
+					"external_users",
+					&["alice@example.com"],
+				),
+			]);
+			let ops = c.operators();
+			assert_eq!(ops.len(), 1);
+			assert_eq!(ops[0].login, "alice@example.com");
+		}
+
+		#[test]
+		fn nobody_when_the_check_is_absent() {
+			let c = checks(vec![check(
+				CheckSubject::Machine,
+				"load",
+				&["alice@example.com"],
+			)]);
+			assert_eq!(c.operators(), Vec::new());
+		}
+	}
 }
 
 /// A server's self-reported health, derived from the outcomes of its own
@@ -423,17 +554,24 @@ pub enum HealthState {
 	Unhealthy,
 }
 
-/// One check in a server's consolidated state: a single `(source, check)`
-/// with its results already graded by policy, ready to present. The same
-/// shape whether taken from current state or reconstructed as of a past
-/// time, and across every reporting source — the presentation never sees a
-/// single source's raw report.
+/// One check in a server's consolidated state: a single check identity with
+/// its results already graded by policy, ready to present. The same shape
+/// whether taken from current state or reconstructed as of a past time, and
+/// across every reporting source — the presentation never sees a single
+/// source's raw report.
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ConsolidatedCheck {
 	/// The source that reports this check.
 	pub source: String,
 	/// The check's name, as reported.
 	pub check: String,
+	/// Which catalog entry this check resolves to. Two application types
+	/// reporting one name are two checks, so the name alone does not address
+	/// a policy, a silence or a document — this does.
+	pub namespace: NamespaceRef,
+	/// How the check reads to an operator: `<type>.<check>` where it is one
+	/// application type's, the bare name otherwise.
+	pub qualified_name: String,
 	/// What the source reported, before policy. `None` if the stored state
 	/// carried no observed result.
 	#[schema(value_type = Option<String>)]
@@ -444,6 +582,14 @@ pub struct ConsolidatedCheck {
 	pub effective: CheckResult,
 	/// Whether this check is silenced at server or group scope.
 	pub silenced: bool,
+	/// Which grain this check is filed against.
+	///
+	/// An application presents its machine's checks among its own, and this is
+	/// what marks them: a `machine` entry in an application's list is the
+	/// box's, one filing seen from each workload the box carries rather than a
+	/// copy per workload.
+	// spec: CHK#a-machines-checks-present-on-its-applications
+	pub subject: CheckSubject,
 	/// The detail the source attached to the check (its extra fields), as an
 	/// object. Empty object when the check carried none.
 	#[schema(value_type = Object)]
@@ -460,7 +606,48 @@ pub struct ConsolidatedChecks {
 	pub checks: Vec<ConsolidatedCheck>,
 }
 
+impl ConsolidatedChecks {
+	/// The people logged in to this target right now, from its
+	/// `external_users` check.
+	///
+	/// People are logged in to a box, so this reads the check filed against
+	/// the machine and ignores one an application reported about itself. A
+	/// box carrying two workloads has one set of sessions rather than one per
+	/// workload, which is what the machine grain is for.
+	// spec: FLT
+	pub fn operators(&self) -> Vec<OperatorPresence> {
+		self.checks
+			.iter()
+			.find(|c| c.check == "external_users" && c.subject == CheckSubject::Machine)
+			.map(|c| operators_from_sessions(c.detail.get("users")))
+			.unwrap_or_default()
+	}
+}
+
 impl HealthState {
+	/// The worse of two rollups.
+	///
+	/// Rolling two sets up separately and taking the worse of the pair gives
+	/// the same answer as classifying their union, because a rollup is the
+	/// worst result over its input and worst-of is associative. That is what
+	/// lets an application take in its machine's health without the box's
+	/// checks being graded once per workload on it.
+	// spec: CHK#health-rollup
+	pub fn worse_of(self, other: Self) -> Self {
+		fn severity(state: HealthState) -> u8 {
+			match state {
+				HealthState::Healthy => 0,
+				HealthState::Warning => 1,
+				HealthState::Unhealthy => 2,
+			}
+		}
+		if severity(other) > severity(self) {
+			other
+		} else {
+			self
+		}
+	}
+
 	/// Roll a set of effective check results into a server health state:
 	/// any failure ⇒ unhealthy; otherwise any warning or brokenness ⇒
 	/// warning; otherwise healthy. Passed and skipped results don't count.

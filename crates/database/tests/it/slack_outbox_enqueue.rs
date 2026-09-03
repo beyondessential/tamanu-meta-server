@@ -38,7 +38,7 @@ async fn insert_server_with_delay(
 	delay_secs: Option<i64>,
 ) -> Uuid {
 	// Group + server pair so events can open incidents (incidents are
-	// group-keyed; ungrouped servers don't promote issues to incidents).
+	// group-keyed; ungrouped applications don't promote issues to incidents).
 	let group: RowId = if let Some(secs) = delay_secs {
 		sql_query(
 			r#"
@@ -65,8 +65,7 @@ async fn insert_server_with_delay(
 	};
 	let row: RowId = sql_query(
 		r#"
-			INSERT INTO servers (host, group_id)
-			VALUES ($1, $2)
+			WITH m AS (INSERT INTO machines (group_id) VALUES ($2) RETURNING id) INSERT INTO applications (type, host, group_id, machine_id) SELECT 'tamanu-central', $1, $2, m.id FROM m
 			RETURNING id
 		"#,
 	)

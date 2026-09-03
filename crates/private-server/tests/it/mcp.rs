@@ -57,7 +57,7 @@ macro_rules! call_tool {
 	}};
 }
 
-/// Seed a group, two servers (one grouped + monitored with a fresh healthy
+/// Seed a group, two applications (one grouped + monitored with a fresh healthy
 /// status, one ungrouped), and a status carrying a version + platform.
 const GROUP: &str = "11111111-1111-1111-1111-111111111111";
 const SRV_GROUPED: &str = "22222222-2222-2222-2222-222222222222";
@@ -66,14 +66,14 @@ const SRV_UNGROUPED: &str = "33333333-3333-3333-3333-333333333333";
 async fn seed(conn: &mut impl SimpleAsyncConnection) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{GROUP}', 'Prod Group'); \
-		 INSERT INTO servers (id, host, name, kind, rank, group_id, is_monitored) VALUES \
-			('{SRV_GROUPED}', 'https://prod-central', 'Prod Central', 'central', 'production', '{GROUP}', true); \
-		 INSERT INTO servers (id, host, name, kind) VALUES \
-			('{SRV_UNGROUPED}', 'https://lonely', 'Lonely Facility', 'facility'); \
+		 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{SRV_GROUPED}', '{GROUP}') RETURNING id) INSERT INTO applications (id, host, name, type, rank, group_id, is_monitored, machine_id) VALUES \
+			('{SRV_GROUPED}', 'https://prod-central', 'Prod Central', 'tamanu-central', 'production', '{GROUP}', true, '{SRV_GROUPED}'); \
+		 WITH m AS (INSERT INTO machines (id) VALUES ('{SRV_UNGROUPED}') RETURNING id) INSERT INTO applications (id, host, name, type, machine_id) VALUES \
+			('{SRV_UNGROUPED}', 'https://lonely', 'Lonely Facility', 'tamanu-facility', '{SRV_UNGROUPED}'); \
 		 INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES \
 			('{SRV_GROUPED}', '2.34.1', true, '[]'::jsonb, \
 			 '{{\"pgVersion\": \"PostgreSQL 14.2 on x86_64-pc-linux-gnu\"}}'::jsonb, NOW() - interval '1 minute'); \
-		 INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES \
+		 INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES \
 			('{SRV_GROUPED}', 'alertd', \
 			 '{{\"pgVersion\": \"PostgreSQL 14.2 on x86_64-pc-linux-gnu\", \"bestoolVersion\": \"2.10.5\"}}'::jsonb, '2.34.1');"
 	))
@@ -113,6 +113,8 @@ async fn initialize_and_list_tools() {
 		for tool in [
 			"find_servers",
 			"get_server",
+			"find_machines",
+			"get_machine",
 			"find_groups",
 			"get_group",
 			"list_versions",
@@ -177,7 +179,7 @@ async fn oauth_discovery_is_404_not_spa() {
 #[tokio::test(flavor = "multi_thread")]
 async fn accepts_non_loopback_host() {
 	// Regression: rmcp's DNS-rebinding guard defaults to a loopback-only Host
-	// allowlist, which 403s the real tailnet deployment host. The endpoint is
+	// allowlist, which 403s the real tailnet instance's host. The endpoint is
 	// gated by the ingress + tagged-device guard + tailnet-user check instead,
 	// so a non-loopback Host must be accepted.
 	commons_tests::server::run(async |_conn, _public, private| {
@@ -209,20 +211,20 @@ async fn find_servers_filters_and_decorates() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		seed(&mut conn).await;
 
-		// Unfiltered: both seeded servers.
+		// Unfiltered: both seeded applications.
 		let all = call_tool!(private, "find_servers", serde_json::json!({}));
 		assert!(all["total_matched"].as_u64().unwrap() >= 2);
 
-		// Filter by kind=facility → only the ungrouped one.
+		// Filter by type=tamanu-facility → only the ungrouped one.
 		let facility = call_tool!(
 			private,
 			"find_servers",
-			serde_json::json!({ "kind": "facility" })
+			serde_json::json!({ "type": "tamanu-facility" })
 		);
-		let servers = facility["servers"].as_array().unwrap();
-		assert_eq!(servers.len(), 1);
-		assert_eq!(servers[0]["id"], SRV_UNGROUPED);
-		assert_eq!(servers[0]["health"], "healthy");
+		let applications = facility["applications"].as_array().unwrap();
+		assert_eq!(applications.len(), 1);
+		assert_eq!(applications[0]["id"], SRV_UNGROUPED);
+		assert_eq!(applications[0]["health"], "healthy");
 
 		// Query matches by name.
 		let q = call_tool!(
@@ -230,7 +232,7 @@ async fn find_servers_filters_and_decorates() {
 			"find_servers",
 			serde_json::json!({ "query": "central" })
 		);
-		let names: Vec<&str> = q["servers"]
+		let names: Vec<&str> = q["applications"]
 			.as_array()
 			.unwrap()
 			.iter()
@@ -238,20 +240,38 @@ async fn find_servers_filters_and_decorates() {
 			.collect();
 		assert_eq!(names, vec!["Prod Central"]);
 
-		// Bad enum → error (protocol or tool-level).
+		// A type Canopy has never seen is a type, not an error: the set is
+		// open, so filtering by one simply matches nothing rather than being
+		// refused. What is refused is a value that is not a type at all.
+		// spec: APP#where-a-type-comes-from
+		let unknown = private
+			.post("/api/mcp")
+			.add_header("accept", ACCEPT)
+			.add_header("mcp-protocol-version", PROTO)
+			.json(&serde_json::json!({
+				"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+				"params": { "name": "find_servers", "arguments": { "type": "open-mrs" } }
+			}))
+			.await;
+		let env = parse_envelope(&unknown.text());
+		assert!(
+			env.get("error").is_none() && env["result"]["isError"] != serde_json::json!(true),
+			"an unknown type filters rather than erroring: {env}"
+		);
+
 		let bad = private
 			.post("/api/mcp")
 			.add_header("accept", ACCEPT)
 			.add_header("mcp-protocol-version", PROTO)
 			.json(&serde_json::json!({
 				"jsonrpc": "2.0", "id": 9, "method": "tools/call",
-				"params": { "name": "find_servers", "arguments": { "kind": "nonsense" } }
+				"params": { "name": "find_servers", "arguments": { "type": "not a slug" } }
 			}))
 			.await;
 		let env = parse_envelope(&bad.text());
 		assert!(
 			env.get("error").is_some() || env["result"]["isError"] == serde_json::json!(true),
-			"bad kind should error: {env}"
+			"a value that is not a type at all should error: {env}"
 		);
 	})
 	.await
@@ -332,7 +352,7 @@ async fn fleet_summary_rolls_up() {
 
 		let s = call_tool!(private, "fleet_summary", serde_json::json!({}));
 		assert!(s["total_servers"].as_u64().unwrap() >= 2);
-		assert_eq!(s["counts"]["by_kind"]["facility"], 1);
+		assert_eq!(s["counts"]["by_type"]["tamanu-facility"], 1);
 		assert_eq!(s["version_distribution"]["2.34.1"], 1);
 		assert_eq!(s["health"]["healthy"], 1);
 	})
@@ -354,9 +374,9 @@ const INC_CLOSED: &str = "aaaaaaaa-0000-0000-0000-0000000000a2";
 async fn seed_incidents(conn: &mut impl SimpleAsyncConnection) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{IGROUP}', 'Inc Group'); \
-		 INSERT INTO servers (id, host, name, kind, group_id, is_monitored) VALUES \
-			('{ISRV}', 'https://inc', 'Inc Server', 'central', '{IGROUP}', true); \
-		 INSERT INTO issues (id, created_at, updated_at, server_id, source, ref, check_name, observed_result, effective_result, description, message, active, first_seen, last_seen, last_degraded_at) VALUES \
+		 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{ISRV}', '{IGROUP}') RETURNING id) INSERT INTO applications (id, host, name, type, group_id, is_monitored, machine_id) VALUES \
+			('{ISRV}', 'https://inc', 'Inc Application', 'tamanu-central', '{IGROUP}', true, '{ISRV}'); \
+		 INSERT INTO issues (id, created_at, updated_at, application_id, source, ref, check_name, observed_result, effective_result, description, message, active, first_seen, last_seen, last_degraded_at) VALUES \
 			('{ISSUE1}', NOW(), NOW(), '{ISRV}', 'test', 'r1', 'r1', 'failed', 'failed', 'Disk full', 'disk usage 98%', true, NOW() - interval '2 days', NOW() - interval '1 hour', NOW() - interval '1 hour'), \
 			('{ISSUE2}', NOW(), NOW(), '{ISRV}', 'test', 'r2', 'r2', 'warning', 'warning', NULL, 'slow query', false, NOW() - interval '10 days', NOW() - interval '9 days', NOW() - interval '9 days'); \
 		 INSERT INTO incidents (id, created_at, updated_at, server_group_id, opened_at, closed_at) VALUES \
@@ -446,7 +466,10 @@ async fn incidents_window_status_and_detail() {
 		assert_eq!(issues[0]["issue_id"], ISSUE1);
 		assert_eq!(issues[0]["effective_result"], "failed");
 		assert_eq!(issues[0]["ref"], "r1");
-		assert_eq!(issues[0]["server_name"], "Inc Server");
+		// The scope says whose failure it is, and names it.
+		// spec: MCP#incidents-and-issues
+		assert_eq!(issues[0]["scope"]["grain"], "application");
+		assert_eq!(issues[0]["scope"]["name"], "Inc Application");
 	})
 	.await
 }
@@ -523,15 +546,15 @@ async fn backup_problems_finds_a_failure_behind_many_later_successes() {
 
 		let mut sql = format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group}', 'Chatty'); \
-			 INSERT INTO servers (id, host, name, kind, group_id) VALUES \
-				('{server}', 'https://chatty', 'Chatty', 'central', '{group}'); \
-			 INSERT INTO devices (id, role) VALUES ('{device}', 'server'); \
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server}', '{group}') RETURNING id) INSERT INTO applications (id, host, name, type, group_id, machine_id) VALUES \
+				('{server}', 'https://chatty', 'Chatty', 'tamanu-central', '{group}', '{server}'); \
+			 INSERT INTO devices (id, role) VALUES ('{device}', 'machine'); \
 			 INSERT INTO server_group_backup_config \
 				(group_id, bucket, prefix, target_role_arn, maintenance_role_arn, \
 				 repo_password_ref, status, mode, placement) \
 				VALUES ('{group}', 'b', '', 'arn', 'maint', 'pw', 'ready', 'from_birth', 'external'); \
 			 INSERT INTO backup_runs \
-				(id, device_id, group_id, server_id, type, purpose, outcome, error, reported_at) \
+				(id, device_id, group_id, machine_id, type, purpose, outcome, error, reported_at) \
 			  VALUES ('{}', '{device}', '{group}', '{server}', 'tamanu-postgres', 'backup', \
 				'failure', 'disk full', NOW() - interval '8 hours');",
 			uuid::Uuid::new_v4()
@@ -541,7 +564,7 @@ async fn backup_problems_finds_a_failure_behind_many_later_successes() {
 		for i in 0..30 {
 			sql.push_str(&format!(
 				"INSERT INTO backup_runs \
-					(id, device_id, group_id, server_id, type, purpose, outcome, reported_at) \
+					(id, device_id, group_id, machine_id, type, purpose, outcome, reported_at) \
 				  VALUES ('{}', '{device}', '{group}', '{server}', 'tamanu-postgres', 'backup', \
 					'success', NOW() - interval '{i} minutes');",
 				uuid::Uuid::new_v4()
@@ -588,11 +611,11 @@ const REPLICA_GAP: &str = "bbbbbbbb-0000-0000-0000-0000000000b3";
 async fn seed_backup_runs(conn: &mut impl SimpleAsyncConnection) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{RGROUP}', 'Backup Group'); \
-		 INSERT INTO servers (id, host, name, kind, group_id) VALUES \
-			('{RSERVER}', 'https://backup-target', 'Backup Target', 'central', '{RGROUP}'); \
-		 INSERT INTO devices (id, role) VALUES ('{RDEVICE}', 'server'); \
+		 WITH m AS (INSERT INTO machines (id, group_id, name) VALUES ('{RSERVER}', '{RGROUP}', 'Backup Target') RETURNING id) INSERT INTO applications (id, host, name, type, group_id, machine_id) VALUES \
+			('{RSERVER}', 'https://backup-target', 'Backup Target', 'tamanu-central', '{RGROUP}', '{RSERVER}'); \
+		 INSERT INTO devices (id, role) VALUES ('{RDEVICE}', 'machine'); \
 		 INSERT INTO backup_runs \
-			(id, device_id, group_id, server_id, type, purpose, outcome, snapshot_id, bytes_uploaded, s3_sent_raw_bytes, snapshot_logical_bytes, reported_at) \
+			(id, device_id, group_id, machine_id, type, purpose, outcome, snapshot_id, bytes_uploaded, s3_sent_raw_bytes, snapshot_logical_bytes, reported_at) \
 			VALUES \
 			('{RUN_OK}', '{RDEVICE}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'backup', 'success', 'snap-1', 1000, 1200, 900, NOW() - interval '1 hour'), \
 			('{RUN_FAIL}', '{RDEVICE}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'backup', 'failure', NULL, NULL, NULL, NULL, NOW() - interval '10 minutes'); \
@@ -614,12 +637,12 @@ async fn seed_restore_replicas(conn: &mut impl SimpleAsyncConnection) {
 		"INSERT INTO devices (id, role) VALUES ('{CONSUMER}', 'backup-restore'); \
 		 INSERT INTO restore_consumer_capabilities (consumer_device_id, intent, semantics) VALUES \
 			('{CONSUMER}', 'verify', '[\"check\"]'::jsonb); \
-		 INSERT INTO restore_replicas (id, consumer_device_id, group_id, server_id, type, intent, name) VALUES \
+		 INSERT INTO restore_replicas (id, consumer_device_id, group_id, machine_id, type, intent, name) VALUES \
 			('{REPLICA_GROUP_WIDE}', '{CONSUMER}', '{RGROUP}', NULL, 'tamanu-postgres', 'verify', 'group-wide'), \
 			('{REPLICA_SERVER_SCOPED}', '{CONSUMER}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'verify', 'server-scoped'), \
 			('{REPLICA_GAP}', '{CONSUMER}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'analytics', 'server-scoped-gap'); \
 		 INSERT INTO backup_restore_checks \
-			(replica_id, replica_name, consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome, replica_healthy, observed_at) \
+			(replica_id, replica_name, consumer_device_id, group_id, machine_id, type, intent, snapshot_id, outcome, replica_healthy, observed_at) \
 			VALUES \
 			('{REPLICA_SERVER_SCOPED}', 'server-scoped', '{CONSUMER}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'verify', 'snap-1', 'success', true, NOW() - interval '30 minutes');"
 	))
@@ -641,7 +664,7 @@ async fn list_backup_runs_filters() {
 			.find(|r| r["id"] == RUN_OK)
 			.expect("seeded run present");
 		assert_eq!(run["group_name"], "Backup Group");
-		assert_eq!(run["server_name"], "Backup Target");
+		assert_eq!(run["machine_name"], "Backup Target");
 		assert_eq!(run["outcome"], "success");
 		assert_eq!(run["s3_sent_raw_bytes"], 1200);
 		assert_eq!(run["snapshot_logical_bytes"], 900);
@@ -761,7 +784,7 @@ async fn find_restore_replicas_reports_gap_and_health() {
 			.find(|r| r["id"] == REPLICA_SERVER_SCOPED)
 			.unwrap();
 		assert_eq!(server_scoped["gap"], false);
-		assert_eq!(server_scoped["server_name"], "Backup Target");
+		assert_eq!(server_scoped["machine_name"], "Backup Target");
 		assert!(!server_scoped["last_healthy_at"].is_null());
 
 		let gap = replicas.iter().find(|r| r["id"] == REPLICA_GAP).unwrap();
@@ -902,7 +925,7 @@ async fn check_stability_returns_full_records_for_pairs() {
 		let rows = out["rows"].as_array().expect("rows array");
 		assert_eq!(rows.len(), 1, "one matching state: {rows:?}");
 		let row = &rows[0];
-		assert_eq!(row["server_id"], serde_json::json!(SRV_GROUPED));
+		assert_eq!(row["application_id"], serde_json::json!(SRV_GROUPED));
 		assert_eq!(row["server_name"], serde_json::json!("Prod Central"));
 		assert_eq!(row["source"], serde_json::json!("test"));
 		assert_eq!(row["check_name"], serde_json::json!("wobbly"));
@@ -927,7 +950,7 @@ async fn check_stability_returns_full_records_for_pairs() {
 			"get_check_stability",
 			serde_json::json!({
 				"checks": [{ "source": "test", "check_name": "wobbly" }],
-				"server_id": SRV_UNGROUPED,
+				"application_id": SRV_UNGROUPED,
 			})
 		);
 		assert_eq!(out["rows"].as_array().map(|r| r.len()), Some(0));
@@ -969,17 +992,17 @@ const SRV_OFFLINE: &str = "44444444-4444-4444-4444-444444444444";
 /// `find_servers` took it from the status row instead, which is read through
 /// a seven-day window — so a server quiet for longer reported no version at
 /// all, and a fleet version survey run through this tool undercounted
-/// exactly the servers most worth noticing.
+/// exactly the applications most worth noticing.
 #[tokio::test(flavor = "multi_thread")]
 async fn find_servers_retains_the_version_of_a_long_offline_server() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, name, kind, rank) VALUES \
-				('{SRV_OFFLINE}', 'https://long-gone', 'Long Gone', 'central', 'production'); \
+			"WITH m AS (INSERT INTO machines (id) VALUES ('{SRV_OFFLINE}') RETURNING id) INSERT INTO applications (id, host, name, type, rank, machine_id) VALUES \
+				('{SRV_OFFLINE}', 'https://long-gone', 'Long Gone', 'tamanu-central', 'production', '{SRV_OFFLINE}'); \
 			 INSERT INTO statuses (server_id, version, healthy, health, extra, created_at) VALUES \
 				('{SRV_OFFLINE}', '2.30.0', true, '[]'::jsonb, '{{}}'::jsonb, \
 				 NOW() - interval '30 days'); \
-			 INSERT INTO server_reported_detail (server_id, source, extra, version, reported_at) VALUES \
+			 INSERT INTO application_reported_detail (application_id, source, extra, version, reported_at) VALUES \
 				('{SRV_OFFLINE}', 'alertd', '{{}}'::jsonb, '2.30.0', NOW() - interval '30 days');"
 		))
 		.await
@@ -990,27 +1013,55 @@ async fn find_servers_retains_the_version_of_a_long_offline_server() {
 			"find_servers",
 			serde_json::json!({ "query": "Long Gone" })
 		);
-		let servers = found["servers"].as_array().unwrap();
-		assert_eq!(servers.len(), 1, "seeded server should match");
-		let s = &servers[0];
+		let applications = found["applications"].as_array().unwrap();
+		assert_eq!(applications.len(), 1, "seeded server should match");
+		let s = &applications[0];
 
 		assert_eq!(
 			s["version"], "2.30.0",
 			"the last version it reported is retained, got {s}",
 		);
-		// Both still come from the windowed status read. Answering
-		// "when, however long ago" against `statuses` means scanning every
-		// weekly partition, which is exactly what the lookback cap exists to
-		// refuse; `server_reported_detail` carries the version without that
-		// cost. So the version is retained and these two are not.
+		// Both come from the same projection row, which carries when the
+		// source last reported as well as what it reported. Answering either
+		// from `statuses` means scanning every weekly partition, which is what
+		// the lookback cap exists to refuse; `application_reported_detail` is
+		// one row per (application, source) reached by primary key, so it
+		// answers both unbounded.
 		assert!(
-			s["last_seen"].is_null(),
-			"last_seen stays bounded by the status window: {s}",
+			!s["last_seen"].is_null(),
+			"a server past the status window still has a last-seen: {s}",
 		);
 		assert_eq!(
-			s["reachability"], "gone",
-			"a server outside the status window is still gone",
+			s["reachability"], "down",
+			"a server that reported a month ago is unreachable, not never heard from",
 		);
+	})
+	.await
+}
+
+/// The state above is the one it is not: a server that has genuinely never
+/// reported has no projection row, so it stays `gone` with no last-seen.
+#[tokio::test(flavor = "multi_thread")]
+async fn find_servers_reports_a_never_reported_server_as_gone() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		conn.batch_execute(&format!(
+			"WITH m AS (INSERT INTO machines (id) VALUES ('{SRV_OFFLINE}') RETURNING id) INSERT INTO applications (id, host, name, type, rank, machine_id) VALUES \
+				('{SRV_OFFLINE}', 'https://never-spoke', 'Never Spoke', 'tamanu-central', 'production', '{SRV_OFFLINE}');"
+		))
+		.await
+		.expect("seed never-reported server");
+
+		let found = call_tool!(
+			private,
+			"find_servers",
+			serde_json::json!({ "query": "Never Spoke" })
+		);
+		let applications = found["applications"].as_array().unwrap();
+		assert_eq!(applications.len(), 1, "seeded server should match");
+		let s = &applications[0];
+
+		assert!(s["last_seen"].is_null(), "nothing was ever heard: {s}");
+		assert_eq!(s["reachability"], "gone");
 	})
 	.await
 }
@@ -1029,13 +1080,13 @@ async fn get_restore_replica_checks_are_the_replicas_own_newest() {
 		// bury it under a run of newer checks from its noisy neighbour.
 		let mut rows = format!(
 			"INSERT INTO backup_restore_checks \
-			 (replica_id, consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome, replica_healthy, observed_at) \
+			 (replica_id, consumer_device_id, group_id, machine_id, type, intent, snapshot_id, outcome, replica_healthy, observed_at) \
 			 VALUES ('{REPLICA_GROUP_WIDE}', '{CONSUMER}', '{RGROUP}', NULL, 'tamanu-postgres', 'verify', 'quiet-snap', 'success', true, NOW() - interval '10 days');"
 		);
 		for i in 0..60 {
 			rows.push_str(&format!(
 				"INSERT INTO backup_restore_checks \
-				 (replica_id, consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome, replica_healthy, observed_at) \
+				 (replica_id, consumer_device_id, group_id, machine_id, type, intent, snapshot_id, outcome, replica_healthy, observed_at) \
 				 VALUES ('{REPLICA_SERVER_SCOPED}', '{CONSUMER}', '{RGROUP}', '{RSERVER}', 'tamanu-postgres', 'verify', 'noisy-{i}', 'success', true, NOW() - interval '{i} minutes');"
 			));
 		}
@@ -1111,6 +1162,296 @@ async fn upgrade_plans_list_the_open_ones_and_keep_the_withdrawn_in_history() {
 		assert_eq!(withdrawn["withdrawn_by"], "someone@example.com");
 		assert!(!withdrawn["ended_at"].is_null());
 		assert!(plans.iter().any(|p| p["outcome"] == "open"));
+	})
+	.await
+}
+
+const MGROUP: &str = "dddddddd-0000-0000-0000-000000000001";
+const MACHINE: &str = "dddddddd-0000-0000-0000-000000000002";
+const MAPP_A: &str = "dddddddd-0000-0000-0000-00000000000a";
+const MAPP_B: &str = "dddddddd-0000-0000-0000-00000000000b";
+
+/// One box carrying two workloads, with figures split by grain: the machine
+/// reports platform and hardware, the applications report versions.
+async fn seed_two_workload_box(conn: &mut impl SimpleAsyncConnection) {
+	conn.batch_execute(&format!(
+		"INSERT INTO server_groups (id, name) VALUES ('{MGROUP}', 'Split Group'); \
+		 INSERT INTO machines (id, group_id, name, cloud) VALUES \
+			('{MACHINE}', '{MGROUP}', 'box-one', false); \
+		 INSERT INTO applications (id, host, name, type, group_id, machine_id) VALUES \
+			('{MAPP_A}', 'https://front', 'Front', 'tamanu-central', '{MGROUP}', '{MACHINE}'), \
+			('{MAPP_B}', 'https://worker', 'Worker', 'tamanu-central', '{MGROUP}', '{MACHINE}'); \
+		 INSERT INTO machine_reported_detail (machine_id, source, extra, reported_at) VALUES \
+			('{MACHINE}', 'alertd', \
+			 '{{\"osName\":\"Debian\",\"osVersion\":\"12\",\"hostname\":\"box-one.internal\",\
+			   \"cpuCores\":8,\"totalMemoryBytes\":16000000000,\"uptimeSecs\":86400}}'::jsonb, NOW()); \
+		 INSERT INTO application_reported_detail (application_id, source, extra, reported_at) VALUES \
+			('{MAPP_A}', 'alertd', '{{\"tamanuVersion\":\"2.62.0\",\"pgVersion\":\"PostgreSQL 16.2\"}}'::jsonb, NOW());"
+	))
+	.await
+	.expect("seed two-workload box");
+}
+
+/// The grains carry different figures, and each names the other side.
+// spec: MCP#detail
+#[tokio::test(flavor = "multi_thread")]
+async fn get_machine_carries_hardware_and_get_server_carries_version() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		seed_two_workload_box(&mut conn).await;
+
+		let machine = call_tool!(
+			private,
+			"get_machine",
+			serde_json::json!({ "machine_id": MACHINE })
+		);
+		assert_eq!(machine["name"], "box-one");
+		let figures = &machine["figures"];
+		assert_eq!(figures["platform"], "Debian 12");
+		assert_eq!(figures["hostname"], "box-one.internal");
+		assert_eq!(figures["cpu_cores"], 8);
+		assert_eq!(figures["total_memory_bytes"], 16000000000u64);
+		assert_eq!(figures["uptime_seconds"], 86400);
+		assert!(
+			figures.get("postgres_version").is_none(),
+			"a database engine is the software's, not the box's: {figures}"
+		);
+
+		// The box names the workloads on it.
+		let on_box = machine["applications"].as_array().expect("applications");
+		assert_eq!(on_box.len(), 2, "both workloads: {on_box:?}");
+
+		let application = call_tool!(
+			private,
+			"get_server",
+			serde_json::json!({ "server_id": MAPP_A })
+		);
+		assert_eq!(
+			application["machine_id"], MACHINE,
+			"and the workload names its box, so a client can cross over"
+		);
+		assert_eq!(application["figures"]["postgres_version"], "16.2");
+	})
+	.await
+}
+
+/// A box hosting two workloads is one machine with a count of two, which is
+/// the case the grain exists for.
+// spec: MCP#discovery
+#[tokio::test(flavor = "multi_thread")]
+async fn find_machines_reports_how_many_applications_each_carries() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		seed_two_workload_box(&mut conn).await;
+
+		let all = call_tool!(private, "find_machines", serde_json::json!({}));
+		let machines = all["machines"].as_array().expect("machines");
+		let found = machines
+			.iter()
+			.find(|m| m["id"] == MACHINE)
+			.expect("the seeded box");
+		assert_eq!(found["application_count"], 2);
+		assert_eq!(found["platform"], "Debian 12");
+		assert_eq!(found["group_name"], "Split Group");
+
+		// The reported hostname is searchable, not just the operator's name.
+		let by_hostname = call_tool!(
+			private,
+			"find_machines",
+			serde_json::json!({ "query": "box-one.internal" })
+		);
+		assert_eq!(by_hostname["machines"].as_array().unwrap().len(), 1);
+
+		let by_platform = call_tool!(
+			private,
+			"find_machines",
+			serde_json::json!({ "platform": "debian" })
+		);
+		assert!(
+			by_platform["machines"]
+				.as_array()
+				.unwrap()
+				.iter()
+				.any(|m| m["id"] == MACHINE)
+		);
+	})
+	.await
+}
+
+/// A box's disk filling is the application's problem too, so asking about an
+/// application returns its machine's issues among its own. Asking about the
+/// machine returns only the machine's.
+// spec: MCP#incidents-and-issues
+#[tokio::test(flavor = "multi_thread")]
+async fn find_issues_by_application_includes_its_machines_issues() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		seed_two_workload_box(&mut conn).await;
+		conn.batch_execute(&format!(
+			"INSERT INTO check_policies (source, subject, application_type, check_name) VALUES \
+				('alertd', 'machine', NULL, 'disk_free'), \
+				('alertd', 'application', 'tamanu-central', 'tamanu_version'); \
+			 INSERT INTO issues \
+				(machine_id, source, ref, check_name, observed_result, effective_result, \
+				 message, active, first_seen, last_seen, degraded_since, last_degraded_at) \
+				VALUES ('{MACHINE}', 'alertd', 'disk', 'disk_free', 'failed', 'failed', \
+				 'disk full', true, NOW(), NOW(), NOW(), NOW()); \
+			 INSERT INTO issues \
+				(application_id, source, ref, check_name, observed_result, effective_result, \
+				 message, active, first_seen, last_seen, degraded_since, last_degraded_at) \
+				VALUES ('{MAPP_A}', 'alertd', 'ver', 'tamanu_version', 'warning', 'warning', \
+				 'behind', true, NOW(), NOW(), NOW(), NOW());"
+		))
+		.await
+		.expect("seed issues");
+
+		let for_app = call_tool!(
+			private,
+			"find_issues",
+			serde_json::json!({ "application_id": MAPP_A })
+		);
+		let refs: Vec<&str> = for_app["issues"]
+			.as_array()
+			.expect("issues")
+			.iter()
+			.map(|i| i["ref"].as_str().unwrap())
+			.collect();
+		assert!(
+			refs.contains(&"disk") && refs.contains(&"ver"),
+			"the box's disk and the software's version both: {refs:?}"
+		);
+
+		// And each says whose failure it is.
+		let disk = for_app["issues"]
+			.as_array()
+			.unwrap()
+			.iter()
+			.find(|i| i["ref"] == "disk")
+			.expect("the disk issue");
+		assert_eq!(disk["scope"]["grain"], "machine");
+		assert_eq!(disk["scope"]["name"], "box-one");
+
+		// The machine's own view is the box's checks only.
+		let for_machine = call_tool!(
+			private,
+			"find_issues",
+			serde_json::json!({ "machine_id": MACHINE })
+		);
+		let machine_refs: Vec<&str> = for_machine["issues"]
+			.as_array()
+			.expect("issues")
+			.iter()
+			.map(|i| i["ref"].as_str().unwrap())
+			.collect();
+		assert_eq!(
+			machine_refs,
+			vec!["disk"],
+			"asking what is wrong with the box does not answer about its software"
+		);
+
+		// The other workload on the same box sees the disk too: it is that
+		// box's failure, and both workloads run on it.
+		let for_sibling = call_tool!(
+			private,
+			"find_issues",
+			serde_json::json!({ "application_id": MAPP_B })
+		);
+		assert!(
+			for_sibling["issues"]
+				.as_array()
+				.unwrap()
+				.iter()
+				.any(|i| i["ref"] == "disk")
+		);
+	})
+	.await
+}
+
+/// An agent reading the fleet through MCP and an operator reading it in the UI
+/// must not be told different things about the same box. Both go through the
+/// same two rollups, one per grain, and this pins that they stay the same two.
+/// The grains are given different answers to tell apart: the box only warns,
+/// while the workload on it has failed a check of its own.
+/// spec: MCP, FLT
+#[tokio::test(flavor = "multi_thread")]
+async fn mcp_health_matches_what_the_ui_presents() {
+	use commons_types::status::CheckResult;
+	use database::issues::{CheckFiling, Scope, file_check};
+
+	commons_tests::server::run(async |mut conn, _public, private| {
+		seed(&mut conn).await;
+		let machine_id: uuid::Uuid = SRV_GROUPED.parse().unwrap();
+		let application_id: uuid::Uuid = SRV_GROUPED.parse().unwrap();
+
+		let filing = |scope, check, observed| CheckFiling {
+			source: "alertd",
+			scope,
+			device_id: None,
+			check,
+			observed,
+			title: Some("parity"),
+			message: "parity filing",
+			detail: None,
+			default_ceiling: CheckResult::Failed,
+			default_escalates: false,
+			documentation: None,
+		};
+		file_check(
+			&mut conn,
+			filing(
+				Scope::Machine(machine_id),
+				"disk_free",
+				CheckResult::Warning,
+			),
+		)
+		.await
+		.expect("machine filing");
+		file_check(
+			&mut conn,
+			filing(
+				Scope::Application(application_id),
+				"db",
+				CheckResult::Failed,
+			),
+		)
+		.await
+		.expect("application filing");
+
+		let card = private
+			.post("/api/statuses/group_details")
+			.json(&serde_json::json!({ "server_group_id": GROUP }))
+			.await;
+		assert_eq!(card.status_code().as_u16(), 200);
+		let card: serde_json::Value = card.json();
+		let member = card["members"]
+			.as_array()
+			.expect("members")
+			.iter()
+			.find(|m| m["id"] == SRV_GROUPED)
+			.expect("the grouped member")
+			.clone();
+
+		let machine = call_tool!(
+			private,
+			"get_machine",
+			serde_json::json!({ "machine_id": SRV_GROUPED })
+		);
+		let application = call_tool!(
+			private,
+			"get_server",
+			serde_json::json!({ "server_id": SRV_GROUPED })
+		);
+
+		assert_eq!(member["machine_health"], "warning");
+		assert_eq!(member["health"], "unhealthy");
+		assert_eq!(machine["health"], member["machine_health"]);
+		assert_eq!(application["health"], member["health"]);
+
+		// And the box's own listing of what runs on it agrees with both.
+		let on_box = machine["applications"]
+			.as_array()
+			.expect("applications")
+			.iter()
+			.find(|a| a["id"] == SRV_GROUPED)
+			.expect("the workload");
+		assert_eq!(on_box["health"], member["health"]);
 	})
 	.await
 }

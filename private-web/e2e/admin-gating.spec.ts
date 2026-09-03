@@ -33,7 +33,7 @@ test.describe("admin gating", () => {
 			await route.continue();
 		});
 
-		await page.goto("/servers");
+		await page.goto("/fleet");
 		await expect(adminControl(page)).toBeVisible();
 		const onLoad = probes;
 
@@ -56,7 +56,7 @@ test.describe("admin gating", () => {
 	}) => {
 		await page.route(PROBE, (route) => route.fulfill({ status: 503, body: "" }));
 
-		await page.goto("/servers");
+		await page.goto("/fleet");
 
 		await expect(
 			page.getByText("Couldn't check your admin status"),
@@ -76,7 +76,7 @@ test.describe("admin gating", () => {
 			}
 		});
 
-		await page.goto("/servers");
+		await page.goto("/fleet");
 		const banner = page.getByText("Couldn't check your admin status");
 		await expect(banner).toBeVisible();
 

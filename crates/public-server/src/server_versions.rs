@@ -9,11 +9,11 @@ use axum::{
 };
 use commons_errors::{AppError, Result};
 use commons_types::{
-	server::{kind::ServerKind, rank::ServerRank},
+	server::{app_type::ApplicationType, rank::ServerRank},
 	status::ShortStatus,
 	version::VersionStr,
 };
-use database::{statuses::Status, versions::Version};
+use database::{pg_duration::PgDuration, statuses::Status, versions::Version};
 use diesel::prelude::*;
 use diesel_async::RunQueryDsl;
 use futures::future::join_all;
@@ -127,7 +127,7 @@ async fn server_versions_page(
 ) -> Result<Response> {
 	let Some(secret) = &state.server_versions_secret else {
 		return Err(AppError::AuthFailed {
-			reason: "Server versions endpoint not configured".to_string(),
+			reason: "Application versions endpoint not configured".to_string(),
 		});
 	};
 
@@ -154,18 +154,26 @@ async fn server_versions_page(
 	let tera = &state.tera;
 	let mut conn = db.get().await?;
 
-	let servers = {
-		use database::schema::servers::dsl::*;
+	let applications = {
+		use database::schema::applications::dsl::*;
 
-		servers
-			.select((id, name, host))
+		applications
+			// The down threshold comes along: reachability is measured against
+			// each application's own, never a fixed one.
+			// spec: CHK#reachability
+			.select((id, name, host, alert_when_down_for))
+			// Public listing is a property of the type, so this is one filter
+			// where it used to be a product and a kind between them.
+			// spec: APP#capabilities
 			.filter(
 				rank.eq(ServerRank::Production)
-					.and(kind.eq(ServerKind::Central))
+					.and(type_.eq_any(ApplicationType::stored_values_where(|t| {
+						t.caps().public_listing
+					})))
 					.and(host.is_not_null()),
 			)
 			.order(name.asc())
-			.load::<(Uuid, Option<String>, Option<String>)>(&mut conn)
+			.load::<(Uuid, Option<String>, Option<String>, PgDuration)>(&mut conn)
 			.await?
 	};
 
@@ -174,20 +182,33 @@ async fn server_versions_page(
 		.ok()
 		.map(|v| v.as_semver());
 
-	let server_ids: Vec<Uuid> = servers.iter().map(|(id, _, _)| *id).collect();
+	let server_ids: Vec<Uuid> = applications.iter().map(|(id, _, _, _)| *id).collect();
 	let statuses = if !server_ids.is_empty() {
 		Status::latest_for_servers(&mut conn, &server_ids).await?
 	} else {
 		Vec::new()
 	};
+	// Reachability is graded on this rather than on the status window, so a
+	// server quiet for longer than the window reads as unreachable rather than
+	// as never heard from.
+	// spec: CHK#reachability
+	let last_reported =
+		database::reported_detail::ReportedDetail::last_reported_ats(&mut conn, &server_ids)
+			.await?;
 
 	let mut server_infos: Vec<ServerVersionInfo> = Vec::new();
-	for (id, name, host) in servers {
+	for (id, name, host, down_after) in applications {
 		let host = host.unwrap_or_default(); // filtered to non-null above
-		let status = statuses.iter().find(|s| s.server_id == id);
+		let status = statuses.iter().find(|s| s.server_id == Some(id));
 
 		let version = status.and_then(|s| s.version.clone());
-		let up = status.map(|s| s.short_status()).unwrap_or_default();
+		let up = ShortStatus::grade(
+			last_reported
+				.get(&id)
+				.copied()
+				.max(status.map(|s| s.created_at)),
+			down_after.0,
+		);
 
 		let version_distance = if let (Some(_), Some(latest)) = (&version, &latest_version) {
 			status.and_then(|s| s.distance_from_version(latest))
@@ -231,7 +252,7 @@ async fn server_versions_page(
 
 	let mut context = Context::new();
 	context.insert("latest_version", &latest_version);
-	context.insert("servers", &server_infos);
+	context.insert("applications", &server_infos);
 	context.insert("rc_environments", &rc_environments);
 
 	let html = tera.render("server_versions", &context)?;

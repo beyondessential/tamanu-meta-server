@@ -83,7 +83,7 @@ pub const DNS_ZONE_COVERAGE_REF: &str = "dns-zone-coverage";
 
 pub const DNS_ZONE_COVERAGE_DOC: &str = "## Description
 
-Canopy holds the DNS zones it may write records in as deployment configuration, and a group domain is only actionable while a configured zone covers it. This alert means at least one group is now depending on a domain Canopy cannot reach — usually a zone removed from the configuration while its claims stood, or a configuration that no longer parses.
+Canopy holds the DNS zones it may write records in as its own instance configuration, and a group domain is only actionable while a configured zone covers it. This alert means at least one group is now depending on a domain Canopy cannot reach — usually a zone removed from the configuration while its claims stood, or a configuration that no longer parses.
 
 Claims are never dropped for this: the group keeps the domain, and it keeps excluding other groups from overlapping it. What stops is Canopy acting on any name beneath it.
 
@@ -94,7 +94,7 @@ Claims are never dropped for this: the group keeps the domain, and it keeps excl
 
 ## Solve
 
-Compare the zone list in Canopy's deployment configuration against the domains reported in the alert message. Restore the missing zone if its removal was accidental; if it was deliberate, release the claims on each group's page. A configuration that does not parse is reported with the parse error — fix the entry and restart.";
+Compare the zone list in the Canopy instance's configuration against the domains reported in the alert message. Restore the missing zone if its removal was accidental; if it was deliberate, release the claims on each group's page. A configuration that does not parse is reported with the parse error — fix the entry and restart.";
 
 /// Canopy cannot reach the certificate authority at all.
 // spec: CRT#when-issuance-fails
@@ -228,7 +228,7 @@ pub const FORGOTTEN_PAUSE_DOC: &str = "## Description
 
 Pausing a server stops Canopy doing anything new on its behalf, including renewing its certificates. That is the point of a pause — but it also suppresses the per-server alerting that would otherwise chase a certificate running out, so a pause nobody remembers is exactly how certificates quietly expire.
 
-This alert is that forgetting, reported against Canopy rather than against the deployment: only an operator can lift a pause, and Canopy never lifts one itself however much is expiring underneath it.
+This alert is that forgetting, reported against Canopy rather than against the group: only an operator can lift a pause, and Canopy never lifts one itself however much is expiring underneath it.
 
 A certificate for a name the server is no longer entitled to is not counted: Canopy stopped renewing that on purpose, and the pause is not why it is running out.
 
@@ -239,7 +239,7 @@ A certificate for a name the server is no longer entitled to is not counted: Can
 
 ## Solve
 
-Look at each server named in the alert. Finish whatever the pause was for — the recorded reason is on the server's page — and unpause it; Canopy then works the renewals that fell due while it was paused. If the pause is no longer needed at all, lifting it is the whole fix. If the deployment is gone for good, archive the server or release the group's claim on the domain instead, which stops the certificates being Canopy's business.";
+Look at each server named in the alert. Finish whatever the pause was for — the recorded reason is on the server's page — and unpause it; Canopy then works the renewals that fell due while it was paused. If the pause is no longer needed at all, lifting it is the whole fix. If it is gone for good, archive the server or release the group's claim on the domain instead, which stops the certificates being Canopy's business.";
 
 /// Evaluate the forgotten-pause condition and raise or recover the coalescing
 /// [`FORGOTTEN_PAUSE_REF`] self-alert.
@@ -249,7 +249,8 @@ Look at each server named in the alert. Finish whatever the pause was for — th
 /// only the second means something has already stopped working.
 // spec: CRT#pausing-a-server
 pub async fn sweep_forgotten_pauses(conn: &mut AsyncPgConnection) -> Result<Option<Issue>> {
-	let lapsing = crate::server_certificates::ServerCertificate::lapsing_under_pause(conn).await?;
+	let lapsing =
+		crate::application_certificates::ApplicationCertificate::lapsing_under_pause(conn).await?;
 
 	if lapsing.is_empty() {
 		return recover(
@@ -260,9 +261,9 @@ pub async fn sweep_forgotten_pauses(conn: &mut AsyncPgConnection) -> Result<Opti
 		.await;
 	}
 
-	let mut servers: Vec<&str> = lapsing.iter().map(|l| l.server_name.as_str()).collect();
-	servers.sort_unstable();
-	servers.dedup();
+	let mut applications: Vec<&str> = lapsing.iter().map(|l| l.server_name.as_str()).collect();
+	applications.sort_unstable();
+	applications.dedup();
 
 	let expired = lapsing.iter().filter(|l| l.expired).count();
 	let listed: Vec<String> = lapsing
@@ -290,7 +291,7 @@ pub async fn sweep_forgotten_pauses(conn: &mut AsyncPgConnection) -> Result<Opti
 			format!(
 				"{expired} certificate(s) have expired under a pause across {} server(s), and {} \
 				 more are overdue for renewal{}",
-				servers.len(),
+				applications.len(),
 				lapsing.len() - expired,
 				list_suffix(&listed),
 			),
@@ -302,7 +303,7 @@ pub async fn sweep_forgotten_pauses(conn: &mut AsyncPgConnection) -> Result<Opti
 				"{} certificate(s) are past renewal under a pause across {} server(s), and nothing \
 				 renews while a server is paused{}",
 				lapsing.len(),
-				servers.len(),
+				applications.len(),
 				list_suffix(&listed),
 			),
 		)
@@ -343,16 +344,42 @@ pub async fn sweep_stale_healthchecks(conn: &mut AsyncPgConnection) -> Result<Op
 		.await;
 	}
 
+	// The qualified name, not the bare one. A check is identified by a
+	// namespace and a name, so `alertd/db_version` names as many entries as
+	// there are types reporting it — and an operator told to decommission one
+	// of them cannot tell which from the message.
 	let names: Vec<String> = quiet
 		.iter()
-		.map(|p| format!("{}/{}", p.source, p.check_name))
+		.map(|p| format!("{}/{}", p.source, p.qualified_name()))
 		.collect();
 	let message = format!(
 		"{} healthcheck(s) unreported fleet-wide for 30 days: {}",
 		quiet.len(),
 		names.join(", "),
 	);
-	raise(
+	// The same set, structured, so the operator surface can link each one to
+	// its own policy page — which is where the decommission this alert asks
+	// for actually lives.
+	let detail = serde_json::json!({
+		"checks": quiet
+			.iter()
+			.map(|p| {
+				let namespace = p.namespace().ok();
+				serde_json::json!({
+					"source": p.source,
+					"check": p.check_name,
+					"qualified_name": p.qualified_name(),
+					"subject": namespace
+						.as_ref()
+						.and_then(|ns| ns.to_columns().0),
+					"application_type": namespace
+						.as_ref()
+						.and_then(|ns| ns.to_columns().1),
+				})
+			})
+			.collect::<Vec<_>>(),
+	});
+	raise_with_detail(
 		conn,
 		STALE_CHECKS_REF,
 		CheckResult::Warning,
@@ -361,6 +388,7 @@ pub async fn sweep_stale_healthchecks(conn: &mut AsyncPgConnection) -> Result<Op
 		Some(STALE_CHECKS_DOC),
 		"Healthchecks gone quiet",
 		&message,
+		Some(detail),
 	)
 	.await
 	.map(Some)
@@ -433,7 +461,7 @@ pub async fn sweep_partition_runway(conn: &mut AsyncPgConnection) -> Result<Opti
 /// unparseable. The two carry different messages and different severity, because
 /// one is a Canopy fault and the other is a tidy-up after a deliberate change.
 ///
-/// A deployment with no zones configured and nothing claimed is not a problem:
+/// A Canopy instance with no zones configured and nothing claimed is not a problem:
 /// that is the feature simply not in use.
 // spec: DOM#when-the-zone-configuration-changes
 pub async fn sweep_dns_zone_coverage(
@@ -545,6 +573,37 @@ pub async fn raise(
 	title: &str,
 	message: &str,
 ) -> Result<Issue> {
+	raise_with_detail(
+		conn,
+		r#ref,
+		observed,
+		default_ceiling,
+		default_escalates,
+		documentation,
+		title,
+		message,
+		None,
+	)
+	.await
+}
+
+/// [`raise`], with structured detail attached to the filing.
+///
+/// A message is for reading; detail is for acting on. An alert that names
+/// things an operator has to go and find needs to hand the UI what those
+/// things are, rather than making it parse them back out of a sentence.
+#[expect(clippy::too_many_arguments)]
+pub async fn raise_with_detail(
+	conn: &mut AsyncPgConnection,
+	r#ref: &str,
+	observed: CheckResult,
+	default_ceiling: CheckResult,
+	default_escalates: bool,
+	documentation: Option<&str>,
+	title: &str,
+	message: &str,
+	detail: Option<serde_json::Value>,
+) -> Result<Issue> {
 	file_check(
 		conn,
 		CheckFiling {
@@ -555,7 +614,7 @@ pub async fn raise(
 			observed,
 			title: Some(title),
 			message,
-			detail: None,
+			detail,
 			default_ceiling,
 			default_escalates,
 			documentation,
@@ -616,7 +675,12 @@ pub async fn list(conn: &mut AsyncPgConnection, limit: i64) -> Result<Vec<Issue>
 
 	dsl::issues
 		.select(Issue::as_select())
-		.filter(dsl::server_id.is_null().and(dsl::server_group_id.is_null()))
+		.filter(
+			dsl::application_id
+				.is_null()
+				.and(dsl::machine_id.is_null())
+				.and(dsl::server_group_id.is_null()),
+		)
 		.order(dsl::last_seen.desc())
 		.limit(limit)
 		.load(conn)

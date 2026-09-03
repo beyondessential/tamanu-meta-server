@@ -84,7 +84,7 @@ test.describe("in-flight backup progress", () => {
 			extra: { engineNote: "hashing large relation" },
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByText("in progress")).toBeVisible();
 
@@ -119,7 +119,7 @@ test.describe("in-flight backup progress", () => {
 			bytesEstimated: 1024 * MIB,
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const transfer = page.getByRole("table").last().getByTestId("live-transfer");
 		await expect(transfer).toContainText("100.0 MiB");
 
@@ -147,7 +147,7 @@ test.describe("in-flight backup progress", () => {
 	}) => {
 		const { group } = await seedInFlightGroup(sql, "progress-absent");
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByText("in progress")).toBeVisible();
 		// No figures invented, and no freeze moment claimed — absent reads as
@@ -181,7 +181,7 @@ test.describe("in-flight backup progress", () => {
 			extra: { engineNote: "hashing large relation" },
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const runs = page.getByRole("table").last();
 		await runs.getByRole("button", { name: /show details/i }).first().click();
 
@@ -221,7 +221,7 @@ test.describe("in-flight backup progress", () => {
 			});
 		}
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const runs = page.getByRole("table").last();
 		await runs.getByRole("button", { name: /show details/i }).first().click();
 
@@ -259,7 +259,7 @@ test.describe("in-flight backup progress", () => {
 			}
 
 			await page.emulateMedia({ colorScheme: scheme });
-			await page.goto(`/groups/${group.id}/backups`);
+			await page.goto(`/fleet/groups/${group.id}/backups`);
 			const runs = page.getByRole("table").last();
 			await runs.getByRole("button", { name: /show details/i }).first().click();
 
@@ -293,7 +293,7 @@ test.describe("in-flight backup progress", () => {
 			bytesEstimated: 1_000_000_000,
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByTestId("live-transfer")).toContainText(
 			/rate unknown/i,
@@ -305,7 +305,7 @@ test.describe("in-flight backup progress", () => {
 		await expect(page.getByTestId("throughput-empty")).toBeVisible();
 	});
 
-	test("the server's own backup section shows live figures and a progress bar", async ({
+	test("the machine's own backup section shows live figures and a progress bar", async ({
 		page,
 		sql,
 	}) => {
@@ -314,7 +314,7 @@ test.describe("in-flight backup progress", () => {
 			"progress-serverpage",
 		);
 		await seedServerBackupCapability(sql, {
-			serverId: server.id,
+			machineId: server.machineId,
 			type: "tamanu-postgres",
 			enabled: true,
 		});
@@ -338,7 +338,7 @@ test.describe("in-flight backup progress", () => {
 			bytesEstimated: 1024 * MIB,
 		});
 
-		await page.goto(`/servers/${server.id}#backups`);
+		await page.goto(`/fleet/machines/${server.machineId}#backups`);
 		await expect(page.getByText("backing up…")).toBeVisible();
 		const progress = page.getByTestId("capability-progress").first();
 		await expect(progress).toContainText("400.0 MiB");
@@ -348,18 +348,18 @@ test.describe("in-flight backup progress", () => {
 		await expect(progress.getByRole("progressbar")).toHaveAccessibleName(/39%/);
 	});
 
-	test("the server's backup section shows no figures when the run reports none", async ({
+	test("the machine's backup section shows no figures when the run reports none", async ({
 		page,
 		sql,
 	}) => {
 		const { server } = await seedInFlightGroup(sql, "progress-serverpage-bare");
 		await seedServerBackupCapability(sql, {
-			serverId: server.id,
+			machineId: server.machineId,
 			type: "tamanu-postgres",
 			enabled: true,
 		});
 
-		await page.goto(`/servers/${server.id}#backups`);
+		await page.goto(`/fleet/machines/${server.machineId}#backups`);
 		// Still visibly running, but nothing invented.
 		await expect(page.getByText("backing up…")).toBeVisible();
 		await expect(page.getByTestId("capability-progress")).toHaveCount(0);
@@ -386,14 +386,14 @@ test.describe("in-flight backup progress", () => {
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
-			serverId: server.id,
+			machineId: server.machineId,
 			outcome: "success",
 			bytesUploaded: 600_000_000_000,
 			reportedAgoSecs: 600,
 			snapshotTakenAgoSecs: 76_200,
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByText("success")).toBeVisible();
 		await expect(runs.getByTestId("snapshot-taken")).toContainText(/data from/i);
@@ -420,13 +420,13 @@ test.describe("in-flight backup progress", () => {
 		await seedBackupRun(sql, {
 			deviceId: device.id,
 			groupId: group.id,
-			serverId: server.id,
+			machineId: server.machineId,
 			outcome: "success",
 			bytesUploaded: 1_000,
 			reportedAgoSecs: 600,
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByText("success")).toBeVisible();
 		await expect(runs.getByTestId("snapshot-taken")).toHaveCount(0);

@@ -65,7 +65,7 @@ async fn private_with_directory(url: &str, directory: TailnetDirectory) -> TestS
 async fn insert_device(conn: &mut commons_tests::diesel_async::AsyncPgConnection) -> Uuid {
 	let id = Uuid::new_v4();
 	conn.batch_execute(&format!(
-		"INSERT INTO devices (id, role) VALUES ('{id}', 'server');"
+		"INSERT INTO devices (id, role) VALUES ('{id}', 'machine');"
 	))
 	.await
 	.expect("insert device");
@@ -157,7 +157,7 @@ async fn attach_tailscale_conflict_when_node_id_already_claimed() {
 		// Pre-attach the node id to one device.
 		let claimer = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO devices (id, role, tailscale_node_id) VALUES ('{claimer}', 'server', '{node_id}');"
+			"INSERT INTO devices (id, role, tailscale_node_id) VALUES ('{claimer}', 'machine', '{node_id}');"
 		))
 		.await
 		.expect("seed claimer");
@@ -239,18 +239,20 @@ async fn detach_tailscale_clears_columns() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn merge_into_reparents_keys_and_deletes_source() {
+async fn merge_into_reparents_keys_and_the_machine_and_deletes_source() {
 	TestDb::run(async |mut conn, url| {
 		let private = private_with_directory(&url, test_directory().2).await;
 
 		let source = Uuid::new_v4();
 		let target = Uuid::new_v4();
-		// Source: tailnet-only, server-role.
+		let machine = Uuid::new_v4();
+		// Source: tailnet-only, server-role, speaks for a box.
 		// Target: mTLS-only, server-role, has one key.
 		conn.batch_execute(&format!(
 			"INSERT INTO devices (id, role, tailscale_node_id) \
 			   VALUES ('{source}', 'server', 'nodekey:fromauto'); \
-			 INSERT INTO devices (id, role) VALUES ('{target}', 'server'); \
+			 INSERT INTO devices (id, role) VALUES ('{target}', 'machine'); \
+			 INSERT INTO machines (id, device_id) VALUES ('{machine}', '{source}'); \
 			 INSERT INTO device_keys (device_id, key_data, name, is_active) \
 			   VALUES ('{target}', '\\x010203', 'mtls', true);"
 		))
@@ -276,6 +278,14 @@ async fn merge_into_reparents_keys_and_deletes_source() {
 			body["device"]["tailscale_node_id"].as_str(),
 			Some("nodekey:fromauto"),
 		);
+
+		// The box the source spoke for now answers to the target: a merge
+		// that dropped this would leave the machine unbound and the box
+		// unable to report.
+		let machine_row = database::machines::Machine::get_by_id(&mut conn, machine)
+			.await
+			.expect("machine");
+		assert_eq!(machine_row.device_id, Some(target), "machine re-parented");
 
 		// Source row gone.
 		conn.batch_execute(&format!(
@@ -353,8 +363,8 @@ async fn resolve_tailnet_identifier_returns_null_for_unknown() {
 
 /// Both attach handlers document 404 for "identifier does not resolve to a
 /// known tailnet node". `devices::attach_tailscale` answered 500 (via
-/// `AppError::custom`) and `servers::attach_tailscale` answered 400 — so
-/// they disagreed with the spec and with each other.
+/// `AppError::custom`) and the machine-side handler answered 400 — so they
+/// disagreed with the spec and with each other.
 #[tokio::test(flavor = "multi_thread")]
 async fn attach_tailscale_is_404_for_an_unresolvable_identifier() {
 	TestDb::run(async |mut conn, url| {
@@ -374,25 +384,25 @@ async fn attach_tailscale_is_404_for_an_unresolvable_identifier() {
 	.await
 }
 
-/// The server-side attach handler documents the same 404 and must agree.
+/// An identity is bound on the box, so the machine-side attach handler is the
+/// one that pairs with this, and it documents the same 404.
 #[tokio::test(flavor = "multi_thread")]
-async fn server_attach_tailscale_is_404_for_an_unresolvable_identifier() {
+async fn machine_attach_tailscale_is_404_for_an_unresolvable_identifier() {
 	TestDb::run(async |mut conn, url| {
 		let (_ip, _node_id, dir) = test_directory();
 		let private = private_with_directory(&url, dir).await;
 
-		let server_id = Uuid::new_v4();
+		let machine_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind) \
-			 VALUES ('{server_id}', 'https://attach.example.com', 'central');"
+			"INSERT INTO machines (id) VALUES ('{machine_id}');"
 		))
 		.await
-		.expect("insert server");
+		.expect("insert machine");
 
 		let resp = private
-			.post("/api/servers/attach_tailscale_device")
+			.post("/api/fleet/machines/attach_tailscale_device")
 			.json(&serde_json::json!({
-				"server_id": server_id,
+				"machine_id": machine_id,
 				"identifier": "100.64.99.99",
 			}))
 			.await;

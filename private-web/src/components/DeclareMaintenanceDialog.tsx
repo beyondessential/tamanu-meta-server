@@ -43,7 +43,7 @@ export default function DeclareMaintenanceDialog({
 }: {
 	open: boolean;
 	onClose: () => void;
-	scope: "server" | "group";
+	scope: "machine" | "group";
 	id: string;
 	targetLabel?: string;
 	/** The target's open window, when this is an amendment. */
@@ -71,7 +71,7 @@ export default function DeclareMaintenanceDialog({
 		if (Number.isNaN(at.getTime())) return;
 		try {
 			await declare.call({
-				...(scope === "server" ? { server_id: id } : { server_group_id: id }),
+				...(scope === "machine" ? { machine_id: id } : { server_group_id: id }),
 				expected_end: at.toISOString(),
 				note: note.trim() === "" ? null : note.trim(),
 			});
@@ -92,8 +92,8 @@ export default function DeclareMaintenanceDialog({
 			<DialogContent>
 				<DialogContentText sx={{ mb: 2 }}>
 					{scope === "group"
-						? "Every check on this group and its servers is suspended: nothing opens or joins an incident, and nothing notifies."
-						: "Every check on this server is suspended: nothing opens or joins an incident, and nothing notifies."}{" "}
+						? "Every check on this group and its machines is suspended: nothing opens or joins an incident, and nothing notifies."
+						: "Every check on this machine and the applications on it is suspended: nothing opens or joins an incident, and nothing notifies."}{" "}
 					The window ends itself at the time below, and watching resumes a
 					few minutes later once the reporters have been heard from.
 				</DialogContentText>

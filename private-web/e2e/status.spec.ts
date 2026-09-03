@@ -2,6 +2,9 @@ import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
 	seedDevice,
+	seedIncident,
+	seedMachine,
+	seedMaintenanceWindow,
 	seedServer,
 	seedServerGroup,
 	seedStatus,
@@ -28,7 +31,12 @@ test.describe("status page", () => {
 		await expect(page.getByText(/no server groups configured/i)).toBeVisible();
 	});
 
-	test("groups by rank bucket and links to each group's detail page", async ({
+	/// One grid, alphabetical. Each card carries its own ranks in its dot strip,
+	/// so ordering the page by rank as well sorts it by something already
+	/// written on every card.
+	///
+	/// spec: CHK#presentation
+	test("orders cards by name rather than by rank, and links each to its group", async ({
 		page,
 		sql,
 	}) => {
@@ -39,26 +47,26 @@ test.describe("status page", () => {
 		const demoGroup = await seedServerGroup(sql, { name: "demo-cluster" });
 		await seedServer(sql, {
 			name: "prod-alpha",
-			kind: "central",
+			type: "tamanu-central",
 			rank: "production",
 			groupId: prodGroup.id,
 		});
 		await seedServer(sql, {
 			name: "demo-beta",
-			kind: "central",
+			type: "tamanu-central",
 			rank: "demo",
 			groupId: demoGroup.id,
 		});
 
 		await page.goto("/status");
 
-		// Rank section headings.
+		// No rank sections: the rank reads off each card's own rows.
 		await expect(
 			page.getByRole("heading", { name: "production", exact: true }),
-		).toBeVisible();
+		).toHaveCount(0);
 		await expect(
 			page.getByRole("heading", { name: "demo", exact: true }),
-		).toBeVisible();
+		).toHaveCount(0);
 
 		// Group names render as h3 inside each card.
 		await expect(
@@ -68,10 +76,22 @@ test.describe("status page", () => {
 			page.getByRole("heading", { name: demoGroup.name }),
 		).toBeVisible();
 
-		// Each card is wrapped in a router link to /groups/<id>.
+		// Each card is wrapped in a router link to /fleet/groups/<id>.
 		await expect(
-			page.locator(`a[href="/groups/${prodGroup.id}"]`),
+			page.locator(`a[href="/fleet/groups/${prodGroup.id}"]`),
 		).toBeVisible();
+
+		// Alphabetical, so demo-cluster leads prod-cluster despite ranking
+		// below it.
+		const cards = page.locator('a[href^="/fleet/groups/"]');
+		await expect(cards.first()).toHaveAttribute(
+			"href",
+			`/fleet/groups/${demoGroup.id}`,
+		);
+		await expect(cards.last()).toHaveAttribute(
+			"href",
+			`/fleet/groups/${prodGroup.id}`,
+		);
 	});
 
 	test("dot strips wrap and align across a spread of group sizes", async ({
@@ -105,7 +125,7 @@ test.describe("status page", () => {
 			for (const [i, rank] of ranks.entries()) {
 				const server = await seedServer(sql, {
 					name: `f${n}-${i}`,
-					kind: i === 0 ? "central" : "facility",
+					type: i === 0 ? "tamanu-central" : "tamanu-facility",
 					rank,
 					groupId: group.id,
 				});
@@ -130,14 +150,217 @@ test.describe("status page", () => {
 		for (const { id, size } of groups) {
 			// A group may surface under more than one rank bucket; every card
 			// shows the full strip, so scope to the first.
-			const card = page.locator(`a[href="/groups/${id}"]`).first();
+			const card = page.locator(`a[href="/fleet/groups/${id}"]`).first();
 			const strip = card.getByTestId("dot-strip");
 			await expect(strip).toBeVisible();
-			// Two rank boundaries (production→clone, clone→dev).
-			await expect(strip.getByTestId("rank-separator")).toHaveCount(2);
-			// Every child cell is a dot or a separator.
-			await expect(strip.locator("> *")).toHaveCount(size + 2);
+			// Three rank rows (production, clone, dev), each a row of machine
+			// enclosures rather than a run of dots with a separator between.
+			await expect(strip.getByTestId("rank-row")).toHaveCount(3);
+			// Every application still has its dot; `seedServer` gives each its
+			// own box, so there is one enclosure per dot here.
+			await expect(strip.locator("[data-testid='rank-row'] > span")).toHaveCount(
+				size,
+			);
 		}
+	});
+
+	/// Two dots in one pill is the whole point: a box carrying two workloads
+	/// is one enclosure, and a box carrying one is still an enclosure, so the
+	/// presence of a pill never means anything on its own.
+	///
+	/// spec: FLT
+	test("a box carrying two workloads is one enclosure", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "shared-box-status" });
+		const shared = await seedMachine(sql, {
+			name: "shared",
+			groupId: group.id,
+		});
+		await sql.query(
+			`INSERT INTO applications (id, name, host, type, rank, group_id, machine_id)
+			 VALUES (gen_random_uuid(), 'pair-central', 'https://pc.e2e.invalid',
+			         'tamanu-central', 'production', $1, $2),
+			        (gen_random_uuid(), 'pair-facility', 'https://pf.e2e.invalid',
+			         'tamanu-facility', 'production', $1, $2)`,
+			[group.id, shared.id],
+		);
+		// A third workload, on a box of its own and at another rank.
+		await seedServer(sql, {
+			name: "solo",
+			rank: "dev",
+			groupId: group.id,
+		});
+
+		await page.goto("/status");
+
+		const strip = page
+			.locator(`a[href="/fleet/groups/${group.id}"]`)
+			.first()
+			.getByTestId("dot-strip");
+		await expect(strip).toBeVisible();
+
+		// Two rank rows: the shared production box, then the dev box.
+		const rows = strip.getByTestId("rank-row");
+		await expect(rows).toHaveCount(2);
+		// The production row is one enclosure holding two dots.
+		await expect(rows.first().locator("> span")).toHaveCount(1);
+		await expect(rows.first().locator("> span > span")).toHaveCount(2);
+		// The dev row is one enclosure holding one — still an enclosure.
+		await expect(rows.nth(1).locator("> span")).toHaveCount(1);
+		await expect(rows.nth(1).locator("> span > span")).toHaveCount(1);
+	});
+
+	/// A window is declared over a box, so the box is what carries it. Before
+	/// this the status page had no maintenance signal at all: a box being
+	/// worked on looked exactly like one that was not.
+	///
+	/// spec: MNT#presentation
+	test("a box under a maintenance window is marked on the status page", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "window-group" });
+		const working = await seedServer(sql, {
+			name: "being-worked-on",
+			rank: "production",
+			groupId: group.id,
+		});
+		const untouched = await seedServer(sql, {
+			name: "left-alone",
+			rank: "production",
+			groupId: group.id,
+		});
+		await seedMaintenanceWindow(sql, {
+			machineId: working.machineId,
+			endsInHours: 2,
+		});
+
+		await page.goto("/status");
+
+		const strip = page
+			.locator(`a[href="/fleet/groups/${group.id}"]`)
+			.first()
+			.getByTestId("dot-strip");
+		await expect(strip).toBeVisible();
+
+		// The hatch is a background on the pill, so assert on computed style:
+		// at this size nothing else carries the distinction. Both boxes are
+		// production and sort by their applications' names, so the worked-on
+		// box is first.
+		const fills = await strip
+			.locator("[data-testid='rank-row'] > span")
+			.evaluateAll((els) =>
+				els.map((el) => getComputedStyle(el).backgroundImage),
+			);
+		expect(fills).toHaveLength(2);
+		expect(fills[0]).not.toBe("none");
+		expect(fills[1]).toBe("none");
+		void untouched;
+
+		// And the pill says why.
+		await strip.locator("[data-testid='rank-row'] > span").first().hover();
+		await expect(
+			page.getByRole("tooltip", { name: /under maintenance/ }),
+		).toBeVisible();
+	});
+
+	/// A group's window covers every box in it, so every pill on the card is
+	/// marked rather than the operator having to know the window was group-wide.
+	///
+	/// spec: MNT#presentation
+	test("a group-wide window marks every box on the card", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "whole-group-window" });
+		await seedServer(sql, { name: "one", rank: "production", groupId: group.id });
+		await seedServer(sql, { name: "two", rank: "production", groupId: group.id });
+		await seedMaintenanceWindow(sql, {
+			serverGroupId: group.id,
+			endsInHours: 2,
+		});
+
+		await page.goto("/status");
+
+		const strip = page
+			.locator(`a[href="/fleet/groups/${group.id}"]`)
+			.first()
+			.getByTestId("dot-strip");
+		await expect(strip).toBeVisible();
+
+		const fills = await strip
+			.locator("[data-testid='rank-row'] > span")
+			.evaluateAll((els) =>
+				els.map((el) => getComputedStyle(el).backgroundImage),
+			);
+		expect(fills).toHaveLength(2);
+		expect(fills.every((f) => f !== "none")).toBe(true);
+	});
+
+	/// A quiet card is two bands. The third says what is happening to the
+	/// group, so a card only grows one when something is.
+	///
+	/// spec: CHK#presentation
+	test("the status band appears only when there is something to put in it", async ({
+		page,
+		sql,
+	}) => {
+		const quiet = await seedServerGroup(sql, { name: "quiet-group" });
+		await seedServer(sql, {
+			name: "quiet-one",
+			rank: "production",
+			groupId: quiet.id,
+		});
+		const noisy = await seedServerGroup(sql, { name: "noisy-group" });
+		await seedServer(sql, {
+			name: "noisy-one",
+			rank: "production",
+			groupId: noisy.id,
+		});
+		await seedIncident(sql, { serverGroupId: noisy.id });
+
+		await page.goto("/status");
+
+		// The quiet card has no incident mark at all.
+		const quietCard = page.locator(`a[href="/fleet/groups/${quiet.id}"]`).first();
+		await expect(quietCard.getByText("incident", { exact: false })).toHaveCount(
+			0,
+		);
+
+		// The noisy one carries its incident in a band of its own.
+		const noisyCard = page.locator(`a[href="/fleet/groups/${noisy.id}"]`).first();
+		await expect(
+			noisyCard.getByText("incident", { exact: false }).first(),
+		).toBeVisible();
+
+		// The rank is spelled out behind the row rather than marked by a
+		// separator between runs of dots.
+		await expect(
+			quietCard.locator("[data-testid='rank-row'][data-rank='production']"),
+		).toHaveCount(1);
+	});
+
+	/// Two dots in one pill is the case the machine grain exists for, and an
+	/// operator who has never seen a shared box has no way to know it means one
+	/// host rather than two dots that happen to be adjacent. So the legend
+	/// shows one.
+	///
+	/// spec: CHK#presentation
+	test("the legend shows a machine carrying two applications", async ({
+		page,
+		sql,
+	}) => {
+		await seedServer(sql, { name: "legend-one", rank: "production" });
+
+		await page.goto("/status");
+
+		const entry = page
+			.getByText("Two applications on one machine")
+			.locator("xpath=..");
+		await expect(entry).toBeVisible();
+		await expect(entry.getByTestId("status-dot")).toHaveCount(2);
 	});
 
 	// spec: FIG#active-versions
@@ -183,7 +406,7 @@ test.describe("status page", () => {
 		// The card answers "which branches"; the figures page answers "which
 		// servers, and what else are they running".
 		await page.getByRole("link", { name: "Fleet figures" }).click();
-		await expect(page).toHaveURL(/\/servers\/figures$/);
+		await expect(page).toHaveURL(/\/fleet\/figures$/);
 		await expect(page.getByRole("group", { name: "Tamanu" })).toBeVisible();
 	});
 });

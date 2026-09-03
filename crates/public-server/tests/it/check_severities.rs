@@ -2,6 +2,7 @@
 //! `GET /status/{server_id}/check-severities` endpoint and the
 //! `check_severities` field riding along status-push responses.
 
+use commons_types::{namespace::Namespace, server::app_type::ApplicationType};
 use diesel::{sql_query, sql_types};
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
@@ -24,12 +25,18 @@ async fn insert_server(
 	group_id: Option<Uuid>,
 ) -> Uuid {
 	let server_id = Uuid::new_v4();
+	sql_query("INSERT INTO machines (id, group_id, device_id) VALUES ($1, $2, $3)")
+		.bind::<sql_types::Uuid, _>(server_id)
+		.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group_id)
+		.bind::<sql_types::Nullable<sql_types::Uuid>, _>(device_id)
+		.execute(conn)
+		.await
+		.expect("insert machine");
 	sql_query(
-		"INSERT INTO servers (id, host, kind, device_id, group_id) \
-		 VALUES ($1, 'https://checks.example.com', 'facility', $2, $3)",
+		"INSERT INTO applications (id, host, type, group_id, machine_id) \
+		 VALUES ($1, 'https://checks.example.com', 'tamanu-facility', $2, $1)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
-	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(device_id)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group_id)
 	.execute(conn)
 	.await
@@ -45,12 +52,20 @@ async fn seed_catalog(
 	ceiling: &str,
 	rules: Option<serde_json::Value>,
 ) {
+	// The servers here are facilities, so that is the namespace their pushes
+	// will read these ceilings back out of.
+	let (subject, application_type) =
+		Namespace::for_application("alertd", check_name, &ApplicationType::TamanuFacility)
+			.to_columns();
 	sql_query(
-		"INSERT INTO check_policies (source, check_name, ceiling, rules, reviewed_at, reviewed_by) \
-		 VALUES ('alertd', $1, $2, $3, NOW(), 'test') \
-		 ON CONFLICT (source, check_name) DO UPDATE \
+		"INSERT INTO check_policies \
+		 (source, subject, application_type, check_name, ceiling, rules, reviewed_at, reviewed_by) \
+		 VALUES ('alertd', $1, $2, $3, $4, $5, NOW(), 'test') \
+		 ON CONFLICT (source, subject, application_type, check_name) DO UPDATE \
 		 SET ceiling = EXCLUDED.ceiling, rules = EXCLUDED.rules",
 	)
+	.bind::<sql_types::Nullable<sql_types::Text>, _>(subject)
+	.bind::<sql_types::Nullable<sql_types::Text>, _>(application_type)
 	.bind::<sql_types::Text, _>(check_name)
 	.bind::<sql_types::Text, _>(ceiling)
 	.bind::<sql_types::Nullable<sql_types::Jsonb>, _>(rules)
@@ -91,9 +106,16 @@ async fn endpoint_maps_catalog_severities_and_silences() {
 			ServerSilencedRef::add(&mut conn, server_id, "alertd", "health/flaky", None)
 				.await
 				.expect("server silence");
-			ServerGroupSilencedRef::add(&mut conn, group_id, "alertd", "health/groupwide", None)
-				.await
-				.expect("group silence");
+			ServerGroupSilencedRef::add(
+				&mut conn,
+				group_id,
+				"alertd",
+				"health/groupwide",
+				Some(&ApplicationType::TamanuFacility),
+				None,
+			)
+			.await
+			.expect("group silence");
 			ServerSilencedRef::add(&mut conn, server_id, "canopy", "reachability", None)
 				.await
 				.expect("canopy silence");
@@ -189,7 +211,7 @@ async fn endpoint_rejects_device_not_bound_to_server() {
 	commons_tests::server::run_with_device_auth(
 		"server",
 		async |mut conn, cert, _device_id, public, _| {
-			// Server bound to no device: the caller's device doesn't match.
+			// Application bound to no device: the caller's device doesn't match.
 			let server_id = insert_server(&mut conn, None, None).await;
 
 			let response = public

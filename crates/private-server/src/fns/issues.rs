@@ -3,13 +3,18 @@ use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
-use commons_types::{Uuid, issue::ResolvedReason, status::CheckResult};
+use commons_types::{
+	Uuid,
+	issue::ResolvedReason,
+	namespace::{Namespace, NamespaceRef},
+	status::CheckResult,
+};
+use database::applications::Application;
 use database::issues::{
 	CheckFiling, Incident, Issue, IssueFilter, IssueIncidentRef, IssueListFilters, MANUAL_SOURCE,
 	Scope, file_check,
 };
 use database::notes::IssueNote;
-use database::servers::Server;
 use database::tailscale_users::TailscaleUser as CachedTailscaleUser;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
@@ -19,16 +24,24 @@ use crate::state::AppState;
 
 const DEFAULT_LIMIT: i64 = 100;
 
-/// A problem raised against a server (or a group of servers), tracking its
+/// A problem raised against a server (or a group of applications), tracking its
 /// current severity, whether it's still ongoing, and how it's been handled
 /// by an operator.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct IssueData {
 	/// Unique identifier for this issue.
 	pub id: Uuid,
-	/// The server this issue was raised against. Absent for issues that
-	/// apply to a whole group of servers rather than a single one.
-	pub server_id: Option<Uuid>,
+	/// The application this issue was raised against. Absent for an issue
+	/// filed at any other grain — a machine's, a group's, or Canopy's own.
+	pub application_id: Option<Uuid>,
+	/// The machine this issue was raised against, for one filed at machine
+	/// scope. Exactly one of this and `application_id` is set on a
+	/// target-scoped issue; both are absent on a group or Canopy-wide one.
+	// spec: MCP#incidents-and-issues
+	pub machine_id: Option<Uuid>,
+	/// Display name of the affected machine, when one is set and the issue is
+	/// the machine's.
+	pub machine_name: Option<String>,
 	/// Display name of the affected server, when one is set. Falls back to
 	/// `server_host` when absent.
 	pub server_name: Option<String>,
@@ -45,6 +58,15 @@ pub struct IssueData {
 	/// What raised the issue (for example, an automated health check or a
 	/// manually submitted event).
 	pub source: String,
+	/// Which catalog entry the check behind this issue resolves to, when the
+	/// issue is a check's. Absent for an issue that is not a check's, and for
+	/// one whose namespace cannot be derived — a structured source's
+	/// application-subject check filed at a grain with no application type.
+	pub namespace: Option<NamespaceRef>,
+	/// How the check behind this issue reads to an operator: `<type>.<check>`
+	/// where it is one application type's, the bare name otherwise. Absent
+	/// alongside `namespace`.
+	pub qualified_name: Option<String>,
 	/// Identifier used to match new incoming events to this issue; unique
 	/// within its source and server.
 	#[serde(rename = "ref")]
@@ -124,8 +146,15 @@ impl From<IssueIncidentRef> for IssueIncidentLink {
 
 /// All the non-Issue extras we tuck into an `IssueData`.
 struct IssueEnrichment<'a> {
+	/// The namespace of the check behind this issue, derived from its source,
+	/// name, and its target's application type. Issues carry no namespace
+	/// columns of their own: a check-state's namespace is a function of what
+	/// it is filed against, and deriving it through the one function is what
+	/// keeps it agreeing with the catalog.
+	namespace: Option<Namespace>,
 	server_name: Option<String>,
 	server_host: String,
+	machine_name: Option<String>,
 	server_group_id: Option<Uuid>,
 	server_group_name: Option<String>,
 	users: &'a std::collections::HashMap<String, CachedTailscaleUser>,
@@ -137,12 +166,20 @@ impl IssueData {
 		let (res_name, res_pic) = lookup_user(e.users, i.resolved_by.as_deref());
 		Self {
 			id: i.id,
-			server_id: i.server_id,
+			application_id: i.application_id,
+			machine_id: i.machine_id,
+			machine_name: e.machine_name,
 			server_name: e.server_name,
 			server_host: e.server_host,
 			server_group_id: e.server_group_id,
 			server_group_name: e.server_group_name,
 			device_id: i.device_id,
+			namespace: e.namespace.as_ref().map(NamespaceRef::from),
+			qualified_name: e
+				.namespace
+				.as_ref()
+				.zip(i.check_name.as_deref())
+				.map(|(ns, check)| ns.qualified_name(check)),
 			source: i.source,
 			r#ref: i.r#ref,
 			escalates: i.escalates,
@@ -191,16 +228,26 @@ fn collect_user_logins(issues: &[Issue]) -> Vec<&str> {
 	s.into_iter().collect()
 }
 
-/// Enrich a list of issues with their server names/hosts, acker/resolver
-/// display info, and the incidents each issue is attached to. Three extra
-/// batch queries (servers, users, incidents).
+/// Enrich a list of issues with their target's name and group, acker/resolver
+/// display info, and the incidents each issue is attached to.
+///
+/// Both target grains are resolved: a machine-scoped issue names its machine
+/// and that machine's group, as an application-scoped one names its
+/// application's. Reading only `application_id` left every machine check —
+/// maintenance, restore verification, redaction, and the machine-subject
+/// checks — displaying with no name, host, or group against it.
+// spec: MCP#incidents-and-issues
 pub(crate) async fn enrich_issues(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	issues: Vec<Issue>,
 ) -> Result<Vec<IssueData>> {
-	let server_ids: Vec<Uuid> = issues.iter().filter_map(|i| i.server_id).collect();
-	let names = Server::names_by_ids(conn, &server_ids).await?;
-	let group_refs = Server::group_refs_by_server_ids(conn, &server_ids).await?;
+	let server_ids: Vec<Uuid> = issues.iter().filter_map(|i| i.application_id).collect();
+	let machine_ids: Vec<Uuid> = issues.iter().filter_map(|i| i.machine_id).collect();
+	let names = Application::names_by_ids(conn, &server_ids).await?;
+	let group_refs = Application::group_refs_by_server_ids(conn, &server_ids).await?;
+	let machine_names = database::machines::Machine::names_by_ids(conn, &machine_ids).await?;
+	let application_types = Application::types_by_id(conn, &server_ids).await?;
+	let machine_groups = database::machines::Machine::group_refs_by_ids(conn, &machine_ids).await?;
 	let user_logins = collect_user_logins(&issues);
 	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
 	let issue_ids: Vec<Uuid> = issues.iter().map(|i| i.id).collect();
@@ -209,24 +256,51 @@ pub(crate) async fn enrich_issues(
 		.into_iter()
 		.map(|i| {
 			let (name, host) = i
-				.server_id
+				.application_id
 				.and_then(|sid| names.get(&sid).cloned())
 				.unwrap_or((None, None));
-			let (group_id, group_name) = i
-				.server_id
-				.and_then(|sid| group_refs.get(&sid).cloned())
-				.unwrap_or((None, None));
+			// An application nobody has named reads as its type, the same as
+			// it does everywhere else it is presented.
+			// spec: FLT#naming
+			let name = name.or_else(|| {
+				i.application_id
+					.and_then(|sid| application_types.get(&sid))
+					.map(|t| t.label())
+			});
+			// A machine's issue answers to its machine's group, so the
+			// group is named either way.
+			let (group_id, group_name) = match (i.application_id, i.machine_id) {
+				(Some(sid), _) => group_refs.get(&sid).cloned().unwrap_or((None, None)),
+				(None, Some(mid)) => machine_groups.get(&mid).cloned().unwrap_or((None, None)),
+				(None, None) => (None, None),
+			};
+			let machine_name = i
+				.machine_id
+				.and_then(|mid| machine_names.get(&mid).cloned())
+				.flatten();
 			let links = incidents
 				.remove(&i.id)
 				.unwrap_or_default()
 				.into_iter()
 				.map(IssueIncidentLink::from)
 				.collect();
+			// A check's namespace follows its target's application type, the
+			// same as it does on ingest, so an issue links to the catalog
+			// entry the check actually files into.
+			let namespace = i.check_name.as_deref().and_then(|check| {
+				Namespace::of(
+					&i.source,
+					check,
+					i.application_id.and_then(|sid| application_types.get(&sid)),
+				)
+			});
 			IssueData::from_with(
 				i,
 				IssueEnrichment {
+					namespace,
 					server_name: name,
 					server_host: host.unwrap_or_default(),
+					machine_name,
 					server_group_id: group_id,
 					server_group_name: group_name,
 					users: &users,
@@ -237,42 +311,19 @@ pub(crate) async fn enrich_issues(
 		.collect())
 }
 
-/// Same as `enrich_issues` but for a single issue.
+/// Same as [`enrich_issues`] but for a single issue.
+///
+/// Delegates rather than repeating the resolution: the two paths drifted apart
+/// once already, which is how a machine-scoped issue could come back enriched
+/// from one entry point and bare from the other.
 pub(crate) async fn enrich_issue(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	issue: Issue,
 ) -> Result<IssueData> {
-	let server_ids: Vec<Uuid> = issue.server_id.into_iter().collect();
-	let mut names = Server::names_by_ids(conn, &server_ids).await?;
-	let (name, host) = issue
-		.server_id
-		.and_then(|sid| names.remove(&sid))
-		.unwrap_or((None, None));
-	let mut group_refs = Server::group_refs_by_server_ids(conn, &server_ids).await?;
-	let (group_id, group_name) = issue
-		.server_id
-		.and_then(|sid| group_refs.remove(&sid))
-		.unwrap_or((None, None));
-	let user_logins = collect_user_logins(std::slice::from_ref(&issue));
-	let users = CachedTailscaleUser::by_logins(conn, &user_logins).await?;
-	let mut incidents = Incident::for_issues(conn, &[issue.id]).await?;
-	let links = incidents
-		.remove(&issue.id)
-		.unwrap_or_default()
-		.into_iter()
-		.map(IssueIncidentLink::from)
-		.collect();
-	Ok(IssueData::from_with(
-		issue,
-		IssueEnrichment {
-			server_name: name,
-			server_host: host.unwrap_or_default(),
-			server_group_id: group_id,
-			server_group_name: group_name,
-			users: &users,
-			incidents: links,
-		},
-	))
+	enrich_issues(conn, vec![issue])
+		.await?
+		.pop()
+		.ok_or_else(|| AppError::NotFound("issue".into()))
 }
 
 pub fn routes() -> OpenApiRouter<AppState> {
@@ -297,7 +348,7 @@ fn filter_from(active_only: Option<bool>) -> IssueFilter {
 	}
 }
 
-/// Filters for listing issues across all servers.
+/// Filters for listing issues across all applications.
 #[derive(Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct IssueListArgs {
@@ -318,7 +369,7 @@ pub struct IssueListArgs {
 	pub limit: Option<i64>,
 }
 
-/// List issues across all servers, with optional filtering.
+/// List issues across all applications, with optional filtering.
 ///
 /// Returns the most relevant issues fleet-wide, matching the given filters.
 /// By default only currently active issues are returned; pass
@@ -346,7 +397,8 @@ pub async fn list(
 			active_only: args.active_only.unwrap_or(true),
 			results: args.results,
 			server_group_id: args.server_group_id,
-			server_id: None,
+			application_id: None,
+			machine_id: None,
 			since: None,
 		},
 		args.limit.unwrap_or(DEFAULT_LIMIT),
@@ -404,7 +456,7 @@ pub async fn list_for_device(
 #[derive(Deserialize, ToSchema)]
 pub struct IssueListForServerArgs {
 	/// Id of the server whose issues to list.
-	pub server_id: Uuid,
+	pub application_id: Uuid,
 	/// When `false`, include resolved and inactive issues as well as active
 	/// ones. Defaults to `true` (active issues only) when omitted.
 	#[serde(default)]
@@ -438,7 +490,7 @@ pub async fn list_for_server(
 	let mut conn = state.db_read.get().await?;
 	let issues = Issue::list_for_server(
 		&mut conn,
-		args.server_id,
+		args.application_id,
 		filter_from(args.active_only),
 		args.limit.unwrap_or(DEFAULT_LIMIT),
 	)
@@ -451,7 +503,7 @@ pub async fn list_for_server(
 #[serde(rename_all = "camelCase")]
 pub struct SubmitManualEventArgs {
 	/// Id of the server the condition applies to.
-	pub server_id: Uuid,
+	pub application_id: Uuid,
 	/// Identifier for the underlying condition. Reports with the same
 	/// `ref` on the same server update the same issue rather than opening
 	/// a new one each time; use a fresh unique value if that deduplication
@@ -518,7 +570,7 @@ pub async fn submit_manual_event(
 		&mut conn,
 		CheckFiling {
 			source: MANUAL_SOURCE,
-			scope: Scope::Server(args.server_id),
+			scope: Scope::Application(args.application_id),
 			device_id: None,
 			check: &args.r#ref,
 			observed,

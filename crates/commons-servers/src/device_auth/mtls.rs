@@ -3,7 +3,7 @@
 //! and resolves it to an existing [`Device`] row.
 //!
 //! A device row is created only through the gated enrollment flow
-//! (`/servers/register/*`); an unknown key here is `AuthCertificateNotFound`.
+//! (`/applications/register/*`); an unknown key here is `AuthCertificateNotFound`.
 
 use commons_errors::{AppError, Result};
 use database::devices::Device;
@@ -16,7 +16,7 @@ use x509_parser::prelude::*;
 /// [`ClientCertHeader`].
 const CERT_HEADER_ENV: &str = "CANOPY_DEVICE_AUTH_CERT_HEADER";
 
-/// Which client-certificate header this deployment's ingress sets — and
+/// Which client-certificate header this Canopy instance's ingress sets — and
 /// therefore the only one that may be believed.
 ///
 /// A header naming a client certificate is meaningful only if it can *only*

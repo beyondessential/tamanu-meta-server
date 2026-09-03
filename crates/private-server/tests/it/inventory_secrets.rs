@@ -1,6 +1,7 @@
-//! Endpoint tests for the secret variables an environment or a server carries:
-//! that a value reaches a run, that a name is a tag or a secret and never both,
-//! and that a value Canopy cannot produce refuses the whole inventory.
+//! Endpoint tests for the secret variables an environment or an application
+//! carries: that a value reaches a run, that a name is a tag or a secret and
+//! never both, and that a value Canopy cannot produce refuses the whole
+//! inventory.
 //!
 //! spec: INV#secret-variables
 
@@ -8,7 +9,7 @@ use commons_tests::diesel_async::{AsyncPgConnection, SimpleAsyncConnection};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::inventory::{insert_group, insert_ranked_server};
+use crate::inventory::{insert_group, insert_ranked_application};
 
 /// Record a name with no value behind it, which only a lost or half-written
 /// secret store would produce.
@@ -30,21 +31,21 @@ async fn an_environment_secret_reaches_every_host() {
 			json!({ "timezone": "Pacific/Auckland" }),
 		)
 		.await;
-		insert_ranked_server(
+		insert_ranked_application(
 			&mut conn,
 			group,
 			"kamaka-prod-central",
-			"central",
+			"tamanu-central",
 			Some("production"),
 			None,
 			json!({}),
 		)
 		.await;
-		insert_ranked_server(
+		insert_ranked_application(
 			&mut conn,
 			group,
 			"kamaka-prod-facility",
-			"facility",
+			"tamanu-facility",
 			Some("production"),
 			None,
 			json!({}),
@@ -76,7 +77,7 @@ async fn an_environment_secret_reaches_every_host() {
 		for host in hosts {
 			assert_eq!(host["vars"]["salt"], "pepper");
 			assert_eq!(host["secret_vars"], json!(["salt"]));
-			// It belongs to the environment, so it is not the server's own.
+			// It belongs to the environment, so it is not the application's own.
 			assert!(host["own_vars"].get("salt").is_none());
 		}
 	})
@@ -84,24 +85,24 @@ async fn an_environment_secret_reaches_every_host() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_servers_secret_overlays_the_environments() {
+async fn an_applications_secret_overlays_the_environments() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "kamaka", json!({})).await;
-		let central = insert_ranked_server(
+		let central = insert_ranked_application(
 			&mut conn,
 			group,
 			"kamaka-prod-central",
-			"central",
+			"tamanu-central",
 			Some("production"),
 			None,
 			json!({}),
 		)
 		.await;
-		insert_ranked_server(
+		insert_ranked_application(
 			&mut conn,
 			group,
 			"kamaka-prod-facility",
-			"facility",
+			"tamanu-facility",
 			Some("production"),
 			None,
 			json!({}),
@@ -110,7 +111,7 @@ async fn a_servers_secret_overlays_the_environments() {
 
 		for args in [
 			json!({ "server_group_id": group, "rank": "production", "name": "salt", "value": "shared" }),
-			json!({ "server_id": central, "name": "salt", "value": "its-own" }),
+			json!({ "application_id": central, "name": "salt", "value": "its-own" }),
 		] {
 			private
 				.post("/api/inventory_secrets/set")
@@ -144,11 +145,11 @@ async fn a_secret_with_no_value_refuses_the_inventory() {
 			json!({ "timezone": "Pacific/Auckland" }),
 		)
 		.await;
-		insert_ranked_server(
+		insert_ranked_application(
 			&mut conn,
 			group,
 			"kamaka-prod-central",
-			"central",
+			"tamanu-central",
 			Some("production"),
 			None,
 			json!({}),
@@ -176,11 +177,11 @@ async fn a_name_is_a_tag_or_a_secret_and_never_both() {
 			json!({ "timezone": "Pacific/Auckland" }),
 		)
 		.await;
-		let central = insert_ranked_server(
+		let central = insert_ranked_application(
 			&mut conn,
 			group,
 			"kamaka-prod-central",
-			"central",
+			"tamanu-central",
 			Some("production"),
 			None,
 			json!({}),
@@ -212,7 +213,7 @@ async fn a_name_is_a_tag_or_a_secret_and_never_both() {
 		// A group tag collides at any rank under it, the group's tags reaching
 		// every environment in it.
 		private
-			.post("/api/server_groups/update")
+			.post("/api/fleet/groups/update")
 			.json(&json!({
 				"server_group_id": group,
 				"data": { "tags": { "salt": "in-the-clear" } },
@@ -220,9 +221,9 @@ async fn a_name_is_a_tag_or_a_secret_and_never_both() {
 			.await
 			.assert_status_bad_request();
 
-		// And the other way round: the server tag write is refused too.
+		// And the other way round: the application tag write is refused too.
 		private
-			.post("/api/servers/update")
+			.post("/api/fleet/applications/update")
 			.json(&json!({
 				"server_id": central,
 				"data": { "tags": { "salt": "in-the-clear" } },
@@ -232,18 +233,18 @@ async fn a_name_is_a_tag_or_a_secret_and_never_both() {
 
 		// As is carrying the name in from another group.
 		let other = insert_group(&mut conn, "drifting", json!({})).await;
-		let mover = insert_ranked_server(
+		let mover = insert_ranked_application(
 			&mut conn,
 			other,
 			"drifting-central",
-			"central",
+			"tamanu-central",
 			Some("production"),
 			None,
 			json!({ "salt": "in-the-clear" }),
 		)
 		.await;
 		private
-			.post("/api/servers/update")
+			.post("/api/fleet/applications/update")
 			.json(&json!({
 				"server_id": mover,
 				"data": { "group_id": group, "rank": "production" },
@@ -254,15 +255,71 @@ async fn a_name_is_a_tag_or_a_secret_and_never_both() {
 	.await;
 }
 
+/// The applications on a box take its group, so moving the box is the move
+/// that carries a tag into an environment holding a secret of that name.
+#[tokio::test(flavor = "multi_thread")]
+async fn moving_a_machine_cannot_carry_a_colliding_tag_in() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka", json!({})).await;
+		insert_ranked_application(
+			&mut conn,
+			group,
+			"kamaka-prod-central",
+			"tamanu-central",
+			Some("production"),
+			None,
+			json!({}),
+		)
+		.await;
+		private
+			.post("/api/inventory_secrets/set")
+			.json(&json!({
+				"server_group_id": group,
+				"rank": "production",
+				"name": "salt",
+				"value": "pepper",
+			}))
+			.await
+			.assert_status_ok();
+
+		let other = insert_group(&mut conn, "drifting", json!({})).await;
+		let machine = Uuid::new_v4();
+		let mover = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO machines (id, name, group_id)
+			 VALUES ('{machine}', 'drifting-box', '{other}');
+			 INSERT INTO applications (id, name, type, rank, group_id, machine_id, tags)
+			 VALUES ('{mover}', 'drifting-central', 'tamanu-central', 'production', '{other}', '{machine}', '{{\"salt\": \"in-the-clear\"}}')"
+		))
+		.await
+		.expect("seed the mover");
+
+		private
+			.post("/api/fleet/machines/update")
+			.json(&json!({ "machine_id": machine, "group_id": group }))
+			.await
+			.assert_status_bad_request();
+
+		// Refused rather than half-applied: the box is still where it was.
+		let response = private
+			.post("/api/fleet/machines/get")
+			.json(&json!({ "machine_id": machine }))
+			.await;
+		response.assert_status_ok();
+		assert_eq!(response.json::<Value>()["group_id"], other.to_string());
+	})
+	.await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn the_names_are_listed_without_their_values() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "kamaka", json!({})).await;
-		insert_ranked_server(
+		insert_ranked_application(
 			&mut conn,
 			group,
 			"kamaka-prod-central",
-			"central",
+			"tamanu-central",
 			Some("production"),
 			None,
 			json!({}),
@@ -304,11 +361,11 @@ async fn the_names_are_listed_without_their_values() {
 async fn removing_forgets_the_value() {
 	commons_tests::server::run(async move |mut conn, _public, private| {
 		let group = insert_group(&mut conn, "kamaka", json!({})).await;
-		insert_ranked_server(
+		insert_ranked_application(
 			&mut conn,
 			group,
 			"kamaka-prod-central",
-			"central",
+			"tamanu-central",
 			Some("production"),
 			None,
 			json!({}),

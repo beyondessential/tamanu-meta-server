@@ -55,13 +55,15 @@ import {
 	BACKUP_STATUS_HELP,
 	BACKUP_STATUS_INTENT,
 	BACKUP_STATUS_LABEL,
+	applicationName,
 	type BackupConfigStatus,
 	type BackupConfigView,
 	type BackupMaintenanceRun,
 	groupServersByRank,
 	type LiveProgress,
+	type RankedMachine,
+	rankMachines,
 	type RecentRun,
-	type ServerInfo,
 } from "../types";
 
 export default function BackupPanel() {
@@ -84,7 +86,7 @@ export default function BackupPanel() {
 		[id, tick],
 	);
 	const group = useApi(
-		"server_groups",
+		"fleet/groups",
 		"get",
 		{ server_group_id: id },
 		[id],
@@ -113,7 +115,7 @@ export default function BackupPanel() {
 				<Box>
 					<MuiLink
 						component={RouterLink}
-						to={`/groups/${id}`}
+						to={`/fleet/groups/${id}`}
 						variant="body2"
 						underline="hover"
 					>
@@ -128,7 +130,7 @@ export default function BackupPanel() {
 					<Box>
 						<Button
 							component={RouterLink}
-							to={`/groups/${id}/backups/config`}
+							to={`/fleet/groups/${id}/backups/config`}
 							variant="contained"
 							startIcon={<BackupIcon />}
 						>
@@ -140,8 +142,14 @@ export default function BackupPanel() {
 		);
 	}
 
+	// A backup is taken of a box, so this page counts boxes: capabilities,
+	// requests and restore windows all key off a machine, and two workloads
+	// sharing a host share one row here.
+	// spec: BKO#status
 	const members =
-		group.status === "ok" ? group.data.servers : [];
+		group.status === "ok"
+			? rankMachines(group.data.machines, group.data.applications)
+			: [];
 	const status = data.status as BackupConfigStatus;
 
 	return (
@@ -149,7 +157,7 @@ export default function BackupPanel() {
 			<Box>
 				<MuiLink
 					component={RouterLink}
-					to={`/groups/${id}`}
+					to={`/fleet/groups/${id}`}
 					variant="body2"
 					underline="hover"
 				>
@@ -178,7 +186,7 @@ export default function BackupPanel() {
 						<Stack direction="row" spacing={1}>
 							<Button
 								component={RouterLink}
-								to={`/groups/${id}/backups/config`}
+								to={`/fleet/groups/${id}/backups/config`}
 								variant="outlined"
 								startIcon={<EditIcon />}
 							>
@@ -657,15 +665,22 @@ function ProvisioningCard({
 	);
 }
 
-/// Human label for the server a run came from. Falls back to the host or a
-/// short id when the server has no name, and to "—" for runs with no server.
-function serverLabel(
-	members: ServerInfo[],
-	serverId: string | null | undefined,
+/// Human label for the machine a run came from. Falls back to the name of a
+/// workload on it, then to a short id, and to "—" for runs with no machine.
+function machineLabel(
+	members: RankedMachine[],
+	machineId: string | null | undefined,
 ): string {
-	if (!serverId) return "—";
-	const m = members.find((m) => m.id === serverId);
-	return m?.name || m?.display_host || serverId.slice(0, 8);
+	if (!machineId) return "—";
+	const box = members.find((m) => m.machine.id === machineId);
+	if (!box) return machineId.slice(0, 8);
+	const [first] = box.applications;
+	return (
+		box.machine.name ||
+		first?.name ||
+		first?.display_host ||
+		machineId.slice(0, 8)
+	);
 }
 
 /// True when the run carries any of bestool's four S3 traffic tallies.
@@ -820,7 +835,7 @@ function SnapshotTakenCaption({ run }: { run: RecentRun }) {
 /// One row of the recent-runs table. Runs with an error, reported S3 traffic, or
 /// live progress get an expand toggle that reveals the detail in a collapsible
 /// sub-row.
-function RunRow({ run, members }: { run: RecentRun; members: ServerInfo[] }) {
+function RunRow({ run, members }: { run: RecentRun; members: RankedMachine[] }) {
 	const [open, setOpen] = useState(false);
 	const hasError = Boolean(run.error);
 	const hasS3 = hasS3Traffic(run);
@@ -864,7 +879,7 @@ function RunRow({ run, members }: { run: RecentRun; members: ServerInfo[] }) {
 					<TimeAgo timestamp={run.at} />
 					<SnapshotTakenCaption run={run} />
 				</TableCell>
-				<TableCell>{serverLabel(members, run.server_id)}</TableCell>
+				<TableCell>{machineLabel(members, run.machine_id)}</TableCell>
 				<TableCell>{run.type}</TableCell>
 				<TableCell>{run.purpose}</TableCell>
 				<TableCell>
@@ -1238,7 +1253,7 @@ function RecentRunsPanel({
 	members,
 }: {
 	groupId: string;
-	members: ServerInfo[];
+	members: RankedMachine[];
 }) {
 	// Poll faster while a run is in flight, so its progress figures actually
 	// advance while someone is watching — a live view that only moved on page
@@ -1596,17 +1611,21 @@ function MaintenancePanel({
 	);
 }
 
-/// The group's servers and their backup types: per (server, type) the schedule
-/// state, when the next backup is expected (per-server, so a lagging member
-/// isn't masked by a freshly-backed-up sibling), the latest snapshot, and the
-/// on-demand "backup now" action.
+/// The group's machines and their backup types: per (machine, type) the
+/// schedule state, when the next backup is expected (per-machine, so a lagging
+/// box isn't masked by a freshly-backed-up sibling), the latest snapshot, and
+/// the on-demand "backup now" action.
+///
+/// Boxes rather than workloads: a backup is taken of the box, so a host
+/// carrying two applications appears once here.
+/// spec: BKO#status
 function ServersPanel({
 	groupId,
 	members,
 	isAdmin,
 }: {
 	groupId: string;
-	members: ServerInfo[];
+	members: RankedMachine[];
 	isAdmin: boolean;
 }) {
 	// As with the runs panel: watch closely while a backup is in flight so its
@@ -1635,33 +1654,33 @@ function ServersPanel({
 	}, [anyInFlight]);
 	const restoreWindows =
 		stats.status === "ok" ? stats.data.restore_windows : [];
-	const restoreWindowFor = (serverId: string) =>
-		restoreWindows.find((w) => w.server_id === serverId);
+	const restoreWindowFor = (machineId: string) =>
+		restoreWindows.find((w) => w.machine_id === machineId);
 
-	const onAllowRestore = async (serverId: string) => {
+	const onAllowRestore = async (machineId: string) => {
 		try {
-			await allowRestore.call({ server_id: serverId });
+			await allowRestore.call({ machine_id: machineId });
 			stats.reload();
 		} catch {
 			/* surfaced via allowRestore.error */
 		}
 	};
-	const onDisallowRestore = async (serverId: string) => {
+	const onDisallowRestore = async (machineId: string) => {
 		try {
-			await disallowRestore.call({ server_id: serverId });
+			await disallowRestore.call({ machine_id: machineId });
 			stats.reload();
 		} catch {
 			/* surfaced via disallowRestore.error */
 		}
 	};
 
-	// Per-server restore-window control, shown under the server name. Restores
+	// Per-machine restore-window control, shown under the box's name. Restores
 	// are gated behind a deliberate, time-boxed opt-in, so this is where an
 	// operator opens (or closes) the window before running `bestool canopy
 	// restore` on the box.
-	const restoreControl = (serverId: string) => {
+	const restoreControl = (machineId: string) => {
 		if (!isAdmin) return null;
-		const win = restoreWindowFor(serverId);
+		const win = restoreWindowFor(machineId);
 		const busy = allowRestore.pending || disallowRestore.pending;
 		if (win) {
 			return (
@@ -1685,7 +1704,7 @@ function ServersPanel({
 					<Button
 						size="small"
 						color="warning"
-						onClick={() => onDisallowRestore(serverId)}
+						onClick={() => onDisallowRestore(machineId)}
 						disabled={busy}
 					>
 						Disable
@@ -1698,7 +1717,7 @@ function ServersPanel({
 				size="small"
 				color="warning"
 				startIcon={<RestoreIcon />}
-				onClick={() => onAllowRestore(serverId)}
+				onClick={() => onAllowRestore(machineId)}
 				disabled={busy}
 			>
 				Allow restores
@@ -1706,58 +1725,62 @@ function ServersPanel({
 		);
 	};
 
-	// The backup types to offer per server: the ones it has declared it can run
-	// (bestool fails fast on a type it has no definition for), unioned with any
-	// type that already has a pending backup request — so a request can always be
-	// cancelled even if the server later stops declaring that type.
-	const typesForServer = (serverId: string): string[] => {
+	// The backup types to offer per machine: the ones the box has declared it
+	// can run (bestool fails fast on a type it has no definition for), unioned
+	// with any type that already has a pending backup request — so a request can
+	// always be cancelled even if the box later stops declaring that type.
+	const typesForMachine = (machineId: string): string[] => {
 		const set = new Set<string>();
 		for (const c of capabilities) {
-			if (c.server_id === serverId) set.add(c.type);
+			if (c.machine_id === machineId) set.add(c.type);
 		}
 		for (const p of pending) {
-			if (p.server_id === serverId && p.purpose === "backup") set.add(p.type);
+			if (p.machine_id === machineId && p.purpose === "backup") set.add(p.type);
 		}
 		return [...set].sort();
 	};
-	const pendingFor = (serverId: string, type: string) =>
+	const pendingFor = (machineId: string, type: string) =>
 		pending.find(
 			(p) =>
-				p.server_id === serverId && p.type === type && p.purpose === "backup",
+				p.machine_id === machineId && p.type === type && p.purpose === "backup",
 		);
-	const capFor = (serverId: string, type: string) =>
-		capabilities.find((c) => c.server_id === serverId && c.type === type);
+	const capFor = (machineId: string, type: string) =>
+		capabilities.find((c) => c.machine_id === machineId && c.type === type);
 
-	const onRequest = async (serverId: string, type: string) => {
+	const onRequest = async (machineId: string, type: string) => {
 		try {
-			await requestNow.call({ server_id: serverId, type, purpose: "backup" });
+			await requestNow.call({ machine_id: machineId, type, purpose: "backup" });
 			stats.reload();
 		} catch {
 			/* surfaced via requestNow.error */
 		}
 	};
-	const onCancel = async (serverId: string, type: string) => {
+	const onCancel = async (machineId: string, type: string) => {
 		try {
-			await cancel.call({ server_id: serverId, type, purpose: "backup" });
+			await cancel.call({ machine_id: machineId, type, purpose: "backup" });
 			stats.reload();
 		} catch {
 			/* surfaced via cancel.error */
 		}
 	};
 
-	const serverLink = (m: ServerInfo) => (
+	// The box's own page, at its backup section. A box with no name of its own
+	// is recognisable by what runs on it, so fall back to that before the id.
+	const machineLink = (box: RankedMachine) => (
 		<MuiLink
 			component={RouterLink}
-			to={`/servers/${m.id}#backups`}
+			to={`/fleet/machines/${box.machine.id}#backups`}
 			variant="body2"
 			underline="hover"
 		>
-			{m.name ?? m.id.slice(0, 8)}
+			{box.machine.name ??
+				(box.applications[0] && applicationName(box.applications[0])) ??
+				box.machine.id.slice(0, 8)}
 		</MuiLink>
 	);
 
-	const actionCell = (serverId: string, type: string) => {
-		const req = pendingFor(serverId, type);
+	const actionCell = (machineId: string, type: string) => {
+		const req = pendingFor(machineId, type);
 		if (req) {
 			return (
 				<Stack
@@ -1778,7 +1801,7 @@ function ServersPanel({
 						<Button
 							size="small"
 							color="error"
-							onClick={() => onCancel(serverId, type)}
+							onClick={() => onCancel(machineId, type)}
 							disabled={cancel.pending}
 						>
 							Cancel
@@ -1793,7 +1816,7 @@ function ServersPanel({
 					size="small"
 					variant="outlined"
 					startIcon={<BackupIcon />}
-					onClick={() => onRequest(serverId, type)}
+					onClick={() => onRequest(machineId, type)}
 					disabled={requestNow.pending}
 				>
 					Backup now
@@ -1805,18 +1828,18 @@ function ServersPanel({
 	return (
 		<Paper variant="outlined" sx={{ p: 2 }}>
 			<Typography variant="h6" component="h2" gutterBottom>
-				Servers
+				Machines
 			</Typography>
 			{members.length === 0 ? (
 				<Typography color="text.secondary">
-					No member servers in this group.
+					No member machines in this group.
 				</Typography>
 			) : (
 				<Box sx={{ overflowX: "auto" }}>
 					<Table size="small">
 						<TableHead>
 							<TableRow>
-								<TableCell>Server</TableCell>
+								<TableCell>Machine</TableCell>
 								<TableCell>Type</TableCell>
 								<TableCell>Next backup</TableCell>
 								<TableCell>Latest snapshot</TableCell>
@@ -1842,14 +1865,14 @@ function ServersPanel({
 										</TableRow>
 									)}
 									{rankMembers.map((m) => {
-										const types = typesForServer(m.id);
+										const types = typesForMachine(m.machine.id);
 										if (types.length === 0) {
 											return (
-												<TableRow key={m.id}>
+												<TableRow key={m.machine.id}>
 													<TableCell>
 														<Stack spacing={0.5} sx={{ alignItems: "flex-start" }}>
-															{serverLink(m)}
-															{restoreControl(m.id)}
+															{machineLink(m)}
+															{restoreControl(m.machine.id)}
 														</Stack>
 													</TableCell>
 													<TableCell colSpan={3}>
@@ -1858,7 +1881,7 @@ function ServersPanel({
 														</Typography>
 													</TableCell>
 													<TableCell align="right">
-														<Tooltip title="This server hasn't registered any backup types yet.">
+														<Tooltip title="This machine hasn't registered any backup types yet.">
 															{/* span so the tooltip works on the disabled button */}
 															<span>
 																<Button
@@ -1876,9 +1899,9 @@ function ServersPanel({
 											);
 										}
 										return types.map((t, i) => {
-											const cap = capFor(m.id, t);
+											const cap = capFor(m.machine.id, t);
 											return (
-												<TableRow key={`${m.id}:${t}`}>
+												<TableRow key={`${m.machine.id}:${t}`}>
 													{i === 0 && (
 														<TableCell
 															rowSpan={types.length}
@@ -1888,8 +1911,8 @@ function ServersPanel({
 																spacing={0.5}
 																sx={{ alignItems: "flex-start" }}
 															>
-																{serverLink(m)}
-																{restoreControl(m.id)}
+																{machineLink(m)}
+																{restoreControl(m.machine.id)}
 															</Stack>
 														</TableCell>
 													)}
@@ -1906,7 +1929,7 @@ function ServersPanel({
 																{t}
 															</Typography>
 															{cap?.enabled === false && (
-																<Tooltip title="Not on the backup schedule for this server (toggle it on in the server's Backups section). You can still back it up on demand.">
+																<Tooltip title="Not on the backup schedule for this machine (toggle it on in the machine's Backups section). You can still back it up on demand.">
 																	<Chip
 																		size="small"
 																		variant="outlined"
@@ -1936,7 +1959,7 @@ function ServersPanel({
 															bytes={cap?.latest_snapshot_bytes}
 														/>
 													</TableCell>
-													<TableCell align="right">{actionCell(m.id, t)}</TableCell>
+													<TableCell align="right">{actionCell(m.machine.id, t)}</TableCell>
 												</TableRow>
 											);
 										});

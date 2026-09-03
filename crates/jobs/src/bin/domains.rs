@@ -44,8 +44,8 @@ async fn report_authority_health(pool: &database::Db, round: Round) {
 pub fn spawn() -> JoinHandle<()> {
 	let pool = database::init();
 	task::spawn(async move {
-		// Read once at startup: changing what Canopy manages is a deployment
-		// change, and re-reading per tick would let a half-applied configuration
+		// Read once at startup: changing what Canopy manages is an instance
+		// configuration change, and re-reading per tick would let a half-applied configuration
 		// take live records down.
 		let zones = match ManagedZone::list_from_env() {
 			Ok(zones) if zones.is_empty() => {

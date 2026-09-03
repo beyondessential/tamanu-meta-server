@@ -1,5 +1,5 @@
 //! Canopy monitoring pod: the minute-cadence, DB-only sweeps that detect
-//! problems and file/close incidents. One loop, one deployment — every sweep
+//! problems and file/close incidents. One loop, one Canopy instance — every sweep
 //! here is a cheap read against the same DB, so there's no reason to stand up
 //! a separate pod per check.
 //!
@@ -45,10 +45,10 @@ use tracing::{debug, error, info, warn};
 /// - **Code changes drift the rules.** When the join/leave logic
 ///   changes (new gates like `is_monitored`, `silenced`, …), existing
 ///   open incidents that no longer satisfy the rules stay open until
-///   the next event arrives — which may be never for the servers in
+///   the next event arrives — which may be never for the applications in
 ///   question. PR #170 hit exactly this: the migration's value bump
 ///   tripped the OLD code's reachability sweep during the deploy
-///   window, opening 22 spurious incidents on unmonitored servers
+///   window, opening 22 spurious incidents on unmonitored applications
 ///   that the NEW code's rules would never have opened, and which
 ///   nothing in the steady-state event flow would reconcile.
 /// - **Idempotent and cheap when consistent.** `re_evaluate_incident_membership`
@@ -61,10 +61,10 @@ async fn reconcile_on_startup(pool: &database::Db) {
 	};
 	match reconcile_open_incidents(&mut db).await {
 		Ok((0, 0)) => debug!("incident reconciliation: nothing to walk"),
-		Ok((servers, issues)) => {
+		Ok((applications, issues)) => {
 			info!(
 				"incident reconciliation: walked {issues} open issue(s) across \
-				 {servers} server(s)"
+				 {applications} server(s)"
 			);
 		}
 		Err(err) => warn!("incident reconciliation: failed: {err}"),
@@ -79,7 +79,7 @@ async fn reconcile_on_startup(pool: &database::Db) {
 /// live issues rows for its whole run, blocking ingestion filings.
 ///
 /// TODO(backfill-removal): transitional; delete this (and its call
-/// below) once every deployment has run it — see
+/// below) once every Canopy instance has run it — see
 /// `database::stability::backfill_from_statuses`.
 async fn backfill_stability_on_startup(pool: &database::Db) {
 	let Ok(mut db) = pool.get().await else {
@@ -120,7 +120,7 @@ async fn ensure_partition_runway(db: &mut AsyncPgConnection) {
 /// server, so a tight cadence is cheap.
 const REEVAL_INTERVAL: Duration = Duration::from_secs(2);
 
-/// Backstop cap on servers drained per reeval tick, so one tick can't hog the
+/// Backstop cap on applications drained per reeval tick, so one tick can't hog the
 /// pod. The queue coalesces per server, so this is rarely reached.
 const REEVAL_BATCH: i64 = 256;
 
@@ -142,7 +142,7 @@ pub fn spawn() -> JoinHandle<()> {
 		task::spawn(async move { backfill_stability_on_startup(&backfill_pool).await });
 
 		// Deferred incident (re-)evaluation worker. The status-ingest path
-		// enqueues servers instead of evaluating incident membership inline
+		// enqueues applications instead of evaluating incident membership inline
 		// (which took the per-group `server_groups` lock and convoyed the
 		// fleet under load). This single worker drains the queue on a short
 		// cadence, so it — not request traffic — is the only taker of that
@@ -306,7 +306,7 @@ pub fn spawn() -> JoinHandle<()> {
 				Err(err) => error!("dns zone coverage sweep failed: {err}"),
 			}
 
-			// Names and certificates: what a deployment is responsible for, filed
+			// Names and certificates: what a group is responsible for, filed
 			// against its server. All DB-only reads over what the domains pod
 			// recorded, so they ride this loop rather than that one — and they keep
 			// reporting when the domains pod is the thing that is down.

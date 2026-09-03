@@ -1,11 +1,9 @@
 use axum::Json;
+use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
-use commons_types::server::{
-	kind::ServerKind,
-	product::{Caps, Product},
-};
+use commons_types::server::app_type::{ApplicationType, Caps};
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -20,47 +18,58 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(products))
 }
 
-/// One product canopy monitors, with what canopy does for its servers and the
+/// One product canopy monitors, with what canopy does for its applications and the
 /// roles it defines.
 #[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct ProductInfo {
-	/// The product itself.
-	pub product: Product,
-	/// What canopy does for this product's servers.
+pub struct ApplicationTypeInfo {
+	/// The type itself.
+	pub r#type: ApplicationType,
+	/// What Canopy does for applications of this type.
 	pub caps: Caps,
-	/// The roles this product defines, in the order they rank when choosing a
-	/// group's canonical member.
-	pub kinds: Vec<ServerKind>,
-	/// The role a server of this product takes when none is chosen.
-	pub default_kind: ServerKind,
+	/// How the type reads when nothing has named the application.
+	pub label: String,
 }
 
-/// Describe every product canopy monitors.
+/// Describe every application type Canopy monitors.
 ///
-/// The operator UI reads this to decide what to present for a server — which
-/// roles to offer, whether a version applies and whether it can be graded,
-/// whether the public-name field is meaningful — rather than restating the
-/// mapping client-side, where it would drift as products are added.
+/// The operator UI reads this to decide what to present for an application —
+/// whether a version applies and whether it can be graded, whether the
+/// public-name field is meaningful — rather than restating the mapping
+/// client-side, where it would drift as types are added. It offers no roles to
+/// choose from: a type is reported, never entered.
 // spec: APP#capabilities
 #[utoipa::path(
 	post,
 	path = "/products",
 	tag = "commons",
 	responses(
-		(status = 200, description = "Every product, its capabilities, and the roles it defines.", body = Vec<ProductInfo>),
+		(status = 200, description = "Every application type and its capabilities.", body = Vec<ApplicationTypeInfo>),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
-pub async fn products() -> Result<Json<Vec<ProductInfo>>> {
+pub async fn products(State(state): State<AppState>) -> Result<Json<Vec<ApplicationTypeInfo>>> {
+	let mut conn = state.db_read.get().await?;
+	// The types Canopy has handling for, plus the ones the fleet is actually
+	// running. The set is open, so a constant list would leave a reported type
+	// without a label or capabilities anywhere the SPA presents it.
+	// spec: APP#where-a-type-comes-from
+	let mut types: Vec<ApplicationType> = ApplicationType::KNOWN.to_vec();
+	for in_use in database::applications::Application::distinct_types(&mut conn).await? {
+		if !types.contains(&in_use) {
+			types.push(in_use);
+		}
+	}
+	// Alphabetical, everywhere types are listed. An invented precedence is
+	// surprising to read and is one more thing to maintain as types appear.
+	types.sort_by_key(ToString::to_string);
+
 	Ok(Json(
-		Product::ALL
-			.iter()
-			.copied()
-			.map(|product| ProductInfo {
-				product,
-				caps: product.caps(),
-				kinds: product.kinds().to_vec(),
-				default_kind: product.default_kind(),
+		types
+			.into_iter()
+			.map(|r#type| ApplicationTypeInfo {
+				caps: r#type.caps(),
+				label: r#type.label(),
+				r#type,
 			})
 			.collect(),
 	))
@@ -68,8 +77,8 @@ pub async fn products() -> Result<Json<Vec<ProductInfo>>> {
 
 /// Get the configured public API base URL.
 ///
-/// Returns the base URL of the device-facing public API for this
-/// deployment, or `null` if none is configured. Used by the operator UI to
+/// Returns the base URL of the device-facing public API for this Canopy
+/// instance, or `null` if none is configured. Used by the operator UI to
 /// build links out to device-facing resources.
 #[utoipa::path(
 	post,
@@ -95,7 +104,7 @@ pub async fn public_url() -> Result<Json<Option<String>>> {
 	path = "/server_versions_url",
 	tag = "commons",
 	responses(
-		(status = 200, description = "Server-versions URL with embedded auth secret, if configured.", body = Option<String>),
+		(status = 200, description = "Application-versions URL with embedded auth secret, if configured.", body = Option<String>),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]

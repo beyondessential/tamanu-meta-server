@@ -11,9 +11,9 @@ use commons_servers::acme::{Acme, Fault};
 use commons_servers::dns_provider::{DnsProvider, RecordChange, RecordKind};
 use commons_tests::db::TestDb;
 use commons_types::dns::ManagedZone;
+use database::application_certificates::OrderState;
 use database::diesel_async::AsyncPgConnection;
-use database::server_certificates::OrderState;
-use database::{ServerCertificate, ServerGroupDomain, ServerName};
+use database::{ApplicationCertificate, ApplicationName, ServerGroupDomain};
 use diesel::{sql_query, sql_types};
 use diesel_async::RunQueryDsl;
 use jiff::{SignedDuration, Timestamp};
@@ -52,8 +52,7 @@ async fn entitled_server(conn: &mut AsyncPgConnection, domain: &str) -> Uuid {
 
 	let host = format!("https://{}.example.invalid", Uuid::new_v4());
 	sql_query(
-		"INSERT INTO servers (name, host, kind, group_id, may_manage_dns, may_manage_tls) \
-		 VALUES ($1, $2, 'central', $3, true, true) RETURNING id",
+		"WITH m AS (INSERT INTO machines (group_id) VALUES ($3) RETURNING id) INSERT INTO applications (name, host, type, group_id, may_manage_dns, may_manage_tls, machine_id) SELECT $1, $2, 'tamanu-central', $3, true, true, m.id FROM m RETURNING id",
 	)
 	.bind::<sql_types::Text, _>("entitled")
 	.bind::<sql_types::Text, _>(host)
@@ -94,7 +93,7 @@ async fn a_registered_name_is_published_and_settles() {
 		let pool = database::init_to(&url);
 		let dns = DnsProvider::fake();
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
-		ServerName::register(
+		ApplicationName::register(
 			&mut conn,
 			server,
 			"a.fiji.tamanu.app",
@@ -116,7 +115,7 @@ async fn a_registered_name_is_published_and_settles() {
 			]
 		);
 
-		let row = ServerName::for_name(&mut conn, "a.fiji.tamanu.app")
+		let row = ApplicationName::for_name(&mut conn, "a.fiji.tamanu.app")
 			.await
 			.expect("read")
 			.expect("present");
@@ -125,7 +124,7 @@ async fn a_registered_name_is_published_and_settles() {
 		assert!(row.last_error.is_none());
 
 		// And a second pass has nothing to do, rather than rewriting the zone
-		// every fifteen seconds for the life of the deployment.
+		// every fifteen seconds for the life of the process.
 		assert_eq!(
 			reconcile_addresses(&pool, &dns, &zones())
 				.await
@@ -142,7 +141,7 @@ async fn a_family_no_longer_wanted_is_taken_down() {
 		let pool = database::init_to(&url);
 		let dns = DnsProvider::fake();
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
-		ServerName::register(
+		ApplicationName::register(
 			&mut conn,
 			server,
 			"a.fiji.tamanu.app",
@@ -156,7 +155,7 @@ async fn a_family_no_longer_wanted_is_taken_down() {
 
 		// The server drops its IPv6 address. Rewriting only the A set would leave
 		// the AAAA pointing at an address the server no longer answers on.
-		ServerName::register(&mut conn, server, "a.fiji.tamanu.app", &[addr("192.0.2.1")])
+		ApplicationName::register(&mut conn, server, "a.fiji.tamanu.app", &[addr("192.0.2.1")])
 			.await
 			.expect("re-register");
 		reconcile_addresses(&pool, &dns, &zones())
@@ -168,7 +167,7 @@ async fn a_family_no_longer_wanted_is_taken_down() {
 			vec![RecordKind::Aaaa],
 			"the family that went away is removed, and only that one"
 		);
-		let row = ServerName::for_name(&mut conn, "a.fiji.tamanu.app")
+		let row = ApplicationName::for_name(&mut conn, "a.fiji.tamanu.app")
 			.await
 			.expect("read")
 			.expect("present");
@@ -183,14 +182,14 @@ async fn a_withdrawn_name_is_taken_down_and_freed() {
 		let pool = database::init_to(&url);
 		let dns = DnsProvider::fake();
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
-		ServerName::register(&mut conn, server, "a.fiji.tamanu.app", &[addr("192.0.2.1")])
+		ApplicationName::register(&mut conn, server, "a.fiji.tamanu.app", &[addr("192.0.2.1")])
 			.await
 			.expect("register");
 		reconcile_addresses(&pool, &dns, &zones())
 			.await
 			.expect("publish");
 
-		ServerName::register(&mut conn, server, "a.fiji.tamanu.app", &[])
+		ApplicationName::register(&mut conn, server, "a.fiji.tamanu.app", &[])
 			.await
 			.expect("withdraw");
 		reconcile_addresses(&pool, &dns, &zones())
@@ -199,7 +198,7 @@ async fn a_withdrawn_name_is_taken_down_and_freed() {
 
 		assert_eq!(deletes(&dns, "a.fiji.tamanu.app"), vec![RecordKind::A]);
 		assert!(
-			ServerName::for_name(&mut conn, "a.fiji.tamanu.app")
+			ApplicationName::for_name(&mut conn, "a.fiji.tamanu.app")
 				.await
 				.expect("read")
 				.is_none(),
@@ -215,7 +214,7 @@ async fn a_name_outside_every_configured_zone_is_reported_and_kept() {
 		let pool = database::init_to(&url);
 		let dns = DnsProvider::fake();
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
-		ServerName::register(&mut conn, server, "a.fiji.tamanu.app", &[addr("192.0.2.1")])
+		ApplicationName::register(&mut conn, server, "a.fiji.tamanu.app", &[addr("192.0.2.1")])
 			.await
 			.expect("register");
 
@@ -226,7 +225,7 @@ async fn a_name_outside_every_configured_zone_is_reported_and_kept() {
 		assert_eq!(done, 0);
 		assert!(dns.recorded().is_empty(), "nothing to write into");
 
-		let row = ServerName::for_name(&mut conn, "a.fiji.tamanu.app")
+		let row = ApplicationName::for_name(&mut conn, "a.fiji.tamanu.app")
 			.await
 			.expect("read")
 			.expect("the intent is kept: a configuration Canopy cannot read is not a withdrawal");
@@ -248,7 +247,7 @@ async fn a_failing_zone_write_leaves_the_intent_to_retry() {
 		let dns = DnsProvider::fake();
 		dns.fail_with("route53 is having a day");
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
-		ServerName::register(&mut conn, server, "a.fiji.tamanu.app", &[addr("192.0.2.1")])
+		ApplicationName::register(&mut conn, server, "a.fiji.tamanu.app", &[addr("192.0.2.1")])
 			.await
 			.expect("register");
 
@@ -259,14 +258,14 @@ async fn a_failing_zone_write_leaves_the_intent_to_retry() {
 			0
 		);
 
-		let row = ServerName::for_name(&mut conn, "a.fiji.tamanu.app")
+		let row = ApplicationName::for_name(&mut conn, "a.fiji.tamanu.app")
 			.await
 			.expect("read")
 			.expect("present");
 		assert!(row.last_error.is_some());
 		assert!(row.published().is_empty(), "nothing was published");
 		assert!(
-			!ServerName::needing_publish(&mut conn, 10)
+			!ApplicationName::needing_publish(&mut conn, 10)
 				.await
 				.expect("work list")
 				.is_empty(),
@@ -285,10 +284,15 @@ async fn an_order_becomes_a_certificate_the_server_can_collect() {
 		let dns = DnsProvider::fake();
 		let acme = Acme::fake();
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
-		let order =
-			ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr-a")
-				.await
-				.expect("request");
+		let order = ApplicationCertificate::request(
+			&mut conn,
+			server,
+			"a.fiji.tamanu.app",
+			KEY_A,
+			b"csr-a",
+		)
+		.await
+		.expect("request");
 		assert_eq!(order.order_state(), OrderState::Pending);
 
 		let round = work_orders(&pool, &dns, &acme, &zones())
@@ -298,7 +302,7 @@ async fn an_order_becomes_a_certificate_the_server_can_collect() {
 		assert_eq!(round.fault, None, "nothing to report against Canopy");
 		assert_eq!(acme.signed(), vec!["a.fiji.tamanu.app"]);
 
-		let after = ServerCertificate::get(&mut conn, order.id)
+		let after = ApplicationCertificate::get(&mut conn, order.id)
 			.await
 			.expect("read");
 		assert_eq!(after.order_state(), OrderState::Issued);
@@ -321,7 +325,7 @@ async fn the_challenge_record_is_published_under_the_name_and_removed() {
 		let pool = database::init_to(&url);
 		let dns = DnsProvider::fake();
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
-		ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+		ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
 			.await
 			.expect("request");
 
@@ -354,7 +358,7 @@ async fn a_failing_authority_backs_the_order_off_rather_than_giving_up() {
 		acme.fail_with("service unavailable");
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
 		let order =
-			ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
 				.await
 				.expect("request");
 
@@ -368,7 +372,7 @@ async fn a_failing_authority_backs_the_order_off_rather_than_giving_up() {
 			"an authority that is up but unhappy is this order's problem, not the fleet's"
 		);
 
-		let after = ServerCertificate::get(&mut conn, order.id)
+		let after = ApplicationCertificate::get(&mut conn, order.id)
 			.await
 			.expect("read");
 		assert_eq!(
@@ -390,7 +394,7 @@ async fn a_failing_authority_backs_the_order_off_rather_than_giving_up() {
 		// Nothing to claim until the backoff has run out, so a broken authority is
 		// not hammered.
 		assert!(
-			ServerCertificate::claim_due(&mut conn, 10)
+			ApplicationCertificate::claim_due(&mut conn, 10)
 				.await
 				.expect("claim")
 				.is_empty()
@@ -398,7 +402,7 @@ async fn a_failing_authority_backs_the_order_off_rather_than_giving_up() {
 
 		// And once it recovers, the same order goes through.
 		acme.recover();
-		sql_query("UPDATE server_certificates SET next_attempt_at = now() WHERE id = $1")
+		sql_query("UPDATE application_certificates SET next_attempt_at = now() WHERE id = $1")
 			.bind::<sql_types::Uuid, _>(order.id)
 			.execute(&mut conn)
 			.await
@@ -421,11 +425,11 @@ async fn an_order_for_a_server_that_lost_the_grant_is_stopped() {
 		let acme = Acme::fake();
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
 		let order =
-			ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
 				.await
 				.expect("request");
 
-		sql_query("UPDATE servers SET may_manage_tls = false WHERE id = $1")
+		sql_query("UPDATE applications SET may_manage_tls = false WHERE id = $1")
 			.bind::<sql_types::Uuid, _>(server)
 			.execute(&mut conn)
 			.await
@@ -435,7 +439,7 @@ async fn an_order_for_a_server_that_lost_the_grant_is_stopped() {
 			.await
 			.expect("work orders");
 
-		let after = ServerCertificate::get(&mut conn, order.id)
+		let after = ApplicationCertificate::get(&mut conn, order.id)
 			.await
 			.expect("read");
 		assert_eq!(after.order_state(), OrderState::Failed);
@@ -462,7 +466,7 @@ async fn an_order_for_a_name_the_group_released_is_stopped() {
 		let acme = Acme::fake();
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
 		let order =
-			ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
 				.await
 				.expect("request");
 
@@ -478,7 +482,7 @@ async fn an_order_for_a_name_the_group_released_is_stopped() {
 			.await
 			.expect("work orders");
 
-		let after = ServerCertificate::get(&mut conn, order.id)
+		let after = ApplicationCertificate::get(&mut conn, order.id)
 			.await
 			.expect("read");
 		assert_eq!(after.order_state(), OrderState::Failed);
@@ -501,13 +505,13 @@ async fn a_profile_the_authority_withdrew_is_reported_rather_than_requested() {
 		let pool = database::init_to(&url);
 		let acme = Acme::fake();
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
-		sql_query("UPDATE servers SET certificate_profile = 'retired-profile' WHERE id = $1")
+		sql_query("UPDATE applications SET certificate_profile = 'retired-profile' WHERE id = $1")
 			.bind::<sql_types::Uuid, _>(server)
 			.execute(&mut conn)
 			.await
 			.expect("set the profile");
 		let order =
-			ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
 				.await
 				.expect("request");
 
@@ -515,7 +519,7 @@ async fn a_profile_the_authority_withdrew_is_reported_rather_than_requested() {
 			.await
 			.expect("work orders");
 
-		let after = ServerCertificate::get(&mut conn, order.id)
+		let after = ApplicationCertificate::get(&mut conn, order.id)
 			.await
 			.expect("read");
 		assert!(acme.signed().is_empty(), "not requested and refused");
@@ -542,13 +546,13 @@ async fn a_profile_the_authority_offers_is_requested_and_recorded() {
 		let pool = database::init_to(&url);
 		let acme = Acme::fake();
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
-		sql_query("UPDATE servers SET certificate_profile = 'shortlived' WHERE id = $1")
+		sql_query("UPDATE applications SET certificate_profile = 'shortlived' WHERE id = $1")
 			.bind::<sql_types::Uuid, _>(server)
 			.execute(&mut conn)
 			.await
 			.expect("set the profile");
 		let order =
-			ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
 				.await
 				.expect("request");
 
@@ -556,7 +560,7 @@ async fn a_profile_the_authority_offers_is_requested_and_recorded() {
 			.await
 			.expect("work orders");
 
-		let after = ServerCertificate::get(&mut conn, order.id)
+		let after = ApplicationCertificate::get(&mut conn, order.id)
 			.await
 			.expect("read");
 		assert_eq!(after.order_state(), OrderState::Issued);
@@ -573,7 +577,7 @@ async fn a_certificate_due_to_renew_is_reissued_without_being_asked() {
 		let acme = Acme::fake();
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
 		let order =
-			ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
 				.await
 				.expect("request");
 
@@ -583,7 +587,7 @@ async fn a_certificate_due_to_renew_is_reissued_without_being_asked() {
 		work_orders(&pool, &dns, &acme, &zones())
 			.await
 			.expect("first issuance");
-		let first = ServerCertificate::get(&mut conn, order.id)
+		let first = ApplicationCertificate::get(&mut conn, order.id)
 			.await
 			.expect("read");
 
@@ -592,7 +596,7 @@ async fn a_certificate_due_to_renew_is_reissued_without_being_asked() {
 			1,
 			"due, so marked for the order sweep"
 		);
-		let pending = ServerCertificate::get(&mut conn, order.id)
+		let pending = ApplicationCertificate::get(&mut conn, order.id)
 			.await
 			.expect("read");
 		assert_eq!(pending.order_state(), OrderState::Pending);
@@ -612,7 +616,7 @@ async fn a_certificate_due_to_renew_is_reissued_without_being_asked() {
 			.await
 			.expect("renewal");
 
-		let renewed = ServerCertificate::get(&mut conn, order.id)
+		let renewed = ApplicationCertificate::get(&mut conn, order.id)
 			.await
 			.expect("read");
 		assert_eq!(renewed.order_state(), OrderState::Issued);
@@ -636,7 +640,7 @@ async fn the_challenge_goes_to_the_zone_that_covers_the_name() {
 		let zones = ManagedZone::parse_list("tamanu.app=Zwide, fiji.tamanu.app=Znarrow", None)
 			.expect("zones");
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
-		ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_B, b"csr")
+		ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_B, b"csr")
 			.await
 			.expect("request");
 
@@ -666,7 +670,7 @@ async fn a_name_no_configured_zone_covers_keeps_its_order_waiting() {
 		let acme = Acme::fake();
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
 		let order =
-			ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
 				.await
 				.expect("request");
 
@@ -675,7 +679,7 @@ async fn a_name_no_configured_zone_covers_keeps_its_order_waiting() {
 			.await
 			.expect("work orders");
 
-		let after = ServerCertificate::get(&mut conn, order.id)
+		let after = ApplicationCertificate::get(&mut conn, order.id)
 			.await
 			.expect("read");
 		assert_eq!(
@@ -706,7 +710,7 @@ async fn an_unreachable_authority_is_reported_as_canopys_own_problem() {
 		acme.fail_with_fault(Fault::Unreachable, "connection refused");
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
 		let order =
-			ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+			ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
 				.await
 				.expect("request");
 
@@ -718,7 +722,7 @@ async fn an_unreachable_authority_is_reported_as_canopys_own_problem() {
 
 		// Still recorded against the order too: an operator looking at the server
 		// wants to know why its certificate has not arrived.
-		let after = ServerCertificate::get(&mut conn, order.id)
+		let after = ApplicationCertificate::get(&mut conn, order.id)
 			.await
 			.expect("read");
 		assert!(
@@ -745,7 +749,7 @@ async fn a_throttled_round_abandons_the_rest_rather_than_spending_the_allowance(
 		for index in 0..12 {
 			let key =
 				format!("{index:02}00000000000000000000000000000000000000000000000000000000000000");
-			ServerCertificate::request(
+			ApplicationCertificate::request(
 				&mut conn,
 				server,
 				&format!("n{index}.fiji.tamanu.app"),
@@ -780,7 +784,7 @@ async fn a_round_that_goes_through_says_nothing_is_wrong_with_the_authority() {
 		let pool = database::init_to(&url);
 		let acme = Acme::fake();
 		let server = entitled_server(&mut conn, "fiji.tamanu.app").await;
-		ServerCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
+		ApplicationCertificate::request(&mut conn, server, "a.fiji.tamanu.app", KEY_A, b"csr")
 			.await
 			.expect("request");
 
@@ -860,7 +864,7 @@ async fn the_three_authority_conditions_are_reported_apart() {
 
 /// How many of a server's orders have been attempted at least once.
 async fn count_attempted(conn: &mut AsyncPgConnection, server_id: Uuid) -> usize {
-	ServerCertificate::for_server(conn, server_id)
+	ApplicationCertificate::for_server(conn, server_id)
 		.await
 		.expect("read certificates")
 		.into_iter()

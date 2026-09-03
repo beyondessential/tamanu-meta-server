@@ -1,11 +1,11 @@
-//! Server group domains (DOM): the DNS names each group controls.
+//! Application group domains (DOM): the DNS names each group controls.
 //!
 //! A claim is exclusive within Canopy — no two claims overlap, so at most one
 //! group controls any given name — but says nothing about the wider DNS, where
 //! the zone holding it is shared with other groups and with names Canopy doesn't
 //! manage at all.
 //!
-//! The zones Canopy may write in are deployment configuration rather than
+//! The zones Canopy may write in are the Canopy instance's own configuration rather than
 //! stored state (see [`commons_types::dns::ManagedZone`]), so a claim is checked
 //! against them at claim time and re-matched on read: a claim whose zone has
 //! left the configuration stays claimed, and reads report it as unmatched.
@@ -138,14 +138,14 @@ impl ServerGroupDomain {
 	}
 
 	/// Every live group's claims that no configured zone covers, by domain —
-	/// the deployments now depending on a domain outside Canopy's reach.
+	/// the groups now depending on a domain outside Canopy's reach.
 	///
 	/// Zone matching is longest-suffix against a list that lives in
 	/// configuration rather than in the database, so the filtering happens here
 	/// rather than in SQL. The claim table is small (one row per domain a group
 	/// controls) and this runs on the monitor's sweep cadence.
 	///
-	/// Archived groups are left out: their claims are kept, but a deployment
+	/// Archived groups are left out: their claims are kept, but a group
 	/// that has been put away is not something to alert an operator about.
 	pub async fn unzoned(
 		db: &mut AsyncPgConnection,
@@ -190,7 +190,7 @@ impl ServerGroupDomain {
 
 	/// Whether any group anywhere controls a domain.
 	///
-	/// The question behind it is whether this deployment uses name management at
+	/// The question behind it is whether this Canopy instance uses name management at
 	/// all: a claim can only be made against a configured zone, but one made
 	/// before a zone was withdrawn outlives it, so "no zones" alone is not the
 	/// same as "not in use".

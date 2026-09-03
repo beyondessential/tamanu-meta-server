@@ -2,7 +2,10 @@
 //! per-check bag of fields, which is what a `check.field` fleet lookup reads.
 
 use commons_types::status::CheckResult;
+use database::check_policies::ScopedCheckPolicy;
 use database::issues::{CheckFiling, Scope, check_detail_by_server, file_check};
+
+use crate::helpers::app_ns;
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::RunQueryDsl;
 use serde_json::json;
@@ -15,11 +18,17 @@ struct RowId {
 }
 
 async fn insert_server(conn: &mut diesel_async::AsyncPgConnection, host: &str) -> Uuid {
-	let row: RowId = sql_query("INSERT INTO servers (host) VALUES ($1) RETURNING id")
-		.bind::<sql_types::Text, _>(host)
+	let machine: RowId = sql_query("INSERT INTO machines DEFAULT VALUES RETURNING id")
 		.get_result(conn)
 		.await
-		.expect("insert server");
+		.expect("insert machine");
+	let row: RowId =
+		sql_query("INSERT INTO applications (type, host, machine_id) VALUES ('tamanu-central', $1, $2) RETURNING id")
+			.bind::<sql_types::Text, _>(host)
+			.bind::<sql_types::Uuid, _>(machine.id)
+			.get_result(conn)
+			.await
+			.expect("insert server");
 	row.id
 }
 
@@ -32,7 +41,7 @@ fn filing<'a>(
 ) -> CheckFiling<'a> {
 	CheckFiling {
 		source,
-		scope: Scope::Server(server_id),
+		scope: Scope::Application(server_id),
 		device_id: None,
 		check,
 		observed,
@@ -141,12 +150,14 @@ async fn silenced_reads_skipped_and_decommissioned_is_absent() {
 		.await
 		.expect("file");
 
-		sql_query(
-			"INSERT INTO scoped_check_policies (server_id, source, check_name, ceiling, created_by) \
-			 VALUES ($1, 'alertd', 'hushed', 'skipped', 'op')",
+		ScopedCheckPolicy::silence(
+			&mut conn,
+			Scope::Application(server_id),
+			"alertd",
+			&app_ns(),
+			"hushed",
+			Some("op"),
 		)
-		.bind::<sql_types::Uuid, _>(server_id)
-		.execute(&mut conn)
 		.await
 		.expect("silence");
 		sql_query(
@@ -212,7 +223,7 @@ async fn same_check_name_from_two_sources_merges_newest_first() {
 		// the filings landing in distinguishable instants.
 		sql_query(
 			"UPDATE issues SET updated_at = now() - INTERVAL '1 hour' \
-			 WHERE server_id = $1 AND source = 'alertd'",
+			 WHERE application_id = $1 AND source = 'alertd'",
 		)
 		.bind::<sql_types::Uuid, _>(server_id)
 		.execute(&mut conn)

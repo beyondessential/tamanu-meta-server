@@ -20,7 +20,7 @@ struct RowId {
 	id: Uuid,
 }
 
-/// Server in a fresh group carrying the given linger window (as an SQL
+/// Application in a fresh group carrying the given linger window (as an SQL
 /// interval literal, e.g. `'5 minutes'`).
 async fn insert_grouped_server(
 	conn: &mut diesel_async::AsyncPgConnection,
@@ -34,7 +34,7 @@ async fn insert_grouped_server(
 	.await
 	.expect("group");
 	let row: RowId = sql_query(
-		"INSERT INTO servers (host, group_id) VALUES ('http://linger.invalid/', $1) RETURNING id",
+		"WITH m AS (INSERT INTO machines (group_id) VALUES ($1) RETURNING id) INSERT INTO applications (type, host, group_id, machine_id) SELECT 'tamanu-central', 'http://linger.invalid/', $1, m.id FROM m RETURNING id",
 	)
 	.bind::<sql_types::Uuid, _>(group.id)
 	.get_result(conn)
@@ -253,7 +253,7 @@ async fn operator_resolve_closes_immediately() {
 			use database::schema::issues::dsl;
 			dsl::issues
 				.select(Issue::as_select())
-				.filter(dsl::server_id.eq(server_id))
+				.filter(dsl::application_id.eq(server_id))
 				.filter(dsl::ref_.eq("handled"))
 				.first(&mut conn)
 				.await

@@ -11,6 +11,7 @@ import NotificationsActiveOutlinedIcon from "@mui/icons-material/NotificationsAc
 import { useState } from "react";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
+import { qualifiedSilenceRef, namespaceSegment, type NamespaceRef } from "../types";
 import TimeAgo from "./TimeAgo";
 
 /// Listed at the bottom of the server / group detail page. Renders the
@@ -23,7 +24,7 @@ export default function SilencedRefsSection({
 	refreshKey,
 	onChanged,
 }: {
-	scope: "server" | "group";
+	scope: "server" | "machine" | "group";
 	id: string;
 	/** Parent-controlled cache-bust; bump to refetch the list after the
 	 * parent took an action that may have added a silence (e.g. silencing
@@ -42,20 +43,32 @@ export default function SilencedRefsSection({
 		onChanged?.();
 	};
 
+	// One hook call per scope, all three always invoked: hooks cannot be
+	// called conditionally, and only the one this section is for is enabled.
+	const serverResult = useApi(
+		"silenced_refs",
+		"list_for_server",
+		{ server_id: scope === "server" ? id : "" },
+		[scope, id, tick, refreshKey],
+	);
+	const machineResult = useApi(
+		"silenced_refs",
+		"list_for_machine",
+		{ machine_id: scope === "machine" ? id : "" },
+		[scope, id, tick, refreshKey],
+	);
+	const groupResult = useApi(
+		"silenced_refs",
+		"list_for_group",
+		{ server_group_id: scope === "group" ? id : "" },
+		[scope, id, tick, refreshKey],
+	);
 	const result =
 		scope === "server"
-			? useApi(
-					"silenced_refs",
-					"list_for_server",
-					{ server_id: id },
-					[id, tick, refreshKey],
-				)
-			: useApi(
-					"silenced_refs",
-					"list_for_group",
-					{ server_group_id: id },
-					[id, tick, refreshKey],
-				);
+			? serverResult
+			: scope === "machine"
+				? machineResult
+				: groupResult;
 
 	if (result.status === "loading" || result.status === "idle") {
 		return (
@@ -84,10 +97,13 @@ export default function SilencedRefsSection({
 			<Stack spacing={1}>
 				{rows.map((row) => (
 					<SilencedRow
-						key={`${row.source}\x00${row.ref}`}
+						key={`${row.source}\x00${namespaceSegment(
+							"namespace" in row ? row.namespace : undefined,
+						)}\x00${row.ref}`}
 						scope={scope}
 						id={id}
 						source={row.source}
+						namespace={"namespace" in row ? row.namespace : null}
 						refName={row.ref}
 						createdAt={row.created_at}
 						createdBy={row.created_by ?? null}
@@ -100,7 +116,11 @@ export default function SilencedRefsSection({
 	);
 }
 
-function SectionHeading({ scope }: { scope: "server" | "group" }) {
+function SectionHeading({
+	scope,
+}: {
+	scope: "server" | "machine" | "group";
+}) {
 	return (
 		<Typography variant="h6" component="h2" gutterBottom>
 			Silenced refs
@@ -112,7 +132,9 @@ function SectionHeading({ scope }: { scope: "server" | "group" }) {
 			>
 				{scope === "server"
 					? "— issues with these refs on this server don't open incidents."
-					: "— issues with these refs anywhere in this group don't open incidents."}
+					: scope === "machine"
+						? "— issues with these refs on this machine don't open incidents."
+						: "— issues with these refs anywhere in this group don't open incidents."}
 			</Typography>
 		</Typography>
 	);
@@ -122,15 +144,20 @@ function SilencedRow({
 	scope,
 	id,
 	source,
+	namespace,
 	refName,
 	createdAt,
 	createdBy,
 	isAdmin,
 	onChanged,
 }: {
-	scope: "server" | "group";
+	scope: "server" | "machine" | "group";
 	id: string;
 	source: string;
+	/** Which catalog entry a group-scoped silence quiets. A group spans
+	 * several application types, so the ref alone does not say. A server's
+	 * or machine's own silences need none: the target fixes the namespace. */
+	namespace: NamespaceRef | null;
 	refName: string;
 	createdAt: string;
 	createdBy: string | null;
@@ -138,24 +165,28 @@ function SilencedRow({
 	onChanged: () => void;
 }) {
 	const unsilenceServer = useApiAction("silenced_refs", "unsilence_server");
+	const unsilenceMachine = useApiAction("silenced_refs", "unsilence_machine");
 	const unsilenceGroup = useApiAction("silenced_refs", "unsilence_group");
-	const pending =
-		scope === "server" ? unsilenceServer.pending : unsilenceGroup.pending;
-	const error =
-		scope === "server" ? unsilenceServer.error : unsilenceGroup.error;
+	const action =
+		scope === "server"
+			? unsilenceServer
+			: scope === "machine"
+				? unsilenceMachine
+				: unsilenceGroup;
+	const pending = action.pending;
+	const error = action.error;
 	const unsilence = async () => {
 		try {
 			if (scope === "server") {
-				await unsilenceServer.call({
-					server_id: id,
-					source,
-					ref: refName,
-				});
+				await unsilenceServer.call({ server_id: id, source, ref: refName });
+			} else if (scope === "machine") {
+				await unsilenceMachine.call({ machine_id: id, source, ref: refName });
 			} else {
 				await unsilenceGroup.call({
 					server_group_id: id,
 					source,
 					ref: refName,
+					application_type: namespace?.application_type ?? null,
 				});
 			}
 			onChanged();
@@ -183,7 +214,7 @@ function SilencedRow({
 					component="code"
 					sx={{ fontFamily: "monospace", fontWeight: 500 }}
 				>
-					{source}/{refName}
+					{source}/{qualifiedSilenceRef(namespace ?? undefined, refName)}
 				</Typography>
 				<Box sx={{ flex: 1 }} />
 				<Typography variant="caption" color="text.secondary">

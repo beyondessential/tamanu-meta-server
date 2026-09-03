@@ -15,6 +15,9 @@ Specs are written in markdown prose with each sentence on its own line and no ha
 This balances ease of writing and diff parseability.
 Acceptance criteria are prose sentences rather than `- [ ]` checklist items; this overrides the checklist format shown in `.agents/docs/spec-format.md`.
 
+This rule is about specs only.
+Implementation plans in `.workhorse/plans/` are working documents, not specs: use `- [ ]` checkboxes there to track build steps, and tick them off (`- [x]`) as you complete them.
+
 ## Cross-references
 
 Link a spec to a related spec — or reference one from any other markdown — by its path under its id: `[BAK](../public-server/backup.md)`.

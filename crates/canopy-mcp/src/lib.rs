@@ -14,19 +14,20 @@
 //! `fleet_summary` (in the `fleet` module) reuse [`database::backup::staleness`]
 //! so the verdicts match what the operator UI and the alerting sweep present.
 //!
-//! Tools are grouped into domain modules (`servers`, `groups`, `versions`,
+//! Tools are grouped into domain modules (`applications`, `groups`, `versions`,
 //! `fleet`, `backups`, `restore`, `incidents`, `upgrade_plans`), each
 //! contributing its own tool router (via rmcp's
 //! `#[tool_router(router = ..., vis = "pub(crate)")]`) that [`CanopyMcp::new`]
 //! combines into the single stored `ToolRouter`. `util` holds helpers shared
 //! across more than one of those modules.
 
+mod applications;
 mod backups;
 mod fleet;
 mod groups;
 mod incidents;
+mod machines;
 mod restore;
-mod servers;
 mod upgrade_plans;
 mod util;
 mod versions;
@@ -52,7 +53,8 @@ impl CanopyMcp {
 	pub fn new(db: database::Db) -> Self {
 		Self {
 			db,
-			tool_router: Self::servers_router()
+			tool_router: Self::applications_router()
+				+ Self::machines_router()
 				+ Self::groups_router()
 				+ Self::versions_router()
 				+ Self::fleet_router()
@@ -73,14 +75,22 @@ impl ServerHandler for CanopyMcp {
 	fn get_info(&self) -> ServerInfo {
 		let mut info = ServerInfo::default();
 		info.instructions = Some(
-			"Read-only access to the Canopy fleet: servers, groups, health/status, Tamanu \
-			 versions, planned upgrades, backups, and incidents/issues. All data is live. Use \
-			 find_* to locate entities and get_* for detail; fleet_summary and \
+			"Read-only access to the Canopy fleet: machines, applications, groups, health/status, \
+			 Tamanu versions, planned upgrades, backups, and incidents/issues. All data is live. \
+			 Use find_* to locate entities and get_* for detail; fleet_summary and \
 			 find_backup_problems for triage.\n\n\
+			 Machines and applications are different things and both are queryable. A machine is \
+			 the box; an application is the software running on it, and a box can carry more than \
+			 one. Ask about a machine (find_machines, get_machine) for platform, disks, memory, \
+			 clock, addresses, and backups, which belong to the box. Ask about an application \
+			 (find_servers, get_server) for its version, database engine, and product role. Each \
+			 result names the other side, so you can move between them without searching. An \
+			 issue carries a `scope` saying which of the two it is about, and a machine's checks \
+			 also count toward the health of every application on it.\n\n\
 			 Upgrade plans: a plan is a group's recorded intention to move to a version. A \
 			 planned date is a plan rather than a deadline, so one that has passed (`late`) is \
 			 normal operational reality rather than an incident. list_upgrade_plans gives what \
-			 every deployment is going to next; get_upgrade_plan_history gives what a group \
+			 every group is going to next; get_upgrade_plan_history gives what a group \
 			 planned before, including plans an operator withdrew.\n\n\
 			 Products: a server's `product` is the application it runs (tamanu, senaite, or \
 			 canopy itself), and its `kind` is its role within that product. The version tools \
@@ -113,7 +123,7 @@ pub fn service(db: database::Db) -> StreamableHttpService<CanopyMcp, LocalSessio
 	// The default stateful mode keeps sessions in process memory and 404s
 	// ("Session not found") any follow-up request that a load balancer routes to
 	// a different replica than the one that handled `initialize` — which is
-	// exactly what a multi-replica deployment behind the Tailscale ingress does.
+	// exactly what a multi-replica Canopy instance behind the Tailscale ingress does.
 	// This is a read-only request/response API with no server-initiated push, so
 	// sessions buy us nothing.
 	config.stateful_mode = false;
@@ -121,11 +131,11 @@ pub fn service(db: database::Db) -> StreamableHttpService<CanopyMcp, LocalSessio
 	// no streaming there's no long-lived response for a proxy to buffer or drop.
 	config.json_response = true;
 	// rmcp's `allowed_hosts` defaults to loopback only — a DNS-rebinding defense
-	// aimed at browser-facing localhost MCP servers. That threat doesn't apply
+	// aimed at browser-facing localhost MCP applications. That threat doesn't apply
 	// here: both mounts sit behind an authenticating gate (tailnet identity on
 	// the operator surface, bearer tokens on the internet-facing one) and serve
 	// no CORS headers, so a browser can't make a credentialed cross-origin POST.
-	// Left as-is the loopback default 403s the real deployment hosts, so disable
+	// Left as-is the loopback default 403s the real instance's hostnames, so disable
 	// it. An operator who wants to pin the Host allowlist anyway can set
 	// CANOPY_MCP_ALLOWED_HOSTS to a comma-separated list (e.g.
 	// `canopy.example.ts.net`); loopback stays allowed for dev.

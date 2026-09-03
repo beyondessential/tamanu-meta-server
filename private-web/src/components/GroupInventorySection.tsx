@@ -17,27 +17,27 @@ import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import type { InventorySecretVariable, ServerRank } from "../types";
 import { SERVER_RANK_ORDER } from "../types";
-import ServerKindChip from "./ServerKindChip";
+import ApplicationTypeChip from "./ApplicationTypeChip";
 
 /// What a configuration run receives for each of this group's environments:
-/// the servers it would act on, the address each is reached at, and the
+/// the applications it would act on, the address each is reached at, and the
 /// variables that configure them, with the environment's values shown once
-/// rather than repeated under every server.
+/// rather than repeated under every application.
 ///
 /// A secret variable appears by name and never by value, and the assembled
 /// inventory is admin-only, carrying those values.
 // spec: INV#presentation
 export default function GroupInventorySection({
 	groupId,
-	servers,
+	applications,
 }: {
 	groupId: string;
-	servers: ReadonlyArray<{ rank?: ServerRank | null }>;
+	applications: ReadonlyArray<{ rank?: ServerRank | null }>;
 }) {
-	// A server carrying no rank sits in the default-rank environment, so the
-	// ranks here are the effective ones rather than the stored ones.
+	// Rank is an application's, so a group's environments are the ranks its
+	// applications sit at, and one carrying no rank sits at the default.
 	const ranks = SERVER_RANK_ORDER.filter((rank) =>
-		servers.some((server) => (server.rank ?? "dev") === rank),
+		applications.some((application) => (application.rank ?? "dev") === rank),
 	);
 
 	return (
@@ -48,7 +48,7 @@ export default function GroupInventorySection({
 			{ranks.length === 0 ? (
 				<Paper variant="outlined" sx={{ p: 2 }}>
 					<Typography variant="body2" color="text.secondary">
-						No live servers, so there is no environment to configure.
+						No live applications, so there is no environment to configure.
 					</Typography>
 				</Paper>
 			) : (
@@ -89,10 +89,10 @@ function EnvironmentInventory({
 
 	const declared = secrets.status === "ok" ? secrets.data : [];
 	const environmentSecrets = declared.filter(
-		(variable) => variable.rank === rank && !variable.server_id,
+		(variable) => variable.rank === rank && !variable.application_id,
 	);
-	const serverSecrets = (serverId: string) =>
-		declared.filter((variable) => variable.server_id === serverId);
+	const applicationSecrets = (applicationId: string) =>
+		declared.filter((variable) => variable.application_id === applicationId);
 
 	const hosts = inventory.status === "ok" ? inventory.data.hosts : [];
 
@@ -136,7 +136,7 @@ function EnvironmentInventory({
 				<Stack spacing={2} sx={{ mt: 1 }}>
 					<Box>
 						<Typography variant="body2" color="text.secondary" gutterBottom>
-							Environment variables, carried by every server below
+							Environment variables, carried by every application below
 						</Typography>
 						<Vars
 							vars={inventory.data.vars}
@@ -150,14 +150,14 @@ function EnvironmentInventory({
 					</Box>
 
 					{hosts.map((host) => (
-						<Box key={host.id} data-testid="inventory-server">
+						<Box key={host.id} data-testid="inventory-application">
 							<Stack
 								direction="row"
 								spacing={1}
 								sx={{ alignItems: "baseline", flexWrap: "wrap" }}
 							>
 								<Typography variant="subtitle2">{host.name}</Typography>
-								<ServerKindChip kind={host.kind} />
+								<ApplicationTypeChip type={host.type} />
 								<Typography
 									variant="body2"
 									color="text.secondary"
@@ -173,9 +173,9 @@ function EnvironmentInventory({
 								empty="Sets nothing of its own"
 							/>
 							<Secrets
-								items={serverSecrets(host.id)}
+								items={applicationSecrets(host.id)}
 								onRemove={reload}
-								scope={{ server_id: host.id }}
+								scope={{ application_id: host.id }}
 							/>
 						</Box>
 					))}
@@ -339,7 +339,7 @@ function SetSecret({
 		const scope =
 			where === ENVIRONMENT
 				? { server_group_id: groupId, rank }
-				: { server_id: where };
+				: { application_id: where };
 		set
 			.call({ ...scope, name: name.trim(), value })
 			.then(() => {

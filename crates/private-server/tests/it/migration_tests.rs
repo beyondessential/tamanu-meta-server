@@ -12,14 +12,21 @@ const FLEET: &str = "INSERT INTO versions (major, minor, patch, changelog, statu
 		VALUES (2, 62, 0, 'x', 'published'), (2, 63, 0, 'x', 'published');
 	INSERT INTO server_groups (id, name)
 		VALUES ('bbbbbbbb-0000-0000-0000-000000000001', 'Kamaka');
-	INSERT INTO servers (id, name, host, kind, group_id) VALUES
-		('bbbbbbbb-0000-0000-0000-0000000000a0', 'central',
-		 'https://central.example.com', 'central',
+	INSERT INTO machines (id, group_id) VALUES
+		('bbbbbbbb-0000-0000-0000-0000000000a0',
 		 'bbbbbbbb-0000-0000-0000-000000000001'),
-		('bbbbbbbb-0000-0000-0000-0000000000b0', 'facility',
-		 'https://facility.example.com', 'facility',
+		('bbbbbbbb-0000-0000-0000-0000000000b0',
 		 'bbbbbbbb-0000-0000-0000-000000000001');
-	INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES
+	INSERT INTO applications (id, name, host, type, group_id, machine_id) VALUES
+		('bbbbbbbb-0000-0000-0000-0000000000a0', 'central',
+		 'https://central.example.com', 'tamanu-central',
+		 'bbbbbbbb-0000-0000-0000-000000000001',
+		 'bbbbbbbb-0000-0000-0000-0000000000a0'),
+		('bbbbbbbb-0000-0000-0000-0000000000b0', 'facility',
+		 'https://facility.example.com', 'tamanu-facility',
+		 'bbbbbbbb-0000-0000-0000-000000000001',
+		 'bbbbbbbb-0000-0000-0000-0000000000b0');
+	INSERT INTO application_reported_detail (application_id, source, extra, version) VALUES
 		('bbbbbbbb-0000-0000-0000-0000000000a0', 'test', '{}'::jsonb, '2.62.0'),
 		('bbbbbbbb-0000-0000-0000-0000000000b0', 'test', '{}'::jsonb, '2.62.0');";
 
@@ -45,7 +52,7 @@ async fn for_group_reports_a_verdict_per_server() {
 		assert_eq!(
 			verdicts.len(),
 			2,
-			"the plan covers the whole deployment: got {verdicts:?}"
+			"the plan covers the whole group: got {verdicts:?}"
 		);
 		for id in [CENTRAL, FACILITY] {
 			let entry = verdicts

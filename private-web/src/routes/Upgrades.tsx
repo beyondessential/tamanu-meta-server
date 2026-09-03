@@ -56,7 +56,7 @@ import type { ApiResponse } from "../types";
 type PastPlan = ApiResponse<"upgrade_plans", "history">[number];
 type PlannableVersion = ApiResponse<"upgrade_plans", "targets">[number];
 
-/// Where every deployment is going. A group with no plan is listed too: one
+/// Where every group is going. A group with no plan is listed too: one
 /// several minors behind with nothing recorded is what this view exists to
 /// surface.
 // spec: UPG#the-dashboard
@@ -107,13 +107,13 @@ export default function Upgrades() {
 				</Typography>
 				{planned.length === 0 ? (
 					<Typography variant="body2" color="text.secondary">
-						No deployment has a recorded plan.
+						No group has a recorded plan.
 					</Typography>
 				) : (
 					<Table size="small" sx={TIGHT_TABLE}>
 						<TableHead>
 							<TableRow>
-								<TableCell>Deployment</TableCell>
+								<TableCell>Group</TableCell>
 								<TableCell>Running</TableCell>
 								<TableCell>Going to</TableCell>
 								<TableCell>Data survives it</TableCell>
@@ -130,7 +130,7 @@ export default function Upgrades() {
 									data-testid="planned-upgrade-row"
 								>
 										<TableCell>
-											<RouterLink to={`/groups/${row.group_id}`}>
+											<RouterLink to={`/fleet/groups/${row.group_id}`}>
 												{row.group_name}
 											</RouterLink>
 										</TableCell>
@@ -206,23 +206,23 @@ export default function Upgrades() {
 
 			<Disclosure
 				title="No plan recorded"
-				subject="deployments with no plan"
+				subject="groups with no plan"
 				caption={
 					unplanned.length === 1
-						? "1 deployment gets no pre-upgrade testing until a plan says where it is going"
-						: `${unplanned.length} deployments get no pre-upgrade testing until a plan says where they are going`
+						? "1 group gets no pre-upgrade testing until a plan says where it is going"
+						: `${unplanned.length} groups get no pre-upgrade testing until a plan says where they are going`
 				}
 				testId="unplanned-upgrades"
 			>
 					{unplanned.length === 0 ? (
 						<Typography variant="body2" color="text.secondary">
-							Every deployment has a plan.
+							Every group has a plan.
 						</Typography>
 					) : (
 						<Table size="small" sx={TIGHT_TABLE}>
 							<TableHead>
 								<TableRow>
-									<TableCell>Deployment</TableCell>
+									<TableCell>Group</TableCell>
 									<TableCell>Running</TableCell>
 								</TableRow>
 							</TableHead>
@@ -233,7 +233,7 @@ export default function Upgrades() {
 										data-testid="unplanned-upgrade-row"
 									>
 										<TableCell>
-											<RouterLink to={`/groups/${row.group_id}`}>
+											<RouterLink to={`/fleet/groups/${row.group_id}`}>
 												{row.group_name}
 											</RouterLink>
 										</TableCell>
@@ -304,8 +304,8 @@ function toneColour(theme: Theme, tone: Tone): string {
 /// sit behind a count that names them.
 const ENTRIES_PER_DAY = 3;
 
-/// Which month, week, or day a deployment moves in. The table below answers
-/// what each plan says; this answers which week is busy, which two deployments
+/// Which month, week, or day a group moves in. The table below answers
+/// what each plan says; this answers which week is busy, which two groups
 /// land on the same night, and how long each one is expected to take.
 // spec: UPG#the-dashboard
 function PlanCalendar({
@@ -375,7 +375,7 @@ function PlanCalendar({
 	).length;
 
 	// A met plan is history and no longer amendable, so it keeps the link out
-	// to the deployment instead.
+	// to the group instead.
 	const editor = (entry: Entry) =>
 		isAdmin && entry.tone !== "done" ? () => setEditing(entry) : null;
 
@@ -573,7 +573,7 @@ function MonthGrid({
 }
 
 /// The hours of a day, or of a week. The length of a block is how long the
-/// deployment expects to be down, and a window running past midnight is drawn
+/// group expects to be down, and a window running past midnight is drawn
 /// again on the following morning.
 function TimeGrid({
 	days,
@@ -696,7 +696,7 @@ function CalendarEntry({
 			<Box
 				{...(onEdit
 					? { component: "button" as const, type: "button", onClick: onEdit }
-					: { component: RouterLink, to: `/groups/${entry.groupId}` })}
+					: { component: RouterLink, to: `/fleet/groups/${entry.groupId}` })}
 				data-testid="calendar-entry"
 				sx={[
 					(theme) => ({
@@ -742,7 +742,7 @@ function TimeBlock({
 			<Box
 				{...(onEdit
 					? { component: "button" as const, type: "button", onClick: onEdit }
-					: { component: RouterLink, to: `/groups/${entry.groupId}` })}
+					: { component: RouterLink, to: `/fleet/groups/${entry.groupId}` })}
 				data-testid="calendar-entry"
 				{...(block.tail ? { "data-continues": "true" } : null)}
 				sx={[
@@ -1228,8 +1228,8 @@ const OVERFLOW_COUNT = {
 	cursor: "default",
 };
 
-/// What each deployment planned before, and how it ended. A withdrawn plan is
-/// readable here or nowhere: a deployment that stopped going somewhere leaves
+/// What each group planned before, and how it ended. A withdrawn plan is
+/// readable here or nowhere: a group that stopped going somewhere leaves
 /// no other mark on the fleet.
 // spec: UPG#the-dashboard
 function PastPlans({ plans }: { plans: PastPlan[] }) {
@@ -1239,13 +1239,13 @@ function PastPlans({ plans }: { plans: PastPlan[] }) {
 		<Disclosure
 			title="Past plans"
 			subject="past plans"
-			caption="where each deployment was going before, and how it ended"
+			caption="where each group was going before, and how it ended"
 			testId="past-plans"
 		>
 			<Table size="small" sx={TIGHT_TABLE}>
 				<TableHead>
 					<TableRow>
-						<TableCell>Deployment</TableCell>
+						<TableCell>Group</TableCell>
 						<TableCell>Was going to</TableCell>
 						<TableCell>Planned for</TableCell>
 						<TableCell>Window</TableCell>
@@ -1257,7 +1257,7 @@ function PastPlans({ plans }: { plans: PastPlan[] }) {
 					{plans.map((row) => (
 						<TableRow key={row.plan.id} data-testid="past-plan-row">
 								<TableCell>
-									<RouterLink to={`/groups/${row.group_id}`}>
+									<RouterLink to={`/fleet/groups/${row.group_id}`}>
 										{row.group_name}
 									</RouterLink>
 								</TableCell>
@@ -1299,7 +1299,7 @@ function PastPlans({ plans }: { plans: PastPlan[] }) {
 	);
 }
 
-/// How a plan ended. Withdrawn reads differently from met: the deployment
+/// How a plan ended. Withdrawn reads differently from met: the group
 /// stopped going there rather than arriving.
 function OutcomeChip({
 	outcome,
@@ -1317,7 +1317,7 @@ function OutcomeChip({
 				title={
 					withdrawnBy
 						? `withdrawn by ${withdrawnBy}; the upgrade did not happen`
-						: "the deployment stopped going there; the upgrade did not happen"
+						: "the group stopped going there; the upgrade did not happen"
 				}
 			>
 				<Chip size="small" color="warning" variant="outlined" label="withdrawn" />
@@ -1331,7 +1331,7 @@ function OutcomeChip({
 	);
 }
 
-/// Whether the deployment's own data survives the planned version, rolled up
+/// Whether the group's own data survives the planned version, rolled up
 /// from its servers. Pairing it with the plan is the point of this view.
 function VerdictChip({
 	verdict,
@@ -1352,7 +1352,7 @@ function VerdictChip({
 	}
 	if (testable === false) {
 		return (
-			<Tooltip title="nothing is declared to migrate this deployment's data, so no test will run: declare a restore replica for it on the group's page">
+			<Tooltip title="nothing is declared to migrate this group's data, so no test will run: declare a restore replica for it on the group's page">
 				<Chip
 					size="small"
 					color="warning"
@@ -1406,7 +1406,7 @@ function PlannedFor({ date, late }: { date: string | null; late: boolean }) {
 		return <>{date}</>;
 	}
 	return (
-		<Tooltip title="the planned day has passed and the deployment has not moved">
+		<Tooltip title="the planned day has passed and the group has not moved">
 			<Chip size="small" color="warning" variant="outlined" label={`${date} (late)`} />
 		</Tooltip>
 	);
@@ -1461,7 +1461,7 @@ function Disclosure({
 
 /// What an operator needed the next reader to know, under the row it belongs
 /// to. Held to one line so a long note cannot set the row height for every
-/// other deployment; the whole of it is on hover.
+/// other group; the whole of it is on hover.
 function PlanNote({ note, testId }: { note: string | null; testId: string }) {
 	if (!note) return null;
 	return (
@@ -1473,7 +1473,7 @@ function PlanNote({ note, testId }: { note: string | null; testId: string }) {
 	);
 }
 
-/// The window a deployment moves in, as the wall clocks it was recorded as.
+/// The window a group moves in, as the wall clocks it was recorded as.
 /// Canopy holds no timezone for a group, so the zone travels with the time or
 /// the reader cannot tell whose midnight it is.
 function PlannedTime({
@@ -1676,7 +1676,7 @@ function helperText(
 	return undefined;
 }
 
-/// Record where a deployment is going. The version picker offers only valid
+/// Record where a group is going. The version picker offers only valid
 /// targets, so the operator cannot pick one the API would refuse.
 // spec: UPG#a-plan
 function RecordPlan({
@@ -1770,7 +1770,7 @@ function RecordPlanDialog({
 						<TextField
 							select
 							size="small"
-							label="Deployment"
+							label="Group"
 							value={groupId}
 							onChange={(e) => {
 								setGroupId(e.target.value);
@@ -1899,7 +1899,7 @@ function RecordPlanDialog({
 }
 
 /// Amend an open plan's date and note. The target is deliberately absent:
-/// moving a deployment somewhere else is a new plan, not a correction to this
+/// moving a group somewhere else is a new plan, not a correction to this
 /// one, so it goes through the record form.
 // spec: UPG#a-plan
 function EditPlan({
@@ -2072,7 +2072,7 @@ function EditPlanDialog({
 	);
 }
 
-/// Withdraw a plan: the deployment is no longer going there. This does not say
+/// Withdraw a plan: the group is no longer going there. This does not say
 /// the upgrade happened; Canopy closes a met plan on its own.
 // spec: UPG#a-plan
 function WithdrawPlan({
@@ -2090,7 +2090,7 @@ function WithdrawPlan({
 	const onClick = async () => {
 		if (
 			!window.confirm(
-				`Withdraw ${groupName}'s plan to move to ${targetVersion}? Pre-upgrade testing stops for this deployment until a new plan is recorded.`,
+				`Withdraw ${groupName}'s plan to move to ${targetVersion}? Pre-upgrade testing stops for this group until a new plan is recorded.`,
 			)
 		)
 			return;
@@ -2114,7 +2114,7 @@ function WithdrawPlan({
 	);
 }
 
-/** How long the plan says the deployment is down, from its window's two
+/** How long the plan says the group is down, from its window's two
  * wall clocks. A close earlier in the day than the open is the following
  * morning, as the plan reads it. Two hours where the plan names no window,
  * which is what a declaration otherwise starts from. */

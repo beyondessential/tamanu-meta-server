@@ -3,7 +3,7 @@
 //! Two jobs, one pod, because both need the same thing nothing else in Canopy
 //! has — write access to the zones:
 //!
-//! - **addresses** — publish the A/AAAA records for the names servers have
+//! - **addresses** — publish the A/AAAA records for the names applications have
 //!   registered, and take them down when a name is withdrawn.
 //! - **certificates** — drive orders at the certificate authority: publish the
 //!   challenge record that proves control of a name, hand over the server's
@@ -18,7 +18,7 @@
 //! is nothing to write into and both sweeps idle; without
 //! `CANOPY_ACME_ACCOUNT_KEY` there is no account to order with and the
 //! certificate sweeps idle while addresses carry on. Either is a legitimate
-//! deployment rather than an error, so each is reported once at startup and not
+//! configuration rather than an error, so each is reported once at startup and not
 //! per tick.
 // spec: CRT
 
@@ -29,10 +29,10 @@ use commons_errors::{AppError, Result};
 use commons_servers::acme::{Acme, Failure, Fault};
 use commons_servers::dns_provider::{DnsProvider, RecordKind, RecordSet};
 use commons_types::dns::{ManagedZone, is_within, match_zone};
-use database::server_certificates::ServerCertificate;
+use database::application_certificates::ApplicationCertificate;
+use database::application_names::ApplicationName;
+use database::applications::Application;
 use database::server_domains::ServerGroupDomain;
-use database::server_names::ServerName;
-use database::servers::Server;
 use futures::StreamExt;
 use tracing::{debug, error, info, warn};
 
@@ -67,7 +67,7 @@ pub async fn reconcile_addresses(
 	zones: &[ManagedZone],
 ) -> Result<usize> {
 	let mut db = pool.get().await?;
-	let due = ServerName::needing_publish(&mut db, NAME_BATCH).await?;
+	let due = ApplicationName::needing_publish(&mut db, NAME_BATCH).await?;
 	let mut reconciled = 0;
 
 	for row in due {
@@ -78,7 +78,7 @@ pub async fn reconcile_addresses(
 				// zone write failing is nearly always transient, and a server that
 				// asked to be reachable has not changed its mind.
 				warn!(name = %row.name, "could not publish addresses: {err}");
-				ServerName::record_publish_error(&mut db, row.id, &err.to_string()).await?;
+				ApplicationName::record_publish_error(&mut db, row.id, &err.to_string()).await?;
 			}
 		}
 	}
@@ -92,7 +92,7 @@ async fn publish_addresses(
 	db: &mut database::diesel_async::AsyncPgConnection,
 	dns: &DnsProvider,
 	zones: &[ManagedZone],
-	row: &ServerName,
+	row: &ApplicationName,
 ) -> Result<()> {
 	let Some(zone) = match_zone(&row.name, zones) else {
 		return Err(AppError::Conflict(format!(
@@ -122,10 +122,10 @@ async fn publish_addresses(
 	if row.is_withdrawing() {
 		// Nothing wanted, and now nothing published. Forgetting the registration
 		// is what frees the name for another server in the group.
-		ServerName::forget(db, row.id).await?;
+		ApplicationName::forget(db, row.id).await?;
 		info!(name = %row.name, "withdrew the name and freed it");
 	} else {
-		ServerName::record_published(db, row.id, &wanted).await?;
+		ApplicationName::record_published(db, row.id, &wanted).await?;
 		debug!(name = %row.name, addresses = ?wanted, "published addresses");
 	}
 
@@ -141,7 +141,7 @@ pub async fn work_orders(
 ) -> Result<Round> {
 	let claimed = {
 		let mut db = pool.get().await?;
-		ServerCertificate::claim_due(&mut db, ORDER_BATCH).await?
+		ApplicationCertificate::claim_due(&mut db, ORDER_BATCH).await?
 	};
 	if claimed.is_empty() {
 		return Ok(Round::default());
@@ -228,7 +228,7 @@ async fn work_order(
 	dns: &DnsProvider,
 	acme: &Acme,
 	zones: &[ManagedZone],
-	cert: ServerCertificate,
+	cert: ApplicationCertificate,
 ) -> OrderOutcome {
 	match attempt_order(db, dns, acme, zones, &cert).await {
 		Ok(Outcome::Issued) => Issued,
@@ -243,7 +243,8 @@ async fn work_order(
 			// Recorded against the order whoever's fault it is: an operator looking
 			// at the server wants to know why its certificate has not arrived, even
 			// when the answer is that Canopy cannot issue at all.
-			if let Err(err) = ServerCertificate::record_failure(db, cert.id, &failure.message).await
+			if let Err(err) =
+				ApplicationCertificate::record_failure(db, cert.id, &failure.message).await
 			{
 				error!(name = %cert.name, "could not record the failure: {err}");
 			}
@@ -263,16 +264,16 @@ async fn attempt_order(
 	dns: &DnsProvider,
 	acme: &Acme,
 	zones: &[ManagedZone],
-	cert: &ServerCertificate,
+	cert: &ApplicationCertificate,
 ) -> std::result::Result<Outcome, Failure> {
 	// Still wanted? A grant revoked, a domain released, or a group changed all
 	// mean Canopy stops here — an order is worked on a server's behalf, and the
 	// authorisation for it is asked afresh rather than remembered from when the
 	// request was accepted.
 	// spec: CRT#renewal
-	let server = Server::get_by_id(db, cert.server_id).await?;
+	let server = Application::get_by_id(db, cert.application_id).await?;
 	if !server.may_manage_tls {
-		ServerCertificate::stop(
+		ApplicationCertificate::stop(
 			db,
 			cert.id,
 			"this server is no longer allowed to obtain its own certificates",
@@ -288,7 +289,7 @@ async fn attempt_order(
 		None => false,
 	};
 	if !controlled {
-		ServerCertificate::stop(
+		ApplicationCertificate::stop(
 			db,
 			cert.id,
 			"this server's group no longer controls a domain covering this name",
@@ -339,7 +340,7 @@ async fn attempt_order(
 	let issued = acme
 		.obtain(dns, zone, &cert.name, &cert.csr, profile, replacing)
 		.await?;
-	ServerCertificate::record_issued(
+	ApplicationCertificate::record_issued(
 		db,
 		cert.id,
 		&issued.chain,
@@ -364,7 +365,7 @@ async fn attempt_order(
 // spec: CRT#renewal
 pub async fn start_renewals(pool: &database::Db) -> Result<usize> {
 	let mut db = pool.get().await?;
-	let started = ServerCertificate::start_renewals(&mut db).await?;
+	let started = ApplicationCertificate::start_renewals(&mut db).await?;
 	for cert in &started {
 		debug!(name = %cert.name, "renewal due");
 	}

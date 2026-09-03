@@ -4,7 +4,7 @@
 //! what the components need: read one key (public-server `/backup-target`,
 //! jobs maintenance), create one Secret (private-server onboarding),
 //! create-or-replace one (the jobs rotation loop), and delete one (private-server
-//! config decommission). Real deployments use the
+//! config decommission). Real Canopy instances use the
 //! `Kube` variant; tests and the e2e binary use the in-memory `Memory` store
 //! (gated by `CANOPY_BACKUP_SECRETS_MEMORY`) so these paths are exercised
 //! without a cluster.

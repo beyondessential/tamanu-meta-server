@@ -27,7 +27,7 @@ import TimeAgo from "../components/TimeAgo";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { humanDuration } from "../lib/humanDuration";
 import {
-	compareServersByRankThenKind,
+	compareServersByRankThenType,
 	type DeviceConnectionData,
 	type DeviceInfo,
 	type DeviceKeyInfo,
@@ -35,7 +35,7 @@ import {
 } from "../types";
 
 const TRUSTABLE_ROLES: DeviceRole[] = [
-	"server",
+	"machine",
 	"releaser",
 	"admin",
 	"backup-restore",
@@ -82,7 +82,6 @@ function DeviceView({
 			<KeysBox device={device} refresh={refresh} />
 			<RoleControls device={device} refresh={refresh} />
 			<AssociatedServersSection deviceId={device.device.id} />
-			<PastServersSection deviceId={device.device.id} />
 			<ConnectionHistory deviceId={device.device.id} />
 		</Stack>
 	);
@@ -444,22 +443,6 @@ function AssociatedServersSection({ deviceId }: { deviceId: string }) {
 	);
 }
 
-function PastServersSection({ deviceId }: { deviceId: string }) {
-	const result = useApi(
-		"devices",
-		"get_past_server_associations",
-		{ device_id: deviceId },
-		[deviceId],
-	);
-	return (
-		<ServersListSection
-			title="Past server associations"
-			result={result}
-			emptyText="No past server associations found."
-		/>
-	);
-}
-
 function ServersListSection({
 	title,
 	result,
@@ -473,7 +456,7 @@ function ServersListSection({
 }) {
 	const items =
 		result.status === "ok" && sort
-			? [...result.data].sort(compareServersByRankThenKind)
+			? [...result.data].sort(compareServersByRankThenType)
 			: result.status === "ok"
 				? result.data
 				: [];

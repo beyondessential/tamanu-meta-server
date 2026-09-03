@@ -1,3 +1,6 @@
+use commons_types::{namespace::Namespace, server::app_type::ApplicationType};
+use database::check_policies::{CheckPolicy, ScopedCheckPolicy};
+use database::issues::Scope;
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::RunQueryDsl;
 use uuid::Uuid;
@@ -57,7 +60,7 @@ async fn fetch_issue(
 		SELECT escalates, active, message, description, (resolved_at IS NOT NULL) AS is_resolved,
 			observed_result, effective_result
 		FROM issues
-		WHERE server_id = $1 AND source = $2 AND ref = $3
+		WHERE application_id = $1 AND source = $2 AND ref = $3
 "#,
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
@@ -78,7 +81,7 @@ async fn count_issues_for_server(
 	conn: &mut diesel_async::AsyncPgConnection,
 	server_id: Uuid,
 ) -> i64 {
-	let c: EventCount = sql_query("SELECT COUNT(*) AS count FROM issues WHERE server_id = $1")
+	let c: EventCount = sql_query("SELECT COUNT(*) AS count FROM issues WHERE application_id = $1")
 		.bind::<sql_types::Uuid, _>(server_id)
 		.get_result(conn)
 		.await
@@ -111,15 +114,23 @@ async fn set_check_severity(
 		"debug" => ("skipped", false),
 		other => panic!("unknown severity {other}"),
 	};
+	// Every server that grades against this seed is a tamanu-central, so the
+	// row has to land in the namespace ingest will look it up under.
+	let (subject, application_type) =
+		Namespace::for_application("alertd", check_name, &ApplicationType::TamanuCentral)
+			.to_columns();
 	sql_query(
-		"INSERT INTO check_policies (source, check_name, ceiling, escalates, reviewed_at, reviewed_by) \
-		 VALUES ('alertd', $1, $2, $3, NOW(), 'test') \
-		 ON CONFLICT (source, check_name) DO UPDATE \
+		"INSERT INTO check_policies \
+		 (source, subject, application_type, check_name, ceiling, escalates, reviewed_at, reviewed_by) \
+		 VALUES ('alertd', $1, $2, $3, $4, $5, NOW(), 'test') \
+		 ON CONFLICT (source, subject, application_type, check_name) DO UPDATE \
 		 SET ceiling = EXCLUDED.ceiling, \
 		     escalates = EXCLUDED.escalates, \
 		     reviewed_at = EXCLUDED.reviewed_at, \
 		     reviewed_by = EXCLUDED.reviewed_by",
 	)
+	.bind::<sql_types::Nullable<sql_types::Text>, _>(subject)
+	.bind::<sql_types::Nullable<sql_types::Text>, _>(application_type)
 	.bind::<sql_types::Text, _>(check_name)
 	.bind::<sql_types::Text, _>(ceiling)
 	.bind::<sql_types::Bool, _>(escalates)
@@ -134,7 +145,7 @@ async fn fetch_open_incident(
 ) -> Option<IncidentRow> {
 	sql_query(
 		"SELECT i.id FROM incidents i \
-		 JOIN servers s ON i.server_group_id = s.group_id \
+		 JOIN applications s ON i.server_group_id = s.group_id \
 		 WHERE s.id = $1 AND i.closed_at IS NULL",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
@@ -223,8 +234,8 @@ async fn submit_status() {
 			let server_id = Uuid::new_v4();
 			sql_query(
 				r#"
-				INSERT INTO servers (id, host, kind, device_id)
-				VALUES ($1, 'https://test.example.com', 'facility', $2)
+				WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, machine_id)
+				VALUES ($1, 'https://test.example.com', 'tamanu-facility', $1)
 			"#,
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -243,11 +254,14 @@ async fn submit_status() {
 
 			// The response carries only the return-path fields; the stored
 			// status record is not echoed back. Tags for this bare ungrouped
-			// server are just the synthetic `canopy:product` and `canopy:kind`.
+			// server are just the synthetic `canopy:type` and the two names it
+			// replaced, which stay emitted for anything reading the earlier pair.
 			// `names` is present but empty throughout: this server holds neither
 			// grant and its group controls no domain, so it is entitled to nothing
 			// — which is a fact worth stating on every push rather than an absence
-			// the server has to infer.
+			// the server has to infer. `applications` carries the same answer per
+			// workload on the box: one entry here, since one application runs on
+			// it.
 			let body: serde_json::Value = response.json();
 			assert_eq!(
 				body,
@@ -261,8 +275,21 @@ async fn submit_status() {
 						"domains": [],
 						"registered_names": [],
 						"certificates": [],
+						"applications": [{
+							"type": "tamanu-facility",
+							"may_manage_dns": false,
+							"may_manage_tls": false,
+							"paused": false,
+							"domains": [],
+							"registered_names": [],
+							"certificates": [],
+						}],
 					},
-					"tags": {"canopy:product": "tamanu", "canopy:kind": "facility"},
+					"tags": {
+						"canopy:type": "tamanu-facility",
+						"canopy:product": "tamanu",
+						"canopy:kind": "facility",
+					},
 				}),
 			);
 
@@ -311,9 +338,9 @@ async fn submit_status_returns_effective_tags_matching_tags_endpoint() {
 			.await
 			.expect("insert group");
 			sql_query(
-				"INSERT INTO servers (id, host, kind, device_id, group_id, rank, tags) \
-				 VALUES ($1, 'https://tagged.example.com', 'central', $2, $3, 'production', \
-				 '{\"env\": \"server\"}'::jsonb)",
+				"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, group_id, rank, tags, machine_id) \
+				 VALUES ($1, 'https://tagged.example.com', 'tamanu-central', $3, 'production', \
+				 '{\"env\": \"server\"}'::jsonb, $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
 			.bind::<sql_types::Uuid, _>(device_id)
@@ -365,8 +392,8 @@ async fn submit_status_with_geolocation() {
 			let server_id = Uuid::new_v4();
 			sql_query(
 				r#"
-				INSERT INTO servers (id, host, kind, device_id, geolocation)
-				VALUES ($1, 'https://test.example.com', 'facility', $2, ARRAY[-41.2865, 174.7762])
+				WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, geolocation, machine_id)
+				VALUES ($1, 'https://test.example.com', 'tamanu-facility', ARRAY[-41.2865, 174.7762], $1)
 			"#,
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -419,7 +446,7 @@ async fn submit_status_with_geolocation() {
 			let server_with_geo: GeoCheck = sql_query(
 				r#"
 				SELECT geolocation IS NOT NULL as has_geolocation
-				FROM servers
+				FROM applications
 				WHERE id = $1
 			"#,
 			)
@@ -430,7 +457,7 @@ async fn submit_status_with_geolocation() {
 
 			assert!(
 				server_with_geo.has_geolocation,
-				"Server should have geolocation"
+				"Application should have geolocation"
 			);
 		},
 	)
@@ -445,8 +472,8 @@ async fn submit_status_with_cloud() {
 			let server_id = Uuid::new_v4();
 			sql_query(
 				r#"
-				INSERT INTO servers (id, host, kind, device_id, cloud)
-				VALUES ($1, 'https://cloud.example.com', 'central', $2, true)
+				WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, cloud, machine_id)
+				VALUES ($1, 'https://cloud.example.com', 'tamanu-central', true, $1)
 			"#,
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -499,7 +526,7 @@ async fn submit_status_with_cloud() {
 			let server_with_cloud: CloudCheck = sql_query(
 				r#"
 				SELECT cloud
-				FROM servers
+				FROM applications
 				WHERE id = $1
 			"#,
 			)
@@ -511,7 +538,7 @@ async fn submit_status_with_cloud() {
 			assert_eq!(
 				server_with_cloud.cloud,
 				Some(true),
-				"Server should have cloud=true"
+				"Application should have cloud=true"
 			);
 		},
 	)
@@ -526,8 +553,8 @@ async fn submit_status_with_geolocation_and_cloud() {
 			let server_id = Uuid::new_v4();
 			sql_query(
 				r#"
-				INSERT INTO servers (id, host, kind, device_id, geolocation, cloud)
-				VALUES ($1, 'https://full.example.com', 'central', $2, ARRAY[40.7128, -74.0060], false)
+				WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, geolocation, cloud, machine_id)
+				VALUES ($1, 'https://full.example.com', 'tamanu-central', ARRAY[40.7128, -74.0060], false, $1)
 			"#,
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
@@ -588,7 +615,7 @@ async fn submit_status_with_geolocation_and_cloud() {
 			let server_check: FullCheck = sql_query(
 				r#"
 				SELECT geolocation, cloud
-				FROM servers
+				FROM applications
 				WHERE id = $1
 			"#,
 			)
@@ -599,7 +626,7 @@ async fn submit_status_with_geolocation_and_cloud() {
 
 			assert!(
 				server_check.geolocation.is_some(),
-				"Server should have geolocation"
+				"Application should have geolocation"
 			);
 			if let Some(geo) = &server_check.geolocation {
 				assert_eq!(geo.len(), 2, "Geolocation should have 2 values");
@@ -616,7 +643,7 @@ async fn submit_status_with_geolocation_and_cloud() {
 			assert_eq!(
 				server_check.cloud,
 				Some(false),
-				"Server should have cloud=false"
+				"Application should have cloud=false"
 			);
 		},
 	)
@@ -629,7 +656,7 @@ async fn insert_health_test_server(
 	conn: &mut diesel_async::AsyncPgConnection,
 	device_id: Uuid,
 ) -> Uuid {
-	// Server gets a group so events promote to incidents normally.
+	// Application gets a group so events promote to incidents normally.
 	let group_id = Uuid::new_v4();
 	sql_query("INSERT INTO server_groups (id, name) VALUES ($1, 'health-group')")
 		.bind::<sql_types::Uuid, _>(group_id)
@@ -639,8 +666,8 @@ async fn insert_health_test_server(
 	let server_id = Uuid::new_v4();
 	sql_query(
 		r#"
-		INSERT INTO servers (id, host, kind, device_id, group_id)
-		VALUES ($1, 'https://health.example.com', 'central', $2, $3)
+		WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id)
+		VALUES ($1, 'https://health.example.com', 'tamanu-central', $3, $1)
 	"#,
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
@@ -1233,13 +1260,14 @@ async fn submit_status_with_all_failing_checks_silenced_opens_no_incident() {
 
 			// Pre-silence both failing checks at server scope.
 			for check in ["database", "disk"] {
-				sql_query(
-					"INSERT INTO scoped_check_policies (server_id, source, check_name, ceiling) \
-					 VALUES ($1, 'alertd', $2, 'skipped')",
+				ScopedCheckPolicy::silence(
+					&mut conn,
+					Scope::Application(server_id),
+					"alertd",
+					&Namespace::for_application("alertd", check, &ApplicationType::TamanuCentral),
+					check,
+					None,
 				)
-				.bind::<sql_types::Uuid, _>(server_id)
-				.bind::<sql_types::Text, _>(check)
-				.execute(&mut conn)
 				.await
 				.expect("seed silence");
 			}
@@ -1291,12 +1319,14 @@ async fn submit_status_with_partial_silence_opens_incident_for_unsilenced() {
 			let server_id = insert_health_test_server(&mut conn, device_id).await;
 
 			// Silence only one of the two failing checks.
-			sql_query(
-				"INSERT INTO scoped_check_policies (server_id, source, check_name, ceiling) \
-				 VALUES ($1, 'alertd', 'database', 'skipped')",
+			ScopedCheckPolicy::silence(
+				&mut conn,
+				Scope::Application(server_id),
+				"alertd",
+				&Namespace::for_application("alertd", "database", &ApplicationType::TamanuCentral),
+				"database",
+				None,
 			)
-			.bind::<sql_types::Uuid, _>(server_id)
-			.execute(&mut conn)
 			.await
 			.expect("seed silence");
 
@@ -1563,7 +1593,7 @@ async fn submit_status_reachability_to_health_handoff() {
 			// leaves — see the severity-≥-error close rule.)
 			set_check_severity(&mut conn, "db", "error").await;
 
-			// Server pings in with a failing per-check; the per-check
+			// Application pings in with a failing per-check; the per-check
 			// issue (Error severity) joins the existing incident rather
 			// than opening a separate one.
 			post_status(
@@ -1590,7 +1620,7 @@ async fn submit_status_reachability_to_health_handoff() {
 				"same incident absorbs both contributors"
 			);
 
-			// Reachability sweep runs again. Server's latest status is fresh
+			// Reachability sweep runs again. Application's latest status is fresh
 			// so the sweep closes the reachability issue. The incident must
 			// stay open because the per-check issue is still contributing.
 			database::statuses::Status::sweep_staleness(&mut conn)
@@ -1791,13 +1821,14 @@ async fn set_check_rules(
 	check_name: &str,
 	rules: serde_json::Value,
 ) {
-	// Ensure the catalog row exists.
-	sql_query(
-		"INSERT INTO check_policies (source, check_name) VALUES ('alertd', $1) \
-		 ON CONFLICT (source, check_name) DO NOTHING",
+	// Ensure the catalog row exists, in the namespace ingest will read it
+	// back out of.
+	CheckPolicy::upsert_default(
+		conn,
+		"alertd",
+		&Namespace::for_application("alertd", check_name, &ApplicationType::TamanuCentral),
+		check_name,
 	)
-	.bind::<sql_types::Text, _>(check_name)
-	.execute(conn)
 	.await
 	.expect("ensure catalog row");
 	// Setting rules reviews the policy in production (via update_rules), and
@@ -1819,7 +1850,7 @@ async fn set_server_tags(
 	server_id: Uuid,
 	tags: serde_json::Value,
 ) {
-	sql_query("UPDATE servers SET tags = $1::jsonb WHERE id = $2")
+	sql_query("UPDATE applications SET tags = $1::jsonb WHERE id = $2")
 		.bind::<sql_types::Text, _>(tags.to_string())
 		.bind::<sql_types::Uuid, _>(server_id)
 		.execute(conn)
@@ -2546,8 +2577,8 @@ async fn seed_server_in_group(
 		.expect("insert group");
 	let server_id = Uuid::new_v4();
 	sql_query(
-		"INSERT INTO servers (id, host, kind, device_id, group_id) \
-		 VALUES ($1, 'https://srv.example.com', 'central', $2, $3)",
+		"WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ($1, $3, $2) RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) \
+		 VALUES ($1, 'https://srv.example.com', 'tamanu-central', $3, $1)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(device_id))
@@ -2581,7 +2612,7 @@ async fn enable_backup_capability(
 	r#type: &str,
 ) {
 	sql_query(
-		"INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES ($1, $2, true)",
+		"INSERT INTO machine_backup_capabilities (machine_id, type, enabled) VALUES ($1, $2, true)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Text, _>(r#type)
@@ -2597,6 +2628,62 @@ fn backup_now(body: &serde_json::Value) -> Vec<String> {
 		.iter()
 		.map(|v| v.as_str().expect("type string").to_string())
 		.collect()
+}
+
+/// A box whose id differs from the workload's, which is every box the fleet
+/// gains from here: only the migration's backfill made the two agree. The
+/// backup instruction is the machine's, so it has to be read off the machine
+/// even when an application id is sitting right there.
+// spec: BKJ, STA#push
+#[tokio::test(flavor = "multi_thread")]
+async fn status_backup_now_reads_the_machine_not_the_application() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			let group_id = Uuid::new_v4();
+			sql_query("INSERT INTO server_groups (id, name) VALUES ($1, 'unequal-ids')")
+				.bind::<sql_types::Uuid, _>(group_id)
+				.execute(&mut conn)
+				.await
+				.expect("insert group");
+			let machine_id = Uuid::new_v4();
+			let application_id = Uuid::new_v4();
+			assert_ne!(machine_id, application_id);
+			sql_query("INSERT INTO machines (id, group_id, device_id) VALUES ($1, $2, $3)")
+				.bind::<sql_types::Uuid, _>(machine_id)
+				.bind::<sql_types::Uuid, _>(group_id)
+				.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(device_id))
+				.execute(&mut conn)
+				.await
+				.expect("insert machine");
+			sql_query(
+				"INSERT INTO applications (id, host, type, group_id, machine_id) \
+				 VALUES ($1, 'https://unequal.example.com', 'tamanu-central', $2, $3)",
+			)
+			.bind::<sql_types::Uuid, _>(application_id)
+			.bind::<sql_types::Uuid, _>(group_id)
+			.bind::<sql_types::Uuid, _>(machine_id)
+			.execute(&mut conn)
+			.await
+			.expect("insert application");
+
+			seed_backup_config(&mut conn, group_id, "ready").await;
+			enable_backup_capability(&mut conn, machine_id, "tamanu-postgres").await;
+
+			let resp = public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({ "health": [] }))
+				.await;
+			resp.assert_status_ok();
+			assert_eq!(
+				backup_now(&resp.json()),
+				vec!["tamanu-postgres"],
+				"the due type is the machine's capability, not the application's id"
+			);
+		},
+	)
+	.await
 }
 
 /// An enabled type with no prior successful run is schedule-due (the seeded
@@ -2666,7 +2753,7 @@ async fn status_no_backup_now_when_recent_success() {
 			seed_backup_config(&mut conn, group_id, "ready").await;
 			enable_backup_capability(&mut conn, server_id, "tamanu-postgres").await;
 			sql_query(
-				"INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, reported_at) \
+				"INSERT INTO backup_runs (id, device_id, group_id, machine_id, type, purpose, outcome, reported_at) \
 				 VALUES ($1, $2, $3, $4, 'tamanu-postgres', 'backup', 'success', now())",
 			)
 			.bind::<sql_types::Uuid, _>(Uuid::new_v4())
@@ -2723,7 +2810,7 @@ async fn status_one_off_request_surfaced_then_cleared_by_report() {
 			// No enabled capability: the type appears only via the explicit request,
 			// so clearing it (not a due schedule) is what empties the signal.
 			sql_query(
-				"INSERT INTO backup_requests (server_id, type, purpose) VALUES ($1, 'tamanu-postgres', 'backup')",
+				"INSERT INTO backup_requests (machine_id, type, purpose) VALUES ($1, 'tamanu-postgres', 'backup')",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
 			.execute(&mut conn)
@@ -3052,7 +3139,7 @@ async fn filings_stamp_check_state_columns() {
 			let fetch = async |conn: &mut diesel_async::AsyncPgConnection| -> StateRow {
 				sql_query(
 					"SELECT check_name, observed_result, effective_result, detail \
-					 FROM issues WHERE server_id = $1 AND ref = 'health/db'",
+					 FROM issues WHERE application_id = $1 AND ref = 'health/db'",
 				)
 				.bind::<sql_types::Uuid, _>(server_id)
 				.get_result(conn)
@@ -3104,8 +3191,8 @@ async fn push_records_the_source_s_current_detail() {
 		async |mut conn, cert, device_id, public, _| {
 			let server_id = Uuid::new_v4();
 			sql_query(
-				"INSERT INTO servers (id, host, kind, device_id) \
-				 VALUES ($1, 'https://detail.example.com', 'central', $2)",
+				"WITH m AS (INSERT INTO machines (id, device_id) VALUES ($1, $2) RETURNING id) INSERT INTO applications (id, host, type, machine_id) \
+				 VALUES ($1, 'https://detail.example.com', 'tamanu-central', $1)",
 			)
 			.bind::<sql_types::Uuid, _>(server_id)
 			.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(device_id))
@@ -3113,10 +3200,20 @@ async fn push_records_the_source_s_current_detail() {
 			.await
 			.unwrap();
 
+			// What a consumer sees: the application's own detail merged with
+			// its machine's. Detail splits by grain on the way in, so
+			// `bestoolVersion` lands on the box while `pgVersion` stays with
+			// the workload; a reader is not meant to care which.
 			let detail = async |conn: &mut diesel_async::AsyncPgConnection, source: &str| {
 				sql_query(
-					"SELECT extra FROM server_reported_detail \
-					 WHERE server_id = $1 AND source = $2",
+					"SELECT COALESCE(m.extra, '{}'::jsonb) || COALESCE(d.extra, '{}'::jsonb) \
+					   AS extra \
+					 FROM applications a \
+					 LEFT JOIN application_reported_detail d \
+					   ON d.application_id = a.id AND d.source = $2 \
+					 LEFT JOIN machine_reported_detail m \
+					   ON m.machine_id = a.machine_id AND m.source = $2 \
+					 WHERE a.id = $1 AND (d.source IS NOT NULL OR m.source IS NOT NULL)",
 				)
 				.bind::<sql_types::Uuid, _>(server_id)
 				.bind::<sql_types::Text, _>(source.to_owned())
@@ -3231,6 +3328,640 @@ async fn duplicate_check_names_file_one_consistent_entry() {
 				!issue.message.contains("`80`"),
 				"the superseded entry's detail must not be reported: {}",
 				issue.message,
+			);
+		},
+	)
+	.await
+}
+
+/// A unified push carries both grains' checks. The machine-subject ones file
+/// against the box, the rest against the workload, from one payload.
+// spec: STA
+#[tokio::test(flavor = "multi_thread")]
+async fn a_unified_push_files_each_check_at_its_own_grain() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			let response = public
+				.post(&format!("/status/{}", server_id))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"healthy": true,
+					"health": [
+						// The box's: disk and clock.
+						{ "check": "disk_free", "result": "failed", "free_pct": 2 },
+						{ "check": "time_sync", "result": "warning" },
+						// The workload's: its database, and an error stream
+						// that merely shares a prefix with the machine's `ips`.
+						{ "check": "postgres", "result": "failed" },
+						{ "check": "ips_errors", "result": "warning" },
+					],
+				}))
+				.await;
+			response.assert_status_ok();
+
+			#[derive(diesel::QueryableByName)]
+			struct Row {
+				#[diesel(sql_type = sql_types::Text)]
+				r#ref: String,
+			}
+			let on_machine: Vec<String> = sql_query(
+				"SELECT i.ref FROM issues i JOIN applications a ON a.machine_id = i.machine_id \
+				 WHERE a.id = $1 ORDER BY i.ref",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.load::<Row>(&mut conn)
+			.await
+			.expect("machine issues")
+			.into_iter()
+			.map(|r| r.r#ref)
+			.collect();
+			assert_eq!(
+				on_machine,
+				vec!["health/disk_free", "health/time_sync"],
+				"the box's checks file against the box"
+			);
+
+			let on_application: Vec<String> =
+				sql_query("SELECT ref FROM issues WHERE application_id = $1 ORDER BY ref")
+					.bind::<sql_types::Uuid, _>(server_id)
+					.load::<Row>(&mut conn)
+					.await
+					.expect("application issues")
+					.into_iter()
+					.map(|r| r.r#ref)
+					.collect();
+			assert_eq!(
+				on_application,
+				vec!["health/ips_errors", "health/postgres"],
+				"the workload's stay with the workload; ips_errors is not ips"
+			);
+		},
+	)
+	.await
+}
+
+/// A machine check keeps the source that reported it. Recording it under
+/// `canopy` would break per-source silences, the severities a push answers
+/// with, and the rule that a source's push only recovers its own checks.
+// spec: STA
+#[tokio::test(flavor = "multi_thread")]
+async fn a_machine_check_keeps_its_reporters_source() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			public
+				.post(&format!("/status/{}", server_id))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"healthy": true,
+					"health": [{ "check": "memory", "result": "failed" }],
+				}))
+				.await
+				.assert_status_ok();
+
+			#[derive(diesel::QueryableByName)]
+			struct Row {
+				#[diesel(sql_type = sql_types::Text)]
+				source: String,
+			}
+			let sources: Vec<String> = sql_query(
+				"SELECT i.source FROM issues i JOIN applications a ON a.machine_id = i.machine_id \
+				 WHERE a.id = $1 AND i.ref = 'health/memory'",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.load::<Row>(&mut conn)
+			.await
+			.expect("machine issue")
+			.into_iter()
+			.map(|r| r.source)
+			.collect();
+			assert_eq!(
+				sources,
+				vec!["alertd"],
+				"the reporter's source, not canopy's"
+			);
+		},
+	)
+	.await
+}
+
+/// The three push shapes are told apart by their health field, and an empty set
+/// of checks is not the absence of one: a source with nothing to report is
+/// still that source describing the target, and recovers what it last reported
+/// rather than being re-attributed to Tamanu.
+// spec: STA#transitional-unified-pushes
+#[tokio::test(flavor = "multi_thread")]
+async fn an_empty_health_set_is_the_source_reporting_nothing_not_a_legacy_push() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			// alertd reports a failing check, then reports nothing at all.
+			post_status(
+				&public,
+				&cert,
+				&mut conn,
+				server_id,
+				serde_json::json!({ "health": [ { "check": "disk", "result": "failed" } ] }),
+			)
+			.await;
+			assert!(
+				fetch_issue(&mut conn, server_id, "alertd", "health/disk")
+					.await
+					.expect("per-check issue filed")
+					.active
+			);
+
+			post_status(
+				&public,
+				&cert,
+				&mut conn,
+				server_id,
+				serde_json::json!({ "health": [], "uptime": 7 }),
+			)
+			.await;
+
+			let row = fetch_latest_health(&mut conn, server_id).await;
+			assert_eq!(
+				row.health,
+				serde_json::json!([]),
+				"an empty set stays empty rather than becoming the Tamanu heartbeat",
+			);
+			assert_eq!(row.extra.get("uptime").and_then(|v| v.as_i64()), Some(7));
+			assert!(
+				!fetch_issue(&mut conn, server_id, "alertd", "health/disk")
+					.await
+					.expect("the check state survives")
+					.active,
+				"reporting no checks recovers the ones the source last reported",
+			);
+			assert!(
+				fetch_issue(&mut conn, server_id, "tamanu", "health/tasks")
+					.await
+					.is_none(),
+				"and no heartbeat is synthesised under the tamanu source",
+			);
+
+			// Omitting the field entirely is the legacy shape, and does become
+			// the heartbeat.
+			post_status(
+				&public,
+				&cert,
+				&mut conn,
+				server_id,
+				serde_json::json!({ "uptime": 8 }),
+			)
+			.await;
+			assert!(
+				fetch_issue(&mut conn, server_id, "tamanu", "health/tasks")
+					.await
+					.is_some(),
+			);
+		},
+	)
+	.await
+}
+
+/// A reporter names its checks bare, so the same name arrives from workloads of
+/// different products meaning different things. Ingestion catalogues each under
+/// the namespace of the type that reported it, so an operator grades the two
+/// separately.
+// spec: STA#health-and-detail, CHK
+#[tokio::test(flavor = "multi_thread")]
+async fn a_bare_check_name_is_catalogued_under_the_reporting_types_namespace() {
+	commons_tests::server::run_with_device_auth(
+		"admin",
+		async |mut conn, cert, device_id, public, _| {
+			let central = insert_health_test_server(&mut conn, device_id).await;
+
+			// Two workloads of different products on the same box, each
+			// reporting the same bare check name. A push is addressed to the
+			// box and names which of its workloads it speaks for, so the
+			// second one comes into being by reporting.
+			for kind in ["central", "facility"] {
+				post_status(
+					&public,
+					&cert,
+					&mut conn,
+					central,
+					serde_json::json!({
+						"health": [ { "check": "disk", "result": "warning" } ],
+						"tamanuServerKind": kind,
+					}),
+				)
+				.await;
+			}
+
+			#[derive(QueryableByName)]
+			struct CatalogRow {
+				#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+				subject: Option<String>,
+				#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+				application_type: Option<String>,
+			}
+			let rows: Vec<CatalogRow> = sql_query(
+				"SELECT subject, application_type FROM check_policies \
+				 WHERE source = 'alertd' AND check_name = 'disk' \
+				 ORDER BY application_type",
+			)
+			.load(&mut conn)
+			.await
+			.expect("catalog rows");
+
+			let namespaces: Vec<_> = rows
+				.iter()
+				.map(|r| (r.subject.as_deref(), r.application_type.as_deref()))
+				.collect();
+			assert_eq!(
+				namespaces,
+				vec![
+					(Some("application"), Some("tamanu-central")),
+					(Some("application"), Some("tamanu-facility")),
+				],
+				"one bare name, one catalog row per reporting type",
+			);
+		},
+	)
+	.await
+}
+
+/// The transition is not a cutover: bestools already in the field push the
+/// unified shape, with no `machine` section and detail spread flat across the
+/// envelope. Canopy separates that push itself, so the box's checks and fields
+/// reach the machine and the workload's reach the application.
+// spec: STA#transitional-unified-pushes
+#[tokio::test(flavor = "multi_thread")]
+async fn a_unified_push_from_a_fielded_agent_still_files_its_checks() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let server_id = insert_health_test_server(&mut conn, device_id).await;
+
+			// The shape a bestool in the field sends today: one flat set of
+			// checks mixing machine-subject (disk_free) and application-subject
+			// (database) material, and detail fields on the envelope.
+			post_status(
+				&public,
+				&cert,
+				&mut conn,
+				server_id,
+				serde_json::json!({
+					"source": "alertd",
+					"healthy": false,
+					"health": [
+						{ "check": "database", "result": "passed" },
+						{ "check": "disk_free", "result": "warning", "free_pct": 4 },
+					],
+					"uptimeSecs": 4321,
+					"timezone": "Pacific/Auckland",
+				}),
+			)
+			.await;
+
+			let database = fetch_issue(&mut conn, server_id, "alertd", "health/database")
+				.await
+				.expect("the workload's check files against the application");
+			assert!(!database.active, "a passing check is not an open issue");
+
+			let disk: IssueRow = sql_query(
+				r#"
+				SELECT escalates, active, message, description,
+					(resolved_at IS NOT NULL) AS is_resolved,
+					observed_result, effective_result
+				FROM issues
+				WHERE machine_id = $1 AND application_id IS NULL
+				  AND source = 'alertd' AND ref = 'health/disk_free'
+			"#,
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.get_result(&mut conn)
+			.await
+			.expect("the box's check files against the machine");
+			assert!(disk.active);
+			assert_eq!(disk.observed_result.as_deref(), Some("warning"));
+
+			// Detail separates on the same axis, without the agent knowing.
+			let machine: ExtraOnly = sql_query(
+				"SELECT extra FROM machine_reported_detail \
+				 WHERE machine_id = $1 AND source = 'alertd'",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.get_result(&mut conn)
+			.await
+			.expect("machine detail recorded");
+			assert_eq!(machine.extra["uptimeSecs"], 4321);
+			assert!(machine.extra.get("timezone").is_none());
+
+			let application: ExtraOnly = sql_query(
+				"SELECT extra FROM application_reported_detail \
+				 WHERE application_id = $1 AND source = 'alertd'",
+			)
+			.bind::<sql_types::Uuid, _>(server_id)
+			.get_result(&mut conn)
+			.await
+			.expect("application detail recorded");
+			assert_eq!(application.extra["timezone"], "Pacific/Auckland");
+			assert!(application.extra.get("uptimeSecs").is_none());
+
+			// The push is still recorded whole as history.
+			let row = fetch_latest_health(&mut conn, server_id).await;
+			assert_eq!(row.health.as_array().expect("array").len(), 2);
+			assert_eq!(row.extra["uptimeSecs"], 4321);
+		},
+	)
+	.await
+}
+
+// -----------------------------------------------------------------
+// Which application a unified push is about.
+//
+// The id on the wire is the machine's, so Canopy has to work out which
+// workload on that box the push describes. It correlates on the type the
+// push names, falls back to the box's one application where it names none,
+// and refuses rather than guessing when neither answers.
+// spec: STA#transitional-unified-pushes, FLT#applications-come-from-reports
+// -----------------------------------------------------------------
+
+/// A bare box bound to the authenticated identity, carrying no applications.
+async fn insert_bare_machine(conn: &mut diesel_async::AsyncPgConnection, device_id: Uuid) -> Uuid {
+	let group_id = Uuid::new_v4();
+	sql_query("INSERT INTO server_groups (id, name) VALUES ($1, 'bare-group')")
+		.bind::<sql_types::Uuid, _>(group_id)
+		.execute(conn)
+		.await
+		.expect("insert group");
+	let machine_id = Uuid::new_v4();
+	sql_query("INSERT INTO machines (id, group_id, device_id) VALUES ($1, $2, $3)")
+		.bind::<sql_types::Uuid, _>(machine_id)
+		.bind::<sql_types::Uuid, _>(group_id)
+		.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(device_id))
+		.execute(conn)
+		.await
+		.expect("insert machine");
+	machine_id
+}
+
+#[derive(QueryableByName)]
+struct TypeRow {
+	#[diesel(sql_type = sql_types::Text)]
+	#[diesel(column_name = "type")]
+	r#type: String,
+}
+
+async fn application_types_on(
+	conn: &mut diesel_async::AsyncPgConnection,
+	machine_id: Uuid,
+) -> Vec<String> {
+	let rows: Vec<TypeRow> = sql_query(
+		"SELECT type FROM applications WHERE machine_id = $1 AND deleted_at IS NULL ORDER BY type",
+	)
+	.bind::<sql_types::Uuid, _>(machine_id)
+	.load(conn)
+	.await
+	.expect("load applications");
+	rows.into_iter().map(|r| r.r#type).collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn push_naming_a_type_creates_the_application_it_describes() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			let machine_id = insert_bare_machine(&mut conn, device_id).await;
+			assert!(application_types_on(&mut conn, machine_id).await.is_empty());
+
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"healthy": true,
+					"health": [{ "check": "db", "result": "passed" }],
+					"tamanuServerKind": "facility",
+				}))
+				.await
+				.assert_status_ok();
+
+			assert_eq!(
+				application_types_on(&mut conn, machine_id).await,
+				vec!["tamanu-facility".to_string()],
+				"a report is the only thing that creates an application"
+			);
+
+			// A second workload reporting from the same box is a second
+			// application, not a correction of the first.
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"healthy": true,
+					"health": [{ "check": "db", "result": "passed" }],
+					"tamanuServerKind": "central",
+				}))
+				.await
+				.assert_status_ok();
+
+			assert_eq!(
+				application_types_on(&mut conn, machine_id).await,
+				vec!["tamanu-central".to_string(), "tamanu-facility".to_string()]
+			);
+
+			// And reporting again as one of them adopts it rather than
+			// minting a third.
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"healthy": true,
+					"health": [{ "check": "db", "result": "passed" }],
+					"tamanuServerKind": "facility",
+				}))
+				.await
+				.assert_status_ok();
+
+			assert_eq!(application_types_on(&mut conn, machine_id).await.len(), 2);
+		},
+	)
+	.await
+}
+
+/// The fleet holds boxes that run nothing Canopy models, and their agents push
+/// the same unified shape as everyone else. There is no second grain for such a
+/// push to split into, so it is the box's in full.
+// spec: STA#transitional-unified-pushes
+#[tokio::test(flavor = "multi_thread")]
+async fn a_push_from_a_bare_box_is_the_machines_in_full() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			let machine_id = insert_bare_machine(&mut conn, device_id).await;
+
+			// Nothing in the push says what it is, and the box runs nothing
+			// Canopy could attribute it to.
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"healthy": true,
+					"health": [
+						{ "check": "db", "result": "warning" },
+						{ "check": "disk_free", "result": "passed" },
+					],
+					"uptimeSecs": 4321,
+					"timezone": "Pacific/Auckland",
+				}))
+				.await
+				.assert_status_ok();
+
+			assert!(
+				application_types_on(&mut conn, machine_id).await.is_empty(),
+				"a box with no workload gets no invented one"
+			);
+
+			// Both checks file at machine scope, including the one whose name
+			// is an application's anywhere else: there is no application here
+			// for it to belong to.
+			for check in ["db", "disk_free"] {
+				let issue: IssueRow = sql_query(
+					r#"
+					SELECT escalates, active, message, description,
+						(resolved_at IS NOT NULL) AS is_resolved,
+						observed_result, effective_result
+					FROM issues
+					WHERE machine_id = $1 AND application_id IS NULL
+					  AND source = 'alertd' AND ref = $2
+				"#,
+				)
+				.bind::<sql_types::Uuid, _>(machine_id)
+				.bind::<sql_types::Text, _>(format!("health/{check}"))
+				.get_result(&mut conn)
+				.await
+				.unwrap_or_else(|e| panic!("{check} files against the machine: {e}"));
+				assert_eq!(issue.active, check == "db");
+			}
+
+			// Detail has nowhere else to go either, so all of it is the box's.
+			let machine: ExtraOnly = sql_query(
+				"SELECT extra FROM machine_reported_detail \
+				 WHERE machine_id = $1 AND source = 'alertd'",
+			)
+			.bind::<sql_types::Uuid, _>(machine_id)
+			.get_result(&mut conn)
+			.await
+			.expect("machine detail recorded");
+			assert_eq!(machine.extra["uptimeSecs"], 4321);
+			assert_eq!(machine.extra["timezone"], "Pacific/Auckland");
+
+			assert!(
+				sql_query("SELECT extra FROM application_reported_detail")
+					.get_result::<ExtraOnly>(&mut conn)
+					.await
+					.is_err(),
+				"no application, so no application detail"
+			);
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn push_naming_no_type_against_a_two_workload_box_is_refused() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			let machine_id = insert_bare_machine(&mut conn, device_id).await;
+			sql_query(
+				"INSERT INTO applications (id, type, machine_id) \
+				 VALUES (gen_random_uuid(), 'tamanu-central', $1), \
+				        (gen_random_uuid(), 'tamanu-facility', $1)",
+			)
+			.bind::<sql_types::Uuid, _>(machine_id)
+			.execute(&mut conn)
+			.await
+			.expect("insert two applications");
+
+			// Attributing the box's whole picture to an arbitrary one of its
+			// workloads is the failure this card exists to stop.
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"healthy": true,
+					"health": [{ "check": "db", "result": "passed" }],
+				}))
+				.await
+				.assert_status_conflict();
+
+			assert_eq!(application_types_on(&mut conn, machine_id).await.len(), 2);
+
+			// Naming which one it is resolves it.
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"healthy": true,
+					"health": [{ "check": "db", "result": "passed" }],
+					"tamanuServerKind": "facility",
+				}))
+				.await
+				.assert_status_ok();
+		},
+	)
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn ignored_source_push_creates_no_application() {
+	commons_tests::server::run_with_device_auth(
+		"machine",
+		async |mut conn, cert, device_id, public, _| {
+			use commons_types::source::IngestMode;
+			use database::source_policies::SourcePolicy;
+
+			let machine_id = insert_bare_machine(&mut conn, device_id).await;
+			sql_query(
+				"INSERT INTO applications (id, type, machine_id) \
+				 VALUES (gen_random_uuid(), 'tamanu-central', $1)",
+			)
+			.bind::<sql_types::Uuid, _>(machine_id)
+			.execute(&mut conn)
+			.await
+			.expect("insert application");
+
+			SourcePolicy::set_ingest(&mut conn, "alertd", IngestMode::Ignore)
+				.await
+				.expect("set ignore");
+
+			// An ignored source records nowhere, so it reads without creating:
+			// a type it names that the box does not run resolves to the one
+			// application there rather than minting a second.
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"healthy": true,
+					"health": [{ "check": "db", "result": "passed" }],
+					"tamanuServerKind": "facility",
+				}))
+				.await
+				.assert_status_ok();
+
+			assert_eq!(
+				application_types_on(&mut conn, machine_id).await,
+				vec!["tamanu-central".to_string()]
 			);
 		},
 	)

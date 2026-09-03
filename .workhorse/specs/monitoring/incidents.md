@@ -9,21 +9,24 @@ It aggregates the issues active on that target over its lifetime, from when it o
 At most one incident is open per target at a time.
 
 Issues and effective results are defined by the check-state model (see [CHK](checks.md)).
-Issues on a server belong to the target of the server's group; issues on an ungrouped server belong to no target and cannot contribute to incidents.
-Group-targeted issues belong to that group's target; Canopy-wide issues belong to the Canopy target.
+An issue is scoped to what its check asserts something about — an application, a machine, a group, or Canopy as a whole — and that scope decides which target's incident it belongs to.
+
+Machine-scoped and application-scoped issues belong to the target of the group the machine or application is in; an issue on something belonging to no group belongs to no target and cannot contribute to incidents.
+Group-scoped issues belong to that group's target; Canopy-wide issues belong to the Canopy target.
+So a group's trouble is one incident whether it began on a box or in the software on it, and a machine's failure is not split across the applications it hosts.
 
 ## Membership
 
 An incident opens when a check's effective result becomes failed on a target with no open incident.
 While an incident is open, every issue on its target joins it — effective warnings included — so the incident carries the full context of what was wrong during its span.
 
-An issue leaves the incident when it stops being one: its effective result recovers (to passed or skipped, whether by report or by policy), it is resolved or snoozed, or its server stops being monitored.
+An issue leaves the incident when it stops being one: its effective result recovers (to passed or skipped, whether by report or by policy), it is resolved or snoozed, or the machine or application it is on stops being monitored.
 Warnings never hold an incident open.
 
 When the last effective failure leaves because its result recovered, the incident does not close immediately: it **lingers** for its target's linger window, remaining the target's open incident.
 A check whose effective result becomes failed during the window — a fresh failure or the same one returning — ends the lingering and the incident continues.
 An incident whose linger window elapses without an effective failure closes, recording the close as of when its last effective failure left.
-Lingering damps reporter flapping, not operator action: a last failure leaving through resolution, snooze, silence, a maintenance window declared over its target (see [MNT](maintenance.md)), or its server's monitoring being turned off closes the incident immediately.
+Lingering damps reporter flapping, not operator action: a last failure leaving through resolution, snooze, silence, a maintenance window declared over its target (see [MNT](maintenance.md)), or its target's monitoring being turned off closes the incident immediately.
 
 The membership history — which issues joined and left, and when — is kept and presented as the incident's timeline.
 An issue can leave and rejoin the same incident.

@@ -21,7 +21,7 @@ struct Count {
 	count: i64,
 }
 
-/// Count active `restore-verification` check-states across a group's servers.
+/// Count active `restore-verification` check-states across a group's machines.
 ///
 /// Sweeps first: `sweep_restore_checks` is the sole filer of the restore checks and
 /// rebuilds each server's from its live declarations, so what a recorded report
@@ -33,8 +33,8 @@ async fn active_restore_issues(conn: &mut AsyncPgConnection, group: Uuid) -> i64
 		.expect("sweep");
 	sql_query(
 		"SELECT count(*) AS count FROM issues i \
-		 JOIN servers s ON s.id = i.server_id \
-		 WHERE s.group_id = $1 AND i.ref = 'restore-verification' AND i.active = true",
+		 JOIN machines m ON m.id = i.machine_id \
+		 WHERE m.group_id = $1 AND i.ref = 'restore-verification' AND i.active = true",
 	)
 	.bind::<sql_types::Uuid, _>(group)
 	.get_result::<Count>(conn)
@@ -62,7 +62,7 @@ fn new_check_for(
 		replica_name: None,
 		consumer_device_id: consumer,
 		group_id: group,
-		server_id: Some(server),
+		machine_id: Some(server),
 		r#type: BackupType::TamanuPostgres,
 		intent,
 		snapshot_id: Some("snap-x".into()),
@@ -113,15 +113,30 @@ async fn insert_group(conn: &mut AsyncPgConnection, name: &str) -> Uuid {
 		.id
 }
 
-async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uuid {
+/// A machine and the one application on it, as `(machine, application)`.
+///
+/// The machine comes first because that is what a replica is declared over and
+/// what a report is about; the application is here for the few cases that turn
+/// on a version or a product, which are an application's.
+async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> (Uuid, Uuid) {
 	let host = format!("http://test.invalid/{}", Uuid::new_v4());
-	sql_query("INSERT INTO servers (host, kind, group_id) VALUES ($1, 'central', $2) RETURNING id")
-		.bind::<sql_types::Text, _>(host)
+	let machine = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
 		.bind::<sql_types::Uuid, _>(group_id)
 		.get_result::<RowId>(conn)
 		.await
-		.expect("insert server")
-		.id
+		.expect("insert machine")
+		.id;
+	let application = sql_query(
+		"INSERT INTO applications (host, type, group_id, machine_id) VALUES ($1, 'tamanu-central', $2, $3) RETURNING id",
+	)
+	.bind::<sql_types::Text, _>(host)
+	.bind::<sql_types::Uuid, _>(group_id)
+	.bind::<sql_types::Uuid, _>(machine)
+	.get_result::<RowId>(conn)
+	.await
+	.expect("insert server")
+	.id;
+	(machine, application)
 }
 
 async fn insert_consumer(conn: &mut AsyncPgConnection) -> Uuid {
@@ -142,7 +157,7 @@ fn new_replica(
 	NewRestoreReplica {
 		consumer_device_id: consumer,
 		group_id: group,
-		server_id: server,
+		machine_id: server,
 		r#type: BackupType::TamanuPostgres,
 		intent,
 		name: name.into(),
@@ -159,7 +174,7 @@ fn update_from(r: &RestoreReplica) -> RestoreReplicaUpdate {
 	RestoreReplicaUpdate {
 		consumer_device_id: r.consumer_device_id,
 		group_id: r.group_id,
-		server_id: r.server_id,
+		machine_id: r.machine_id,
 		r#type: r.r#type.clone(),
 		intent: r.intent.clone(),
 		name: r.name.clone(),
@@ -249,7 +264,7 @@ async fn one_scope_takes_several_declarations_told_apart_by_name() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
-		let server = insert_server(&mut conn, group).await;
+		let (server, _application) = insert_server(&mut conn, group).await;
 
 		RestoreReplica::create(
 			&mut conn,
@@ -501,7 +516,7 @@ async fn record_report_raises_then_recovers() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
-		let server = insert_server(&mut conn, group).await;
+		let (server, _application) = insert_server(&mut conn, group).await;
 		let replica = declare(&mut conn, consumer, group, "verify").await;
 
 		// A failed report degrades the server's restore-verification check.
@@ -546,17 +561,17 @@ struct VerifRow {
 	#[diesel(sql_type = sql_types::Text)]
 	check_name: String,
 	#[diesel(sql_type = sql_types::Nullable<sql_types::Uuid>)]
-	server_id: Option<Uuid>,
+	machine_id: Option<Uuid>,
 	#[diesel(sql_type = sql_types::Nullable<sql_types::Uuid>)]
 	server_group_id: Option<Uuid>,
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn record_report_files_server_scoped_with_stable_name() {
+async fn record_report_files_machine_scoped_with_stable_name() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
-		let server = insert_server(&mut conn, group).await;
+		let (server, _application) = insert_server(&mut conn, group).await;
 		let replica = declare(&mut conn, consumer, group, "verify").await;
 
 		BackupRestoreCheck::record_report(
@@ -578,10 +593,10 @@ async fn record_report_files_server_scoped_with_stable_name() {
 			.expect("sweep");
 
 		// The check is server-scoped and named for the condition alone: the
-		// server is the scope (issues.server_id) and the replica an instance,
-		// neither of them baked into the check name.
+		// the machine is the scope (issues.machine_id) and the replica an
+		// instance, neither of them baked into the check name.
 		let rows: Vec<VerifRow> = sql_query(
-			"SELECT check_name, server_id, server_group_id FROM issues \
+			"SELECT check_name, machine_id, server_group_id FROM issues \
 			 WHERE source = 'canopy' AND ref = 'restore-verification' AND active",
 		)
 		.load(&mut conn)
@@ -589,7 +604,7 @@ async fn record_report_files_server_scoped_with_stable_name() {
 		.expect("load");
 		assert_eq!(rows.len(), 1);
 		assert_eq!(rows[0].check_name, "restore-verification");
-		assert_eq!(rows[0].server_id, Some(server));
+		assert_eq!(rows[0].machine_id, Some(server));
 		assert_eq!(rows[0].server_group_id, None);
 	})
 	.await;
@@ -600,7 +615,7 @@ async fn record_report_unhealthy_success_still_raises() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
-		let server = insert_server(&mut conn, group).await;
+		let (server, _application) = insert_server(&mut conn, group).await;
 		let replica = declare(&mut conn, consumer, group, "verify").await;
 
 		// Restore succeeded but the database wasn't healthy → still a failure.
@@ -675,21 +690,24 @@ async fn sweep_restore_checks_raises_for_stale_replica_but_skips_gaps() {
 }
 
 /// Insert a successful backup run whose snapshot was produced `hours_ago`.
+///
+/// Takes the *machine*: a run captures a box's data, so that is what it records.
+// spec: BAK
 async fn insert_old_success_run(
 	conn: &mut AsyncPgConnection,
 	device: Uuid,
 	group: Uuid,
-	server: Uuid,
+	machine: Uuid,
 	snapshot: &str,
 	hours_ago: i64,
 ) {
 	sql_query(
-		"INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, snapshot_id, reported_at) \
+		"INSERT INTO backup_runs (id, device_id, group_id, machine_id, type, purpose, outcome, snapshot_id, reported_at) \
 		 VALUES (gen_random_uuid(), $1, $2, $3, 'tamanu-postgres', 'backup', 'success', $4, now() - make_interval(hours => $5))",
 	)
 	.bind::<sql_types::Uuid, _>(device)
 	.bind::<sql_types::Uuid, _>(group)
-	.bind::<sql_types::Uuid, _>(server)
+	.bind::<sql_types::Uuid, _>(machine)
 	.bind::<sql_types::Text, _>(snapshot)
 	.bind::<sql_types::Int4, _>(hours_ago as i32)
 	.execute(conn)
@@ -702,7 +720,7 @@ async fn sweep_once_is_snapshot_driven() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
-		let server = insert_server(&mut conn, group).await;
+		let (server, _application) = insert_server(&mut conn, group).await;
 
 		RestoreConsumerCapability::register(
 			&mut conn,
@@ -734,6 +752,7 @@ async fn sweep_once_is_snapshot_driven() {
 		);
 
 		// A snapshot older than the bound, never verified → overdue.
+		// The run records the box whose data it captured.
 		insert_old_success_run(&mut conn, consumer, group, server, "snap-1", 2).await;
 		assert_eq!(
 			database::restore::sweep_restore_checks(&mut conn)
@@ -779,7 +798,7 @@ async fn records_and_returns_arbitrary_health_details() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
-		let server = insert_server(&mut conn, group).await;
+		let (server, _application) = insert_server(&mut conn, group).await;
 
 		let details = serde_json::json!({
 			"cluster": { "live_tuples": 12345, "dead_tuples": 6 },
@@ -911,7 +930,7 @@ async fn update_moving_scope_recovers_stale_alert_at_old_key() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
-		let server = insert_server(&mut conn, group).await;
+		let (server, _application) = insert_server(&mut conn, group).await;
 		let r = RestoreReplica::create(
 			&mut conn,
 			new_replica(
@@ -973,7 +992,7 @@ async fn disabling_recovers_the_stale_alert() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
-		let server = insert_server(&mut conn, group).await;
+		let (server, _application) = insert_server(&mut conn, group).await;
 		let r = RestoreReplica::create(
 			&mut conn,
 			new_replica(
@@ -1031,7 +1050,7 @@ async fn re_enabling_does_not_recover_anything() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
-		let server = insert_server(&mut conn, group).await;
+		let (server, _application) = insert_server(&mut conn, group).await;
 		let r = RestoreReplica::create(
 			&mut conn,
 			new_replica(
@@ -1101,7 +1120,7 @@ async fn delete_recovers_stale_alert_for_removed_scope() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
-		let server = insert_server(&mut conn, group).await;
+		let (server, _application) = insert_server(&mut conn, group).await;
 		let r = RestoreReplica::create(
 			&mut conn,
 			new_replica(
@@ -1151,8 +1170,8 @@ async fn delete_group_wide_recovers_alerts_on_every_server() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
-		let server_a = insert_server(&mut conn, group).await;
-		let server_b = insert_server(&mut conn, group).await;
+		let (server_a, _application) = insert_server(&mut conn, group).await;
+		let (server_b, _application) = insert_server(&mut conn, group).await;
 		let r = RestoreReplica::create(
 			&mut conn,
 			new_replica(consumer, group, None, RestoreIntent::from("verify"), "n"),
@@ -1194,7 +1213,7 @@ async fn delete_detaches_reports_rather_than_being_blocked_by_them() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
-		let server = insert_server(&mut conn, group).await;
+		let (server, _application) = insert_server(&mut conn, group).await;
 		let r = RestoreReplica::create(
 			&mut conn,
 			new_replica(
@@ -1239,7 +1258,7 @@ async fn delete_detaches_reports_rather_than_being_blocked_by_them() {
 			checks[0].replica_id, None,
 			"the retained report no longer names a declaration"
 		);
-		assert_eq!(checks[0].server_id, Some(server));
+		assert_eq!(checks[0].machine_id, Some(server));
 		assert_eq!(checks[0].intent, RestoreIntent::from("verify"));
 	})
 	.await;
@@ -1393,8 +1412,8 @@ async fn blank_name_is_rejected() {
 async fn a_version_without_a_published_manifest_is_a_redaction_gap() {
 	TestDb::run(|mut conn, _url| async move {
 		let group = insert_group(&mut conn, "redaction-gap").await;
-		let server_id = insert_server(&mut conn, group).await;
-		let server = database::servers::Server::get_by_id(&mut conn, server_id)
+		let (_machine, server_id) = insert_server(&mut conn, group).await;
+		let server = database::applications::Application::get_by_id(&mut conn, server_id)
 			.await
 			.expect("server");
 
@@ -1417,7 +1436,7 @@ async fn a_version_without_a_published_manifest_is_a_redaction_gap() {
 		.expect("insert version")
 		.id;
 		sql_query(
-			"INSERT INTO server_reported_detail (server_id, source, extra, version) \
+			"INSERT INTO application_reported_detail (application_id, source, extra, version) \
 			 VALUES ($1, 'tamanu', '{}'::jsonb, '2.41.3')",
 		)
 		.bind::<sql_types::Uuid, _>(server_id)
@@ -1466,7 +1485,7 @@ async fn a_finding_survives_its_capability_being_withdrawn() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
-		let server = insert_server(&mut conn, group).await;
+		let (server, _application) = insert_server(&mut conn, group).await;
 		RestoreConsumerCapability::register(
 			&mut conn,
 			consumer,
@@ -1518,15 +1537,15 @@ async fn a_finding_survives_its_capability_being_withdrawn() {
 
 /// A report about a server the declaration doesn't name still surfaces. The
 /// ingest authorizes a report per (group, type), so a consumer maintaining one
-/// replica can report on any of the group's servers, and the finding belongs to
+/// replica can report on any of the group's applications, and the finding belongs to
 /// the server the report is about.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_report_about_an_unnamed_server_still_surfaces() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
-		let named = insert_server(&mut conn, group).await;
-		let other = insert_server(&mut conn, group).await;
+		let (named, _) = insert_server(&mut conn, group).await;
+		let (other, _) = insert_server(&mut conn, group).await;
 		let r = RestoreReplica::create(
 			&mut conn,
 			new_replica(
@@ -1576,12 +1595,16 @@ struct NameRow {
 }
 
 /// Every canopy issue ref on a server matching a LIKE pattern.
-async fn issue_refs(conn: &mut AsyncPgConnection, server_id: Uuid, pattern: &str) -> Vec<String> {
+/// The canopy refs filed against a target, on whichever scope column it holds:
+/// a machine check's issue is on `machine_id`, an application's on
+/// `application_id`.
+async fn issue_refs(conn: &mut AsyncPgConnection, target_id: Uuid, pattern: &str) -> Vec<String> {
 	sql_query(
 		"SELECT \"ref\" AS name FROM issues \
-		 WHERE server_id = $1 AND source = 'canopy' AND \"ref\" LIKE $2 ORDER BY \"ref\"",
+		 WHERE (application_id = $1 OR machine_id = $1) AND source = 'canopy' \
+		   AND \"ref\" LIKE $2 ORDER BY \"ref\"",
 	)
-	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Uuid, _>(target_id)
 	.bind::<sql_types::Text, _>(pattern)
 	.load::<NameRow>(conn)
 	.await
@@ -1615,16 +1638,23 @@ struct FiledRow {
 	detail: Option<serde_json::Value>,
 }
 
-async fn filed(conn: &mut AsyncPgConnection, server_id: Uuid, r#ref: &str) -> FiledRow {
-	sql_query(
+/// The filed check for a target, looked up on the column its grain files on:
+/// restore-verification and redaction are the machine's, migration-test the
+/// application's.
+async fn filed(conn: &mut AsyncPgConnection, target_id: Uuid, r#ref: &str) -> FiledRow {
+	let column = match r#ref {
+		"migration-test" => "application_id",
+		_ => "machine_id",
+	};
+	sql_query(format!(
 		"SELECT message, detail FROM issues \
-		 WHERE server_id = $1 AND source = 'canopy' AND \"ref\" = $2 AND active",
-	)
-	.bind::<sql_types::Uuid, _>(server_id)
+		 WHERE {column} = $1 AND source = 'canopy' AND \"ref\" = $2 AND active"
+	))
+	.bind::<sql_types::Uuid, _>(target_id)
 	.bind::<sql_types::Text, _>(r#ref)
 	.get_result::<FiledRow>(conn)
 	.await
-	.unwrap_or_else(|e| panic!("{ref} was filed for {server_id}: {e}"))
+	.unwrap_or_else(|e| panic!("{ref} was filed for {target_id}: {e}"))
 }
 
 /// Two replicas of one `(type, intent)` on one server are two instances, not
@@ -1635,7 +1665,7 @@ async fn same_scope_replicas_grade_separately_by_name() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
-		let server = insert_server(&mut conn, group).await;
+		let (server, _application) = insert_server(&mut conn, group).await;
 		RestoreConsumerCapability::register(
 			&mut conn,
 			consumer,
@@ -1724,11 +1754,11 @@ async fn same_scope_replicas_grade_separately_by_name() {
 /// carries them with their own results, and the catalog gains one entry per
 /// check rather than one per (type, intent) pair.
 #[tokio::test(flavor = "multi_thread")]
-async fn one_check_of_each_kind_per_server_with_the_replicas_as_instances() {
+async fn one_check_of_each_kind_per_machine_with_the_replicas_as_instances() {
 	TestDb::run(|mut conn, _url| async move {
 		let consumer = insert_consumer(&mut conn).await;
 		let group = insert_group(&mut conn, "g").await;
-		let server = insert_server(&mut conn, group).await;
+		let (server, application) = insert_server(&mut conn, group).await;
 		RestoreConsumerCapability::register(
 			&mut conn,
 			consumer,
@@ -1834,6 +1864,7 @@ async fn one_check_of_each_kind_per_server_with_the_replicas_as_instances() {
 				true,
 			),
 			database::migration_tests::NewMigrationTest {
+				application_id: application,
 				target_version_id: version.id,
 				total_elapsed: PgDuration(SignedDuration::from_secs(45)),
 				failed_migration: Some("backfillNoteTypeIds".into()),
@@ -1849,11 +1880,15 @@ async fn one_check_of_each_kind_per_server_with_the_replicas_as_instances() {
 			.await
 			.expect("sweep");
 
-		for r#ref in ["restore-verification", "redaction", "migration-test"] {
+		for (r#ref, target) in [
+			("restore-verification", server),
+			("redaction", server),
+			("migration-test", application),
+		] {
 			assert_eq!(
-				issue_refs(&mut conn, server, &format!("{ref}%")).await,
+				issue_refs(&mut conn, target, &format!("{ref}%")).await,
 				vec![r#ref.to_string()],
-				"one {ref} check for the server, named for the condition only",
+				"one {ref} check for its target, named for the condition only",
 			);
 			assert_eq!(
 				catalog_names(&mut conn, &format!("{ref}%")).await,
@@ -1893,12 +1928,146 @@ async fn one_check_of_each_kind_per_server_with_the_replicas_as_instances() {
 		assert_eq!(detail["instances"][0]["columns_skipped"], 3);
 
 		// The migration finding carries the version in its detail, not its name.
-		let migration = filed(&mut conn, server, "migration-test").await;
+		let migration = filed(&mut conn, application, "migration-test").await;
 		let detail = migration.detail.expect("detail");
 		assert_eq!(detail["instances"][0]["target_version"], "2.63.0");
 		assert_eq!(
 			detail["instances"][0]["failed_migration"],
 			"backfillNoteTypeIds"
+		);
+	})
+	.await;
+}
+
+/// The two grains part on which check they file against. Getting these the
+/// wrong way round is silent — both file successfully and both present, just
+/// against the wrong thing — so this pins the columns directly.
+// spec: RST#alerting
+#[tokio::test(flavor = "multi_thread")]
+async fn the_three_checks_file_at_the_grain_they_are_about() {
+	TestDb::run(|mut conn, _url| async move {
+		let consumer = insert_consumer(&mut conn).await;
+		let group = insert_group(&mut conn, "grains").await;
+		let (machine, application) = insert_server(&mut conn, group).await;
+		RestoreConsumerCapability::register(
+			&mut conn,
+			consumer,
+			&[descriptor("verify", &["check"])],
+		)
+		.await
+		.expect("register caps");
+
+		let failing = RestoreReplica::create(
+			&mut conn,
+			new_replica(
+				consumer,
+				group,
+				Some(machine),
+				RestoreIntent::from("verify"),
+				"nightly",
+			),
+		)
+		.await
+		.expect("declare");
+
+		// A failed restore that also failed to redaction, so both machine
+		// checks have something to say.
+		let mut report = new_check_for(
+			Some(failing.id),
+			consumer,
+			group,
+			machine,
+			RestoreIntent::from("verify"),
+			RunOutcome::Failure,
+			false,
+		);
+		report.redaction_outcome = Some(commons_types::backup::RedactionOutcome::Partial);
+		BackupRestoreCheck::record_report(&mut conn, report)
+			.await
+			.expect("report");
+
+		// A separate replica for the migration test, so its healthy restore does
+		// not supersede the failing one above on the same key.
+		let migrating = RestoreReplica::create(
+			&mut conn,
+			new_replica(
+				consumer,
+				group,
+				Some(machine),
+				RestoreIntent::from("migrate"),
+				"pre-upgrade",
+			),
+		)
+		.await
+		.expect("declare migrating");
+
+		// And a failed migration test, whose finding is the application's.
+		let version: RowId = sql_query(
+			"INSERT INTO versions (major, minor, patch, status, changelog) \
+			           VALUES (2, 63, 0, 'published', '') RETURNING id",
+		)
+		.get_result(&mut conn)
+		.await
+		.expect("version");
+		database::migration_tests::MigrationTest::record(
+			&mut conn,
+			new_check_for(
+				Some(migrating.id),
+				consumer,
+				group,
+				machine,
+				RestoreIntent::from("migrate"),
+				RunOutcome::Success,
+				true,
+			),
+			database::migration_tests::NewMigrationTest {
+				application_id: application,
+				target_version_id: version.id,
+				total_elapsed: PgDuration(SignedDuration::from_secs(30)),
+				failed_migration: Some("backfillNoteTypeIds".into()),
+				data_bytes_before: 10,
+				data_bytes_after: 10,
+				timings: vec![],
+			},
+		)
+		.await
+		.expect("migration test");
+
+		database::restore::sweep_restore_checks(&mut conn)
+			.await
+			.expect("sweep");
+
+		#[derive(diesel::QueryableByName)]
+		struct Scoped {
+			#[diesel(sql_type = sql_types::Nullable<sql_types::Uuid>)]
+			machine_id: Option<Uuid>,
+			#[diesel(sql_type = sql_types::Nullable<sql_types::Uuid>)]
+			application_id: Option<Uuid>,
+		}
+		let scoped_for = async |conn: &mut AsyncPgConnection, r#ref: &str| -> Scoped {
+			sql_query(
+				"SELECT machine_id, application_id FROM issues \
+				 WHERE source = 'canopy' AND \"ref\" = $1 AND active",
+			)
+			.bind::<sql_types::Text, _>(r#ref)
+			.get_result::<Scoped>(conn)
+			.await
+			.unwrap_or_else(|e| panic!("{ref} filed: {e}"))
+		};
+
+		// What failed to restore is the box's backup, so it is the box's check.
+		for r#ref in ["restore-verification", "redaction"] {
+			let row = scoped_for(&mut conn, r#ref).await;
+			assert_eq!(row.machine_id, Some(machine), "{ref} is the machine's");
+			assert_eq!(row.application_id, None, "{ref} is not an application's");
+		}
+
+		// The version under test is the workload's, so it is the workload's.
+		let row = scoped_for(&mut conn, "migration-test").await;
+		assert_eq!(row.application_id, Some(application));
+		assert_eq!(
+			row.machine_id, None,
+			"a box hosting two workloads carries this against the one the version was for"
 		);
 	})
 	.await;

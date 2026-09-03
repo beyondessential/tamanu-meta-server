@@ -8,11 +8,11 @@ import {
 	Typography,
 } from "@mui/material";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
-import { NavLink, Navigate, Route, Routes } from "react-router-dom";
+import { NavLink, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { useApi } from "./api";
 import AdminProbeBanner from "./components/AdminProbeBanner";
 import { AdminProvider } from "./hooks/useIsAdmin";
-import { ProductsProvider } from "./hooks/useProducts";
+import { ApplicationTypesProvider } from "./hooks/useApplicationTypes";
 import { useReloadInterval } from "./hooks/useReloadInterval";
 import Admins from "./routes/Admins";
 import BackupConfig from "./routes/BackupConfig";
@@ -35,6 +35,7 @@ import GroupDetail from "./routes/GroupDetail";
 import GroupEdit from "./routes/GroupEdit";
 import GroupsList from "./routes/GroupsList";
 import CheckDetail from "./routes/CheckDetail";
+import CheckRedirect from "./routes/CheckRedirect";
 import HealthcheckSettings from "./routes/HealthcheckSettings";
 import Healthchecks from "./routes/Healthchecks";
 import SourcesSettings from "./routes/SourcesSettings";
@@ -42,7 +43,9 @@ import IncidentDetail from "./routes/IncidentDetail";
 import Incidents from "./routes/Incidents";
 import Maintenance from "./routes/Maintenance";
 import Status from "./routes/Status";
-import ServerCreate from "./routes/ServerCreate";
+import MachineCreate from "./routes/MachineCreate";
+import MachineDetail from "./routes/MachineDetail";
+import MachineEdit from "./routes/MachineEdit";
 import ServerDetail from "./routes/ServerDetail";
 import ServerEdit from "./routes/ServerEdit";
 import ArchivedList from "./routes/ArchivedList";
@@ -50,7 +53,6 @@ import FleetFigures from "./routes/FleetFigures";
 import Servers from "./routes/Servers";
 import Settings from "./routes/Settings";
 import Sql from "./routes/Sql";
-import UngroupedServersList from "./routes/UngroupedServersList";
 import VersionDetail from "./routes/VersionDetail";
 import Upgrades from "./routes/Upgrades";
 import Versions from "./routes/Versions";
@@ -60,10 +62,24 @@ interface NavItem {
 	to: string;
 }
 
+/// Send an address from before the fleet was namespaced to where it lives now.
+///
+/// `servers` named the box and the workload at once, and the fleet's own pages
+/// sat beside its records — so `/servers/figures` and `/servers/{id}` were told
+/// apart only by route ranking. Everything the fleet holds is under `/fleet`
+/// now: its listings, its applications, its machines.
+///
+/// Replaces rather than pushes, so the back button goes where the operator came
+/// from instead of bouncing off the redirect.
+function Moved({ to }: { to: (id: string) => string }) {
+	const { id = "" } = useParams<{ id: string }>();
+	return <Navigate to={to(id)} replace />;
+}
+
 const BASE_NAV: NavItem[] = [
 	{ label: "Status", to: "/status" },
 	{ label: "Incidents", to: "/incidents" },
-	{ label: "Fleet", to: "/servers" },
+	{ label: "Fleet", to: "/fleet" },
 	{ label: "Versions", to: "/versions" },
 	{ label: "Upgrades", to: "/upgrades" },
 	{ label: "Maintenance", to: "/maintenance" },
@@ -106,7 +122,7 @@ export default function App() {
 
 	return (
 		<AdminProvider>
-		<ProductsProvider>
+		<ApplicationTypesProvider>
 		<Box>
 			<AppBar position="static" color="default" elevation={1}>
 				<Toolbar variant="dense" sx={{ gap: 2 }}>
@@ -129,7 +145,7 @@ export default function App() {
 							aria-hidden
 							sx={{ height: 24, width: 24 }}
 						/>
-						<Typography variant="h6" component="h1">
+						<Typography variant="h6" component="span">
 							Canopy
 						</Typography>
 					</Box>
@@ -196,33 +212,124 @@ export default function App() {
 					<Route path="/alerts" element={<SelfAlerts />} />
 					<Route path="/incidents" element={<Incidents />} />
 					<Route path="/incidents/:id" element={<IncidentDetail />} />
-					<Route path="/healthchecks/:source/:check" element={<CheckDetail />} />
+					<Route
+						path="/healthchecks/:source/:namespace/:check"
+						element={<CheckDetail />}
+					/>
+					<Route
+						path="/healthchecks/:source/:check"
+						element={<CheckRedirect settings={false} />}
+					/>
 					<Route path="/upgrades" element={<Upgrades />} />
 					<Route path="/maintenance" element={<Maintenance />} />
 					<Route path="/versions" element={<Versions />} />
 					<Route path="/versions/:version" element={<VersionDetail />} />
-					<Route path="/servers" element={<Servers />}>
+					<Route path="/fleet" element={<Servers />}>
 						<Route index element={<GroupsList />} />
-						<Route path="ungrouped" element={<UngroupedServersList />} />
 						<Route path="archived" element={<ArchivedList />} />
 						<Route path="figures" element={<FleetFigures />} />
 					</Route>
+					<Route path="/fleet/groups/new" element={<GroupEdit />} />
+					<Route path="/fleet/groups/:id" element={<GroupDetail />} />
 					<Route
-						path="/groups/:id/servers/new"
-						element={<ServerCreate />}
+						path="/fleet/groups/:id/edit"
+						element={<GroupEdit />}
 					/>
-					<Route path="/servers/:id" element={<ServerDetail />} />
-					<Route path="/servers/:id/edit" element={<ServerEdit />} />
-					<Route path="/groups/new" element={<GroupEdit />} />
-					<Route path="/groups/:id" element={<GroupDetail />} />
-					<Route path="/groups/:id/edit" element={<GroupEdit />} />
 					<Route
-						path="/groups/:id/backups"
+						path="/fleet/groups/:id/machines/new"
+						element={<MachineCreate />}
+					/>
+					<Route
+						path="/fleet/groups/:id/backups"
 						element={<BackupPanel />}
 					/>
 					<Route
-						path="/groups/:id/backups/config"
+						path="/fleet/groups/:id/backups/config"
 						element={<BackupConfig />}
+					/>
+					<Route
+						path="/fleet/applications/:id"
+						element={<ServerDetail />}
+					/>
+					<Route
+						path="/fleet/applications/:id/edit"
+						element={<ServerEdit />}
+					/>
+					<Route
+						path="/fleet/machines/:id"
+						element={<MachineDetail />}
+					/>
+					<Route
+						path="/fleet/machines/:id/edit"
+						element={<MachineEdit />}
+					/>
+
+					{/* Where the fleet used to live. A link into Canopy outlives
+					    a rename — a bookmark, a Slack message, an incident
+					    writeup — so every old address still lands. */}
+					<Route
+						path="/servers"
+						element={<Navigate to="/fleet" replace />}
+					/>
+					<Route
+						path="/servers/archived"
+						element={<Navigate to="/fleet/archived" replace />}
+					/>
+					<Route
+						path="/servers/figures"
+						element={<Navigate to="/fleet/figures" replace />}
+					/>
+					<Route
+						path="/servers/:id"
+						element={<Moved to={(id) => `/fleet/applications/${id}`} />}
+					/>
+					<Route
+						path="/servers/:id/edit"
+						element={<Moved to={(id) => `/fleet/applications/${id}/edit`} />}
+					/>
+					<Route
+						path="/applications/:id"
+						element={<Moved to={(id) => `/fleet/applications/${id}`} />}
+					/>
+					<Route
+						path="/applications/:id/edit"
+						element={<Moved to={(id) => `/fleet/applications/${id}/edit`} />}
+					/>
+					<Route
+						path="/machines/:id"
+						element={<Moved to={(id) => `/fleet/machines/${id}`} />}
+					/>
+					<Route
+						path="/machines/:id/edit"
+						element={<Moved to={(id) => `/fleet/machines/${id}/edit`} />}
+					/>
+					<Route
+						path="/groups/new"
+						element={<Navigate to="/fleet/groups/new" replace />}
+					/>
+					<Route
+						path="/groups/:id"
+						element={<Moved to={(id) => `/fleet/groups/${id}`} />}
+					/>
+					<Route
+						path="/groups/:id/edit"
+						element={<Moved to={(id) => `/fleet/groups/${id}/edit`} />}
+					/>
+					<Route
+						path="/groups/:id/machines/new"
+						element={
+							<Moved to={(id) => `/fleet/groups/${id}/machines/new`} />
+						}
+					/>
+					<Route
+						path="/groups/:id/backups"
+						element={<Moved to={(id) => `/fleet/groups/${id}/backups`} />}
+					/>
+					<Route
+						path="/groups/:id/backups/config"
+						element={
+							<Moved to={(id) => `/fleet/groups/${id}/backups/config`} />
+						}
 					/>
 					<Route path="/settings" element={<Settings />}>
 						<Route
@@ -238,8 +345,12 @@ export default function App() {
 							element={<SourcesSettings />}
 						/>
 						<Route
-							path="healthchecks/:source/:checkName"
+							path="healthchecks/:source/:namespace/:checkName"
 							element={<HealthcheckSettings />}
+						/>
+						<Route
+							path="healthchecks/:source/:check"
+							element={<CheckRedirect settings />}
 						/>
 						<Route path="restore-consumers" element={<RestoreConsumers />} />
 						<Route path="mcp-tokens" element={<McpTokens />} />
@@ -268,7 +379,7 @@ export default function App() {
 				</Routes>
 			</Container>
 		</Box>
-		</ProductsProvider>
+		</ApplicationTypesProvider>
 		</AdminProvider>
 	);
 }

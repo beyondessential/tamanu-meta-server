@@ -31,7 +31,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 
 /// A DNS zone Canopy can write records in.
 ///
-/// Zones come from Canopy's deployment configuration rather than from operator
+/// Zones come from the Canopy instance's own configuration rather than from operator
 /// state: they are what the infrastructure has granted Canopy write access to,
 /// and they bound which domains a group can be given.
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -80,7 +80,7 @@ fn to_view(row: ServerGroupDomain, zones: &[ManagedZone]) -> GroupDomainView {
 /// An operator claiming a domain for a group needs these to know which names
 /// are claimable at all: a claim has to sit at or under one of these apexes.
 /// An empty list means Canopy has been given no zones, so no domain can be
-/// claimed until its deployment configuration provides one.
+/// claimed until the Canopy instance's configuration provides one.
 #[utoipa::path(
 	post,
 	path = "/zones",
@@ -132,13 +132,13 @@ pub async fn for_group(
 	))
 }
 
-/// Where a group stands with respect to granting its servers name management.
+/// Where a group stands with respect to granting its applications name management.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct GrantAvailabilityView {
 	/// What an operator can do with the two grants right now:
 	///
 	/// - `unconfigured` — Canopy has no managed zones and no group anywhere
-	///   controls a domain, so name management is not in use in this deployment.
+	///   controls a domain, so name management is not in use in this Canopy instance.
 	///   Granting it would do nothing and there is nothing an operator can do
 	///   about that from here; it becomes available once the infrastructure
 	///   provides a zone.
@@ -165,7 +165,7 @@ pub struct MaybeGroupIdArgs {
 ///
 /// The two grants are only ever exercised over names beneath a domain the
 /// server's group controls, so offering them where no domain is controlled — or
-/// where the deployment has no zones at all — presents a control that cannot do
+/// where the Canopy instance has no zones at all — presents a control that cannot do
 /// anything. The rule lives here rather than in the UI so there is one answer
 /// to it.
 // spec: DOM#permission-for-a-server-to-manage-its-own-names

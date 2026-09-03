@@ -9,7 +9,7 @@ use database::{
 		BackupMaintenanceRun, BackupMaintenanceRunFilters, BackupRun, BackupRunFilters,
 		BackupTypeDefault, MaintenanceOutcomeFilter, RetentionPolicy,
 	},
-	servers::Server,
+	machines::Machine,
 };
 use jiff::Timestamp;
 use rmcp::{
@@ -36,8 +36,9 @@ const MAX_RUN_LIMIT: i64 = 200;
 pub struct ListBackupRunsArgs {
 	/// Restrict to one group's id.
 	pub group_id: Option<String>,
-	/// Restrict to one server's id.
-	pub server_id: Option<String>,
+	/// Restrict to one machine's id. A run is a box's, so this names the box
+	/// rather than any workload on it.
+	pub machine_id: Option<String>,
 	/// Filter by backup type, e.g. `tamanu-postgres`.
 	pub r#type: Option<String>,
 	/// Filter by outcome: `success` or `failure`.
@@ -67,8 +68,8 @@ struct BackupRunOut {
 	id: Uuid,
 	group_id: Uuid,
 	group_name: Option<String>,
-	server_id: Option<Uuid>,
-	server_name: Option<String>,
+	machine_id: Option<Uuid>,
+	machine_name: Option<String>,
 	device_id: Uuid,
 	r#type: String,
 	purpose: String,
@@ -154,7 +155,7 @@ impl CanopyMcp {
 	) -> Result<CallToolResult, McpError> {
 		let mut conn = self.conn().await?;
 		let group_id = parse_opt_uuid(&args.group_id, "group_id")?;
-		let server_id = parse_opt_uuid(&args.server_id, "server_id")?;
+		let machine_id = parse_opt_uuid(&args.machine_id, "machine_id")?;
 		let r#type = args.r#type.as_deref().map(BackupType::from);
 		let outcome = parse_opt::<RunOutcome>(&args.outcome, "outcome")?;
 		let since = args.since_days.map(since_from_days);
@@ -167,7 +168,7 @@ impl CanopyMcp {
 			&mut conn,
 			BackupRunFilters {
 				group_id,
-				server_id,
+				machine_id,
 				r#type,
 				outcome,
 				since,
@@ -178,10 +179,14 @@ impl CanopyMcp {
 		.map_err(mcp_err)?;
 
 		let group_names = group_names(&mut conn, &unique(runs.iter().map(|r| r.group_id))).await?;
-		let server_names =
-			Server::names_by_ids(&mut conn, &unique(runs.iter().filter_map(|r| r.server_id)))
+		// A run names the box it captured, so the name comes from the machine.
+		let machine_names: std::collections::HashMap<Uuid, Option<String>> =
+			Machine::get_many(&mut conn, &unique(runs.iter().filter_map(|r| r.machine_id)))
 				.await
-				.map_err(mcp_err)?;
+				.map_err(mcp_err)?
+				.into_iter()
+				.map(|m| (m.id, m.name))
+				.collect();
 
 		let count = runs.len();
 		let truncated = count as i64 == limit;
@@ -191,11 +196,12 @@ impl CanopyMcp {
 				id: r.id,
 				group_id: r.group_id,
 				group_name: group_names.get(&r.group_id).cloned(),
-				server_id: r.server_id,
-				server_name: r
-					.server_id
-					.and_then(|s| server_names.get(&s))
-					.and_then(|(n, _)| n.clone()),
+				machine_id: r.machine_id,
+				machine_name: r
+					.machine_id
+					.and_then(|m| machine_names.get(&m))
+					.cloned()
+					.flatten(),
 				device_id: r.device_id,
 				r#type: r.r#type.to_string(),
 				purpose: r.purpose.to_string(),

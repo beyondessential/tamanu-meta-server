@@ -133,9 +133,6 @@ pub struct ServerGroupBackupConfig {
 	/// ARN of the IAM role devices assume to upload their own backups
 	/// (write-only; no delete permission).
 	pub target_role_arn: String,
-	/// ARN of the IAM role used to run repository maintenance, inspection,
-	/// and metrics collection (full read/write/delete permission).
-	pub maintenance_role_arn: String,
 	/// AWS region the bucket lives in, if known.
 	pub region: Option<String>,
 	/// Reference to where the repository's encryption passphrase is stored.
@@ -156,8 +153,18 @@ pub struct ServerGroupBackupConfig {
 	/// Error message from the most recent failed provisioning attempt, if
 	/// any.
 	pub last_init_error: Option<String>,
+	/// ARN of the IAM role used to run repository maintenance, inspection,
+	/// and metrics collection (full read/write/delete permission).
+	///
+	/// Sits here, rather than beside `target_role_arn` where it reads more
+	/// naturally, because `Queryable` maps positionally against the column
+	/// list `schema.rs` declares, and that file is generated in the table's
+	/// physical column order. This column was added late. Grouping it with
+	/// the other ARN means hand-patching `schema.rs` after every
+	/// regeneration.
+	pub maintenance_role_arn: String,
 	/// Where the backup bucket lives and who provisioned it: an externally
-	/// provisioned account the deployment brought itself, or an
+	/// provisioned account the group brought itself, or an
 	/// automatically provisioned bucket in a shared account.
 	#[schema(value_type = String)]
 	pub placement: BackupPlacement,
@@ -612,55 +619,59 @@ impl BackupTypeDefault {
 }
 
 // ---------------------------------------------------------------------------
-// server_backup_capabilities — what a server advertises it can back up
+// machine_backup_capabilities — what a server advertises it can back up
 // ---------------------------------------------------------------------------
 
-/// A backup type that a server has advertised it can run, and whether it's
-/// currently enabled for that server.
+/// A backup type that a machine has advertised it can run, and whether it is
+/// currently enabled for that box.
+///
+/// A capability is the box's: what a run captures is its data, and a box
+/// shared by two workloads advertises once.
+// spec: BAK
 #[derive(
 	Debug, Clone, Serialize, Deserialize, Queryable, Selectable, Insertable, utoipa::ToSchema,
 )]
-#[diesel(table_name = crate::schema::server_backup_capabilities)]
+#[diesel(table_name = crate::schema::machine_backup_capabilities)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct ServerBackupCapability {
-	/// ID of the server that advertised this capability.
-	pub server_id: Uuid,
+pub struct MachineBackupCapability {
+	/// The box that advertised this capability.
+	pub machine_id: Uuid,
 	/// The backup type advertised (e.g. `tamanu-postgres`).
 	#[diesel(column_name = type_)]
 	#[serde(rename = "type")]
 	#[schema(value_type = String)]
 	pub r#type: BackupType,
-	/// Whether this `(server, type)` pair is enabled — only enabled pairs are
+	/// Whether this `(machine, type)` pair is enabled — only enabled pairs are
 	/// scheduled and issued credentials.
 	pub enabled: bool,
-	/// When the server first advertised this capability.
+	/// When the box first advertised this capability.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub registered_at: Timestamp,
 }
 
-impl ServerBackupCapability {
+impl MachineBackupCapability {
 	/// Register a capability advertised by bestool. `enabled_seed` is the
 	/// type's `auto_enable` default and is applied only when the row is first
 	/// created — an existing row keeps its operator-set `enabled`.
 	pub async fn register(
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		machine_id: Uuid,
 		r#type: &BackupType,
 		enabled_seed: bool,
 	) -> Result<Self> {
-		use crate::schema::server_backup_capabilities::dsl;
+		use crate::schema::machine_backup_capabilities::dsl;
 
-		diesel::insert_into(dsl::server_backup_capabilities)
+		diesel::insert_into(dsl::machine_backup_capabilities)
 			.values((
-				dsl::server_id.eq(server_id),
+				dsl::machine_id.eq(machine_id),
 				dsl::type_.eq(r#type.as_str()),
 				dsl::enabled.eq(enabled_seed),
 			))
-			.on_conflict((dsl::server_id, dsl::type_))
+			.on_conflict((dsl::machine_id, dsl::type_))
 			// Keep the existing (operator-set) enabled; no-op update so we can
 			// RETURNING the existing row.
 			.do_update()
-			.set(dsl::server_id.eq(server_id))
+			.set(dsl::machine_id.eq(machine_id))
 			.returning(Self::as_select())
 			.get_result(db)
 			.await
@@ -671,15 +682,15 @@ impl ServerBackupCapability {
 	/// type default.
 	pub async fn set_enabled(
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		machine_id: Uuid,
 		r#type: &BackupType,
 		enabled: bool,
 	) -> Result<Self> {
-		use crate::schema::server_backup_capabilities::dsl;
+		use crate::schema::machine_backup_capabilities::dsl;
 
 		diesel::update(
-			dsl::server_backup_capabilities
-				.filter(dsl::server_id.eq(server_id))
+			dsl::machine_backup_capabilities
+				.filter(dsl::machine_id.eq(machine_id))
 				.filter(dsl::type_.eq(r#type.as_str())),
 		)
 		.set(dsl::enabled.eq(enabled))
@@ -689,30 +700,35 @@ impl ServerBackupCapability {
 		.map_err(AppError::from)
 	}
 
-	pub async fn list_for_server(db: &mut AsyncPgConnection, server_id: Uuid) -> Result<Vec<Self>> {
-		use crate::schema::server_backup_capabilities::dsl;
+	pub async fn list_for_machine(
+		db: &mut AsyncPgConnection,
+		machine_id: Uuid,
+	) -> Result<Vec<Self>> {
+		use crate::schema::machine_backup_capabilities::dsl;
 
-		dsl::server_backup_capabilities
-			.filter(dsl::server_id.eq(server_id))
+		dsl::machine_backup_capabilities
+			.filter(dsl::machine_id.eq(machine_id))
 			.order(dsl::type_)
+			.select(Self::as_select())
 			.load(db)
 			.await
 			.map_err(AppError::from)
 	}
 
-	/// All enabled `(server, type)` capabilities fleet-wide — the candidate set
+	/// All enabled `(machine, type)` capabilities fleet-wide — the candidate set
 	/// the scheduler / staleness scan starts from.
 	pub async fn list_enabled(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
-		use crate::schema::server_backup_capabilities::dsl;
+		use crate::schema::machine_backup_capabilities::dsl;
 
-		dsl::server_backup_capabilities
+		dsl::machine_backup_capabilities
 			.filter(dsl::enabled.eq(true))
+			.select(Self::as_select())
 			.load(db)
 			.await
 			.map_err(AppError::from)
 	}
 
-	/// Distinct backup types that are **enabled** on any non-archived server in
+	/// Distinct backup types that are **enabled** on any non-archived machine in
 	/// the group — i.e. the types the group is actively expected to back up on a
 	/// schedule. Used for scheduling cadence and staleness alerting.
 	pub async fn enabled_types_for_group(
@@ -723,7 +739,7 @@ impl ServerBackupCapability {
 	}
 
 	/// Distinct backup types **declared** (advertised by bestool) on any
-	/// non-archived server in the group, regardless of their enabled flag — i.e.
+	/// non-archived machine in the group, regardless of their enabled flag — i.e.
 	/// every type the repo can hold snapshots for, including manual-only
 	/// (disabled) ones. Retention is resolved per declared type so a manual
 	/// backup of a non-scheduled type still gets its own policy, not the global.
@@ -734,17 +750,21 @@ impl ServerBackupCapability {
 		Self::types_for_group(db, group_id, false).await
 	}
 
+	/// A capability belongs to a machine, so this reaches the group through the
+	/// box that declared it. Going via the applications would find nothing for a
+	/// box carrying no workload, and would double-count one carrying two.
+	// spec: BKO#participation-and-on-demand
 	async fn types_for_group(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
 		enabled_only: bool,
 	) -> Result<Vec<BackupType>> {
-		use crate::schema::{server_backup_capabilities as cap, servers};
+		use crate::schema::{machine_backup_capabilities as cap, machines};
 
 		let mut q = cap::table
-			.inner_join(servers::table.on(servers::id.eq(cap::server_id)))
-			.filter(servers::group_id.eq(group_id))
-			.filter(servers::deleted_at.is_null())
+			.inner_join(machines::table.on(machines::id.eq(cap::machine_id)))
+			.filter(machines::group_id.eq(group_id))
+			.filter(machines::deleted_at.is_null())
 			.into_boxed();
 		if enabled_only {
 			q = q.filter(cap::enabled.eq(true));
@@ -1149,7 +1169,7 @@ pub struct BackupRun {
 	/// ID of the server group the run's backup repository belongs to.
 	pub group_id: Uuid,
 	/// ID of the server the run was performed for, if known.
-	pub server_id: Option<Uuid>,
+	pub machine_id: Option<Uuid>,
 	/// The backup type this run performed (e.g. `tamanu-postgres`).
 	#[diesel(column_name = type_)]
 	#[serde(rename = "type")]
@@ -1233,7 +1253,7 @@ pub struct NewBackupRun {
 	pub id: Uuid,
 	pub device_id: Uuid,
 	pub group_id: Uuid,
-	pub server_id: Option<Uuid>,
+	pub machine_id: Option<Uuid>,
 	#[diesel(column_name = type_)]
 	pub r#type: BackupType,
 	pub purpose: BackupPurpose,
@@ -1254,7 +1274,7 @@ pub struct NewBackupRun {
 #[derive(Debug, Clone, Default)]
 pub struct BackupRunFilters {
 	pub group_id: Option<Uuid>,
-	pub server_id: Option<Uuid>,
+	pub machine_id: Option<Uuid>,
 	pub r#type: Option<BackupType>,
 	pub outcome: Option<RunOutcome>,
 	/// When `Some`, restrict to runs reported at or after this time.
@@ -1289,15 +1309,15 @@ impl BackupRun {
 	///
 	/// "Latest" is by [`Self::anchor`] — the data's own moment — not by report
 	/// time; see [`ANCHOR_SQL`].
-	pub async fn latest_success_for_server(
+	pub async fn latest_success_for_machine(
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		machine_id: Uuid,
 		r#type: &BackupType,
 	) -> Result<Option<Self>> {
 		use crate::schema::backup_runs::dsl;
 
 		dsl::backup_runs
-			.filter(dsl::server_id.eq(server_id))
+			.filter(dsl::machine_id.eq(machine_id))
 			.filter(dsl::type_.eq(r#type.as_str()))
 			.filter(dsl::purpose.eq(BackupPurpose::Backup))
 			.filter(dsl::outcome.eq(RunOutcome::Success))
@@ -1309,12 +1329,19 @@ impl BackupRun {
 	}
 
 	/// Latest successful backup per `(server, type)` within a group — the bulk
-	/// staleness-scan input. Keyed `(server_id, type)`; rows with a NULL
-	/// `server_id` are skipped (they can't be attributed to a server).
+	/// staleness-scan input. Keyed `(machine_id, type)`; rows with a NULL
+	/// `machine_id` are skipped (they can't be attributed to a server).
 	///
 	/// "Latest" is by [`Self::anchor`], matching what the caller then measures
 	/// staleness from; see [`ANCHOR_SQL`] for why the two must agree.
-	pub async fn latest_success_by_server_type_for_group(
+	/// Latest successful backup per `(machine, type)` within a group.
+	///
+	/// This is the snapshot authority a restore replica is pointed at: what gets
+	/// restored is a snapshot, and a snapshot is what a machine backed up (see
+	/// RST, "Snapshot authority"). A box carrying two workloads has one latest
+	/// snapshot per type, being one box.
+	// spec: RST#snapshot-authority
+	pub async fn latest_success_by_machine_type_for_group(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
 	) -> Result<HashMap<(Uuid, BackupType), Self>> {
@@ -1324,24 +1351,24 @@ impl BackupRun {
 			.filter(dsl::group_id.eq(group_id))
 			.filter(dsl::purpose.eq(BackupPurpose::Backup))
 			.filter(dsl::outcome.eq(RunOutcome::Success))
-			.filter(dsl::server_id.is_not_null())
-			.distinct_on((dsl::server_id, dsl::type_))
-			.order_by((dsl::server_id, dsl::type_, anchor_expr().desc()))
+			.filter(dsl::machine_id.is_not_null())
+			.distinct_on((dsl::machine_id, dsl::type_))
+			.order_by((dsl::machine_id, dsl::type_, anchor_expr().desc()))
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
 
 		Ok(rows
 			.into_iter()
-			.filter_map(|r| r.server_id.map(|sid| ((sid, r.r#type.clone()), r)))
+			.filter_map(|r| r.machine_id.map(|mid| ((mid, r.r#type.clone()), r)))
 			.collect())
 	}
 
-	/// Latest *reported* backup per `(server, type)` within a group, regardless of
-	/// outcome (success or failure). Keyed `(server_id, type)`. Used to tell
-	/// whether a backup has been reported since credentials were last issued —
-	/// i.e. whether one is still in flight.
-	pub async fn latest_report_by_server_type_for_group(
+	/// Latest *reported* backup per `(machine, type)` within a group, regardless
+	/// of outcome (success or failure). Used to tell whether a backup has been
+	/// reported since credentials were last issued — i.e. whether one is still
+	/// in flight.
+	pub async fn latest_report_by_machine_type_for_group(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
 	) -> Result<HashMap<(Uuid, BackupType), Timestamp>> {
@@ -1350,9 +1377,9 @@ impl BackupRun {
 		let rows: Vec<Self> = dsl::backup_runs
 			.filter(dsl::group_id.eq(group_id))
 			.filter(dsl::purpose.eq(BackupPurpose::Backup))
-			.filter(dsl::server_id.is_not_null())
-			.distinct_on((dsl::server_id, dsl::type_))
-			.order_by((dsl::server_id, dsl::type_, dsl::reported_at.desc()))
+			.filter(dsl::machine_id.is_not_null())
+			.distinct_on((dsl::machine_id, dsl::type_))
+			.order_by((dsl::machine_id, dsl::type_, dsl::reported_at.desc()))
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
@@ -1360,7 +1387,7 @@ impl BackupRun {
 		Ok(rows
 			.into_iter()
 			.filter_map(|r| {
-				r.server_id
+				r.machine_id
 					.map(|sid| ((sid, r.r#type.clone()), r.reported_at))
 			})
 			.collect())
@@ -1416,8 +1443,8 @@ impl BackupRun {
 		if let Some(gid) = filters.group_id {
 			q = q.filter(dsl::group_id.eq(gid));
 		}
-		if let Some(sid) = filters.server_id {
-			q = q.filter(dsl::server_id.eq(sid));
+		if let Some(sid) = filters.machine_id {
+			q = q.filter(dsl::machine_id.eq(sid));
 		}
 		if let Some(ty) = &filters.r#type {
 			q = q.filter(dsl::type_.eq(ty.as_str()));
@@ -1548,9 +1575,9 @@ impl BackupRun {
 
 	/// The latest backup run per `(server, type)` in a group that carries both a
 	/// device-reported size (`bytes_uploaded`) and an inspection-observed size
-	/// (`snapshot_logical_bytes`), both non-zero. Keyed `(server_id, type)` →
+	/// (`snapshot_logical_bytes`), both non-zero. Keyed `(machine_id, type)` →
 	/// `(reported, observed)`. The basis for the size-discrepancy check.
-	pub async fn latest_sized_by_server_type_for_group(
+	pub async fn latest_sized_by_machine_type_for_group(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
 	) -> Result<HashMap<(Uuid, BackupType), (i64, i64)>> {
@@ -1559,11 +1586,11 @@ impl BackupRun {
 		let rows: Vec<Self> = dsl::backup_runs
 			.filter(dsl::group_id.eq(group_id))
 			.filter(dsl::purpose.eq(BackupPurpose::Backup))
-			.filter(dsl::server_id.is_not_null())
+			.filter(dsl::machine_id.is_not_null())
 			.filter(dsl::bytes_uploaded.is_not_null())
 			.filter(dsl::snapshot_logical_bytes.is_not_null())
-			.distinct_on((dsl::server_id, dsl::type_))
-			.order_by((dsl::server_id, dsl::type_, dsl::reported_at.desc()))
+			.distinct_on((dsl::machine_id, dsl::type_))
+			.order_by((dsl::machine_id, dsl::type_, dsl::reported_at.desc()))
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
@@ -1571,7 +1598,7 @@ impl BackupRun {
 		Ok(rows
 			.into_iter()
 			.filter_map(|r| {
-				let sid = r.server_id?;
+				let sid = r.machine_id?;
 				let (up, snap) = (r.bytes_uploaded?, r.snapshot_logical_bytes?);
 				(up > 0 && snap > 0).then_some(((sid, r.r#type.clone()), (up, snap)))
 			})
@@ -1612,7 +1639,7 @@ pub struct BackupRunProgress {
 	/// The group whose repository the run is writing to or reading from.
 	pub group_id: Uuid,
 	/// The server the run is for, when the device resolved to one.
-	pub server_id: Option<Uuid>,
+	pub machine_id: Option<Uuid>,
 	/// The backup type being run.
 	#[diesel(column_name = type_)]
 	#[serde(rename = "type")]
@@ -1620,7 +1647,7 @@ pub struct BackupRunProgress {
 	pub r#type: BackupType,
 	/// Whether the run is a backup (upload) or a restore (download).
 	pub purpose: BackupPurpose,
-	/// When Canopy received this sample. Server-stamped, not device-supplied:
+	/// When Canopy received this sample. Application-stamped, not device-supplied:
 	/// transfer rate is derived from it, and "is this run moving, as far as
 	/// Canopy can tell" is a receipt-time question.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
@@ -1671,7 +1698,7 @@ pub struct NewBackupRunProgress {
 	pub run_id: Uuid,
 	pub device_id: Uuid,
 	pub group_id: Uuid,
-	pub server_id: Option<Uuid>,
+	pub machine_id: Option<Uuid>,
 	#[diesel(column_name = type_)]
 	pub r#type: BackupType,
 	pub purpose: BackupPurpose,
@@ -2105,9 +2132,9 @@ pub struct BackupRepoSnapshot {
 	/// combines a host and path). Used to match this inventory row back to a
 	/// server and backup type.
 	pub source: String,
-	/// Server this source was matched to, if the source identifier could be
-	/// parsed as one of the group's servers.
-	pub server_id: Option<Uuid>,
+	/// Application this source was matched to, if the source identifier could be
+	/// parsed as one of the group's applications.
+	pub machine_id: Option<Uuid>,
 	/// Backup type this source was matched to, if the source identifier could
 	/// be parsed as a known backup type.
 	#[diesel(column_name = type_)]
@@ -2130,7 +2157,7 @@ impl BackupRepoSnapshot {
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
 		source: &str,
-		server_id: Option<Uuid>,
+		machine_id: Option<Uuid>,
 		r#type: Option<&BackupType>,
 		latest_snapshot_at: Option<Timestamp>,
 	) -> Result<()> {
@@ -2143,14 +2170,14 @@ impl BackupRepoSnapshot {
 			.values((
 				dsl::group_id.eq(group_id),
 				dsl::source.eq(source),
-				dsl::server_id.eq(server_id),
+				dsl::machine_id.eq(machine_id),
 				dsl::type_.eq(type_str),
 				dsl::latest_snapshot_at.eq(latest),
 			))
 			.on_conflict((dsl::group_id, dsl::source))
 			.do_update()
 			.set((
-				dsl::server_id.eq(server_id),
+				dsl::machine_id.eq(machine_id),
 				dsl::type_.eq(type_str),
 				dsl::latest_snapshot_at.eq(latest),
 				dsl::observed_at.eq(now),
@@ -2344,7 +2371,7 @@ pub struct BackupRepoStats {
 	pub group_id: Uuid,
 	/// Total number of snapshots currently in the repository, if known.
 	pub snapshot_count: Option<i32>,
-	/// Number of distinct backup sources (servers/types) currently in the
+	/// Number of distinct backup sources (applications/types) currently in the
 	/// repository, if known.
 	pub source_count: Option<i32>,
 	/// Total logical (uncompressed, pre-dedup) size of all data in the
@@ -2460,7 +2487,7 @@ impl BackupRepoStats {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct BackupRequest {
 	/// ID of the server the one-off run is requested for.
-	pub server_id: Uuid,
+	pub machine_id: Uuid,
 	/// The backup type to run (e.g. `tamanu-postgres`).
 	#[diesel(column_name = type_)]
 	#[serde(rename = "type")]
@@ -2479,7 +2506,7 @@ impl BackupRequest {
 	/// Enqueue (or refresh) a one-off request for a `(server, type, purpose)`.
 	pub async fn enqueue(
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		machine_id: Uuid,
 		r#type: &BackupType,
 		purpose: BackupPurpose,
 		requested_by: Option<&str>,
@@ -2488,12 +2515,12 @@ impl BackupRequest {
 
 		diesel::insert_into(dsl::backup_requests)
 			.values((
-				dsl::server_id.eq(server_id),
+				dsl::machine_id.eq(machine_id),
 				dsl::type_.eq(r#type.as_str()),
 				dsl::purpose.eq(purpose),
 				dsl::requested_by.eq(requested_by),
 			))
-			.on_conflict((dsl::server_id, dsl::type_, dsl::purpose))
+			.on_conflict((dsl::machine_id, dsl::type_, dsl::purpose))
 			.do_update()
 			.set((
 				dsl::requested_at.eq(now),
@@ -2508,7 +2535,7 @@ impl BackupRequest {
 	/// Clear a pending request (called when the run is reported).
 	pub async fn clear(
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		machine_id: Uuid,
 		r#type: &BackupType,
 		purpose: BackupPurpose,
 	) -> Result<()> {
@@ -2516,7 +2543,7 @@ impl BackupRequest {
 
 		diesel::delete(
 			dsl::backup_requests
-				.filter(dsl::server_id.eq(server_id))
+				.filter(dsl::machine_id.eq(machine_id))
 				.filter(dsl::type_.eq(r#type.as_str()))
 				.filter(dsl::purpose.eq(purpose)),
 		)
@@ -2526,14 +2553,14 @@ impl BackupRequest {
 		Ok(())
 	}
 
-	pub async fn pending_for_server(
+	pub async fn pending_for_machine(
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		machine_id: Uuid,
 	) -> Result<Vec<Self>> {
 		use crate::schema::backup_requests::dsl;
 
 		dsl::backup_requests
-			.filter(dsl::server_id.eq(server_id))
+			.filter(dsl::machine_id.eq(machine_id))
 			.order((dsl::type_, dsl::purpose))
 			.load(db)
 			.await
@@ -2543,7 +2570,7 @@ impl BackupRequest {
 	/// Whether a one-off request is pending for `(server, type, purpose)`.
 	pub async fn exists(
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		machine_id: Uuid,
 		r#type: &BackupType,
 		purpose: BackupPurpose,
 	) -> Result<bool> {
@@ -2552,7 +2579,7 @@ impl BackupRequest {
 
 		select(exists(
 			dsl::backup_requests
-				.filter(dsl::server_id.eq(server_id))
+				.filter(dsl::machine_id.eq(machine_id))
 				.filter(dsl::type_.eq(r#type.as_str()))
 				.filter(dsl::purpose.eq(purpose)),
 		))

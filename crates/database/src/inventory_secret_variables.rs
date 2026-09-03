@@ -1,4 +1,4 @@
-//! Which secret variables an environment or a server carries.
+//! Which secret variables an environment or an application carries.
 //!
 //! Only the names and who set them live here. The values are held in canopy's
 //! secret store, so listing what an environment carries, and refusing a tag that
@@ -25,8 +25,8 @@ pub struct InventorySecretVariable {
 	pub server_group_id: Option<Uuid>,
 	/// The rank of the environment, set alongside `server_group_id`.
 	pub rank: Option<ServerRank>,
-	/// Set for a variable belonging to one server.
-	pub server_id: Option<Uuid>,
+	/// Set for a variable belonging to one application.
+	pub application_id: Option<Uuid>,
 	/// The variable's name, and the key its value is stored under.
 	pub name: String,
 	/// The login that last set the value.
@@ -39,11 +39,11 @@ pub struct InventorySecretVariable {
 	pub updated_at: Timestamp,
 }
 
-/// Where a secret variable is set: one environment, or one server.
+/// Where a secret variable is set: one environment, or one application.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SecretScope {
 	Environment { group_id: Uuid, rank: ServerRank },
-	Server { server_id: Uuid },
+	Application { application_id: Uuid },
 }
 
 impl InventorySecretVariable {
@@ -58,7 +58,7 @@ impl InventorySecretVariable {
 		dsl::inventory_secret_variables
 			.filter(dsl::server_group_id.eq(group_id))
 			.filter(dsl::rank.eq(rank.to_string()))
-			.filter(dsl::server_id.is_null())
+			.filter(dsl::application_id.is_null())
 			.order(dsl::name.asc())
 			.select(Self::as_select())
 			.get_results(conn)
@@ -66,19 +66,19 @@ impl InventorySecretVariable {
 			.map_err(AppError::from)
 	}
 
-	/// The names the given servers carry, sorted by server then name.
-	pub async fn list_for_servers(
+	/// The names the given applications carry, sorted by application then name.
+	pub async fn list_for_applications(
 		conn: &mut AsyncPgConnection,
-		server_ids: &[Uuid],
+		application_ids: &[Uuid],
 	) -> Result<Vec<Self>> {
 		use crate::schema::inventory_secret_variables::dsl;
 
-		if server_ids.is_empty() {
+		if application_ids.is_empty() {
 			return Ok(Vec::new());
 		}
 		dsl::inventory_secret_variables
-			.filter(dsl::server_id.eq_any(server_ids))
-			.order((dsl::server_id.asc(), dsl::name.asc()))
+			.filter(dsl::application_id.eq_any(application_ids))
+			.order((dsl::application_id.asc(), dsl::name.asc()))
 			.select(Self::as_select())
 			.get_results(conn)
 			.await
@@ -86,17 +86,17 @@ impl InventorySecretVariable {
 	}
 
 	/// Every declaration under a group: its environments' and those of the
-	/// servers in it. Backs the collision check on a group tag write, where a
-	/// name set at any rank is a collision.
+	/// applications in it. Backs the collision check on a group tag write, where
+	/// a name set at any rank is a collision.
 	pub async fn list_under_group(
 		conn: &mut AsyncPgConnection,
 		group_id: Uuid,
 	) -> Result<Vec<Self>> {
-		use crate::schema::{inventory_secret_variables::dsl, servers};
+		use crate::schema::{applications, inventory_secret_variables::dsl};
 
-		let server_ids: Vec<Uuid> = servers::table
-			.filter(servers::group_id.eq(group_id))
-			.select(servers::id)
+		let application_ids: Vec<Uuid> = applications::table
+			.filter(applications::group_id.eq(group_id))
+			.select(applications::id)
 			.get_results(conn)
 			.await
 			.map_err(AppError::from)?;
@@ -105,7 +105,7 @@ impl InventorySecretVariable {
 			.filter(
 				dsl::server_group_id
 					.eq(group_id)
-					.or(dsl::server_id.eq_any(server_ids)),
+					.or(dsl::application_id.eq_any(application_ids)),
 			)
 			.order(dsl::name.asc())
 			.select(Self::as_select())
@@ -129,15 +129,15 @@ impl InventorySecretVariable {
 				.filter(dsl::name.eq(name))
 				.filter(dsl::server_group_id.eq(group_id))
 				.filter(dsl::rank.eq(rank.to_string()))
-				.filter(dsl::server_id.is_null())
+				.filter(dsl::application_id.is_null())
 				.select(dsl::id)
 				.first(conn)
 				.await
 				.optional()
 				.map_err(AppError::from)?,
-			SecretScope::Server { server_id } => dsl::inventory_secret_variables
+			SecretScope::Application { application_id } => dsl::inventory_secret_variables
 				.filter(dsl::name.eq(name))
-				.filter(dsl::server_id.eq(server_id))
+				.filter(dsl::application_id.eq(application_id))
 				.select(dsl::id)
 				.first(conn)
 				.await
@@ -154,17 +154,17 @@ impl InventorySecretVariable {
 				.map_err(AppError::from);
 		}
 
-		let (group_id, rank, server_id) = match scope {
+		let (group_id, rank, application_id) = match scope {
 			SecretScope::Environment { group_id, rank } => {
 				(Some(group_id), Some(rank.to_string()), None)
 			}
-			SecretScope::Server { server_id } => (None, None, Some(server_id)),
+			SecretScope::Application { application_id } => (None, None, Some(application_id)),
 		};
 		diesel::insert_into(dsl::inventory_secret_variables)
 			.values((
 				dsl::server_group_id.eq(group_id),
 				dsl::rank.eq(rank),
-				dsl::server_id.eq(server_id),
+				dsl::application_id.eq(application_id),
 				dsl::name.eq(name),
 				dsl::set_by.eq(set_by),
 			))
@@ -188,15 +188,15 @@ impl InventorySecretVariable {
 					.filter(dsl::name.eq(name))
 					.filter(dsl::server_group_id.eq(group_id))
 					.filter(dsl::rank.eq(rank.to_string()))
-					.filter(dsl::server_id.is_null()),
+					.filter(dsl::application_id.is_null()),
 			)
 			.execute(conn)
 			.await
 			.map_err(AppError::from)?,
-			SecretScope::Server { server_id } => diesel::delete(
+			SecretScope::Application { application_id } => diesel::delete(
 				dsl::inventory_secret_variables
 					.filter(dsl::name.eq(name))
-					.filter(dsl::server_id.eq(server_id)),
+					.filter(dsl::application_id.eq(application_id)),
 			)
 			.execute(conn)
 			.await
@@ -208,9 +208,9 @@ impl InventorySecretVariable {
 
 /// A secret variable name a tag may not take, given where the tag is being set.
 ///
-/// A server's tag collides with a secret of that server or of its environment;
-/// a group's tag collides with a secret set anywhere under the group, since the
-/// group's tags reach every environment in it.
+/// An application's tag collides with a secret of that application or of its
+/// environment; a group's tag collides with a secret set anywhere under the
+/// group, since the group's tags reach every environment in it.
 pub async fn colliding_name(
 	conn: &mut AsyncPgConnection,
 	scope: TagScope,
@@ -220,13 +220,13 @@ pub async fn colliding_name(
 		TagScope::Group { group_id } => {
 			InventorySecretVariable::list_under_group(conn, group_id).await?
 		}
-		TagScope::Server {
-			server_id,
+		TagScope::Application {
+			application_id,
 			group_id,
 			rank,
 		} => {
 			let mut declared =
-				InventorySecretVariable::list_for_servers(conn, &[server_id]).await?;
+				InventorySecretVariable::list_for_applications(conn, &[application_id]).await?;
 			if let Some(group_id) = group_id {
 				declared.extend(
 					InventorySecretVariable::list_for_environment(conn, group_id, rank).await?,
@@ -250,8 +250,8 @@ pub enum TagScope {
 	Group {
 		group_id: Uuid,
 	},
-	Server {
-		server_id: Uuid,
+	Application {
+		application_id: Uuid,
 		group_id: Option<Uuid>,
 		rank: ServerRank,
 	},

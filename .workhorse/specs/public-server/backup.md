@@ -4,8 +4,10 @@ id: BAK
 
 # Device backups
 
-A server device backs up to object storage that Canopy mediates: it holds no long-lived storage credentials and knows nothing of the bucket layout until Canopy tells it, per run.
+A machine's agent backs up to object storage that Canopy mediates: it holds no long-lived storage credentials and knows nothing of the bucket layout until Canopy tells it, per run.
 Canopy is the control plane — it owns the credentials, the repo location, the passphrase, and the record of what ran.
+
+Backup is a machine concern rather than an application one: what a run captures is a box's databases, configuration and filesystems, and a box shared by two workloads backs up once (see [FLT](../servers/overview.md)).
 
 ## Scope
 
@@ -15,15 +17,21 @@ It does not cover what an operator configures (see [BKO](../private-server/backu
 
 ## Identity and resolution
 
-A device authenticates with the `server` role, over either transport Canopy accepts (a client certificate on the internet-facing path, or tailnet identity on the private mount).
-Every device request resolves through the authenticated identity, never the request body: device → its single live server → that server's group → the group's backup configuration.
-A device bound to no live server is refused; a server with no group, or whose group has no ready configuration, is refused.
+A device authenticates with the machine role (see [DTR](../private-server/device-trust.md)), over either transport Canopy accepts (a client certificate on the internet-facing path, or tailnet identity on the private mount).
+Every device request resolves through the authenticated identity, never the request body: identity → its machine → that machine's group → the group's backup configuration.
+A device belonging to no live machine is refused; a machine with no group, or whose group has no ready configuration, is refused.
+
+Resolution stops at the machine and never reaches the applications on it, so a box running two workloads resolves the same way as one running a single workload.
 
 ## Capabilities
 
-A device registers the backup types it can run on its server.
+A device registers the backup types it can run on its machine.
 A newly seen type is enabled for scheduling or not according to that type's fleet default; a type already known keeps the operator's setting.
-Registration requires the server to be grouped, but not the group's configuration to be ready.
+Registration requires the machine to be grouped, but not the group's configuration to be ready.
+
+What a type captures is the agent's to decide, and Canopy does not interpret it.
+A type is a name Canopy schedules against, issues credentials for, and tracks snapshots under, with no view of what was written beneath it and no meaning attached to the name itself.
+So a machine's backups are its own whatever it runs, and Canopy never derives from a type which of a box's workloads a snapshot belongs to.
 
 ## Credentials
 
@@ -37,8 +45,16 @@ The credentials carry the storage role's identity for at most an hour; a device 
 Every issuance is recorded before the credentials are returned.
 A device may include the run identifier it minted (the same one it reports the run under) with the credential request; Canopy records it on the issuance so the issuance ties to the run, and derives the run's duration from the interval between the first such issuance and the report.
 
-A `(type, purpose)` is issuable only when the type is an enabled capability of the server, or an operator has queued a one-off request of that purpose for it; otherwise it is refused.
+A `(type, purpose)` is issuable only when the type is an enabled capability of the machine, or an operator has queued a one-off request of that purpose for it; otherwise it is refused.
 The group's configuration must be ready: until then the endpoints refuse, so a half-provisioned group cannot be written to.
+
+### The restore window
+
+Restore credentials read the group's entire backup history, so a device may mint them only while an operator has the machine's restore window open (see [BKO](../private-server/backup.md)).
+A device whose machine has no open window is refused, and told that restores must be enabled in Canopy first.
+
+The window is the machine's, matching what a restore does: a restore rewrites the box, so one is opened once for the box however many workloads it carries.
+Credentials already minted keep their own short lifetime when the window closes, and no further ones are issued.
 
 ## Target
 
@@ -48,7 +64,7 @@ The passphrase is Canopy-owned and read from the group's secret store at request
 ## Reporting
 
 A device reports each run's outcome: the type and purpose, success or failure, an error when it failed, the resulting snapshot identifier, the bytes uploaded, the object-storage traffic the run moved, and the moment the run froze the data it backed up.
-The run is keyed by an identifier the device mints at the start of the run; the device, server, and group are taken from the authenticated context, so a device cannot report a run as another group's.
+The run is keyed by an identifier the device mints at the start of the run; the device, machine, and group are taken from the authenticated context, so a device cannot report a run as another group's.
 A duplicate run identifier is refused.
 Reporting a run clears any matching operator one-off request, so the standing "back up now" prompt stops.
 
@@ -66,7 +82,7 @@ A run whose device never reports the moment has none, and Canopy falls back to t
 
 A device may report progress while a run is in flight, as often as it chooses.
 Progress reporting is optional: a device that never reports it is treated exactly as one that cannot, and the run's own record is unaffected either way.
-Progress is accepted for any grouped device bound to a live server, without requiring the group's configuration to be ready or the type to be issuable — it describes a run already under way, and refusing it would blind Canopy precisely when something is misconfigured.
+Progress is accepted for any device belonging to a live grouped machine, without requiring the group's configuration to be ready or the type to be issuable — it describes a run already under way, and refusing it would blind Canopy precisely when something is misconfigured.
 
 Each progress report carries the run identifier, the type and purpose, and two independent sets of counters:
 
@@ -92,6 +108,6 @@ Decommissioning a device is revoking its certificate: it can no longer obtain cr
 
 ## Failure contract
 
-The device endpoints distinguish: the caller is bound to no live server; the server is ungrouped, has no ready configuration, the type is not issuable, or a run identifier is duplicate; the caller is reporting progress faster than Canopy accepts; and Canopy's own dependency — the credential issuer or the secret store — is unavailable or unconfigured.
+The device endpoints distinguish: the caller belongs to no live machine; the machine is ungrouped, has no ready configuration, the type is not issuable, or a run identifier is duplicate; the caller is reporting progress faster than Canopy accepts; and Canopy's own dependency — the credential issuer or the secret store — is unavailable or unconfigured.
 Each is a distinct, stable status so a device need not guess.
 A refused progress report is never a reason for a device to abandon a run: progress is telemetry, and a run continues regardless of whether Canopy accepted the last report.

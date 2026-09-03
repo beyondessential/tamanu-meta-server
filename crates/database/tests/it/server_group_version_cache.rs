@@ -23,11 +23,11 @@ async fn insert_group(conn: &mut database::diesel_async::AsyncPgConnection, name
 	row.id
 }
 
-/// Insert a server with the given kind/rank into a group, returning its id.
+/// Insert an application of the given type and rank into a group, returning its id.
 async fn insert_server(
 	conn: &mut database::diesel_async::AsyncPgConnection,
 	group_id: Uuid,
-	kind: &str,
+	r#type: &str,
 	rank: Option<&str>,
 ) -> Uuid {
 	#[derive(diesel::QueryableByName)]
@@ -37,10 +37,10 @@ async fn insert_server(
 	}
 	let host = format!("http://test.invalid/{}", Uuid::new_v4());
 	let row: RowId = sql_query(
-		"INSERT INTO servers (host, kind, rank, group_id) VALUES ($1, $2, $3, $4) RETURNING id",
+		"WITH m AS (INSERT INTO machines (group_id) VALUES ($4) RETURNING id) INSERT INTO applications (host, type, rank, group_id, machine_id) SELECT $1, $2, $3, $4, m.id FROM m RETURNING id",
 	)
 	.bind::<sql_types::Text, _>(host)
-	.bind::<sql_types::Text, _>(kind)
+	.bind::<sql_types::Text, _>(r#type)
 	.bind::<sql_types::Nullable<sql_types::Text>, _>(rank)
 	.bind::<sql_types::Uuid, _>(group_id)
 	.get_result(conn)
@@ -72,10 +72,10 @@ async fn insert_status(
 	// recompute reads — including its rule that a version-less push keeps the
 	// version the source last reported.
 	sql_query(
-		"INSERT INTO server_reported_detail (server_id, source, version, reported_at)
+		"INSERT INTO application_reported_detail (application_id, source, version, reported_at)
 		 VALUES ($1, 'alertd', $3, now() + ($2 || ' seconds')::interval)
-		 ON CONFLICT (server_id, source) DO UPDATE
-		 SET version = COALESCE(EXCLUDED.version, server_reported_detail.version),
+		 ON CONFLICT (application_id, source) DO UPDATE
+		 SET version = COALESCE(EXCLUDED.version, application_reported_detail.version),
 		     reported_at = EXCLUDED.reported_at",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
@@ -92,7 +92,7 @@ async fn cache(
 ) -> (Option<Uuid>, Option<String>) {
 	use database::schema::server_groups::dsl;
 	dsl::server_groups
-		.select((dsl::version_server_id, dsl::effective_version))
+		.select((dsl::version_application_id, dsl::effective_version))
 		.filter(dsl::id.eq(group_id))
 		.first(conn)
 		.await
@@ -103,8 +103,10 @@ async fn cache(
 async fn recompute_picks_canonical_and_trigger_updates_only_it() {
 	TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn, "Group").await;
-		// dev-facility is the only member at first.
-		let dev = insert_server(&mut conn, group_id, "facility", Some("dev")).await;
+		// A dev central is the only member at first. The headline is a
+		// central's version, so the members that can carry it are centrals;
+		// rank is what orders them.
+		let dev = insert_server(&mut conn, group_id, "tamanu-central", Some("dev")).await;
 		insert_status(&mut conn, dev, Some("1.0.0"), -60).await;
 
 		// (a) recompute picks the (lone) canonical member.
@@ -117,7 +119,7 @@ async fn recompute_picks_canonical_and_trigger_updates_only_it() {
 
 		// (b) a higher-ranked server added to the group flips the cache after
 		// recompute.
-		let prod = insert_server(&mut conn, group_id, "central", Some("production")).await;
+		let prod = insert_server(&mut conn, group_id, "tamanu-central", Some("production")).await;
 		insert_status(&mut conn, prod, Some("2.0.0"), -50).await;
 		ServerGroup::recompute_version(&mut conn, group_id)
 			.await
@@ -136,7 +138,7 @@ async fn recompute_picks_canonical_and_trigger_updates_only_it() {
 			"canonical server's new version updates the cache"
 		);
 
-		// A later status from the non-canonical dev server is ignored.
+		// A later status from the non-canonical dev central is ignored.
 		insert_status(&mut conn, dev, Some("9.9.9"), -5).await;
 		let (_, ver) = cache(&mut conn, group_id).await;
 		assert_eq!(
@@ -157,7 +159,7 @@ async fn recompute_picks_canonical_and_trigger_updates_only_it() {
 
 		// (d) deleting the canonical member then recomputing falls back to the
 		// next-ranked member.
-		sql_query("DELETE FROM servers WHERE id = $1")
+		sql_query("DELETE FROM applications WHERE id = $1")
 			.bind::<sql_types::Uuid, _>(prod)
 			.execute(&mut conn)
 			.await
@@ -180,7 +182,7 @@ async fn recompute_picks_canonical_and_trigger_updates_only_it() {
 async fn recompute_clears_cache_when_no_members() {
 	TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn, "Empty").await;
-		let server = insert_server(&mut conn, group_id, "central", Some("production")).await;
+		let server = insert_server(&mut conn, group_id, "tamanu-central", Some("production")).await;
 		insert_status(&mut conn, server, Some("3.0.0"), -10).await;
 		ServerGroup::recompute_version(&mut conn, group_id)
 			.await
@@ -189,7 +191,7 @@ async fn recompute_clears_cache_when_no_members() {
 		assert_eq!(vsid, Some(server));
 		assert_eq!(ver.as_deref(), Some("3.0.0"));
 
-		sql_query("DELETE FROM servers WHERE id = $1")
+		sql_query("DELETE FROM applications WHERE id = $1")
 			.bind::<sql_types::Uuid, _>(server)
 			.execute(&mut conn)
 			.await

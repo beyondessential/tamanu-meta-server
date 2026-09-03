@@ -1,7 +1,7 @@
 //! Create + configure a kopia backup bucket in the shared account
 //! (`placement=shared`).
 //!
-//! BYO (`external`) buckets are made by ops/pulumi in the deployment's own
+//! BYO (`external`) buckets are made by ops/pulumi in the group's own
 //! account; for shared-account configs Canopy creates the bucket itself at init,
 //! applying the same security recipe pulumi's `backups` stack uses — Object Lock
 //! + default GOVERNANCE retention, versioning, a reclaim lifecycle,

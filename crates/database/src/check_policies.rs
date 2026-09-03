@@ -19,6 +19,8 @@
 use crate::issues::Scope;
 use crate::maintenance_windows::MaintenanceWindow;
 use commons_errors::{AppError, Result};
+use commons_types::namespace::Namespace;
+use commons_types::server::app_type::ApplicationType;
 use commons_types::status::CheckResult;
 use diesel::dsl::{AsSelect, SqlTypeOf};
 use diesel::prelude::*;
@@ -44,11 +46,19 @@ pub const STALE_ALERT_HOURS: i64 = 24 * 30;
 #[diesel(table_name = crate::schema::check_policies)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct CheckPolicy {
-	/// The source that reports this check. Together with `check_name`,
-	/// uniquely identifies this policy.
+	/// The source that reports this check. Together with the namespace and
+	/// `check_name`, uniquely identifies this policy.
 	pub source: String,
-	/// The check's name, as reported in status pushes.
+	/// The check's name, as reported in status pushes. Stored on its own —
+	/// the qualified `<type>.<check>` form an operator sees is built for
+	/// presentation from [`Self::namespace`], never concatenated here.
 	pub check_name: String,
+	/// The namespace's subject column. Read through [`Self::namespace`]
+	/// rather than matched on: the pair is only meaningful together.
+	pub subject: Option<String>,
+	/// The namespace's application type column. Set when and only when
+	/// `subject` is `application`, which the schema's CHECK enforces.
+	pub application_type: Option<String>,
 	/// The maximum effective result for this check when no conditional
 	/// rule (see `rules`) overrides it: an observed result more urgent
 	/// than the ceiling grades down to it.
@@ -101,6 +111,28 @@ pub struct CheckPolicy {
 	pub decommissioned_by: Option<String>,
 }
 
+impl CheckPolicy {
+	/// This entry's namespace, from its two columns.
+	///
+	/// The schema's CHECK admits only the three shapes, so a pair outside
+	/// them is a row written around the constraint. Falling back to `Flat`
+	/// would quietly merge it with the curated catalog, so it errors.
+	pub fn namespace(&self) -> Result<Namespace> {
+		Namespace::from_columns(self.subject.as_deref(), self.application_type.as_deref())
+			.map_err(|e| AppError::Custom(e.to_string()))
+	}
+
+	/// How this entry reads to an operator: `<type>.<check>` for an
+	/// application namespace, the bare name otherwise. An unreadable
+	/// namespace presents as the bare name rather than failing a listing.
+	pub fn qualified_name(&self) -> String {
+		match self.namespace() {
+			Ok(ns) => ns.qualified_name(&self.check_name),
+			Err(_) => self.check_name.clone(),
+		}
+	}
+}
+
 /// Escalation only makes sense at a `failed` ceiling: it bypasses
 /// incident grace on an effective *failure*, and only a `failed` ceiling
 /// lets an effective result reach failed in the first place. At any lower
@@ -109,6 +141,84 @@ pub struct CheckPolicy {
 /// invariant with a check constraint.
 fn escalates_normalised(ceiling: CheckResult, escalates: bool) -> bool {
 	escalates && ceiling == CheckResult::Failed
+}
+
+/// A check's identity: who reports it, which namespace it lives in, and its
+/// name. The three together are what the catalog is keyed on, and what a
+/// check-state has to match to be treated as a real check.
+pub type CatalogKey = (String, Namespace, String);
+
+/// A set of [`CatalogKey`]s, loaded once and tested per row.
+pub type CatalogKeys = std::collections::HashSet<CatalogKey>;
+
+/// A boxed predicate over one of the two policy tables.
+type Predicate<T> =
+	Box<dyn BoxableExpression<T, diesel::pg::Pg, SqlType = diesel::sql_types::Bool>>;
+
+/// The filter matching one catalog entry: its source, both namespace
+/// columns, and its name.
+///
+/// The namespace columns compare with `IS NOT DISTINCT FROM` rather than
+/// `=` because two of the three shapes leave one or both null, and `= NULL`
+/// matches nothing — a flat entry addressed with `=` would silently look
+/// absent, and ingest would mint a second row on every push.
+fn catalog_identity(
+	source: &str,
+	namespace: &Namespace,
+	check_name: &str,
+) -> Predicate<crate::schema::check_policies::table> {
+	use crate::schema::check_policies::dsl;
+	let (subject, application_type) = namespace.to_columns();
+	Box::new(
+		dsl::source
+			.eq(source.to_owned())
+			.and(dsl::subject.is_not_distinct_from(subject.map(str::to_owned)))
+			.and(dsl::application_type.is_not_distinct_from(application_type))
+			.and(dsl::check_name.eq(check_name.to_owned())),
+	)
+}
+
+/// [`catalog_identity`] over the scoped table, which carries the same four
+/// identity columns alongside its target columns.
+fn scoped_identity(
+	source: &str,
+	namespace: &Namespace,
+	check_name: &str,
+) -> Predicate<crate::schema::scoped_check_policies::table> {
+	use crate::schema::scoped_check_policies::dsl;
+	let (subject, application_type) = namespace.to_columns();
+	Box::new(
+		dsl::source
+			.eq(source.to_owned())
+			.and(dsl::subject.is_not_distinct_from(subject.map(str::to_owned)))
+			.and(dsl::application_type.is_not_distinct_from(application_type))
+			.and(dsl::check_name.eq(check_name.to_owned())),
+	)
+}
+
+/// The namespaces a reporter for an application of `application_type` can file
+/// into: the machine's, its own type's, and the flat one a curated source uses.
+///
+/// This is the reverse of [`Namespace::of`] — the set a bare check name coming
+/// off the wire could resolve to — and is what narrows the catalog for the
+/// device-facing map and for a report's scoped chains. A reporter with no
+/// application (a machine's own agent) admits only the machine and flat
+/// namespaces.
+fn reported_by(
+	application_type: Option<&ApplicationType>,
+) -> Predicate<crate::schema::check_policies::table> {
+	use crate::schema::check_policies::dsl;
+	let machine_or_flat = dsl::subject
+		.is_null()
+		.or(dsl::subject.is_not_distinct_from(commons_types::namespace::SUBJECT_MACHINE));
+	match application_type {
+		None => Box::new(machine_or_flat),
+		Some(ty) => Box::new(
+			machine_or_flat.or(dsl::subject
+				.is_not_distinct_from(commons_types::namespace::SUBJECT_APPLICATION)
+				.and(dsl::application_type.is_not_distinct_from(ty.to_string()))),
+		),
+	}
 }
 
 /// The outcome of applying a check's policy to an observed result.
@@ -151,8 +261,9 @@ impl FleetGrading {
 
 impl CheckPolicy {
 	/// Reconcile fleet-wide check liveness. Refreshes every catalogued
-	/// `(source, check)`'s `last_seen` to the most recent report of that
-	/// check on any server (synthetic `canopy`/`manual` sources excluded),
+	/// check's `last_seen` to the most recent report of that check, in that
+	/// check's namespace, on any target (synthetic `canopy`/`manual` sources
+	/// excluded),
 	/// and re-animates any decommissioned check that has been reported
 	/// since it was retired: cleared back to the newly-registered state
 	/// (warning ceiling, pending review) so a resurrected check never
@@ -163,20 +274,81 @@ impl CheckPolicy {
 		use diesel::sql_query;
 
 		// Refresh last_seen from current check state: one row per
-		// (server, source, check) carries that check's most recent report
-		// time, so the fleet-wide max per (source, check) is its liveness.
-		let refresh = format!(
-			"UPDATE check_policies cp SET last_seen = f.max_seen FROM (\
-			 SELECT source, check_name, max(last_seen) AS max_seen FROM issues \
-			 WHERE server_id IS NOT NULL AND check_name IS NOT NULL \
-			 AND source NOT IN ('{canopy}', '{manual}') \
-			 GROUP BY source, check_name) f \
-			 WHERE cp.source = f.source AND cp.check_name = f.check_name \
-			 AND (cp.last_seen IS NULL OR cp.last_seen < f.max_seen)",
+		// (target, source, check) carries that check's most recent report
+		// time, so the max per catalog entry is its liveness.
+		//
+		// A filing names a target, not a namespace, so the namespace is
+		// derived here the same way ingest derives it — through
+		// `Namespace::of`, in Rust. Deriving it in the SQL instead would put a
+		// second copy of the machine-check list in a second language, free to
+		// drift from the one ingest uses; an entry it disagreed about would
+		// simply stop being refreshed and decommission itself a week later.
+		//
+		// A machine filing has no application, so the type comes back null and
+		// the outer join keeps the row: the earlier
+		// `application_id IS NOT NULL` filter meant "a filing about a server",
+		// which after the machine split silently excluded every machine check.
+		#[derive(QueryableByName)]
+		struct Reported {
+			#[diesel(sql_type = diesel::sql_types::Text)]
+			source: String,
+			#[diesel(sql_type = diesel::sql_types::Text)]
+			check_name: String,
+			#[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
+			application_type: Option<String>,
+			#[diesel(sql_type = diesel::sql_types::Timestamptz)]
+			max_seen: jiff_diesel::Timestamp,
+		}
+		let reported: Vec<Reported> = sql_query(format!(
+			"SELECT i.source, i.check_name, a.type AS application_type, \
+			 max(i.last_seen) AS max_seen FROM issues i \
+			 LEFT JOIN applications a ON a.id = i.application_id \
+			 WHERE i.check_name IS NOT NULL \
+			 AND (i.application_id IS NOT NULL OR i.machine_id IS NOT NULL) \
+			 AND i.application_id IS DISTINCT FROM '{nil}' \
+			 AND i.source NOT IN ('{canopy}', '{manual}') \
+			 GROUP BY i.source, i.check_name, a.type",
+			nil = Uuid::nil(),
 			canopy = crate::statuses::CANOPY_SOURCE,
 			manual = crate::issues::MANUAL_SOURCE,
-		);
-		sql_query(refresh).execute(db).await?;
+		))
+		.load(db)
+		.await?;
+
+		// Several triples can fold into one entry — every application type on a
+		// box reports the box's `disk_free`, and they share the machine entry —
+		// so take the max per entry before writing.
+		let mut latest: HashMap<CatalogKey, Timestamp> = HashMap::new();
+		for row in reported {
+			let ty = row
+				.application_type
+				.as_deref()
+				.and_then(|t| t.parse::<ApplicationType>().ok());
+			let Some(ns) = Namespace::of(&row.source, &row.check_name, ty.as_ref()) else {
+				continue;
+			};
+			let seen = Timestamp::from(row.max_seen);
+			latest
+				.entry((row.source, ns, row.check_name))
+				.and_modify(|t| *t = (*t).max(seen))
+				.or_insert(seen);
+		}
+
+		// One statement per entry rather than a set-based join: the catalog
+		// holds one row per distinct check the fleet reports, so this loop is
+		// catalog-sized, and this runs off the ingestion path.
+		for ((source, ns, check_name), seen) in latest {
+			use crate::schema::check_policies::dsl;
+			let seen = jiff_diesel::Timestamp::from(seen);
+			diesel::update(
+				dsl::check_policies
+					.filter(catalog_identity(&source, &ns, &check_name))
+					.filter(dsl::last_seen.is_null().or(dsl::last_seen.lt(seen))),
+			)
+			.set(dsl::last_seen.eq(seen))
+			.execute(db)
+			.await?;
+		}
 
 		// Re-animate any decommissioned check that has reported since it was
 		// retired: reset to the newly-registered state (warning ceiling, no
@@ -197,41 +369,129 @@ impl CheckPolicy {
 		Ok(reanimated)
 	}
 
-	/// The set of `(source, check)` pairs backed by a **live** catalog row
-	/// (present and not decommissioned). Callers require membership before
-	/// treating a check-state as a real check — anything user-facing
-	/// (health, presentation) ignores states with no live catalog row: both
+	/// The set of check identities backed by a **live** catalog row (present
+	/// and not decommissioned). Callers require membership before treating a
+	/// check-state as a real check — anything user-facing (health,
+	/// presentation) ignores states with no live catalog row: both
 	/// decommissioned checks and orphaned check-states (an `issues` row whose
-	/// (source, check) has no catalog row at all, e.g. a superseded source
-	/// whose catalog rows were removed while its states lingered).
-	pub async fn live_cataloged_pairs(
-		db: &mut AsyncPgConnection,
-	) -> Result<std::collections::HashSet<(String, String)>> {
+	/// identity has no catalog row at all, e.g. a superseded source whose
+	/// catalog rows were removed while its states lingered).
+	///
+	/// A row whose namespace columns are unreadable is left out rather than
+	/// admitted flat: it cannot be the identity of anything reported, so
+	/// counting it would gate a check on a row nothing can ever match.
+	pub async fn live_cataloged_pairs(db: &mut AsyncPgConnection) -> Result<CatalogKeys> {
 		use crate::schema::check_policies::dsl;
 		Ok(dsl::check_policies
-			.select((dsl::source, dsl::check_name))
+			.select((
+				dsl::source,
+				dsl::subject,
+				dsl::application_type,
+				dsl::check_name,
+			))
 			.filter(dsl::decommissioned_at.is_null())
-			.load::<(String, String)>(db)
+			.load::<(String, Option<String>, Option<String>, String)>(db)
 			.await?
 			.into_iter()
+			.filter_map(|(source, subject, ty, check_name)| {
+				let ns = Namespace::from_columns(subject.as_deref(), ty.as_deref()).ok()?;
+				Some((source, ns, check_name))
+			})
 			.collect())
+	}
+
+	/// Is `(source, check_name)` live for a reporter of this application type?
+	///
+	/// The companion to [`Self::live_cataloged_pairs`] for the callers that hold
+	/// a check-state rather than a filing: a state row records the bare check
+	/// name, and which catalog row backs it follows the target's application
+	/// type. `None` is a machine's own check, which no type bears on.
+	///
+	/// A name that resolves to no namespace at all (an application-subject check
+	/// against a target with no application) is not live: nothing could have
+	/// filed it there.
+	pub fn live_for(
+		cataloged: &CatalogKeys,
+		source: &str,
+		check_name: &str,
+		application_type: Option<&ApplicationType>,
+	) -> bool {
+		Namespace::of(source, check_name, application_type)
+			.is_some_and(|ns| Self::live_in(cataloged, source, &ns, check_name))
+	}
+
+	/// As [`Self::live_for`], for a caller that has already derived the
+	/// namespace. Both go through the one membership test, so a caller that
+	/// needs the namespace for anything else derives it once rather than
+	/// deriving it twice and risking two answers.
+	pub fn live_in(
+		cataloged: &CatalogKeys,
+		source: &str,
+		namespace: &Namespace,
+		check_name: &str,
+	) -> bool {
+		cataloged.contains(&(
+			source.to_string(),
+			namespace.clone(),
+			check_name.to_string(),
+		))
 	}
 
 	/// Live (not decommissioned) catalogued checks whose most recent
 	/// fleet-wide report is older than `cutoff`. Ordered by source then
 	/// name. Drives the operator "gone quiet" list and the stale-check
 	/// self-alert.
+	///
+	/// An entry no live application could report into is left out. A check is
+	/// identified by a namespace, and an application-subject namespace names a
+	/// type; if the fleet holds no live application of that type, nothing can
+	/// ever report that check again, whatever anyone does. That is not a check
+	/// that went away — it is an entry whose population went away, and telling
+	/// an operator to decommission it every day is asking them to tidy up after
+	/// a fleet change rather than reporting a reporter falling silent.
+	///
+	/// Machine-subject and curated entries are always kept: their populations
+	/// are every box and Canopy itself, neither of which empties.
+	// spec: CHK#liveness-and-decommissioning
 	pub async fn gone_quiet(db: &mut AsyncPgConnection, cutoff: Timestamp) -> Result<Vec<Self>> {
 		use crate::schema::check_policies::dsl;
-		dsl::check_policies
+		let quiet: Vec<Self> = dsl::check_policies
 			.select(Self::as_select())
 			.filter(dsl::decommissioned_at.is_null())
 			.filter(dsl::last_seen.is_not_null())
 			.filter(dsl::last_seen.lt(jiff_diesel::Timestamp::from(cutoff)))
-			.order((dsl::source, dsl::check_name))
+			.order((
+				dsl::source,
+				dsl::check_name,
+				dsl::subject,
+				dsl::application_type,
+			))
 			.load(db)
 			.await
-			.map_err(AppError::from)
+			.map_err(AppError::from)?;
+
+		if quiet.is_empty() {
+			return Ok(quiet);
+		}
+
+		let live: std::collections::HashSet<commons_types::server::app_type::ApplicationType> =
+			crate::applications::Application::distinct_types(db)
+				.await?
+				.into_iter()
+				.collect();
+
+		Ok(quiet
+			.into_iter()
+			.filter(|entry| match entry.namespace() {
+				// A namespace that does not parse cannot be matched against
+				// the fleet, so it is kept and surfaced rather than hidden.
+				Err(_) => true,
+				Ok(ns) => match ns.application_type() {
+					Some(ty) => live.contains(ty),
+					None => true,
+				},
+			})
+			.collect())
 	}
 
 	/// Decommission a `(source, check)` fleet-wide: mark the catalog row,
@@ -242,6 +502,7 @@ impl CheckPolicy {
 	pub async fn decommission(
 		db: &mut AsyncPgConnection,
 		source: &str,
+		namespace: &Namespace,
 		check_name: &str,
 		by: &str,
 	) -> Result<()> {
@@ -250,23 +511,44 @@ impl CheckPolicy {
 		use commons_types::issue::ResolvedReason;
 
 		let now = jiff_diesel::Timestamp::from(Timestamp::now());
-		diesel::update(
-			cp::check_policies.filter(cp::source.eq(source).and(cp::check_name.eq(check_name))),
-		)
-		.set((
-			cp::decommissioned_at.eq(Some(now)),
-			cp::decommissioned_by.eq(Some(by)),
-		))
-		.execute(db)
-		.await?;
+		diesel::update(cp::check_policies.filter(catalog_identity(source, namespace, check_name)))
+			.set((
+				cp::decommissioned_at.eq(Some(now)),
+				cp::decommissioned_by.eq(Some(by)),
+			))
+			.execute(db)
+			.await?;
 
-		// Resolve the check's outstanding states on every server, so they
+		// Resolve this entry's outstanding states across the fleet, so they
 		// stop counting toward health and incidents.
+		//
+		// Only this entry's. Retiring one namespace's `disk_free` must leave
+		// another namespace's alone, so the sweep narrows by namespace and not
+		// by name: a machine entry reaches machine filings, an application
+		// entry reaches only the filings of applications of its type, and a
+		// flat entry (a curated source, whose names mean one thing fleet-wide)
+		// reaches all of them.
+		let in_namespace: Predicate<crate::schema::issues::table> = match namespace {
+			Namespace::Flat => Box::new(iss::id.is_not_null()),
+			Namespace::Machine => Box::new(iss::machine_id.is_not_null()),
+			Namespace::Application(ty) => {
+				use crate::schema::applications::dsl as app;
+				Box::new(
+					iss::application_id
+						.eq_any(
+							app::applications
+								.select(app::id.nullable())
+								.filter(app::type_.eq(ty.to_string())),
+						)
+						.assume_not_null(),
+				)
+			}
+		};
 		let state_ids: Vec<Uuid> = iss::issues
 			.select(iss::id)
 			.filter(iss::source.eq(source))
 			.filter(iss::check_name.eq(check_name))
-			.filter(iss::server_id.is_not_null())
+			.filter(in_namespace)
 			.filter(iss::resolved_at.is_null())
 			.load(db)
 			.await?;
@@ -279,8 +561,7 @@ impl CheckPolicy {
 		// would otherwise linger in the operator's silence list forever.
 		use crate::schema::scoped_check_policies::dsl as scp;
 		diesel::delete(
-			scp::scoped_check_policies
-				.filter(scp::source.eq(source).and(scp::check_name.eq(check_name))),
+			scp::scoped_check_policies.filter(scoped_identity(source, namespace, check_name)),
 		)
 		.execute(db)
 		.await?;
@@ -291,7 +572,7 @@ impl CheckPolicy {
 		Ok(())
 	}
 
-	/// Insert a row for `(source, check_name)` with default values
+	/// Insert a row for this check identity with default values
 	/// (ceiling = warning) if and only if no row exists yet. Idempotent:
 	/// safe to call on every status push for every check seen, including
 	/// healthy ones. Concurrent pushes are serialised by Postgres via
@@ -299,12 +580,24 @@ impl CheckPolicy {
 	pub async fn upsert_default(
 		db: &mut AsyncPgConnection,
 		source: &str,
+		namespace: &Namespace,
 		check_name: &str,
 	) -> Result<()> {
 		use crate::schema::check_policies::dsl;
+		let (subject, application_type) = namespace.to_columns();
 		diesel::insert_into(dsl::check_policies)
-			.values((dsl::source.eq(source), dsl::check_name.eq(check_name)))
-			.on_conflict((dsl::source, dsl::check_name))
+			.values((
+				dsl::source.eq(source),
+				dsl::subject.eq(subject),
+				dsl::application_type.eq(application_type),
+				dsl::check_name.eq(check_name),
+			))
+			.on_conflict((
+				dsl::source,
+				dsl::subject,
+				dsl::application_type,
+				dsl::check_name,
+			))
 			.do_nothing()
 			.execute(db)
 			.await
@@ -312,7 +605,7 @@ impl CheckPolicy {
 		Ok(())
 	}
 
-	/// Insert a row for `(source, check_name)` with the given policy —
+	/// Insert a row for the catalogued check with the given policy —
 	/// and, for canopy's own checks, shipped documentation — if and only
 	/// if no row exists yet. Canopy's own checks register with the policy
 	/// their condition warrants instead of the default warning ceiling;
@@ -326,6 +619,7 @@ impl CheckPolicy {
 	pub async fn register(
 		db: &mut AsyncPgConnection,
 		source: &str,
+		namespace: &Namespace,
 		check_name: &str,
 		ceiling: CheckResult,
 		escalates: bool,
@@ -333,9 +627,12 @@ impl CheckPolicy {
 	) -> Result<()> {
 		use crate::schema::check_policies::dsl;
 		let now = jiff_diesel::Timestamp::from(Timestamp::now());
+		let (subject, application_type) = namespace.to_columns();
 		diesel::insert_into(dsl::check_policies)
 			.values((
 				dsl::source.eq(source),
+				dsl::subject.eq(subject),
+				dsl::application_type.eq(application_type),
 				dsl::check_name.eq(check_name),
 				dsl::ceiling.eq(ceiling.to_string()),
 				dsl::escalates.eq(escalates_normalised(ceiling, escalates)),
@@ -343,7 +640,12 @@ impl CheckPolicy {
 				dsl::reviewed_at.eq(Some(now)),
 				dsl::reviewed_by.eq(Some(source)),
 			))
-			.on_conflict((dsl::source, dsl::check_name))
+			.on_conflict((
+				dsl::source,
+				dsl::subject,
+				dsl::application_type,
+				dsl::check_name,
+			))
 			.do_nothing()
 			.execute(db)
 			.await
@@ -366,6 +668,7 @@ impl CheckPolicy {
 		Self::register(
 			db,
 			crate::statuses::CANOPY_SOURCE,
+			&Namespace::Flat,
 			crate::statuses::REACHABILITY_REF,
 			CheckResult::Failed,
 			false,
@@ -374,7 +677,7 @@ impl CheckPolicy {
 		.await
 	}
 
-	/// Apply the `(source, check_name)` policy to an `observed` result:
+	/// Apply the catalogued check's policy to an `observed` result:
 	/// if the entry has a `rules` ladder and a branch matches the
 	/// supplied evaluation context, that branch's result wins (any
 	/// direction — rules can upgrade as well as downgrade); otherwise the
@@ -393,11 +696,12 @@ impl CheckPolicy {
 	pub async fn apply(
 		db: &mut AsyncPgConnection,
 		source: &str,
+		namespace: &Namespace,
 		check_name: &str,
 		observed: CheckResult,
 		ctx: &EvaluationContext<'_>,
 	) -> Result<GradedResult> {
-		let entry = Self::fleet_grading(db, source, check_name).await?;
+		let entry = Self::fleet_grading(db, source, namespace, check_name).await?;
 		Ok(Self::grade(
 			entry.as_ref(),
 			source,
@@ -415,6 +719,7 @@ impl CheckPolicy {
 	pub async fn fleet_grading(
 		db: &mut AsyncPgConnection,
 		source: &str,
+		namespace: &Namespace,
 		check_name: &str,
 	) -> Result<Option<FleetGrading>> {
 		use crate::schema::check_policies::dsl;
@@ -425,7 +730,7 @@ impl CheckPolicy {
 				dsl::rules,
 				dsl::reviewed_at.is_not_null(),
 			))
-			.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name)))
+			.filter(catalog_identity(source, namespace, check_name))
 			.first(db)
 			.await
 			.optional()?;
@@ -477,37 +782,52 @@ impl CheckPolicy {
 		}
 	}
 
-	/// Grading fields for every catalog row, keyed by `(source, check_name)`.
+	/// Grading fields for every catalog row, keyed by [`CatalogKey`].
 	///
 	/// For callers grading many checks in one pass: the catalog holds one row
 	/// per distinct check the fleet reports, so a single load is far cheaper
 	/// than [`Self::apply`]'s query per check. Feed the entries to
 	/// [`Self::grade`].
+	///
+	/// A row whose namespace columns are unreadable is left out, on the same
+	/// reasoning as [`Self::live_cataloged_pairs`]: nothing can key to it.
 	pub async fn grading_table(
 		db: &mut AsyncPgConnection,
-	) -> Result<HashMap<(String, String), FleetGrading>> {
+	) -> Result<HashMap<CatalogKey, FleetGrading>> {
 		use crate::schema::check_policies::dsl;
-		let rows: Vec<(String, String, String, bool, Option<JsonValue>, bool)> =
-			dsl::check_policies
-				.select((
-					dsl::source,
-					dsl::check_name,
-					dsl::ceiling,
-					dsl::escalates,
-					dsl::rules,
-					dsl::reviewed_at.is_not_null(),
-				))
-				.load(db)
-				.await
-				.map_err(AppError::from)?;
+		#[allow(clippy::type_complexity)]
+		let rows: Vec<(
+			String,
+			Option<String>,
+			Option<String>,
+			String,
+			String,
+			bool,
+			Option<JsonValue>,
+			bool,
+		)> = dsl::check_policies
+			.select((
+				dsl::source,
+				dsl::subject,
+				dsl::application_type,
+				dsl::check_name,
+				dsl::ceiling,
+				dsl::escalates,
+				dsl::rules,
+				dsl::reviewed_at.is_not_null(),
+			))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
 		Ok(rows
 			.into_iter()
-			.map(
-				|(source, check_name, ceiling, escalates, rules, reviewed)| {
-					(
-						(source, check_name),
+			.filter_map(
+				|(source, subject, ty, check_name, ceiling, escalates, rules, reviewed)| {
+					let ns = Namespace::from_columns(subject.as_deref(), ty.as_deref()).ok()?;
+					Some((
+						(source, ns, check_name),
 						FleetGrading::from_row((ceiling, escalates, rules, reviewed)),
-					)
+					))
 				},
 			)
 			.collect())
@@ -530,15 +850,14 @@ impl CheckPolicy {
 	pub async fn apply_scoped(
 		db: &mut AsyncPgConnection,
 		source: &str,
+		namespace: &Namespace,
 		check_name: &str,
 		observed: CheckResult,
 		ctx: &EvaluationContext<'_>,
-		server_id: Option<Uuid>,
-		group_id: Option<Uuid>,
+		scope: FilingScope,
 	) -> Result<GradedResult> {
-		let fleet = Self::apply(db, source, check_name, observed, ctx).await?;
-		let scoped =
-			ScopedCheckPolicy::chain_for(db, source, check_name, server_id, group_id).await?;
+		let fleet = Self::apply(db, source, namespace, check_name, observed, ctx).await?;
+		let scoped = ScopedCheckPolicy::chain_for(db, source, namespace, check_name, scope).await?;
 		Ok(Self::chain_scoped(fleet, &scoped, ctx))
 	}
 
@@ -568,18 +887,17 @@ impl CheckPolicy {
 	pub async fn update_documentation(
 		db: &mut AsyncPgConnection,
 		source: &str,
+		namespace: &Namespace,
 		check_name: &str,
 		documentation: Option<&str>,
 	) -> Result<Self> {
 		use crate::schema::check_policies::dsl;
-		diesel::update(
-			dsl::check_policies.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name))),
-		)
-		.set(dsl::documentation.eq(documentation))
-		.returning(Self::as_select())
-		.get_result(db)
-		.await
-		.map_err(AppError::from)
+		diesel::update(dsl::check_policies.filter(catalog_identity(source, namespace, check_name)))
+			.set(dsl::documentation.eq(documentation))
+			.returning(Self::as_select())
+			.get_result(db)
+			.await
+			.map_err(AppError::from)
 	}
 
 	/// Replace the conditional-rules ladder for a check (or clear it
@@ -588,6 +906,7 @@ impl CheckPolicy {
 	pub async fn update_rules(
 		db: &mut AsyncPgConnection,
 		source: &str,
+		namespace: &Namespace,
 		check_name: &str,
 		rules: Option<&IfLadder>,
 		by: &str,
@@ -596,34 +915,41 @@ impl CheckPolicy {
 		let now = Timestamp::now();
 		let rules_json: Option<JsonValue> =
 			rules.map(|l| serde_json::to_value(l).expect("IfLadder always serialises"));
-		diesel::update(
-			dsl::check_policies.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name))),
-		)
-		.set((
-			dsl::rules.eq(rules_json),
-			dsl::reviewed_at.eq(jiff_diesel::Timestamp::from(now)),
-			dsl::reviewed_by.eq(by),
-		))
-		.returning(Self::as_select())
-		.get_result(db)
-		.await
-		.map_err(AppError::from)
+		diesel::update(dsl::check_policies.filter(catalog_identity(source, namespace, check_name)))
+			.set((
+				dsl::rules.eq(rules_json),
+				dsl::reviewed_at.eq(jiff_diesel::Timestamp::from(now)),
+				dsl::reviewed_by.eq(by),
+			))
+			.returning(Self::as_select())
+			.get_result(db)
+			.await
+			.map_err(AppError::from)
 	}
 
 	/// One source's catalog as `check_name → ceiling`, for building the
-	/// device-facing effective check map. Deliberately reads only the
+	/// device-facing effective check map for an application of `application_type`.
+	/// Deliberately reads only the
 	/// static `ceiling` column: conditional `rules` ladders are
 	/// expressions evaluated per push against the report's contents, so
 	/// they can't be resolved ahead of time and are ignored here. An
 	/// unparseable ceiling falls back to warning, same as [`Self::apply`].
+	///
+	/// Keyed by the bare check name, because that is what a reporter sends and
+	/// what it reads this map back with. Names cannot collide across the
+	/// namespaces [`reported_by`] admits: a name is machine-subject or
+	/// application-subject and never both, and only the one application type is
+	/// in play.
 	pub async fn ceiling_map_for_source(
 		db: &mut AsyncPgConnection,
 		source: &str,
+		application_type: Option<&ApplicationType>,
 	) -> Result<BTreeMap<String, CheckResult>> {
 		use crate::schema::check_policies::dsl;
 		let rows: Vec<(String, String)> = dsl::check_policies
 			.select((dsl::check_name, dsl::ceiling))
 			.filter(dsl::source.eq(source))
+			.filter(reported_by(application_type))
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
@@ -637,27 +963,52 @@ impl CheckPolicy {
 		use crate::schema::check_policies::dsl;
 		dsl::check_policies
 			.select(Self::as_select())
-			.order((dsl::source.asc(), dsl::check_name.asc()))
+			.order((
+				dsl::source.asc(),
+				dsl::check_name.asc(),
+				dsl::subject.asc(),
+				dsl::application_type.asc(),
+			))
 			.load(db)
 			.await
 			.map_err(AppError::from)
 	}
 
-	/// The catalog row for a single (source, check), or `None` if that
-	/// source has never reported it (so ingestion has never upserted a
+	/// The catalog row for a single (source, namespace, check), or `None` if
+	/// that source has never reported it (so ingestion has never upserted a
 	/// row).
 	pub async fn get(
 		db: &mut AsyncPgConnection,
 		source: &str,
+		namespace: &Namespace,
 		check_name: &str,
 	) -> Result<Option<Self>> {
 		use crate::schema::check_policies::dsl;
 		dsl::check_policies
 			.select(Self::as_select())
-			.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name)))
+			.filter(catalog_identity(source, namespace, check_name))
 			.first(db)
 			.await
 			.optional()
+			.map_err(AppError::from)
+	}
+
+	/// Every catalog row for a `(source, check_name)` across all namespaces,
+	/// name-ordered. For the operator-facing paths that address a check by name
+	/// alone and have to disambiguate — or report that there is nothing to
+	/// disambiguate.
+	pub async fn get_across_namespaces(
+		db: &mut AsyncPgConnection,
+		source: &str,
+		check_name: &str,
+	) -> Result<Vec<Self>> {
+		use crate::schema::check_policies::dsl;
+		dsl::check_policies
+			.select(Self::as_select())
+			.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name)))
+			.order((dsl::subject.asc(), dsl::application_type.asc()))
+			.load(db)
+			.await
 			.map_err(AppError::from)
 	}
 
@@ -673,6 +1024,7 @@ impl CheckPolicy {
 	pub async fn update(
 		db: &mut AsyncPgConnection,
 		source: &str,
+		namespace: &Namespace,
 		check_name: &str,
 		ceiling: CheckResult,
 		escalates: bool,
@@ -681,20 +1033,18 @@ impl CheckPolicy {
 	) -> Result<Self> {
 		use crate::schema::check_policies::dsl;
 		let now = Timestamp::now();
-		diesel::update(
-			dsl::check_policies.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name))),
-		)
-		.set((
-			dsl::ceiling.eq(ceiling.to_string()),
-			dsl::escalates.eq(escalates_normalised(ceiling, escalates)),
-			dsl::notes.eq(notes),
-			dsl::reviewed_at.eq(jiff_diesel::Timestamp::from(now)),
-			dsl::reviewed_by.eq(by),
-		))
-		.returning(Self::as_select())
-		.get_result(db)
-		.await
-		.map_err(AppError::from)
+		diesel::update(dsl::check_policies.filter(catalog_identity(source, namespace, check_name)))
+			.set((
+				dsl::ceiling.eq(ceiling.to_string()),
+				dsl::escalates.eq(escalates_normalised(ceiling, escalates)),
+				dsl::notes.eq(notes),
+				dsl::reviewed_at.eq(jiff_diesel::Timestamp::from(now)),
+				dsl::reviewed_by.eq(by),
+			))
+			.returning(Self::as_select())
+			.get_result(db)
+			.await
+			.map_err(AppError::from)
 	}
 }
 
@@ -723,10 +1073,20 @@ pub struct ScopedCheckPolicy {
 	pub source: String,
 	/// The check this transform applies to.
 	pub check_name: String,
-	/// Set for a server-scoped transform.
-	pub server_id: Option<Uuid>,
-	/// Set for a group-scoped transform. Both `server_id` and
-	/// `server_group_id` unset means canopy-wide scope.
+	/// The subject half of the check's namespace: `machine`, `application`, or
+	/// unset for the flat namespace. Read through [`Self::namespace`], never
+	/// paired by hand.
+	pub subject: Option<String>,
+	/// The application type half of the check's namespace, set only for an
+	/// application-subject check. Read through [`Self::namespace`].
+	pub application_type: Option<String>,
+	/// Set for an application-scoped transform.
+	pub application_id: Option<Uuid>,
+	/// Set for a machine-scoped transform. Silencing a machine's check quiets
+	/// it wherever it presents, including on the applications that show it.
+	pub machine_id: Option<Uuid>,
+	/// Set for a group-scoped transform. All of `application_id`,
+	/// `machine_id` and `server_group_id` unset means canopy-wide scope.
 	pub server_group_id: Option<Uuid>,
 	/// Scoped ceiling: caps the effective result arriving from the
 	/// previous transform in the chain. `skipped` is the silence.
@@ -738,23 +1098,53 @@ pub struct ScopedCheckPolicy {
 	pub created_by: Option<String>,
 }
 
+/// Which scopes a filing sits in, for reading the transforms that apply to it.
+///
+/// Four bare `Option<Uuid>` in a row is a transposition waiting to happen, and
+/// two of them mean subtly different things, so they travel named.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FilingScope {
+	/// Set for a filing about one application.
+	pub application_id: Option<Uuid>,
+	/// Set for a filing about one machine. Scopes machine-written *silences*,
+	/// and is not what a maintenance window is matched on.
+	pub machine_id: Option<Uuid>,
+	/// The group the filing's target belongs to, where it has one.
+	pub group_id: Option<Uuid>,
+	/// The machine whose maintenance window covers this filing: for a
+	/// machine's own check, itself; for an application's, the box it runs on,
+	/// since taking that down stops the workload. Kept apart from `machine_id`
+	/// so a window over a box does not widen which silences reach its
+	/// workloads.
+	pub covering_machine: Option<Uuid>,
+}
+
 impl ScopedCheckPolicy {
-	/// The transform at exactly this (scope, source, check), if any.
+	/// This transform's namespace, from its two columns. Same shape rule as
+	/// [`CheckPolicy::namespace`], so a pair outside the three shapes errors
+	/// rather than quietly reading as flat.
+	pub fn namespace(&self) -> Result<Namespace> {
+		Namespace::from_columns(self.subject.as_deref(), self.application_type.as_deref())
+			.map_err(|e| AppError::Custom(e.to_string()))
+	}
+
+	/// The transform at exactly this (scope, source, namespace, check), if any.
 	pub async fn get(
 		db: &mut AsyncPgConnection,
 		scope: Scope,
 		source: &str,
+		namespace: &Namespace,
 		check_name: &str,
 	) -> Result<Option<Self>> {
 		use crate::schema::scoped_check_policies::dsl;
-		let (server, group) = scope.to_columns();
+		let (server, machine, group) = scope.to_columns();
 		dsl::scoped_check_policies
 			.select(Self::as_select())
+			.filter(scoped_identity(source, namespace, check_name))
 			.filter(
-				dsl::source
-					.eq(source)
-					.and(dsl::check_name.eq(check_name))
-					.and(dsl::server_id.is_not_distinct_from(server))
+				dsl::application_id
+					.is_not_distinct_from(server)
+					.and(dsl::machine_id.is_not_distinct_from(machine))
 					.and(dsl::server_group_id.is_not_distinct_from(group)),
 			)
 			.first(db)
@@ -764,18 +1154,20 @@ impl ScopedCheckPolicy {
 	}
 
 	/// Upsert a silence: a skipped ceiling at this scope. An existing
-	/// transform at the same (scope, source, check) keeps its rules; its
-	/// ceiling becomes skipped. Idempotent.
+	/// transform at the same (scope, source, namespace, check) keeps its rules;
+	/// its ceiling becomes skipped. Idempotent.
 	pub async fn silence(
 		db: &mut AsyncPgConnection,
 		scope: Scope,
 		source: &str,
+		namespace: &Namespace,
 		check_name: &str,
 		created_by: Option<&str>,
 	) -> Result<Self> {
 		use crate::schema::scoped_check_policies::dsl;
-		let (server, group) = scope.to_columns();
-		if let Some(existing) = Self::get(db, scope, source, check_name).await? {
+		let (server, machine, group) = scope.to_columns();
+		let (subject, application_type) = namespace.to_columns();
+		if let Some(existing) = Self::get(db, scope, source, namespace, check_name).await? {
 			return diesel::update(dsl::scoped_check_policies.filter(dsl::id.eq(existing.id)))
 				.set((
 					dsl::ceiling.eq(CheckResult::Skipped.to_string()),
@@ -789,8 +1181,11 @@ impl ScopedCheckPolicy {
 		diesel::insert_into(dsl::scoped_check_policies)
 			.values((
 				dsl::source.eq(source),
+				dsl::subject.eq(subject),
+				dsl::application_type.eq(application_type),
 				dsl::check_name.eq(check_name),
-				dsl::server_id.eq(server),
+				dsl::application_id.eq(server),
+				dsl::machine_id.eq(machine),
 				dsl::server_group_id.eq(group),
 				dsl::ceiling.eq(CheckResult::Skipped.to_string()),
 				dsl::created_by.eq(created_by),
@@ -808,10 +1203,11 @@ impl ScopedCheckPolicy {
 		db: &mut AsyncPgConnection,
 		scope: Scope,
 		source: &str,
+		namespace: &Namespace,
 		check_name: &str,
 	) -> Result<()> {
 		use crate::schema::scoped_check_policies::dsl;
-		let Some(existing) = Self::get(db, scope, source, check_name).await? else {
+		let Some(existing) = Self::get(db, scope, source, namespace, check_name).await? else {
 			return Ok(());
 		};
 		if existing.ceiling.as_deref() != Some("skipped") {
@@ -842,12 +1238,13 @@ impl ScopedCheckPolicy {
 	/// dead config that shouldn't clutter the operator's list.
 	pub async fn list_silences(db: &mut AsyncPgConnection, scope: Scope) -> Result<Vec<Self>> {
 		use crate::schema::scoped_check_policies::dsl;
-		let (server, group) = scope.to_columns();
+		let (server, machine, group) = scope.to_columns();
 		let rows: Vec<Self> = dsl::scoped_check_policies
 			.select(Self::as_select())
 			.filter(
-				dsl::server_id
+				dsl::application_id
 					.is_not_distinct_from(server)
+					.and(dsl::machine_id.is_not_distinct_from(machine))
 					.and(dsl::server_group_id.is_not_distinct_from(group))
 					.and(dsl::ceiling.eq(CheckResult::Skipped.to_string())),
 			)
@@ -858,67 +1255,89 @@ impl ScopedCheckPolicy {
 		let cataloged = CheckPolicy::live_cataloged_pairs(db).await?;
 		Ok(rows
 			.into_iter()
-			.filter(|r| cataloged.contains(&(r.source.clone(), r.check_name.clone())))
+			.filter(|r| {
+				r.namespace().is_ok_and(|ns| {
+					cataloged.contains(&(r.source.clone(), ns, r.check_name.clone()))
+				})
+			})
 			.collect())
 	}
 
 	/// The scoped transforms that apply to a filing, in application
 	/// order. A server filing chains group then server; a group filing
 	/// its group row; a canopy-wide filing the global row.
+	///
+	/// `covering_machine` is the machine whose maintenance window would cover
+	/// this filing, which is not the same as `machine_id`: an application's
+	/// checks are covered by the window over the box it runs on, while
+	/// `machine_id` scopes only to machine-scoped *silences*. Keeping them
+	/// apart is what stops a window over a box from silently widening which
+	/// operator-written silences apply to its workloads.
 	pub async fn chain_for(
 		db: &mut AsyncPgConnection,
 		source: &str,
+		namespace: &Namespace,
 		check_name: &str,
-		server_id: Option<Uuid>,
-		group_id: Option<Uuid>,
+		scope: FilingScope,
 	) -> Result<Vec<Self>> {
-		use crate::schema::scoped_check_policies::dsl;
-		let query = Self::scoped_to(server_id, group_id)
-			.filter(dsl::source.eq(source).and(dsl::check_name.eq(check_name)));
+		let query = Self::scoped_to(scope.application_id, scope.machine_id, scope.group_id)
+			.filter(scoped_identity(source, namespace, check_name));
 		let mut rows: Vec<Self> = query.load(db).await.map_err(AppError::from)?;
 		Self::order_chain(&mut rows);
-		if MaintenanceWindow::suspends(db, server_id, group_id).await? {
-			rows.push(Self::maintenance(server_id, group_id));
+		if MaintenanceWindow::suspends(db, scope.covering_machine, scope.group_id).await? {
+			rows.push(Self::maintenance(scope.covering_machine, scope.group_id));
 		}
 		Ok(rows)
 	}
 
-	/// Every scoped transform covering `(server_id, group_id)`, grouped by
-	/// `(source, check_name)` and in application order within each group —
+	/// Every scoped transform covering `(application_id, group_id)`, grouped by
+	/// [`CatalogKey`] and in application order within each group —
 	/// the batch form of [`Self::chain_for`], for callers walking a whole
 	/// report's checks. One query for the lot instead of one per check.
+	///
+	/// A transform whose namespace columns are out of shape is dropped: it
+	/// names no check any filing can resolve to, so keying it under a guessed
+	/// namespace would apply it to a check it was never written for.
 	pub async fn chains_for_scope(
 		db: &mut AsyncPgConnection,
-		server_id: Option<Uuid>,
-		group_id: Option<Uuid>,
-	) -> Result<HashMap<(String, String), Vec<Self>>> {
-		let rows: Vec<Self> = Self::scoped_to(server_id, group_id)
-			.load(db)
-			.await
-			.map_err(AppError::from)?;
-		let mut chains: HashMap<(String, String), Vec<Self>> = HashMap::new();
+		scope: FilingScope,
+	) -> Result<HashMap<CatalogKey, Vec<Self>>> {
+		let rows: Vec<Self> =
+			Self::scoped_to(scope.application_id, scope.machine_id, scope.group_id)
+				.load(db)
+				.await
+				.map_err(AppError::from)?;
+		let mut chains: HashMap<CatalogKey, Vec<Self>> = HashMap::new();
 		for row in rows {
+			let Ok(namespace) = row.namespace() else {
+				continue;
+			};
 			chains
-				.entry((row.source.clone(), row.check_name.clone()))
+				.entry((row.source.clone(), namespace, row.check_name.clone()))
 				.or_default()
 				.push(row);
 		}
 		for chain in chains.values_mut() {
 			Self::order_chain(chain);
 		}
-		if MaintenanceWindow::suspends(db, server_id, group_id).await? {
+		if MaintenanceWindow::suspends(db, scope.covering_machine, scope.group_id).await? {
 			for chain in chains.values_mut() {
-				chain.push(Self::maintenance(server_id, group_id));
+				chain.push(Self::maintenance(scope.covering_machine, scope.group_id));
 			}
 		}
 		Ok(chains)
 	}
 
 	/// The scope half of the chain predicate: the rows whose scope covers a
-	/// filing against `(server_id, group_id)`. Shared so the single-check and
-	/// batch paths can never disagree about what a scope covers.
+	/// filing against `(application_id, machine_id, group_id)`. Shared so the
+	/// single-check and batch paths can never disagree about what a scope
+	/// covers.
+	///
+	/// A filing is at exactly one of the application or machine grains, so at
+	/// most one of those two ever matches; the group arm is what both share.
 	fn scoped_to(
-		server_id: Option<Uuid>,
+		application_id: Option<Uuid>,
+		machine_id: Option<Uuid>,
 		group_id: Option<Uuid>,
 	) -> crate::schema::scoped_check_policies::BoxedQuery<
 		'static,
@@ -929,14 +1348,20 @@ impl ScopedCheckPolicy {
 		let query = dsl::scoped_check_policies
 			.select(Self::as_select())
 			.into_boxed();
-		match (server_id, group_id) {
-			(None, None) => {
-				query.filter(dsl::server_id.is_null().and(dsl::server_group_id.is_null()))
-			}
-			(server, group) => query.filter(
-				dsl::server_id
+		match (application_id, machine_id, group_id) {
+			(None, None, None) => query.filter(
+				dsl::application_id
+					.is_null()
+					.and(dsl::machine_id.is_null())
+					.and(dsl::server_group_id.is_null()),
+			),
+			(server, machine, group) => query.filter(
+				dsl::application_id
 					.is_not_distinct_from(server)
-					.and(dsl::server_id.is_not_null())
+					.and(dsl::application_id.is_not_null())
+					.or(dsl::machine_id
+						.is_not_distinct_from(machine)
+						.and(dsl::machine_id.is_not_null()))
 					.or(dsl::server_group_id
 						.is_not_distinct_from(group)
 						.and(dsl::server_group_id.is_not_null())),
@@ -954,7 +1379,7 @@ impl ScopedCheckPolicy {
 	/// `scoped_check_policies` holds operator-owned transforms on one
 	/// (source, check). A ceiling only narrows, so where it sits in the
 	/// chain makes no difference.
-	fn maintenance(server_id: Option<Uuid>, group_id: Option<Uuid>) -> Self {
+	fn maintenance(machine_id: Option<Uuid>, group_id: Option<Uuid>) -> Self {
 		let now = Timestamp::now();
 		Self {
 			id: Uuid::nil(),
@@ -962,7 +1387,10 @@ impl ScopedCheckPolicy {
 			updated_at: now,
 			source: String::new(),
 			check_name: String::new(),
-			server_id,
+			subject: None,
+			application_type: None,
+			application_id: None,
+			machine_id,
 			server_group_id: group_id,
 			ceiling: Some(CheckResult::Skipped.to_string()),
 			rules: None,
@@ -970,10 +1398,11 @@ impl ScopedCheckPolicy {
 		}
 	}
 
-	/// Group scope applies before server scope: the most specific transform
-	/// has the last word.
+	/// Group scope applies before the target's own scope: the most specific
+	/// transform has the last word. An application-scoped and a
+	/// machine-scoped row never appear in one chain, so they sort alike.
 	fn order_chain(rows: &mut [Self]) {
-		rows.sort_by_key(|r| r.server_id.is_some());
+		rows.sort_by_key(|r| r.application_id.is_some() || r.machine_id.is_some());
 	}
 
 	/// Apply this transform to the effective result arriving from the
@@ -1061,7 +1490,7 @@ pub struct EvaluationContext<'a> {
 	/// The check's own fields (the `health[i]` object minus `check` and
 	/// `healthy`).
 	pub check_extra: &'a serde_json::Map<String, JsonValue>,
-	/// Server's resolved tag map (merged server + group). Each value is
+	/// Application's resolved tag map (merged server + group). Each value is
 	/// already wrapped as `JsonValue::String` for uniform comparison.
 	pub tags: &'a HashMap<String, JsonValue>,
 }

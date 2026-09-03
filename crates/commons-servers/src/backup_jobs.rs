@@ -1,6 +1,6 @@
 //! Shared helpers for the backup-credentials scheduler binaries
 //! (`backup_preflight` here, plus maintenance/inspection in the sibling jobs
-//! component). Kept in `commons-servers` so all three schedulers agree on the
+//! component). Kept in `commons-applications` so all three schedulers agree on the
 //! jitter scheme.
 
 use std::time::Duration;
@@ -9,10 +9,10 @@ use commons_errors::Result;
 use commons_types::{
 	Uuid,
 	backup::{BackupConfigStatus, BackupPurpose, BackupType},
-	server::{product::Product, rank::ServerRank, tags::TagMap},
+	server::{app_type::ApplicationType, rank::ServerRank, tags::TagMap},
 };
 use database::{
-	BackupRequest, BackupRun, BackupTypeDefault, ServerBackupCapability, ServerGroupBackupConfig,
+	BackupRequest, BackupRun, BackupTypeDefault, MachineBackupCapability, ServerGroupBackupConfig,
 	ServerGroupBackupSchedule,
 };
 use diesel_async::AsyncPgConnection;
@@ -122,7 +122,7 @@ pub async fn effective_retention_for_group(
 	db: &mut AsyncPgConnection,
 	group_id: Uuid,
 ) -> Result<Vec<(BackupType, RetentionPolicy)>> {
-	let types = ServerBackupCapability::declared_types_for_group(db, group_id).await?;
+	let types = MachineBackupCapability::declared_types_for_group(db, group_id).await?;
 	let mut out = Vec::with_capacity(types.len());
 	for ty in types {
 		let override_ = ServerGroupBackupSchedule::get(db, group_id, &ty)
@@ -157,7 +157,7 @@ pub async fn effective_interval_for_group(
 	db: &mut AsyncPgConnection,
 	group_id: Uuid,
 ) -> Result<Option<Duration>> {
-	let types = ServerBackupCapability::enabled_types_for_group(db, group_id).await?;
+	let types = MachineBackupCapability::enabled_types_for_group(db, group_id).await?;
 	let mut min: Option<Duration> = None;
 	for ty in types {
 		if let Some(d) = effective_interval_for_type(db, group_id, &ty).await? {
@@ -178,9 +178,9 @@ pub async fn effective_interval_for_group(
 /// successful run reports (advancing the staleness anchor), and a one-off until
 /// the run is reported (which clears the request). The device is responsible
 /// for not starting a second run while one is already in flight.
-pub async fn backups_due_now_for_server(
+pub async fn backups_due_now_for_machine(
 	db: &mut AsyncPgConnection,
-	server_id: Uuid,
+	machine_id: Uuid,
 	group_id: Uuid,
 	now: Timestamp,
 ) -> Result<Vec<BackupType>> {
@@ -194,13 +194,13 @@ pub async fn backups_due_now_for_server(
 
 	let mut due: std::collections::HashSet<BackupType> = std::collections::HashSet::new();
 
-	for req in BackupRequest::pending_for_server(db, server_id).await? {
+	for req in BackupRequest::pending_for_machine(db, machine_id).await? {
 		if req.purpose == BackupPurpose::Backup {
 			due.insert(req.r#type);
 		}
 	}
 
-	for cap in ServerBackupCapability::list_for_server(db, server_id).await? {
+	for cap in MachineBackupCapability::list_for_machine(db, machine_id).await? {
 		if !cap.enabled {
 			continue;
 		}
@@ -210,7 +210,7 @@ pub async fn backups_due_now_for_server(
 		// Due-ness is measured from the data's own moment, matching staleness
 		// detection — otherwise a server could be flagged stale without ever being
 		// asked to back up.
-		let last = BackupRun::latest_success_for_server(db, server_id, &cap.r#type)
+		let last = BackupRun::latest_success_for_machine(db, machine_id, &cap.r#type)
 			.await?
 			.map(|r| r.anchor());
 		if is_due(interval, last, now) {
@@ -259,21 +259,18 @@ impl BillingLabels {
 	/// `stage = mapped highest rank` (omitted when the group has no ranked
 	/// members).
 	///
-	/// `product` is the one its live members agree on, or `None` when they span
-	/// products; see [`Self::product`].
+	/// `product` is the software to attribute to, or `None` for a grain that is
+	/// not one: a group's own resources carry no product, a group not being a
+	/// piece of software (see [`Self::product`]).
 	// spec: APP#billing-attribution
 	pub fn from_group(
 		tags: &TagMap,
 		group_name: &str,
-		product: Option<Product>,
+		product: Option<String>,
 		highest_rank: Option<ServerRank>,
 	) -> Self {
 		BillingLabels {
-			product: tags
-				.0
-				.get("billing.product")
-				.cloned()
-				.or_else(|| product.map(String::from)),
+			product: tags.0.get("billing.product").cloned().or(product),
 			deployment: tags
 				.0
 				.get("billing.deployment")
@@ -287,21 +284,25 @@ impl BillingLabels {
 		}
 	}
 
-	/// Labels for one server's own resources: its own product and its own rank,
-	/// against the deployment its group names.
+	/// Labels for one application's own resources: its own product and its own
+	/// rank, under the deployment label its group names.
 	///
-	/// Every label describing the server carries the server's value rather than
-	/// its group's — a `rank = clone` server must report `stage = clone` and
-	/// never the group's `prod`, and a SENAITE server in a Tamanu group must
-	/// report `product = senaite`.
+	/// Every label describing the application carries the application's value
+	/// rather than its group's — a `rank = clone` application reports
+	/// `stage = clone` and never the group's `prod`, and a SENAITE application
+	/// in a Tamanu group reports `product = senaite`.
+	///
+	/// `billing.product` carries the software without its role, so a central and
+	/// a facility of one group attribute to the same product: that is what cost
+	/// allocation groups by.
 	// spec: APP#billing-attribution
 	pub fn for_server(
 		tags: &TagMap,
 		group_name: &str,
-		product: Product,
+		r#type: &ApplicationType,
 		rank: Option<ServerRank>,
 	) -> Self {
-		Self::from_group(tags, group_name, Some(product), rank)
+		Self::from_group(tags, group_name, Some(r#type.software().to_string()), rank)
 	}
 
 	/// Override the `product` label — e.g. `"backups"` for a backup bucket, which
@@ -414,7 +415,7 @@ pub fn shared_bucket_name(group_name: &str, random: &str) -> String {
 /// Billing tags for a canopy backup bucket. Built from the group's
 /// [`BillingLabels`] — so a group's explicit `billing.deployment` /
 /// `billing.stage` overrides are honored (keeping the bucket's cost attribution
-/// consistent with the deployment's other resources) — with `billing.product`
+/// consistent with the group's other resources) — with `billing.product`
 /// **forced to `backups`** (backup spend attributes to the backups product
 /// regardless of the group's own product). Applied at provision time and
 /// re-applied by the reconcile pass on drift.
@@ -848,27 +849,27 @@ mod tests {
 	fn billing_labels_defaults_and_overrides() {
 		// All-unranked group: no stage label, defaults for the rest.
 		let empty = TagMap::default();
-		let b = BillingLabels::from_group(&empty, "my-group", Some(Product::Tamanu), None);
+		let b = BillingLabels::from_group(&empty, "my-group", Some("tamanu".to_string()), None);
 		assert_eq!(b.product.as_deref(), Some("tamanu"));
 		assert_eq!(b.deployment, "my-group");
 		assert_eq!(b.stage, None);
 
-		// A computed deployment (group name) is lower-kebab-cased.
-		let b = BillingLabels::from_group(&empty, "Acme Prod", Some(Product::Tamanu), None);
+		// A computed deployment label (group name) is lower-kebab-cased.
+		let b = BillingLabels::from_group(&empty, "Acme Prod", Some("tamanu".to_string()), None);
 		assert_eq!(b.deployment, "acme-prod");
 
 		// An explicit billing.deployment tag is honored verbatim (not kebab'd).
 		let mut dep = TagMap::default();
 		dep.0
 			.insert("billing.deployment".into(), "Acme Prod".into());
-		let b = BillingLabels::from_group(&dep, "ignored", Some(Product::Tamanu), None);
+		let b = BillingLabels::from_group(&dep, "ignored", Some("tamanu".to_string()), None);
 		assert_eq!(b.deployment, "Acme Prod");
 
 		// Highest rank maps in when present.
 		let b = BillingLabels::from_group(
 			&empty,
 			"g",
-			Some(Product::Tamanu),
+			Some("tamanu".to_string()),
 			Some(ServerRank::Production),
 		);
 		assert_eq!(b.stage.as_deref(), Some("prod"));
@@ -880,7 +881,7 @@ mod tests {
 		let b = BillingLabels::from_group(
 			&tags,
 			"g",
-			Some(Product::Tamanu),
+			Some("tamanu".to_string()),
 			Some(ServerRank::Production),
 		);
 		assert_eq!(b.product.as_deref(), Some("pgro"));
@@ -915,16 +916,46 @@ mod tests {
 		// A SENAITE server in a Tamanu group attributes to senaite, and to its
 		// own stage rather than the group's highest.
 		let empty = TagMap::default();
-		let b =
-			BillingLabels::for_server(&empty, "Pacific", Product::Senaite, Some(ServerRank::Clone));
+		let b = BillingLabels::for_server(
+			&empty,
+			"Pacific",
+			&ApplicationType::Senaite,
+			Some(ServerRank::Clone),
+		);
 		assert_eq!(b.product.as_deref(), Some("senaite"));
 		assert_eq!(b.deployment, "pacific");
 		assert_eq!(b.stage.as_deref(), Some("clone"));
 	}
 
 	#[test]
+	fn application_labels_name_the_software_without_its_role() {
+		// Cost allocation groups by software, so a central and a facility of one
+		// deployment label attribute to the same product. Each still carries its own
+		// stage, and both take the deployment label from the group.
+		let empty = TagMap::default();
+		let central = BillingLabels::for_server(
+			&empty,
+			"Pacific",
+			&ApplicationType::TamanuCentral,
+			Some(ServerRank::Production),
+		);
+		let facility = BillingLabels::for_server(
+			&empty,
+			"Pacific",
+			&ApplicationType::TamanuFacility,
+			Some(ServerRank::Test),
+		);
+		assert_eq!(central.product.as_deref(), Some("tamanu"));
+		assert_eq!(facility.product.as_deref(), Some("tamanu"));
+		assert_eq!(central.stage.as_deref(), Some("prod"));
+		assert_eq!(facility.stage.as_deref(), Some("test"));
+		assert_eq!(central.deployment, "pacific");
+		assert_eq!(facility.deployment, "pacific");
+	}
+
+	#[test]
 	fn backup_bucket_tags_attribute_to_the_backups_product() {
-		// Backup spend never charges to the deployment's application, and a
+		// Backup spend never charges to the group's application, and a
 		// group's own product label must not leak through.
 		let mut tags = TagMap::default();
 		tags.0.insert("billing.product".into(), "tamanu".into());
@@ -998,7 +1029,7 @@ mod tests {
 			Some(ServerRank::Production),
 		);
 		assert!(t.contains(&("billing.product".to_string(), "backups".to_string())));
-		// Computed deployment (group name) is lower-kebab-cased.
+		// Computed deployment label (group name) is lower-kebab-cased.
 		assert!(t.contains(&("billing.deployment".to_string(), "acme-prod".to_string())));
 		// Production maps to "prod", not the Display "production".
 		assert!(t.contains(&("billing.stage".to_string(), "prod".to_string())));
