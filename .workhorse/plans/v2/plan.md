@@ -862,3 +862,8 @@ The headline stays on the application page rather than being removed to match th
 
 `seedStatus` was filing every check in a seeded push against the application, including machine-subject ones that ingestion files against the box.
 It now splits by subject the way `file_health_events` does, so seeded state and reported state land in the same place.
+
+**Done since the audit: the split push shape's remaining edges.**
+`detail` is a section of its own, so a reporter field named `source`, `health`, `check` or `result` inside it is an ordinary field: recorded verbatim on both grains, with the envelope's reporter and the `health` arrays' checks unmoved.
+A key is an address rather than a label, so a payload repeating one describes one application, the last write standing; `applications` being a JSON object is what makes two under one key inexpressible.
+Both covered in `statuses_split.rs`.

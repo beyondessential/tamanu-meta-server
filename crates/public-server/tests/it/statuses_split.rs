@@ -686,3 +686,161 @@ async fn a_type_change_under_one_key_stands_a_new_application_beside_the_old() {
 	)
 	.await
 }
+
+/// `detail` is a section of its own, so the names the envelope reserves mean
+/// nothing inside it. A reporter whose box exposes a field called `source` or
+/// `health` gets it recorded as the field it is.
+///
+/// spec: STA
+#[tokio::test(flavor = "multi_thread")]
+async fn reserved_names_inside_detail_are_ordinary_fields() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let machine_id = machine_for(&mut conn, device_id).await;
+
+			let collides = serde_json::json!({
+				"source": "not-the-reporter",
+				"health": "excellent",
+				"check": "not-a-check",
+				"result": "not-a-result",
+			});
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"machine": {
+						"health": [{ "check": "disk_free", "result": "failed" }],
+						"detail": collides,
+					},
+					"applications": {
+						"central": {
+							"type": "tamanu-central",
+							"health": [{ "check": "db", "result": "passed" }],
+							"detail": collides,
+						},
+					},
+				}))
+				.await
+				.assert_status_ok();
+
+			#[derive(QueryableByName)]
+			struct Extra {
+				#[diesel(sql_type = sql_types::Jsonb)]
+				extra: serde_json::Value,
+			}
+			let machine_detail: Extra = sql_query(
+				"SELECT extra FROM machine_reported_detail WHERE machine_id = $1 AND source = 'alertd'",
+			)
+			.bind::<sql_types::Uuid, _>(machine_id)
+			.get_result(&mut conn)
+			.await
+			.expect("machine detail");
+			assert_eq!(
+				machine_detail.extra, collides,
+				"every field is recorded as reported, reserved name or not"
+			);
+
+			let central = application_id(&mut conn, machine_id, "central").await;
+			let app_detail: Extra = sql_query(
+				"SELECT extra FROM application_reported_detail WHERE application_id = $1 AND source = 'alertd'",
+			)
+			.bind::<sql_types::Uuid, _>(central)
+			.get_result(&mut conn)
+			.await
+			.expect("application detail");
+			assert_eq!(app_detail.extra, collides);
+
+			// The envelope's own answers are unmoved: the reporter is still
+			// the one the envelope named, and the checks are still the ones
+			// the `health` arrays carried.
+			let rows: Vec<Count> =
+				sql_query("SELECT count(*) AS count FROM statuses WHERE source <> 'alertd'")
+					.load(&mut conn)
+					.await
+					.expect("status rows");
+			assert_eq!(
+				rows[0].count, 0,
+				"the reporter is the one the envelope named"
+			);
+			assert_eq!(
+				issue_active(&mut conn, "machine_id", machine_id, "health/disk_free").await,
+				Some(true),
+			);
+			assert_eq!(
+				issue_active(&mut conn, "machine_id", machine_id, "health/not-a-check").await,
+				None,
+				"a `check` inside detail is a field, not a check",
+			);
+		},
+	)
+	.await
+}
+
+/// The shape keys applications by name, so a box cannot claim two workloads
+/// under one key: a payload that repeats a key describes one application, the
+/// last one written. That is what makes a key an address rather than a label.
+///
+/// spec: STA
+#[tokio::test(flavor = "multi_thread")]
+async fn two_applications_cannot_share_a_key() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let machine_id = machine_for(&mut conn, device_id).await;
+
+			// Literal JSON, because the duplicate key this asserts about
+			// cannot be built from a map in the first place.
+			let body = r#"{
+				"source": "alertd",
+				"machine": {},
+				"applications": {
+					"central": {
+						"type": "tamanu-central",
+						"detail": { "tamanuVersion": "2.4.0" }
+					},
+					"central": {
+						"type": "tamanu-central",
+						"detail": { "tamanuVersion": "2.4.1" }
+					}
+				}
+			}"#;
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.text(body)
+				.content_type("application/json")
+				.await
+				.assert_status_ok();
+
+			let rows: Vec<Count> =
+				sql_query("SELECT count(*) AS count FROM applications WHERE machine_id = $1")
+					.bind::<sql_types::Uuid, _>(machine_id)
+					.load(&mut conn)
+					.await
+					.expect("count applications");
+			assert_eq!(rows[0].count, 1, "one key is one application");
+
+			#[derive(QueryableByName)]
+			struct Extra {
+				#[diesel(sql_type = sql_types::Jsonb)]
+				extra: serde_json::Value,
+			}
+			let central = application_id(&mut conn, machine_id, "central").await;
+			let detail: Extra = sql_query(
+				"SELECT extra FROM application_reported_detail WHERE application_id = $1 AND source = 'alertd'",
+			)
+			.bind::<sql_types::Uuid, _>(central)
+			.get_result(&mut conn)
+			.await
+			.expect("application detail");
+			assert_eq!(
+				detail.extra,
+				serde_json::json!({ "tamanuVersion": "2.4.1" }),
+				"the last write under a repeated key is the one that stands"
+			);
+		},
+	)
+	.await
+}
