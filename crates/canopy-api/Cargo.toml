@@ -5,7 +5,7 @@ version = "0.0.0"
 edition = "2024"
 resolver = "3"
 license = "GPL-3.0-or-later"
-description = "Rust client for the Canopy public API, generated from its OpenAPI document"
+description = "Raw client bindings for the BES Canopy API"
 repository = "https://github.com/beyondessential/canopy"
 authors = [
 	"Félix Saparelli <felix@passcod.name>",
