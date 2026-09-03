@@ -90,9 +90,35 @@ An application's type is among the reserved read-only tags on applications, toge
 A machine's own name as the operating system reports it is a reported figure rather than a field an operator sets (see [FIG](../private-server/figures.md)).
 It is distinct from the DNS names an application serves at: two applications on one machine share one hostname and serve at names of their own.
 
+## Editing
+
+Editing is machine-first: one form per machine, holding the machine's own section and one section per application on it.
+
+So a machine fact has one place it is edited, and a shared box is edited where everything sharing it is visible — a change to the box is visibly a change to every workload on it.
+Editing an application leads to that form, its own fields being a section of it rather than a form of their own.
+
+The group is offered on the machine alone, since the applications on it take it and an application's group is never set independently.
+An identity is not offered at all: it is bound by enrolment rather than by editing a form.
+A machine's name is required when it is created and not when it is edited, so a box that arrived without one stays editable.
+
+## Editing
+
+Editing is machine-first: one form per machine, holding the machine's own section and one section per application on it.
+
+So a machine fact has one place it is edited, and a shared box is edited where everything sharing it is visible — a change to the box is visibly a change to every workload on it.
+Editing an application leads to that form, its own fields being a section of it rather than a form of their own.
+
+The group is offered on the machine alone, since the applications on it take it and an application's group is never set independently.
+An identity is not offered at all: it is bound by enrolment rather than by editing a form.
+A machine's name is required when a box is created and not when it is edited, so a box that arrived without one stays editable.
+
 ## Navigating the two grains
 
 The fleet is browsed by group, and its listing offers the groups, the archived records, and the fleet's figures.
+
+Everything the fleet holds is addressed beneath the fleet: its listings, its applications, and its machines, in the operator UI and in the private API alike.
+So a listing and a record are never told apart by which of them a name happens to match first, and an address says which grain it names.
+Every address these pages and endpoints answered at before still resolves to where that thing now lives, because a link into Canopy outlives a rename.
 Every machine sits in a group and every application takes its machine's, so a group is a complete index of the fleet.
 
 Each grain has a page of its own, and each names the other, so an operator moves between a box and the software on it without a search.

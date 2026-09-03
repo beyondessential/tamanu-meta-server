@@ -1,37 +1,41 @@
 import {
 	Alert,
 	Box,
+	Chip,
 	LinearProgress,
-	Link as MuiLink,
 	Paper,
 	Stack,
 	Typography,
 } from "@mui/material";
+import EditIcon from "@mui/icons-material/Edit";
 import InsightsIcon from "@mui/icons-material/Insights";
 import { useEffect, useState } from "react";
-import { Link as RouterLink, useLocation, useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import { useApi } from "../api";
 import ActionButton from "../components/ActionButton";
-import ApplicationTypeChip from "../components/ApplicationTypeChip";
+import ActiveIncidentCard from "../components/ActiveIncidentCard";
 import { ChecksTable, HealthIndicator } from "../components/ChecksTable";
+import IncidentsLink from "../components/IncidentsLink";
 import { HealthLegend, StatusLegend } from "../components/Legends";
 import MachineBackupSection from "../components/MachineBackupSection";
 import MachineIdentitySection from "../components/MachineIdentitySection";
 import MachineSetupInstructions from "../components/MachineSetupInstructions";
 import MaintenanceSection from "../components/MaintenanceSection";
 import ServerRankChip from "../components/ServerRankChip";
+import ServerShorty from "../components/ServerShorty";
 import GroupTree from "../components/GroupTree";
 import SilencedRefsSection from "../components/SilencedRefsSection";
-import StatusDot from "../components/StatusDot";
+import TargetName from "../components/TargetName";
 import TimeAgo from "../components/TimeAgo";
 import TimezoneTooltip from "../components/TimezoneTooltip";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { humanSeconds } from "../lib/humanDuration";
 import {
-	applicationName,
 	type MachineDetailData,
+	SERVER_RANK_ORDER,
 	type ServerInfo,
+	type ServerRank,
 } from "../types";
 
 /// A machine's own page: the box, what it reports about itself, its health,
@@ -46,10 +50,20 @@ export default function MachineDetail() {
 	const isAdmin = useIsAdmin() === true;
 	const [refreshTick, setRefreshTick] = useState(0);
 	const bumpRefresh = () => setRefreshTick((t) => t + 1);
-	const detail = useApi("machines", "get_detail", { machine_id: id }, [
+	const detail = useApi("fleet/machines", "get_detail", { machine_id: id }, [
 		id,
 		refreshTick,
 	]);
+	// The group's open incident, if any. An incident is never a box's, so this
+	// is read by group and shown as the group's.
+	const groupId = detail.status === "ok" ? (detail.data.group?.id ?? null) : null;
+	const activeIncidents = useApi(
+		"incidents",
+		"list_for_group",
+		{ server_group_id: groupId ?? "", include_closed: false, limit: 1 },
+		[groupId, refreshTick],
+		{ skip: groupId === null },
+	);
 	// Honour a `#backups` anchor (linked from the group's backup page): once the
 	// detail has loaded and the section is painted, scroll it into view.
 	const location = useLocation();
@@ -78,6 +92,10 @@ export default function MachineDetail() {
 
 	const data = detail.data;
 	const enrolled = data.machine.registered_at != null;
+	const openIncident =
+		activeIncidents.status === "ok" && activeIncidents.data.length > 0
+			? activeIncidents.data[0]
+			: null;
 	// Munin watches the box, reachable over the tailnet — build its URL from
 	// the bound identity's MagicDNS name (live value preferred, falling back to
 	// the stored snapshot). Offered only when the box is known to run Munin and
@@ -90,32 +108,82 @@ export default function MachineDetail() {
 	const muninUrl =
 		data.munin && tailnetName ? `https://${tailnetName}:4950/` : null;
 
+	// A box has no rank of its own: it takes the highest of the workloads on
+	// it, which is the same derivation its billing stage uses.
+	// spec: FLT#environments
+	const rank = machineRank(data.applications);
+
 	return (
 		<Stack spacing={3}>
-			<Stack
-				direction="row"
-				spacing={1}
-				sx={{ alignItems: "center", flexWrap: "wrap" }}
-				useFlexGap
-			>
-				<Typography variant="h4" component="h1">
-					{machineLabel(data) ?? "Unnamed machine"}
-				</Typography>
-				{data.group && (
-					<MuiLink
-						component={RouterLink}
-						to={`/groups/${data.group.id}`}
-						variant="body2"
-					>
-						{data.group.name}
-					</MuiLink>
-				)}
+			{/* The same header the application page has, because the two grains
+			    are siblings and reading one should teach the other: chips, then
+			    the group-prefixed title, then the actions. */}
+			{/* spec: FLT#navigating-the-two-grains */}
+			<Stack spacing={1.5}>
+				<Stack
+					direction="row"
+					spacing={1}
+					sx={{ alignItems: "center", flexWrap: "wrap" }}
+					useFlexGap
+				>
+					{rank && <ServerRankChip rank={rank} />}
+					{/* A box created a minute ago has nothing on it, and that is
+					    its normal condition rather than a count of zero. */}
+					<Chip
+						size="small"
+						label={
+							data.applications.length === 0
+								? "not yet reporting"
+								: `${data.applications.length} application${
+										data.applications.length === 1 ? "" : "s"
+									}`
+						}
+					/>
+					<Typography variant="h4" component="h1" sx={{ ml: 1 }}>
+						<TargetName
+							parts={[
+								{
+									label: data.group?.name ?? "",
+									to: data.group ? `/fleet/groups/${data.group.id}` : null,
+								},
+								{ label: machineLabel(data) ?? "Unnamed machine" },
+							]}
+						/>
+					</Typography>
+				</Stack>
+				<Stack
+					direction="row"
+					spacing={1}
+					sx={{ alignItems: "center", flexWrap: "wrap" }}
+					useFlexGap
+				>
+					{muninUrl && (
+						<ActionButton
+							href={muninUrl}
+							icon={<InsightsIcon />}
+							label="Munin"
+						/>
+					)}
+					<IncidentsLink
+						groupId={data.group?.id ?? null}
+						refreshKey={refreshTick}
+					/>
+					{isAdmin && (
+						<ActionButton
+							to={`/fleet/machines/${data.machine.id}/edit`}
+							icon={<EditIcon />}
+							label="Edit"
+							color="primary"
+						/>
+					)}
+				</Stack>
 			</Stack>
 
-			{muninUrl && (
-				<Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }} useFlexGap>
-					<ActionButton href={muninUrl} icon={<InsightsIcon />} label="Munin" />
-				</Stack>
+			{openIncident && (
+				<ActiveIncidentCard
+					incident={openIncident}
+					groupName={data.group?.name ?? null}
+				/>
 			)}
 
 			{data.machine.deleted_at != null && (
@@ -349,48 +417,49 @@ function gibibytes(bytes: number): string {
 
 /// The workloads this box carries. Two or more is the case the machine grain
 /// exists for.
+///
+/// The rows are the same shorty the fleet uses elsewhere, so a workload reads
+/// the same here as it does anywhere else: state, name, what it is, and where
+/// it answers. The group is left off — every one of them is in this box's.
 function ApplicationsOnThisBox({
 	applications,
 }: {
 	applications: ServerInfo[];
 }) {
 	return (
-		<Paper variant="outlined" sx={{ p: 2 }} data-testid="applications-on-box">
-			<Typography variant="h6" gutterBottom>
+		<Box data-testid="applications-on-box">
+			<Typography variant="h5" component="h2" gutterBottom>
 				Applications ({applications.length})
 			</Typography>
 			{applications.length === 0 ? (
 				<Typography variant="body2" color="text.secondary">
-					Nothing reported on this box yet.
+					None yet. Applications appear here as the machine reports them.
 				</Typography>
 			) : (
 				<Stack spacing={1}>
 					{applications.map((application) => (
-						<Stack
+						<ServerShorty
 							key={application.id}
-							direction="row"
-							spacing={1}
-							sx={{ alignItems: "center" }}
-						>
-							<StatusDot
-								up={application.up ?? "gone"}
-								health={application.health ?? "healthy"}
-							/>
-							<MuiLink
-								component={RouterLink}
-								to={`/servers/${application.id}`}
-								sx={{ fontWeight: 500 }}
-							>
-								{applicationName(application)}
-							</MuiLink>
-							{application.rank && <ServerRankChip rank={application.rank} />}
-							<ApplicationTypeChip type={application.type} />
-						</Stack>
+							server={application}
+							withGroup={false}
+						/>
 					))}
 				</Stack>
 			)}
-		</Paper>
+		</Box>
 	);
+}
+
+/// The highest rank among the workloads on a box, which is what a box's rank
+/// means. A box carrying nothing yet has none.
+// spec: FLT#environments
+function machineRank(applications: ServerInfo[]): ServerRank | null {
+	for (const rank of SERVER_RANK_ORDER) {
+		if (applications.some((application) => application.rank === rank)) {
+			return rank;
+		}
+	}
+	return null;
 }
 
 function InfoItem({

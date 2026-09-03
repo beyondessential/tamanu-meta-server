@@ -90,8 +90,10 @@ export default function MachineEnclosure({
 					bgcolor: state.fill,
 					backgroundImage: maintained ? MAINTAINED_HATCH : undefined,
 					borderRadius: "999px",
-					px: "4px",
-					py: "3px",
+					// px and py must stay the same. In em rather than px, so
+					// the pill scales with the type around it.
+					px: "0.1875em",
+					py: "0.1875em",
 					// The dots carry their own right margin, which the pill's own
 					// gap replaces.
 					"& span": { marginRight: 0 },

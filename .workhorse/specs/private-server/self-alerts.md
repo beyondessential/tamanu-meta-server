@@ -32,3 +32,7 @@ Active self-alerts are presented on their own surface in the operator UI, apart 
 Self-alerts do not appear in the fleet issue listings, and are not presented as belonging to any machine or application.
 Only Canopy's own conditions appear on that surface: a check filed about an application, a machine, or a group is a fleet issue, not a self-alert.
 Each alert presents its effective result, when it became active, and a description of the condition and what to do about it.
+
+An alert that names things an operator has to act on presents each of them as a way to reach it, not only as text in the message.
+The alert for checks gone quiet names each check by its whole identity — its source and its namespace-qualified name, since a name alone can belong to several entries — and each one leads to that check's own policy, where decommissioning it is done.
+This matters because the condition is not something resolving the alert clears: it holds until each check named has been decommissioned or has reported again, so an alert that only describes what is wrong is one an operator cannot act on from where they are reading it.

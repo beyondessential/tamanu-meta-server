@@ -29,10 +29,18 @@ const DOT_ENTRIES: Array<{
 // The enclosure's own states. Orange is the pill's alone, so each hue means
 // one thing: light green a degraded application, orange a degraded machine,
 // red down.
+//
+// `dots` is how many applications the sample pill holds. Two is not decoration:
+// a shared box is the case the machine grain exists for, and an operator who
+// has never seen one has no way to know that two dots in a pill is one host
+// rather than a coincidence. The down entry carries two as well, so "everything
+// on it with it" is shown rather than only claimed.
+// spec: CHK#presentation
 const MACHINE_ENTRIES: Array<{
 	up: ShortStatus;
 	health: HealthState;
 	maintained?: boolean;
+	dots?: number;
 	label: string;
 }> = [
 	{ up: "up", health: "healthy", label: "Machine fine" },
@@ -40,6 +48,7 @@ const MACHINE_ENTRIES: Array<{
 	{
 		up: "down",
 		health: "healthy",
+		dots: 2,
 		label: "Machine down (everything on it with it)",
 	},
 	{
@@ -47,6 +56,12 @@ const MACHINE_ENTRIES: Array<{
 		health: "healthy",
 		maintained: true,
 		label: "Hatched: under maintenance (being worked on)",
+	},
+	{
+		up: "up",
+		health: "healthy",
+		dots: 2,
+		label: "Two applications on one machine",
 	},
 ];
 
@@ -115,7 +130,7 @@ export function OperatorLegend() {
 export function HealthLegend() {
 	return (
 		<Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap" }}>
-			{MACHINE_ENTRIES.map(({ up, health, maintained, label }) => (
+			{MACHINE_ENTRIES.map(({ up, health, maintained, dots = 1, label }) => (
 				<Stack
 					key={label}
 					direction="row"
@@ -123,7 +138,9 @@ export function HealthLegend() {
 					sx={{ alignItems: "center" }}
 				>
 					<MachineEnclosure up={up} health={health} maintained={maintained}>
-						<StatusDot up="up" health="healthy" />
+						{Array.from({ length: dots }, (_, i) => (
+							<StatusDot key={i} up="up" health="healthy" />
+						))}
 					</MachineEnclosure>
 					<Typography variant="body2" color="text.secondary">
 						{label}

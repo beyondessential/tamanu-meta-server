@@ -10,16 +10,16 @@ export default function Servers() {
 	// No ungrouped tab: a machine is created in a group and an application takes
 	// its machine's, so there is nothing left for that listing to list.
 	// spec: FLT
-	const value = location.pathname.startsWith("/servers/archived")
+	const value = location.pathname.startsWith("/fleet/archived")
 		? "archived"
-		: location.pathname.startsWith("/servers/figures")
+		: location.pathname.startsWith("/fleet/figures")
 			? "figures"
 			: "groups";
 
 	const tabTarget: Record<string, string> = {
-		groups: "/servers",
-		archived: "/servers/archived",
-		figures: "/servers/figures",
+		groups: "/fleet",
+		archived: "/fleet/archived",
+		figures: "/fleet/figures",
 	};
 
 	return (
@@ -41,7 +41,7 @@ export default function Servers() {
 
 function ServerNameBreadcrumb({ serverId }: { serverId: string }) {
 	const result = useApi(
-		"servers",
+		"fleet/applications",
 		"get_name",
 		{ server_id: serverId },
 		[serverId],

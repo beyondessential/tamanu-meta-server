@@ -215,7 +215,7 @@ function Header({
 						{incident.server_group_id != null ? (
 							<MuiLink
 								component={RouterLink}
-								to={`/groups/${incident.server_group_id}`}
+								to={`/fleet/groups/${incident.server_group_id}`}
 								underline="hover"
 								color="inherit"
 							>

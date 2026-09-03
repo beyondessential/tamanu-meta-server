@@ -125,7 +125,7 @@ test.describe("fleet figures", () => {
 	}) => {
 		await seedFleet(sql);
 
-		await page.goto("/servers/figures");
+		await page.goto("/fleet/figures");
 
 		// The card groups by PostgreSQL's major version, so the two servers on
 		// 16.3 and 16.4 read as one population.
@@ -154,7 +154,7 @@ test.describe("fleet figures", () => {
 	}) => {
 		await seedFleet(sql);
 
-		await page.goto("/servers/figures");
+		await page.goto("/fleet/figures");
 		await page.getByRole("combobox", { name: "Field" }).fill("postgres");
 		await page.getByRole("option", { name: "PostgreSQL version" }).click();
 
@@ -174,7 +174,7 @@ test.describe("fleet figures", () => {
 		const delta = await seedServer(sql, { name: "fleet-delta" });
 		await seedStatus(sql, { serverId: delta.id, version: "2.9.4" });
 
-		await page.goto("/servers/figures");
+		await page.goto("/fleet/figures");
 
 		const release = page.getByRole("group", { name: "Tamanu release" });
 		await expect(valueRows(release).first()).toHaveAccessibleName("2.54: 2");
@@ -196,7 +196,7 @@ test.describe("fleet figures", () => {
 	}) => {
 		await seedFleet(sql);
 
-		await page.goto("/servers/figures");
+		await page.goto("/fleet/figures");
 		await page.getByRole("combobox", { name: "Field" }).fill("uptimeSecs");
 
 		// Three distinct values, one server each, plus the unreported server.
@@ -227,7 +227,7 @@ test.describe("fleet figures", () => {
 			health: [{ check: "diskspace", result: "passed", percent: 12 }],
 		});
 
-		await page.goto("/servers/figures");
+		await page.goto("/fleet/figures");
 		await page
 			.getByRole("combobox", { name: "Field" })
 			.fill("diskspace.percent");
@@ -246,7 +246,7 @@ test.describe("fleet figures", () => {
 	test("crosses two fields into a table of counts", async ({ page, sql }) => {
 		await seedFleet(sql);
 
-		await page.goto("/servers/figures");
+		await page.goto("/fleet/figures");
 
 		const crossTab = page.getByRole("group", { name: "Cross two fields" });
 		await crossTab.getByLabel("Rows").click();
@@ -269,7 +269,7 @@ test.describe("fleet figures", () => {
 	}) => {
 		await seedFleet(sql);
 
-		await page.goto("/servers/figures");
+		await page.goto("/fleet/figures");
 
 		// The crossing leads with the coarse version figures.
 		const crossTab = page.getByRole("group", { name: "Cross two fields" });
@@ -295,7 +295,7 @@ test.describe("fleet figures", () => {
 	}) => {
 		await seedTwinBox(sql, { central: "2.54.3", facility: "2.54.1" });
 
-		await page.goto("/servers/figures");
+		await page.goto("/fleet/figures");
 
 		// Three applications, two boxes, one platform value.
 		const platform = page.getByRole("group", { name: "Platform" });
@@ -322,7 +322,7 @@ test.describe("fleet figures", () => {
 	}) => {
 		await seedTwinBox(sql, { central: "2.54.3", facility: "2.54.1" });
 
-		await page.goto("/servers/figures");
+		await page.goto("/fleet/figures");
 
 		const release = page.getByRole("group", { name: "Tamanu release" });
 		// Both workloads on the shared box are on 2.54, and both are counted.
@@ -347,7 +347,7 @@ test.describe("fleet figures", () => {
 	}) => {
 		await seedTwinBox(sql, { central: "2.54.3", facility: "2.54.1" });
 
-		await page.goto("/servers/figures");
+		await page.goto("/fleet/figures");
 
 		const crossTab = page.getByRole("group", { name: "Cross two fields" });
 		await crossFields(crossTab, "Platform", "Tamanu release");
@@ -375,7 +375,7 @@ test.describe("fleet figures", () => {
 	}) => {
 		await seedTwinBox(sql, { central: "2.54.3", facility: "2.46.0" });
 
-		await page.goto("/servers/figures");
+		await page.goto("/fleet/figures");
 
 		const crossTab = page.getByRole("group", { name: "Cross two fields" });
 		await crossFields(crossTab, "Platform", "Tamanu release");
@@ -418,7 +418,7 @@ test.describe("fleet figures", () => {
 			extra: { pgVersion: pg("16.3") },
 		});
 
-		await page.goto("/servers/figures");
+		await page.goto("/fleet/figures");
 
 		// Neither box reported an operating system, and neither reads as
 		// unreported.

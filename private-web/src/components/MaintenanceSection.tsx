@@ -110,7 +110,7 @@ export default function MaintenanceSection({
 					<Typography variant="body2">
 						Under maintenance, ending{" "}
 						<TimeAgo timestamp={fromGroup.expected_end} />, as part of{" "}
-						<MuiLink component={RouterLink} to={`/groups/${groupId}`}>
+						<MuiLink component={RouterLink} to={`/fleet/groups/${groupId}`}>
 							{groupName ?? "its group"}
 						</MuiLink>
 						. Amend or lift it there.

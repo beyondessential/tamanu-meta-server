@@ -22,7 +22,7 @@ import { humanDuration } from "../lib/humanDuration";
 import MessageView from "./MessageView";
 import NotesList, { AddNoteButton } from "./NotesList";
 import ResolverAvatar from "./ResolverAvatar";
-import ServerNameWithGroup from "./ServerNameWithGroup";
+import TargetName from "./TargetName";
 import CheckDocButton from "./CheckDocButton";
 import CheckResultChip from "./CheckResultChip";
 import StatusSnapshotPanel, { StatusSnapshotButton } from "./StatusSnapshot";
@@ -153,42 +153,61 @@ function Header({
 			{issue.application_id != null ? (
 				<MuiLink
 					component={RouterLink}
-					to={`/servers/${issue.application_id}`}
+					to={`/fleet/applications/${issue.application_id}`}
 					underline="hover"
 					color="text.primary"
 					sx={{ fontWeight: 500, flexShrink: 0 }}
 				>
-					<ServerNameWithGroup
-						groupName={issue.server_group_name}
-						serverName={
-							issue.server_name && issue.server_name.trim() !== ""
-								? issue.server_name
-								: issue.server_host || "(unknown)"
-						}
+					<TargetName
+						parts={[
+							{ label: issue.server_group_name ?? "" },
+							{
+								label:
+									issue.server_name && issue.server_name.trim() !== ""
+										? issue.server_name
+										: issue.server_host || "(unknown)",
+							},
+						]}
 					/>
 				</MuiLink>
 			) : issue.machine_id != null ? (
 				// A machine's issue: the box's own, so it names the box rather
-				// than reading as group-wide. No link yet — the machine detail
-				// page arrives with the frontend step.
+				// than reading as group-wide, and links to it. Reaching the box
+				// is the whole point of the row — an operator triaging an
+				// unreachable host has nowhere else to go from here.
 				// spec: CHK#reachability
 				<Box sx={{ fontWeight: 500, flexShrink: 0 }}>
-					<ServerNameWithGroup
-						groupName={issue.server_group_name}
-						groupId={issue.server_group_id ?? undefined}
-						serverName={issue.machine_name?.trim() || "(machine)"}
+					<TargetName
+						parts={[
+							{
+								label: issue.server_group_name ?? "",
+								to: issue.server_group_id
+									? `/fleet/groups/${issue.server_group_id}`
+									: null,
+							},
+							{
+								label: issue.machine_name?.trim() || "(machine)",
+								to: `/fleet/machines/${issue.machine_id}`,
+							},
+						]}
 					/>
 				</Box>
 			) : (
 				// Group-scoped issue (no target): link the group instead of a
-				// bogus `/servers/null`. Falls back to a plain label when the
-				// issue carries no group name.
+				// bogus `/applications/null`. Falls back to a plain label when
+				// the issue carries no group name.
 				<Box sx={{ fontWeight: 500, flexShrink: 0 }}>
 					{issue.server_group_name ? (
-						<ServerNameWithGroup
-							groupName={issue.server_group_name}
-							groupId={issue.server_group_id ?? undefined}
-							serverName="(group-wide)"
+						<TargetName
+							parts={[
+								{
+									label: issue.server_group_name,
+									to: issue.server_group_id
+										? `/fleet/groups/${issue.server_group_id}`
+										: null,
+								},
+								{ label: "(group-wide)" },
+							]}
 						/>
 					) : (
 						<Typography

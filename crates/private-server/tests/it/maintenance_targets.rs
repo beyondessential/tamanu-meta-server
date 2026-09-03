@@ -59,7 +59,7 @@ async fn a_window_over_a_machine_suspends_the_applications_on_it() {
 		.unwrap();
 
 		let response = private
-			.post("/api/server_groups/get")
+			.post("/api/fleet/groups/get")
 			.json(&serde_json::json!({ "server_group_id": group }))
 			.await;
 		response.assert_status_ok();
@@ -110,7 +110,7 @@ async fn a_window_over_a_group_suspends_all_of_it() {
 		.unwrap();
 
 		let response = private
-			.post("/api/server_groups/get")
+			.post("/api/fleet/groups/get")
 			.json(&serde_json::json!({ "server_group_id": group }))
 			.await;
 		response.assert_status_ok();

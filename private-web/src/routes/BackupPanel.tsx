@@ -86,7 +86,7 @@ export default function BackupPanel() {
 		[id, tick],
 	);
 	const group = useApi(
-		"server_groups",
+		"fleet/groups",
 		"get",
 		{ server_group_id: id },
 		[id],
@@ -115,7 +115,7 @@ export default function BackupPanel() {
 				<Box>
 					<MuiLink
 						component={RouterLink}
-						to={`/groups/${id}`}
+						to={`/fleet/groups/${id}`}
 						variant="body2"
 						underline="hover"
 					>
@@ -130,7 +130,7 @@ export default function BackupPanel() {
 					<Box>
 						<Button
 							component={RouterLink}
-							to={`/groups/${id}/backups/config`}
+							to={`/fleet/groups/${id}/backups/config`}
 							variant="contained"
 							startIcon={<BackupIcon />}
 						>
@@ -157,7 +157,7 @@ export default function BackupPanel() {
 			<Box>
 				<MuiLink
 					component={RouterLink}
-					to={`/groups/${id}`}
+					to={`/fleet/groups/${id}`}
 					variant="body2"
 					underline="hover"
 				>
@@ -186,7 +186,7 @@ export default function BackupPanel() {
 						<Stack direction="row" spacing={1}>
 							<Button
 								component={RouterLink}
-								to={`/groups/${id}/backups/config`}
+								to={`/fleet/groups/${id}/backups/config`}
 								variant="outlined"
 								startIcon={<EditIcon />}
 							>
@@ -1769,7 +1769,7 @@ function ServersPanel({
 	const machineLink = (box: RankedMachine) => (
 		<MuiLink
 			component={RouterLink}
-			to={`/machines/${box.machine.id}#backups`}
+			to={`/fleet/machines/${box.machine.id}#backups`}
 			variant="body2"
 			underline="hover"
 		>

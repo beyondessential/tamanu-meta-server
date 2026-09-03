@@ -28,7 +28,7 @@ test.describe("munin link on machine detail", () => {
 			extra: { munin: true },
 		});
 
-		await page.goto(`/machines/${machine.id}`);
+		await page.goto(`/fleet/machines/${machine.id}`);
 
 		const munin = page.getByRole("link", { name: "Munin" });
 		await expect(munin).toBeVisible();
@@ -55,7 +55,7 @@ test.describe("munin link on machine detail", () => {
 			extra: { uptimeSecs: 3600 },
 		});
 
-		await page.goto(`/machines/${machine.id}`);
+		await page.goto(`/fleet/machines/${machine.id}`);
 
 		// Wait for the page to render before asserting the link's absence.
 		await expect(

@@ -124,7 +124,7 @@ export function useApi<
 		// Keep prior data on screen during background refetches so the UI
 		// doesn't collapse to a loading placeholder on every reload tick —
 		// but only when it's still the *same* query. Detail routes reuse the
-		// mounted component across /servers/A → /servers/B, so holding on to
+		// mounted component across /applications/A → /applications/B, so holding on to
 		// prior data across an identity change renders A's name, health and
 		// checks under B's URL, with no loading indicator to say otherwise.
 		const identity = queryIdentity(module, fn, params);

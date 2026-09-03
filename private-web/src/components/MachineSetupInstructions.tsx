@@ -49,8 +49,8 @@ export default function MachineSetupInstructions({
 	/// ticket; re-enroll waits for the operator to press "Re-enroll a device".
 	reEnroll?: boolean;
 }) {
-	const mint = useApiAction("machines", "mint_enrollment");
-	const revoke = useApiAction("machines", "revoke_enrollment");
+	const mint = useApiAction("fleet/machines", "mint_enrollment");
+	const revoke = useApiAction("fleet/machines", "revoke_enrollment");
 	const [ticket, setTicket] = useState<EnrollmentTicket | null>(null);
 	const [copied, setCopied] = useState(false);
 	const [copiedPassphrase, setCopiedPassphrase] = useState(false);
@@ -59,7 +59,7 @@ export default function MachineSetupInstructions({
 	// outstanding and whether the machine has (re-)registered.
 	const tick = useReloadInterval(5000);
 	const status = useApi(
-		"machines",
+		"fleet/machines",
 		"enrollment_status",
 		{ machine_id: machineId },
 		[machineId, tick],

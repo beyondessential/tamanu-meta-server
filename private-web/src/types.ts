@@ -20,11 +20,24 @@ type Schemas = components["schemas"];
 // hand-writing them.
 
 export type ApiPath = keyof paths & string;
-type ModuleOf<P extends string> = P extends `/api/${infer M}/${string}`
-	? M
+
+/// Split a path's tail at its **last** slash, so a module may itself be
+/// nested: `fleet/applications/get_detail` is the `get_detail` function of the
+/// `fleet/applications` module, not an `applications/get_detail` function of a
+/// `fleet` module. Inferring on the first slash would say the latter, and
+/// collapse every fleet module into one.
+type SplitLast<
+	S extends string,
+	Head extends string = "",
+> = S extends `${infer Segment}/${infer Rest}`
+	? SplitLast<Rest, Head extends "" ? Segment : `${Head}/${Segment}`>
+	: [Head, S];
+
+type ModuleOf<P extends string> = P extends `/api/${infer Tail}`
+	? SplitLast<Tail>[0]
 	: never;
-type FnOf<P extends string> = P extends `/api/${string}/${infer F}`
-	? F
+type FnOf<P extends string> = P extends `/api/${infer Tail}`
+	? SplitLast<Tail>[1]
 	: never;
 
 export type ApiModule = ModuleOf<ApiPath>;

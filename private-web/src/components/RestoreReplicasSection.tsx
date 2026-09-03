@@ -580,7 +580,7 @@ function wireParamsToValues(
  * against, shared by the declare and edit dialogs. */
 function useGroupScopeData(groupId: string) {
 	const detail = useApi(
-		"server_groups",
+		"fleet/groups",
 		"get",
 		{ server_group_id: groupId },
 		[groupId],

@@ -344,16 +344,42 @@ pub async fn sweep_stale_healthchecks(conn: &mut AsyncPgConnection) -> Result<Op
 		.await;
 	}
 
+	// The qualified name, not the bare one. A check is identified by a
+	// namespace and a name, so `alertd/db_version` names as many entries as
+	// there are types reporting it — and an operator told to decommission one
+	// of them cannot tell which from the message.
 	let names: Vec<String> = quiet
 		.iter()
-		.map(|p| format!("{}/{}", p.source, p.check_name))
+		.map(|p| format!("{}/{}", p.source, p.qualified_name()))
 		.collect();
 	let message = format!(
 		"{} healthcheck(s) unreported fleet-wide for 30 days: {}",
 		quiet.len(),
 		names.join(", "),
 	);
-	raise(
+	// The same set, structured, so the operator surface can link each one to
+	// its own policy page — which is where the decommission this alert asks
+	// for actually lives.
+	let detail = serde_json::json!({
+		"checks": quiet
+			.iter()
+			.map(|p| {
+				let namespace = p.namespace().ok();
+				serde_json::json!({
+					"source": p.source,
+					"check": p.check_name,
+					"qualified_name": p.qualified_name(),
+					"subject": namespace
+						.as_ref()
+						.and_then(|ns| ns.to_columns().0),
+					"application_type": namespace
+						.as_ref()
+						.and_then(|ns| ns.to_columns().1),
+				})
+			})
+			.collect::<Vec<_>>(),
+	});
+	raise_with_detail(
 		conn,
 		STALE_CHECKS_REF,
 		CheckResult::Warning,
@@ -362,6 +388,7 @@ pub async fn sweep_stale_healthchecks(conn: &mut AsyncPgConnection) -> Result<Op
 		Some(STALE_CHECKS_DOC),
 		"Healthchecks gone quiet",
 		&message,
+		Some(detail),
 	)
 	.await
 	.map(Some)
@@ -546,6 +573,37 @@ pub async fn raise(
 	title: &str,
 	message: &str,
 ) -> Result<Issue> {
+	raise_with_detail(
+		conn,
+		r#ref,
+		observed,
+		default_ceiling,
+		default_escalates,
+		documentation,
+		title,
+		message,
+		None,
+	)
+	.await
+}
+
+/// [`raise`], with structured detail attached to the filing.
+///
+/// A message is for reading; detail is for acting on. An alert that names
+/// things an operator has to go and find needs to hand the UI what those
+/// things are, rather than making it parse them back out of a sentence.
+#[expect(clippy::too_many_arguments)]
+pub async fn raise_with_detail(
+	conn: &mut AsyncPgConnection,
+	r#ref: &str,
+	observed: CheckResult,
+	default_ceiling: CheckResult,
+	default_escalates: bool,
+	documentation: Option<&str>,
+	title: &str,
+	message: &str,
+	detail: Option<serde_json::Value>,
+) -> Result<Issue> {
 	file_check(
 		conn,
 		CheckFiling {
@@ -556,7 +614,7 @@ pub async fn raise(
 			observed,
 			title: Some(title),
 			message,
-			detail: None,
+			detail,
 			default_ceiling,
 			default_escalates,
 			documentation,

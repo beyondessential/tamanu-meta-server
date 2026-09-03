@@ -130,7 +130,7 @@ export default function Upgrades() {
 									data-testid="planned-upgrade-row"
 								>
 										<TableCell>
-											<RouterLink to={`/groups/${row.group_id}`}>
+											<RouterLink to={`/fleet/groups/${row.group_id}`}>
 												{row.group_name}
 											</RouterLink>
 										</TableCell>
@@ -233,7 +233,7 @@ export default function Upgrades() {
 										data-testid="unplanned-upgrade-row"
 									>
 										<TableCell>
-											<RouterLink to={`/groups/${row.group_id}`}>
+											<RouterLink to={`/fleet/groups/${row.group_id}`}>
 												{row.group_name}
 											</RouterLink>
 										</TableCell>
@@ -696,7 +696,7 @@ function CalendarEntry({
 			<Box
 				{...(onEdit
 					? { component: "button" as const, type: "button", onClick: onEdit }
-					: { component: RouterLink, to: `/groups/${entry.groupId}` })}
+					: { component: RouterLink, to: `/fleet/groups/${entry.groupId}` })}
 				data-testid="calendar-entry"
 				sx={[
 					(theme) => ({
@@ -742,7 +742,7 @@ function TimeBlock({
 			<Box
 				{...(onEdit
 					? { component: "button" as const, type: "button", onClick: onEdit }
-					: { component: RouterLink, to: `/groups/${entry.groupId}` })}
+					: { component: RouterLink, to: `/fleet/groups/${entry.groupId}` })}
 				data-testid="calendar-entry"
 				{...(block.tail ? { "data-continues": "true" } : null)}
 				sx={[
@@ -1257,7 +1257,7 @@ function PastPlans({ plans }: { plans: PastPlan[] }) {
 					{plans.map((row) => (
 						<TableRow key={row.plan.id} data-testid="past-plan-row">
 								<TableCell>
-									<RouterLink to={`/groups/${row.group_id}`}>
+									<RouterLink to={`/fleet/groups/${row.group_id}`}>
 										{row.group_name}
 									</RouterLink>
 								</TableCell>

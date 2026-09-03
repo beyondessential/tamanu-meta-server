@@ -3192,6 +3192,1235 @@
         ]
       }
     },
+    "/api/fleet/applications/delete": {
+      "post": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Archive (soft-delete) a server.",
+        "description": "Releases and demotes its device. Archived applications no longer appear in\nregular listings but can be restored later.",
+        "operationId": "delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdOnlyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/applications/get_detail": {
+      "post": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Get full detail for a server.",
+        "description": "Returns the server's record, its bound device (if any), its most recent\nstatus report, current reachability/health, its group (if any) together\nwith the group's whole membership for the tree the page ends with, and the\ngroup's billing labels.\nReturns 404 if no server exists with that id.",
+        "operationId": "get_detail",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerDetailData"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/fleet/applications/get_info": {
+      "post": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Get a server's basic record.",
+        "description": "Returns identity, classification, and configuration for a single server,\nincluding its group name where applicable. Does not include current\nreachability/health or device/group detail — use the detail endpoint for\nthat. Returns 404 if no server exists with that id.",
+        "operationId": "get_info",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerInfo"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/fleet/applications/get_name": {
+      "post": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Get a server's display name.",
+        "description": "Returns the server's name if set, else its stored host, else its id —\nalways a non-empty string suitable for display. Returns 404 if no server\nexists with that id.",
+        "operationId": "get_name",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/fleet/applications/list_archived": {
+      "post": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "List archived (soft-deleted) applications.",
+        "description": "Each entry has `archived: true` and includes current reachability/health.\nArchived applications can be brought back with the restore endpoint.",
+        "operationId": "list_archived",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServerInfo"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/applications/list_some": {
+      "post": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "List applications, optionally filtered by kind, paginated.",
+        "description": "Returns a page of applications plus the total matching count. Entries include\ntheir group name where applicable, but not current reachability/health —\nuse the detail endpoint for that.",
+        "operationId": "list_some",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerListArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_ServerInfo"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/fleet/applications/restore": {
+      "post": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Un-archive a server.",
+        "description": "Restores a previously archived server to regular listings. Its machine\nmust re-enroll afterwards to rebind a device. Restoring a server that\nisn't archived has no effect.",
+        "operationId": "restore",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerIdOnlyArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/applications/update": {
+      "post": {
+        "tags": [
+          "applications"
+        ],
+        "summary": "Update a server's fields.",
+        "description": "Applies a partial update — only the fields present in `data` are\nchanged. Moving a previously-ungrouped server into a group, or toggling\n`is_monitored`, re-evaluates the server's open issues so incidents catch\nup with the new state. Returns 400 if the update is rejected (e.g. an\ninvalid host value, or a role the target product doesn't define).",
+        "operationId": "server_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerUpdateArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/groups/create": {
+      "post": {
+        "tags": [
+          "server_groups"
+        ],
+        "summary": "Create a server group.",
+        "description": "Creates a new, empty server group and returns it. Requires the caller to\nbe on the admin allow-list. Responds 400 if the request is invalid.",
+        "operationId": "server_groups_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerGroupsCreateArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/groups/delete": {
+      "post": {
+        "tags": [
+          "server_groups"
+        ],
+        "summary": "Archive a server group.",
+        "description": "Soft-deletes the group: it disappears from live listings but is kept and\ncan be restored later. Requires the caller to be on the admin allow-list.\nResponds 409 if the group still has live member applications; move or archive\nthose first.",
+        "operationId": "server_groups_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "409": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/groups/get": {
+      "post": {
+        "tags": [
+          "server_groups"
+        ],
+        "summary": "Get a server group with its members.",
+        "description": "Returns the group, its member applications (sorted by name, with current status\nand display host), and the group's effective billing labels. Responds 404\nif no group exists with the given identifier.",
+        "operationId": "server_groups_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/groups/list": {
+      "post": {
+        "tags": [
+          "server_groups"
+        ],
+        "summary": "List all live server groups.",
+        "description": "Returns every non-archived server group, including its name, notes, tags,\nSlack notification delay, and effective version information. The request\nbody is ignored; send an empty JSON object.",
+        "operationId": "server_groups_list",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServerGroup"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/groups/list_archived": {
+      "post": {
+        "tags": [
+          "server_groups"
+        ],
+        "summary": "List archived server groups.",
+        "description": "Returns every group that has been archived (soft-deleted) and can be\nrestored. The request body is ignored; send an empty JSON object.",
+        "operationId": "server_groups_list_archived",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServerGroup"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/groups/restore": {
+      "post": {
+        "tags": [
+          "server_groups"
+        ],
+        "summary": "Restore an archived server group.",
+        "description": "Un-archives a previously deleted group so it reappears in live listings.\nRequires the caller to be on the admin allow-list. Responds 404 if the\ngroup does not exist.",
+        "operationId": "server_groups_restore",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/groups/search": {
+      "post": {
+        "tags": [
+          "server_groups"
+        ],
+        "summary": "Search live server groups.",
+        "description": "Returns non-archived groups matching the free-text query.",
+        "operationId": "server_groups_search",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerGroupsSearchArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServerGroup"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/groups/server_counts": {
+      "post": {
+        "tags": [
+          "server_groups"
+        ],
+        "summary": "Count live applications per group.",
+        "description": "Returns one entry per server group that has at least one live\n(non-archived) member server. Groups with no live members are omitted, so\ntreat a missing entry as a count of zero. The request body is ignored;\nsend an empty JSON object.",
+        "operationId": "server_groups_server_counts",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/GroupServerCount"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/groups/update": {
+      "post": {
+        "tags": [
+          "server_groups"
+        ],
+        "summary": "Update a server group.",
+        "description": "Applies a partial update: only the fields present in `data` (name, notes,\ntags, Slack notification delay) are changed. Returns the updated group.\nRequires the caller to be on the admin allow-list. Responds 404 if the\ngroup does not exist and 400 if the request is invalid.",
+        "operationId": "server_groups_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerGroupsUpdateArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerGroup"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/machines/archive": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Archive a machine, and with it the applications on it.",
+        "description": "A box going away takes its workloads with it. Archival is not deletion:\nthe records and their history remain.",
+        "operationId": "machines_archive",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "default": null
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/machines/attach_tailscale_device": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Attach an identity to a machine via a Tailscale identifier.",
+        "description": "Resolves the identifier to a tailnet node, finds the identity already on\nthat node or mints one for it, and binds it to the machine. Useful when an\noperator can already see the box on the tailnet and wants to name it now\nrather than wait for enrolment. `registered_at` stays unset: naming a box is\nnot the box arriving.\n\nReturns 409 if the resolved identity already speaks for another live\nmachine; detach it there first.",
+        "operationId": "machines_attach_tailscale_device",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachTailscaleDeviceArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Identity now bound to the machine.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Identifier does not resolve to a known tailnet node.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The resolved identity already speaks for another machine.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Tailnet directory not configured or unreachable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/machines/create": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Add a machine to the fleet.",
+        "description": "The machine starts with no applications and no identity; enrolment binds an\nidentity, and the applications on it arrive by report.",
+        "operationId": "machines_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineCreateArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/machines/enrollment_status": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Get the enrollment state of a machine.",
+        "description": "Reports whether the machine has completed enrollment, and whether an\nenrollment token is currently outstanding (issue and expiry times only —\nthe token itself is never revealed).",
+        "operationId": "enrollment_status",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/machines/get": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Get one machine and the applications running on it.",
+        "description": "Returns the machine's own facts — its group, where it is, how long it may\nbe silent — together with the applications it hosts. Returns 404 if the\nmachine doesn't exist.",
+        "operationId": "machines_get",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/machines/get_detail": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Get full detail for one machine.",
+        "description": "Returns the box's record, what it reports about itself, its identity, its\nown health and checks, and the applications running on it. Returns 404 if\nthe machine doesn't exist.",
+        "operationId": "machines_get_detail",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MachineDetailData"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/machines/list": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "List the live fleet's machines.",
+        "description": "Every machine that has not been archived, ordered by name. A machine with\nno applications on it is included: one created but not yet reporting is\nawaiting check-in, not an error. The request body is ignored; send an empty\nJSON object.",
+        "operationId": "machines_list",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Machine"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/machines/mint_enrollment": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Mint (or reissue) an enrollment ticket for a machine.",
+        "description": "Creates a fresh enrollment token and returns it wrapped in a\npassphrase-encrypted ticket the operator runs through bestool on the\nenrolling machine, plus the 4-word passphrase that decrypts it. The\nplaintext token lives only inside the encrypted ticket; reissuing\ninvalidates any prior token. Fails if the server is archived.",
+        "operationId": "mint_enrollment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrollmentTicket"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/machines/revoke_enrollment": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Revoke any outstanding enrollment ticket for a machine.",
+        "description": "Use this when a ticket was issued by mistake or is no longer needed.\nAfterwards, the enrollment status endpoint reports no outstanding token,\nand the revoked ticket can no longer be used to enroll.",
+        "operationId": "revoke_enrollment",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineIdArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-admin": []
+          }
+        ]
+      }
+    },
+    "/api/fleet/machines/update": {
+      "post": {
+        "tags": [
+          "machines"
+        ],
+        "summary": "Edit a machine.",
+        "description": "Moving a machine to another group moves the applications on it: an\napplication's group is never set independently of its machine's.",
+        "operationId": "machines_update",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MachineUpdateArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Machine"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetailsSchema"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
     "/api/healthchecks/decommission": {
       "post": {
         "tags": [
@@ -4540,534 +5769,6 @@
         ]
       }
     },
-    "/api/machines/archive": {
-      "post": {
-        "tags": [
-          "machines"
-        ],
-        "summary": "Archive a machine, and with it the applications on it.",
-        "description": "A box going away takes its workloads with it. Archival is not deletion:\nthe records and their history remain.",
-        "operationId": "machines_archive",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MachineIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "default": null
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-user": []
-          }
-        ]
-      }
-    },
-    "/api/machines/attach_tailscale_device": {
-      "post": {
-        "tags": [
-          "machines"
-        ],
-        "summary": "Attach an identity to a machine via a Tailscale identifier.",
-        "description": "Resolves the identifier to a tailnet node, finds the identity already on\nthat node or mints one for it, and binds it to the machine. Useful when an\noperator can already see the box on the tailnet and wants to name it now\nrather than wait for enrolment. `registered_at` stays unset: naming a box is\nnot the box arriving.\n\nReturns 409 if the resolved identity already speaks for another live\nmachine; detach it there first.",
-        "operationId": "machines_attach_tailscale_device",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AttachTailscaleDeviceArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Identity now bound to the machine.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "string",
-                  "format": "uuid"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Identifier does not resolve to a known tailnet node.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "The resolved identity already speaks for another machine.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Tailnet directory not configured or unreachable.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/machines/create": {
-      "post": {
-        "tags": [
-          "machines"
-        ],
-        "summary": "Add a machine to the fleet.",
-        "description": "The machine starts with no applications and no identity; enrolment binds an\nidentity, and the applications on it arrive by report.",
-        "operationId": "machines_create",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MachineCreateArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string",
-                  "format": "uuid"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-user": []
-          }
-        ]
-      }
-    },
-    "/api/machines/enrollment_status": {
-      "post": {
-        "tags": [
-          "machines"
-        ],
-        "summary": "Get the enrollment state of a machine.",
-        "description": "Reports whether the machine has completed enrollment, and whether an\nenrollment token is currently outstanding (issue and expiry times only —\nthe token itself is never revealed).",
-        "operationId": "enrollment_status",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MachineIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnrollmentStatus"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/machines/get": {
-      "post": {
-        "tags": [
-          "machines"
-        ],
-        "summary": "Get one machine and the applications running on it.",
-        "description": "Returns the machine's own facts — its group, where it is, how long it may\nbe silent — together with the applications it hosts. Returns 404 if the\nmachine doesn't exist.",
-        "operationId": "machines_get",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MachineIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MachineDetail"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-user": []
-          }
-        ]
-      }
-    },
-    "/api/machines/get_detail": {
-      "post": {
-        "tags": [
-          "machines"
-        ],
-        "summary": "Get full detail for one machine.",
-        "description": "Returns the box's record, what it reports about itself, its identity, its\nown health and checks, and the applications running on it. Returns 404 if\nthe machine doesn't exist.",
-        "operationId": "machines_get_detail",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MachineIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MachineDetailData"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-user": []
-          }
-        ]
-      }
-    },
-    "/api/machines/list": {
-      "post": {
-        "tags": [
-          "machines"
-        ],
-        "summary": "List the live fleet's machines.",
-        "description": "Every machine that has not been archived, ordered by name. A machine with\nno applications on it is included: one created but not yet reporting is\nawaiting check-in, not an error. The request body is ignored; send an empty\nJSON object.",
-        "operationId": "machines_list",
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Machine"
-                  }
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-user": []
-          }
-        ]
-      }
-    },
-    "/api/machines/mint_enrollment": {
-      "post": {
-        "tags": [
-          "machines"
-        ],
-        "summary": "Mint (or reissue) an enrollment ticket for a machine.",
-        "description": "Creates a fresh enrollment token and returns it wrapped in a\npassphrase-encrypted ticket the operator runs through bestool on the\nenrolling machine, plus the 4-word passphrase that decrypts it. The\nplaintext token lives only inside the encrypted ticket; reissuing\ninvalidates any prior token. Fails if the server is archived.",
-        "operationId": "mint_enrollment",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MachineIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EnrollmentTicket"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/machines/revoke_enrollment": {
-      "post": {
-        "tags": [
-          "machines"
-        ],
-        "summary": "Revoke any outstanding enrollment ticket for a machine.",
-        "description": "Use this when a ticket was issued by mistake or is no longer needed.\nAfterwards, the enrollment status endpoint reports no outstanding token,\nand the revoked ticket can no longer be used to enroll.",
-        "operationId": "revoke_enrollment",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MachineIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": ""
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/machines/update": {
-      "post": {
-        "tags": [
-          "machines"
-        ],
-        "summary": "Edit a machine.",
-        "description": "Moving a machine to another group moves the applications on it: an\napplication's group is never set independently of its machine's.",
-        "operationId": "machines_update",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MachineUpdateArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Machine"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-user": []
-          }
-        ]
-      }
-    },
     "/api/maintenance/declare": {
       "post": {
         "tags": [
@@ -5881,707 +6582,6 @@
         ]
       }
     },
-    "/api/server_groups/create": {
-      "post": {
-        "tags": [
-          "server_groups"
-        ],
-        "summary": "Create a server group.",
-        "description": "Creates a new, empty server group and returns it. Requires the caller to\nbe on the admin allow-list. Responds 400 if the request is invalid.",
-        "operationId": "server_groups_create",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerGroupsCreateArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ServerGroup"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/server_groups/delete": {
-      "post": {
-        "tags": [
-          "server_groups"
-        ],
-        "summary": "Archive a server group.",
-        "description": "Soft-deletes the group: it disappears from live listings but is kept and\ncan be restored later. Requires the caller to be on the admin allow-list.\nResponds 409 if the group still has live member applications; move or archive\nthose first.",
-        "operationId": "server_groups_delete",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GroupIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": ""
-          },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/server_groups/get": {
-      "post": {
-        "tags": [
-          "server_groups"
-        ],
-        "summary": "Get a server group with its members.",
-        "description": "Returns the group, its member applications (sorted by name, with current status\nand display host), and the group's effective billing labels. Responds 404\nif no group exists with the given identifier.",
-        "operationId": "server_groups_get",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GroupIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GroupDetail"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-user": []
-          }
-        ]
-      }
-    },
-    "/api/server_groups/list": {
-      "post": {
-        "tags": [
-          "server_groups"
-        ],
-        "summary": "List all live server groups.",
-        "description": "Returns every non-archived server group, including its name, notes, tags,\nSlack notification delay, and effective version information. The request\nbody is ignored; send an empty JSON object.",
-        "operationId": "server_groups_list",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {}
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ServerGroup"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-user": []
-          }
-        ]
-      }
-    },
-    "/api/server_groups/list_archived": {
-      "post": {
-        "tags": [
-          "server_groups"
-        ],
-        "summary": "List archived server groups.",
-        "description": "Returns every group that has been archived (soft-deleted) and can be\nrestored. The request body is ignored; send an empty JSON object.",
-        "operationId": "server_groups_list_archived",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {}
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ServerGroup"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-user": []
-          }
-        ]
-      }
-    },
-    "/api/server_groups/restore": {
-      "post": {
-        "tags": [
-          "server_groups"
-        ],
-        "summary": "Restore an archived server group.",
-        "description": "Un-archives a previously deleted group so it reappears in live listings.\nRequires the caller to be on the admin allow-list. Responds 404 if the\ngroup does not exist.",
-        "operationId": "server_groups_restore",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GroupIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": ""
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/server_groups/search": {
-      "post": {
-        "tags": [
-          "server_groups"
-        ],
-        "summary": "Search live server groups.",
-        "description": "Returns non-archived groups matching the free-text query.",
-        "operationId": "server_groups_search",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerGroupsSearchArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ServerGroup"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-user": []
-          }
-        ]
-      }
-    },
-    "/api/server_groups/server_counts": {
-      "post": {
-        "tags": [
-          "server_groups"
-        ],
-        "summary": "Count live applications per group.",
-        "description": "Returns one entry per server group that has at least one live\n(non-archived) member server. Groups with no live members are omitted, so\ntreat a missing entry as a count of zero. The request body is ignored;\nsend an empty JSON object.",
-        "operationId": "server_groups_server_counts",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {}
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/GroupServerCount"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-user": []
-          }
-        ]
-      }
-    },
-    "/api/server_groups/update": {
-      "post": {
-        "tags": [
-          "server_groups"
-        ],
-        "summary": "Update a server group.",
-        "description": "Applies a partial update: only the fields present in `data` (name, notes,\ntags, Slack notification delay) are changed. Returns the updated group.\nRequires the caller to be on the admin allow-list. Responds 404 if the\ngroup does not exist and 400 if the request is invalid.",
-        "operationId": "server_groups_update",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerGroupsUpdateArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ServerGroup"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/servers/delete": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "Archive (soft-delete) a server.",
-        "description": "Releases and demotes its device. Archived applications no longer appear in\nregular listings but can be restored later.",
-        "operationId": "delete",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerIdOnlyArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": ""
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/servers/get_detail": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "Get full detail for a server.",
-        "description": "Returns the server's record, its bound device (if any), its most recent\nstatus report, current reachability/health, its group (if any) together\nwith the group's whole membership for the tree the page ends with, and the\ngroup's billing labels.\nReturns 404 if no server exists with that id.",
-        "operationId": "get_detail",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ServerDetailData"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/servers/get_info": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "Get a server's basic record.",
-        "description": "Returns identity, classification, and configuration for a single server,\nincluding its group name where applicable. Does not include current\nreachability/health or device/group detail — use the detail endpoint for\nthat. Returns 404 if no server exists with that id.",
-        "operationId": "get_info",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ServerInfo"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/servers/get_name": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "Get a server's display name.",
-        "description": "Returns the server's name if set, else its stored host, else its id —\nalways a non-empty string suitable for display. Returns 404 if no server\nexists with that id.",
-        "operationId": "get_name",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerIdArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/servers/list_archived": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "List archived (soft-deleted) applications.",
-        "description": "Each entry has `archived: true` and includes current reachability/health.\nArchived applications can be brought back with the restore endpoint.",
-        "operationId": "list_archived",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {}
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ServerInfo"
-                  }
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/servers/list_some": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "List applications, optionally filtered by kind, paginated.",
-        "description": "Returns a page of applications plus the total matching count. Entries include\ntheir group name where applicable, but not current reachability/health —\nuse the detail endpoint for that.",
-        "operationId": "list_some",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerListArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Page_ServerInfo"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/servers/restore": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "Un-archive a server.",
-        "description": "Restores a previously archived server to regular listings. Its machine\nmust re-enroll afterwards to rebind a device. Restoring a server that\nisn't archived has no effect.",
-        "operationId": "restore",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerIdOnlyArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": ""
-          },
-          "409": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
-    "/api/servers/update": {
-      "post": {
-        "tags": [
-          "applications"
-        ],
-        "summary": "Update a server's fields.",
-        "description": "Applies a partial update — only the fields present in `data` are\nchanged. Moving a previously-ungrouped server into a group, or toggling\n`is_monitored`, re-evaluates the server's open issues so incidents catch\nup with the new state. Returns 400 if the update is rejected (e.g. an\ninvalid host value, or a role the target product doesn't define).",
-        "operationId": "server_update",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerUpdateArgs"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": ""
-          },
-          "400": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "tailscale-admin": []
-          }
-        ]
-      }
-    },
     "/api/silenced_refs/list_for_group": {
       "post": {
         "tags": [
@@ -6675,6 +6675,46 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/ServerScopeArgs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ServerSilencedRef"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "tailscale-user": []
+          }
+        ]
+      }
+    },
+    "/api/silenced_refs/list_for_servers": {
+      "post": {
+        "tags": [
+          "silenced_refs"
+        ],
+        "summary": "List application-scoped silences across several applications.",
+        "description": "The plural of `list_for_server`, for a surface holding a section per\napplication on one machine. Doesn't include silences applied at the group\nor machine level.",
+        "operationId": "list_for_servers",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApplicationsScopeArgs"
               }
             }
           },
@@ -7225,38 +7265,24 @@
         }
       }
     },
-    "/api/statuses/server_grouped_ids": {
+    "/api/statuses/group_ids": {
       "post": {
         "tags": [
           "statuses"
         ],
-        "summary": "List server group ids, bucketed by rank.",
-        "description": "Each group is bucketed under the highest rank held by any of its member\napplications (production outranks clone, which outranks demo, then test,\nthen dev). Groups whose members are all unranked are omitted entirely.\nWithin each rank bucket, groups are ordered alphabetically by name.",
-        "operationId": "server_grouped_ids",
+        "summary": "List the server group ids the status page shows, ordered by name.",
+        "description": "Alphabetical, because the card carries its own ranks: a rank row per rank,\neach labelled. Ordering the cards by rank as well would sort the page by\nsomething already written on every card, and leave an operator looking for\none group scanning for where its rank happens to start. A name is what they\nknow it by.\n\nA group with no ranked member at all is omitted, as it always has been:\nnothing in it has a place in the fleet's promotion order yet.",
+        "operationId": "group_ids",
         "responses": {
           "200": {
-            "description": "Application group IDs grouped by highest-ranked member's rank.",
+            "description": "Application group IDs, ordered by group name.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "format": "uuid"
-                    }
-                  },
-                  "propertyNames": {
+                  "type": "array",
+                  "items": {
                     "type": "string",
-                    "description": "The environment tier of a server, from `production` down to `dev`.",
-                    "enum": [
-                      "production",
-                      "clone",
-                      "demo",
-                      "test",
-                      "dev"
-                    ]
+                    "format": "uuid"
                   }
                 }
               }
@@ -8588,6 +8614,23 @@
           "type": {
             "$ref": "#/components/schemas/ApplicationType",
             "description": "The type itself."
+          }
+        }
+      },
+      "ApplicationsScopeArgs": {
+        "type": "object",
+        "description": "Identifies several applications whose silences to list.",
+        "required": [
+          "application_ids"
+        ],
+        "properties": {
+          "application_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "description": "The applications to read. An empty list reads nothing."
           }
         }
       },
@@ -10975,15 +11018,26 @@
       },
       "GroupMachine": {
         "type": "object",
-        "description": "One of a group's machines, as an operator picks it out of a list.",
+        "description": "One of a group's machines, as an operator picks it out of a list.\n\nCarries the box's own state as well as its name, because the group tree\ndraws each machine as an enclosure around the applications on it and an\nenclosure with nothing to say is a decoration. A box whose own checks are\nfailing while its workloads are fine is a state only this can show.",
         "required": [
-          "id"
+          "id",
+          "up",
+          "health",
+          "maintained"
         ],
         "properties": {
+          "health": {
+            "$ref": "#/components/schemas/HealthState",
+            "description": "The box's own health, from the checks filed against it. What the\napplications on it make of their own checks is each application's."
+          },
           "id": {
             "type": "string",
             "format": "uuid",
             "description": "Unique identifier of the machine."
+          },
+          "maintained": {
+            "type": "boolean",
+            "description": "Whether a maintenance window suspends this box, its own or its group's."
           },
           "name": {
             "type": [
@@ -10991,6 +11045,17 @@
               "null"
             ],
             "description": "The operator-assigned name, where it has one."
+          },
+          "platform": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The platform the box reports, where it reports one. The one machine\nfigure the tree shows: it is what distinguishes two otherwise\nidentical rows."
+          },
+          "up": {
+            "$ref": "#/components/schemas/ShortStatus",
+            "description": "Whether the box is reachable, judged against its own threshold."
           }
         }
       },
@@ -15657,6 +15722,9 @@
             "type": "boolean",
             "description": "Whether the underlying condition is still ongoing. Becomes `false`\nonce the condition has cleared on its own, independently of whether\nan operator has resolved the alert."
           },
+          "detail": {
+            "description": "Whatever structured detail the condition attached, or `null` where it\nattached none. A message is for reading and this is for acting on: the\nstale-healthcheck alert, for one, lists the checks it names here so the\nsurface can link each to its own policy page."
+          },
           "effective_result": {
             "type": [
               "string",
@@ -15923,6 +15991,13 @@
                 "description": "The server's most recently reported status, if it has ever reported one."
               }
             ]
+          },
+          "machine_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name of the box this application runs on, where it has one.\n\nThe page names its machine in the heading, so it needs the name and not\nonly the id `server.machine_id` carries — and it needs it whether or\nnot the application is grouped, which is why it is not read out of\n`group_machines`."
           },
           "maintained": {
             "type": "boolean",

@@ -28,13 +28,13 @@ test.describe("backups zero-state + config", () => {
 	}) => {
 		const group = await seedServerGroup(sql, { name: "no-backups" });
 
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 		// The CTA is a MUI Button rendered as a router link (role "link").
 		await expect(
 			page.getByRole("link", { name: /set up backups/i }),
 		).toBeVisible();
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		await expect(page.getByText(/backups not set up/i)).toBeVisible();
 	});
 
@@ -44,7 +44,7 @@ test.describe("backups zero-state + config", () => {
 	}) => {
 		const group = await seedServerGroup(sql, { name: "cfg-group" });
 
-		await page.goto(`/groups/${group.id}/backups/config`);
+		await page.goto(`/fleet/groups/${group.id}/backups/config`);
 		await page.getByRole("button", { name: /use an existing bucket/i }).click();
 		await page.getByLabel("Bucket").fill("bes-kopia-created");
 		await page
@@ -58,7 +58,7 @@ test.describe("backups zero-state + config", () => {
 		// No schedule step — schedule/retention inherit the per-type defaults.
 		await page.getByRole("button", { name: /create & provision/i }).click();
 
-		await expect(page).toHaveURL(new RegExp(`/groups/${group.id}/backups$`));
+		await expect(page).toHaveURL(new RegExp(`/fleet/groups/${group.id}/backups$`));
 
 		const rows = await sql.query<{
 			status: string;
@@ -88,7 +88,7 @@ test.describe("backups zero-state + config", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "passphrase-group" });
-		await page.goto(`/groups/${group.id}/backups/config`);
+		await page.goto(`/fleet/groups/${group.id}/backups/config`);
 		await page.getByRole("button", { name: /use an existing bucket/i }).click();
 		// `…existing…` → the fake prober reports an existing kopia repo.
 		await page.getByLabel("Bucket").fill("bes-existing-repo");
@@ -108,7 +108,7 @@ test.describe("backups zero-state + config", () => {
 			.fill("an-existing-repo-passphrase");
 		await page.getByRole("button", { name: /create & provision/i }).click();
 
-		await expect(page).toHaveURL(new RegExp(`/groups/${group.id}/backups$`));
+		await expect(page).toHaveURL(new RegExp(`/fleet/groups/${group.id}/backups$`));
 		const rows = await sql.query<{ mode: string }>(
 			`SELECT mode FROM server_group_backup_config WHERE group_id = $1`,
 			[group.id],
@@ -118,7 +118,7 @@ test.describe("backups zero-state + config", () => {
 
 	test("wizard blocks other (non-kopia) content", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "other-group" });
-		await page.goto(`/groups/${group.id}/backups/config`);
+		await page.goto(`/fleet/groups/${group.id}/backups/config`);
 		await page.getByRole("button", { name: /use an existing bucket/i }).click();
 		// `…other…` → the fake prober reports non-kopia content.
 		await page.getByLabel("Bucket").fill("bes-other-stuff");
@@ -140,12 +140,12 @@ test.describe("backups zero-state + config", () => {
 	}) => {
 		const group = await seedServerGroup(sql, { name: "Acme Prod" });
 
-		await page.goto(`/groups/${group.id}/backups/config`);
+		await page.goto(`/fleet/groups/${group.id}/backups/config`);
 		// "Create a bucket" = shared-account backups — no bucket/roles, no probe.
 		await page.getByRole("button", { name: /create a bucket/i }).click();
 		await page.getByRole("button", { name: /create & provision/i }).click();
 
-		await expect(page).toHaveURL(new RegExp(`/groups/${group.id}/backups$`));
+		await expect(page).toHaveURL(new RegExp(`/fleet/groups/${group.id}/backups$`));
 		// The panel shows which placement was used.
 		await expect(page.getByText(/shared account/i)).toBeVisible();
 
@@ -186,7 +186,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			status: "ready",
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 
 		// Scope to the schedule panel: the type also appears in the Servers
 		// panel (as a declared-type label), so a page-wide text match is
@@ -226,7 +226,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			status: "ready",
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		await page.getByRole("button", { name: /^override$/i }).click();
 
 		// Below-floor daily is blocked until the dangerous toggle is on.
@@ -287,14 +287,14 @@ test.describe("backups ready: stats + backup-now", () => {
 			status: "ready",
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 
 		// Boxes, not workloads: each seeded application gets a box of its own,
 		// named after it, and the box takes its workload's rank.
 		const panel = page
 			.getByRole("heading", { name: "Machines", exact: true })
 			.locator("..");
-		await expect(panel.locator('a[href^="/machines/"]')).toHaveText([
+		await expect(panel.locator('a[href^="/fleet/machines/"]')).toHaveText([
 			"zzz-prod-central",
 			"aaa-prod-facility",
 			"ccc-clone",
@@ -338,7 +338,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			bytesUploaded: 2048,
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		await expect(page.getByText(/repository stats/i)).toBeVisible();
 		await expect(page.getByText("42")).toBeVisible();
 		// bucket_bytes NULL → "unknown" shown, per the indicators rule.
@@ -412,7 +412,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			ttlSecs: 3600,
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const runs = page.getByRole("table").last();
 		// Duration column populated for the reported run.
 		await expect(runs.getByText("5m")).toBeVisible();
@@ -468,7 +468,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			reportedAgoSecs: 40 * 24 * 3600,
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		// getByText resolves to the innermost <strong> label; the values live in
 		// its parent Typography, so assert (and hover) on that.
 		const stat = page.getByText(/S3 traffic \(this month\)/i).locator("..");
@@ -505,7 +505,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			bucketBytesObservedAt: new Date(Date.now() - 86_400_000).toISOString(),
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		await expect(page.getByText(/bucket bytes:\s*100\.0 GiB/i)).toBeVisible();
 
 		await page.getByText(/^100\.0 GiB$/).hover();
@@ -545,7 +545,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			snapshotId: "k0123456789abcdef0123",
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const runs = page.getByRole("table").last();
 		// Shown truncated (not the full opaque id), with a copy button.
 		await expect(runs.getByText(/k0123456789/)).toBeVisible();
@@ -582,7 +582,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			snapshotLogicalBytes: 4096,
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByText("4.0 KiB")).toBeVisible();
 		// No S3 traffic reported and no snapshot id → Transfer and Snapshot cells
@@ -615,7 +615,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			bytesUploaded: null,
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByText("err-srv")).toBeVisible();
 		await expect(runs.getByText("failure")).toBeVisible();
@@ -660,7 +660,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			s3ReceivedRawBytes: 1024, // 1.0 KiB
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByText("s3-srv")).toBeVisible();
 		await expect(runs.getByText("2.0 KiB")).toBeVisible();
@@ -725,7 +725,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			s3ReceivedRawBytes: 9437184,
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByRole("columnheader", { name: "Transfer" })).toBeVisible();
 		// Pick the restore row by its exact Purpose cell — the server name also
@@ -778,7 +778,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			s3ReceivedRawBytes: 1024,
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const runs = page.getByRole("table").last();
 		await expect(runs.getByText("both-sizes-srv")).toBeVisible();
 		await expect(runs.getByText("1.0 MiB")).toBeVisible();
@@ -807,7 +807,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			type: "tamanu-postgres",
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		await page.getByRole("button", { name: /backup now/i }).click();
 
 		await expect(async () => {
@@ -842,7 +842,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			status: "ready",
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		// The box appears in the "Back up now" panel, but its button is greyed
 		// out because it has registered no backup types.
 		await expect(page.getByText("no-types-srv")).toBeVisible();
@@ -874,7 +874,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			enabled: false,
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 
 		// Both declared types are listed (the disabled-for-schedule one too, since
 		// a one-off backup-now overrides the enabled gate), each with its own button.
@@ -935,7 +935,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			snapshotId: "kdeadbeef0123cafe",
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const panel = page
 			.getByRole("heading", { name: /^machines$/i })
 			.locator("..");
@@ -968,7 +968,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			status: "ready",
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 
 		// Header carries the group name + a back-link to the group page.
 		await expect(
@@ -983,12 +983,12 @@ test.describe("backups ready: stats + backup-now", () => {
 		// workload on it.
 		await page.getByRole("link", { name: "linky-srv" }).click();
 		await expect(page).toHaveURL(
-			new RegExp(`/machines/${server.machineId}#backups$`),
+			new RegExp(`/fleet/machines/${server.machineId}#backups$`),
 		);
 
 		// That backup section links back to the group's backup page.
 		await page.getByRole("link", { name: /group backups/i }).click();
-		await expect(page).toHaveURL(new RegExp(`/groups/${group.id}/backups$`));
+		await expect(page).toHaveURL(new RegExp(`/fleet/groups/${group.id}/backups$`));
 	});
 
 	test("provisioning with init error shows retry", async ({ page, sql }) => {
@@ -999,7 +999,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			lastInitError: "kopia repository create failed",
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		await expect(
 			page.getByText(/kopia repository create failed/i),
 		).toBeVisible();
@@ -1015,7 +1015,7 @@ test.describe("backups ready: stats + backup-now", () => {
 			status: "ready",
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		// Header delete → confirm dialog → confirm.
 		await page.getByRole("button", { name: /^delete$/i }).click();
 		const dialog = page.getByRole("dialog");
@@ -1047,7 +1047,7 @@ test.describe("machine backup capabilities", () => {
 			groupId: group.id,
 		});
 
-		await page.goto(`/machines/${server.machineId}`);
+		await page.goto(`/fleet/machines/${server.machineId}`);
 		await expect(
 			page.getByText(/no backup types registered for this machine/i),
 		).toBeVisible();
@@ -1078,7 +1078,7 @@ test.describe("machine backup capabilities", () => {
 			snapshotId: "k0123456789abcdef0123",
 		});
 
-		await page.goto(`/machines/${server.machineId}`);
+		await page.goto(`/fleet/machines/${server.machineId}`);
 		const backups = page.locator("#backups");
 		await expect(backups.getByText(/k0123456789/)).toBeVisible();
 		await expect(backups.getByText(/2\.0 KiB/)).toBeVisible();
@@ -1102,7 +1102,7 @@ test.describe("machine backup capabilities", () => {
 			type: "tamanu-postgres",
 		});
 
-		await page.goto(`/machines/${server.machineId}`);
+		await page.goto(`/fleet/machines/${server.machineId}`);
 		const backups = page.locator("#backups");
 		await expect(backups.getByText(/no snapshot yet/i)).toBeVisible();
 	});
@@ -1127,7 +1127,7 @@ test.describe("machine backup capabilities", () => {
 			issuedAgoSecs: 600,
 		});
 
-		await page.goto(`/machines/${server.machineId}`);
+		await page.goto(`/fleet/machines/${server.machineId}`);
 		const backups = page.locator("#backups");
 		await expect(backups.getByText(/backing up…/i)).toBeVisible();
 
@@ -1159,7 +1159,7 @@ test.describe("machine backup capabilities", () => {
 			type: "tamanu-postgres",
 		});
 
-		await page.goto(`/machines/${server.machineId}`);
+		await page.goto(`/fleet/machines/${server.machineId}`);
 		const backups = page.locator("#backups");
 		// The message explains the toggles are inert.
 		await expect(backups.getByText(/aren't set up for this group/i)).toBeVisible();
@@ -1189,7 +1189,7 @@ test.describe("machine backup capabilities", () => {
 			enabled: false,
 		});
 
-		await page.goto(`/machines/${server.machineId}`);
+		await page.goto(`/fleet/machines/${server.machineId}`);
 		const toggle = page.getByRole("switch", {
 			name: /enable tamanu-postgres backups/i,
 		});
@@ -1222,7 +1222,7 @@ test.describe("backups ready: repo maintenance panel", () => {
 			status: "ready",
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const panel = page.getByTestId("repo-maintenance");
 		await expect(panel.getByText(/no maintenance has run yet/i)).toBeVisible();
 	});
@@ -1245,7 +1245,7 @@ test.describe("backups ready: repo maintenance panel", () => {
 			durationSecs: 180, // renders as "3m"
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const panel = page.getByTestId("repo-maintenance");
 		await expect(panel.getByText("Healthy")).toBeVisible();
 		await expect(panel.getByText(/last successful maintenance/i)).toBeVisible();
@@ -1283,7 +1283,7 @@ test.describe("backups ready: repo maintenance panel", () => {
 			finishedAgoSecs: 3600,
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const panel = page.getByTestId("repo-maintenance");
 		await expect(panel.getByText(/last run failed/i)).toBeVisible();
 		// Error detail is hidden until the failed row is expanded.
@@ -1305,7 +1305,7 @@ test.describe("backups ready: repo maintenance panel", () => {
 			finishedAgoSecs: 60,
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const panel = page.getByTestId("repo-maintenance");
 		// exact: the summary chip reads "Running" (capitalised); the row chip "running".
 		await expect(panel.getByText("running", { exact: true })).toBeVisible();
@@ -1326,7 +1326,7 @@ test.describe("backups ready: repo maintenance panel", () => {
 			status: "ready",
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const panel = page.getByTestId("repo-maintenance");
 
 		await panel
@@ -1387,7 +1387,7 @@ test.describe("backups ready: repo maintenance panel", () => {
 			finishedAgoSecs: 30,
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const panel = page.getByTestId("repo-maintenance");
 
 		// Header shows the spinning "Running" indicator (a progressbar). exact:
@@ -1421,7 +1421,7 @@ test.describe("restore window", () => {
 			status: "ready",
 		});
 
-		await page.goto(`/groups/${group.id}/backups`);
+		await page.goto(`/fleet/groups/${group.id}/backups`);
 		const row = page.getByRole("row").filter({ hasText: "restore-srv" });
 
 		// Opening the window persists a future expiry attributed to the operator.
@@ -1464,7 +1464,7 @@ test.describe("restore window", () => {
 			status: "ready",
 		});
 
-		await page.goto(`/machines/${server.machineId}`);
+		await page.goto(`/fleet/machines/${server.machineId}`);
 		const backups = page.locator("#backups");
 
 		await backups.getByRole("button", { name: /allow restores/i }).click();

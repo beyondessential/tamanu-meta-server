@@ -44,7 +44,7 @@ fn spec_has_paths_for_every_module() {
 		"/api/devices/list_trusted",
 		"/api/incidents/list_active",
 		"/api/issues/list",
-		"/api/server_groups/list",
+		"/api/fleet/groups/list",
 		"/api/sql/is_sql_available",
 		"/api/statuses/summary",
 		"/api/versions/get_grouped_versions",

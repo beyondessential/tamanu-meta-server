@@ -65,6 +65,14 @@ pub struct ServerDetailData {
 	/// ungrouped.
 	// spec: FLT
 	pub group_machines: Vec<super::server_groups::GroupMachine>,
+	/// The name of the box this application runs on, where it has one.
+	///
+	/// The page names its machine in the heading, so it needs the name and not
+	/// only the id `server.machine_id` carries — and it needs it whether or
+	/// not the application is grouped, which is why it is not read out of
+	/// `group_machines`.
+	// spec: FLT#navigating-the-two-grains
+	pub machine_name: Option<String>,
 	/// The server's own effective `billing.*` labels
 	/// (product/deployment/stage) — the ones canopy hands the server's device,
 	/// carrying its own product and rank rather than its group's. Empty when
@@ -726,6 +734,10 @@ pub async fn get_detail(
 		None => (Vec::new(), Vec::new()),
 	};
 
+	let machine_name = database::machines::Machine::get_by_id(&mut conn, server.machine_id)
+		.await?
+		.name;
+
 	// This server's own attribution, not its group's: for a server whose
 	// product or rank differs from the group's, the page would otherwise show
 	// labels the device is never handed.
@@ -778,6 +790,7 @@ pub async fn get_detail(
 		group,
 		group_applications,
 		group_machines,
+		machine_name,
 		billing_labels,
 	}))
 }

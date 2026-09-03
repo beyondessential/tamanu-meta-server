@@ -8,7 +8,7 @@ import {
 	Typography,
 } from "@mui/material";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
-import { NavLink, Navigate, Route, Routes } from "react-router-dom";
+import { NavLink, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { useApi } from "./api";
 import AdminProbeBanner from "./components/AdminProbeBanner";
 import { AdminProvider } from "./hooks/useIsAdmin";
@@ -45,6 +45,7 @@ import Maintenance from "./routes/Maintenance";
 import Status from "./routes/Status";
 import MachineCreate from "./routes/MachineCreate";
 import MachineDetail from "./routes/MachineDetail";
+import MachineEdit from "./routes/MachineEdit";
 import ServerDetail from "./routes/ServerDetail";
 import ServerEdit from "./routes/ServerEdit";
 import ArchivedList from "./routes/ArchivedList";
@@ -61,10 +62,24 @@ interface NavItem {
 	to: string;
 }
 
+/// Send an address from before the fleet was namespaced to where it lives now.
+///
+/// `servers` named the box and the workload at once, and the fleet's own pages
+/// sat beside its records — so `/servers/figures` and `/servers/{id}` were told
+/// apart only by route ranking. Everything the fleet holds is under `/fleet`
+/// now: its listings, its applications, its machines.
+///
+/// Replaces rather than pushes, so the back button goes where the operator came
+/// from instead of bouncing off the redirect.
+function Moved({ to }: { to: (id: string) => string }) {
+	const { id = "" } = useParams<{ id: string }>();
+	return <Navigate to={to(id)} replace />;
+}
+
 const BASE_NAV: NavItem[] = [
 	{ label: "Status", to: "/status" },
 	{ label: "Incidents", to: "/incidents" },
-	{ label: "Fleet", to: "/servers" },
+	{ label: "Fleet", to: "/fleet" },
 	{ label: "Versions", to: "/versions" },
 	{ label: "Upgrades", to: "/upgrades" },
 	{ label: "Maintenance", to: "/maintenance" },
@@ -209,28 +224,112 @@ export default function App() {
 					<Route path="/maintenance" element={<Maintenance />} />
 					<Route path="/versions" element={<Versions />} />
 					<Route path="/versions/:version" element={<VersionDetail />} />
-					<Route path="/servers" element={<Servers />}>
+					<Route path="/fleet" element={<Servers />}>
 						<Route index element={<GroupsList />} />
 						<Route path="archived" element={<ArchivedList />} />
 						<Route path="figures" element={<FleetFigures />} />
 					</Route>
+					<Route path="/fleet/groups/new" element={<GroupEdit />} />
+					<Route path="/fleet/groups/:id" element={<GroupDetail />} />
 					<Route
-						path="/groups/:id/machines/new"
+						path="/fleet/groups/:id/edit"
+						element={<GroupEdit />}
+					/>
+					<Route
+						path="/fleet/groups/:id/machines/new"
 						element={<MachineCreate />}
 					/>
-					<Route path="/servers/:id" element={<ServerDetail />} />
-					<Route path="/machines/:id" element={<MachineDetail />} />
-					<Route path="/servers/:id/edit" element={<ServerEdit />} />
-					<Route path="/groups/new" element={<GroupEdit />} />
-					<Route path="/groups/:id" element={<GroupDetail />} />
-					<Route path="/groups/:id/edit" element={<GroupEdit />} />
 					<Route
-						path="/groups/:id/backups"
+						path="/fleet/groups/:id/backups"
 						element={<BackupPanel />}
 					/>
 					<Route
-						path="/groups/:id/backups/config"
+						path="/fleet/groups/:id/backups/config"
 						element={<BackupConfig />}
+					/>
+					<Route
+						path="/fleet/applications/:id"
+						element={<ServerDetail />}
+					/>
+					<Route
+						path="/fleet/applications/:id/edit"
+						element={<ServerEdit />}
+					/>
+					<Route
+						path="/fleet/machines/:id"
+						element={<MachineDetail />}
+					/>
+					<Route
+						path="/fleet/machines/:id/edit"
+						element={<MachineEdit />}
+					/>
+
+					{/* Where the fleet used to live. A link into Canopy outlives
+					    a rename — a bookmark, a Slack message, an incident
+					    writeup — so every old address still lands. */}
+					<Route
+						path="/servers"
+						element={<Navigate to="/fleet" replace />}
+					/>
+					<Route
+						path="/servers/archived"
+						element={<Navigate to="/fleet/archived" replace />}
+					/>
+					<Route
+						path="/servers/figures"
+						element={<Navigate to="/fleet/figures" replace />}
+					/>
+					<Route
+						path="/servers/:id"
+						element={<Moved to={(id) => `/fleet/applications/${id}`} />}
+					/>
+					<Route
+						path="/servers/:id/edit"
+						element={<Moved to={(id) => `/fleet/applications/${id}/edit`} />}
+					/>
+					<Route
+						path="/applications/:id"
+						element={<Moved to={(id) => `/fleet/applications/${id}`} />}
+					/>
+					<Route
+						path="/applications/:id/edit"
+						element={<Moved to={(id) => `/fleet/applications/${id}/edit`} />}
+					/>
+					<Route
+						path="/machines/:id"
+						element={<Moved to={(id) => `/fleet/machines/${id}`} />}
+					/>
+					<Route
+						path="/machines/:id/edit"
+						element={<Moved to={(id) => `/fleet/machines/${id}/edit`} />}
+					/>
+					<Route
+						path="/groups/new"
+						element={<Navigate to="/fleet/groups/new" replace />}
+					/>
+					<Route
+						path="/groups/:id"
+						element={<Moved to={(id) => `/fleet/groups/${id}`} />}
+					/>
+					<Route
+						path="/groups/:id/edit"
+						element={<Moved to={(id) => `/fleet/groups/${id}/edit`} />}
+					/>
+					<Route
+						path="/groups/:id/machines/new"
+						element={
+							<Moved to={(id) => `/fleet/groups/${id}/machines/new`} />
+						}
+					/>
+					<Route
+						path="/groups/:id/backups"
+						element={<Moved to={(id) => `/fleet/groups/${id}/backups`} />}
+					/>
+					<Route
+						path="/groups/:id/backups/config"
+						element={
+							<Moved to={(id) => `/fleet/groups/${id}/backups/config`} />
+						}
 					/>
 					<Route path="/settings" element={<Settings />}>
 						<Route

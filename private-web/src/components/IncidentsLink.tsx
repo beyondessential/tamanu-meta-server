@@ -22,20 +22,32 @@ import { isIncidentLingering } from "../types";
  * An ungrouped server has no group to filter by, so the issues query is
  * skipped and the links fall back to the unfiltered incidents view. */
 export default function IncidentsLink({
-	serverId,
+	applicationId = null,
 	groupId,
 	refreshKey = 0,
 }: {
-	serverId: string;
+	/// The application this button sits on, where it sits on one. A machine
+	/// page passes none: an incident belongs to the group either way, and a
+	/// box has no per-application lookup to go through.
+	applicationId?: string | null;
 	groupId: string | null;
 	refreshKey?: number;
 }) {
-	const incidents = useApi(
+	const byApplication = useApi(
 		"incidents",
 		"list_for_server",
-		{ server_id: serverId, include_closed: false },
-		[serverId, refreshKey],
+		{ server_id: applicationId ?? "", include_closed: false },
+		[applicationId, refreshKey],
+		{ skip: applicationId === null },
 	);
+	const byGroup = useApi(
+		"incidents",
+		"list_for_group",
+		{ server_group_id: groupId ?? "", include_closed: false, limit: 1 },
+		[groupId, refreshKey],
+		{ skip: applicationId !== null || groupId === null },
+	);
+	const incidents = applicationId !== null ? byApplication : byGroup;
 	const openIncident =
 		incidents.status === "ok" && incidents.data.length > 0
 			? incidents.data[0]

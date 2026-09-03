@@ -127,7 +127,7 @@ async fn get_detail_last_status_carries_operators() {
 		.unwrap();
 
 		let response = private
-			.post("/api/servers/get_detail")
+			.post("/api/fleet/applications/get_detail")
 			.json(&serde_json::json!({"server_id": "11111111-1111-1111-1111-111111111111"}))
 			.await;
 		response.assert_status_ok();

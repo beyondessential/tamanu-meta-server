@@ -109,13 +109,12 @@ async fn status_json_empty_database() {
 	commons_tests::server::run(async |_conn, _, private| {
 		// Get server IDs
 		let server_ids_response = private
-			.post("/api/statuses/server_grouped_ids")
+			.post("/api/statuses/group_ids")
 			.json(&serde_json::json!({}))
 			.await;
 		server_ids_response.assert_status_ok();
-		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> =
-			server_ids_response.json();
-		let server_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
+		let group_ids: Vec<String> = server_ids_response.json();
+		let server_ids: Vec<String> = group_ids;
 
 		assert!(server_ids.is_empty());
 	})
@@ -144,12 +143,11 @@ async fn status_json_basic_server() {
 		.unwrap();
 
 		let server_ids_response = private
-			.post("/api/statuses/server_grouped_ids")
+			.post("/api/statuses/group_ids")
 			.json(&serde_json::json!({}))
 			.await;
 		server_ids_response.assert_status_ok();
-		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
-		let group_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
+		let group_ids: Vec<String> = server_ids_response.json();
 		assert_eq!(group_ids.len(), 1);
 
 		let group_id = &group_ids[0];
@@ -209,10 +207,10 @@ async fn status_json_server_with_recent_status() {
 		.unwrap();
 
 		// Get server IDs
-		let server_ids_response = private.post("/api/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
+		let server_ids_response = private.post("/api/statuses/group_ids").json(&serde_json::json!({})).await;
 		server_ids_response.assert_status_ok();
-		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
-		let server_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
+		let group_ids: Vec<String> = server_ids_response.json();
+		let server_ids: Vec<String> = group_ids;
 		assert_eq!(server_ids.len(), 1);
 
 		let server_id = &server_ids[0];
@@ -268,10 +266,10 @@ async fn reachability_uses_each_targets_own_threshold() {
 		.await
 		.unwrap();
 
-		let server_ids_response = private.post("/api/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
+		let server_ids_response = private.post("/api/statuses/group_ids").json(&serde_json::json!({})).await;
 		server_ids_response.assert_status_ok();
-		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
-		let server_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
+		let group_ids: Vec<String> = server_ids_response.json();
+		let server_ids: Vec<String> = group_ids;
 		assert_eq!(server_ids.len(), 2);
 
 		let mut impatient: Option<String> = None;
@@ -341,10 +339,10 @@ async fn status_json_platform_detection() {
 		.unwrap();
 
 		// Get server IDs
-		let server_ids_response = private.post("/api/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
+		let server_ids_response = private.post("/api/statuses/group_ids").json(&serde_json::json!({})).await;
 		server_ids_response.assert_status_ok();
-		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
-		let server_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
+		let group_ids: Vec<String> = server_ids_response.json();
+		let server_ids: Vec<String> = group_ids;
 		assert_eq!(server_ids.len(), 3);
 
 		let mut win_status: Option<ServerGroupCardResponse> = None;
@@ -404,17 +402,22 @@ async fn status_json_mixed_server_ranks() {
 		.await
 		.unwrap();
 
-		let server_ids_response = private.post("/api/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
+		let server_ids_response = private.post("/api/statuses/group_ids").json(&serde_json::json!({})).await;
 		server_ids_response.assert_status_ok();
-		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
+		let group_ids: Vec<String> = server_ids_response.json();
 
-		// Three rank buckets, one group each.
-		assert_eq!(grouped_ids.len(), 3);
-		assert!(grouped_ids.contains_key("production"));
-		assert!(grouped_ids.contains_key("clone"));
-		assert!(grouped_ids.contains_key("dev"));
+		// All three, in name order rather than rank order: Clone and Dev come
+		// before Production despite ranking below it.
+		assert_eq!(
+			group_ids,
+			vec![
+				"cccccccc-cccc-cccc-cccc-cccccccccccc".to_string(),
+				"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb".to_string(),
+				"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string(),
+			]
+		);
 
-		let production_id = &grouped_ids.get("production").unwrap()[0];
+		let production_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 		let details_response = private
 			.post("/api/statuses/group_details")
 			.json(&serde_json::json!({"server_group_id": production_id}))
@@ -456,10 +459,9 @@ async fn status_json_unnamed_servers_excluded() {
 		.await
 		.unwrap();
 
-		let server_ids_response = private.post("/api/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
+		let server_ids_response = private.post("/api/statuses/group_ids").json(&serde_json::json!({})).await;
 		server_ids_response.assert_status_ok();
-		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
-		let group_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
+		let group_ids: Vec<String> = server_ids_response.json();
 		assert_eq!(group_ids.len(), 1);
 
 		let details_response = private
@@ -499,12 +501,11 @@ async fn a_gap_inside_the_threshold_is_simply_reachable() {
 		.unwrap();
 
 		let server_ids_response = private
-			.post("/api/statuses/server_grouped_ids")
+			.post("/api/statuses/group_ids")
 			.json(&serde_json::json!({}))
 			.await;
 		server_ids_response.assert_status_ok();
-		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
-		let group_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
+		let group_ids: Vec<String> = server_ids_response.json();
 		assert_eq!(group_ids.len(), 1);
 
 		let group_id = &group_ids[0];
@@ -549,10 +550,9 @@ async fn status_json_gone_server() {
 		.await
 		.unwrap();
 
-		let server_ids_response = private.post("/api/statuses/server_grouped_ids").json(&serde_json::json!({})).await;
+		let server_ids_response = private.post("/api/statuses/group_ids").json(&serde_json::json!({})).await;
 		server_ids_response.assert_status_ok();
-		let grouped_ids: std::collections::BTreeMap<String, Vec<String>> = server_ids_response.json();
-		let group_ids: Vec<String> = grouped_ids.into_values().flatten().collect();
+		let group_ids: Vec<String> = server_ids_response.json();
 		assert_eq!(group_ids.len(), 1);
 
 		let group_id = &group_ids[0];
@@ -591,7 +591,7 @@ async fn get_detail_basic() {
 		.unwrap();
 
 		let response = private
-			.post("/api/servers/get_detail")
+			.post("/api/fleet/applications/get_detail")
 			.json(&serde_json::json!({"server_id": "11111111-1111-1111-1111-111111111111"}))
 			.await;
 		response.assert_status_ok();
@@ -634,7 +634,7 @@ async fn get_detail_munin_flag() {
 		}
 
 		let munin_detail: MachineMunin = private
-			.post("/api/machines/get_detail")
+			.post("/api/fleet/machines/get_detail")
 			.json(&serde_json::json!({"machine_id": "11111111-1111-1111-1111-111111111111"}))
 			.await
 			.json();
@@ -644,7 +644,7 @@ async fn get_detail_munin_flag() {
 		);
 
 		let plain_detail: MachineMunin = private
-			.post("/api/machines/get_detail")
+			.post("/api/fleet/machines/get_detail")
 			.json(&serde_json::json!({"machine_id": "22222222-2222-2222-2222-222222222222"}))
 			.await
 			.json();
@@ -684,7 +684,7 @@ async fn get_detail_with_status() {
 		.unwrap();
 
 		let response = private
-			.post("/api/servers/get_detail")
+			.post("/api/fleet/applications/get_detail")
 			.json(&serde_json::json!({"server_id": "11111111-1111-1111-1111-111111111111"}))
 			.await;
 		response.assert_status_ok();
@@ -737,7 +737,7 @@ async fn get_detail_figures_resolve_across_sources() {
 		.unwrap();
 
 		let detail: ServerDetailResponse = private
-			.post("/api/servers/get_detail")
+			.post("/api/fleet/applications/get_detail")
 			.json(&serde_json::json!({"server_id": "11111111-1111-1111-1111-111111111111"}))
 			.await
 			.json();
@@ -752,7 +752,7 @@ async fn get_detail_figures_resolve_across_sources() {
 		assert_eq!(status.timezone, Some("Pacific/Auckland".to_string()));
 
 		let plain: ServerDetailResponse = private
-			.post("/api/servers/get_detail")
+			.post("/api/fleet/applications/get_detail")
 			.json(&serde_json::json!({"server_id": "22222222-2222-2222-2222-222222222222"}))
 			.await
 			.json();
@@ -790,7 +790,7 @@ async fn get_detail_with_device() {
 		.unwrap();
 
 		let response = private
-			.post("/api/servers/get_detail")
+			.post("/api/fleet/applications/get_detail")
 			.json(&serde_json::json!({"server_id": "11111111-1111-1111-1111-111111111111"}))
 			.await;
 		response.assert_status_ok();
@@ -821,7 +821,7 @@ async fn get_detail_with_device() {
 async fn get_detail_not_found() {
 	commons_tests::server::run(async |_conn, _, private| {
 		let response = private
-			.post("/api/servers/get_detail")
+			.post("/api/fleet/applications/get_detail")
 			.json(&serde_json::json!({"server_id": "99999999-9999-9999-9999-999999999999"}))
 			.await;
 		// AppError maps DatabaseQuery::NotFound to 404
@@ -834,7 +834,7 @@ async fn get_detail_not_found() {
 async fn get_detail_invalid_id() {
 	commons_tests::server::run(async |_conn, _, private| {
 		let response = private
-			.post("/api/servers/get_detail")
+			.post("/api/fleet/applications/get_detail")
 			.json(&serde_json::json!({"server_id": "not-a-uuid"}))
 			.await;
 		// axum's Json extractor rejects malformed bodies with 422
@@ -861,22 +861,22 @@ struct GroupMemberResponse {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn server_grouped_ids_empty() {
+async fn group_ids_empty() {
 	commons_tests::server::run(async |_conn, _, private| {
 		let response = private
-			.post("/api/statuses/server_grouped_ids")
+			.post("/api/statuses/group_ids")
 			.json(&serde_json::json!({}))
 			.await;
 		response.assert_status_ok();
 
-		let data: std::collections::BTreeMap<String, Vec<String>> = response.json();
+		let data: Vec<String> = response.json();
 		assert!(data.is_empty());
 	})
 	.await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn server_grouped_ids_with_data() {
+async fn group_ids_with_data() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
 			"INSERT INTO versions (id, major, minor, patch, status, changelog, created_at) VALUES
@@ -886,8 +886,8 @@ async fn server_grouped_ids_with_data() {
 		.unwrap();
 
 		// Three groups, each with one or more applications — Production group has
-		// multiple members to make sure the bucket gets exactly one entry per
-		// group rather than per server.
+		// multiple members to make sure the listing gets exactly one entry per
+		// group rather than per application.
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) VALUES
 			('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'Production cluster'),
@@ -904,17 +904,22 @@ async fn server_grouped_ids_with_data() {
 		.unwrap();
 
 		let response = private
-			.post("/api/statuses/server_grouped_ids")
+			.post("/api/statuses/group_ids")
 			.json(&serde_json::json!({}))
 			.await;
 		response.assert_status_ok();
 
-		let data: std::collections::BTreeMap<String, Vec<String>> = response.json();
+		let data: Vec<String> = response.json();
 
-		assert_eq!(data.get("production").map(|v| v.len()), Some(1));
+		// One entry per group, however many applications it carries, in name
+		// order: Clone cluster, Demo cluster, Production cluster.
 		assert_eq!(
-			data.get("production").and_then(|v| v.first()),
-			Some(&"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string())
+			data,
+			vec![
+				"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb".to_string(),
+				"cccccccc-cccc-cccc-cccc-cccccccccccc".to_string(),
+				"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string(),
+			]
 		);
 
 		// group_details returns the group card with all members.
@@ -926,27 +931,12 @@ async fn server_grouped_ids_with_data() {
 		let prod_group: ServerGroupCardResponse = details_response.json();
 		assert_eq!(prod_group.name, "Production cluster");
 		assert_eq!(prod_group.members.len(), 3);
-
-		assert_eq!(data.get("clone").map(|v| v.len()), Some(1));
-		assert_eq!(
-			data.get("clone").and_then(|v| v.first()),
-			Some(&"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb".to_string())
-		);
-
-		assert_eq!(data.get("demo").map(|v| v.len()), Some(1));
-		assert_eq!(
-			data.get("demo").and_then(|v| v.first()),
-			Some(&"cccccccc-cccc-cccc-cccc-cccccccccccc".to_string())
-		);
-
-		assert!(!data.contains_key("test"));
-		assert!(!data.contains_key("dev"));
 	})
 	.await
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn server_grouped_ids_excludes_ungrouped() {
+async fn group_ids_excludes_ungrouped() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		// One group with a production-ranked member, plus a standalone
 		// ungrouped server. The endpoint should expose the group but ignore
@@ -962,17 +952,16 @@ async fn server_grouped_ids_excludes_ungrouped() {
 		.unwrap();
 
 		let response = private
-			.post("/api/statuses/server_grouped_ids")
+			.post("/api/statuses/group_ids")
 			.json(&serde_json::json!({}))
 			.await;
 		response.assert_status_ok();
 
-		let data: std::collections::BTreeMap<String, Vec<String>> = response.json();
+		let data: Vec<String> = response.json();
 
-		assert_eq!(data.get("production").map(|v| v.len()), Some(1));
 		assert_eq!(
-			data.get("production").and_then(|v| v.first()),
-			Some(&"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string())
+			data,
+			vec!["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string()]
 		);
 	})
 	.await
@@ -2003,7 +1992,7 @@ async fn get_detail_health_excludes_silenced_checks() {
 
 		let detail = async || {
 			let response = private
-				.post("/api/servers/get_detail")
+				.post("/api/fleet/applications/get_detail")
 				.json(&serde_json::json!({"server_id": "11111111-1111-1111-1111-111111111111"}))
 				.await;
 			response.assert_status_ok();

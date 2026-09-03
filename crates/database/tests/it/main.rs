@@ -44,6 +44,7 @@ mod mcp_tokens;
 mod migration_test_candidates;
 mod migration_test_reports;
 mod partitions;
+mod reachability_silence_migration;
 mod reachability_sweep;
 mod recovery_vault;
 mod reported_detail;

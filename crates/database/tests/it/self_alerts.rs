@@ -364,6 +364,106 @@ async fn recently_seen_check_raises_nothing() {
 	.await
 }
 
+/// An application-subject entry whose type has left the fleet cannot be
+/// reported again by anything, so it is not a reporter falling silent — it is
+/// an entry whose population went away. Surfacing it asks the operator to tidy
+/// up after a fleet change, every day, forever.
+// spec: CHK#liveness-and-decommissioning
+#[tokio::test(flavor = "multi_thread")]
+async fn a_quiet_check_no_live_application_could_report_is_ignored() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		quiet_check(&mut conn, "orphaned", 24 * 40).await;
+		// The only application of the type that reported it goes, taking the
+		// population its namespace names with it.
+		diesel::sql_query("UPDATE applications SET deleted_at = now()")
+			.execute(&mut conn)
+			.await
+			.expect("archive the fleet");
+
+		self_alerts::sweep_stale_healthchecks(&mut conn)
+			.await
+			.expect("sweep");
+
+		assert!(
+			!stale_alert_active(&mut conn).await,
+			"an entry no live application could report into is not gone quiet",
+		);
+	})
+	.await
+}
+
+/// The machine and curated namespaces have populations that do not empty —
+/// every box, and Canopy itself — so they are never filtered out on this
+/// reasoning.
+// spec: CHK#liveness-and-decommissioning
+#[tokio::test(flavor = "multi_thread")]
+async fn a_quiet_machine_check_still_raises_with_no_applications_left() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		// `disk_free` is a machine-subject name, so its entry is the machine
+		// namespace's and names no type.
+		quiet_check(&mut conn, "disk_free", 24 * 40).await;
+		diesel::sql_query("UPDATE applications SET deleted_at = now()")
+			.execute(&mut conn)
+			.await
+			.expect("archive the fleet");
+
+		self_alerts::sweep_stale_healthchecks(&mut conn)
+			.await
+			.expect("sweep");
+
+		assert!(
+			stale_alert_active(&mut conn).await,
+			"a machine check's population is every box, which does not empty",
+		);
+	})
+	.await
+}
+
+/// The alert has to say which entry to retire, and hand the surface enough to
+/// link it. A bare `source/name` names as many entries as there are types
+/// reporting that name.
+// spec: SELF#presentation
+#[tokio::test(flavor = "multi_thread")]
+async fn the_alert_names_each_check_by_its_whole_identity() {
+	commons_tests::db::TestDb::run(async |mut conn, _url| {
+		quiet_check(&mut conn, "db_version", 24 * 40).await;
+
+		let issue = self_alerts::sweep_stale_healthchecks(&mut conn)
+			.await
+			.expect("sweep")
+			.expect("an alert");
+
+		assert!(
+			issue.message.contains("alertd/tamanu-central.db_version"),
+			"the message qualifies the name by the type whose check it is: {}",
+			issue.message,
+		);
+
+		let detail = issue.detail.expect("structured detail");
+		let checks = detail
+			.get("checks")
+			.and_then(|c| c.as_array())
+			.expect("a checks array");
+		assert_eq!(checks.len(), 1);
+		let entry = &checks[0];
+		assert_eq!(entry.get("source").and_then(|v| v.as_str()), Some("alertd"));
+		assert_eq!(
+			entry.get("check").and_then(|v| v.as_str()),
+			Some("db_version")
+		);
+		assert_eq!(
+			entry.get("subject").and_then(|v| v.as_str()),
+			Some("application")
+		);
+		assert_eq!(
+			entry.get("application_type").and_then(|v| v.as_str()),
+			Some("tamanu-central"),
+			"the surface needs the namespace to build the policy-page link"
+		);
+	})
+	.await
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn decommissioned_stale_check_is_ignored() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
