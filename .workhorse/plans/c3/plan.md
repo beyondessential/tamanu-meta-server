@@ -45,6 +45,13 @@ probing, mTLS device identity, cert rotation), the `new` / `with_urls` construct
 and the `raw-requests` escape hatch. Exactly what it settles on is bestool's call,
 tracked as bestool card X1.
 
+## The generator
+
+The generator lives here, as a workspace member producing committed source, driven by
+a `just` recipe alongside `gen-openapi`. bestool's `build.rs` is roughly 450 lines of
+typify plus hand-rolled method emission, so it is the starting point to port; what
+carries over unchanged and what gets rewritten is settled while doing it.
+
 ## Why the generated methods stay in the published crate
 
 A types-only crate would be thinner but would cost the compatibility check. The `API`
@@ -90,8 +97,6 @@ canopy-side decisions at the source. Canopy knows which of its fields are secret
 
 ## Open
 
-- Where the generator lives: a workspace member producing committed source, driven by
-  a `just` recipe alongside `gen-openapi`.
 - `crates/public-server/src/openapi.rs` sets `info.version = ""`. Decide what it
   carries once a published crate's semver is what consumers pin. Tracked in L3.
 - `request_body_type` falls back to `serde_json::Value` for open `allOf` schemas such
