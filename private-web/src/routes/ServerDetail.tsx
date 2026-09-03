@@ -16,7 +16,6 @@ import {
 } from "@mui/material";
 import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
 import EditIcon from "@mui/icons-material/Edit";
-import InsightsIcon from "@mui/icons-material/Insights";
 import LanguageIcon from "@mui/icons-material/Language";
 import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
 import { useState } from "react";
@@ -221,17 +220,6 @@ function Header({
 	onArchived: () => void;
 }) {
 	const archived = data.server.archived;
-	// Munin runs on the server's own box, reachable over the tailnet — build
-	// its URL from the bound device's MagicDNS name (live value preferred,
-	// falling back to the stored snapshot). Only offered when the server is
-	// known to run Munin and has a tailnet name.
-	// spec: SVC#munin-link
-	const tailnetName =
-		data.device_info?.tailnet_live?.display_name ??
-		data.device_info?.device?.tailscale_node_name ??
-		null;
-	const muninUrl =
-		data.munin && tailnetName ? `https://${tailnetName}:4950/` : null;
 	return (
 		<Stack spacing={1.5}>
 			<Stack
@@ -263,9 +251,6 @@ function Header({
 						label="Open"
 						title={data.server.display_host}
 					/>
-				)}
-				{muninUrl && (
-					<ActionButton href={muninUrl} icon={<InsightsIcon />} label="Munin" />
 				)}
 				<IncidentsLink
 					serverId={data.server.id}

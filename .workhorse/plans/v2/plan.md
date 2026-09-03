@@ -808,7 +808,13 @@ FIG: "A machine figure spreads over machines and an application figure over appl
 
 `fleet_detail` returns one row per application with no machine on it, and `ReportedDetail::all` fans each machine's detail onto every application it hosts. A two-application box therefore counts twice on platform, bestool version and every crossing. The fan-out is right for a detail page, which asks about one application, and wrong for a spread, which counts.
 
-The snapshot reader has the mirror-image problem. `MergedDetail::from_statuses` reads only the application's status rows, so under a split push the machine figures -- platform, timezone, bestool version -- are absent from a past snapshot rather than doubled. Both are the same missing step: the reader has to name which grain a figure comes from. Neither is started; this needs a decision on how far the figure split goes before either is worth touching.
+The snapshot reader has the mirror-image problem. `MergedDetail::from_statuses` reads only the application's status rows, so under a split push the machine figures -- platform, timezone, bestool version -- are absent from a past snapshot rather than doubled. Both are the same missing step: the reader has to name which grain a figure comes from.
+
+FIG decides how far the split goes, so neither is blocked on a decision.
+`fleet_detail` returns both populations: the machines, each with its own detail and checks, and the applications, each with its own detail and the id of the box it runs on.
+The view works out a figure's grain from the data, treating a key as machine-grained when a machine reports it, spreads machine figures over machines and application figures over applications, and counts machines in every crossing.
+A machine takes the set of values its applications give an application-grained axis, so a box whose applications disagree lands in each matching cell.
+The snapshot reader gains the machine grain the same way, reading a machine's status rows alongside the application's.
 
 ### What the remaining unticked cases actually are
 
@@ -892,6 +898,10 @@ The title says which thing the page is about, and whether that thing is well is 
 
 One affordance goes with the flat sibling list: it carried an admin-only manual-event button per sibling, and the tree has never had one.
 The group page's tree did not offer it either, so an admin filing an event against a neighbouring workload now goes to that workload's own page, one click further than before.
+
+**Done since the audit: the Munin flag and its link move to the machine.**
+Munin watches the box, so `munin` was already routed to the machine's reported detail on ingest; what was still wrong was where it surfaced.
+The flag moves from the application's detail response to the machine's, and the Munin action button from the application's page to the machine's, built from the tailnet name of the identity bound to the box.
 
 **Done since the audit: the fleet listing loses its ungrouped tab.**
 Every machine is created in a group and every application takes its machine's, so nothing can be ungrouped and the listing had nothing left to list.

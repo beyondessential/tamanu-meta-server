@@ -7191,6 +7191,12 @@ export interface components {
             /** @description Whether the suspension is only the settle period. */
             maintenance_settling: boolean;
             /**
+             * @description Whether the box is known to run Munin, from the most recent source to
+             *     report the flag. Munin watches the box rather than anything running on
+             *     it, so the flag and the link it drives are the machine's.
+             */
+            munin: boolean;
+            /**
              * @description The people logged in to this box right now, from its `external_users`
              *     check. Empty unless the box is currently reporting: a stale report
              *     cannot say who is on it now.
@@ -9108,11 +9114,6 @@ export interface components {
              *     ended and watching resumes when it elapses.
              */
             maintenance_settling: boolean;
-            /**
-             * @description Whether the server is known to run Munin, from the most recent source
-             *     to report the flag. The UI offers a Munin link only when this is true.
-             */
-            munin: boolean;
             /** @description The server's own record. */
             server: components["schemas"]["ServerInfo"];
             /** @description Current reachability, derived from the most recent status report. */

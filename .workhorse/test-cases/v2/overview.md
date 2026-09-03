@@ -95,7 +95,7 @@ plan's "Specced and not built" section says which is which.
 - [ ] A crossing counts machines whatever is on its axes, and names the unit it counts (verifies spec: FIG)
 - [ ] A machine whose applications disagree on an application figure appears in each matching cell (verifies spec: FIG)
 - [x] The OS timezone and an application's configured timezone present as separate figures and may differ (verifies spec: FIG)
-- [ ] The Munin flag is a machine figure, and the Munin link is offered on the machine (verifies spec: SVC, FIG)
+- [x] The Munin flag is a machine figure, and the Munin link is offered on the machine (verifies spec: SVC, FIG)
 - [ ] A machine reporting no OS falls back to the family its applications' database engine gives away (verifies spec: FIG)
 - [ ] Runtime version falls back to the reporting identity's connection metadata (verifies spec: FIG)
 

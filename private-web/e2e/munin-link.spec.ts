@@ -1,26 +1,34 @@
 import { expect, test } from "./test-fixtures";
-import { resetSeededTables, seedDevice, seedServer, seedStatus } from "./seed";
+import {
+	resetSeededTables,
+	seedDevice,
+	seedMachine,
+	seedMachineReport,
+} from "./seed";
 
 // spec: SVC#munin-link
-test.describe("munin link on server detail", () => {
+test.describe("munin link on machine detail", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
 	});
 
-	test("links to the tailnet host on :4950 when the server reports munin", async ({
+	test("links to the tailnet host on :4950 when the machine reports munin", async ({
 		page,
 		sql,
 	}) => {
 		const device = await seedDevice(sql, {
 			tailscaleNodeName: "munin-box.e2e.ts.net",
 		});
-		const server = await seedServer(sql, {
+		const machine = await seedMachine(sql, {
 			name: "has-munin",
 			deviceId: device.id,
 		});
-		await seedStatus(sql, { serverId: server.id, extra: { munin: true } });
+		await seedMachineReport(sql, {
+			machineId: machine.id,
+			extra: { munin: true },
+		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/machines/${machine.id}`);
 
 		const munin = page.getByRole("link", { name: "Munin" });
 		await expect(munin).toBeVisible();
@@ -31,20 +39,23 @@ test.describe("munin link on server detail", () => {
 		await expect(munin).toHaveAttribute("target", "_blank");
 	});
 
-	test("offers no Munin link when the server never reported munin", async ({
+	test("offers no Munin link when the machine never reported munin", async ({
 		page,
 		sql,
 	}) => {
 		const device = await seedDevice(sql, {
 			tailscaleNodeName: "plain-box.e2e.ts.net",
 		});
-		const server = await seedServer(sql, {
+		const machine = await seedMachine(sql, {
 			name: "no-munin",
 			deviceId: device.id,
 		});
-		await seedStatus(sql, { serverId: server.id, extra: { uptimeSecs: 3600 } });
+		await seedMachineReport(sql, {
+			machineId: machine.id,
+			extra: { uptimeSecs: 3600 },
+		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/machines/${machine.id}`);
 
 		// Wait for the page to render before asserting the link's absence.
 		await expect(

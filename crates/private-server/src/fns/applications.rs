@@ -71,10 +71,6 @@ pub struct ServerDetailData {
 	/// the server is ungrouped, there being no deployment to attribute to.
 	// spec: APP#billing-attribution
 	pub billing_labels: Vec<super::server_groups::BillingTag>,
-	/// Whether the server is known to run Munin, from the most recent source
-	/// to report the flag. The UI offers a Munin link only when this is true.
-	// spec: SVC#munin-link
-	pub munin: bool,
 }
 
 /// A server in the fleet inventory: its identity, classification, network
@@ -753,9 +749,6 @@ pub async fn get_detail(
 		None => Vec::new(),
 	};
 
-	// spec: SVC#munin-link
-	let munin = figures.munin().unwrap_or(false);
-
 	// An application is under maintenance when the box it runs on is: work on
 	// the machine stops the workload whether or not anyone named it.
 	let maintained = database::maintenance_windows::MaintenanceWindow::suspends(
@@ -791,7 +784,6 @@ pub async fn get_detail(
 		group_applications,
 		group_machines,
 		billing_labels,
-		munin,
 	}))
 }
 

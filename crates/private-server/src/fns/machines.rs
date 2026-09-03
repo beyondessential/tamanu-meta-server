@@ -172,6 +172,11 @@ pub struct MachineDetailData {
 	pub figures: serde_json::Value,
 	/// When the box last reported anything, across every source.
 	pub last_reported_at: Option<jiff::Timestamp>,
+	/// Whether the box is known to run Munin, from the most recent source to
+	/// report the flag. Munin watches the box rather than anything running on
+	/// it, so the flag and the link it drives are the machine's.
+	// spec: SVC#munin-link
+	pub munin: bool,
 	/// Whether the box is currently reporting, on its own threshold.
 	pub up: ShortStatus,
 	/// The machine's own health, from the checks filed against it. What the
@@ -245,8 +250,10 @@ pub async fn get_detail(
 	// spec: FIG#sourcing
 	let reports = MachineReportedDetail::for_machine(&mut conn, machine.id).await?;
 	let last_reported_at = reports.iter().map(|r| r.reported_at).max();
-	let figures =
-		MergedDetail::from_reports(reports.iter().map(|r| (r.reported_at, &r.extra))).into_json();
+	let merged = MergedDetail::from_reports(reports.iter().map(|r| (r.reported_at, &r.extra)));
+	// spec: SVC#munin-link
+	let munin = merged.munin().unwrap_or(false);
+	let figures = merged.into_json();
 
 	// One consolidated read drives both the headline health and the checks
 	// table, so they cannot disagree.
@@ -316,6 +323,7 @@ pub async fn get_detail(
 		device_info,
 		figures,
 		last_reported_at,
+		munin,
 		up,
 		health,
 		maintained,

@@ -7,9 +7,11 @@ import {
 	Stack,
 	Typography,
 } from "@mui/material";
+import InsightsIcon from "@mui/icons-material/Insights";
 import { useEffect, useState } from "react";
 import { Link as RouterLink, useLocation, useParams } from "react-router-dom";
 import { useApi } from "../api";
+import ActionButton from "../components/ActionButton";
 import ApplicationTypeChip from "../components/ApplicationTypeChip";
 import { ChecksTable, HealthIndicator } from "../components/ChecksTable";
 import { HealthLegend, StatusLegend } from "../components/Legends";
@@ -76,6 +78,17 @@ export default function MachineDetail() {
 
 	const data = detail.data;
 	const enrolled = data.machine.registered_at != null;
+	// Munin watches the box, reachable over the tailnet — build its URL from
+	// the bound identity's MagicDNS name (live value preferred, falling back to
+	// the stored snapshot). Offered only when the box is known to run Munin and
+	// has a tailnet name.
+	// spec: SVC#munin-link
+	const tailnetName =
+		data.device_info?.tailnet_live?.display_name ??
+		data.device_info?.device?.tailscale_node_name ??
+		null;
+	const muninUrl =
+		data.munin && tailnetName ? `https://${tailnetName}:4950/` : null;
 
 	return (
 		<Stack spacing={3}>
@@ -98,6 +111,12 @@ export default function MachineDetail() {
 					</MuiLink>
 				)}
 			</Stack>
+
+			{muninUrl && (
+				<Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }} useFlexGap>
+					<ActionButton href={muninUrl} icon={<InsightsIcon />} label="Munin" />
+				</Stack>
+			)}
 
 			{data.machine.deleted_at != null && (
 				<Alert severity="warning">This machine is archived.</Alert>

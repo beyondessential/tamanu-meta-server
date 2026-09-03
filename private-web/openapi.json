@@ -12716,6 +12716,7 @@
         "required": [
           "machine",
           "figures",
+          "munin",
           "up",
           "health",
           "maintained",
@@ -12809,6 +12810,10 @@
           "maintenance_settling": {
             "type": "boolean",
             "description": "Whether the suspension is only the settle period."
+          },
+          "munin": {
+            "type": "boolean",
+            "description": "Whether the box is known to run Munin, from the most recent source to\nreport the flag. Munin watches the box rather than anything running on\nit, so the flag and the link it drives are the machine's."
           },
           "operators": {
             "type": "array",
@@ -15781,8 +15786,7 @@
           "checks",
           "group_applications",
           "group_machines",
-          "billing_labels",
-          "munin"
+          "billing_labels"
         ],
         "properties": {
           "billing_labels": {
@@ -15854,10 +15858,6 @@
           "maintenance_settling": {
             "type": "boolean",
             "description": "Whether the suspension is only the settle period: the window has\nended and watching resumes when it elapses."
-          },
-          "munin": {
-            "type": "boolean",
-            "description": "Whether the server is known to run Munin, from the most recent source\nto report the flag. The UI offers a Munin link only when this is true."
           },
           "server": {
             "$ref": "#/components/schemas/ServerInfo",
