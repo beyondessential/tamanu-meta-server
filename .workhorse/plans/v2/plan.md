@@ -809,3 +809,27 @@ FIG: "A machine figure spreads over machines and an application figure over appl
 `fleet_detail` returns one row per application with no machine on it, and `ReportedDetail::all` fans each machine's detail onto every application it hosts. A two-application box therefore counts twice on platform, bestool version and every crossing. The fan-out is right for a detail page, which asks about one application, and wrong for a spread, which counts.
 
 The snapshot reader has the mirror-image problem. `MergedDetail::from_statuses` reads only the application's status rows, so under a split push the machine figures -- platform, timezone, bestool version -- are absent from a past snapshot rather than doubled. Both are the same missing step: the reader has to name which grain a figure comes from. Neither is started; this needs a decision on how far the figure split goes before either is worth touching.
+
+### What the remaining unticked cases actually are
+
+An audit of every unticked case in the test-cases document, since "unticked" was covering three different situations and they need different work.
+
+**Four were already covered and simply not ticked.** `push_naming_a_type_creates_the_application_it_describes` covers the first report creating an application, silent adoption of an unseen one, silent adoption of a reported type, and a later report omitting an application leaving it in place. Ticked.
+
+**One verified behaviour the spec no longer has.** "A migrated application's type is corrected by the first report that disagrees with it" predates APP's rule that an application never changes type. `applications_take_one_type` derives the type mechanically from the product and kind and hard-fails on a pair it cannot map, so there is no guess left to correct. Rewritten as the case the spec does have: a migrated application carries no key, so the first split push naming its type takes it over, and a push naming a different type stands a new application beside it.
+
+**Three are built and want only coverage.** The fleet maintenance view already links a machine target to `/machines/:id`. The application page already carries neither backups nor an identity. MCP already reads `health_from_check_state` and `machine_health_from_check_state`, the same two rollups the detail pages read, so its classifications match by construction and a test pins that they stay matching.
+
+**The rest are real gaps, in four clusters.**
+
+*The figures split, which is the largest.* The fleet spread and its crossings count applications where FIG says machine figures count machines, the snapshot reader misses machine figures entirely, the Munin flag and its link still sit on the application, and both figure fallbacks now reach across a grain boundary they did not have to before: the OS family falls back to the database engine an *application* reports, and the runtime version falls back to the connection metadata of the identity on the *machine*.
+
+*The split push shape's edges.* A reporter changing an application's type under an unchanged key, a reporter field named `source`, `health`, `check` or `result` inside `detail`, and two applications sharing one key.
+
+*The detail pages' last three deviations from the mockup.* Both pages should end with the group's tree — rank, then machine, then applications, with the current page marked in place — where the application page still shows a flat sibling list and the machine page shows nothing. Neither page should carry a status dot beside its title; both still do. And the fleet listing keeps an ungrouped tab.
+
+*The operator count at the machine grain.* `aggregateOperators` collects the application names a person is connected to, so a box running two workloads reads as two places one person is. The count is already deduped by login; what is wrong is the unit underneath it, which should be the machine.
+
+*Migration replay coverage.* `add_machines` and its followers ran without the replay tests `maintenance_windows_take_the_machine` has: that every server became one application and one machine, that `alert_when_down_for`, the group and the identity landed on the machine, and that silences, incidents and check states survived the rename.
+
+The default application name is its own small item: FLT says an application with no name presents as the sentence case of its type, and the UI still reads "Unnamed server".

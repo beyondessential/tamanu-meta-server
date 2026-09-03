@@ -2,17 +2,16 @@
 
 Coverage the card owes. An unticked box is a scenario not yet covered.
 
-The unticked cases carry over to card G3. Most of them are unticked because the
-behaviour they verify was specced on this card and not built, not because the
-coverage was deferred; G3 says which is which, and leads with the one item that
-is a regression.
+Most unticked cases are unticked because the behaviour they verify was specced
+on this card and not built, rather than because the coverage was deferred. The
+plan's "Specced and not built" section says which is which.
 
 ## Model and lifecycle
 
 - [x] Creating a machine in a group, with no applications, presents as not-yet-checked-in rather than as an error (verifies spec: FLT)
-- [ ] A machine's first report creates the applications it describes (verifies spec: FLT)
-- [ ] An application Canopy has not seen before is adopted silently, with no operator step (verifies spec: APP)
-- [ ] A report that omits a previously-reported application does not remove it (verifies spec: FLT)
+- [x] A machine's first report creates the applications it describes (verifies spec: FLT)
+- [x] An application Canopy has not seen before is adopted silently, with no operator step (verifies spec: APP)
+- [x] A report that omits a previously-reported application does not remove it (verifies spec: FLT)
 - [x] Only an operator archives an application; an archived one leaves the live fleet with its history intact (verifies spec: FLT)
 - [x] Archiving a machine archives the applications on it (verifies spec: FLT)
 - [ ] An application with no operator-set name presents as the sentence case of its type (verifies spec: FLT)
@@ -29,7 +28,7 @@ is a regression.
 ## Application types
 
 - [x] A server with product `tamanu` and kind `central` migrates to an application of type `tamanu-central` (verifies spec: APP)
-- [ ] A reported type is adopted without an operator step (verifies spec: APP)
+- [x] A reported type is adopted without an operator step (verifies spec: APP)
 - [ ] A reporter sending a different type under an unchanged key produces an unreachable application and a new one beside it (verifies spec: APP, STA)
 - [x] A type appears among an application's reserved read-only tags and on no machine (verifies spec: APP, FLT)
 - [x] A `tamanu-central` is eligible for public listing; other types are not (verifies spec: APP)
@@ -183,7 +182,7 @@ cover the runtime half of that, which the spec diff cannot see.
 
 - [ ] Every existing server becomes one application and one machine (verifies spec: FLT)
 - [ ] `alert_when_down_for`, the group and the identity link land on the machine (verifies spec: FLT)
-- [ ] A migrated application's type is corrected by the first report that disagrees with it (verifies spec: APP)
+- [ ] A migrated application, having no key, is taken over by the first split push naming its type, and a push naming a different type stands a new application beside it (verifies spec: APP, STA)
 - [ ] Existing silences, incidents and check states survive the rename intact
 - [x] Each application type that reported a check gets its own catalog entry, with its own first and last seen (verifies spec: CHK)
 - [x] A machine-subject name from a structured source is re-keyed, not multiplied (verifies spec: CHK)
