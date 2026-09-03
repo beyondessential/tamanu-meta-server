@@ -230,8 +230,8 @@ Canopy knows the version each server reports running and the upgrade path it wou
 
 Canopy decides which versions are tested against which servers, rather than an operator naming each pair.
 
-A server's candidate is the version its group's open plan moves it to (see [UPG](../private-server/upgrade-plans.md)).
-A group with no open plan has no candidate, so none of its servers are tested.
+A server's candidate is the version its environment's open plan moves it to: the plan for its group at its rank (see [UPG](../private-server/upgrade-plans.md)).
+An environment with no open plan has no candidate, so none of its servers are tested, and a server with no rank is in no environment and has none either.
 
 Recording a plan is what asks for the testing.
 A run costs hours of a consumer's capacity per server, and which minor a group moves to is not something Canopy can derive, so aiming at whatever is newest would spend that capacity on versions nobody has decided to take.
@@ -256,7 +256,7 @@ That window is where the answer is still cheap: the fleet is not moving yet, and
 It carries `check` alongside, so a single restore reports the replica's health and the migrations' outcome as two signals from one report.
 
 An intent carrying `migrate` is withheld from a server with no candidate version.
-An intent that verifies backups therefore does not also migrate: it would go undispatched for every server without a candidate, leaving the backups of any non-Tamanu product, and of every group with no plan open, unverified.
+An intent that verifies backups therefore does not also migrate: it would go undispatched for every server without a candidate, leaving the backups of any non-Tamanu product, and of every environment with no plan open, unverified.
 An intent that keeps a replica queryable does not migrate either: a migrated replica sits at a version its group is not running, so a declaration promoted to it would give an operator a schema that does not match production.
 
 A verifying intent and a migrating intent restore the same snapshot separately.

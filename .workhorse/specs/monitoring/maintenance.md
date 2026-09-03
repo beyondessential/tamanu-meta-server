@@ -28,7 +28,7 @@ A server covered by its own window and by its group's stays suspended until the 
 A target has at most one open window: declaring over one that already has a window amends it, recording who amended and when.
 
 Canopy never opens a window by itself.
-A group with an open upgrade plan is offered the declaration from that plan, prefilled with its window and note, so declaring is one action at the moment the work starts (see [UPG](../private-server/upgrade-plans.md)).
+A group is offered the declaration from each of its environments' open upgrade plans, prefilled with that plan's window and note, so declaring is one action at the moment the work starts (see [UPG](../private-server/upgrade-plans.md)).
 An hour someone typed in advance is not evidence that work began, so a planned window suspends nothing on its own.
 An open incident offers the declaration over its target too, so an operator who recognises an alert as their own work declares from where they are reading it.
 
