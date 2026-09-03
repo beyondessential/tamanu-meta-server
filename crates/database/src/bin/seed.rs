@@ -4,7 +4,7 @@
 //! data so the admin UI (and the new server-enrollment flow in particular) has
 //! something to render against. LOCAL DEV ONLY — it truncates the app tables it
 //! manages before reinserting, so it's safe to re-run, but it must never point
-//! at a real deployment.
+//! at a real Canopy instance.
 //!
 //! Run via `just seed`. It reuses the model functions in this crate wherever
 //! they exist (so the seed tracks the schema and the real code paths), and
@@ -86,7 +86,7 @@ fn url(s: &str) -> UrlField {
 	UrlField(s.parse().expect("seed URL parses"))
 }
 
-/// Refuse to run against anything that looks like a real deployment.
+/// Refuse to run against anything that looks like a real Canopy instance.
 fn guard_database_url(database_url: &str) -> Result<()> {
 	let lower = database_url.to_ascii_lowercase();
 	let looks_prod = [
@@ -107,7 +107,7 @@ fn guard_database_url(database_url: &str) -> Result<()> {
 
 	if let Some(needle) = looks_prod {
 		return Err(AppError::custom(format!(
-			"refusing to seed: DATABASE_URL looks like a real deployment (matched {needle:?}). \
+			"refusing to seed: DATABASE_URL looks like a real Canopy instance (matched {needle:?}). \
 			 The seeder is LOCAL DEV ONLY and truncates application tables."
 		)));
 	}
@@ -121,10 +121,10 @@ async fn main() -> miette::Result<()> {
 	eprintln!("┌─────────────────────────────────────────────────────────────┐");
 	eprintln!("│  canopy seed — LOCAL DEVELOPMENT ONLY                        │");
 	eprintln!("│  Truncates and repopulates application tables.              │");
-	eprintln!("│  Never run this against a real deployment.                  │");
+	eprintln!("│  Never run this against a real Canopy instance.             │");
 	eprintln!("└─────────────────────────────────────────────────────────────┘");
 
-	// Release builds are for deployments; the seeder is a dev-only tool that
+	// Release builds are for real instances; the seeder is a dev-only tool that
 	// truncates tables, so refuse to run unless built with debug assertions.
 	if !cfg!(debug_assertions) {
 		eprintln!(
@@ -539,7 +539,7 @@ async fn seed_groups(conn: &mut AsyncPgConnection) -> Result<SeededGroups> {
 		conn,
 		NewServerGroup {
 			name: "Pacific Region".to_string(),
-			notes: "Production deployments across the Pacific facilities.".to_string(),
+			notes: "Production servers across the Pacific facilities.".to_string(),
 			tags: tags(&[("region", "pacific"), ("tier", "production")]),
 			slack_open_delay: Some(PgDuration(SignedDuration::from_secs(300))),
 			slack_close_delay: None,

@@ -236,7 +236,7 @@ export interface paths {
         put?: never;
         /**
          * Onboard a group onto Canopy's shared-account backups.
-         * @description Use this for deployments that don't have their own AWS account. Canopy
+         * @description Use this for groups that don't have their own AWS account. Canopy
          *     generates a bucket name automatically, generates and stores the repository
          *     passphrase, and marks the configuration as provisioning with shared
          *     placement. The bucket and its access roles are provisioned asynchronously;
@@ -881,7 +881,7 @@ export interface paths {
         /**
          * The names in use under each domain a group controls, and which of them hold a
          *     current certificate.
-         * @description So that whether a deployment's names are healthy is answerable from the
+         * @description So that whether a group's names are healthy is answerable from the
          *     group's page, without visiting each of its applications.
          */
         post: operations["certificates_for_group"];
@@ -925,7 +925,7 @@ export interface paths {
         /**
          * Pause a server: Canopy makes no new changes on its behalf.
          * @description Nothing already in place is withdrawn — records published stand, certificates
-         *     held stay held and collectable until they expire, and the deployment keeps
+         *     held stay held and collectable until they expire, and the group keeps
          *     working exactly as it did. What stops is Canopy doing anything *new*.
          *
          *     A second pause leaves the first in place, so the original reason and time are
@@ -1026,8 +1026,8 @@ export interface paths {
         put?: never;
         /**
          * Set the profile a server's certificates are requested under.
-         * @description Lifetime is a property of how a deployment is run rather than of Canopy, so it
-         *     is an operator's choice per server: a cloud deployment whose issuance is
+         * @description Lifetime is a property of how an application is run rather than of Canopy, so it
+         *     is an operator's choice per server: a cloud-hosted application whose issuance is
          *     exercised constantly can carry a short lifetime where an on-premises one that
          *     may be offline for days cannot. Takes effect on the next issuance or renewal;
          *     a certificate already held keeps the lifetime it was issued with.
@@ -1126,8 +1126,8 @@ export interface paths {
         put?: never;
         /**
          * Get the configured public API base URL.
-         * @description Returns the base URL of the device-facing public API for this
-         *     deployment, or `null` if none is configured. Used by the operator UI to
+         * @description Returns the base URL of the device-facing public API for this Canopy
+         *     instance, or `null` if none is configured. Used by the operator UI to
          *     build links out to device-facing resources.
          */
         post: operations["public_url"];
@@ -1590,7 +1590,7 @@ export interface paths {
          * Whether granting a server name management would mean anything yet.
          * @description The two grants are only ever exercised over names beneath a domain the
          *     server's group controls, so offering them where no domain is controlled — or
-         *     where the deployment has no zones at all — presents a control that cannot do
+         *     where the Canopy instance has no zones at all — presents a control that cannot do
          *     anything. The rule lives here rather than in the UI so there is one answer
          *     to it.
          */
@@ -1637,7 +1637,7 @@ export interface paths {
          * @description An operator claiming a domain for a group needs these to know which names
          *     are claimable at all: a claim has to sit at or under one of these apexes.
          *     An empty list means Canopy has been given no zones, so no domain can be
-         *     claimed until its deployment configuration provides one.
+         *     claimed until the Canopy instance's configuration provides one.
          */
         post: operations["domains_zones"];
         delete?: never;
@@ -3862,7 +3862,7 @@ export interface paths {
         put?: never;
         /**
          * A group's plan and the plans it has had before.
-         * @description The history is the record of what a deployment planned, when for, and when
+         * @description The history is the record of what a group planned, when for, and when
          *     it landed.
          */
         post: operations["upgrade_plans_for_group"];
@@ -3883,7 +3883,7 @@ export interface paths {
         put?: never;
         /**
          * The plans that have closed, across the fleet.
-         * @description A deployment that stopped going somewhere leaves no other mark on the fleet,
+         * @description A group that stopped going somewhere leaves no other mark on the fleet,
          *     so a withdrawn plan is readable here or nowhere.
          */
         post: operations["upgrade_plans_history"];
@@ -3946,7 +3946,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Withdraw a plan: the deployment is no longer going there.
+         * Withdraw a plan: the group is no longer going there.
          * @description This does not say the upgrade happened. Canopy closes a met plan on its own
          *     once the group reports the target.
          */
@@ -4643,7 +4643,7 @@ export interface components {
             mode: string;
             /**
              * @description Where the backup bucket lives: `external` if it was provisioned in the
-             *     deployment's own cloud account, or `shared` if Canopy provisioned it
+             *     group's own cloud account, or `shared` if Canopy provisioned it
              *     automatically in a shared account. Distinguishes the two onboarding
              *     paths.
              */
@@ -4876,7 +4876,7 @@ export interface components {
          *
          *     Labels are computed from the group's configuration: explicit `billing.*`
          *     tags on the group are honoured verbatim; otherwise the product comes from
-         *     the one its live members agree on, the deployment from the group name in
+         *     the one its live members agree on, the deployment label from the group name in
          *     lower-kebab-case, and the stage from the group's highest-ranked live member
          *     (for example `prod`). A label with nothing to attribute to is omitted
          *     entirely: the stage when the group has no ranked members, and the product
@@ -5928,7 +5928,7 @@ export interface components {
              * @description What an operator can do with the two grants right now:
              *
              *     - `unconfigured` — Canopy has no managed zones and no group anywhere
-             *       controls a domain, so name management is not in use in this deployment.
+             *       controls a domain, so name management is not in use in this Canopy instance.
              *       Granting it would do nothing and there is nothing an operator can do
              *       about that from here; it becomes available once the infrastructure
              *       provides a zone.
@@ -7474,7 +7474,7 @@ export interface components {
         /**
          * @description A DNS zone Canopy can write records in.
          *
-         *     Zones come from Canopy's deployment configuration rather than from operator
+         *     Zones come from the Canopy instance's own configuration rather than from operator
          *     state: they are what the infrastructure has granted Canopy write access to,
          *     and they bound which domains a group can be given.
          */
@@ -9200,7 +9200,7 @@ export interface components {
              * @description The server's own effective `billing.*` labels
              *     (product/deployment/stage) — the ones canopy hands the server's device,
              *     carrying its own product and rank rather than its group's. Empty when
-             *     the server is ungrouped, there being no deployment to attribute to.
+             *     the server is ungrouped, there being no group to attribute to.
              */
             billing_labels: components["schemas"]["BillingTag"][];
             /**

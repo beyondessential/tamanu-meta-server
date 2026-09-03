@@ -10,7 +10,7 @@ import { isIncidentLingering, type IncidentData } from "../types";
 ///
 /// An incident is always the group's, never one application's or one box's, so
 /// the same card appears on the group and on both detail pages: an operator who
-/// lands on a workload needs to know its deployment is already on fire, and
+/// lands on a workload needs to know its group is already on fire, and
 /// finding that out by noticing a coloured button is finding it out too late.
 /// spec: INC
 export default function ActiveIncidentCard({

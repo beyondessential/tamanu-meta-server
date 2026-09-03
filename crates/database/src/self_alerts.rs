@@ -83,7 +83,7 @@ pub const DNS_ZONE_COVERAGE_REF: &str = "dns-zone-coverage";
 
 pub const DNS_ZONE_COVERAGE_DOC: &str = "## Description
 
-Canopy holds the DNS zones it may write records in as deployment configuration, and a group domain is only actionable while a configured zone covers it. This alert means at least one group is now depending on a domain Canopy cannot reach — usually a zone removed from the configuration while its claims stood, or a configuration that no longer parses.
+Canopy holds the DNS zones it may write records in as its own instance configuration, and a group domain is only actionable while a configured zone covers it. This alert means at least one group is now depending on a domain Canopy cannot reach — usually a zone removed from the configuration while its claims stood, or a configuration that no longer parses.
 
 Claims are never dropped for this: the group keeps the domain, and it keeps excluding other groups from overlapping it. What stops is Canopy acting on any name beneath it.
 
@@ -94,7 +94,7 @@ Claims are never dropped for this: the group keeps the domain, and it keeps excl
 
 ## Solve
 
-Compare the zone list in Canopy's deployment configuration against the domains reported in the alert message. Restore the missing zone if its removal was accidental; if it was deliberate, release the claims on each group's page. A configuration that does not parse is reported with the parse error — fix the entry and restart.";
+Compare the zone list in the Canopy instance's configuration against the domains reported in the alert message. Restore the missing zone if its removal was accidental; if it was deliberate, release the claims on each group's page. A configuration that does not parse is reported with the parse error — fix the entry and restart.";
 
 /// Canopy cannot reach the certificate authority at all.
 // spec: CRT#when-issuance-fails
@@ -228,7 +228,7 @@ pub const FORGOTTEN_PAUSE_DOC: &str = "## Description
 
 Pausing a server stops Canopy doing anything new on its behalf, including renewing its certificates. That is the point of a pause — but it also suppresses the per-server alerting that would otherwise chase a certificate running out, so a pause nobody remembers is exactly how certificates quietly expire.
 
-This alert is that forgetting, reported against Canopy rather than against the deployment: only an operator can lift a pause, and Canopy never lifts one itself however much is expiring underneath it.
+This alert is that forgetting, reported against Canopy rather than against the group: only an operator can lift a pause, and Canopy never lifts one itself however much is expiring underneath it.
 
 A certificate for a name the server is no longer entitled to is not counted: Canopy stopped renewing that on purpose, and the pause is not why it is running out.
 
@@ -239,7 +239,7 @@ A certificate for a name the server is no longer entitled to is not counted: Can
 
 ## Solve
 
-Look at each server named in the alert. Finish whatever the pause was for — the recorded reason is on the server's page — and unpause it; Canopy then works the renewals that fell due while it was paused. If the pause is no longer needed at all, lifting it is the whole fix. If the deployment is gone for good, archive the server or release the group's claim on the domain instead, which stops the certificates being Canopy's business.";
+Look at each server named in the alert. Finish whatever the pause was for — the recorded reason is on the server's page — and unpause it; Canopy then works the renewals that fell due while it was paused. If the pause is no longer needed at all, lifting it is the whole fix. If it is gone for good, archive the server or release the group's claim on the domain instead, which stops the certificates being Canopy's business.";
 
 /// Evaluate the forgotten-pause condition and raise or recover the coalescing
 /// [`FORGOTTEN_PAUSE_REF`] self-alert.
@@ -461,7 +461,7 @@ pub async fn sweep_partition_runway(conn: &mut AsyncPgConnection) -> Result<Opti
 /// unparseable. The two carry different messages and different severity, because
 /// one is a Canopy fault and the other is a tidy-up after a deliberate change.
 ///
-/// A deployment with no zones configured and nothing claimed is not a problem:
+/// A Canopy instance with no zones configured and nothing claimed is not a problem:
 /// that is the feature simply not in use.
 // spec: DOM#when-the-zone-configuration-changes
 pub async fn sweep_dns_zone_coverage(

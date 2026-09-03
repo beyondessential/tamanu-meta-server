@@ -316,7 +316,7 @@ async fn a_first_issuance_that_keeps_failing_is_reported_separately() {
 			"the recorded reason is carried through: {}",
 			issue.message
 		);
-		// And it is not the expiry check: a deployment that never came up wants a
+		// And it is not the expiry check: a server that never came up wants a
 		// different response from one about to go dark.
 		assert!(server_issue(&mut conn, server, EXPIRY_REF).await.is_none());
 	})

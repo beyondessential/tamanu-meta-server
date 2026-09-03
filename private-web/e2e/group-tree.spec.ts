@@ -8,7 +8,7 @@ import {
 	seedServerGroup,
 } from "./seed";
 
-/// Every page in a deployment ends with the same picture of it: rank, then the
+/// Every page in a group ends with the same picture of it: rank, then the
 /// boxes at that rank, then the workloads on each box. An operator learns one
 /// arrangement and reads it everywhere, and moving sideways never goes back
 /// through the group.
@@ -56,7 +56,7 @@ test.describe("the group's tree on the detail pages", () => {
 		await expect(tree).toBeVisible();
 
 		// The box this workload is on, and the other box in the group, are both
-		// reachable from here: the tree is a map of the deployment.
+		// reachable from here: the tree is a map of the group.
 		await expect(tree.locator(`a[href="/fleet/machines/${shared.id}"]`)).toBeVisible();
 		await expect(
 			tree.locator(`a[href="/fleet/machines/${solo.machineId}"]`),

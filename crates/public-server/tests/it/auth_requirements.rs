@@ -175,7 +175,7 @@ async fn auth_with_ssl_client_cert_header() {
 #[tokio::test(flavor = "multi_thread")]
 async fn auth_with_an_untrusted_xfcc_header_is_rejected() {
 	commons_tests::server::run(async |_conn, public, _| {
-		// The deployment trusts the nginx header, so XFCC is client-supplied
+		// The Canopy instance trusts the nginx header, so XFCC is client-supplied
 		// as far as this server can tell and must not authenticate anything —
 		// valid certificate or not.
 		let response = public

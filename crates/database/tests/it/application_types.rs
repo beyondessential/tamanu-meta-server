@@ -223,7 +223,7 @@ async fn group_without_a_versioned_member_has_no_headline_version() {
 	.await
 }
 
-/// A deployment's version is its central's version, so the central speaks for
+/// A group's version is its central's version, so the central speaks for
 /// the group whatever else is in it — not by outranking other types, but
 /// because nothing else is considered. Here the facility is the higher-ranked
 /// of the two and still does not carry the headline.
@@ -451,7 +451,7 @@ async fn public_search_excludes_types_that_are_not_listed() {
 
 /// A group's shared cost can only be attributed to one product when its
 /// members agree on one. They agree on software rather than on type: a central
-/// and a facility of one deployment are both Tamanu.
+/// and a facility of one group are both Tamanu.
 #[tokio::test(flavor = "multi_thread")]
 async fn sole_member_software_is_absent_for_a_group_spanning_two() {
 	commons_tests::db::TestDb::run(|mut conn, _url| async move {

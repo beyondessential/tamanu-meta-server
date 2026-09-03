@@ -90,7 +90,7 @@ impl ServerHandler for CanopyMcp {
 			 Upgrade plans: a plan is a group's recorded intention to move to a version. A \
 			 planned date is a plan rather than a deadline, so one that has passed (`late`) is \
 			 normal operational reality rather than an incident. list_upgrade_plans gives what \
-			 every deployment is going to next; get_upgrade_plan_history gives what a group \
+			 every group is going to next; get_upgrade_plan_history gives what a group \
 			 planned before, including plans an operator withdrew.\n\n\
 			 Products: a server's `product` is the application it runs (tamanu, senaite, or \
 			 canopy itself), and its `kind` is its role within that product. The version tools \
@@ -123,7 +123,7 @@ pub fn service(db: database::Db) -> StreamableHttpService<CanopyMcp, LocalSessio
 	// The default stateful mode keeps sessions in process memory and 404s
 	// ("Session not found") any follow-up request that a load balancer routes to
 	// a different replica than the one that handled `initialize` — which is
-	// exactly what a multi-replica deployment behind the Tailscale ingress does.
+	// exactly what a multi-replica Canopy instance behind the Tailscale ingress does.
 	// This is a read-only request/response API with no server-initiated push, so
 	// sessions buy us nothing.
 	config.stateful_mode = false;
@@ -135,7 +135,7 @@ pub fn service(db: database::Db) -> StreamableHttpService<CanopyMcp, LocalSessio
 	// here: both mounts sit behind an authenticating gate (tailnet identity on
 	// the operator surface, bearer tokens on the internet-facing one) and serve
 	// no CORS headers, so a browser can't make a credentialed cross-origin POST.
-	// Left as-is the loopback default 403s the real deployment hosts, so disable
+	// Left as-is the loopback default 403s the real instance's hostnames, so disable
 	// it. An operator who wants to pin the Host allowlist anyway can set
 	// CANOPY_MCP_ALLOWED_HOSTS to a comma-separated list (e.g.
 	// `canopy.example.ts.net`); loopback stays allowed for dev.

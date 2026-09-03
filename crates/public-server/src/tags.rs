@@ -76,7 +76,7 @@ pub async fn get_self(device: ServerDevice, State(db): State<Db>) -> Result<Json
 /// `canopy:` tags.
 ///
 /// The type, product, kind and rank tags are an application's, and so are the
-/// billing labels, which attribute a workload to a deployment. A box with no
+/// billing labels, which attribute a workload to a group. A box with no
 /// workload has none of them rather than a made-up default.
 // spec: FLT#what-each-carries
 pub async fn effective_tags_for_machine(
@@ -117,7 +117,7 @@ pub async fn effective_tags_for_server(
 	// comes from the server's own rank, so a rank=clone server reports
 	// `billing.stage=clone` and never the group's `prod`; and the product comes
 	// from the server's own product, so a SENAITE server in a Tamanu group
-	// reports `billing.product=senaite`. Attribution needs a deployment to
+	// reports `billing.product=senaite`. Attribution needs a group to
 	// attribute to, so an ungrouped server carries none.
 	// spec: APP#billing-attribution
 	if let Some(group_id) = server.group_id {

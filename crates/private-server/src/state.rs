@@ -57,7 +57,7 @@ pub struct AppState {
 	pub recovery_recipients: Option<Recipients>,
 	/// The single in-flight recovery verification challenge, if any.
 	pub recovery_challenge: RecoveryChallengeStore,
-	/// The DNS zones Canopy may write records in, from its deployment
+	/// The DNS zones Canopy may write records in, from its instance
 	/// configuration. Empty when none are configured, in which case no group
 	/// domain can be claimed — read once at startup, so a configuration change
 	/// takes effect on restart.

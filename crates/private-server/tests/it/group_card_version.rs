@@ -68,7 +68,7 @@ async fn group_card_version_is_from_highest_rank_kind_member() {
 	.await;
 }
 
-/// A fresh deployment — or one where every version is still draft — has no
+/// A fresh Canopy instance — or one where every version is still draft — has no
 /// published version to measure against. That's an unknown distance, not a
 /// missing group: 404ing here blanks the whole status board.
 #[tokio::test(flavor = "multi_thread")]

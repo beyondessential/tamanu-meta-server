@@ -3,7 +3,7 @@
 //! Canopy certifies exactly the name a server asked for and nothing else, so
 //! the request is checked against that name rather than trusted or trimmed: a
 //! CSR carrying a second name would otherwise let one server obtain a
-//! certificate valid for another deployment, and one carrying fewer would leave
+//! certificate valid for another group, and one carrying fewer would leave
 //! the server serving something it did not expect.
 // spec: CRT#requesting
 

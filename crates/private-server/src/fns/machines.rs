@@ -127,9 +127,9 @@ pub async fn get(
 ///
 /// A box is not a piece of software, so it carries no product. Its stage is the
 /// highest rank among the applications on it — a box shared by a production and
-/// a test workload bills as production — and its deployment comes from its
+/// a test workload bills as production — and its deployment label comes from its
 /// group. An ungrouped machine carries no attribution at all, there being no
-/// deployment to attribute it to.
+/// group to attribute it to.
 // spec: APP#billing-attribution
 async fn machine_billing_labels(
 	machine: &Machine,
