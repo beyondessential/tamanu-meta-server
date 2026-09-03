@@ -128,16 +128,17 @@ Reports are retained indefinitely as an audit trail.
 
 ## Applying
 
-A server applies the newest schema Canopy offers it for the version it runs, with no operator moving a file: it obtains the artefact over its own credential, applies it, and stamps the schema with what it applied.
+A server's device applies the newest schema Canopy offers the server for the version it runs, with no operator moving a file: it obtains the artefact over its own credential, applies it, and stamps the schema with what it applied (see [DID](device-identity.md)).
+The device does this beside the running product, which neither fetches a schema nor restarts for one, so a rebuild lands on a server that stays up.
 
 A facility server is offered its group's schema as a central server is, since a schema follows the group and the version rather than the server it was built from, and a facility runs the reports the same views serve.
 Where a facility's database is the one its central server uses, it is already applied and the facility stamps nothing of its own.
-It applies one when its stamp and the offered artefact differ, and does nothing when they match, so an upgrade that emptied the schema is repaired by the server itself.
-A schema is applied by replacing it whole, which cannot proceed under an open report, so a server applies before its reporting connections are serving rather than beneath them.
+The device compares the stamp with the offered artefact each time it reports on its server, applies when they differ, and does nothing when they match, so an upgrade that emptied the schema is repaired by the device itself.
+A schema is applied by replacing it whole in one transaction, so a report running while it lands sees the schema it started under or the new one, and never a half-built one.
 
-A server provisions the reporting role and the schema's privileges for itself, so a schema arriving after the server started is readable as soon as it is applied, with no grant to run after it.
+The device applies the schema as the product's own database role and grants the reporting role its privileges in the same transaction, so a schema arriving after the product started is readable as soon as it lands, with no grant to run after it.
 
-A server that cannot obtain or apply one keeps what it has and reports that, which grades it behind or unknown rather than silently current.
+A device that cannot obtain or apply one leaves what the server has and reports that, which grades the server behind or unknown rather than silently current.
 
 ## Currency
 
