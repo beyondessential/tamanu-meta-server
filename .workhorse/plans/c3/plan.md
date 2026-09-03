@@ -210,9 +210,9 @@ supplied by the consumer, and what the generated types carry.
 now states it against Canopy's own published crate, and its unreached-surface section
 narrows to map keys, since a map's value type is generated and judged with the crate.
 
-`AGENTS.md` line 45 states the compatibility bar in terms of `bestool-canopy` generated
-from `crates/public-server/openapi.json`. It names the published crate instead once this
-lands, so the rule agents read matches the specs.
+`AGENTS.md` states the compatibility bar in terms of `bes-canopy-api` and points at both
+specs, and records that changing the public API means running `just gen-openapi &&
+just gen-api` and committing the regenerated client.
 
 ## Out of scope
 
