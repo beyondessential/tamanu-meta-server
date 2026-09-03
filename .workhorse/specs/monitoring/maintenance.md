@@ -27,7 +27,7 @@ Taking a box down to patch it stops everything on it, so a window naming one app
 
 A group's window covers the group's own checks and those of every machine in it, including machines that join while it holds.
 
-A window over one of a group's environments covers the machines serving that environment and nothing else of the group, so an upgrade rehearsed on a site's clone leaves its production, and the group's own checks such as its backups, watched.
+A window over one of a group's environments covers the machines serving that environment and nothing else of the group: an upgrade rehearsed on a site's clone leaves its production watched, and the group's own checks such as its backups with it.
 An environment is a group's applications at one rank, and the machines serving it are those whose own rank is that one, a machine taking the rank of the highest-ranked application on it (see [GRP](../servers/groups.md), "Environments").
 
 A machine covered by its own window, by its environment's, and by its group's stays suspended until the last of them has ended.
