@@ -370,7 +370,7 @@ export async function seedServer(
 	const alertWhenDownFor = opts.alertWhenDownFor ?? 600;
 	// A box of its own for each seeded workload unless the caller names one,
 	// carrying the same group so the machine and the application agree on
-	// which deployment they're in.
+	// which group they're in.
 	//
 	// An identity belongs to the box, so a seeded device binds to the machine.
 	// Anything that resolves a device to what it speaks for — backups, reports —

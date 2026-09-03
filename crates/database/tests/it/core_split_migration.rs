@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 /// The first migration of the split, `rename_servers_to_applications`, in the
 /// digits-only form diesel stores a version as. Reverting to before it puts
-/// the database back in the shape a deployment had on the day this card
+/// the database back in the shape it had on the day this card
 /// started.
 const FIRST_SPLIT_MIGRATION: &str = "202608261018080000";
 
@@ -75,7 +75,7 @@ async fn the_split_gives_every_server_a_machine_and_leaves_its_history_alone() {
 
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name) \
-			 VALUES ('11111111-1111-1111-1111-111111111111', 'a-deployment');
+			 VALUES ('11111111-1111-1111-1111-111111111111', 'a-group');
 
 			 INSERT INTO devices (id, role, tailscale_node_id) \
 			 VALUES ('22222222-2222-2222-2222-222222222222', 'server', 'node-one');
@@ -180,7 +180,7 @@ async fn the_split_gives_every_server_a_machine_and_leaves_its_history_alone() {
 		assert_eq!(
 			facts.group_id,
 			Some(Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap()),
-			"which deployment a box belongs to is the box's"
+			"which group a box belongs to is the box's"
 		);
 		assert_eq!(
 			facts.device_id,

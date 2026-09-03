@@ -76,7 +76,7 @@ pub async fn get_self(device: ServerDevice, State(db): State<Db>) -> Result<Json
 /// `canopy:` tags.
 ///
 /// The type, product, kind and rank tags are an application's, and so are the
-/// billing labels, which attribute a workload to a deployment. A box with no
+/// billing labels, which attribute a workload to a group. A box with no
 /// workload has none of them rather than a made-up default.
 // spec: FLT#what-each-carries
 pub async fn effective_tags_for_machine(

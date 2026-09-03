@@ -294,7 +294,7 @@ export function applicationName(application: {
 
 /// Rank first, then type alphabetically, then name.
 ///
-/// Application types are a flat, open set: a deployment can report a type
+/// Application types are a flat, open set: a group can report a type
 /// Canopy has never seen, so there is no precedence to consult and an invented
 /// one would be surprising to read. Alphabetical is the rule everywhere types
 /// are listed.
@@ -461,7 +461,7 @@ export function checkResultOf(
 /// type's.
 ///
 /// The subject leads even though the type alone would usually be enough,
-/// because the type set is open: a deployment can report an application type
+/// because the type set is open: a group can report an application type
 /// called `machine`, and `application.machine` is still unmistakably that
 /// type rather than the box.
 export function namespaceSegment(namespace: NamespaceRef | undefined): string {

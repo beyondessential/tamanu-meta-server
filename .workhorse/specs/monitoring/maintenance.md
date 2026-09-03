@@ -49,10 +49,10 @@ Canopy-wide checks are Canopy monitoring its own operation, and are never suspen
 ## Ending
 
 A window ends when an operator lifts it or when its expected end passes, and Canopy records which, with the operator and the time.
-Ending at the expected end without asking anyone is what keeps a forgotten window from leaving a deployment unwatched.
+Ending at the expected end without asking anyone is what keeps a forgotten window from leaving a target unwatched.
 Work running long extends the window by amending its end before it passes; a window that has ended is history, and suspending again is a fresh declaration.
 
-Ended windows are retained as the target's maintenance history, so what was being done the last time a deployment went quiet is readable against it.
+Ended windows are retained as the target's maintenance history, so what was being done the last time it went quiet is readable against it.
 
 ## Settling
 

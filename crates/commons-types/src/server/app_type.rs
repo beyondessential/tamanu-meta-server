@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 /// two instances of one thing behave.
 ///
 /// **The set is open.** A report is the only thing that creates an
-/// application, and it carries the type, so a deployment can bring a new kind
+/// application, and it carries the type, so a group can bring a new kind
 /// of application to Canopy without Canopy being changed and shipped. Canopy
 /// holds built-in handling for the types it knows (see [`ApplicationType::caps`]);
 /// a type it does not know carries none of it and is treated generically.
@@ -179,7 +179,7 @@ impl ApplicationType {
 	/// The software this type is an instance of, without its role.
 	///
 	/// Cost allocation groups by software rather than by software-in-a-role, so
-	/// `billing.product` reads this: a central and a facility of one deployment
+	/// `billing.product` reads this: a central and a facility of one group
 	/// attribute to the same product, as they did when product was a field.
 	// spec: APP#billing-attribution
 	pub fn software(&self) -> &str {
@@ -451,7 +451,7 @@ mod tests {
 
 	/// A report is the only thing that creates an application, and it carries
 	/// the type, so a type Canopy has never seen has to be accepted rather than
-	/// refused — otherwise no deployment can bring a new kind of application
+	/// refused — otherwise no group can bring a new kind of application
 	/// without Canopy being changed and shipped.
 	#[test]
 	fn an_unknown_type_is_accepted_and_carries_no_capabilities() {

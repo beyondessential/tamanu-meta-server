@@ -341,7 +341,7 @@ impl Application {
 	/// A report is the only thing that creates an application, so a type
 	/// reported on a machine that has none of it is adopted without ceremony
 	/// rather than refused. Everything else about the new record is left for
-	/// an operator: it takes its machine's group, because which deployment a
+	/// an operator: it takes its machine's group, because which group a
 	/// box belongs to is the one fact the box cannot know, and nothing else.
 	///
 	/// Concurrent reports for one box are serialised by the caller on the
@@ -463,7 +463,7 @@ impl Application {
 
 	/// Stand up the application a report describes. Everything about the new
 	/// record beyond what the report said is left for an operator: it takes
-	/// its machine's group, because which deployment a box belongs to is the
+	/// its machine's group, because which group a box belongs to is the
 	/// one fact the box cannot know, and nothing else.
 	async fn adopt(
 		db: &mut AsyncPgConnection,

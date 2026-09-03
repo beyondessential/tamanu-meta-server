@@ -17,7 +17,7 @@ test.describe("application types", () => {
 	});
 
 	/// The set of types is open: a report is the only thing that creates an
-	/// application and it carries the type, so a deployment brings a new kind of
+	/// application and it carries the type, so a group brings a new kind of
 	/// application without Canopy being changed and released.
 	///
 	/// spec: APP#where-a-type-comes-from
