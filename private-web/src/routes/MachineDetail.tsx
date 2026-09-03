@@ -122,7 +122,7 @@ export default function MachineDetail() {
 					monitored={data.machine.is_monitored}
 					maintained={data.maintained}
 					maintenanceSettling={data.maintenance_settling}
-					operators={[]}
+					operators={data.operators}
 				/>
 				<Stack
 					direction="row"
@@ -148,7 +148,7 @@ export default function MachineDetail() {
 				</Stack>
 				<ChecksTable
 					checks={data.checks}
-					operators={[]}
+					operators={data.operators}
 					target={{ kind: "machine", id: data.machine.id }}
 					groupId={data.group?.id ?? null}
 					maintained={data.maintained}

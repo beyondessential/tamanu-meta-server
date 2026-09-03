@@ -548,10 +548,10 @@ function InfoSection({
  * `HealthState` rollup rather than the raw top-level `healthy` bool so
  * a failing check can't hide behind a self-reported "healthy".
  *
- * Alongside it, the operator-presence headline: identified humans
- * connected to the server per the `external_users` check. Only asserted
- * while the server is actively reporting — a stale push can't claim
- * anyone is in the server *right now*. */
+ * Alongside it, the operator-presence headline: identified humans logged
+ * in to the box this application runs on, per the `external_users` check.
+ * Only asserted while the application is actively reporting — a stale push
+ * can't claim anyone is on the box *right now*. */
 function StatusInfoFields({ status }: { status: ServerLastStatusData }) {
 	const caps = useApplicationTypeCaps(status.type);
 	const tracking = caps?.version_tracking;

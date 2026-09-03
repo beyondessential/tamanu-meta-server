@@ -89,7 +89,8 @@ export function HealthIndicator({
 					<OperatorAvatars operators={operators} size={24} />
 					<Typography variant="body2">
 						{operators.length} operator
-						{operators.length === 1 ? "" : "s"} in the server right now
+						{operators.length === 1 ? "" : "s"} in the machine right
+						now
 					</Typography>
 				</Stack>
 			)}

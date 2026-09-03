@@ -12756,6 +12756,7 @@
           "maintained",
           "maintenance_settling",
           "checks",
+          "operators",
           "applications",
           "billing_labels"
         ],
@@ -12827,6 +12828,13 @@
           "maintenance_settling": {
             "type": "boolean",
             "description": "Whether the suspension is only the settle period."
+          },
+          "operators": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperatorPresence"
+            },
+            "description": "The people logged in to this box right now, from its `external_users`\ncheck. Empty unless the box is currently reporting: a stale report\ncannot say who is on it now."
           },
           "up": {
             "$ref": "#/components/schemas/ShortStatus",

@@ -436,7 +436,7 @@ function IncidentMark({ loudness }: { loudness: IncidentLoudness }) {
 }
 
 /// Compact "people are in here" marker on a group card: person icon +
-/// distinct operator count, tooltip naming who's on which server.
+/// distinct operator count, tooltip naming who's on which box.
 function OperatorCountChip({
 	operators,
 }: {
@@ -446,9 +446,9 @@ function OperatorCountChip({
 		<Tooltip
 			title={
 				<Box>
-					{operators.map(({ op, servers }) => (
+					{operators.map(({ op, machines }) => (
 						<Box key={op.login}>
-							{op.login} · {servers.join(", ")}
+							{op.login} · {machines.join(", ")}
 						</Box>
 					))}
 				</Box>

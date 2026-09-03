@@ -337,10 +337,10 @@ function BackupsCard({
 	);
 }
 
-/// Distinct people connected across the group's servers right now (from
-/// each member's `external_users` check, deduped by Tailscale login).
-/// The same aggregate the status-page card chip counts. Hidden entirely
-/// when nobody's connected.
+/// Distinct people connected across the group's boxes right now (from each
+/// member's `external_users` check, deduped by Tailscale login). The same
+/// aggregate the status-page card chip counts. Hidden entirely when nobody's
+/// connected.
 function OperatorsSection({
 	operators,
 }: {
@@ -350,10 +350,10 @@ function OperatorsSection({
 		<Paper variant="outlined" sx={{ p: 2 }}>
 			<Typography variant="h6" component="h2" gutterBottom>
 				{operators.length} operator{operators.length === 1 ? "" : "s"} in
-				the servers right now
+				the group right now
 			</Typography>
 			<Stack spacing={1}>
-				{operators.map(({ op, servers }) => {
+				{operators.map(({ op, machines }) => {
 					const dur = connectedFor(op.connected_since);
 					return (
 						<Stack
@@ -368,7 +368,7 @@ function OperatorsSection({
 									{op.name ? `${op.name} (${op.login})` : op.login}
 								</Typography>
 								<Typography variant="caption" color="text.secondary">
-									{[dur && `connected ${dur}`, `on ${servers.join(", ")}`]
+									{[dur && `connected ${dur}`, `on ${machines.join(", ")}`]
 										.filter(Boolean)
 										.join(" · ")}
 								</Typography>

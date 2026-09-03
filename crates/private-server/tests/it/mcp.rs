@@ -1405,7 +1405,11 @@ async fn mcp_health_matches_what_the_ui_presents() {
 		.expect("machine filing");
 		file_check(
 			&mut conn,
-			filing(Scope::Application(application_id), "db", CheckResult::Failed),
+			filing(
+				Scope::Application(application_id),
+				"db",
+				CheckResult::Failed,
+			),
 		)
 		.await
 		.expect("application filing");

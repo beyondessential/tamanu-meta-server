@@ -221,8 +221,9 @@ cover the runtime half of that, which the spec diff cannot see.
 - [x] A machine silence does not reach the applications on that machine (verifies spec: CHK)
 - [x] A group silence covers a machine in that group (verifies spec: CHK)
 - [ ] Neither detail page shows a status dot beside its title
-- [ ] A group card's operator count counts people once across machines
-- [ ] The operator tooltip names each person and the machines they are on
+- [x] A group card's operator count counts people once across machines
+- [x] The operator tooltip names each person and the machines they are on
+- [x] The machine page names the people on the box, and an application's headline speaks of the box it runs on (verifies spec: FLT)
 - [x] The status card encloses every machine, including one hosting a single application (verifies spec: CHK)
 - [x] A machine enclosure carries the machine's state; the indicator inside carries the application's (verifies spec: CHK)
 - [x] A box under a maintenance window is marked as such on the status page (verifies spec: CHK, MNT)

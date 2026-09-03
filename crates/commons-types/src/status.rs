@@ -234,21 +234,35 @@ pub struct OperatorPresence {
 
 /// Distil a status row's `health[]` into the set of identified operators.
 ///
-/// Finds the `external_users` entry and collects its `users[]` sessions
-/// that carry a `tailscale` login, deduplicating by login (keeping the
-/// earliest `connected_since`). Display fields are left unfilled — looking
-/// up the `tailscale_users` cache is the private-server's job. Lenient on
-/// shape: malformed entries and sessions are skipped.
+/// Finds the `external_users` entry and reads its sessions. Lenient on shape:
+/// a malformed entry yields nobody rather than an error.
 pub fn operators_from_health(health: &serde_json::Value) -> Vec<OperatorPresence> {
-	let Some(users) = health
+	let Some(entry) = health
 		.as_array()
 		.into_iter()
 		.flatten()
 		.filter_map(|e| e.as_object())
 		.find(|e| e.get("check").and_then(|v| v.as_str()) == Some("external_users"))
-		.and_then(|e| e.get("users"))
-		.and_then(|u| u.as_array())
 	else {
+		return Vec::new();
+	};
+	operators_from_sessions(entry.get("users"))
+}
+
+/// Distil the `users[]` of an `external_users` check into identified
+/// operators.
+///
+/// The sessions are the same whichever way the check is read — out of a
+/// status row's `health[]` or out of the detail on a stored check state — so
+/// both go through here and a person reads the same in either place.
+///
+/// Collects the sessions carrying a `tailscale` login, deduplicating by login
+/// and keeping the earliest `connected_since`. Display fields are left
+/// unfilled: looking up the `tailscale_users` cache is the private-server's
+/// job. Lenient on shape, so a malformed session is skipped rather than
+/// losing the rest.
+pub fn operators_from_sessions(users: Option<&serde_json::Value>) -> Vec<OperatorPresence> {
+	let Some(users) = users.and_then(|u| u.as_array()) else {
 		return Vec::new();
 	};
 
@@ -430,6 +444,91 @@ mod tests {
 			}
 		}
 	}
+
+	/// A person is logged in to a box, so the sessions read are the box's.
+	mod consolidated_operators {
+		use crate::status::{CheckResult, ConsolidatedCheck, ConsolidatedChecks, HealthState};
+		use crate::subject::CheckSubject;
+
+		fn check(subject: CheckSubject, name: &str, logins: &[&str]) -> ConsolidatedCheck {
+			let users: Vec<serde_json::Value> = logins
+				.iter()
+				.map(|l| serde_json::json!({"tailscale": l}))
+				.collect();
+			ConsolidatedCheck {
+				source: "alertd".into(),
+				check: name.into(),
+				namespace: (&crate::namespace::Namespace::for_machine("alertd", name)).into(),
+				qualified_name: name.into(),
+				observed: Some(CheckResult::Passed),
+				effective: CheckResult::Passed,
+				silenced: false,
+				subject,
+				detail: serde_json::json!({ "users": users }),
+			}
+		}
+
+		fn checks(checks: Vec<ConsolidatedCheck>) -> ConsolidatedChecks {
+			ConsolidatedChecks {
+				health_state: HealthState::Healthy,
+				checks,
+			}
+		}
+
+		#[test]
+		fn reads_the_machines_sessions() {
+			let c = checks(vec![check(
+				CheckSubject::Machine,
+				"external_users",
+				&["alice@example.com", "bob@example.com"],
+			)]);
+			let ops = c.operators();
+			assert_eq!(ops.len(), 2);
+			assert_eq!(ops[0].login, "alice@example.com");
+		}
+
+		/// A workload reporting sessions about itself is not who is on the
+		/// box, so it does not answer the question.
+		#[test]
+		fn ignores_an_applications_own_sessions() {
+			let c = checks(vec![check(
+				CheckSubject::Application,
+				"external_users",
+				&["mallory@example.com"],
+			)]);
+			assert_eq!(c.operators(), Vec::new());
+		}
+
+		/// Where both are present the box's is the one that counts.
+		#[test]
+		fn prefers_the_machines_over_an_applications() {
+			let c = checks(vec![
+				check(
+					CheckSubject::Application,
+					"external_users",
+					&["mallory@example.com"],
+				),
+				check(
+					CheckSubject::Machine,
+					"external_users",
+					&["alice@example.com"],
+				),
+			]);
+			let ops = c.operators();
+			assert_eq!(ops.len(), 1);
+			assert_eq!(ops[0].login, "alice@example.com");
+		}
+
+		#[test]
+		fn nobody_when_the_check_is_absent() {
+			let c = checks(vec![check(
+				CheckSubject::Machine,
+				"load",
+				&["alice@example.com"],
+			)]);
+			assert_eq!(c.operators(), Vec::new());
+		}
+	}
 }
 
 /// A server's self-reported health, derived from the outcomes of its own
@@ -505,6 +604,24 @@ pub struct ConsolidatedChecks {
 	pub health_state: HealthState,
 	/// Every source's checks, most urgent first.
 	pub checks: Vec<ConsolidatedCheck>,
+}
+
+impl ConsolidatedChecks {
+	/// The people logged in to this target right now, from its
+	/// `external_users` check.
+	///
+	/// People are logged in to a box, so this reads the check filed against
+	/// the machine and ignores one an application reported about itself. A
+	/// box carrying two workloads has one set of sessions rather than one per
+	/// workload, which is what the machine grain is for.
+	// spec: FLT
+	pub fn operators(&self) -> Vec<OperatorPresence> {
+		self.checks
+			.iter()
+			.find(|c| c.check == "external_users" && c.subject == CheckSubject::Machine)
+			.map(|c| operators_from_sessions(c.detail.get("users")))
+			.unwrap_or_default()
+	}
 }
 
 impl HealthState {

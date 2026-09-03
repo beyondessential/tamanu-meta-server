@@ -185,6 +185,11 @@ pub struct MachineDetailData {
 	pub maintenance_settling: bool,
 	/// The machine's own checks across every source, graded and classified.
 	pub checks: commons_types::status::ConsolidatedChecks,
+	/// The people logged in to this box right now, from its `external_users`
+	/// check. Empty unless the box is currently reporting: a stale report
+	/// cannot say who is on it now.
+	// spec: FLT
+	pub operators: Vec<commons_types::status::OperatorPresence>,
 	/// The applications running on this box, each carrying its own
 	/// reachability and health so the page renders a dot per workload.
 	pub applications: Vec<super::applications::ServerInfo>,
@@ -245,6 +250,14 @@ pub async fn get_detail(
 	let health = checks.health_state;
 	let up = machine.reachability(last_reported_at);
 
+	// Who is on the box, from the same consolidated read. Withheld unless the
+	// box is reporting, since sessions from an old push say nothing about now.
+	let mut operators = match up {
+		ShortStatus::Up => checks.operators(),
+		_ => Vec::new(),
+	};
+	super::statuses::enrich_operators(&mut conn, operators.iter_mut()).await?;
+
 	let device_info = match machine.device_id {
 		Some(did) => {
 			let with_info = Device::get_with_info(&mut conn, did).await?;
@@ -294,6 +307,7 @@ pub async fn get_detail(
 		maintained,
 		maintenance_settling,
 		checks,
+		operators,
 		applications,
 		billing_labels,
 	}))

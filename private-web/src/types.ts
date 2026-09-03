@@ -571,32 +571,42 @@ export const REACHABILITY_CHECK = {
 	ref: silenceRef("canopy", "reachability"),
 } as const;
 
-/// One person connected somewhere in a server group, with the names of
-/// the member servers they're on. Produced by [`aggregateOperators`].
+/// One person connected somewhere in a server group, with the boxes they're
+/// logged in to. Produced by [`aggregateOperators`].
 export type AggregatedOperator = {
 	op: OperatorPresence;
-	servers: string[];
+	machines: string[];
 };
 
 /// Aggregate per-member operator presence into distinct people across the
 /// group: deduped by login, keeping the earliest `connected_since` and
-/// collecting which member servers each person is connected to. Shared by
-/// the status-page group cards and the group detail page so both show the
-/// same numbers.
+/// collecting which boxes each person is logged in to. Shared by the
+/// status-page group cards and the group detail page so both show the same
+/// numbers.
+///
+/// A person is logged in to a box, not to the software on it, so a box
+/// running two applications is one place a person is rather than two.
+// spec: FLT
 export function aggregateOperators(
 	members: FacilityServerStatus[],
 ): AggregatedOperator[] {
 	const byLogin = new Map<string, AggregatedOperator>();
+	const seenOn = new Map<string, Set<string>>();
 	for (const m of members) {
+		// An unnamed box reads as the application leading it, the same
+		// fallback the dot strip's enclosures use.
+		const machineName = m.machine_name ?? m.name;
 		for (const op of m.operators) {
-			const serverName = m.name;
 			const existing = byLogin.get(op.login);
 			if (!existing) {
-				byLogin.set(op.login, { op, servers: [serverName] });
+				byLogin.set(op.login, { op, machines: [machineName] });
+				seenOn.set(op.login, new Set([m.machine_id]));
 				continue;
 			}
-			if (!existing.servers.includes(serverName)) {
-				existing.servers.push(serverName);
+			const on = seenOn.get(op.login)!;
+			if (!on.has(m.machine_id)) {
+				on.add(m.machine_id);
+				existing.machines.push(machineName);
 			}
 			if (
 				op.connected_since &&

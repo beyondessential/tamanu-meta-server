@@ -846,3 +846,19 @@ Where the backend now guarantees a name, the `|| "(unnamed)"` guards beside it w
 A name stays the operator's: a push describes the workload it found and never renames what an operator has named, nor invents a name for what they have not.
 
 Coverage: `application_types.rs` covers the fallback and an operator's name overriding it, `statuses_split.rs` covers a push leaving a set name alone and creating unnamed, and `application-types.spec.ts` covers both readings on the application page and in the group listing.
+
+**Done since the audit: presence at the machine grain.**
+A person is logged in to a box, not to the software on it, so everything about presence now counts and names boxes.
+`aggregateOperators` dedupes by `machine_id` and presents `machine_name ?? name`, the same unnamed-box fallback the status page's dot strip already uses, so a box carrying two workloads is one place someone is rather than two.
+The group card's tooltip and the group page's list follow from that one function, so both read the same.
+
+The machine's own page had no presence at all, passing an empty operator list while `external_users` is machine-subject and files against the box.
+`ConsolidatedChecks::operators()` reads the sessions off the machine-subject check, which the machine page and the application page both have in their consolidated read, and `operators_from_sessions` is now shared with the status-row path so a person reads the same however the check is reached.
+The machine page gets real operators, gated on the box reporting: sessions from an old push cannot claim anyone is on it now.
+
+The shared headline says "in the machine right now" on both pages.
+On the application page that is a statement about the box it runs on, which is what the sessions are, and the mockup's own wording.
+The headline stays on the application page rather than being removed to match the mockup exactly: the mockup puts the line on the machine page and is silent about the application page, and taking a line operators use off a page is a product decision that silence does not make.
+
+`seedStatus` was filing every check in a seeded push against the application, including machine-subject ones that ingestion files against the box.
+It now splits by subject the way `file_health_events` does, so seeded state and reported state land in the same place.

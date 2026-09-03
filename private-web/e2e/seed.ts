@@ -477,6 +477,15 @@ export async function seedStatus(
 	// The reporting application's type decides the namespace a check that
 	// names the workload belongs to.
 	const applicationType = await applicationTypeOf(sql, opts.serverId);
+	// Ingestion splits a unified push by each check's subject: a check about
+	// the box files against the machine, not against the workload that
+	// happened to report it. Seeded state has to land the same way or a box
+	// with two workloads reads as two sets of the same facts.
+	const machineRows = await sql.query<{ machine_id: string }>(
+		"SELECT machine_id FROM applications WHERE id = $1",
+		[opts.serverId],
+	);
+	const machineId = machineRows[0]?.machine_id ?? null;
 	for (const entry of (opts.health ?? []) as Record<string, unknown>[]) {
 		const check = entry.check;
 		if (typeof check !== "string") continue;
@@ -501,13 +510,14 @@ export async function seedStatus(
 			[source, ns.subject, ns.applicationType, check],
 		);
 		const degraded = ["failed", "warning", "broken"].includes(result);
+		const onMachine = ns.subject === "machine" && machineId !== null;
 		await sql.query(
 			`INSERT INTO issues
-			 (application_id, source, ref, check_name, observed_result, effective_result, detail, message, active, first_seen, last_seen, degraded_since, last_degraded_at)
-			 VALUES ($1, $10, $2, $3, $4, $4, $5::jsonb, $6, $7, NOW(), NOW(), $8, $9)
+			 (application_id, machine_id, source, ref, check_name, observed_result, effective_result, detail, message, active, first_seen, last_seen, degraded_since, last_degraded_at)
+			 VALUES ($1, $11, $10, $2, $3, $4, $4, $5::jsonb, $6, $7, NOW(), NOW(), $8, $9)
 			 ON CONFLICT DO NOTHING`,
 			[
-				opts.serverId,
+				onMachine ? null : opts.serverId,
 				`health/${check}`,
 				check,
 				result,
@@ -517,6 +527,7 @@ export async function seedStatus(
 				degraded ? new Date().toISOString() : null,
 				degraded ? new Date().toISOString() : null,
 				source,
+				onMachine ? machineId : null,
 			],
 		);
 	}

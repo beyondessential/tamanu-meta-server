@@ -7199,6 +7199,12 @@ export interface components {
             maintained: boolean;
             /** @description Whether the suspension is only the settle period. */
             maintenance_settling: boolean;
+            /**
+             * @description The people logged in to this box right now, from its `external_users`
+             *     check. Empty unless the box is currently reporting: a stale report
+             *     cannot say who is on it now.
+             */
+            operators: components["schemas"]["OperatorPresence"][];
             /** @description Whether the box is currently reporting, on its own threshold. */
             up: components["schemas"]["ShortStatus"];
         };
