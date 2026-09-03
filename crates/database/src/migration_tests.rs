@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use commons_errors::Result;
 use commons_types::{
 	backup::{BackupType, RestoreIntent, RunOutcome},
-	server::product::Product,
+	server::{product::Product, rank::ServerRank},
 };
 use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
@@ -33,9 +33,10 @@ pub struct Candidate {
 
 /// The version `server` should be tested against, if any.
 ///
-/// Its group's open plan names it (see [`crate::upgrade_plans`]), and a group
-/// with no plan has no candidate: a restore costs hours, and it is only worth
-/// spending on a version a group has said it intends to apply.
+/// Its environment's open plan names it (see [`crate::upgrade_plans`]), and an
+/// environment with no plan has no candidate: a restore costs hours, and it is
+/// only worth spending on a version an environment has said it intends to
+/// apply. An unranked server is in no environment, so it has none.
 ///
 /// Tamanu servers only: the migrations under test are Tamanu's, so no other
 /// product's server has an upgrade path through them.
@@ -45,11 +46,11 @@ pub async fn candidate_for(db: &mut AsyncPgConnection, server: &Server) -> Resul
 		return Ok(None);
 	}
 
-	let Some(group_id) = server.group_id else {
+	let (Some(group_id), Some(rank)) = (server.group_id, server.rank) else {
 		return Ok(None);
 	};
 
-	crate::upgrade_plans::planned_target(db, group_id).await
+	crate::upgrade_plans::planned_target(db, group_id, rank).await
 }
 
 /// Every candidate across the fleet, at most one per server.
@@ -487,9 +488,30 @@ pub async fn verdicts_for_group(
 	db: &mut AsyncPgConnection,
 	group_id: Uuid,
 ) -> Result<Vec<GroupVerdict>> {
+	let servers = Server::list_live_in_group(db, group_id).await?;
+	verdicts(db, servers).await
+}
+
+/// Where every server in one of `group`'s environments stands against the
+/// version it would take next.
+// spec: RST#verdicts
+pub async fn verdicts_for_environment(
+	db: &mut AsyncPgConnection,
+	group_id: Uuid,
+	rank: ServerRank,
+) -> Result<Vec<GroupVerdict>> {
+	let servers = Server::list_live_in_group(db, group_id)
+		.await?
+		.into_iter()
+		.filter(|server| server.rank == Some(rank))
+		.collect();
+	verdicts(db, servers).await
+}
+
+async fn verdicts(db: &mut AsyncPgConnection, servers: Vec<Server>) -> Result<Vec<GroupVerdict>> {
 	let mut out = Vec::new();
 
-	for server in Server::list_live_in_group(db, group_id).await? {
+	for server in servers {
 		let Some(version) = candidate_for(db, &server).await? else {
 			continue;
 		};

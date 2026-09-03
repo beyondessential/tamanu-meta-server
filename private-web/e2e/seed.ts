@@ -1315,6 +1315,8 @@ export async function seedUpgradePlan(
 	sql: Sql,
 	opts: {
 		groupId: string;
+		/** The environment the plan is for. Defaults to production. */
+		rank?: ServerRank;
 		targetVersionId: string;
 		plannedFor?: string | null;
 		plannedTime?: string | null;
@@ -1322,27 +1324,29 @@ export async function seedUpgradePlan(
 		plannedZone?: string | null;
 		note?: string | null;
 		createdBy?: string;
-		/** Retire the group's open plan first, as recording a second one does.
-		 * A group holds one open plan at a time, so a second insert without this
-		 * breaks the unique index. */
+		/** Retire the environment's open plan first, as recording a second one
+		 * does. An environment holds one open plan at a time, so a second insert
+		 * without this breaks the unique index. */
 		supersedes?: boolean;
 	},
 ): Promise<void> {
+	const rank = opts.rank ?? "production";
 	if (opts.supersedes) {
 		await sql.query(
 			`UPDATE upgrade_plans SET superseded_at = NOW()
-			 WHERE group_id = $1
+			 WHERE group_id = $1 AND rank = $2
 			   AND met_at IS NULL AND superseded_at IS NULL AND withdrawn_at IS NULL`,
-			[opts.groupId],
+			[opts.groupId, rank],
 		);
 	}
 	await sql.query(
 		`INSERT INTO upgrade_plans
-		   (group_id, target_version_id, planned_for, planned_time, planned_end_time,
+		   (group_id, rank, target_version_id, planned_for, planned_time, planned_end_time,
 		    planned_zone, note, created_by)
-		 VALUES ($1, $2, $3::date, $4::time, $5::time, $6, $7, $8)`,
+		 VALUES ($1, $2, $3, $4::date, $5::time, $6::time, $7, $8, $9)`,
 		[
 			opts.groupId,
+			rank,
 			opts.targetVersionId,
 			opts.plannedFor ?? null,
 			opts.plannedTime ?? null,

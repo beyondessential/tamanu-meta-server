@@ -1062,16 +1062,19 @@ async fn upgrade_plans_list_the_open_ones_and_keep_the_withdrawn_in_history() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		seed(&mut conn).await;
 		conn.batch_execute(&format!(
-			"UPDATE server_groups SET effective_version = '2.34.1' WHERE id = '{GROUP}'; \
-			 INSERT INTO server_groups (id, name, effective_version) VALUES \
-				('44444444-4444-4444-4444-444444444444', 'Drifting', '2.34.1'); \
+			"INSERT INTO server_groups (id, name) VALUES \
+				('44444444-4444-4444-4444-444444444444', 'Drifting'); \
+			 INSERT INTO servers (id, host, kind, rank, group_id) VALUES \
+				('44444444-4444-4444-4444-4444444444a1', 'https://drifting', 'central', 'production', '44444444-4444-4444-4444-444444444444'); \
+			 INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES \
+				('44444444-4444-4444-4444-4444444444a1', 'test', '{{}}'::jsonb, '2.34.1'); \
 			 INSERT INTO versions (id, major, minor, patch, changelog, status) VALUES \
 				('55555555-5555-5555-5555-555555555555', 2, 36, 0, 'x', 'published'), \
 				('66666666-6666-6666-6666-666666666666', 2, 40, 0, 'x', 'published'); \
-			 INSERT INTO upgrade_plans (group_id, target_version_id, created_by, withdrawn_at, withdrawn_by) VALUES \
-				('{GROUP}', '66666666-6666-6666-6666-666666666666', 'someone@example.com', NOW(), 'someone@example.com'); \
-			 INSERT INTO upgrade_plans (group_id, target_version_id, planned_for, note, created_by) VALUES \
-				('{GROUP}', '55555555-5555-5555-5555-555555555555', DATE '2020-01-01', 'site can absorb 2.36 only', 'someone@example.com');"
+			 INSERT INTO upgrade_plans (group_id, rank, target_version_id, created_by, withdrawn_at, withdrawn_by) VALUES \
+				('{GROUP}', 'production', '66666666-6666-6666-6666-666666666666', 'someone@example.com', NOW(), 'someone@example.com'); \
+			 INSERT INTO upgrade_plans (group_id, rank, target_version_id, planned_for, note, created_by) VALUES \
+				('{GROUP}', 'production', '55555555-5555-5555-5555-555555555555', DATE '2020-01-01', 'site can absorb 2.36 only', 'someone@example.com');"
 		))
 		.await
 		.expect("seed plans");
@@ -1080,17 +1083,18 @@ async fn upgrade_plans_list_the_open_ones_and_keep_the_withdrawn_in_history() {
 		let plans = list["plans"].as_array().expect("plans");
 		assert_eq!(plans.len(), 1, "one group has an open plan: {list}");
 		assert_eq!(plans[0]["group_name"], "Prod Group");
+		assert_eq!(plans[0]["rank"], "production");
 		assert_eq!(plans[0]["current_version"], "2.34.1");
 		assert_eq!(plans[0]["target_version"], "2.36.0");
 		assert_eq!(plans[0]["planned_for"], "2020-01-01");
 		assert_eq!(plans[0]["late"], true, "the planned day has passed unmet");
 		assert_eq!(plans[0]["note"], "site can absorb 2.36 only");
 
-		// A group with nothing recorded gets no pre-upgrade testing, so it is
-		// returned rather than omitted.
-		let unplanned = list["groups_without_a_plan"]
+		// A production with nothing recorded gets no pre-upgrade testing, so it
+		// is returned rather than omitted.
+		let unplanned = list["environments_without_a_plan"]
 			.as_array()
-			.expect("unplanned groups");
+			.expect("unplanned environments");
 		assert!(
 			unplanned.iter().any(|g| g["group_name"] == "Drifting"),
 			"missing the unplanned group: {list}"
@@ -1108,6 +1112,7 @@ async fn upgrade_plans_list_the_open_ones_and_keep_the_withdrawn_in_history() {
 			.find(|p| p["outcome"] == "withdrawn")
 			.unwrap_or_else(|| panic!("no withdrawn plan in {history}"));
 		assert_eq!(withdrawn["target_version"], "2.40.0");
+		assert_eq!(withdrawn["rank"], "production");
 		assert_eq!(withdrawn["withdrawn_by"], "someone@example.com");
 		assert!(!withdrawn["ended_at"].is_null());
 		assert!(plans.iter().any(|p| p["outcome"] == "open"));

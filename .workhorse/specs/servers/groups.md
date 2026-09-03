@@ -4,7 +4,7 @@ id: GRP
 
 # Server groups
 
-A group is what Canopy holds shared state against: one backup repository with its passphrase and retention, one incident target with its channel and grace period, one open upgrade plan, the domain names it claims, and one billing identity.
+A group is what Canopy holds shared state against: one backup repository with its passphrase and retention, one incident target with its channel and grace period, the domain names it claims, and one billing identity.
 Servers are grouped so that what is true of several of them at once is watched, alerted, and paid for in one place.
 
 ## What a group is
@@ -22,7 +22,8 @@ A server's rank is its environment tier: production, clone, demo, test, or dev.
 An operator sets it, and a server may carry none.
 
 A group's servers at one rank are one of its environments, so a site's production central server and the facility servers syncing to it are that site's production environment.
-Canopy holds no state against an environment: it presents a group's servers under their rank, and everything it attaches belongs to the group.
+An environment is where a group's servers are going next: each holds at most one open upgrade plan, and what it runs is what its highest-kind live server reports (see [UPG](../private-server/upgrade-plans.md)).
+Everything else Canopy attaches belongs to the group, and it presents a group's servers under their rank.
 
 ## A group's headline rank
 

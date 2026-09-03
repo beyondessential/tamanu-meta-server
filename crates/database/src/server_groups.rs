@@ -47,6 +47,25 @@ fn higher_rank(a: ServerRank, b: ServerRank) -> ServerRank {
 	}
 }
 
+/// A group's servers at one rank, and what its canonical member reports
+/// running: the highest kind among them, ties broken by id.
+// spec: GRP#environments
+#[derive(Debug, Clone)]
+pub struct Environment {
+	pub group_id: Uuid,
+	pub rank: ServerRank,
+	pub version: Option<VersionStr>,
+}
+
+/// How an environment is named where it is read: the group's name, with the
+/// rank after it unless it is production.
+pub fn environment_name(group: &str, rank: ServerRank) -> String {
+	match rank {
+		ServerRank::Production => group.to_owned(),
+		rank => format!("{group} {rank}"),
+	}
+}
+
 /// A group of servers managed together: incidents roll up across the group,
 /// members share tags, and the group carries its own notes and
 /// notification settings.
@@ -392,6 +411,81 @@ impl ServerGroup {
 			out.insert(gid, better);
 		}
 		Ok(out)
+	}
+
+	/// Every environment across `group_ids`: each group's live servers at one
+	/// rank, in the order the groups were given and then by rank, production
+	/// first. A group whose live members are all unranked, or all of products
+	/// canopy holds no release train for, has none.
+	// spec: GRP#environments
+	pub async fn environments(
+		db: &mut AsyncPgConnection,
+		group_ids: &[Uuid],
+	) -> Result<Vec<Environment>> {
+		use crate::schema::servers::dsl;
+		use std::collections::HashMap;
+
+		if group_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+		let members: Vec<Server> = dsl::servers
+			.select(Server::as_select())
+			.filter(dsl::group_id.eq_any(group_ids))
+			.filter(dsl::deleted_at.is_null())
+			.filter(dsl::rank.is_not_null())
+			.load(db)
+			.await?;
+
+		let mut canonical: HashMap<(Uuid, ServerRank), Server> = HashMap::new();
+		for server in members {
+			let (Some(group_id), Some(rank)) = (server.group_id, server.rank) else {
+				continue;
+			};
+			if !server.product.tracks_versions() {
+				continue;
+			}
+			let better = canonical.get(&(group_id, rank)).is_none_or(|held| {
+				(kind_priority(server.kind), server.id) < (kind_priority(held.kind), held.id)
+			});
+			if better {
+				canonical.insert((group_id, rank), server);
+			}
+		}
+
+		let ids: Vec<Uuid> = canonical.values().map(|server| server.id).collect();
+		let versions = crate::reported_detail::ReportedDetail::last_versions(db, &ids).await?;
+
+		let mut out = Vec::new();
+		for group_id in group_ids {
+			let mut ranks: Vec<ServerRank> = canonical
+				.keys()
+				.filter(|(group, _)| group == group_id)
+				.map(|(_, rank)| *rank)
+				.collect();
+			ranks.sort();
+			for rank in ranks {
+				let server = &canonical[&(*group_id, rank)];
+				out.push(Environment {
+					group_id: *group_id,
+					rank,
+					version: versions.get(&server.id).cloned(),
+				});
+			}
+		}
+		Ok(out)
+	}
+
+	/// What one environment runs: the version its canonical member reports.
+	pub async fn environment_version(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		rank: ServerRank,
+	) -> Result<Option<VersionStr>> {
+		Ok(Self::environments(db, &[group_id])
+			.await?
+			.into_iter()
+			.find(|env| env.rank == rank)
+			.and_then(|env| env.version))
 	}
 
 	/// The product each group's live members agree on, keyed by group id.

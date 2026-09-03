@@ -4,11 +4,26 @@ import {
 	seedDevice,
 	seedRestoreConsumerCapability,
 	seedRestoreReplica,
+	seedServer,
 	seedServerGroup,
+	seedStatus,
 	seedUpgradePlan,
 	seedVersion,
 	seedVersionKnownIssue,
+	type ServerRank,
 } from "./seed";
+
+/** A server of the group at `rank` reporting `version`, which is what that
+ * environment reads as running. */
+async function runningAt(
+	sql: Parameters<typeof seedServer>[0],
+	groupId: string,
+	version: string,
+	rank: ServerRank = "production",
+): Promise<void> {
+	const server = await seedServer(sql, { groupId, rank });
+	await seedStatus(sql, { serverId: server.id, version });
+}
 
 /** Declare a replica on an intent that migrates, which is what makes a plan
  * something the pipeline will act on. */
@@ -40,10 +55,8 @@ test.describe("upgrades dashboard", () => {
 	}) => {
 		const planned = await seedServerGroup(sql, { name: "kamaka" });
 		const unplanned = await seedServerGroup(sql, { name: "drifting" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = ANY($1)",
-			[[planned.id, unplanned.id]],
-		);
+		await runningAt(sql, planned.id, "2.60.0");
+		await runningAt(sql, unplanned.id, "2.60.0");
 		const target = await seedVersion(sql, {
 			major: 2,
 			minor: 61,
@@ -94,6 +107,7 @@ test.describe("upgrades dashboard", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await runningAt(sql, group.id, "2.60.0");
 		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 		await seedUpgradePlan(sql, {
 			groupId: group.id,
@@ -114,7 +128,8 @@ test.describe("upgrades dashboard", () => {
 	});
 
 	test("says so when nothing is planned", async ({ page, sql }) => {
-		await seedServerGroup(sql, { name: "quiet" });
+		const group = await seedServerGroup(sql, { name: "quiet" });
+		await runningAt(sql, group.id, "2.60.0");
 
 		await page.goto("/upgrades");
 
@@ -128,10 +143,7 @@ test.describe("upgrades dashboard", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		const target = await seedVersion(sql, {
 			major: 2,
 			minor: 61,
@@ -181,10 +193,7 @@ test.describe("upgrades dashboard", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		const first = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 		const second = await seedVersion(sql, { major: 2, minor: 63, patch: 0 });
 		await seedUpgradePlan(sql, {
@@ -220,10 +229,7 @@ test.describe("upgrades dashboard", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		const target = await seedVersion(sql, {
 			major: 2,
 			minor: 61,
@@ -266,10 +272,7 @@ test.describe("upgrades dashboard", () => {
 
 	test("a date no longer expected can be cleared", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		const target = await seedVersion(sql, {
 			major: 2,
 			minor: 61,
@@ -301,15 +304,55 @@ test.describe("upgrades dashboard", () => {
 		await expect(row).not.toContainText("FJT");
 	});
 
+	test("a clone is planned apart from its production", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await runningAt(sql, group.id, "2.60.0");
+		await runningAt(sql, group.id, "2.60.0", "clone");
+		await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+
+		await page.goto("/upgrades");
+		await page.getByRole("button", { name: "Record a plan" }).click();
+		const form = page.getByTestId("record-plan");
+		await form.getByLabel("Group").click();
+		await page.getByRole("option", { name: "kamaka" }).click();
+		// Two environments, so the form does not guess which one is moving.
+		await expect(form.getByLabel("Going to")).toBeDisabled();
+		await form.getByLabel("Environment").click();
+		await page.getByRole("option", { name: /clone/i }).click();
+		await form.getByLabel("Going to").click();
+		await page.getByRole("option", { name: "2.61.0" }).click();
+		await form.getByRole("button", { name: "Record" }).click();
+
+		// The clone's row names its rank; production, still unplanned, stays
+		// in the list of gaps.
+		const row = page
+			.getByTestId("planned-upgrade-row")
+			.filter({ hasText: "kamaka" });
+		await expect(row).toHaveCount(1);
+		await expect(row).toContainText("clone");
+		await expect(row).toContainText("2.61.0");
+		await expect(
+			page.getByRole("button", { name: "Withdraw kamaka clone's plan" }),
+		).toBeVisible();
+		await page
+			.getByRole("button", { name: "Show groups with no plan" })
+			.click();
+		await expect(
+			page
+				.getByTestId("unplanned-upgrade-row")
+				.filter({ hasText: "kamaka" }),
+		).toBeVisible();
+	});
+
 	test("a version far behind the newest can still be planned", async ({
 		page,
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.53.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.53.0");
 		// Ten minors of patch releases sit between the group and the newest, so the
 		// version it is going to is a long way down the list.
 		await seedVersion(sql, { major: 2, minor: 54, patch: 0 });
@@ -347,10 +390,7 @@ test.describe("upgrades dashboard", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 		await seedVersion(sql, { major: 2, minor: 61, patch: 1 });
 		await seedVersion(sql, { major: 2, minor: 61, patch: 2 });
@@ -380,10 +420,7 @@ test.describe("upgrades dashboard", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		const target = await seedVersion(sql, {
 			major: 2,
 			minor: 61,
@@ -422,10 +459,7 @@ test.describe("upgrades dashboard", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 
 		await page.goto("/upgrades");
@@ -472,10 +506,7 @@ test.describe("upgrade calendar", () => {
 
 	test("shows a dated plan on the day it lands", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 
 		const now = new Date();
@@ -521,10 +552,7 @@ test.describe("upgrade calendar hours", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 
 		const now = new Date();
@@ -563,10 +591,7 @@ test.describe("upgrade calendar editing", () => {
 
 	test("clicking an entry amends the plan in place", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 
 		const now = new Date();
@@ -601,10 +626,7 @@ test.describe("upgrade windows", () => {
 
 	test("a window recorded by hand reads as a range", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 
 		await page.goto("/upgrades");
@@ -631,10 +653,7 @@ test.describe("upgrade windows", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 
 		// The Monday of the week on screen, so the morning the window runs into
@@ -676,10 +695,7 @@ test.describe("upgrade windows", () => {
 
 	test("a day number opens that day on its own", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
-		await sql.query(
-			"UPDATE server_groups SET effective_version = '2.60.0' WHERE id = $1",
-			[group.id],
-		);
+		await runningAt(sql, group.id, "2.60.0");
 		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 
 		const now = new Date();

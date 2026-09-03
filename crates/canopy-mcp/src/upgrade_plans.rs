@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use commons_types::{Uuid, version::VersionStr};
+use commons_types::{Uuid, server::rank::ServerRank, version::VersionStr};
 use database::{
 	server_groups::ServerGroup,
 	upgrade_plans::{PlanOutcome, UpgradePlan},
@@ -25,13 +25,16 @@ use crate::{
 #[derive(Serialize)]
 struct PlanList {
 	plans: Vec<OpenPlan>,
-	groups_without_a_plan: Vec<GroupRef>,
+	/// Each group's highest-ranked environment where it has no open plan.
+	environments_without_a_plan: Vec<EnvironmentRef>,
 }
 
+/// One of a group's environments: its servers at one rank.
 #[derive(Serialize)]
-struct GroupRef {
+struct EnvironmentRef {
 	group_id: Uuid,
 	group_name: String,
+	rank: ServerRank,
 	current_version: Option<VersionStr>,
 }
 
@@ -39,6 +42,8 @@ struct GroupRef {
 struct OpenPlan {
 	group_id: Uuid,
 	group_name: String,
+	/// The environment the plan is for: the group's servers at this rank.
+	rank: ServerRank,
 	current_version: Option<VersionStr>,
 	target_version: String,
 	planned_for: Option<Date>,
@@ -49,7 +54,7 @@ struct OpenPlan {
 	/// morning.
 	planned_end_time: Option<Time>,
 	planned_zone: Option<String>,
-	/// The planned day has passed and the group has not moved.
+	/// The planned day has passed and the environment has not moved.
 	late: bool,
 	note: Option<String>,
 	recorded_by: Option<String>,
@@ -66,6 +71,8 @@ struct PlanHistory {
 
 #[derive(Serialize)]
 struct HistoricPlan {
+	/// The environment the plan was for: the group's servers at this rank.
+	rank: ServerRank,
 	target_version: String,
 	outcome: PlanOutcome,
 	planned_for: Option<Date>,
@@ -89,10 +96,11 @@ struct HistoricPlan {
 #[tool_router(router = upgrade_plans_router, vis = "pub(crate)")]
 impl CanopyMcp {
 	#[tool(
-		description = "Where every group is going: each group's open upgrade plan with the \
-		               version it runs now, the version it plans to move to, the planned date, and \
-		               whether that date has passed unmet. Groups with nothing recorded are \
-		               returned separately."
+		description = "Where every environment is going: each open upgrade plan, per group and \
+		               rank, with the version that environment runs now, the version it plans to \
+		               move to, the planned date, and whether that date has passed unmet. Each \
+		               group's highest-ranked environment with nothing recorded is returned \
+		               separately."
 	)]
 	async fn list_upgrade_plans(
 		&self,
@@ -102,17 +110,31 @@ impl CanopyMcp {
 		let today = Zoned::now().date();
 		let versions = version_names(&mut conn).await?;
 
+		let groups = ServerGroup::list_all(&mut conn).await.map_err(mcp_err)?;
+		let ids: Vec<Uuid> = groups.iter().map(|group| group.id).collect();
+		let names: HashMap<Uuid, String> = groups
+			.into_iter()
+			.map(|group| (group.id, group.name))
+			.collect();
+
 		let mut plans = Vec::new();
 		let mut unplanned = Vec::new();
-		for group in ServerGroup::list_all(&mut conn).await.map_err(mcp_err)? {
-			let plan = UpgradePlan::open_for_group(&mut conn, group.id)
+		let mut seen = std::collections::HashSet::new();
+		for env in ServerGroup::environments(&mut conn, &ids)
+			.await
+			.map_err(mcp_err)?
+		{
+			let headline = seen.insert(env.group_id);
+			let group_name = names.get(&env.group_id).cloned().unwrap_or_default();
+			let plan = UpgradePlan::open_for_environment(&mut conn, env.group_id, env.rank)
 				.await
 				.map_err(mcp_err)?;
 			match plan {
 				Some(plan) => plans.push(OpenPlan {
-					group_id: group.id,
-					group_name: group.name,
-					current_version: group.effective_version,
+					group_id: env.group_id,
+					group_name,
+					rank: env.rank,
+					current_version: env.version,
 					target_version: version_name(&versions, plan.target_version_id),
 					late: database::upgrade_plans::is_late(&plan, today),
 					planned_for: plan.planned_for,
@@ -123,24 +145,27 @@ impl CanopyMcp {
 					recorded_by: plan.created_by,
 					recorded_at: plan.created_at,
 				}),
-				None => unplanned.push(GroupRef {
-					group_id: group.id,
-					group_name: group.name,
-					current_version: group.effective_version,
+				None if headline => unplanned.push(EnvironmentRef {
+					group_id: env.group_id,
+					group_name,
+					rank: env.rank,
+					current_version: env.version,
 				}),
+				None => {}
 			}
 		}
 
 		ok_json(&PlanList {
 			plans,
-			groups_without_a_plan: unplanned,
+			environments_without_a_plan: unplanned,
 		})
 	}
 
 	#[tool(
-		description = "Every upgrade plan one group has had, newest first, with how each stands: \
-		               open, met (the group reached the target), replaced by a later plan, or \
-		               withdrawn (an operator said the group is no longer going there)."
+		description = "Every upgrade plan one group's environments have had, newest first, with \
+		               the rank each was for and how each stands: open, met (the environment \
+		               reached the target), replaced by a later plan, or withdrawn (an operator \
+		               said the environment is no longer going there)."
 	)]
 	async fn get_upgrade_plan_history(
 		&self,
@@ -158,6 +183,7 @@ impl CanopyMcp {
 			.map_err(mcp_err)?
 			.into_iter()
 			.map(|plan| HistoricPlan {
+				rank: plan.rank,
 				target_version: version_name(&versions, plan.target_version_id),
 				outcome: database::upgrade_plans::outcome(&plan),
 				ended_at: database::upgrade_plans::ended_at(&plan),

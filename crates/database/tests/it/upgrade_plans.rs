@@ -1,8 +1,11 @@
-//! Recording where a group is going, and what that changes: the planned
+//! Recording where an environment is going, and what that changes: the planned
 //! version becomes what pre-upgrade testing holds the data against.
 
 use commons_tests::db::TestDb;
-use commons_types::version::{VersionStatus, VersionStr};
+use commons_types::{
+	server::rank::ServerRank,
+	version::{VersionStatus, VersionStr},
+};
 use database::{
 	migration_tests::candidate_for,
 	reported_detail::ReportedDetail,
@@ -38,15 +41,15 @@ async fn publish(conn: &mut AsyncPgConnection, minor: i32, patch: i32) -> Versio
 		.expect("publish")
 }
 
-/// A group with one server reporting `running`, and the group's cached
-/// effective version recomputed through the real path.
+/// A group with one production server reporting `running`, and the group's
+/// cached effective version recomputed through the real path.
 async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Server) {
 	let group: RowId = sql_query("INSERT INTO server_groups (name) VALUES ('kamaka') RETURNING id")
 		.get_result(conn)
 		.await
 		.expect("group");
 	let server: RowId = sql_query(
-		"INSERT INTO servers (host, kind, group_id) VALUES ($1, 'central', $2) RETURNING id",
+		"INSERT INTO servers (host, kind, rank, group_id) VALUES ($1, 'central', 'production', $2) RETURNING id",
 	)
 	.bind::<sql_types::Text, _>("https://central.kamaka.example")
 	.bind::<sql_types::Uuid, _>(group.id)
@@ -54,16 +57,7 @@ async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Se
 	.await
 	.expect("server");
 
-	let version: VersionStr = running.parse().expect("parse");
-	ReportedDetail::record(
-		conn,
-		server.id,
-		"test",
-		&serde_json::json!({}),
-		Some(&version),
-	)
-	.await
-	.expect("report");
+	report(conn, server.id, running).await;
 	sql_query(
 		"INSERT INTO statuses (server_id, version, healthy, health) VALUES ($1, $2, true, '[]'::jsonb)",
 	)
@@ -80,6 +74,36 @@ async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Se
 		.await
 		.expect("get server");
 	(group.id, server)
+}
+
+/// What `server` says it runs.
+async fn report(conn: &mut AsyncPgConnection, server: Uuid, running: &str) {
+	let version: VersionStr = running.parse().expect("parse");
+	ReportedDetail::record(conn, server, "test", &serde_json::json!({}), Some(&version))
+		.await
+		.expect("report");
+}
+
+/// Another member of `group` at `rank`, reporting `running`.
+async fn server_at(
+	conn: &mut AsyncPgConnection,
+	group: Uuid,
+	rank: ServerRank,
+	running: &str,
+) -> Server {
+	let server: RowId = sql_query(
+		"INSERT INTO servers (host, kind, rank, group_id) VALUES ($1, 'central', $2, $3) RETURNING id",
+	)
+	.bind::<sql_types::Text, _>(format!("https://{rank}.kamaka.example"))
+	.bind::<sql_types::Text, _>(rank.to_string())
+	.bind::<sql_types::Uuid, _>(group)
+	.get_result(conn)
+	.await
+	.expect("server");
+	report(conn, server.id, running).await;
+	Server::get_by_id(conn, server.id)
+		.await
+		.expect("get server")
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -101,6 +125,7 @@ async fn a_plan_is_what_makes_a_version_the_test_target() {
 		UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			intended.id,
 			PlannedWhen {
 				date: Some(date(2026, 8, 14)),
@@ -134,6 +159,7 @@ async fn recording_a_plan_retires_the_one_before_it() {
 		UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			first.id,
 			PlannedWhen::default(),
 			None,
@@ -144,6 +170,7 @@ async fn recording_a_plan_retires_the_one_before_it() {
 		UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			second.id,
 			PlannedWhen::default(),
 			None,
@@ -152,7 +179,7 @@ async fn recording_a_plan_retires_the_one_before_it() {
 		.await
 		.expect("second plan");
 
-		let open = UpgradePlan::open_for_group(&mut conn, group)
+		let open = UpgradePlan::open_for_environment(&mut conn, group, ServerRank::Production)
 			.await
 			.expect("open")
 			.expect("there is one");
@@ -183,6 +210,7 @@ async fn a_plan_cannot_aim_at_where_the_group_already_is() {
 		let refused = UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			behind.id,
 			PlannedWhen::default(),
 			None,
@@ -197,11 +225,12 @@ async fn a_plan_cannot_aim_at_where_the_group_already_is() {
 #[tokio::test(flavor = "multi_thread")]
 async fn canopy_closes_a_plan_once_the_group_arrives() {
 	TestDb::run(|mut conn, _url| async move {
-		let (group, _server) = group_running(&mut conn, "2.60.0").await;
+		let (group, server) = group_running(&mut conn, "2.60.0").await;
 		let target = publish(&mut conn, 61, 0).await;
 		UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			target.id,
 			PlannedWhen::default(),
 			None,
@@ -216,25 +245,21 @@ async fn canopy_closes_a_plan_once_the_group_arrives() {
 			"still on its way"
 		);
 
-		// The group lands past the target: further than planned still means
-		// the upgrade happened.
-		sql_query("UPDATE server_groups SET effective_version = '2.62.0' WHERE id = $1")
-			.bind::<sql_types::Uuid, _>(group)
-			.execute(&mut conn)
-			.await
-			.expect("arrive");
+		// The environment lands past the target: further than planned still
+		// means the upgrade happened.
+		report(&mut conn, server.id, "2.62.0").await;
 
 		// Through the periodic sweep, which is what runs in production.
 		database::backup::sweep(&mut conn).await.expect("sweep");
 		assert!(
-			UpgradePlan::open_for_group(&mut conn, group)
+			UpgradePlan::open_for_environment(&mut conn, group, ServerRank::Production)
 				.await
 				.expect("open")
 				.is_none(),
 			"a met plan is closed, not left outstanding"
 		);
 		assert!(
-			planned_target(&mut conn, group)
+			planned_target(&mut conn, group, ServerRank::Production)
 				.await
 				.expect("target")
 				.is_none(),
@@ -252,6 +277,7 @@ async fn a_date_that_has_passed_reads_as_late() {
 		let plan = UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			target.id,
 			PlannedWhen {
 				date: Some(date(2026, 7, 1)),
@@ -269,6 +295,7 @@ async fn a_date_that_has_passed_reads_as_late() {
 		let undated = UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			target.id,
 			PlannedWhen::default(),
 			None,
@@ -293,6 +320,7 @@ async fn amending_a_plan_keeps_it_the_same_plan() {
 		let plan = UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			target.id,
 			PlannedWhen {
 				date: Some(date(2026, 7, 1)),
@@ -353,6 +381,7 @@ async fn amending_can_clear_the_date_and_note() {
 		let plan = UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			target.id,
 			PlannedWhen {
 				date: Some(date(2026, 7, 1)),
@@ -393,6 +422,7 @@ async fn a_replaced_plan_is_not_amendable() {
 		let replaced = UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			first.id,
 			PlannedWhen::default(),
 			None,
@@ -403,6 +433,7 @@ async fn a_replaced_plan_is_not_amendable() {
 		UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			second.id,
 			PlannedWhen::default(),
 			None,
@@ -433,11 +464,12 @@ async fn a_replaced_plan_is_not_amendable() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_met_plan_is_not_amendable() {
 	TestDb::run(|mut conn, _url| async move {
-		let (group, _server) = group_running(&mut conn, "2.60.0").await;
+		let (group, server) = group_running(&mut conn, "2.60.0").await;
 		let target = publish(&mut conn, 61, 0).await;
 		let plan = UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			target.id,
 			PlannedWhen::default(),
 			None,
@@ -446,11 +478,7 @@ async fn a_met_plan_is_not_amendable() {
 		.await
 		.expect("plan");
 
-		sql_query("UPDATE server_groups SET effective_version = '2.61.0' WHERE id = $1")
-			.bind::<sql_types::Uuid, _>(group)
-			.execute(&mut conn)
-			.await
-			.expect("arrive");
+		report(&mut conn, server.id, "2.61.0").await;
 		close_met_plans(&mut conn).await.expect("sweep");
 
 		let refused = UpgradePlan::amend(
@@ -480,6 +508,7 @@ async fn a_withdrawn_plan_leaves_the_group_unplanned_but_stays_in_its_history() 
 		let plan = UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			target.id,
 			PlannedWhen::default(),
 			None,
@@ -500,14 +529,14 @@ async fn a_withdrawn_plan_leaves_the_group_unplanned_but_stays_in_its_history() 
 		);
 
 		assert!(
-			UpgradePlan::open_for_group(&mut conn, group)
+			UpgradePlan::open_for_environment(&mut conn, group, ServerRank::Production)
 				.await
 				.expect("open")
 				.is_none(),
 			"the group is no longer going anywhere"
 		);
 		assert!(
-			planned_target(&mut conn, group)
+			planned_target(&mut conn, group, ServerRank::Production)
 				.await
 				.expect("target")
 				.is_none(),
@@ -533,6 +562,7 @@ async fn a_withdrawn_plan_does_not_hold_the_group_s_open_slot() {
 		let plan = UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			first.id,
 			PlannedWhen::default(),
 			None,
@@ -547,6 +577,7 @@ async fn a_withdrawn_plan_does_not_hold_the_group_s_open_slot() {
 		let replacement = UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			second.id,
 			PlannedWhen::default(),
 			None,
@@ -555,7 +586,7 @@ async fn a_withdrawn_plan_does_not_hold_the_group_s_open_slot() {
 		.await
 		.expect("a group that withdrew a plan can record another");
 		assert_eq!(
-			UpgradePlan::open_for_group(&mut conn, group)
+			UpgradePlan::open_for_environment(&mut conn, group, ServerRank::Production)
 				.await
 				.expect("open")
 				.map(|p| p.id),
@@ -584,6 +615,7 @@ async fn a_withdrawn_plan_is_not_amendable_or_withdrawable_twice() {
 		let plan = UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			target.id,
 			PlannedWhen::default(),
 			None,
@@ -630,6 +662,7 @@ async fn a_plan_can_carry_the_hour_it_starts() {
 		let plan = UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			target.id,
 			PlannedWhen {
 				date: Some(date(2026, 8, 20)),
@@ -676,6 +709,7 @@ async fn a_window_qualifies_the_hour_it_opens() {
 		let plan = UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			target.id,
 			PlannedWhen {
 				date: Some(date(2026, 8, 20)),
@@ -696,7 +730,16 @@ async fn a_window_qualifies_the_hour_it_opens() {
 		);
 
 		let mut refuses = async |when| {
-			UpgradePlan::record(&mut conn, group, target.id, when, None, "a@example.com").await
+			UpgradePlan::record(
+				&mut conn,
+				group,
+				ServerRank::Production,
+				target.id,
+				when,
+				None,
+				"a@example.com",
+			)
+			.await
 		};
 
 		assert!(
@@ -731,7 +774,16 @@ async fn an_hour_nobody_can_read_is_refused() {
 		let target = publish(&mut conn, 61, 0).await;
 
 		let mut refuses = async |when| {
-			UpgradePlan::record(&mut conn, group, target.id, when, None, "a@example.com").await
+			UpgradePlan::record(
+				&mut conn,
+				group,
+				ServerRank::Production,
+				target.id,
+				when,
+				None,
+				"a@example.com",
+			)
+			.await
 		};
 
 		assert!(
@@ -781,6 +833,7 @@ async fn only_dated_plans_that_still_stand_reach_the_calendar() {
 		UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			first.id,
 			PlannedWhen {
 				date: Some(date(2026, 8, 14)),
@@ -795,6 +848,7 @@ async fn only_dated_plans_that_still_stand_reach_the_calendar() {
 		let open = UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			second.id,
 			PlannedWhen {
 				date: Some(date(2026, 9, 2)),
@@ -818,6 +872,7 @@ async fn only_dated_plans_that_still_stand_reach_the_calendar() {
 		UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			second.id,
 			PlannedWhen::default(),
 			None,
@@ -831,6 +886,122 @@ async fn only_dated_plans_that_still_stand_reach_the_calendar() {
 				.expect("dated")
 				.is_empty(),
 			"a plan with no day has nowhere to sit on a calendar"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn each_environment_goes_its_own_place() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, production) = group_running(&mut conn, "2.60.0").await;
+		let clone = server_at(&mut conn, group, ServerRank::Clone, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+
+		// The clone rehearses the upgrade first.
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			ServerRank::Clone,
+			target.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("clone plan");
+
+		assert_eq!(
+			candidate_for(&mut conn, &clone)
+				.await
+				.expect("candidate")
+				.map(|v| v.id),
+			Some(target.id),
+			"the clone is tested against its own plan"
+		);
+		assert_eq!(
+			candidate_for(&mut conn, &production)
+				.await
+				.expect("candidate")
+				.map(|v| v.id),
+			None,
+			"production has said nothing about where it is going"
+		);
+
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			ServerRank::Production,
+			target.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("production plan");
+		assert!(
+			UpgradePlan::open_for_environment(&mut conn, group, ServerRank::Clone)
+				.await
+				.expect("open")
+				.is_some(),
+			"a plan for production leaves the clone's where it was"
+		);
+
+		// The clone arrives; production has not moved.
+		report(&mut conn, clone.id, "2.61.0").await;
+		close_met_plans(&mut conn).await.expect("sweep");
+		assert!(
+			UpgradePlan::open_for_environment(&mut conn, group, ServerRank::Clone)
+				.await
+				.expect("open")
+				.is_none(),
+			"the clone's plan is met"
+		);
+		assert!(
+			UpgradePlan::open_for_environment(&mut conn, group, ServerRank::Production)
+				.await
+				.expect("open")
+				.is_some(),
+			"a clone arriving says nothing about its production"
+		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_server_with_no_rank_is_in_no_environment() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, _production) = group_running(&mut conn, "2.60.0").await;
+		let unranked: RowId = sql_query(
+			"INSERT INTO servers (host, kind, group_id) VALUES ('https://x.kamaka.example', 'facility', $1) RETURNING id",
+		)
+		.bind::<sql_types::Uuid, _>(group)
+		.get_result(&mut conn)
+		.await
+		.expect("server");
+		let unranked = Server::get_by_id(&mut conn, unranked.id)
+			.await
+			.expect("get server");
+		let target = publish(&mut conn, 61, 0).await;
+
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			ServerRank::Production,
+			target.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("plan");
+
+		assert!(
+			candidate_for(&mut conn, &unranked)
+				.await
+				.expect("candidate")
+				.is_none(),
+			"no rank, no environment, nothing to test against"
 		);
 	})
 	.await

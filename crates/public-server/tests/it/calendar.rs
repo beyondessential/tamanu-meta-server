@@ -2,7 +2,10 @@
 //! and what a URL carrying the wrong secret gets.
 
 use commons_tests::diesel_async::SimpleAsyncConnection;
-use commons_types::version::{VersionStatus, VersionStr};
+use commons_types::{
+	server::rank::ServerRank,
+	version::{VersionStatus, VersionStr},
+};
 use database::{
 	reported_detail::ReportedDetail,
 	server_groups::ServerGroup,
@@ -30,8 +33,8 @@ const SERVER: &str = "22222222-2222-2222-2222-222222222222";
 async fn seed(conn: &mut AsyncPgConnection) -> (Uuid, Version) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{GROUP}', 'kamaka'); \
-		 INSERT INTO servers (id, host, kind, group_id) VALUES \
-			('{SERVER}', 'https://central.kamaka.example', 'central', '{GROUP}');"
+		 INSERT INTO servers (id, host, kind, rank, group_id) VALUES \
+			('{SERVER}', 'https://central.kamaka.example', 'central', 'production', '{GROUP}');"
 	))
 	.await
 	.expect("seed");
@@ -75,6 +78,7 @@ async fn a_dated_plan_is_an_all_day_entry() {
 		UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			target.id,
 			PlannedWhen {
 				date: Some(date(2026, 8, 14)),
@@ -128,6 +132,7 @@ async fn an_hour_is_resolved_from_its_zone_to_an_instant() {
 		UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			target.id,
 			PlannedWhen {
 				date: Some(date(2026, 8, 14)),
@@ -160,6 +165,7 @@ async fn a_window_ends_where_the_plan_closes_it() {
 		let plan = UpgradePlan::record(
 			&mut conn,
 			group,
+			ServerRank::Production,
 			target.id,
 			PlannedWhen {
 				date: Some(date(2026, 8, 14)),

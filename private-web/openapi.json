@@ -7020,11 +7020,11 @@
           "upgrade_plans"
         ],
         "summary": "Planned upgrades across the fleet.",
-        "description": "Every live group, whether or not it has a plan. A group several minors\nbehind with no plan is the thing this view exists to surface, so it is listed\nrather than omitted.",
+        "description": "Every environment of every live group, whether or not it has a plan. A\ngroup several minors behind with no plan is the thing this view exists to\nsurface, so its environments are listed rather than omitted.",
         "operationId": "upgrade_plans_fleet",
         "responses": {
           "200": {
-            "description": "One row per live group.",
+            "description": "One row per environment of each live group.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7179,8 +7179,8 @@
         "tags": [
           "upgrade_plans"
         ],
-        "summary": "Record where a group is going, retiring any plan it already had.",
-        "description": "A group goes one place next, so this replaces rather than queues. The target\nmust be published and ahead of what the group runs.",
+        "summary": "Record where an environment is going, retiring any plan it already had.",
+        "description": "An environment goes one place next, so this replaces rather than queues. The\ntarget must be published and ahead of what the environment runs.",
         "operationId": "upgrade_plans_record",
         "requestBody": {
           "content": {
@@ -7204,7 +7204,7 @@
             }
           },
           "400": {
-            "description": "The target is unpublished, or not ahead of the group.",
+            "description": "The target is unpublished, or not ahead of the environment.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7246,14 +7246,14 @@
         "tags": [
           "upgrade_plans"
         ],
-        "summary": "The versions a group could be planned onto: published, and ahead of what it\nruns.",
+        "summary": "The versions an environment could be planned onto: published, and ahead of\nwhat it runs.",
         "description": "Offering only valid targets is what keeps the operator from picking one\n`record` would refuse.",
         "operationId": "upgrade_plans_targets",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PlansForGroupArgs"
+                "$ref": "#/components/schemas/TargetsArgs"
               }
             }
           },
@@ -12649,7 +12649,7 @@
       },
       "PlanOutcome": {
         "type": "string",
-        "description": "How a plan stands: still where the group is going, or the way it closed.",
+        "description": "How a plan stands: still where the environment is going, or the way it\nclosed.",
         "enum": [
           "open",
           "met",
@@ -12683,10 +12683,12 @@
       },
       "PlannedUpgrade": {
         "type": "object",
-        "description": "One row of the planned-upgrades view.",
+        "description": "One row of the planned-upgrades view: one of a group's environments.",
         "required": [
           "group_id",
           "group_name",
+          "rank",
+          "headline",
           "late"
         ],
         "properties": {
@@ -12706,7 +12708,7 @@
               "string",
               "null"
             ],
-            "description": "The version the group runs now, where it has reported one."
+            "description": "The version the environment runs now, where it has reported one."
           },
           "group_id": {
             "type": "string",
@@ -12716,6 +12718,10 @@
           "group_name": {
             "type": "string",
             "description": "Its name, so the view reads without a second lookup."
+          },
+          "headline": {
+            "type": "boolean",
+            "description": "Whether this is the group's highest-ranked environment, the one the\ngroup's own version is read from."
           },
           "late": {
             "type": "boolean",
@@ -12728,9 +12734,13 @@
               },
               {
                 "$ref": "#/components/schemas/UpgradePlan",
-                "description": "The plan, absent for a group with none."
+                "description": "The plan, absent for an environment with none."
               }
             ]
+          },
+          "rank": {
+            "$ref": "#/components/schemas/ServerRank",
+            "description": "The rank of the environment this concerns: the group's servers at that\nrank."
           },
           "target_version": {
             "type": [
@@ -12751,7 +12761,7 @@
               "string",
               "null"
             ],
-            "description": "Where the group's data stands against the planned version, rolled up from\nits servers: any failure makes the group a failure, since one server\nwhose data breaks is enough to stop the upgrade. `null` without a plan."
+            "description": "Where the environment's data stands against the planned version, rolled\nup from its servers: any failure makes the environment a failure, since\none server whose data breaks is enough to stop the upgrade. `null`\nwithout a plan."
           }
         }
       },
@@ -13164,13 +13174,14 @@
         "description": "Request body for recording where a group is going.",
         "required": [
           "group_id",
+          "rank",
           "target_version_id"
         ],
         "properties": {
           "group_id": {
             "type": "string",
             "format": "uuid",
-            "description": "The group that intends to move."
+            "description": "The group whose environment intends to move."
           },
           "note": {
             "type": [
@@ -13206,6 +13217,10 @@
               "null"
             ],
             "description": "The IANA zone the planned time is a wall clock in, such as\n`Pacific/Fiji`. Required alongside a time."
+          },
+          "rank": {
+            "$ref": "#/components/schemas/ServerRank",
+            "description": "The rank of the environment within it that intends to move."
           },
           "target_version_id": {
             "type": "string",
@@ -16247,6 +16262,25 @@
           }
         }
       },
+      "TargetsArgs": {
+        "type": "object",
+        "description": "Request body for the versions an environment could be planned onto.",
+        "required": [
+          "group_id",
+          "rank"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The group."
+          },
+          "rank": {
+            "$ref": "#/components/schemas/ServerRank",
+            "description": "The rank of the environment within it."
+          }
+        }
+      },
       "Transition": {
         "type": "object",
         "description": "One healthy↔degraded transition: the state became (or was first\nobserved) `degraded`/healthy at `at`.",
@@ -16482,10 +16516,11 @@
       },
       "UpgradePlan": {
         "type": "object",
-        "description": "A group's recorded intention to move to a version.",
+        "description": "An environment's recorded intention to move to a version.",
         "required": [
           "id",
           "group_id",
+          "rank",
           "target_version_id",
           "created_at"
         ],
@@ -16518,7 +16553,7 @@
           "group_id": {
             "type": "string",
             "format": "uuid",
-            "description": "The group that intends to move."
+            "description": "The group whose environment intends to move."
           },
           "id": {
             "type": "string",
@@ -16530,7 +16565,7 @@
               "string",
               "null"
             ],
-            "description": "When the group's reported version reached the target."
+            "description": "When the environment's reported version reached the target."
           },
           "note": {
             "type": [
@@ -16566,6 +16601,10 @@
               "null"
             ],
             "description": "The IANA zone the planned time is a wall clock in."
+          },
+          "rank": {
+            "$ref": "#/components/schemas/ServerRank",
+            "description": "The rank of the environment that intends to move: the group's servers at\nthat rank."
           },
           "superseded_at": {
             "type": [

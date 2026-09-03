@@ -762,6 +762,7 @@ diesel::table! {
 		planned_time -> Nullable<Time>,
 		planned_zone -> Nullable<Text>,
 		planned_end_time -> Nullable<Time>,
+		rank -> Text,
 	}
 }
 

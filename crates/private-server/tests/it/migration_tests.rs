@@ -12,12 +12,12 @@ const FLEET: &str = "INSERT INTO versions (major, minor, patch, changelog, statu
 		VALUES (2, 62, 0, 'x', 'published'), (2, 63, 0, 'x', 'published');
 	INSERT INTO server_groups (id, name)
 		VALUES ('bbbbbbbb-0000-0000-0000-000000000001', 'Kamaka');
-	INSERT INTO servers (id, name, host, kind, group_id) VALUES
+	INSERT INTO servers (id, name, host, kind, rank, group_id) VALUES
 		('bbbbbbbb-0000-0000-0000-0000000000a0', 'central',
-		 'https://central.example.com', 'central',
+		 'https://central.example.com', 'central', 'production',
 		 'bbbbbbbb-0000-0000-0000-000000000001'),
 		('bbbbbbbb-0000-0000-0000-0000000000b0', 'facility',
-		 'https://facility.example.com', 'facility',
+		 'https://facility.example.com', 'facility', 'production',
 		 'bbbbbbbb-0000-0000-0000-000000000001');
 	INSERT INTO server_reported_detail (server_id, source, extra, version) VALUES
 		('bbbbbbbb-0000-0000-0000-0000000000a0', 'test', '{}'::jsonb, '2.62.0'),
@@ -28,8 +28,8 @@ async fn for_group_reports_a_verdict_per_server() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(FLEET).await.unwrap();
 		conn.batch_execute(
-			"INSERT INTO upgrade_plans (group_id, target_version_id, created_by)
-				SELECT 'bbbbbbbb-0000-0000-0000-000000000001', id, 'test@example.com'
+			"INSERT INTO upgrade_plans (group_id, rank, target_version_id, created_by)
+				SELECT 'bbbbbbbb-0000-0000-0000-000000000001', 'production', id, 'test@example.com'
 				FROM versions WHERE major = 2 AND minor = 63 AND patch = 0;",
 		)
 		.await
