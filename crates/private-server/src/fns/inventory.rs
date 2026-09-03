@@ -27,6 +27,7 @@ use database::{
 	maintenance_windows::MaintenanceWindow,
 	server_groups::ServerGroup,
 	servers::Server,
+	upgrade_plans::UpgradePlan,
 };
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
@@ -58,6 +59,19 @@ pub struct InventoryArgs {
 	/// group's live servers span more than one rank.
 	#[serde(default)]
 	pub rank: Option<ServerRank>,
+	/// What the run is doing to the environment. Configuring where not named.
+	#[serde(default)]
+	pub intent: RunIntent,
+}
+
+/// What a run intends to do to the environment it reads. An upgrade of a
+/// production environment needs the group's open upgrade plan behind it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum RunIntent {
+	#[default]
+	Configure,
+	Upgrade,
 }
 
 /// One server in an environment.
@@ -186,8 +200,8 @@ async fn resolve_group(
 /// holding several environments with no rank named, a rank with no live
 /// server to configure, an environment someone else has work under way on (a
 /// maintenance window they declared, or a secret variable they set moments
-/// ago), and a secret variable whose value cannot be read, saying which it
-/// was: a refusal is a decision to respect, and a caller has to be able to
+/// ago), an upgrade of production with no plan recorded, and a secret variable
+/// whose value cannot be read, saying which it was: a refusal is a decision to respect, and a caller has to be able to
 /// tell it from Canopy being unreachable.
 ///
 /// Requires admin access, the inventory carrying the secret variables' values.
@@ -202,7 +216,7 @@ async fn resolve_group(
 		(status = 200, body = InventoryView),
 		(status = 400, description = "Neither or both of the group arguments", body = ProblemDetailsSchema),
 		(status = 404, description = "No such server group", body = ProblemDetailsSchema),
-		(status = 409, description = "Archived, empty, ambiguously named, spanning environments, or under someone else's work", body = ProblemDetailsSchema),
+		(status = 409, description = "Archived, empty, ambiguously named, spanning environments, under someone else's work, or an unplanned upgrade of production", body = ProblemDetailsSchema),
 		(status = 502, description = "A secret variable could not be read", body = ProblemDetailsSchema),
 	),
 )]
@@ -213,6 +227,7 @@ pub async fn for_group(
 ) -> Result<Json<InventoryView>> {
 	let mut conn = state.db.get().await?;
 	let args_rank = args.rank;
+	let intent = args.intent;
 	let group = resolve_group(&mut conn, args).await?;
 
 	if group.deleted_at.is_some() {
@@ -260,6 +275,18 @@ pub async fn for_group(
 	if servers.is_empty() {
 		return Err(AppError::Conflict(format!(
 			"server group {:?} has no live server at rank {rank}",
+			group.name
+		)));
+	}
+
+	if intent == RunIntent::Upgrade
+		&& rank == ServerRank::Production
+		&& UpgradePlan::open_for_group(&mut conn, group.id)
+			.await?
+			.is_none()
+	{
+		return Err(AppError::Conflict(format!(
+			"server group {:?} has no upgrade plan; record one before upgrading production",
 			group.name
 		)));
 	}
@@ -321,6 +348,7 @@ pub async fn for_group(
 		login = %admin.0.login,
 		group = %group.name,
 		%rank,
+		?intent,
 		secrets = environment_secrets.0.len()
 			+ server_secrets.values().map(|vars| vars.0.len()).sum::<usize>(),
 		"inventory served"

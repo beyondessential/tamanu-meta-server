@@ -831,3 +831,155 @@ async fn serves_once_someone_elses_secret_change_has_aged() {
 	})
 	.await
 }
+
+async fn plan_upgrade(
+	conn: &mut AsyncPgConnection,
+	group: Uuid,
+	extra_columns: &str,
+	extra_values: &str,
+) {
+	let version = Uuid::new_v4();
+	conn.batch_execute(&format!(
+		"INSERT INTO versions (id, major, minor, patch, changelog, status)
+		 VALUES ('{version}', 2, 63, 0, '', 'published');
+		 INSERT INTO upgrade_plans (group_id, target_version_id{extra_columns})
+		 VALUES ('{group}', '{version}'{extra_values})"
+	))
+	.await
+	.expect("plan upgrade");
+}
+
+/// An upgrade of production is permitted by the group's open plan and refused
+/// without one.
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_an_unplanned_upgrade_of_production() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-unplanned", json!({})).await;
+		insert_ranked_server(
+			&mut conn,
+			group,
+			"kamaka-unplanned-central",
+			"central",
+			Some("production"),
+			None,
+			json!({}),
+		)
+		.await;
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka-unplanned", "intent": "upgrade" }))
+			.await;
+		response.assert_status_conflict();
+		let detail = response.text();
+		assert!(detail.contains("upgrade plan"), "{detail}");
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn serves_a_planned_upgrade_of_production() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-planned", json!({})).await;
+		insert_ranked_server(
+			&mut conn,
+			group,
+			"kamaka-planned-central",
+			"central",
+			Some("production"),
+			None,
+			json!({}),
+		)
+		.await;
+		plan_upgrade(&mut conn, group, "", "").await;
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka-planned", "intent": "upgrade" }))
+			.await;
+		response.assert_status_ok();
+	})
+	.await
+}
+
+/// A withdrawn plan says the deployment is no longer going there, so it
+/// permits nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn refuses_an_upgrade_whose_plan_was_withdrawn() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-withdrawn", json!({})).await;
+		insert_ranked_server(
+			&mut conn,
+			group,
+			"kamaka-withdrawn-central",
+			"central",
+			Some("production"),
+			None,
+			json!({}),
+		)
+		.await;
+		plan_upgrade(
+			&mut conn,
+			group,
+			", withdrawn_at, withdrawn_by",
+			", now(), 'someone@else'",
+		)
+		.await;
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka-withdrawn", "intent": "upgrade" }))
+			.await;
+		response.assert_status_conflict();
+	})
+	.await
+}
+
+/// A configuration run moves nothing, so there is nothing to plan.
+#[tokio::test(flavor = "multi_thread")]
+async fn serves_an_unplanned_configuration_run_on_production() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-config", json!({})).await;
+		insert_ranked_server(
+			&mut conn,
+			group,
+			"kamaka-config-central",
+			"central",
+			Some("production"),
+			None,
+			json!({}),
+		)
+		.await;
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka-config" }))
+			.await;
+		response.assert_status_ok();
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn serves_an_unplanned_upgrade_at_another_rank() {
+	commons_tests::server::run(async move |mut conn, _public, private| {
+		let group = insert_group(&mut conn, "kamaka-demo-up", json!({})).await;
+		insert_ranked_server(
+			&mut conn,
+			group,
+			"kamaka-demo-up-central",
+			"central",
+			Some("demo"),
+			None,
+			json!({}),
+		)
+		.await;
+
+		let response = private
+			.post("/api/inventory/for_group")
+			.json(&json!({ "group": "kamaka-demo-up", "intent": "upgrade" }))
+			.await;
+		response.assert_status_ok();
+	})
+	.await
+}

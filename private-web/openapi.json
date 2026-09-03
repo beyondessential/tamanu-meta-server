@@ -4057,7 +4057,7 @@
           "inventory"
         ],
         "summary": "Serve one environment's inventory.",
-        "description": "Refuses a group Canopy does not have, one that has been archived, one\nholding several environments with no rank named, a rank with no live\nserver to configure, an environment someone else has work under way on (a\nmaintenance window they declared, or a secret variable they set moments\nago), and a secret variable whose value cannot be read, saying which it\nwas: a refusal is a decision to respect, and a caller has to be able to\ntell it from Canopy being unreachable.\n\nRequires admin access, the inventory carrying the secret variables' values.",
+        "description": "Refuses a group Canopy does not have, one that has been archived, one\nholding several environments with no rank named, a rank with no live\nserver to configure, an environment someone else has work under way on (a\nmaintenance window they declared, or a secret variable they set moments\nago), an upgrade of production with no plan recorded, and a secret variable\nwhose value cannot be read, saying which it was: a refusal is a decision to respect, and a caller has to be able to\ntell it from Canopy being unreachable.\n\nRequires admin access, the inventory carrying the secret variables' values.",
         "operationId": "inventory_for_group",
         "requestBody": {
           "content": {
@@ -4101,7 +4101,7 @@
             }
           },
           "409": {
-            "description": "Archived, empty, ambiguously named, spanning environments, or under someone else's work",
+            "description": "Archived, empty, ambiguously named, spanning environments, under someone else's work, or an unplanned upgrade of production",
             "content": {
               "application/json": {
                 "schema": {
@@ -11153,6 +11153,10 @@
             ],
             "description": "Name of the server group, matched exactly."
           },
+          "intent": {
+            "$ref": "#/components/schemas/RunIntent",
+            "description": "What the run is doing to the environment. Configuring where not named."
+          },
           "rank": {
             "oneOf": [
               {
@@ -14584,6 +14588,14 @@
             "description": "The id of the token to revoke."
           }
         }
+      },
+      "RunIntent": {
+        "type": "string",
+        "description": "What a run intends to do to the environment it reads. An upgrade of a\nproduction environment needs the group's open upgrade plan behind it.",
+        "enum": [
+          "configure",
+          "upgrade"
+        ]
       },
       "RunOutcome": {
         "type": "string",
