@@ -444,6 +444,10 @@ async fn each_shape_is_answered_the_way_its_reporter_expects() {
 				"answered under the keys the reporter named them by"
 			);
 			assert!(applications["central"].check_severities.contains_key("db"));
+			assert!(
+				applications["central"].tags.contains_key("canopy:group-id"),
+				"each workload is answered with its own effective tags"
+			);
 
 			let unified: SplitResponse = public
 				.post(&format!("/status/{machine_id}"))

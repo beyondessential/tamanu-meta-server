@@ -72,20 +72,21 @@ is a regression.
 
 ## Status pushes
 
-- [ ] A split push is ingested against the machine and applications it names, unmodified (verifies spec: STA)
+- [x] A split push is ingested against the machine and applications it names, unmodified (verifies spec: STA)
 - [x] A unified push is separated by the machine-subject rule and ingested against both grains (verifies spec: STA)
 - [x] A push with no health field is a legacy Tamanu report, while an empty health set is the source reporting nothing (verifies spec: STA)
 - [ ] A reporter field named `source`, `health`, `check` or `result` inside `detail` is recorded and does not collide with the envelope (verifies spec: STA)
 - [ ] Two applications sharing a key cannot be expressed in a payload (verifies spec: STA)
-- [ ] Correlation is by machine, key and type together (verifies spec: STA)
+- [x] Correlation is by machine, key and type together (verifies spec: STA)
+- [x] A key naming a type the machine does not run yet creates that application (verifies spec: STA, FLT)
 - [x] A check name reported bare is catalogued qualified by the reporting application's type (verifies spec: STA, CHK)
-- [ ] A push response returns effective tags for the machine and each application described (verifies spec: STA)
+- [x] A push response returns effective tags for the machine and each application described (verifies spec: STA)
 - [x] `caddy_certs` files against the application while `caddy_version` files against the machine (verifies spec: STA)
 - [x] `ips` files against the machine while `ips_errors` files against the application (verifies spec: STA)
 - [x] A push is authorised against the machine the identity is bound to, not against any application (verifies spec: STA, DID)
 - [x] A push naming a type the box does not yet run creates that application (verifies spec: FLT)
 - [x] A push naming no type against a box running two applications is refused rather than attributed to one (verifies spec: STA)
-- [x] A push naming no type against a box running none is refused (verifies spec: STA)
+- [x] A push naming no type against a box running none is the box's in full, filed at machine scope (verifies spec: STA)
 - [x] A push from an ignored source resolves its application without creating one (verifies spec: STA, CHK)
 
 ## Figures
