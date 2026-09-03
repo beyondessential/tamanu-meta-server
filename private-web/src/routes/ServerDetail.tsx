@@ -8,12 +8,10 @@ import {
 	DialogContent,
 	DialogContentText,
 	DialogTitle,
-	IconButton,
 	LinearProgress,
 	Link as MuiLink,
 	Paper,
 	Stack,
-	Tooltip,
 	Typography,
 } from "@mui/material";
 import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
@@ -30,7 +28,7 @@ import ManualEventButton from "../components/ManualEventButton";
 import ServerCertificatesSection from "../components/ServerCertificatesSection";
 import MaintenanceSection from "../components/MaintenanceSection";
 import SilencedRefsSection from "../components/SilencedRefsSection";
-import StatusDot from "../components/StatusDot";
+import GroupTree from "../components/GroupTree";
 import TimeAgo from "../components/TimeAgo";
 import TimezoneTooltip from "../components/TimezoneTooltip";
 import VersionIndicator from "../components/VersionIndicator";
@@ -48,8 +46,6 @@ import { humanSeconds } from "../lib/humanDuration";
 import ServerNameWithGroup from "../components/ServerNameWithGroup";
 import {
 	applicationName,
-	compareServersByRankThenType,
-	groupServersByRank,
 	type ConsolidatedChecks,
 	type HealthState,
 	type ServerDetailData,
@@ -169,14 +165,6 @@ export default function ServerDetail() {
 					</MuiLink>
 				</Paper>
 			)}
-			{data.siblings.length > 0 && (
-				<SiblingServers
-					siblings={data.siblings}
-					isAdmin={admin}
-					hasOpenIncident={hasOpenIncident}
-					onEventSubmitted={bumpRefresh}
-				/>
-			)}
 			<MaintenanceSection
 				scope="machine"
 				anchor="maintenance"
@@ -192,6 +180,18 @@ export default function ServerDetail() {
 				refreshKey={refreshTick}
 				onChanged={bumpRefresh}
 			/>
+			{data.group && (
+				<Box>
+					<Typography variant="h5" component="h2" gutterBottom>
+						{data.group.name}
+					</Typography>
+					<GroupTree
+						machines={data.group_machines}
+						applications={data.group_applications}
+						currentApplicationId={data.server.id}
+					/>
+				</Box>
+			)}
 			<Box>
 				<VersionLegend />
 				<Box sx={{ mt: 1 }}>
@@ -243,12 +243,6 @@ function Header({
 				{data.server.rank && <ServerRankChip rank={data.server.rank} />}
 				<ApplicationTypeChip type={data.server.type} />
 				<Typography variant="h4" component="h1" sx={{ ml: 1 }}>
-					<SiblingDotStrip
-						focused={data.server}
-						focusedUp={data.up}
-						focusedHealth={data.health}
-						siblings={data.siblings}
-					/>
 					<ServerNameWithGroup
 						groupName={data.server.group_name}
 						groupId={data.server.group_id}
@@ -657,112 +651,6 @@ function nameManagementLabel(server: ServerInfo): string {
 	return server.may_manage_dns ? "DNS only" : "TLS only";
 }
 
-function SiblingServers({
-	siblings,
-	isAdmin,
-	hasOpenIncident,
-	onEventSubmitted,
-}: {
-	siblings: ServerDetailData["siblings"];
-	isAdmin: boolean;
-	hasOpenIncident: boolean;
-	onEventSubmitted: () => void;
-}) {
-	// Same rank-then-kind grouping as the GroupDetail server list, so a
-	// reader scanning ServerDetail's sibling section sees the production
-	// peers up top and the dev scratch at the bottom in a predictable
-	// order. Unranked servers fall into a trailing `null` bucket.
-	const groups = groupServersByRank(siblings);
-
-	return (
-		<Box>
-			<Typography variant="h5" component="h2" gutterBottom>
-				Other servers in this group ({siblings.length})
-			</Typography>
-			<Stack spacing={2}>
-				{groups.map(([rank, members]) => (
-					<Box key={rank ?? "_unranked"}>
-						{rank && (
-							<Typography
-								variant="overline"
-								color="text.secondary"
-								sx={{ display: "block", mb: 0.5 }}
-							>
-								{rank}
-							</Typography>
-						)}
-						<Stack spacing={1}>
-							{members.map((sib) => (
-								<Stack
-									key={sib.id}
-									direction="row"
-									spacing={1}
-									sx={{
-										p: 1.5,
-										border: 1,
-										borderColor: "divider",
-										borderRadius: 1,
-										alignItems: "center",
-									}}
-								>
-									{sib.display_host && (
-										<Tooltip title={sib.display_host}>
-											<IconButton
-												component="a"
-												href={sib.display_host}
-												target="_blank"
-												rel="noopener noreferrer"
-												size="small"
-												aria-label={`Open ${applicationName(sib)} (${sib.display_host})`}
-											>
-												<LanguageIcon fontSize="small" />
-											</IconButton>
-										</Tooltip>
-									)}
-									<StatusDot
-										up={sib.up ?? "gone"}
-										health={sib.health ?? undefined}
-										monitored={sib.is_monitored !== false}
-										maintained={sib.maintained === true}
-									/>
-									<MuiLink
-										component={RouterLink}
-										to={`/servers/${sib.id}`}
-										underline="hover"
-										color="text.primary"
-										sx={{ fontWeight: 500 }}
-									>
-										{applicationName(sib)}
-									</MuiLink>
-									{sib.rank && <ServerRankChip rank={sib.rank} />}
-									<ApplicationTypeChip type={sib.type} />
-									{!sib.is_monitored && (
-										<Tooltip title="Status alerts are off for this server — canopy isn't watching it.">
-											<Chip
-												size="small"
-												variant="outlined"
-												label="unmonitored"
-											/>
-										</Tooltip>
-									)}
-									<Box sx={{ flex: 1 }} />
-									{isAdmin && (
-										<ManualEventButton
-											serverId={sib.id}
-											hasOpenIncident={hasOpenIncident}
-											onSubmitted={onEventSubmitted}
-										/>
-									)}
-								</Stack>
-							))}
-						</Stack>
-					</Box>
-				))}
-			</Stack>
-		</Box>
-	);
-}
-
 function GroupSection({
 	group,
 	billingLabels,
@@ -859,94 +747,5 @@ function NotesAndTagsSection({
 				</Stack>
 			)}
 		</Paper>
-	);
-}
-
-/// Header strip of StatusDots: the focused server (full-colour) plus its
-/// siblings (dimmed), sorted by rank then kind. A thin grey vertical bar
-/// separates adjacent ranks. The focused server's dot is the only one
-/// without `dim`, so it visually pops regardless of where in the strip
-/// rank+kind ordering places it.
-function SiblingDotStrip({
-	focused,
-	focusedUp,
-	focusedHealth,
-	siblings,
-}: {
-	focused: ServerInfo & { name?: string | null };
-	focusedUp: ShortStatus;
-	focusedHealth: HealthState;
-	siblings: Array<
-		ServerInfo & {
-			up?: ShortStatus | null;
-			health?: HealthState | null;
-			name?: string | null;
-		}
-	>;
-}) {
-	// Combine + sort. The focused server keeps a marker so we can render
-	// it without `dim` once the order is established.
-	const combined: Array<{
-		entry: ServerInfo & {
-			up?: ShortStatus | null;
-			health?: HealthState | null;
-		};
-		focused: boolean;
-	}> = [
-		{
-			entry: { ...focused, up: focusedUp, health: focusedHealth },
-			focused: true,
-		},
-		...siblings.map((sib) => ({ entry: sib, focused: false })),
-	];
-	combined.sort((a, b) => compareServersByRankThenType(a.entry, b.entry));
-
-	const chunks: Array<{
-		rank: string;
-		entries: typeof combined;
-	}> = [];
-	for (const m of combined) {
-		const key = m.entry.rank ?? "_unranked";
-		const last = chunks[chunks.length - 1];
-		if (last && last.rank === key) last.entries.push(m);
-		else chunks.push({ rank: key, entries: [m] });
-	}
-
-	return (
-		<Box component="span" sx={{ display: "inline-flex", alignItems: "center" }}>
-			{chunks.map((chunk, idx) => (
-				<Box
-					key={chunk.rank}
-					component="span"
-					sx={{ display: "inline-flex", alignItems: "center" }}
-				>
-					{idx > 0 && (
-						<Box
-							component="span"
-							aria-hidden
-							sx={{
-								display: "inline-block",
-								width: "2px",
-								height: "0.7em",
-								mx: 0.5,
-								bgcolor: "text.disabled",
-							}}
-						/>
-					)}
-					{chunk.entries.map((m) => (
-						<StatusDot
-							key={m.entry.id}
-							up={(m.entry.up as ShortStatus | undefined) ?? "gone"}
-							health={(m.entry.health as HealthState | undefined) ?? undefined}
-							monitored={m.entry.is_monitored !== false}
-							maintained={m.entry.maintained === true}
-							title={applicationName(m.entry)}
-							dim={!m.focused}
-							size="0.8em"
-						/>
-					))}
-				</Box>
-			))}
-		</Box>
 	);
 }

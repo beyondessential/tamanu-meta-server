@@ -68,12 +68,15 @@ test.describe("machine detail", () => {
 
 		await page.goto(`/machines/${machine.id}`);
 
-		await expect(page.getByText("Applications (2)")).toBeVisible();
+		// The box's own section, rather than the group tree the page ends with,
+		// which lists every workload in the group.
+		const onThisBox = page.getByTestId("applications-on-box");
+		await expect(onThisBox.getByText("Applications (2)")).toBeVisible();
 		await expect(
-			page.getByRole("link", { name: "central-on-shared" }),
+			onThisBox.getByRole("link", { name: "central-on-shared" }),
 		).toBeVisible();
 		await expect(
-			page.getByRole("link", { name: "facility-on-shared" }),
+			onThisBox.getByRole("link", { name: "facility-on-shared" }),
 		).toBeVisible();
 	});
 
@@ -90,7 +93,9 @@ test.describe("machine detail", () => {
 		await page.goto(`/machines/${machine.id}`);
 
 		await expect(page.getByText(/hasn't checked in yet/i)).toBeVisible();
-		await expect(page.getByText("Applications (0)")).toBeVisible();
+		await expect(
+			page.getByTestId("applications-on-box").getByText("Applications (0)"),
+		).toBeVisible();
 		await expect(page.getByText(/nothing reported on this box yet/i)).toBeVisible();
 	});
 
@@ -167,7 +172,10 @@ test.describe("machine detail", () => {
 		await page.getByRole("link", { name: "This box" }).click();
 		await expect(page).toHaveURL(new RegExp(`/machines/${server.machineId}$`));
 
-		await page.getByRole("link", { name: "round-trip-app" }).click();
+		await page
+			.getByTestId("applications-on-box")
+			.getByRole("link", { name: "round-trip-app" })
+			.click();
 		await expect(page).toHaveURL(new RegExp(`/servers/${server.id}$`));
 	});
 

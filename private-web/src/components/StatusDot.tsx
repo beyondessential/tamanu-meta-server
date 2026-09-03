@@ -87,6 +87,7 @@ export default function StatusDot({
 	const dot = (
 		<Box
 			component="span"
+			data-testid="status-dot"
 			sx={{
 				display: "inline-block",
 				width: size,

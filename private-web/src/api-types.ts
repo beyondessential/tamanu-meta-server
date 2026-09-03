@@ -3181,7 +3181,8 @@ export interface paths {
          * Get full detail for a server.
          * @description Returns the server's record, its bound device (if any), its most recent
          *     status report, current reachability/health, its group (if any) together
-         *     with sibling applications in the same group, and the group's billing labels.
+         *     with the group's whole membership for the tree the page ends with, and the
+         *     group's billing labels.
          *     Returns 404 if no server exists with that id.
          */
         post: operations["get_detail"];
@@ -7181,6 +7182,17 @@ export interface components {
             figures: Record<string, never>;
             group?: null | components["schemas"]["ServerGroup"];
             /**
+             * @description Every application in this box's group, for the tree the page ends with.
+             *     Empty when the machine is ungrouped. The applications on this box are
+             *     among them, the tree being a map of the group rather than of elsewhere.
+             */
+            group_applications: components["schemas"]["ServerInfo"][];
+            /**
+             * @description Every machine in this box's group, for the same tree. Empty when the
+             *     machine is ungrouped.
+             */
+            group_machines: components["schemas"]["GroupMachine"][];
+            /**
              * @description The machine's own health, from the checks filed against it. What the
              *     applications on it make of their own checks is each application's.
              */
@@ -9092,6 +9104,18 @@ export interface components {
             checks: components["schemas"]["ConsolidatedChecks"];
             device_info?: null | components["schemas"]["DeviceInfo"];
             group?: null | components["schemas"]["ServerGroup"];
+            /**
+             * @description Every application in the group, this one included, for the tree the page
+             *     ends with. Empty when the application is ungrouped. Each entry carries
+             *     its own `up` / `health` so the tree renders a status dot per workload.
+             */
+            group_applications: components["schemas"]["ServerInfo"][];
+            /**
+             * @description Every machine in the group, for the same tree: the boxes the
+             *     applications above are arranged under. Empty when the application is
+             *     ungrouped.
+             */
+            group_machines: components["schemas"]["GroupMachine"][];
             /** @description Current self-reported health, derived from the most recent status report. */
             health: components["schemas"]["HealthState"];
             last_status?: null | components["schemas"]["ServerLastStatusData"];
@@ -9112,12 +9136,6 @@ export interface components {
             munin: boolean;
             /** @description The server's own record. */
             server: components["schemas"]["ServerInfo"];
-            /**
-             * @description Other applications in the same group (excluding `server`). Empty when the
-             *     server is ungrouped or alone in its group. Each entry carries its
-             *     own `up` / `health` so the UI can render a status dot per sibling.
-             */
-            siblings: components["schemas"]["ServerInfo"][];
             /** @description Current reachability, derived from the most recent status report. */
             up: components["schemas"]["ShortStatus"];
         };

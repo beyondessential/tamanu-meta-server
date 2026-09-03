@@ -30,7 +30,9 @@ struct ServerDetailResponse {
 	#[serde(default)]
 	group: Option<ServerGroupResponse>,
 	#[serde(default)]
-	siblings: Vec<serde_json::Value>,
+	group_applications: Vec<serde_json::Value>,
+	#[serde(default)]
+	group_machines: Vec<serde_json::Value>,
 	#[serde(default)]
 	munin: bool,
 }
@@ -603,7 +605,9 @@ async fn get_detail_basic() {
 		assert!(detail.device_info.is_none());
 		assert!(detail.last_status.is_none());
 		assert_eq!(detail.up, "gone");
-		assert!(detail.siblings.is_empty());
+		// Ungrouped, so there is no tree to end the page with.
+		assert!(detail.group_applications.is_empty());
+		assert!(detail.group_machines.is_empty());
 	})
 	.await
 }
@@ -794,7 +798,9 @@ async fn get_detail_with_device() {
 
 		assert_eq!(detail.server.name, "Device Application");
 		assert!(detail.device_info.is_some());
-		assert!(detail.siblings.is_empty());
+		// Ungrouped, so there is no tree to end the page with.
+		assert!(detail.group_applications.is_empty());
+		assert!(detail.group_machines.is_empty());
 
 		let device_info = detail.device_info.unwrap();
 		assert_eq!(device_info.device.id, "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");

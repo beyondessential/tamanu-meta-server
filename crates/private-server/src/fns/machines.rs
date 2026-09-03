@@ -193,6 +193,15 @@ pub struct MachineDetailData {
 	/// The applications running on this box, each carrying its own
 	/// reachability and health so the page renders a dot per workload.
 	pub applications: Vec<super::applications::ServerInfo>,
+	/// Every application in this box's group, for the tree the page ends with.
+	/// Empty when the machine is ungrouped. The applications on this box are
+	/// among them, the tree being a map of the group rather than of elsewhere.
+	// spec: FLT
+	pub group_applications: Vec<super::applications::ServerInfo>,
+	/// Every machine in this box's group, for the same tree. Empty when the
+	/// machine is ungrouped.
+	// spec: FLT
+	pub group_machines: Vec<super::server_groups::GroupMachine>,
 	/// The machine's effective `billing.*` labels — the ones Canopy hands its
 	/// device. A machine carries no product, a box not being a piece of
 	/// software.
@@ -296,6 +305,11 @@ pub async fn get_detail(
 
 	let billing_labels = machine_billing_labels(&machine, group.as_ref(), &applications).await;
 
+	let (group_applications, group_machines) = match group.as_ref() {
+		Some(g) => super::server_groups::tree_members(&mut conn, g).await?,
+		None => (Vec::new(), Vec::new()),
+	};
+
 	Ok(Json(MachineDetailData {
 		machine,
 		group,
@@ -309,6 +323,8 @@ pub async fn get_detail(
 		checks,
 		operators,
 		applications,
+		group_applications,
+		group_machines,
 		billing_labels,
 	}))
 }

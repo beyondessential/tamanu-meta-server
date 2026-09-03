@@ -878,3 +878,17 @@ Canopy's own nil record predates the split and is excluded, the way fleet querie
 
 A migrated application carries no reporter key, which is what lets a split push claim it.
 Takeover by type was already covered; the other half was not, so `statuses_split.rs` gains a push naming a type the box has no application of, which stands one beside the keyless record rather than renaming it.
+
+**Done since the audit: the group's tree on the detail pages.**
+The tree the group page shows is now `GroupTree`, a component of its own, and both detail pages end with it.
+An operator learns one arrangement and reads it everywhere, and moving sideways between two workloads on a box never goes back through the group.
+Whichever page it is rendered on is marked in place rather than omitted, so the tree reads as a map: the current row takes the hover background and its name stops being a link back to where the operator already is.
+
+Both detail endpoints needed the group's *whole* membership rather than an application's siblings, so `server_groups::tree_members` was factored out of the group page's own handler and all three handlers now read the membership from it.
+`ServerDetailData.siblings` is replaced by `group_applications` and `group_machines`, the same pair `MachineDetailData` gains; `Application::siblings` stays because MCP still reports a sibling count.
+
+Neither page carries a status dot beside its title any more.
+The title says which thing the page is about, and whether that thing is well is the tree's and the checks' business.
+
+One affordance goes with the flat sibling list: it carried an admin-only manual-event button per sibling, and the tree has never had one.
+The group page's tree did not offer it either, so an admin filing an event against a neighbouring workload now goes to that workload's own page, one click further than before.

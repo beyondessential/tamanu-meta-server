@@ -6312,7 +6312,7 @@
           "applications"
         ],
         "summary": "Get full detail for a server.",
-        "description": "Returns the server's record, its bound device (if any), its most recent\nstatus report, current reachability/health, its group (if any) together\nwith sibling applications in the same group, and the group's billing labels.\nReturns 404 if no server exists with that id.",
+        "description": "Returns the server's record, its bound device (if any), its most recent\nstatus report, current reachability/health, its group (if any) together\nwith the group's whole membership for the tree the page ends with, and the\ngroup's billing labels.\nReturns 404 if no server exists with that id.",
         "operationId": "get_detail",
         "requestBody": {
           "content": {
@@ -12758,6 +12758,8 @@
           "checks",
           "operators",
           "applications",
+          "group_applications",
+          "group_machines",
           "billing_labels"
         ],
         "properties": {
@@ -12804,6 +12806,20 @@
                 "description": "The group this machine belongs to, with its notes and tags, so the page\nrenders its group section without a second fetch."
               }
             ]
+          },
+          "group_applications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServerInfo"
+            },
+            "description": "Every application in this box's group, for the tree the page ends with.\nEmpty when the machine is ungrouped. The applications on this box are\namong them, the tree being a map of the group rather than of elsewhere."
+          },
+          "group_machines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupMachine"
+            },
+            "description": "Every machine in this box's group, for the same tree. Empty when the\nmachine is ungrouped."
           },
           "health": {
             "$ref": "#/components/schemas/HealthState",
@@ -15798,7 +15814,8 @@
           "maintained",
           "maintenance_settling",
           "checks",
-          "siblings",
+          "group_applications",
+          "group_machines",
           "billing_labels",
           "munin"
         ],
@@ -15836,6 +15853,20 @@
               }
             ]
           },
+          "group_applications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServerInfo"
+            },
+            "description": "Every application in the group, this one included, for the tree the page\nends with. Empty when the application is ungrouped. Each entry carries\nits own `up` / `health` so the tree renders a status dot per workload."
+          },
+          "group_machines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GroupMachine"
+            },
+            "description": "Every machine in the group, for the same tree: the boxes the\napplications above are arranged under. Empty when the application is\nungrouped."
+          },
           "health": {
             "$ref": "#/components/schemas/HealthState",
             "description": "Current self-reported health, derived from the most recent status report."
@@ -15866,13 +15897,6 @@
           "server": {
             "$ref": "#/components/schemas/ServerInfo",
             "description": "The server's own record."
-          },
-          "siblings": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ServerInfo"
-            },
-            "description": "Other applications in the same group (excluding `server`). Empty when the\nserver is ungrouped or alone in its group. Each entry carries its\nown `up` / `health` so the UI can render a status dot per sibling."
           },
           "up": {
             "$ref": "#/components/schemas/ShortStatus",

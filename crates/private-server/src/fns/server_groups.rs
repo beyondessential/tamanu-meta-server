@@ -198,7 +198,44 @@ pub async fn get(
 ) -> Result<Json<GroupDetail>> {
 	let mut conn = state.db.get().await?;
 	let group = ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
-	let members = group.list_servers(&mut conn).await?;
+	let (applications, machines) = tree_members(&mut conn, &group).await?;
+	let billing_labels = group_billing_labels(&mut conn, &group).await?;
+	let maintained = database::maintenance_windows::MaintenanceWindow::suspends(
+		&mut conn,
+		None,
+		Some(args.server_group_id),
+	)
+	.await?;
+	let maintenance_settling = maintained
+		&& database::maintenance_windows::MaintenanceWindow::open_for(
+			&mut conn,
+			database::issues::Scope::Group(args.server_group_id),
+		)
+		.await?
+		.is_none();
+
+	Ok(Json(GroupDetail {
+		group,
+		applications,
+		machines,
+		maintained,
+		maintenance_settling,
+		billing_labels,
+	}))
+}
+
+/// A group's whole membership, in the shape the group tree renders it: every
+/// live application in the group, decorated with its status and display host,
+/// and every machine in it.
+///
+/// Both detail pages end with the same tree the group page shows, so all three
+/// read the membership from here rather than each assembling its own.
+// spec: FLT
+pub async fn tree_members(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	group: &ServerGroup,
+) -> Result<(Vec<super::applications::ServerInfo>, Vec<GroupMachine>)> {
+	let members = group.list_servers(conn).await?;
 	let group_name = group.name.clone();
 	let mut applications: Vec<super::applications::ServerInfo> = members
 		.into_iter()
@@ -214,23 +251,10 @@ pub async fn get(
 			.unwrap_or("")
 			.cmp(b.name.as_deref().unwrap_or(""))
 	});
-	super::applications::decorate_with_status(&mut conn, &mut applications).await?;
-	super::applications::fill_display_hosts(&mut conn, &mut applications).await?;
-	let billing_labels = group_billing_labels(&mut conn, &group).await?;
-	let maintained = database::maintenance_windows::MaintenanceWindow::suspends(
-		&mut conn,
-		None,
-		Some(args.server_group_id),
-	)
-	.await?;
-	let maintenance_settling = maintained
-		&& database::maintenance_windows::MaintenanceWindow::open_for(
-			&mut conn,
-			database::issues::Scope::Group(args.server_group_id),
-		)
-		.await?
-		.is_none();
-	let machines = database::machines::Machine::list_for_group(&mut conn, args.server_group_id)
+	super::applications::decorate_with_status(conn, &mut applications).await?;
+	super::applications::fill_display_hosts(conn, &mut applications).await?;
+
+	let machines = database::machines::Machine::list_for_group(conn, group.id)
 		.await?
 		.into_iter()
 		.map(|m| GroupMachine {
@@ -239,14 +263,7 @@ pub async fn get(
 		})
 		.collect();
 
-	Ok(Json(GroupDetail {
-		group,
-		applications,
-		machines,
-		maintained,
-		maintenance_settling,
-		billing_labels,
-	}))
+	Ok((applications, machines))
 }
 
 /// Request to create a new server group.

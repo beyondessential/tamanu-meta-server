@@ -18,6 +18,7 @@ import MachineIdentitySection from "../components/MachineIdentitySection";
 import MachineSetupInstructions from "../components/MachineSetupInstructions";
 import MaintenanceSection from "../components/MaintenanceSection";
 import ServerRankChip from "../components/ServerRankChip";
+import GroupTree from "../components/GroupTree";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import StatusDot from "../components/StatusDot";
 import TimeAgo from "../components/TimeAgo";
@@ -84,8 +85,7 @@ export default function MachineDetail() {
 				sx={{ alignItems: "center", flexWrap: "wrap" }}
 				useFlexGap
 			>
-				<StatusDot up={data.up} health={data.health} />
-				<Typography variant="h4" component="h1" sx={{ ml: 1 }}>
+				<Typography variant="h4" component="h1">
 					{machineLabel(data) ?? "Unnamed machine"}
 				</Typography>
 				{data.group && (
@@ -229,6 +229,19 @@ export default function MachineDetail() {
 				onChanged={bumpRefresh}
 			/>
 
+			{data.group && (
+				<Box>
+					<Typography variant="h5" component="h2" gutterBottom>
+						{data.group.name}
+					</Typography>
+					<GroupTree
+						machines={data.group_machines}
+						applications={data.group_applications}
+						currentMachineId={data.machine.id}
+					/>
+				</Box>
+			)}
+
 			<Box>
 				<StatusLegend />
 				<Box sx={{ mt: 1 }}>
@@ -323,7 +336,7 @@ function ApplicationsOnThisBox({
 	applications: ServerInfo[];
 }) {
 	return (
-		<Paper variant="outlined" sx={{ p: 2 }}>
+		<Paper variant="outlined" sx={{ p: 2 }} data-testid="applications-on-box">
 			<Typography variant="h6" gutterBottom>
 				Applications ({applications.length})
 			</Typography>

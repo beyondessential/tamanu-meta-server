@@ -55,10 +55,16 @@ pub struct ServerDetailData {
 	/// render the "Group" section without a second fetch. `None` when the
 	/// server is ungrouped.
 	pub group: Option<ServerGroup>,
-	/// Other applications in the same group (excluding `server`). Empty when the
-	/// server is ungrouped or alone in its group. Each entry carries its
-	/// own `up` / `health` so the UI can render a status dot per sibling.
-	pub siblings: Vec<ServerInfo>,
+	/// Every application in the group, this one included, for the tree the page
+	/// ends with. Empty when the application is ungrouped. Each entry carries
+	/// its own `up` / `health` so the tree renders a status dot per workload.
+	// spec: FLT
+	pub group_applications: Vec<ServerInfo>,
+	/// Every machine in the group, for the same tree: the boxes the
+	/// applications above are arranged under. Empty when the application is
+	/// ungrouped.
+	// spec: FLT
+	pub group_machines: Vec<super::server_groups::GroupMachine>,
 	/// The server's own effective `billing.*` labels
 	/// (product/deployment/stage) — the ones canopy hands the server's device,
 	/// carrying its own product and rank rather than its group's. Empty when
@@ -598,7 +604,8 @@ pub async fn get_info(
 ///
 /// Returns the server's record, its bound device (if any), its most recent
 /// status report, current reachability/health, its group (if any) together
-/// with sibling applications in the same group, and the group's billing labels.
+/// with the group's whole membership for the tree the page ends with, and the
+/// group's billing labels.
 /// Returns 404 if no server exists with that id.
 #[utoipa::path(
 	post,
@@ -751,21 +758,9 @@ pub async fn get_detail(
 		None => None,
 	};
 
-	let siblings = if let Some(g) = group.as_ref() {
-		let raw_siblings = server.siblings(&mut conn).await?;
-		let mut infos: Vec<ServerInfo> = raw_siblings
-			.into_iter()
-			.map(|s| {
-				let mut info = server_to_info(s);
-				info.group_name = Some(g.name.clone());
-				info
-			})
-			.collect();
-		decorate_with_status(&mut conn, &mut infos).await?;
-		fill_display_hosts(&mut conn, &mut infos).await?;
-		infos
-	} else {
-		Vec::new()
+	let (group_applications, group_machines) = match group.as_ref() {
+		Some(g) => super::server_groups::tree_members(&mut conn, g).await?,
+		None => (Vec::new(), Vec::new()),
 	};
 
 	// This server's own attribution, not its group's: for a server whose
@@ -821,7 +816,8 @@ pub async fn get_detail(
 		maintenance_settling,
 		checks,
 		group,
-		siblings,
+		group_applications,
+		group_machines,
 		billing_labels,
 		munin,
 	}))
