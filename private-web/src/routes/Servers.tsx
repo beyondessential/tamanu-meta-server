@@ -7,19 +7,19 @@ export default function Servers() {
 	const navigate = useNavigate();
 	const params = useParams<{ id?: string }>();
 
-	const value = location.pathname.startsWith("/servers/ungrouped")
-		? "ungrouped"
-		: location.pathname.startsWith("/servers/archived")
-			? "archived"
-			: location.pathname.startsWith("/servers/figures")
-				? "figures"
-				: "groups";
+	// No ungrouped tab: a machine is created in a group and an application takes
+	// its machine's, so there is nothing left for that listing to list.
+	// spec: FLT
+	const value = location.pathname.startsWith("/fleet/archived")
+		? "archived"
+		: location.pathname.startsWith("/fleet/figures")
+			? "figures"
+			: "groups";
 
 	const tabTarget: Record<string, string> = {
-		groups: "/servers",
-		ungrouped: "/servers/ungrouped",
-		archived: "/servers/archived",
-		figures: "/servers/figures",
+		groups: "/fleet",
+		archived: "/fleet/archived",
+		figures: "/fleet/figures",
 	};
 
 	return (
@@ -30,7 +30,6 @@ export default function Servers() {
 				sx={{ mb: 2 }}
 			>
 				<Tab label="Groups" value="groups" />
-				<Tab label="Ungrouped" value="ungrouped" />
 				<Tab label="Archived" value="archived" />
 				<Tab label="Figures" value="figures" />
 			</Tabs>
@@ -42,7 +41,7 @@ export default function Servers() {
 
 function ServerNameBreadcrumb({ serverId }: { serverId: string }) {
 	const result = useApi(
-		"servers",
+		"fleet/applications",
 		"get_name",
 		{ server_id: serverId },
 		[serverId],

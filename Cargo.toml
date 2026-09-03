@@ -50,7 +50,7 @@ lloggs = "1.4.0"
 miette = "7.6.0"
 mobc = "0.9.0"
 node-semver = "2.2.0"
-problem_details = "0.9.0"
+problem_details = "0.10.0"
 pulldown-cmark = { version = "0.13.4", features = ["html"] }
 reqwest = { version = "0.13.3", default-features = false, features = ["json", "rustls", "stream"] }
 rss = "2.0.13"

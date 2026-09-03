@@ -721,15 +721,16 @@ mod tests {
 	async fn deliver_returns_error_on_non_2xx() {
 		let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
 		let url = format!("http://{}/hook", listener.local_addr().unwrap());
-		let server = std::thread::spawn(move || {
-			let (mut stream, _) = listener.accept().unwrap();
-			use std::io::{Read, Write};
-			let mut buf = [0u8; 4096];
-			let _ = stream.read(&mut buf);
-			stream
-				.write_all(b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 5\r\n\r\nnope!")
+		let server =
+			std::thread::spawn(move || {
+				let (mut stream, _) = listener.accept().unwrap();
+				use std::io::{Read, Write};
+				let mut buf = [0u8; 4096];
+				let _ = stream.read(&mut buf);
+				stream
+				.write_all(b"HTTP/1.1 500 Internal Application Error\r\nContent-Length: 5\r\n\r\nnope!")
 				.unwrap();
-		});
+			});
 
 		let cfg = Config {
 			open: Some(url),

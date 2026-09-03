@@ -1,15 +1,14 @@
 import { Box, Chip, Link as MuiLink, Stack, Tooltip, Typography } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
-import type {
-	HealthState,
-	Product,
-	ServerKind,
-	ServerRank,
-	ShortStatus,
+import {
+	applicationName,
+	type ApplicationType,
+	type HealthState,
+	type ServerRank,
+	type ShortStatus,
 } from "../types";
-import ServerKindChip from "./ServerKindChip";
-import ServerProductChip from "./ServerProductChip";
-import ServerNameWithGroup from "./ServerNameWithGroup";
+import ApplicationTypeChip from "./ApplicationTypeChip";
+import TargetName from "./TargetName";
 import ServerRankChip from "./ServerRankChip";
 import StatusDot from "./StatusDot";
 
@@ -18,8 +17,7 @@ export interface ServerInfo {
 	name: string | null;
 	host?: string | null;
 	display_host: string;
-	product: Product;
-	kind: ServerKind;
+	type: ApplicationType;
 	rank: ServerRank | null;
 	group_name?: string | null;
 	is_monitored?: boolean;
@@ -27,9 +25,29 @@ export interface ServerInfo {
 	health?: HealthState | null;
 }
 
-export default function ServerShorty({ server }: { server: ServerInfo }) {
-	const name = server.name || "Unnamed server";
+export default function ServerShorty({
+	server,
+	current = false,
+	withGroup = true,
+}: {
+	server: ServerInfo;
+	/// Whether this row is the page the operator is already on. It is marked in
+	/// place rather than omitted, so a tree reads as a map rather than as a list
+	/// of everything else, and its name doesn't link back to where they are.
+	/// spec: FLT
+	current?: boolean;
+	/// Whether to prefix the name with its group. Off inside a listing that is
+	/// already one group's.
+	withGroup?: boolean;
+}) {
+	const name = applicationName(server);
 	const unmonitored = server.is_monitored === false;
+	// The group is dropped where the caller is already inside one: a row in a
+	// group's own tree naming that group again says nothing.
+	const trail = [
+		...(withGroup && server.group_name ? [{ label: server.group_name }] : []),
+		{ label: name },
+	];
 	return (
 		<Stack
 			direction="row"
@@ -40,6 +58,7 @@ export default function ServerShorty({ server }: { server: ServerInfo }) {
 				borderColor: "divider",
 				borderRadius: 1,
 				alignItems: "center",
+				bgcolor: current ? "action.hover" : undefined,
 			}}
 		>
 			{server.up && (
@@ -49,21 +68,27 @@ export default function ServerShorty({ server }: { server: ServerInfo }) {
 					monitored={!unmonitored}
 				/>
 			)}
-			<MuiLink
-				component={RouterLink}
-				to={`/servers/${server.id}`}
-				underline="hover"
-				color="text.primary"
-				sx={{ fontWeight: 500 }}
-			>
-				<ServerNameWithGroup
-					groupName={server.group_name}
-					serverName={name}
-				/>
-			</MuiLink>
+			{current ? (
+				<Typography
+					component="span"
+					color="text.secondary"
+					sx={{ fontWeight: 500 }}
+				>
+					<TargetName parts={trail} />
+				</Typography>
+			) : (
+				<MuiLink
+					component={RouterLink}
+					to={`/fleet/applications/${server.id}`}
+					underline="hover"
+					color="text.primary"
+					sx={{ fontWeight: 500 }}
+				>
+					<TargetName parts={trail} />
+				</MuiLink>
+			)}
 			{server.rank && <ServerRankChip rank={server.rank} />}
-			<ServerProductChip product={server.product} />
-			<ServerKindChip kind={server.kind} />
+			<ApplicationTypeChip type={server.type} />
 			{unmonitored && (
 				<Tooltip title="Status alerts are off for this server — canopy isn't watching it.">
 					<Chip size="small" variant="outlined" label="unmonitored" />

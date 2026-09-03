@@ -17,11 +17,15 @@ test.describe("check detail page", () => {
 	test("renders an empty state when no server flags the check", async ({
 		page,
 	}) => {
-		await page.goto("/healthchecks/alertd/postgres");
+		await page.goto("/healthchecks/alertd/application.tamanu-central/postgres");
 		await expect(
 			page.getByText("Nothing currently flags"),
 		).toBeVisible();
-		await expect(page.getByRole("heading", { name: "postgres" })).toBeVisible();
+		// An application's check reads qualified by the type that reports it:
+		// another type's postgres is a different check with its own page.
+		await expect(
+			page.getByRole("heading", { name: "tamanu-central.postgres", exact: true }),
+		).toBeVisible();
 	});
 
 	test("lists servers flagging the check under their group heading, with server and group links", async ({
@@ -70,7 +74,7 @@ test.describe("check detail page", () => {
 			health: [{ check: "disk_space", result: "failed", free_pct: 3 }],
 		});
 
-		await page.goto("/healthchecks/alertd/postgres");
+		await page.goto("/healthchecks/alertd/application.tamanu-central/postgres");
 
 		const failingLink = page.getByRole("link", { name: "Korolevu Facility" });
 		const warningLink = page.getByRole("link", { name: "Sigatoka Facility" });
@@ -83,13 +87,13 @@ test.describe("check detail page", () => {
 		// group page; server rows link to their server pages.
 		await expect(failingLink).toHaveAttribute(
 			"href",
-			`/servers/${failing.id}`,
+			`/fleet/applications/${failing.id}`,
 		);
-		await expect(page.locator(`a[href="/groups/${group.id}"]`)).toHaveCount(
+		await expect(page.locator(`a[href="/fleet/groups/${group.id}"]`)).toHaveCount(
 			1,
 		);
 		await expect(
-			page.locator(`a[href="/groups/${group.id}"]`),
+			page.locator(`a[href="/fleet/groups/${group.id}"]`),
 		).toHaveText("Coral Coast");
 
 		// Standard list ordering within the group: kind then name
@@ -99,7 +103,7 @@ test.describe("check detail page", () => {
 		expect(failingY).toBeLessThan(warningY);
 
 		await failingLink.click();
-		await expect(page).toHaveURL(new RegExp(`/servers/${failing.id}$`));
+		await expect(page).toHaveURL(new RegExp(`/fleet/applications/${failing.id}$`));
 	});
 
 	test("the healthy-servers toggle reveals servers reporting the check passed", async ({
@@ -126,7 +130,7 @@ test.describe("check detail page", () => {
 			health: [{ check: "postgres", result: "passed", latency_ms: 12 }],
 		});
 
-		await page.goto("/healthchecks/alertd/postgres");
+		await page.goto("/healthchecks/alertd/application.tamanu-central/postgres");
 		await expect(
 			page.getByRole("link", { name: "Mendi Facility" }),
 		).toBeVisible();
@@ -179,7 +183,7 @@ test.describe("check detail page", () => {
 			health: [{ check: "disk_space", result: "warning" }],
 		});
 
-		await page.goto("/healthchecks/alertd/disk_space");
+		await page.goto("/healthchecks/alertd/application.tamanu-central/disk_space");
 		await expect(
 			page.getByRole("link", { name: "Labasa Facility" }),
 		).toBeVisible();
@@ -209,7 +213,7 @@ test.describe("check detail page", () => {
 		const group = await seedServerGroup(sql, { name: "Backup Coast" });
 		await seedServer(sql, {
 			name: "Anchor Central",
-			kind: "central",
+			type: "tamanu-central",
 			rank: "production",
 			groupId: group.id,
 		});
@@ -227,13 +231,13 @@ test.describe("check detail page", () => {
 			message: "self-monitoring",
 		});
 
-		await page.goto("/healthchecks/canopy/backup-maintenance");
+		await page.goto("/healthchecks/canopy/-/backup-maintenance");
 
 		// The group's state sits under the production rank heading, in the
 		// group's section, labelled as the whole group.
 		await expect(page.getByText("production", { exact: true })).toBeVisible();
 		await expect(
-			page.locator(`a[href="/groups/${group.id}"]`),
+			page.locator(`a[href="/fleet/groups/${group.id}"]`),
 		).toHaveText("Backup Coast");
 		await expect(page.getByText("whole group", { exact: true })).toBeVisible();
 
@@ -272,16 +276,16 @@ test.describe("check detail page", () => {
 		// (inactive, no streak), which renders the placeholder.
 		await sql.query(
 			`UPDATE issues SET degraded_since = NOW() - INTERVAL '3 hours'
-			 WHERE server_id = $1 AND ref = 'health/postgres'`,
+			 WHERE application_id = $1 AND ref = 'health/postgres'`,
 			[failing.id],
 		);
 		await sql.query(
 			`UPDATE issues SET active = false, degraded_since = NULL
-			 WHERE server_id = $1 AND ref = 'health/postgres'`,
+			 WHERE application_id = $1 AND ref = 'health/postgres'`,
 			[fresh.id],
 		);
 
-		await page.goto("/healthchecks/alertd/postgres");
+		await page.goto("/healthchecks/alertd/application.tamanu-central/postgres");
 
 		// The state-backed row shows a relative failing-since; the row
 		// without an active streak shows the em-dash placeholder.
@@ -304,7 +308,7 @@ test.describe("check detail page", () => {
 			escalates: true,
 		});
 
-		await page.goto("/healthchecks/alertd/disk_space");
+		await page.goto("/healthchecks/alertd/application.tamanu-central/disk_space");
 		// The heading chip renders the configured ceiling, plus the
 		// escalates marker.
 		await expect(
@@ -328,7 +332,7 @@ test.describe("check detail page", () => {
 				"## Description\n\nWatches free disk space.\n\n## Solve\n\nClear old backups.",
 		});
 
-		await page.goto("/healthchecks/alertd/disk_space");
+		await page.goto("/healthchecks/alertd/application.tamanu-central/disk_space");
 		await page.getByText("About this check").click();
 		await expect(page.getByText("Watches free disk space.")).toBeVisible();
 		await expect(page.getByText("Clear old backups.")).toBeVisible();
@@ -340,7 +344,7 @@ test.describe("check detail page", () => {
 	}) => {
 		await seedCheckPolicy(sql, { checkName: "disk_space" });
 
-		await page.goto("/settings/healthchecks/alertd/disk_space");
+		await page.goto("/settings/healthchecks/alertd/application.tamanu-central/disk_space");
 		await expect(
 			page.getByText("Nobody has documented this check yet", { exact: false }),
 		).toBeVisible();
@@ -380,7 +384,7 @@ test.describe("check detail page", () => {
 			health: [{ check: checkName, result: "failed" }],
 		});
 
-		await page.goto(`/healthchecks/alertd/${encodeURIComponent(checkName)}`);
+		await page.goto(`/healthchecks/alertd/application.tamanu-central/${encodeURIComponent(checkName)}`);
 		await expect(
 			page.getByRole("heading", { name: checkName }),
 		).toBeVisible();
@@ -402,11 +406,13 @@ test.describe("check detail page", () => {
 			],
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 		const checkLink = page.getByRole("link", { name: "postgres" });
 		await expect(checkLink).toBeVisible();
 		await checkLink.click();
-		await expect(page).toHaveURL(/\/healthchecks\/alertd\/postgres$/);
+		await expect(page).toHaveURL(
+			/\/healthchecks\/alertd\/application\.tamanu-central\/postgres$/,
+		);
 	});
 });
 
@@ -444,7 +450,7 @@ test.describe("stability record", () => {
 			dutyBuckets: { 0: [10, 8], 1: [10, 1] },
 		});
 
-		await page.goto("/healthchecks/alertd/postgres");
+		await page.goto("/healthchecks/alertd/application.tamanu-central/postgres");
 		const row = page.getByRole("row", { name: /wobbly facility/i });
 		await expect(row.getByText("4 flips/24h")).toBeVisible();
 
@@ -479,7 +485,7 @@ test.describe("stability record", () => {
 			health: [{ check: "postgres", result: "failed" }],
 		});
 
-		await page.goto("/healthchecks/alertd/postgres");
+		await page.goto("/healthchecks/alertd/application.tamanu-central/postgres");
 		const row = page.getByRole("row", { name: /quiet facility/i });
 		await expect(row.getByText("no record")).toBeVisible();
 	});
@@ -527,7 +533,7 @@ test.describe("fleet stability", () => {
 			dutyBuckets: { 5: [10, 0] },
 		});
 
-		await page.goto("/healthchecks/alertd/postgres");
+		await page.goto("/healthchecks/alertd/application.tamanu-central/postgres");
 		await expect(
 			page.getByRole("heading", { name: "Fleet stability" }),
 		).toBeVisible();

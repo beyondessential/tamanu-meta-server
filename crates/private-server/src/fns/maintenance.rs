@@ -26,19 +26,19 @@ pub fn routes() -> OpenApiRouter<AppState> {
 /// The target a window covers: exactly one of the two ids is set.
 #[derive(Deserialize, ToSchema)]
 pub struct TargetArgs {
-	/// The server, for a window over one server.
-	pub server_id: Option<Uuid>,
+	/// The machine, for a window over one box. Covers every application on it.
+	pub machine_id: Option<Uuid>,
 	/// The group, for a window over a whole group or one of its environments.
 	pub server_group_id: Option<Uuid>,
 }
 
 impl TargetArgs {
 	fn scope(&self) -> Result<Scope> {
-		match (self.server_id, self.server_group_id) {
-			(Some(id), None) => Ok(Scope::Server(id)),
+		match (self.machine_id, self.server_group_id) {
+			(Some(id), None) => Ok(Scope::Machine(id)),
 			(None, Some(id)) => Ok(Scope::Group(id)),
 			_ => Err(AppError::BadRequest(
-				"a maintenance window covers one server or one group".into(),
+				"a maintenance window covers one machine or one group".into(),
 			)),
 		}
 	}
@@ -47,13 +47,13 @@ impl TargetArgs {
 /// Declare a window over a target, or amend the one it already has.
 #[derive(Deserialize, ToSchema)]
 pub struct DeclareArgs {
-	/// The server, for a window over one server.
-	pub server_id: Option<Uuid>,
+	/// The machine, for a window over one box. Covers every application on it.
+	pub machine_id: Option<Uuid>,
 	/// The group, for a window over a whole group or one of its environments.
 	pub server_group_id: Option<Uuid>,
 	/// With the group, the rank of the environment the window covers: the
-	/// group's servers at that rank, and nothing else of the group. Absent for
-	/// a window over the whole group.
+	/// machines serving the group's applications at that rank, and nothing else
+	/// of the group. Absent for a window over the whole group.
 	pub rank: Option<ServerRank>,
 	/// When the work is expected to finish. The window ends itself then.
 	#[schema(value_type = String, format = DateTime)]
@@ -135,7 +135,7 @@ pub async fn for_target(
 	Ok(Json(rows))
 }
 
-/// Declare that a server, a group, or one of a group's environments is being
+/// Declare that a machine, a group, or one of a group's environments is being
 /// worked on.
 ///
 /// Every check on the target grades to skipped while the window holds and
@@ -162,7 +162,7 @@ pub async fn declare(
 ) -> Result<Json<MaintenanceWindow>> {
 	let mut conn = state.db.get().await?;
 	let scope = TargetArgs {
-		server_id: args.server_id,
+		machine_id: args.machine_id,
 		server_group_id: args.server_group_id,
 	}
 	.scope()?;

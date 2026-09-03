@@ -25,7 +25,7 @@ export default function GroupShorty({
 		>
 			<MuiLink
 				component={RouterLink}
-				to={`/groups/${group.id}`}
+				to={`/fleet/groups/${group.id}`}
 				underline="hover"
 				color="text.primary"
 				sx={{ fontWeight: 500 }}

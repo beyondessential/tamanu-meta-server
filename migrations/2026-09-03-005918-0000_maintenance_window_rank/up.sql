@@ -1,7 +1,7 @@
--- A window can cover one of a group's environments: the group's servers at one
--- rank. Declaring from an environment's upgrade plan suspends that environment
--- and leaves the group's other environments, and the group's own checks,
--- watched.
+-- A window can cover one of a group's environments: the machines serving the
+-- group's applications at one rank. Declaring from an environment's upgrade
+-- plan suspends that environment and leaves the group's other environments,
+-- and the group's own checks, watched.
 ALTER TABLE maintenance_windows
 	ADD COLUMN rank TEXT,
 	ADD CONSTRAINT maintenance_windows_rank_needs_group

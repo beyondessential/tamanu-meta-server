@@ -1,8 +1,12 @@
 //! Maintenance windows: an operator's declaration that a target is being
 //! worked on. While one suspends a target every check on it grades to
 //! skipped, its issues leave their incident, and suspension outlasts the
-//! window by the settle period so a server that is back but has not
+//! window by the settle period so a machine that is back but has not
 //! reported yet is not called unreachable.
+//!
+//! A window is over a machine, and the checks it suspends are those of the
+//! applications running on it: these tests declare over the machine and assert
+//! against an application's issues, which is the coverage that matters.
 
 use commons_types::{server::rank::ServerRank, status::CheckResult};
 use database::{
@@ -35,37 +39,58 @@ async fn insert_group(conn: &mut diesel_async::AsyncPgConnection) -> Uuid {
 	row.id
 }
 
-async fn insert_server(conn: &mut diesel_async::AsyncPgConnection, group_id: Option<Uuid>) -> Uuid {
-	let row: RowId = sql_query(
-		"INSERT INTO servers (host, group_id) VALUES ('http://maint.invalid/', $1) RETURNING id",
+/// A machine and the one application on it, as `(machine, application)`.
+async fn insert_server(
+	conn: &mut diesel_async::AsyncPgConnection,
+	group_id: Option<Uuid>,
+) -> (Uuid, Uuid) {
+	let machine: RowId = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
+		.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group_id)
+		.get_result(conn)
+		.await
+		.expect("insert machine");
+	let application: RowId = sql_query(
+		"INSERT INTO applications (type, host, group_id, machine_id) \
+		 VALUES ('tamanu-central', 'http://maint.invalid/', $1, $2) RETURNING id",
 	)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group_id)
+	.bind::<sql_types::Uuid, _>(machine.id)
 	.get_result(conn)
 	.await
-	.expect("insert server");
-	row.id
+	.expect("insert application");
+	(machine.id, application.id)
 }
 
+/// A machine and the one ranked application on it, as `(machine,
+/// application)`. The machine takes the application's rank, which is the rank
+/// an environment's window has to match.
 async fn insert_ranked_server(
 	conn: &mut diesel_async::AsyncPgConnection,
 	group_id: Uuid,
 	rank: &str,
-) -> Uuid {
-	let row: RowId = sql_query(
-		"INSERT INTO servers (host, group_id, rank) VALUES ('http://maint.invalid/', $1, $2) RETURNING id",
+) -> (Uuid, Uuid) {
+	let machine: RowId = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
+		.bind::<sql_types::Uuid, _>(group_id)
+		.get_result(conn)
+		.await
+		.expect("insert machine");
+	let application: RowId = sql_query(
+		"INSERT INTO applications (type, host, group_id, rank, machine_id) VALUES ('tamanu-central', $1, $2, $3, $4) RETURNING id",
 	)
+	.bind::<sql_types::Text, _>(format!("http://maint-{rank}.invalid/"))
 	.bind::<sql_types::Uuid, _>(group_id)
 	.bind::<sql_types::Text, _>(rank)
+	.bind::<sql_types::Uuid, _>(machine.id)
 	.get_result(conn)
 	.await
-	.expect("insert server");
-	row.id
+	.expect("insert application");
+	(machine.id, application.id)
 }
 
 fn filing(server_id: Uuid, check: &str, observed: CheckResult) -> CheckFiling<'_> {
 	CheckFiling {
 		source: CANOPY_SOURCE,
-		scope: Scope::Server(server_id),
+		scope: Scope::Application(server_id),
 		device_id: None,
 		check,
 		observed,
@@ -138,10 +163,10 @@ fn in_an_hour() -> Timestamp {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_window_grades_every_check_on_its_target_to_skipped() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let server_id = insert_server(&mut conn, None).await;
+		let (machine_id, server_id) = insert_server(&mut conn, None).await;
 		MaintenanceWindow::declare(
 			&mut conn,
-			Scope::Server(server_id),
+			Scope::Machine(machine_id),
 			None,
 			in_an_hour(),
 			Some("upgrading"),
@@ -177,7 +202,7 @@ async fn a_window_grades_every_check_on_its_target_to_skipped() {
 async fn declaring_takes_the_target_out_of_its_open_incident() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn).await;
-		let server_id = insert_server(&mut conn, Some(group_id)).await;
+		let (machine_id, server_id) = insert_server(&mut conn, Some(group_id)).await;
 
 		file_check(
 			&mut conn,
@@ -193,7 +218,7 @@ async fn declaring_takes_the_target_out_of_its_open_incident() {
 
 		MaintenanceWindow::declare(
 			&mut conn,
-			Scope::Server(server_id),
+			Scope::Machine(machine_id),
 			None,
 			in_an_hour(),
 			None,
@@ -220,7 +245,7 @@ async fn declaring_takes_the_target_out_of_its_open_incident() {
 async fn a_group_window_covers_its_servers_and_the_group_itself() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn).await;
-		let server_id = insert_server(&mut conn, Some(group_id)).await;
+		let (_machine_id, server_id) = insert_server(&mut conn, Some(group_id)).await;
 		MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Group(group_id),
@@ -263,10 +288,10 @@ async fn a_group_window_covers_its_servers_and_the_group_itself() {
 #[tokio::test(flavor = "multi_thread")]
 async fn the_window_ends_at_its_expected_end_and_suspension_outlasts_it() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let server_id = insert_server(&mut conn, None).await;
+		let (machine_id, _server_id) = insert_server(&mut conn, None).await;
 		let window = MaintenanceWindow::declare(
 			&mut conn,
-			Scope::Server(server_id),
+			Scope::Machine(machine_id),
 			None,
 			in_an_hour(),
 			None,
@@ -290,7 +315,7 @@ async fn the_window_ends_at_its_expected_end_and_suspension_outlasts_it() {
 			"nobody lifted it; its expected end passed"
 		);
 		assert!(
-			MaintenanceWindow::suspends(&mut conn, Some(server_id), None)
+			MaintenanceWindow::suspends(&mut conn, Some(machine_id), None)
 				.await
 				.expect("suspends"),
 			"suspension runs on through the settle period"
@@ -304,7 +329,7 @@ async fn the_window_ends_at_its_expected_end_and_suspension_outlasts_it() {
 			.await
 			.expect("backdate end");
 		assert!(
-			!MaintenanceWindow::suspends(&mut conn, Some(server_id), None)
+			!MaintenanceWindow::suspends(&mut conn, Some(machine_id), None)
 				.await
 				.expect("suspends"),
 			"the settle period has elapsed, so the target is watched again"
@@ -322,10 +347,10 @@ async fn the_window_ends_at_its_expected_end_and_suspension_outlasts_it() {
 async fn a_failure_after_the_settle_period_opens_an_incident_again() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn).await;
-		let server_id = insert_server(&mut conn, Some(group_id)).await;
+		let (machine_id, server_id) = insert_server(&mut conn, Some(group_id)).await;
 		let window = MaintenanceWindow::declare(
 			&mut conn,
-			Scope::Server(server_id),
+			Scope::Machine(machine_id),
 			None,
 			in_an_hour(),
 			None,
@@ -370,10 +395,10 @@ async fn a_failure_after_the_settle_period_opens_an_incident_again() {
 #[tokio::test(flavor = "multi_thread")]
 async fn declaring_over_an_open_window_amends_it() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let server_id = insert_server(&mut conn, None).await;
+		let (machine_id, _server_id) = insert_server(&mut conn, None).await;
 		let first = MaintenanceWindow::declare(
 			&mut conn,
-			Scope::Server(server_id),
+			Scope::Machine(machine_id),
 			None,
 			in_an_hour(),
 			Some("upgrading"),
@@ -385,7 +410,7 @@ async fn declaring_over_an_open_window_amends_it() {
 		let later = Timestamp::now() + SignedDuration::from_hours(3);
 		let second = MaintenanceWindow::declare(
 			&mut conn,
-			Scope::Server(server_id),
+			Scope::Machine(machine_id),
 			None,
 			later,
 			Some("still upgrading"),
@@ -404,7 +429,7 @@ async fn declaring_over_an_open_window_amends_it() {
 		assert!(second.amended_at.is_some());
 		assert!(second.expected_end > first.expected_end);
 
-		let windows = MaintenanceWindow::list_for_scope(&mut conn, Scope::Server(server_id), 10)
+		let windows = MaintenanceWindow::list_for_scope(&mut conn, Scope::Machine(machine_id), 10)
 			.await
 			.expect("list");
 		assert_eq!(windows.len(), 1, "and not a second window");
@@ -415,10 +440,10 @@ async fn declaring_over_an_open_window_amends_it() {
 #[tokio::test(flavor = "multi_thread")]
 async fn lifting_records_the_operator_and_is_idempotent() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let server_id = insert_server(&mut conn, None).await;
+		let (machine_id, _server_id) = insert_server(&mut conn, None).await;
 		let window = MaintenanceWindow::declare(
 			&mut conn,
-			Scope::Server(server_id),
+			Scope::Machine(machine_id),
 			None,
 			in_an_hour(),
 			None,
@@ -468,10 +493,10 @@ async fn outbox_vars(conn: &mut diesel_async::AsyncPgConnection, kind: &str) -> 
 #[tokio::test(flavor = "multi_thread")]
 async fn declaring_and_ending_notify_operators() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let server_id = insert_server(&mut conn, None).await;
+		let (machine_id, _server_id) = insert_server(&mut conn, None).await;
 		let window = MaintenanceWindow::declare(
 			&mut conn,
-			Scope::Server(server_id),
+			Scope::Machine(machine_id),
 			None,
 			in_an_hour(),
 			Some("swapping the disk"),
@@ -498,10 +523,10 @@ async fn declaring_and_ending_notify_operators() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_window_expiring_notifies_as_the_expected_end_passing() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let server_id = insert_server(&mut conn, None).await;
+		let (machine_id, _server_id) = insert_server(&mut conn, None).await;
 		let window = MaintenanceWindow::declare(
 			&mut conn,
-			Scope::Server(server_id),
+			Scope::Machine(machine_id),
 			None,
 			in_an_hour(),
 			None,
@@ -527,7 +552,7 @@ async fn a_window_expiring_notifies_as_the_expected_end_passing() {
 async fn an_incident_closed_by_a_declaration_says_so() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn).await;
-		let server_id = insert_server(&mut conn, Some(group_id)).await;
+		let (machine_id, server_id) = insert_server(&mut conn, Some(group_id)).await;
 
 		file_check(
 			&mut conn,
@@ -546,7 +571,7 @@ async fn an_incident_closed_by_a_declaration_says_so() {
 
 		MaintenanceWindow::declare(
 			&mut conn,
-			Scope::Server(server_id),
+			Scope::Machine(machine_id),
 			None,
 			in_an_hour(),
 			None,
@@ -591,7 +616,7 @@ async fn a_server_joining_a_group_under_a_window_is_covered() {
 		.expect("declare");
 
 		// Joins while the window holds.
-		let server_id = insert_server(&mut conn, Some(group_id)).await;
+		let (_machine_id, server_id) = insert_server(&mut conn, Some(group_id)).await;
 		file_check(
 			&mut conn,
 			filing(server_id, "reachability", CheckResult::Failed),
@@ -615,7 +640,7 @@ async fn a_server_joining_a_group_under_a_window_is_covered() {
 async fn canopy_wide_checks_are_never_suspended() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn).await;
-		let server_id = insert_server(&mut conn, Some(group_id)).await;
+		let (machine_id, server_id) = insert_server(&mut conn, Some(group_id)).await;
 		MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Group(group_id),
@@ -628,7 +653,7 @@ async fn canopy_wide_checks_are_never_suspended() {
 		.expect("declare group window");
 		MaintenanceWindow::declare(
 			&mut conn,
-			Scope::Server(server_id),
+			Scope::Machine(machine_id),
 			None,
 			in_an_hour(),
 			None,
@@ -648,7 +673,8 @@ async fn canopy_wide_checks_are_never_suspended() {
 		}
 		let row: Effective = sql_query(
 			"SELECT effective_result FROM issues \
-			 WHERE check_name = 'self-heartbeat' AND server_id IS NULL AND server_group_id IS NULL",
+			 WHERE check_name = 'self-heartbeat' AND application_id IS NULL \
+			   AND machine_id IS NULL AND server_group_id IS NULL",
 		)
 		.get_result(&mut conn)
 		.await
@@ -656,20 +682,88 @@ async fn canopy_wide_checks_are_never_suspended() {
 		assert_eq!(
 			row.effective_result.as_deref(),
 			Some("failed"),
-			"a window over a server or a group never suspends canopy's own checks"
+			"a window over a machine or a group never suspends canopy's own checks"
 		);
 	})
 	.await
 }
 
+/// The point of declaring over the machine: one window, every workload on the
+/// box. Naming an application would have left its neighbours alerting through
+/// work that was always going to stop them too.
+// spec: MNT#declaring
+#[tokio::test(flavor = "multi_thread")]
+async fn a_machine_window_covers_every_application_on_the_box() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let (machine_id, first) = insert_server(&mut conn, Some(group_id)).await;
+
+		// A second workload on the same box.
+		let second: RowId = sql_query(
+			"INSERT INTO applications (type, host, group_id, machine_id) \
+			 VALUES ('tamanu-central', 'http://maint2.invalid/', $1, $2) RETURNING id",
+		)
+		.bind::<sql_types::Nullable<sql_types::Uuid>, _>(Some(group_id))
+		.bind::<sql_types::Uuid, _>(machine_id)
+		.get_result(&mut conn)
+		.await
+		.expect("second application");
+
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Machine(machine_id),
+			None,
+			in_an_hour(),
+			Some("patching the host"),
+			None,
+		)
+		.await
+		.expect("declare machine window");
+
+		for (label, application) in [("first", first), ("second", second.id)] {
+			file_check(
+				&mut conn,
+				filing(application, "reachability", CheckResult::Failed),
+			)
+			.await
+			.expect("file");
+			let state = state_for(&mut conn, application, "reachability").await;
+			assert_eq!(
+				state.effective_result,
+				Some(CheckResult::Skipped),
+				"the {label} application on the box is covered by its machine's window"
+			);
+		}
+
+		// An application on another box is untouched by it.
+		let (_elsewhere, other) = insert_server(&mut conn, Some(group_id)).await;
+		file_check(
+			&mut conn,
+			filing(other, "reachability", CheckResult::Failed),
+		)
+		.await
+		.expect("file");
+		assert_eq!(
+			state_for(&mut conn, other, "reachability")
+				.await
+				.effective_result,
+			Some(CheckResult::Failed),
+			"a window covers the box it names and no other"
+		);
+	})
+	.await;
+}
+
 /// An upgrade rehearsed on a site's clone leaves its production, and the
 /// group's own checks, watched.
+// spec: MNT#declaring
 #[tokio::test(flavor = "multi_thread")]
 async fn an_environment_window_covers_only_its_rank() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn).await;
-		let production = insert_ranked_server(&mut conn, group_id, "production").await;
-		let clone = insert_ranked_server(&mut conn, group_id, "clone").await;
+		let (production_box, production) =
+			insert_ranked_server(&mut conn, group_id, "production").await;
+		let (clone_box, clone) = insert_ranked_server(&mut conn, group_id, "clone").await;
 		MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Group(group_id),
@@ -719,10 +813,10 @@ async fn an_environment_window_covers_only_its_rank() {
 			"the group's own checks are watched through a clone's window"
 		);
 
-		let (servers, groups) = MaintenanceWindow::suspended_targets(&mut conn)
+		let (machines, groups) = MaintenanceWindow::suspended_targets(&mut conn)
 			.await
 			.expect("suspended");
-		assert!(servers.contains(&clone) && !servers.contains(&production));
+		assert!(machines.contains(&clone_box) && !machines.contains(&production_box));
 		assert!(
 			!groups.contains(&group_id),
 			"an environment's window is not the group's"
@@ -750,13 +844,14 @@ async fn an_environment_window_covers_only_its_rank() {
 	.await
 }
 
-/// Ranks were spelled `live` and `prod` before the canonical set, and such a
-/// server is production: a production window must still cover it.
+/// Ranks were spelled `live` and `prod` before the canonical set, and such an
+/// application is production: a production window must still cover it.
+// spec: MNT#declaring
 #[tokio::test(flavor = "multi_thread")]
 async fn a_legacy_rank_spelling_falls_under_its_environment_window() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn).await;
-		let legacy = insert_ranked_server(&mut conn, group_id, "live").await;
+		let (_box, legacy) = insert_ranked_server(&mut conn, group_id, "live").await;
 		MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Group(group_id),
@@ -779,7 +874,7 @@ async fn a_legacy_rank_spelling_falls_under_its_environment_window() {
 				.await
 				.effective_result,
 			Some(CheckResult::Skipped),
-			"a server stored as live is under its group's production window"
+			"an application stored as live is under its group's production window"
 		);
 	})
 	.await

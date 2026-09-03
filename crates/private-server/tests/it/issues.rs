@@ -7,12 +7,12 @@ async fn list_issues_for_device_and_server() {
 		let device_id = Uuid::new_v4();
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'server');
+			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'machine');
 			 INSERT INTO device_keys (device_id, key_data, name, is_active) VALUES \
 				('{device_id}', '\\x6b6579'::bytea, 'k', true);
-			 INSERT INTO servers (id, host, kind, device_id) VALUES \
-				('{server_id}', 'https://example.com', 'central', '{device_id}');
-			 INSERT INTO issues (server_id, device_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, last_degraded_at) VALUES \
+			 WITH m AS (INSERT INTO machines (id, device_id) VALUES ('{server_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
+				('{server_id}', 'https://example.com', 'tamanu-central', '{server_id}');
+			 INSERT INTO issues (application_id, device_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, last_degraded_at) VALUES \
 				('{server_id}', '{device_id}', 'src', 'a', 'a', 'failed',  'failed',  'newest', true,  '2026-05-03T10:00:00Z', '2026-05-03T10:00:00Z', '2026-05-03T10:00:00Z'),
 				('{server_id}', '{device_id}', 'src', 'b', 'b', 'warning', 'warning', 'older',  true,  '2026-05-01T10:00:00Z', '2026-05-01T10:00:00Z', '2026-05-01T10:00:00Z'),
 				('{server_id}', '{device_id}', 'src', 'c', 'c', 'passed',  'passed',  'gone',   false, '2026-05-02T10:00:00Z', '2026-05-02T10:00:00Z', '2026-05-02T10:00:00Z');"
@@ -34,7 +34,7 @@ async fn list_issues_for_device_and_server() {
 		// Include resolved.
 		let resp = private
 			.post("/api/issues/list_for_server")
-			.json(&serde_json::json!({ "server_id": server_id, "active_only": false }))
+			.json(&serde_json::json!({ "application_id": server_id, "active_only": false }))
 			.await;
 		resp.assert_status_ok();
 		let items: Vec<serde_json::Value> = resp.json();
@@ -48,8 +48,8 @@ async fn manual_event_submit_creates_issue_without_device() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind) VALUES \
-				('{server_id}', 'https://example.com', 'central');"
+			"WITH m AS (INSERT INTO machines (id) VALUES ('{server_id}') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
+				('{server_id}', 'https://example.com', 'tamanu-central', '{server_id}');"
 		))
 		.await
 		.expect("seed");
@@ -57,7 +57,7 @@ async fn manual_event_submit_creates_issue_without_device() {
 		let resp = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "operator-note-1",
 				"message": "manually opened",
 			}))
@@ -81,20 +81,20 @@ async fn manual_event_submit_creates_issue_without_device() {
 #[tokio::test(flavor = "multi_thread")]
 async fn incident_groups_at_server_group() {
 	commons_tests::server::run(async |mut conn, _public, private| {
-		// One group containing two equal-level servers.
+		// One group containing two equal-level applications.
 		let device_id = Uuid::new_v4();
 		let group_id = Uuid::new_v4();
 		let server_a_id = Uuid::new_v4();
 		let server_b_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'cluster');
-			 INSERT INTO devices (id, role) VALUES ('{device_id}', 'server');
+			 INSERT INTO devices (id, role) VALUES ('{device_id}', 'machine');
 			 INSERT INTO device_keys (device_id, key_data, name, is_active) VALUES \
 				('{device_id}', '\\x6b6579'::bytea, 'k', true);
-			 INSERT INTO servers (id, host, kind, group_id) VALUES \
-				('{server_a_id}', 'https://a.example.com', 'central', '{group_id}');
-			 INSERT INTO servers (id, host, kind, device_id, group_id) VALUES \
-				('{server_b_id}', 'https://b.example.com', 'facility', '{device_id}', '{group_id}');"
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_a_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{server_a_id}', 'https://a.example.com', 'tamanu-central', '{group_id}', '{server_a_id}');
+			 WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ('{server_b_id}', '{group_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{server_b_id}', 'https://b.example.com', 'tamanu-facility', '{group_id}', '{server_b_id}');"
 		))
 		.await
 		.expect("seed");
@@ -103,7 +103,7 @@ async fn incident_groups_at_server_group() {
 		let resp = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_b_id,
+				"applicationId": server_b_id,
 				"ref": "x",
 				"result": "failed",
 				"message": "trouble in B",
@@ -156,8 +156,8 @@ async fn ungrouped_server_event_skips_incident() {
 		// incident is opened — incidents are group-keyed.
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind) VALUES \
-				('{server_id}', 'https://orphan.example.com', 'central');"
+			"WITH m AS (INSERT INTO machines (id) VALUES ('{server_id}') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
+				('{server_id}', 'https://orphan.example.com', 'tamanu-central', '{server_id}');"
 		))
 		.await
 		.expect("seed");
@@ -165,7 +165,7 @@ async fn ungrouped_server_event_skips_incident() {
 		let resp = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "x",
 				"result": "failed",
 				"message": "no group yet",
@@ -179,7 +179,10 @@ async fn ungrouped_server_event_skips_incident() {
 			.await;
 		resp.assert_status_ok();
 		let items: Vec<serde_json::Value> = resp.json();
-		assert!(items.is_empty(), "ungrouped servers can't have incidents");
+		assert!(
+			items.is_empty(),
+			"ungrouped applications can't have incidents"
+		);
 	})
 	.await;
 }
@@ -194,8 +197,8 @@ async fn assigning_group_opens_pending_incident() {
 		let server_id = Uuid::new_v4();
 		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind) VALUES \
-				('{server_id}', 'https://late.example.com', 'central');
+			"WITH m AS (INSERT INTO machines (id) VALUES ('{server_id}') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
+				('{server_id}', 'https://late.example.com', 'tamanu-central', '{server_id}');
 			 INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'late group');"
 		))
 		.await
@@ -205,7 +208,7 @@ async fn assigning_group_opens_pending_incident() {
 		let resp = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "stuck",
 				"result": "failed",
 				"message": "waiting to be grouped",
@@ -223,7 +226,7 @@ async fn assigning_group_opens_pending_incident() {
 
 		// Assign the server to a group: open issue should now have an incident.
 		let resp = private
-			.post("/api/servers/update")
+			.post("/api/fleet/applications/update")
 			.json(&serde_json::json!({
 				"server_id": server_id,
 				"data": { "group_id": group_id }
@@ -253,8 +256,8 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
-			 INSERT INTO servers (id, host, kind, group_id) VALUES \
-				('{server_id}', 'https://example.com', 'central', '{group_id}');"
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{server_id}', 'https://example.com', 'tamanu-central', '{group_id}', '{server_id}');"
 		))
 		.await
 		.expect("seed");
@@ -263,7 +266,7 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 		let r1 = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "x",
 				"result": "failed",
 				"message": "trouble",
@@ -282,7 +285,7 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 		let r2 = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "x",
 				"result": "failed",
 				"active": false,
@@ -316,7 +319,7 @@ async fn issue_reopen_keeps_identity_and_joins_new_incident() {
 		let r3 = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "x",
 				"result": "failed",
 				"escalates": true,
@@ -358,8 +361,8 @@ async fn low_severity_issue_joins_existing_open_incident() {
 		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
-			 INSERT INTO servers (id, host, kind, group_id) VALUES \
-				('{server_id}', 'https://example.com', 'central', '{group_id}');"
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{server_id}', 'https://example.com', 'tamanu-central', '{group_id}', '{server_id}');"
 		))
 		.await
 		.expect("seed");
@@ -368,7 +371,7 @@ async fn low_severity_issue_joins_existing_open_incident() {
 		private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "a",
 				"result": "failed",
 				"message": "primary trouble",
@@ -381,7 +384,7 @@ async fn low_severity_issue_joins_existing_open_incident() {
 		private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "b",
 				"result": "warning",
 				"message": "ride-along",
@@ -414,8 +417,8 @@ async fn low_severity_alone_does_not_open_incident() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind) VALUES \
-				('{server_id}', 'https://example.com', 'central');"
+			"WITH m AS (INSERT INTO machines (id) VALUES ('{server_id}') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
+				('{server_id}', 'https://example.com', 'tamanu-central', '{server_id}');"
 		))
 		.await
 		.expect("seed");
@@ -424,7 +427,7 @@ async fn low_severity_alone_does_not_open_incident() {
 		private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "b",
 				"result": "warning",
 				"message": "minor",
@@ -452,8 +455,8 @@ async fn severity_downgrade_keeps_issue_in_incident() {
 		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
-			 INSERT INTO servers (id, host, kind, group_id) VALUES \
-				('{server_id}', 'https://example.com', 'central', '{group_id}');"
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{server_id}', 'https://example.com', 'tamanu-central', '{group_id}', '{server_id}');"
 		))
 		.await
 		.expect("seed");
@@ -462,7 +465,7 @@ async fn severity_downgrade_keeps_issue_in_incident() {
 		private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "x",
 				"result": "failed",
 				"message": "trouble",
@@ -474,7 +477,7 @@ async fn severity_downgrade_keeps_issue_in_incident() {
 		private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "x",
 				"result": "warning",
 				"message": "less bad now",
@@ -504,8 +507,8 @@ async fn open_issue(
 	let group_id = Uuid::new_v4();
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g') ON CONFLICT DO NOTHING; \
-		 INSERT INTO servers (id, host, kind, group_id) VALUES \
-			('{server_id}', 'https://example.com', 'central', '{group_id}') ON CONFLICT DO NOTHING;"
+		 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+			('{server_id}', 'https://example.com', 'tamanu-central', '{group_id}', '{server_id}') ON CONFLICT DO NOTHING;"
 	))
 	.await
 	.expect("seed");
@@ -513,7 +516,7 @@ async fn open_issue(
 	let r = private
 		.post("/api/issues/submit_manual_event")
 		.json(&serde_json::json!({
-			"serverId": server_id,
+			"applicationId": server_id,
 			"ref": "x",
 			"result": "failed",
 			"message": "trouble",
@@ -606,8 +609,8 @@ async fn reopen_via_device_clears_resolved_fields() {
 		async |mut conn, cert, device_id, public, private| {
 			let server_id = Uuid::new_v4();
 			conn.batch_execute(&format!(
-				"INSERT INTO servers (id, host, kind, device_id) VALUES \
-					('{server_id}', 'https://example.com', 'central', '{device_id}');"
+				"WITH m AS (INSERT INTO machines (id, device_id) VALUES ('{server_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
+					('{server_id}', 'https://example.com', 'tamanu-central', '{server_id}');"
 			))
 			.await
 			.expect("seed");
@@ -706,7 +709,7 @@ async fn snooze_leaves_incident_and_blocks_rejoin() {
 		private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "x",
 				"result": "failed",
 				"escalates": true,
@@ -756,8 +759,8 @@ async fn unmonitored_server_event_does_not_open_incident() {
 		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
-			 INSERT INTO servers (id, host, kind, group_id, is_monitored) VALUES \
-				('{server_id}', 'https://muted.example.com', 'central', '{group_id}', FALSE);"
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, is_monitored, machine_id) VALUES \
+				('{server_id}', 'https://muted.example.com', 'tamanu-central', '{group_id}', FALSE, '{server_id}');"
 		))
 		.await
 		.expect("seed");
@@ -768,7 +771,7 @@ async fn unmonitored_server_event_does_not_open_incident() {
 		let resp = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "ignored",
 				"result": "failed",
 				"message": "should not open an incident",
@@ -782,12 +785,15 @@ async fn unmonitored_server_event_does_not_open_incident() {
 			.await;
 		resp.assert_status_ok();
 		let items: Vec<serde_json::Value> = resp.json();
-		assert!(items.is_empty(), "unmonitored servers don't open incidents");
+		assert!(
+			items.is_empty(),
+			"unmonitored applications don't open incidents"
+		);
 
 		// The issue itself is still there for the record.
 		let resp = private
 			.post("/api/issues/list_for_server")
-			.json(&serde_json::json!({ "server_id": server_id }))
+			.json(&serde_json::json!({ "application_id": server_id }))
 			.await;
 		let issues: Vec<serde_json::Value> = resp.json();
 		assert_eq!(issues.len(), 1, "issue rows are kept even when unmonitored");
@@ -806,8 +812,8 @@ async fn enabling_monitoring_opens_pending_incident() {
 		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
-			 INSERT INTO servers (id, host, kind, group_id, is_monitored) VALUES \
-				('{server_id}', 'https://later.example.com', 'central', '{group_id}', FALSE);"
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, is_monitored, machine_id) VALUES \
+				('{server_id}', 'https://later.example.com', 'tamanu-central', '{group_id}', FALSE, '{server_id}');"
 		))
 		.await
 		.expect("seed");
@@ -816,7 +822,7 @@ async fn enabling_monitoring_opens_pending_incident() {
 		let resp = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "stuck",
 				"result": "failed",
 				"message": "waiting to be re-enabled",
@@ -826,7 +832,7 @@ async fn enabling_monitoring_opens_pending_incident() {
 
 		// Flip monitoring on: the open issue should be promoted.
 		let resp = private
-			.post("/api/servers/update")
+			.post("/api/fleet/applications/update")
 			.json(&serde_json::json!({
 				"server_id": server_id,
 				"data": { "is_monitored": true },
@@ -863,7 +869,7 @@ async fn disabling_monitoring_removes_open_contribution() {
 
 		// Flip monitoring off: the lone contributor leaves, incident closes.
 		let resp = private
-			.post("/api/servers/update")
+			.post("/api/fleet/applications/update")
 			.json(&serde_json::json!({
 				"server_id": server_id,
 				"data": { "is_monitored": false },
@@ -909,7 +915,7 @@ async fn silencing_server_ref_closes_only_matching_open_incident() {
 		let resp = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_id,
+				"applicationId": server_id,
 				"ref": "other",
 				"result": "failed",
 				"message": "second contributor",
@@ -1009,9 +1015,9 @@ async fn group_silence_blocks_events_from_all_members() {
 		let server_b = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
-			 INSERT INTO servers (id, host, kind, group_id) VALUES \
-				('{server_a}', 'https://a.example.com', 'central', '{group_id}'),
-				('{server_b}', 'https://b.example.com', 'central', '{group_id}');"
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_a}', '{group_id}'), ('{server_b}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{server_a}', 'https://a.example.com', 'tamanu-central', '{group_id}', '{server_a}'),
+				('{server_b}', 'https://b.example.com', 'tamanu-central', '{group_id}', '{server_b}');"
 		))
 		.await
 		.expect("seed");
@@ -1032,7 +1038,7 @@ async fn group_silence_blocks_events_from_all_members() {
 			let resp = private
 				.post("/api/issues/submit_manual_event")
 				.json(&serde_json::json!({
-					"serverId": sid,
+					"applicationId": sid,
 					"ref": "noisy",
 					"result": "failed",
 					"message": "should not fire",
@@ -1051,7 +1057,7 @@ async fn group_silence_blocks_events_from_all_members() {
 		let resp = private
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
-				"serverId": server_a,
+				"applicationId": server_a,
 				"ref": "other",
 				"result": "failed",
 				"message": "should still fire",
@@ -1078,8 +1084,8 @@ async fn list_silenced_refs_for_server_and_group() {
 		let server_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
-			 INSERT INTO servers (id, host, kind, group_id) VALUES \
-				('{server_id}', 'https://l.example.com', 'central', '{group_id}');
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{server_id}', 'https://l.example.com', 'tamanu-central', '{group_id}', '{server_id}');
 			 INSERT INTO check_policies (source, check_name) VALUES \
 				('manual', 'srv-ref'), ('canopy', 'grp-ref');"
 		))
@@ -1175,9 +1181,9 @@ async fn empty_validation_input_is_a_400_not_a_500() {
 		let group_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
 			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g');
-			 INSERT INTO servers (id, host, kind, group_id) VALUES \
-				('{server_id}', 'https://validate.example.com', 'central', '{group_id}');
-			 INSERT INTO issues (id, server_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, last_degraded_at) VALUES \
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{server_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{server_id}', 'https://validate.example.com', 'tamanu-central', '{group_id}', '{server_id}');
+			 INSERT INTO issues (id, application_id, source, \"ref\", check_name, observed_result, effective_result, message, active, first_seen, last_seen, last_degraded_at) VALUES \
 				('11111111-2222-3333-4444-555555555555', '{server_id}', 'src', 'r', 'r', 'failed', 'failed', 'm', true, NOW(), NOW(), NOW());"
 		))
 		.await
@@ -1188,7 +1194,7 @@ async fn empty_validation_input_is_a_400_not_a_500() {
 			.post("/api/issues/submit_manual_event")
 			.json(&serde_json::json!({
 				"ref": "   ",
-				"serverId": server_id,
+				"applicationId": server_id,
 				"message": "m",
 			}))
 			.await;

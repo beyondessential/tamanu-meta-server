@@ -1,12 +1,18 @@
-//! Operator declarations that a server or a group is being worked on.
+//! Operator declarations that a machine, a group, or one of a group's
+//! environments is being worked on.
 //!
 //! While a window suspends a target, every check on it grades to skipped
 //! (the transform a silence applies to one check, applied to all of them:
 //! see [`crate::check_policies::ScopedCheckPolicy::chain_for`]), so nothing
 //! on the target opens or joins an incident and nothing notifies.
 //!
-//! Suspension outlasts the window itself by [`SETTLE`]. A server is back
-//! before the sources on it have reported again, and a server whose every
+//! A window is over the machine rather than over one workload on it. Taking a
+//! box down to patch it stops everything running on it, so a window naming one
+//! application would leave the others alerting through work that was always
+//! going to stop them. One declaration, N consequences.
+//!
+//! Suspension outlasts the window itself by [`SETTLE`]. A machine is back
+//! before the sources on it have reported again, and a machine whose every
 //! source is stale is unreachable, so ending suspension the instant the
 //! work finishes would report a server that has just come back as
 //! failed for as long as the work took.
@@ -22,8 +28,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::issues::Scope;
-use crate::server_groups::{ServerGroup, environment_name};
-use crate::servers::Server;
+use crate::machines::Machine;
+use crate::server_groups::{ServerGroup, environment_name, rank_priority};
 use crate::slack_outbox::{KIND_MAINTENANCE_DECLARED, KIND_MAINTENANCE_ENDED, SlackOutbox, vars};
 
 /// How long suspension outlasts the window, giving the reporters on a
@@ -31,7 +37,7 @@ use crate::slack_outbox::{KIND_MAINTENANCE_DECLARED, KIND_MAINTENANCE_ENDED, Sla
 /// every window.
 pub const SETTLE: SignedDuration = SignedDuration::from_mins(10);
 
-/// A declaration that a server, a group, or one of a group's environments is
+/// A declaration that a machine, a group, or one of a group's environments is
 /// being worked on.
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema)]
 #[diesel(table_name = crate::schema::maintenance_windows)]
@@ -39,13 +45,15 @@ pub const SETTLE: SignedDuration = SignedDuration::from_mins(10);
 pub struct MaintenanceWindow {
 	/// Unique identifier of this window.
 	pub id: Uuid,
-	/// Set for a window over one server.
-	pub server_id: Option<Uuid>,
+	/// Set for a window over one machine, covering the machine's own checks
+	/// and those of every application running on it.
+	pub machine_id: Option<Uuid>,
 	/// Set for a window over a group, covering the group's own checks and
-	/// those of every server in it.
+	/// those of every machine in it.
 	pub server_group_id: Option<Uuid>,
 	/// Set with `server_group_id` for a window over one of the group's
-	/// environments: its servers at this rank, and nothing else of the group.
+	/// environments, covering the machines serving that environment and
+	/// nothing else of the group.
 	pub rank: Option<ServerRank>,
 	/// When the operator expects the work to finish. A window reaching it
 	/// ends itself.
@@ -84,7 +92,7 @@ pub struct MaintenanceWindow {
 impl MaintenanceWindow {
 	/// The target this window covers.
 	pub fn scope(&self) -> Scope {
-		Scope::from_columns(self.server_id, self.server_group_id)
+		Scope::from_columns(None, self.machine_id, self.server_group_id)
 	}
 
 	/// When the window itself ended, or is due to: an operator's lift where
@@ -123,12 +131,12 @@ impl MaintenanceWindow {
 		use crate::schema::maintenance_windows::dsl;
 		let Some((server, group)) = fleet_columns(scope) else {
 			return Err(AppError::BadRequest(
-				"a maintenance window covers a server or a group".into(),
+				"a maintenance window covers a machine or a group".into(),
 			));
 		};
 		if rank.is_some() && group.is_none() {
 			return Err(AppError::BadRequest(
-				"an environment is a group's servers at one rank, so a window over one names the group".into(),
+				"an environment is a group's applications at one rank, so a window over one names the group".into(),
 			));
 		}
 		if expected_end <= Timestamp::now() {
@@ -154,7 +162,7 @@ impl MaintenanceWindow {
 
 		let window: Self = diesel::insert_into(dsl::maintenance_windows)
 			.values((
-				dsl::server_id.eq(server),
+				dsl::machine_id.eq(server),
 				dsl::server_group_id.eq(group),
 				dsl::rank.eq(rank),
 				dsl::expected_end.eq(jiff_diesel::Timestamp::from(expected_end)),
@@ -252,7 +260,7 @@ impl MaintenanceWindow {
 
 	/// The target's window while it holds. A settling window is over as far
 	/// as declaring goes: a fresh declaration opens a new one. A group's own
-	/// window and its environments' are distinct targets.
+	/// window and each of its environments' are distinct targets.
 	pub async fn open_for(
 		db: &mut AsyncPgConnection,
 		scope: Scope,
@@ -267,7 +275,7 @@ impl MaintenanceWindow {
 			.filter(
 				dsl::ended_at
 					.is_null()
-					.and(dsl::server_id.is_not_distinct_from(server))
+					.and(dsl::machine_id.is_not_distinct_from(server))
 					.and(dsl::server_group_id.is_not_distinct_from(group))
 					.and(dsl::rank.is_not_distinct_from(rank)),
 			)
@@ -290,7 +298,7 @@ impl MaintenanceWindow {
 	}
 
 	/// The target's windows, open and ended, most recently declared first. A
-	/// group's include its environments' windows.
+	/// group's include the windows over its environments.
 	pub async fn list_for_scope(
 		db: &mut AsyncPgConnection,
 		scope: Scope,
@@ -303,7 +311,7 @@ impl MaintenanceWindow {
 		dsl::maintenance_windows
 			.select(Self::as_select())
 			.filter(
-				dsl::server_id
+				dsl::machine_id
 					.is_not_distinct_from(server)
 					.and(dsl::server_group_id.is_not_distinct_from(group)),
 			)
@@ -314,59 +322,32 @@ impl MaintenanceWindow {
 			.map_err(AppError::from)
 	}
 
-	/// Is a check filed against `(server_id, group_id)` suspended? A server
-	/// is covered by its own window, by its group's, and by its environment's,
-	/// and stays suspended until the last of them has settled. A group's own
-	/// checks are covered by the group's window alone.
+	/// Is a check covered by `(machine_id, group_id)` suspended? A target is
+	/// covered by its machine's window, by its group's, and by the window over
+	/// the environment the machine serves, and stays suspended until the last
+	/// of them has settled. A group's own checks are the group's window's
+	/// alone.
+	///
+	/// `machine_id` is the machine a window would have to name to cover this
+	/// check: for a machine's own check, itself; for an application's, the
+	/// machine it runs on, since taking the box down stops the workload too.
 	pub async fn suspends(
 		db: &mut AsyncPgConnection,
-		server_id: Option<Uuid>,
+		machine_id: Option<Uuid>,
 		group_id: Option<Uuid>,
 	) -> Result<bool> {
-		use crate::schema::{maintenance_windows::dsl, servers};
-		if server_id.is_none() && group_id.is_none() {
+		use crate::schema::maintenance_windows::dsl;
+		if machine_id.is_none() && group_id.is_none() {
 			return Ok(false);
 		}
 		let cutoff = jiff_diesel::Timestamp::from(Timestamp::now() - SETTLE);
-		// A server's stored rank predates the canonical spellings, so `live`
-		// and `prod` are still production and must fall under a production
-		// window.
-		let server_rank = servers::table
-			.filter(servers::id.nullable().eq(server_id))
-			.select(diesel::dsl::sql::<diesel::sql_types::Nullable<diesel::sql_types::Text>>(
-				"CASE lower(servers.rank) WHEN 'live' THEN 'production' WHEN 'prod' THEN 'production' WHEN 'staging' THEN 'clone' ELSE lower(servers.rank) END",
-			))
-			.single_value();
-		let found: Option<Uuid> = dsl::maintenance_windows
-			.select(dsl::id)
+		let ranks: Vec<Option<ServerRank>> = dsl::maintenance_windows
+			.select(dsl::rank)
 			.filter(
-				dsl::server_id.eq(server_id).or(dsl::server_group_id
-					.eq(group_id)
-					.and(dsl::rank.is_null().or(dsl::rank.eq(server_rank)))),
+				dsl::machine_id
+					.eq(machine_id)
+					.or(dsl::server_group_id.eq(group_id)),
 			)
-			.filter(
-				dsl::ended_at
-					.is_null()
-					.and(dsl::expected_end.gt(cutoff))
-					.or(dsl::ended_at.gt(cutoff)),
-			)
-			.first(db)
-			.await
-			.optional()
-			.map_err(AppError::from)?;
-		Ok(found.is_some())
-	}
-
-	/// The servers and groups currently suspended, for callers judging many
-	/// targets in one pass. An environment's window counts as one over each
-	/// server in it, since it covers nothing of the group itself.
-	pub async fn suspended_targets(
-		db: &mut AsyncPgConnection,
-	) -> Result<(HashSet<Uuid>, HashSet<Uuid>)> {
-		use crate::schema::{maintenance_windows::dsl, servers};
-		let cutoff = jiff_diesel::Timestamp::from(Timestamp::now() - SETTLE);
-		let rows: Vec<(Option<Uuid>, Option<Uuid>, Option<ServerRank>)> = dsl::maintenance_windows
-			.select((dsl::server_id, dsl::server_group_id, dsl::rank))
 			.filter(
 				dsl::ended_at
 					.is_null()
@@ -376,13 +357,49 @@ impl MaintenanceWindow {
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
-		let mut suspended = HashSet::new();
+
+		if ranks.iter().any(Option::is_none) {
+			return Ok(true);
+		}
+		let Some(machine_id) = machine_id else {
+			return Ok(false);
+		};
+		let Some(rank) = Machine::rank(db, machine_id).await? else {
+			return Ok(false);
+		};
+		Ok(ranks.contains(&Some(rank)))
+	}
+
+	/// The machines and groups currently suspended, for callers judging many
+	/// targets in one pass.
+	///
+	/// A window is declared over a machine, so an application is suspended by
+	/// its machine's id appearing here rather than its own. An environment's
+	/// window counts as one over each machine serving it, since it covers
+	/// nothing of the group itself.
+	pub async fn suspended_targets(
+		db: &mut AsyncPgConnection,
+	) -> Result<(HashSet<Uuid>, HashSet<Uuid>)> {
+		use crate::schema::maintenance_windows::dsl;
+		let cutoff = jiff_diesel::Timestamp::from(Timestamp::now() - SETTLE);
+		let rows: Vec<(Option<Uuid>, Option<Uuid>, Option<ServerRank>)> = dsl::maintenance_windows
+			.select((dsl::machine_id, dsl::server_group_id, dsl::rank))
+			.filter(
+				dsl::ended_at
+					.is_null()
+					.and(dsl::expected_end.gt(cutoff))
+					.or(dsl::ended_at.gt(cutoff)),
+			)
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		let mut machines = HashSet::new();
 		let mut groups = HashSet::new();
 		let mut environments = HashSet::new();
-		for (server, group, rank) in rows {
-			match (server, group, rank) {
+		for (machine, group, rank) in rows {
+			match (machine, group, rank) {
 				(Some(id), _, _) => {
-					suspended.insert(id);
+					machines.insert(id);
 				}
 				(None, Some(id), None) => {
 					groups.insert(id);
@@ -393,24 +410,8 @@ impl MaintenanceWindow {
 				(None, None, _) => {}
 			}
 		}
-		if !environments.is_empty() {
-			let group_ids: Vec<Uuid> = environments.iter().map(|(id, _)| *id).collect();
-			let members: Vec<(Uuid, Option<Uuid>, Option<ServerRank>)> = servers::table
-				.select((servers::id, servers::group_id, servers::rank))
-				.filter(servers::group_id.eq_any(&group_ids))
-				.filter(servers::deleted_at.is_null())
-				.load(db)
-				.await
-				.map_err(AppError::from)?;
-			for (id, group, rank) in members {
-				if let (Some(group), Some(rank)) = (group, rank)
-					&& environments.contains(&(group, rank))
-				{
-					suspended.insert(id);
-				}
-			}
-		}
-		Ok((suspended, groups))
+		machines.extend(machines_in_environments(db, &environments).await?);
+		Ok((machines, groups))
 	}
 
 	/// End every window whose expected end has passed, stamping the end at
@@ -482,20 +483,23 @@ pub async fn target_label(
 	rank: Option<ServerRank>,
 ) -> Result<String> {
 	match scope {
-		Scope::Server(sid) => {
-			let server = Server::get_by_id(db, sid).await?;
-			match server.group_id {
+		Scope::Machine(mid) => {
+			let machine = Machine::get_by_id(db, mid).await?;
+			let own = machine
+				.name
+				.clone()
+				.unwrap_or_else(|| machine.id.to_string());
+			match machine.group_id {
 				Some(gid) => {
 					let group = ServerGroup::get_by_id(db, gid).await?;
-					Ok(crate::issues::format_group_label(&group, Some(&server)))
+					Ok(format!("{} {own}", group.name))
 				}
-				None => Ok(server
-					.name
-					.clone()
-					.or_else(|| server.host.as_ref().map(|h| h.0.to_string()))
-					.unwrap_or_else(|| server.id.to_string())),
+				None => Ok(own),
 			}
 		}
+		// A window is never declared over one application, so this is only
+		// reachable if a caller hands in a scope from elsewhere.
+		Scope::Application(aid) => Ok(aid.to_string()),
 		Scope::Group(gid) => {
 			let group = ServerGroup::get_by_id(db, gid).await?;
 			Ok(match rank {
@@ -516,8 +520,54 @@ fn format_when(at: Timestamp) -> String {
 /// work never suspends them.
 fn fleet_columns(scope: Scope) -> Option<(Option<Uuid>, Option<Uuid>)> {
 	match scope {
-		Scope::Server(id) => Some((Some(id), None)),
+		Scope::Machine(id) => Some((Some(id), None)),
 		Scope::Group(id) => Some((None, Some(id))),
-		Scope::Global => None,
+		// A window covers a machine or a group. An application is covered
+		// through its machine rather than named, and Canopy's own checks are
+		// its self-monitoring, which fleet work never suspends.
+		Scope::Application(_) | Scope::Global => None,
 	}
+}
+
+/// The machines serving any of these environments, each machine taking the
+/// rank of the highest-ranked application on it.
+// spec: MNT#declaring
+async fn machines_in_environments(
+	db: &mut AsyncPgConnection,
+	environments: &HashSet<(Uuid, ServerRank)>,
+) -> Result<HashSet<Uuid>> {
+	use crate::schema::applications::dsl;
+	use std::collections::HashMap;
+
+	if environments.is_empty() {
+		return Ok(HashSet::new());
+	}
+	let group_ids: Vec<Uuid> = environments.iter().map(|(group, _)| *group).collect();
+	let members: Vec<(Uuid, Option<Uuid>, Option<ServerRank>)> = dsl::applications
+		.select((dsl::machine_id, dsl::group_id, dsl::rank))
+		.filter(dsl::group_id.eq_any(&group_ids))
+		.filter(dsl::deleted_at.is_null())
+		.load(db)
+		.await
+		.map_err(AppError::from)?;
+
+	let mut serving: HashMap<Uuid, (Uuid, ServerRank)> = HashMap::new();
+	for (machine, group, rank) in members {
+		let (Some(group), Some(rank)) = (group, rank) else {
+			continue;
+		};
+		serving
+			.entry(machine)
+			.and_modify(|held| {
+				if rank_priority(Some(rank)) < rank_priority(Some(held.1)) {
+					*held = (group, rank);
+				}
+			})
+			.or_insert((group, rank));
+	}
+	Ok(serving
+		.into_iter()
+		.filter(|(_, pair)| environments.contains(pair))
+		.map(|(machine, _)| machine)
+		.collect())
 }

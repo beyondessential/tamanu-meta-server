@@ -1,1 +1,1 @@
-ALTER TABLE server_reported_detail DROP COLUMN version_reported_at;
+ALTER TABLE application_reported_detail DROP COLUMN version_reported_at;

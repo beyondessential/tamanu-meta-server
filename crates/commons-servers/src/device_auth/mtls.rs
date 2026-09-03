@@ -3,7 +3,7 @@
 //! and resolves it to an existing [`Device`] row.
 //!
 //! A device row is created only through the gated enrollment flow
-//! (`/servers/register/*`); an unknown key here is `AuthCertificateNotFound`.
+//! (`/applications/register/*`); an unknown key here is `AuthCertificateNotFound`.
 
 use commons_errors::{AppError, Result};
 use database::devices::Device;

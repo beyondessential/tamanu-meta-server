@@ -21,7 +21,7 @@ test.describe("lingering incidents", () => {
 		const group = await seedServerGroup(sql, { name: "linger-group" });
 		const server = await seedServer(sql, {
 			name: "linger-server",
-			kind: "central",
+			type: "tamanu-central",
 			rank: "production",
 			groupId: group.id,
 		});
@@ -61,7 +61,7 @@ test.describe("lingering incidents", () => {
 	}) => {
 		const { server, incident } = await seedLingering(sql);
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 		const button = page.getByRole("link", {
 			name: new RegExp(`incident ${incident.id.slice(0, 8)}.*recovering`, "i"),
 		});
@@ -79,6 +79,10 @@ test.describe("lingering incidents", () => {
 
 		await page.goto("/status");
 		await expect(page.getByRole("heading", { name: group.name })).toBeVisible();
-		await expect(page.getByText("incident (recovering)")).toBeVisible();
+		// The card's status band names the state in one word; that there is an
+		// incident at all is said by the segment being coloured.
+		await expect(
+			page.getByTestId("incident-segment").filter({ hasText: "recovering" }),
+		).toBeVisible();
 	});
 });

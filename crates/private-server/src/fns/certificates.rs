@@ -17,15 +17,15 @@ use commons_servers::acme::RevokeFor;
 use commons_servers::tailscale_auth::{TailscaleAdmin, TailscaleUser};
 use commons_types::Uuid;
 use commons_types::dns::{is_within, match_zone};
-use database::server_certificates::{RevocationReason, ServerCertificate};
-use database::servers::Server;
-use database::{ServerGroupDomain, ServerName};
+use database::application_certificates::{ApplicationCertificate, RevocationReason};
+use database::applications::Application;
+use database::{ApplicationName, ServerGroupDomain};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::fns::applications::ServerIdArgs;
 use crate::fns::server_groups::GroupIdArgs;
-use crate::fns::servers::ServerIdArgs;
 use crate::state::AppState;
 
 pub fn routes() -> OpenApiRouter<AppState> {
@@ -37,6 +37,8 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(pause))
 		.routes(routes!(resume))
 		.routes(routes!(revoke))
+		.routes(routes!(declare))
+		.routes(routes!(release))
 }
 
 /// A name a server has registered, and how far Canopy has got with it.
@@ -111,7 +113,7 @@ pub struct CertificateView {
 
 /// What a server's page shows about its names and certificates.
 #[derive(Debug, Clone, Serialize, ToSchema)]
-pub struct ServerNamesView {
+pub struct ApplicationNamesView {
 	/// Whether an operator has allowed this server to manage its own DNS.
 	pub may_manage_dns: bool,
 	/// Whether an operator has allowed this server to obtain its own
@@ -140,7 +142,7 @@ pub struct ServerNamesView {
 	pub certificates: Vec<CertificateView>,
 }
 
-fn name_view(row: ServerName, zones: &[commons_types::dns::ManagedZone]) -> NameView {
+fn name_view(row: ApplicationName, zones: &[commons_types::dns::ManagedZone]) -> NameView {
 	NameView {
 		published: row.is_reconciled(),
 		addresses: row.wanted().iter().map(|a| a.to_string()).collect(),
@@ -153,8 +155,8 @@ fn name_view(row: ServerName, zones: &[commons_types::dns::ManagedZone]) -> Name
 	}
 }
 
-fn certificate_view(cert: ServerCertificate) -> CertificateView {
-	use database::server_certificates::Risk;
+fn certificate_view(cert: ApplicationCertificate) -> CertificateView {
+	use database::application_certificates::Risk;
 	CertificateView {
 		remaining_seconds: cert.remaining().map(|d| d.as_secs()),
 		collectable: cert.is_collectable(),
@@ -193,7 +195,7 @@ fn certificate_view(cert: ServerCertificate) -> CertificateView {
 	security(("tailscale-user" = [])),
 	request_body = ServerIdArgs,
 	responses(
-		(status = 200, body = ServerNamesView),
+		(status = 200, body = ApplicationNamesView),
 		(status = 404, body = ProblemDetailsSchema),
 	),
 )]
@@ -201,9 +203,9 @@ pub async fn for_server(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
 	Json(args): Json<ServerIdArgs>,
-) -> Result<Json<ServerNamesView>> {
+) -> Result<Json<ApplicationNamesView>> {
 	let mut conn = state.db_read.get().await?;
-	let server = Server::get_by_id(&mut conn, args.server_id).await?;
+	let server = Application::get_by_id(&mut conn, args.server_id).await?;
 
 	let domains = match server.group_id {
 		Some(group) => ServerGroupDomain::list_for_group(&mut conn, group)
@@ -213,10 +215,10 @@ pub async fn for_server(
 			.collect(),
 		None => Vec::new(),
 	};
-	let names = ServerName::for_server(&mut conn, args.server_id).await?;
-	let certificates = ServerCertificate::for_server(&mut conn, args.server_id).await?;
+	let names = ApplicationName::for_server(&mut conn, args.server_id).await?;
+	let certificates = ApplicationCertificate::for_server(&mut conn, args.server_id).await?;
 
-	Ok(Json(ServerNamesView {
+	Ok(Json(ApplicationNamesView {
 		may_manage_dns: server.may_manage_dns,
 		may_manage_tls: server.may_manage_tls,
 		paused: server.name_management_paused(),
@@ -269,7 +271,7 @@ pub struct DomainHealthView {
 /// current certificate.
 ///
 /// So that whether a group's names are healthy is answerable from the
-/// group's page, without visiting each of its servers.
+/// group's page, without visiting each of its applications.
 // spec: CRT#presentation
 #[utoipa::path(
 	post,
@@ -285,7 +287,7 @@ pub async fn for_group(
 	_user: TailscaleUser,
 	Json(args): Json<GroupIdArgs>,
 ) -> Result<Json<Vec<DomainHealthView>>> {
-	use database::server_certificates::Risk;
+	use database::application_certificates::Risk;
 	use std::collections::BTreeMap;
 
 	let mut conn = state.db_read.get().await?;
@@ -294,19 +296,19 @@ pub async fn for_group(
 		return Ok(Json(Vec::new()));
 	}
 
-	let servers = Server::list_live_in_group(&mut conn, args.server_group_id).await?;
+	let applications = Application::list_live_in_group(&mut conn, args.server_group_id).await?;
 
 	// Gathered per name across both registrations and certificates: a name may
 	// have one, the other, or both, and the group's view is of names rather than
 	// of either table.
 	let mut rows: BTreeMap<String, DomainNameView> = BTreeMap::new();
-	for server in &servers {
-		for row in ServerName::for_server(&mut conn, server.id).await? {
+	for server in &applications {
+		for row in ApplicationName::for_server(&mut conn, server.id).await? {
 			rows.entry(row.name.clone())
 				.or_insert_with(|| DomainNameView {
 					name: row.name.clone(),
 					server_id: server.id,
-					server_name: server.name.clone(),
+					server_name: Some(server.display_name()),
 					published: None,
 					certificate: false,
 					risk: None,
@@ -314,13 +316,13 @@ pub async fn for_group(
 				})
 				.published = Some(row.is_reconciled());
 		}
-		for cert in ServerCertificate::for_server(&mut conn, server.id).await? {
+		for cert in ApplicationCertificate::for_server(&mut conn, server.id).await? {
 			let entry = rows
 				.entry(cert.name.clone())
 				.or_insert_with(|| DomainNameView {
 					name: cert.name.clone(),
 					server_id: server.id,
-					server_name: server.name.clone(),
+					server_name: Some(server.display_name()),
 					published: None,
 					certificate: false,
 					risk: None,
@@ -436,8 +438,8 @@ pub struct SetProfileArgs {
 
 /// Set the profile a server's certificates are requested under.
 ///
-/// Lifetime is a property of how a server is run rather than of Canopy, so it
-/// is an operator's choice per server: a cloud server whose issuance is
+/// Lifetime is a property of how an application is run rather than of Canopy, so it
+/// is an operator's choice per server: a cloud-hosted application whose issuance is
 /// exercised constantly can carry a short lifetime where an on-premises one that
 /// may be offline for days cannot. Takes effect on the next issuance or renewal;
 /// a certificate already held keeps the lifetime it was issued with.
@@ -481,7 +483,8 @@ pub async fn set_profile(
 	}
 
 	let mut conn = state.db.get().await?;
-	Server::set_certificate_profile(&mut conn, args.server_id, args.profile.as_deref()).await?;
+	Application::set_certificate_profile(&mut conn, args.server_id, args.profile.as_deref())
+		.await?;
 	Ok(Json(()))
 }
 
@@ -518,7 +521,7 @@ pub async fn pause(
 	Json(args): Json<PauseArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	Server::pause_name_management(&mut conn, args.server_id, Some(&admin.login), &args.reason)
+	Application::pause_name_management(&mut conn, args.server_id, Some(&admin.login), &args.reason)
 		.await?;
 	Ok(Json(()))
 }
@@ -543,7 +546,7 @@ pub async fn resume(
 	Json(args): Json<ServerIdArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	Server::resume_name_management(&mut conn, args.server_id).await?;
+	Application::resume_name_management(&mut conn, args.server_id).await?;
 	Ok(Json(()))
 }
 
@@ -595,7 +598,7 @@ pub async fn revoke(
 	Json(args): Json<RevokeArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	let cert = ServerCertificate::get(&mut conn, args.id).await?;
+	let cert = ApplicationCertificate::get(&mut conn, args.id).await?;
 
 	let Some(chain) = cert.chain.as_deref() else {
 		return Err(AppError::Conflict(format!(
@@ -624,6 +627,76 @@ pub async fn revoke(
 	acme.revoke(chain, RevokeFor::from_stored(args.reason.as_str()))
 		.await?;
 
-	ServerCertificate::record_revoked(&mut conn, args.id, args.reason, Some(&admin.login)).await?;
+	ApplicationCertificate::record_revoked(&mut conn, args.id, args.reason, Some(&admin.login))
+		.await?;
+	Ok(Json(()))
+}
+
+/// An application and the name being declared for it, or released from it.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct DeclarationArgs {
+	/// The application that serves the name.
+	pub application_id: Uuid,
+	/// The name, in any case and with or without a trailing dot.
+	pub name: String,
+}
+
+/// Declare that an application serves a name.
+///
+/// A declaration is what an address registration or a certificate request from
+/// the machine is resolved against, so it is how a box running several workloads
+/// gets its requests routed to the right one. It carries no addresses; the
+/// application registers those itself.
+///
+/// Declaring a name the same application already holds changes nothing. A name
+/// another application holds is refused, and the refusal names the holder so an
+/// operator can see what to release first.
+// spec: CRT#declared-names
+#[utoipa::path(
+	post,
+	path = "/declare",
+	operation_id = "certificates_declare",
+	tag = "certificates",
+	security(("tailscale-admin" = [])),
+	request_body = DeclarationArgs,
+	responses(
+		(status = 200, body = NameView),
+		(status = 404, body = ProblemDetailsSchema),
+		(status = 409, description = "Another application already declares this name.", body = ProblemDetailsSchema),
+	),
+)]
+pub async fn declare(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<DeclarationArgs>,
+) -> Result<Json<NameView>> {
+	let mut conn = state.db.get().await?;
+	let row = ApplicationName::declare(&mut conn, args.application_id, &args.name).await?;
+	Ok(Json(name_view(row, &state.dns_zones)))
+}
+
+/// End an application's hold on a name.
+///
+/// What is already in place stands, as revoking a grant leaves it: the records
+/// published stay published and the certificates held stay held until they
+/// expire. What ends is Canopy treating the name as this application's, which
+/// frees it to be declared elsewhere.
+// spec: CRT#declared-names
+#[utoipa::path(
+	post,
+	path = "/release",
+	operation_id = "certificates_release",
+	tag = "certificates",
+	security(("tailscale-admin" = [])),
+	request_body = DeclarationArgs,
+	responses((status = 200), (status = 404, body = ProblemDetailsSchema)),
+)]
+pub async fn release(
+	State(state): State<AppState>,
+	_admin: TailscaleAdmin,
+	Json(args): Json<DeclarationArgs>,
+) -> Result<Json<()>> {
+	let mut conn = state.db.get().await?;
+	ApplicationName::release(&mut conn, args.application_id, &args.name).await?;
 	Ok(Json(()))
 }

@@ -41,21 +41,143 @@ function randomLabel(prefix: string): string {
 	return `${prefix}-${randomBytes(4).toString("hex")}`;
 }
 
+// ── The check namespace ─────────────────────────────────────────────────────
+//
+// A check's identity is its source, its namespace, and its name, so a seeded
+// catalog row or silence that leaves the namespace off is one ingestion could
+// never produce: the UI would then be reading a row nothing files into.
+// These helpers derive it the way `Namespace::of` does, so the rows a spec
+// seeds are the rows a real report would have made.
+
+/** The checks that describe the box rather than the workload on it.
+ *
+ * A snapshot of MACHINE_SUBJECT_CHECKS in crates/commons-types/src/subject.rs.
+ * `the_e2e_seed_snapshot_matches_the_subject_list`, beside that list, parses
+ * this array to hold the two together, so keep the quoting as it is. */
+const MACHINE_SUBJECT_CHECKS = [
+	"billing_tags",
+	"btrfs",
+	"caddy_resolvers",
+	"caddy_version",
+	"caddyfile_version",
+	"canopy_registration",
+	"disk_free",
+	"external_users",
+	"held_captures",
+	"inodes",
+	"ips",
+	"load",
+	"memory",
+	"munin",
+	"tailscale",
+	"tailscale_config",
+	"time_sync",
+	"uptime",
+];
+
+/** The reported detail fields that describe the box rather than the workload
+ * on it.
+ *
+ * A snapshot of MACHINE_SUBJECT_DETAIL in crates/commons-types/src/subject.rs.
+ * `the_e2e_seed_snapshot_matches_the_detail_list`, beside that list, parses
+ * this array to hold the two together, so keep the quoting as it is. */
+const MACHINE_SUBJECT_DETAIL = [
+	"arch",
+	"bestoolVersion",
+	"cpuCores",
+	"filesystems",
+	"hostname",
+	"instanceTags",
+	"ipv4",
+	"ipv6",
+	"kernel",
+	"lanIps",
+	"munin",
+	"nat64",
+	"osKind",
+	"osName",
+	"osTimezone",
+	"osVersion",
+	"reportingSchemaVersion",
+	"services",
+	"totalMemoryBytes",
+	"uptimeSecs",
+	"virtualisation",
+	"virtualised",
+	"wanIpv4",
+	"wanIpv6",
+];
+
+/** Split a push's detail the way ingestion does: the box's fields to the
+ * machine, everything else to the application. */
+export function splitDetail(extra: Record<string, unknown>): {
+	machine: Record<string, unknown>;
+	application: Record<string, unknown>;
+} {
+	const machine: Record<string, unknown> = {};
+	const application: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(extra)) {
+		if (MACHINE_SUBJECT_DETAIL.includes(key)) machine[key] = value;
+		else application[key] = value;
+	}
+	return { machine, application };
+}
+
+/** Sources whose check names canopy curates itself. Their names mean one
+ * thing fleet-wide, so they are namespaced flat. */
+const RESERVED_SOURCES = ["canopy", "manual"];
+
+/** The two namespace columns, as `Namespace::to_columns` writes them. */
+export interface SeedNamespace {
+	subject: string | null;
+	applicationType: string | null;
+}
+
+/** The namespace a check lands in: flat for a curated source, the machine's
+ * for a name that describes the box, and the reporting application's type
+ * otherwise. */
+export function namespaceOf(
+	source: string,
+	checkName: string,
+	applicationType: string,
+): SeedNamespace {
+	if (RESERVED_SOURCES.includes(source)) {
+		return { subject: null, applicationType: null };
+	}
+	if (MACHINE_SUBJECT_CHECKS.includes(checkName)) {
+		return { subject: "machine", applicationType: null };
+	}
+	return { subject: "application", applicationType };
+}
+
+/** What kind of application a seeded row is, for the namespace its checks
+ * land in. Falls back to a Tamanu central, which is what `seedServer`
+ * defaults to. */
+async function applicationTypeOf(sql: Sql, applicationId: string): Promise<string> {
+	const rows = await sql.query<{ type: string }>(
+		"SELECT type FROM applications WHERE id = $1",
+		[applicationId],
+	);
+	return rows[0]?.type ?? "tamanu-central";
+}
+
 /** Wipe every table this suite seeds into. Use from a `beforeEach`
  * when a test needs to make assertions that depend on the absence
  * of data (the "empty state" UI banners, mostly). Fast — single
  * statement with CASCADE. */
 export async function resetSeededTables(sql: Sql): Promise<void> {
 	await sql.query(
-		"TRUNCATE statuses, server_reported_detail, issues, device_keys, servers, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, server_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, upgrade_plans, maintenance_windows, version_known_issues, recovery_vault_writes, server_names, server_certificates, compromised_keys RESTART IDENTITY CASCADE",
+		"TRUNCATE statuses, application_reported_detail, machine_reported_detail, issues, device_keys, applications, machines, server_groups, server_group_domains, devices, versions, tailscale_users, check_policies, scoped_check_policies, source_policies, server_group_backup_config, server_group_backup_schedule, machine_backup_capabilities, backup_requests, backup_runs, backup_run_progress, backup_repo_stats, backup_maintenance_runs, backup_credential_issuances, restore_replicas, restore_consumer_capabilities, backup_restore_checks, migration_tests, migration_timings, upgrade_plans, maintenance_windows, version_known_issues, recovery_vault_writes, application_names, application_certificates, compromised_keys RESTART IDENTITY CASCADE",
 	);
-	// The truncate takes the migration-seeded nil "Canopy" server with it;
-	// self-alerts attach to that row, so put it back. `kind = 'canopy'` is the
-	// legacy value the product migration deliberately left in place, so this
-	// also keeps the read alias exercised; `product` has to be set explicitly
-	// since that migration's backfill has already run by now.
+	// The truncate takes the migration-seeded nil "Canopy" application with
+	// it; self-alerts attach to that row, so put it back.
+	// The machine goes back with it: an application runs on exactly one, and
+	// the split's backfill gave this row a machine sharing its id.
 	await sql.query(
-		"INSERT INTO servers (id, product, kind, name, host) VALUES ('00000000-0000-0000-0000-000000000000', 'canopy', 'canopy', 'Canopy', 'http://localhost')",
+		"INSERT INTO machines (id, name) VALUES ('00000000-0000-0000-0000-000000000000', 'Canopy')",
+	);
+	await sql.query(
+		"INSERT INTO applications (id, type, name, host, machine_id) VALUES ('00000000-0000-0000-0000-000000000000', 'canopy', 'Canopy', 'http://localhost', '00000000-0000-0000-0000-000000000000')",
 	);
 	// Same for the migration's one seeded source policy: tamanu reports on
 	// its own schedule, so its silence is not a reachability signal.
@@ -117,26 +239,107 @@ export async function seedServerGroup(
 }
 
 export type ServerRank = "production" | "clone" | "demo" | "test" | "dev";
-export type Product = "tamanu" | "senaite" | "canopy";
-export type ServerKind = "central" | "facility" | "standalone";
+export type ApplicationType =
+	| "tamanu-central"
+	| "tamanu-facility"
+	| "senaite"
+	| "canopy";
 
 export interface SeededServer {
 	id: string;
-	name: string;
+	/** `null` when the application was seeded unnamed, which is how one Canopy
+	 * learned about from a report arrives: a name is the operator's to set. */
+	name: string | null;
 	host: string;
-	product: Product;
-	kind: ServerKind;
+	type: ApplicationType;
 	rank: ServerRank | null;
+	/** The box this workload runs on. Maintenance is declared over it. */
+	machineId: string;
+}
+
+/** A box on its own, with no workload on it — the state a machine is in
+ * between an operator adding it and the first report arriving. */
+export async function seedMachine(
+	sql: Sql,
+	opts: { name?: string; groupId?: string | null; deviceId?: string } = {},
+): Promise<{ id: string; name: string }> {
+	const id = randomUUID();
+	const name = opts.name ?? randomLabel("box");
+	await sql.query(
+		`INSERT INTO machines (id, name, group_id, device_id) VALUES ($1, $2, $3, $4)`,
+		[id, name, opts.groupId ?? null, opts.deviceId ?? null],
+	);
+	return { id, name };
+}
+
+/** What a box reports about itself. */
+export async function seedMachineReport(
+	sql: Sql,
+	opts: {
+		machineId: string;
+		source?: string;
+		extra?: Record<string, unknown>;
+	},
+): Promise<void> {
+	await sql.query(
+		`INSERT INTO machine_reported_detail (machine_id, source, extra, reported_at)
+		 VALUES ($1, $2, $3::jsonb, NOW())`,
+		[opts.machineId, opts.source ?? "alertd", JSON.stringify(opts.extra ?? {})],
+	);
+}
+
+/** What an application last reported, written straight to the current-state
+ * projection with no matching status row.
+ *
+ * This is the state a long-quiet application is really in: `statuses` is
+ * pruned and read through a lookback window, so history from months ago is
+ * gone, while the projection carries one row per (application, source) for as
+ * long as the application exists. Seeding it alone gives an application that
+ * has reported, just not recently, which is what separates unreachable from
+ * never heard from. */
+export async function seedApplicationReport(
+	sql: Sql,
+	opts: {
+		applicationId: string;
+		source?: string;
+		version?: string | null;
+		extra?: Record<string, unknown>;
+		/** ISO 8601 timestamp or relative SQL like `NOW() - INTERVAL '90 days'`.
+		 * Defaults to NOW(). */
+		reportedAt?: string;
+	},
+): Promise<void> {
+	const useSqlExpr =
+		opts.reportedAt !== undefined && opts.reportedAt.toUpperCase().startsWith("NOW");
+	const reportedAtClause = opts.reportedAt === undefined
+		? "NOW()"
+		: useSqlExpr
+			? opts.reportedAt
+			: "$5";
+	const params: unknown[] = [
+		opts.applicationId,
+		opts.source ?? "alertd",
+		JSON.stringify(opts.extra ?? {}),
+		opts.version ?? null,
+	];
+	if (!useSqlExpr && opts.reportedAt !== undefined) params.push(opts.reportedAt);
+	await sql.query(
+		`INSERT INTO application_reported_detail (application_id, source, extra, version, reported_at)
+		 VALUES ($1, $2, $3::jsonb, $4, ${reportedAtClause})
+		 ON CONFLICT (application_id, source) DO UPDATE
+		 SET extra = EXCLUDED.extra, version = EXCLUDED.version, reported_at = EXCLUDED.reported_at`,
+		params,
+	);
 }
 
 export async function seedServer(
 	sql: Sql,
 	opts: {
-		name?: string;
+		/** Pass `null` for an application nobody has named. */
+		name?: string | null;
 		host?: string;
-		/** Which application the server runs. Defaults to tamanu. */
-		product?: Product;
-		kind?: ServerKind;
+		/** What the application is. Defaults to a Tamanu central. */
+		type?: ApplicationType;
 		rank?: ServerRank | null;
 		groupId?: string | null;
 		deviceId?: string;
@@ -152,39 +355,59 @@ export async function seedServer(
 		 * they are for a real server. */
 		mayManageDns?: boolean;
 		mayManageTls?: boolean;
+		/** The box to put this workload on. Omit for a box of its own; pass
+		 * another application's `machineId` for the two-workloads-on-one-box
+		 * case. */
+		machineId?: string;
 	} = {},
 ): Promise<SeededServer> {
 	const id = randomUUID();
-	const name = opts.name ?? randomLabel("srv");
+	const name = opts.name === null ? null : (opts.name ?? randomLabel("srv"));
 	const host = opts.host ?? `https://${randomLabel("host")}.e2e.invalid`;
-	const product = opts.product ?? "tamanu";
-	// Default the role to one the chosen product actually defines, so a seed
-	// that only names a product doesn't produce a misclassified server.
-	const kind = opts.kind ?? (product === "tamanu" ? "central" : "standalone");
+	const type = opts.type ?? "tamanu-central";
 	const rank = opts.rank ?? "production";
 	const isMonitored = opts.isMonitored ?? false;
 	const alertWhenDownFor = opts.alertWhenDownFor ?? 600;
+	// A box of its own for each seeded workload unless the caller names one,
+	// carrying the same group so the machine and the application agree on
+	// which group they're in.
+	//
+	// An identity belongs to the box, so a seeded device binds to the machine.
+	// Anything that resolves a device to what it speaks for — backups, reports —
+	// goes through the machine.
+	const machineId = opts.machineId ?? randomUUID();
+	if (opts.machineId === undefined) {
+		await sql.query(
+			`INSERT INTO machines (id, name, group_id, device_id) VALUES ($1, $2, $3, $4)`,
+			// A machine is always named, whether or not the workload on it is.
+			[
+				machineId,
+				name ?? randomLabel("box"),
+				opts.groupId ?? null,
+				opts.deviceId ?? null,
+			],
+		);
+	}
 	await sql.query(
-		`INSERT INTO servers (id, name, host, product, kind, rank, group_id, device_id, is_monitored, alert_when_down_for, notes, tags, may_manage_dns, may_manage_tls)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13, $14)`,
+		`INSERT INTO applications (id, name, host, type, rank, group_id, is_monitored, alert_when_down_for, notes, tags, may_manage_dns, may_manage_tls, machine_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13)`,
 		[
 			id,
 			name,
 			host,
-			product,
-			kind,
+			type,
 			rank,
 			opts.groupId ?? null,
-			opts.deviceId ?? null,
 			isMonitored,
 			alertWhenDownFor,
 			opts.notes ?? "",
 			JSON.stringify(opts.tags ?? {}),
 			opts.mayManageDns ?? false,
 			opts.mayManageTls ?? false,
+			machineId,
 		],
 	);
-	return { id, name, host, product, kind, rank };
+	return { id, name, host, type, rank, machineId };
 }
 
 export interface SeededDevice {
@@ -197,7 +420,7 @@ export async function seedDevice(
 	opts: { role?: string; tailscaleNodeName?: string } = {},
 ): Promise<SeededDevice> {
 	const id = randomUUID();
-	const role = opts.role ?? "server";
+	const role = opts.role ?? "machine";
 	await sql.query(
 		`INSERT INTO devices (id, role, tailscale_node_name) VALUES ($1, $2, $3)`,
 		[id, role, opts.tailscaleNodeName ?? null],
@@ -226,6 +449,25 @@ export async function seedDeviceKey(
 			opts.isActive ?? true,
 			opts.keyData ?? randomBytes(32),
 		],
+	);
+	return { id };
+}
+
+/** A connection an identity made to canopy, carrying the User-Agent it
+ * presented.
+ *
+ * The runtime an application reports is read out of this when a push doesn't
+ * name one, so it goes on the identity bound to the application's *machine*,
+ * not on whichever identity happened to file a push. */
+export async function seedDeviceConnection(
+	sql: Sql,
+	opts: { deviceId: string; userAgent: string; ip?: string },
+): Promise<{ id: string }> {
+	const id = randomUUID();
+	await sql.query(
+		`INSERT INTO device_connections (id, device_id, ip, user_agent)
+		 VALUES ($1, $2, $3, $4)`,
+		[id, opts.deviceId, opts.ip ?? "203.0.113.7", opts.userAgent],
 	);
 	return { id };
 }
@@ -279,28 +521,57 @@ export async function seedStatus(
 		params,
 	);
 
-	// Mirror ingestion: the push is the source's current server-wide detail,
-	// which is what the live figures (and the Munin flag) read — they never
-	// search status history. Ordered by the status's own timestamp so
-	// out-of-order seeding still resolves newest-wins correctly.
+	const machineRows = await sql.query<{ machine_id: string }>(
+		"SELECT machine_id FROM applications WHERE id = $1",
+		[opts.serverId],
+	);
+	const machineId = machineRows[0]?.machine_id ?? null;
+
+	// Mirror ingestion: the push is the source's current detail, which is what
+	// the live figures read — they never search status history. Ordered by the
+	// status's own timestamp so out-of-order seeding still resolves
+	// newest-wins correctly.
+	//
+	// Ingestion splits the push by grain, so the seed does too: a field about
+	// the box is the machine's report, and a fleet spread that counts machines
+	// reads it there. Writing it all to the application would make a
+	// two-workload box report the same fact twice.
+	const detail = splitDetail(opts.extra ?? {});
 	await sql.query(
-		`INSERT INTO server_reported_detail (server_id, source, extra, version, reported_at)
+		`INSERT INTO application_reported_detail (application_id, source, extra, version, reported_at)
 		 VALUES ($1, $2, $3::jsonb, $4, $5)
-		 ON CONFLICT (server_id, source) DO UPDATE
+		 ON CONFLICT (application_id, source) DO UPDATE
 		 SET extra = EXCLUDED.extra, version = EXCLUDED.version, reported_at = EXCLUDED.reported_at
-		 WHERE server_reported_detail.reported_at <= EXCLUDED.reported_at`,
+		 WHERE application_reported_detail.reported_at <= EXCLUDED.reported_at`,
 		[
 			opts.serverId,
 			source,
-			JSON.stringify(opts.extra ?? {}),
+			JSON.stringify(detail.application),
 			opts.version ?? null,
 			rows[0]!.created_at,
 		],
 	);
+	if (machineId !== null && Object.keys(detail.machine).length > 0) {
+		await sql.query(
+			`INSERT INTO machine_reported_detail (machine_id, source, extra, reported_at)
+			 VALUES ($1, $2, $3::jsonb, $4)
+			 ON CONFLICT (machine_id, source) DO UPDATE
+			 SET extra = EXCLUDED.extra, reported_at = EXCLUDED.reported_at
+			 WHERE machine_reported_detail.reported_at <= EXCLUDED.reported_at`,
+			[machineId, source, JSON.stringify(detail.machine), rows[0]!.created_at],
+		);
+	}
 
 	// Mirror ingestion: each check in the push has a check-state row, which
 	// is what the health rollup and attention pages read. Degraded checks
 	// carry the degraded-streak stamps; healthy ones record inactive state.
+	// The reporting application's type decides the namespace a check that
+	// names the workload belongs to.
+	const applicationType = await applicationTypeOf(sql, opts.serverId);
+	// Ingestion splits a unified push by each check's subject: a check about
+	// the box files against the machine, not against the workload that
+	// happened to report it. Seeded state has to land the same way or a box
+	// with two workloads reads as two sets of the same facts.
 	for (const entry of (opts.health ?? []) as Record<string, unknown>[]) {
 		const check = entry.check;
 		if (typeof check !== "string") continue;
@@ -314,21 +585,25 @@ export async function seedStatus(
 					: null;
 		if (result === null) continue;
 		// Mirror ingestion's upsert_default: a check-state only presents and
-		// counts if a live catalog row backs it. Never clobbers an explicit
-		// seedCheckPolicy for the same (source, check).
+		// counts if a live catalog row backs it, in the namespace the reporter
+		// files into. Never clobbers an explicit seedCheckPolicy for the same
+		// entry.
+		const ns = namespaceOf(source, check, applicationType);
 		await sql.query(
-			`INSERT INTO check_policies (source, check_name) VALUES ($1, $2)
-			 ON CONFLICT (source, check_name) DO NOTHING`,
-			[source, check],
+			`INSERT INTO check_policies (source, subject, application_type, check_name)
+			 VALUES ($1, $2, $3, $4)
+			 ON CONFLICT (source, subject, application_type, check_name) DO NOTHING`,
+			[source, ns.subject, ns.applicationType, check],
 		);
 		const degraded = ["failed", "warning", "broken"].includes(result);
+		const onMachine = ns.subject === "machine" && machineId !== null;
 		await sql.query(
 			`INSERT INTO issues
-			 (server_id, source, ref, check_name, observed_result, effective_result, detail, message, active, first_seen, last_seen, degraded_since, last_degraded_at)
-			 VALUES ($1, $10, $2, $3, $4, $4, $5::jsonb, $6, $7, NOW(), NOW(), $8, $9)
+			 (application_id, machine_id, source, ref, check_name, observed_result, effective_result, detail, message, active, first_seen, last_seen, degraded_since, last_degraded_at)
+			 VALUES ($1, $11, $10, $2, $3, $4, $4, $5::jsonb, $6, $7, NOW(), NOW(), $8, $9)
 			 ON CONFLICT DO NOTHING`,
 			[
-				opts.serverId,
+				onMachine ? null : opts.serverId,
 				`health/${check}`,
 				check,
 				result,
@@ -338,6 +613,7 @@ export async function seedStatus(
 				degraded ? new Date().toISOString() : null,
 				degraded ? new Date().toISOString() : null,
 				source,
+				onMachine ? machineId : null,
 			],
 		);
 	}
@@ -372,7 +648,7 @@ export async function seedCheckStability(
 		`INSERT INTO check_stability
 		 (issue_id, observations, degraded_observations, last_observed_at, last_observed_degraded, transitions, duty_cycle)
 		 SELECT id, $4, $5, $6::timestamptz, $7, $8::jsonb, $9::jsonb
-		 FROM issues WHERE server_id = $1 AND source = $2 AND ref = $3`,
+		 FROM issues WHERE application_id = $1 AND source = $2 AND ref = $3`,
 		[
 			opts.serverId,
 			opts.source ?? "alertd",
@@ -390,6 +666,7 @@ export async function seedCheckStability(
 export interface SeededCheckPolicy {
 	source: string;
 	checkName: string;
+	namespace: SeedNamespace;
 }
 
 /** Policy row for a (source, check), as ingestion would have upserted
@@ -409,16 +686,26 @@ export async function seedCheckPolicy(
 		 * candidate ("gone quiet"). */
 		lastSeen?: string | null;
 		decommissionedAt?: string | null;
+		/** Which application type reports it, for a check that names the
+		 * workload. Defaults to a Tamanu central, as `seedServer` does. */
+		applicationType?: ApplicationType;
 	},
 ): Promise<SeededCheckPolicy> {
 	const source = opts.source ?? "alertd";
+	const namespace = namespaceOf(
+		source,
+		opts.checkName,
+		opts.applicationType ?? "tamanu-central",
+	);
 	await sql.query(
-		`INSERT INTO check_policies (source, check_name, ceiling, escalates, notes, documentation, last_seen, decommissioned_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		 ON CONFLICT (source, check_name)
+		`INSERT INTO check_policies (source, subject, application_type, check_name, ceiling, escalates, notes, documentation, last_seen, decommissioned_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		 ON CONFLICT (source, subject, application_type, check_name)
 		 DO UPDATE SET ceiling = EXCLUDED.ceiling, escalates = EXCLUDED.escalates, notes = EXCLUDED.notes, documentation = EXCLUDED.documentation, last_seen = EXCLUDED.last_seen, decommissioned_at = EXCLUDED.decommissioned_at`,
 		[
 			source,
+			namespace.subject,
+			namespace.applicationType,
 			opts.checkName,
 			opts.ceiling ?? "warning",
 			opts.escalates ?? false,
@@ -428,7 +715,7 @@ export async function seedCheckPolicy(
 			opts.decommissionedAt ?? null,
 		],
 	);
-	return { source, checkName: opts.checkName };
+	return { source, checkName: opts.checkName, namespace };
 }
 
 /** The check name a silence ref maps to in scoped-policy storage:
@@ -450,14 +737,21 @@ export async function seedServerSilencedRef(
 		createdBy?: string | null;
 	},
 ): Promise<void> {
+	const source = opts.source ?? "alertd";
+	const check = refToCheck(opts.ref);
+	// A silence names a check, so it names a namespace: quieting one
+	// application type's check leaves another type's same-named check alone.
+	const ns = namespaceOf(source, check, await applicationTypeOf(sql, opts.serverId));
 	await sql.query(
-		`INSERT INTO scoped_check_policies (server_id, source, check_name, ceiling, created_by)
-		 VALUES ($1, $2, $3, 'skipped', $4)
+		`INSERT INTO scoped_check_policies (application_id, source, subject, application_type, check_name, ceiling, created_by)
+		 VALUES ($1, $2, $3, $4, $5, 'skipped', $6)
 		 ON CONFLICT DO NOTHING`,
 		[
 			opts.serverId,
-			opts.source ?? "alertd",
-			refToCheck(opts.ref),
+			source,
+			ns.subject,
+			ns.applicationType,
+			check,
 			opts.createdBy ?? null,
 		],
 	);
@@ -472,16 +766,25 @@ export async function seedGroupSilencedRef(
 		ref: string;
 		source?: string;
 		createdBy?: string | null;
+		/** Which application type's check is silenced. A group spans several,
+		 * so the same name reported by another type is another silence.
+		 * Defaults to a Tamanu central, as `seedServer` does. */
+		applicationType?: ApplicationType;
 	},
 ): Promise<void> {
+	const source = opts.source ?? "alertd";
+	const check = refToCheck(opts.ref);
+	const ns = namespaceOf(source, check, opts.applicationType ?? "tamanu-central");
 	await sql.query(
-		`INSERT INTO scoped_check_policies (server_group_id, source, check_name, ceiling, created_by)
-		 VALUES ($1, $2, $3, 'skipped', $4)
+		`INSERT INTO scoped_check_policies (server_group_id, source, subject, application_type, check_name, ceiling, created_by)
+		 VALUES ($1, $2, $3, $4, $5, 'skipped', $6)
 		 ON CONFLICT DO NOTHING`,
 		[
 			opts.groupId,
-			opts.source ?? "alertd",
-			refToCheck(opts.ref),
+			source,
+			ns.subject,
+			ns.applicationType,
+			check,
 			opts.createdBy ?? null,
 		],
 	);
@@ -513,9 +816,12 @@ export async function seedIssue(
 		/** Server-scoped issue. Mutually exclusive with `serverGroupId` — the
 		 * `issues` scope CHECK allows at most one set. */
 		serverId?: string | null;
+		/** Machine-scoped issue: a fact about the box rather than a workload on
+		 * it. Mutually exclusive with the other two. */
+		machineId?: string | null;
 		/** Group-scoped issue (e.g. a backup issue spanning the group). When set,
 		 * leave `serverId` unset so the row satisfies the scope constraint.
-		 * Leaving both unset seeds a canopy-wide issue (a self-alert). */
+		 * Leaving all unset seeds a canopy-wide issue (a self-alert). */
 		serverGroupId?: string | null;
 		source?: string;
 		ref?: string;
@@ -535,6 +841,9 @@ export async function seedIssue(
 		 * the past to test "since when" displays (e.g. the per-healthcheck
 		 * page's failing-since column). */
 		firstSeen?: string;
+		/** Structured detail the condition attached, as the filing path stores
+		 * it. The self-alert surface links from this. */
+		detail?: unknown;
 	},
 ): Promise<SeededIssue> {
 	const id = randomUUID();
@@ -553,22 +862,35 @@ export async function seedIssue(
 	// A server-scoped check-state only presents/counts if a live catalog row
 	// backs it (mirrors ingestion's upsert_default); never clobbers an
 	// explicit seedCheckPolicy for the same (source, check).
-	if (opts.serverId) {
+	if (opts.serverId || opts.machineId) {
+		const source = opts.source ?? "alertd";
+		// A machine-scoped issue names a check about the box, which derives to
+		// the machine namespace whatever type is passed; the fallback only
+		// matters for a server-scoped one, and there the application says.
+		const ns = namespaceOf(
+			source,
+			check,
+			opts.serverId
+				? await applicationTypeOf(sql, opts.serverId)
+				: "tamanu-central",
+		);
 		await sql.query(
-			`INSERT INTO check_policies (source, check_name) VALUES ($1, $2)
-			 ON CONFLICT (source, check_name) DO NOTHING`,
-			[opts.source ?? "alertd", check],
+			`INSERT INTO check_policies (source, subject, application_type, check_name)
+			 VALUES ($1, $2, $3, $4)
+			 ON CONFLICT (source, subject, application_type, check_name) DO NOTHING`,
+			[source, ns.subject, ns.applicationType, check],
 		);
 	}
 	// Every seeded issue was degraded at some point — that's what makes it
 	// an issue rather than healthy check state, which the listings exclude.
 	await sql.query(
 		`INSERT INTO issues
-		 (id, server_id, server_group_id, device_id, source, ref, check_name, observed_result, effective_result, escalates, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason, degraded_since, last_degraded_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12, COALESCE($13::timestamptz, NOW()), NOW(), $14, $15, $16, $17, NOW())`,
+		 (id, application_id, machine_id, server_group_id, device_id, source, ref, check_name, observed_result, effective_result, escalates, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason, degraded_since, last_degraded_at, detail)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11, $12, $13, COALESCE($14::timestamptz, NOW()), NOW(), $15, $16, $17, $18, NOW(), $19)`,
 		[
 			id,
 			opts.serverId ?? null,
+			opts.machineId ?? null,
 			opts.serverGroupId ?? null,
 			opts.deviceId ?? null,
 			opts.source ?? "alertd",
@@ -584,6 +906,7 @@ export async function seedIssue(
 			resolved ? (opts.resolvedBy ?? null) : null,
 			resolved ? (opts.resolvedReason ?? null) : null,
 			active ? (opts.firstSeen ?? new Date().toISOString()) : null,
+			opts.detail === undefined ? null : JSON.stringify(opts.detail),
 		],
 	);
 	return { id };
@@ -785,7 +1108,7 @@ export async function seedBackupRun(
 	opts: {
 		deviceId: string;
 		groupId: string;
-		serverId?: string | null;
+		machineId?: string | null;
 		type?: string;
 		purpose?: "backup" | "restore";
 		outcome?: "success" | "failure";
@@ -809,7 +1132,7 @@ export async function seedBackupRun(
 	const id = opts.id ?? randomUUID();
 	await sql.query(
 		`INSERT INTO backup_runs
-		 (id, device_id, group_id, server_id, type, purpose, outcome, error, bytes_uploaded, snapshot_id,
+		 (id, device_id, group_id, machine_id, type, purpose, outcome, error, bytes_uploaded, snapshot_id,
 		  s3_sent_raw_bytes, s3_sent_payload_bytes, s3_received_raw_bytes, s3_received_payload_bytes,
 		  snapshot_logical_bytes, reported_at, snapshot_taken_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
@@ -819,7 +1142,7 @@ export async function seedBackupRun(
 			id,
 			opts.deviceId,
 			opts.groupId,
-			opts.serverId ?? null,
+			opts.machineId ?? null,
 			opts.type ?? "tamanu-postgres",
 			opts.purpose ?? "backup",
 			opts.outcome ?? "success",
@@ -924,7 +1247,7 @@ export async function seedBackupRunProgress(
 		runId: string;
 		deviceId: string;
 		groupId: string;
-		serverId?: string | null;
+		machineId?: string | null;
 		type?: string;
 		purpose?: "backup" | "restore";
 		observedAgoSecs?: number;
@@ -948,7 +1271,7 @@ export async function seedBackupRunProgress(
 ): Promise<void> {
 	await sql.query(
 		`INSERT INTO backup_run_progress
-		 (run_id, device_id, group_id, server_id, type, purpose, observed_at, snapshot_taken_at,
+		 (run_id, device_id, group_id, machine_id, type, purpose, observed_at, snapshot_taken_at,
 		  bytes_read, bytes_hashed, bytes_uploaded, bytes_cached, bytes_estimated,
 		  files_done, files_estimated, errors, ignored_errors, current_path,
 		  s3_sent_raw_bytes, s3_sent_payload_bytes, s3_received_raw_bytes, s3_received_payload_bytes,
@@ -961,7 +1284,7 @@ export async function seedBackupRunProgress(
 			opts.runId,
 			opts.deviceId,
 			opts.groupId,
-			opts.serverId ?? null,
+			opts.machineId ?? null,
 			opts.type ?? "tamanu-postgres",
 			opts.purpose ?? "backup",
 			opts.observedAgoSecs ?? 0,
@@ -1015,20 +1338,20 @@ export async function seedBackupRepoStats(
 	);
 }
 
-/** Seed a `server_backup_capabilities` row (what a server advertises it can
- * back up, plus the operator-set enabled flag). */
+/** Seed a `machine_backup_capabilities` row (what a box advertises it can back
+ * up, plus the operator-set enabled flag). A capability is the machine's. */
 export async function seedServerBackupCapability(
 	sql: Sql,
 	opts: {
-		serverId: string;
+		machineId: string;
 		type?: string;
 		enabled?: boolean;
 	},
 ): Promise<void> {
 	await sql.query(
-		`INSERT INTO server_backup_capabilities (server_id, type, enabled)
+		`INSERT INTO machine_backup_capabilities (machine_id, type, enabled)
 		 VALUES ($1, $2, $3)`,
-		[opts.serverId, opts.type ?? "tamanu-postgres", opts.enabled ?? true],
+		[opts.machineId, opts.type ?? "tamanu-postgres", opts.enabled ?? true],
 	);
 }
 
@@ -1036,17 +1359,17 @@ export async function seedServerBackupCapability(
 export async function seedBackupRequest(
 	sql: Sql,
 	opts: {
-		serverId: string;
+		machineId: string;
 		type?: string;
 		purpose?: "backup" | "restore";
 		requestedBy?: string | null;
 	},
 ): Promise<void> {
 	await sql.query(
-		`INSERT INTO backup_requests (server_id, type, purpose, requested_by)
+		`INSERT INTO backup_requests (machine_id, type, purpose, requested_by)
 		 VALUES ($1, $2, $3, $4)`,
 		[
-			opts.serverId,
+			opts.machineId,
 			opts.type ?? "tamanu-postgres",
 			opts.purpose ?? "backup",
 			opts.requestedBy ?? null,
@@ -1098,8 +1421,8 @@ export async function seedRestoreReplica(
 	opts: {
 		consumerDeviceId: string;
 		groupId: string;
-		/** Omit for a whole-group declaration. */
-		serverId?: string | null;
+		/** The machine whose snapshot is restored. Omit for a whole-group declaration. */
+		machineId?: string | null;
 		type?: string;
 		intent?: string;
 		name?: string;
@@ -1118,13 +1441,13 @@ export async function seedRestoreReplica(
 	if (overdue == null) {
 		await sql.query(
 			`INSERT INTO restore_replicas
-			 (id, consumer_device_id, group_id, server_id, type, intent, name, params, enabled, redacts)
+			 (id, consumer_device_id, group_id, machine_id, type, intent, name, params, enabled, redacts)
 			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)`,
 			[
 				id,
 				opts.consumerDeviceId,
 				opts.groupId,
-				opts.serverId ?? null,
+				opts.machineId ?? null,
 				opts.type ?? "tamanu-postgres",
 				opts.intent ?? "verify",
 				opts.name ?? randomLabel("replica"),
@@ -1136,13 +1459,13 @@ export async function seedRestoreReplica(
 	} else {
 		await sql.query(
 			`INSERT INTO restore_replicas
-			 (id, consumer_device_id, group_id, server_id, type, intent, name, overdue_after, params, enabled, redacts)
+			 (id, consumer_device_id, group_id, machine_id, type, intent, name, overdue_after, params, enabled, redacts)
 			 VALUES ($1, $2, $3, $4, $5, $6, $7, make_interval(secs => $8), $9::jsonb, $10, $11)`,
 			[
 				id,
 				opts.consumerDeviceId,
 				opts.groupId,
-				opts.serverId ?? null,
+				opts.machineId ?? null,
 				opts.type ?? "tamanu-postgres",
 				opts.intent ?? "verify",
 				opts.name ?? randomLabel("replica"),
@@ -1162,7 +1485,7 @@ export async function seedRestoreCheck(
 	opts: {
 		consumerDeviceId: string;
 		groupId: string;
-		serverId?: string | null;
+		machineId?: string | null;
 		replicaId?: string | null;
 		type?: string;
 		intent?: string;
@@ -1190,14 +1513,14 @@ export async function seedRestoreCheck(
 	const redaction = opts.redaction;
 	await sql.query(
 		`INSERT INTO backup_restore_checks
-		 (replica_id, consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome, error, replica_healthy, postgres_version, health_details, observed_at, run_id,
+		 (replica_id, consumer_device_id, group_id, machine_id, type, intent, snapshot_id, outcome, error, replica_healthy, postgres_version, health_details, observed_at, run_id,
 		  redaction_outcome, redaction_manifest_version, redaction_columns_masked, redaction_columns_skipped, redaction_error)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, COALESCE($13::timestamptz, NOW()), $14, $15, $16, $17, $18, $19)`,
 		[
 			opts.replicaId ?? null,
 			opts.consumerDeviceId,
 			opts.groupId,
-			opts.serverId ?? null,
+			opts.machineId ?? null,
 			opts.type ?? "tamanu-postgres",
 			opts.intent ?? "verify",
 			opts.snapshotId ?? null,
@@ -1225,7 +1548,10 @@ export async function seedMigrationTest(
 	opts: {
 		consumerDeviceId: string;
 		groupId: string;
-		serverId: string;
+		/** The machine whose snapshot was restored. */
+		machineId: string;
+		/** The application whose candidate version was tried. */
+		applicationId: string;
 		targetVersionId: string;
 		snapshotId?: string;
 		failedMigration?: string | null;
@@ -1237,21 +1563,22 @@ export async function seedMigrationTest(
 ): Promise<void> {
 	const rows = await sql.query<{ id: string }>(
 		`INSERT INTO backup_restore_checks
-		 (consumer_device_id, group_id, server_id, type, intent, snapshot_id, outcome,
+		 (consumer_device_id, group_id, machine_id, type, intent, snapshot_id, outcome,
 		  replica_healthy, observed_at)
 		 VALUES ($1, $2, $3, 'tamanu-postgres', 'migrate', $4, 'success', true, NOW())
 		 RETURNING id`,
-		[opts.consumerDeviceId, opts.groupId, opts.serverId, opts.snapshotId ?? "snap-1"],
+		[opts.consumerDeviceId, opts.groupId, opts.machineId, opts.snapshotId ?? "snap-1"],
 	);
 	const checkId = rows[0]!.id;
 
 	await sql.query(
 		`INSERT INTO migration_tests
-		 (check_id, target_version_id, total_elapsed, failed_migration,
+		 (check_id, application_id, target_version_id, total_elapsed, failed_migration,
 		  data_bytes_before, data_bytes_after)
-		 VALUES ($1, $2, make_interval(secs => $3), $4, $5, $6)`,
+		 VALUES ($1, $2, $3, make_interval(secs => $4), $5, $6, $7)`,
 		[
 			checkId,
+			opts.applicationId,
 			opts.targetVersionId,
 			opts.totalElapsedSecs ?? 60,
 			opts.failedMigration ?? null,
@@ -1275,12 +1602,12 @@ export interface SeededMaintenanceWindow {
 	id: string;
 }
 
-/** A maintenance window over a server or a group. `endsInHours` places the
+/** A maintenance window over a machine or a group. `endsInHours` places the
  * expected end, so a negative value seeds one the sweep will end. */
 export async function seedMaintenanceWindow(
 	sql: Sql,
 	opts: {
-		serverId?: string;
+		machineId?: string;
 		serverGroupId?: string;
 		endsInHours?: number;
 		/** Seed the window already ended this many minutes ago (still inside
@@ -1292,13 +1619,13 @@ export async function seedMaintenanceWindow(
 ): Promise<SeededMaintenanceWindow> {
 	const rows = await sql.query<{ id: string }>(
 		`INSERT INTO maintenance_windows
-		   (server_id, server_group_id, expected_end, ended_at, note, declared_by)
+		   (machine_id, server_group_id, expected_end, ended_at, note, declared_by)
 		 VALUES ($1, $2, NOW() + make_interval(mins => $3),
 		         CASE WHEN $4::int IS NULL THEN NULL ELSE NOW() - make_interval(mins => $4::int) END,
 		         $5, $6)
 		 RETURNING id`,
 		[
-			opts.serverId ?? null,
+			opts.machineId ?? null,
 			opts.serverGroupId ?? null,
 			opts.endedMinutesAgo != null
 				? -opts.endedMinutesAgo
@@ -1403,8 +1730,8 @@ export async function seedServerName(
 	const toInet = (addresses: string[]) =>
 		`{${addresses.map((a) => `"${a}"`).join(",")}}`;
 	await sql.query(
-		`INSERT INTO server_names
-		   (id, server_id, name, addresses, published_addresses, published_at, last_error)
+		`INSERT INTO application_names
+		   (id, application_id, name, addresses, published_addresses, published_at, last_error)
 		 VALUES ($1, $2, $3, $4::inet[], $5::inet[], $6, $7)`,
 		[
 			id,
@@ -1455,8 +1782,8 @@ export async function seedServerCertificate(
 		? new Date(Date.now() - (lifetimeDays - expiresInDays) * 86400_000)
 		: null;
 	await sql.query(
-		`INSERT INTO server_certificates
-		   (id, server_id, name, key_fingerprint, csr, state, chain, not_after,
+		`INSERT INTO application_certificates
+		   (id, application_id, name, key_fingerprint, csr, state, chain, not_after,
 		    issued_at, renewing, attempts, last_error, profile, renew_after,
 		    revoked_at, revoked_by, revocation_reason)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,

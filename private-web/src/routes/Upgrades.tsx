@@ -296,7 +296,7 @@ function EnvironmentName({
 }) {
 	return (
 		<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-			<RouterLink to={`/groups/${groupId}`}>{groupName}</RouterLink>
+			<RouterLink to={`/fleet/groups/${groupId}`}>{groupName}</RouterLink>
 			{rank !== "production" && <ServerRankChip rank={rank} />}
 		</Stack>
 	);
@@ -746,7 +746,7 @@ function CalendarEntry({
 			<Box
 				{...(onEdit
 					? { component: "button" as const, type: "button", onClick: onEdit }
-					: { component: RouterLink, to: `/groups/${entry.groupId}` })}
+					: { component: RouterLink, to: `/fleet/groups/${entry.groupId}` })}
 				data-testid="calendar-entry"
 				sx={[
 					(theme) => ({
@@ -792,7 +792,7 @@ function TimeBlock({
 			<Box
 				{...(onEdit
 					? { component: "button" as const, type: "button", onClick: onEdit }
-					: { component: RouterLink, to: `/groups/${entry.groupId}` })}
+					: { component: RouterLink, to: `/fleet/groups/${entry.groupId}` })}
 				data-testid="calendar-entry"
 				{...(block.tail ? { "data-continues": "true" } : null)}
 				sx={[
@@ -1385,8 +1385,8 @@ function OutcomeChip({
 	);
 }
 
-/// Whether the group's own data survives the planned version, rolled up
-/// from its servers. Pairing it with the plan is the point of this view.
+/// Whether the environment's own data survives the planned version, rolled up
+/// from its applications. Pairing it with the plan is the point of this view.
 function VerdictChip({
 	verdict,
 	testable,
@@ -1399,7 +1399,7 @@ function VerdictChip({
 	}
 	if (verdict === "failed") {
 		return (
-			<Tooltip title="a server's data broke the migrations; the version is held back">
+			<Tooltip title="an application's data broke the migrations; the version is held back">
 				<Chip size="small" color="warning" label="failed" />
 			</Tooltip>
 		);

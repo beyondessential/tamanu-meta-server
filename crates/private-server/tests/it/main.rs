@@ -3,10 +3,13 @@
 // file, which keeps rebuilds from swamping the machine with I/O.
 // Nextest still runs every #[tokio::test] in parallel as usual.
 
+mod application_host;
+mod application_paths;
+mod application_types;
 mod artifacts;
 mod backups;
 mod bestool;
-mod create_server;
+mod certificates;
 mod device_admin_endpoints;
 mod device_keys;
 mod devices;
@@ -18,6 +21,7 @@ mod health;
 mod healthchecks;
 mod issues;
 mod maintenance;
+mod maintenance_targets;
 mod mcp;
 mod migration_tests;
 mod notes;
@@ -26,7 +30,6 @@ mod operator_presence;
 mod private_statuses;
 mod provision_credential;
 mod restore_replicas;
-mod server_products;
 mod server_version_distance;
 mod sql;
 mod tagged_device_guard;

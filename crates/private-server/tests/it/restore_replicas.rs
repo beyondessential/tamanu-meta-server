@@ -30,9 +30,9 @@ async fn insert_consumer(conn: &mut AsyncPgConnection) -> Uuid {
 async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uuid {
 	let id = Uuid::new_v4();
 	conn.batch_execute(&format!(
-		"INSERT INTO servers (id, name, host, kind, rank, group_id) VALUES
-			('{id}', 'rr-test-server', 'https://{id}.example.com', 'facility',
-			 'production', '{group_id}')"
+		"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{id}', '{group_id}') RETURNING id) INSERT INTO applications (id, name, host, type, rank, group_id, machine_id) VALUES
+			('{id}', 'rr-test-server', 'https://{id}.example.com', 'tamanu-facility',
+			 'production', '{group_id}', '{id}')"
 	))
 	.await
 	.expect("insert server");
@@ -112,7 +112,7 @@ async fn create_rejects_wrong_typed_param() {
 			.json(&serde_json::json!({
 				"consumer_device_id": consumer,
 				"group_id": group,
-				"server_id": null,
+				"machine_id": null,
 				"type": "tamanu-postgres",
 				"intent": "analytics",
 				"name": "an-decl",
@@ -137,7 +137,7 @@ async fn create_stores_valid_params_and_they_round_trip() {
 			.json(&serde_json::json!({
 				"consumer_device_id": consumer,
 				"group_id": group,
-				"server_id": null,
+				"machine_id": null,
 				"type": "tamanu-postgres",
 				"intent": "analytics",
 				"name": "an-decl",
@@ -295,9 +295,8 @@ async fn a_server_that_cannot_be_redacted_shows_as_a_gap() {
 		advertise_redacting_analytics(&mut conn, consumer).await;
 		let senaite = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, name, host, kind, product, rank, group_id) VALUES
-				('{senaite}', 'lims', 'https://{senaite}.example.com', 'standalone',
-				 'senaite', 'production', '{group}')"
+			"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{senaite}', '{group}') RETURNING id) INSERT INTO applications (id, name, host, type, rank, group_id, machine_id) VALUES
+				('{senaite}', 'lims', 'https://{senaite}.example.com', 'senaite', 'production', '{group}', '{senaite}')"
 		))
 		.await
 		.expect("insert senaite server");
@@ -341,7 +340,7 @@ async fn create_replica(
 		.json(&serde_json::json!({
 			"consumer_device_id": consumer,
 			"group_id": group,
-			"server_id": null,
+			"machine_id": null,
 			"type": "tamanu-postgres",
 			"intent": intent,
 			"name": format!("{intent}-decl"),
@@ -369,7 +368,7 @@ async fn update_changes_intent_and_round_trips() {
 				"id": id,
 				"consumer_device_id": consumer,
 				"group_id": group,
-				"server_id": null,
+				"machine_id": null,
 				"type": "tamanu-postgres",
 				"intent": "analytics",
 				"name": "verify-decl",
@@ -419,7 +418,7 @@ async fn only_the_name_collides_not_the_scope() {
 				"id": b,
 				"consumer_device_id": consumer,
 				"group_id": group,
-				"server_id": null,
+				"machine_id": null,
 				"type": "tamanu-postgres",
 				"intent": "verify",
 				"name": "analytics-decl",
@@ -437,7 +436,7 @@ async fn only_the_name_collides_not_the_scope() {
 				"id": b,
 				"consumer_device_id": consumer,
 				"group_id": group,
-				"server_id": null,
+				"machine_id": null,
 				"type": "tamanu-postgres",
 				"intent": "verify",
 				"name": "verify-decl",
@@ -468,7 +467,7 @@ async fn update_revalidates_params_against_new_intent() {
 				"id": id,
 				"consumer_device_id": consumer,
 				"group_id": group,
-				"server_id": null,
+				"machine_id": null,
 				"type": "tamanu-postgres",
 				"intent": "analytics",
 				"name": "verify-decl",
@@ -502,7 +501,7 @@ async fn update_can_change_consumer_and_server_scope() {
 				"id": id,
 				"consumer_device_id": consumer_b,
 				"group_id": group,
-				"server_id": server,
+				"machine_id": server,
 				"type": "tamanu-postgres",
 				"intent": "verify",
 				"name": "verify-decl",
@@ -521,7 +520,7 @@ async fn update_can_change_consumer_and_server_scope() {
 		let rows: Vec<serde_json::Value> = resp.json();
 		assert_eq!(rows.len(), 1, "got {rows:?}");
 		assert_eq!(rows[0]["consumer_device_id"], consumer_b.to_string());
-		assert_eq!(rows[0]["server_id"], server.to_string());
+		assert_eq!(rows[0]["machine_id"], server.to_string());
 	})
 	.await;
 }
@@ -546,7 +545,7 @@ async fn update_to_unadvertised_intent_creates_gap() {
 				"id": id,
 				"consumer_device_id": consumer,
 				"group_id": group,
-				"server_id": null,
+				"machine_id": null,
 				"type": "tamanu-postgres",
 				"intent": "analytics",
 				"name": "verify-decl",
@@ -582,13 +581,13 @@ async fn checks_reports_duration_and_surfaces_unreported_restores() {
 		let inflight_run = Uuid::new_v4();
 		let member_run = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO devices (id, role) VALUES ('{member_device}', 'server');
-			 INSERT INTO servers (id, host, kind, group_id, device_id) VALUES
-				('{server}', 'https://s.test', 'central', '{group}', '{member_device}');
+			"INSERT INTO devices (id, role) VALUES ('{member_device}', 'machine');
+			 WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ('{server}', '{group}', '{member_device}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES
+				('{server}', 'https://s.test', 'tamanu-central', '{group}', '{server}');
 			 -- A reported check plus the issuance that started it 5 minutes before
 			 -- the report → the row carries a ~300s duration.
 			 INSERT INTO backup_restore_checks
-				(consumer_device_id, group_id, server_id, type, intent, outcome, replica_healthy, observed_at, reported_at, run_id)
+				(consumer_device_id, group_id, machine_id, type, intent, outcome, replica_healthy, observed_at, reported_at, run_id)
 				VALUES ('{consumer}', '{group}', '{server}', 'tamanu-postgres', 'verify', 'success', true, now(), now(), '{reported_run}');
 			 INSERT INTO backup_credential_issuances
 				(device_id, group_id, type, issued_at, expires_at, purpose, sts_assumed_role, bucket, prefix, run_id)
@@ -624,7 +623,7 @@ async fn checks_reports_duration_and_surfaces_unreported_restores() {
 		assert_eq!(reported["intent"], "verify");
 
 		let inflight = rows.iter().find(|r| r["status"] == "in_progress").unwrap();
-		assert!(inflight["server_id"].is_null(), "inferred row has no server");
+		assert!(inflight["machine_id"].is_null(), "inferred row has no server");
 		assert!(inflight["duration_seconds"].is_null());
 	})
 	.await;
@@ -642,7 +641,7 @@ async fn create_resolves_unit_strings_and_stores_raw_values() {
 			.json(&serde_json::json!({
 				"consumer_device_id": consumer,
 				"group_id": group,
-				"server_id": null,
+				"machine_id": null,
 				"type": "tamanu-postgres",
 				"intent": "sizing",
 				"name": "sizing-decl",
@@ -696,7 +695,7 @@ async fn create_accepts_raw_integers_for_unit_params() {
 			.json(&serde_json::json!({
 				"consumer_device_id": consumer,
 				"group_id": group,
-				"server_id": null,
+				"machine_id": null,
 				"type": "tamanu-postgres",
 				"intent": "sizing",
 				"name": "raw-decl",
@@ -751,7 +750,7 @@ async fn create_rejects_bad_unit_strings() {
 				.json(&serde_json::json!({
 					"consumer_device_id": consumer,
 					"group_id": group,
-					"server_id": null,
+					"machine_id": null,
 					"type": "tamanu-postgres",
 					"intent": "sizing",
 					"name": "bad-decl",
@@ -777,7 +776,7 @@ async fn create_rejects_bad_overdue_bound_and_allows_blank() {
 			.json(&serde_json::json!({
 				"consumer_device_id": consumer,
 				"group_id": group,
-				"server_id": null,
+				"machine_id": null,
 				"type": "tamanu-postgres",
 				"intent": "verify",
 				"name": "bad-bound",
@@ -793,7 +792,7 @@ async fn create_rejects_bad_overdue_bound_and_allows_blank() {
 			.json(&serde_json::json!({
 				"consumer_device_id": consumer,
 				"group_id": group,
-				"server_id": null,
+				"machine_id": null,
 				"type": "tamanu-postgres",
 				"intent": "verify",
 				"name": "no-bound",
@@ -844,7 +843,7 @@ async fn create_and_update_reject_a_name_the_consumer_already_uses() {
 			.json(&serde_json::json!({
 				"consumer_device_id": consumer,
 				"group_id": group,
-				"server_id": null,
+				"machine_id": null,
 				"type": "tamanu-postgres",
 				"intent": "verify",
 				"name": "nightly",
@@ -862,7 +861,7 @@ async fn create_and_update_reject_a_name_the_consumer_already_uses() {
 			.json(&serde_json::json!({
 				"consumer_device_id": consumer,
 				"group_id": group,
-				"server_id": null,
+				"machine_id": null,
 				"type": "tamanu-postgres",
 				"intent": "analytics",
 				"name": "nightly",
@@ -877,7 +876,7 @@ async fn create_and_update_reject_a_name_the_consumer_already_uses() {
 			.json(&serde_json::json!({
 				"consumer_device_id": consumer,
 				"group_id": group,
-				"server_id": null,
+				"machine_id": null,
 				"type": "tamanu-postgres",
 				"intent": "analytics",
 				"name": "",
@@ -901,7 +900,7 @@ async fn create_and_update_reject_a_name_the_consumer_already_uses() {
 				"id": other,
 				"consumer_device_id": consumer,
 				"group_id": group,
-				"server_id": null,
+				"machine_id": null,
 				"type": "tamanu-postgres",
 				"intent": "analytics",
 				"name": "nightly",
@@ -926,7 +925,7 @@ async fn delete_succeeds_for_a_declaration_with_restore_health_history() {
 
 		conn.batch_execute(&format!(
 			"INSERT INTO backup_restore_checks \
-			 (replica_id, consumer_device_id, group_id, server_id, type, intent, \
+			 (replica_id, consumer_device_id, group_id, machine_id, type, intent, \
 			  snapshot_id, outcome, replica_healthy, observed_at) \
 			 VALUES ('{id}', '{consumer}', '{group}', '{server}', 'tamanu-postgres', \
 			  'verify', 'snap-1', 'success', true, now())"

@@ -4,7 +4,7 @@ id: UPG
 
 # Planned upgrades
 
-Canopy records where each environment is going: the version a group's servers at one rank intend to move to, and optionally the day and the window on it.
+Canopy records where each environment is going: the version a group's applications at one rank intend to move to, and optionally the day and the window on it.
 A plan makes the fleet's intended upgrades visible in one place, and it tells the rest of Canopy which version to hold an environment's data against, so pre-upgrade testing exercises the version that will actually be applied rather than guessing.
 
 ## Scope
@@ -12,11 +12,11 @@ A plan makes the fleet's intended upgrades visible in one place, and it tells th
 This spec covers what a plan records, who sets it, when Canopy considers it met, and what reads it.
 
 It does not cover performing an upgrade.
-Canopy serves versions to servers and records what they report running; the act of upgrading is the site's own, and a plan is a statement of intent rather than an instruction to anything.
+Canopy serves versions to applications and records what they report running; the act of upgrading is the site's own, and a plan is a statement of intent rather than an instruction to anything.
 
 ## Why it exists
 
-Canopy already knows what every server runs and every version that exists.
+Canopy already knows what every application runs and every version that exists.
 What it cannot derive is where an environment is going: which minor a site moves to next is a decision made by people, weighing what the release contains against what the site can absorb.
 Nor is it one decision per site: a clone is often moved first, to rehearse the upgrade on a copy of the data before production follows, so the clone and the production are going different places at once.
 
@@ -26,7 +26,7 @@ And nobody can see at a glance which environments are mid-plan, which are overdu
 
 ## A plan
 
-An operator records, per environment, a group's servers at one rank (see [GRP](../servers/groups.md)):
+An operator records, per environment, a group's applications at one rank (see [GRP](../servers/groups.md), "Environments"):
 
 - the **target version**, which must be a published version newer than the environment is running;
 - an optional **planned date**, the day the upgrade is expected to happen;
@@ -48,10 +48,10 @@ An environment has at most one open plan, and a group holds as many open plans a
 An environment moves to one place next, so a second plan for it replaces the first rather than queueing behind it, and the replaced plan is retained as history.
 A plan for a group's clone leaves its production's plan where it was.
 
-What an environment runs is what its canonical member reports: the highest kind among the group's live servers at that rank, so a site's production reads from its production central server and its clone from the clone's.
+What an environment runs is what its own central reports, so a site's production reads from its production central and its clone from the clone's (see [APP](../servers/application-types.md), "Versions").
 Wherever an environment is named, it is named by its group with the rank after it, except a group's production, which is named by the group alone.
-A server with no rank belongs to its group's highest-ranked environment, since that is the environment the group's own version is read from.
-A plan names an environment the group has servers at; one cannot be recorded for a rank the group holds nothing at.
+An application with no rank belongs to its group's headline environment, the one at the group's highest rank (see [GRP](../servers/groups.md), "A group's headline rank").
+A plan names an environment the group has applications at; one cannot be recorded for a rank the group holds nothing at.
 
 An open plan's date, time, and note can be amended, and an amendment records who made it and when.
 A corrected date or a reworded note is the same plan better described, so it stays one plan rather than entering the history as a second.
@@ -78,7 +78,7 @@ The record of what an environment planned, when it planned it for, and when it a
 
 ## What reads a plan
 
-Pre-upgrade migration testing takes each server's target from its own environment's open plan, and an environment with no plan is not tested at all.
+Pre-upgrade migration testing takes each application's target from its own environment's open plan, and an environment with no plan is not tested at all.
 Recording a plan is what asks for the testing, and no restore is spent on a version nobody intends to apply.
 
 A plan changes what is tested, so changing one invalidates nothing already recorded: earlier verdicts stand against the versions they named, and the new target simply becomes the one that has not been tested yet.
@@ -94,11 +94,11 @@ For each environment with an open plan it shows the environment, the target vers
 The window is shown with its timezone abbreviated, so a reader can tell which site's midnight it is.
 Where a restore attempt is under way it shows that too.
 A restore takes hours, and without this a plan that is still being tested and one the pipeline has stopped testing both read as not yet tested.
-An attempt is the group's rather than one environment's, since a restore is issued credentials for the group's backups without naming the server it will restore, so it shows on each of the group's environments that is set up for testing.
-Where nothing is declared to migrate the group's data it says so in place of the verdict, since a plan on a group with no such declaration is never dispatched and a reader would otherwise wait on a result that cannot arrive.
-Groups whose highest-ranked environment runs behind the newest published version with no plan are shown too, with how far behind each is, behind a disclosure that counts them: an unplanned production several minors behind is what this view exists to surface, and the count surfaces it without the list crowding out what is moving.
-An environment already on the newest version has nothing to plan, and one that has reported no version cannot be placed, so neither is listed.
-A clone or demo with no plan is not listed there either, since most of them are never planned and listing them would bury the gap that matters.
+An attempt is the group's rather than one environment's, since a restore is issued credentials for the group's backups without naming the machine it will restore, so it shows on each of the group's environments that is set up for testing.
+Where nothing is declared to migrate the environment's data it says so in place of the verdict, since a plan with no such declaration is never dispatched and a reader would otherwise wait on a result that cannot arrive.
+Environments with no plan are shown too, behind a disclosure that counts them, and each is shown with how far behind it is: an unplanned production several minors behind is what this view exists to surface, and the count surfaces it without the list crowding out what is moving.
+Only a group's headline environment is listed there, since a clone or a demo is mostly never planned and listing them would bury the gap that matters.
+An environment already on the newest published version has nothing to plan, and one that has reported no version cannot be placed, so neither is listed either.
 
 A plan whose date has passed without being met is presented as late, judged on the day alone rather than the hour.
 Late is a presentational state and not an incident: an upgrade slipping is normal operational reality, and Canopy has no basis for treating a date someone typed as a failure of anything.

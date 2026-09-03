@@ -20,7 +20,7 @@ test.describe("group domains", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "domainless" });
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 
 		await expect(
 			page.getByRole("heading", { name: "Domains" }),
@@ -54,7 +54,7 @@ test.describe("group domains", () => {
 			domain: "old.senaite.app",
 		});
 
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 
 		await expect(page.getByText("fiji.tamanu.app", { exact: true })).toBeVisible();
 		await expect(page.getByText("zone tamanu.app")).toBeVisible();
@@ -68,7 +68,7 @@ test.describe("group domains", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "samoa" });
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 
 		await page.getByLabel("Domain").fill("samoa.tamanu.app");
 		await page.getByRole("button", { name: "Claim" }).click();
@@ -91,7 +91,7 @@ test.describe("group domains", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "outside" });
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 
 		await page.getByLabel("Domain").fill("nope.example.com");
 		await page.getByRole("button", { name: "Claim" }).click();
@@ -115,7 +115,7 @@ test.describe("group domains", () => {
 		});
 		const rival = await seedServerGroup(sql, { name: "rival" });
 
-		await page.goto(`/groups/${rival.id}`);
+		await page.goto(`/fleet/groups/${rival.id}`);
 		await page.getByLabel("Domain").fill("sub.contested.tamanu.app");
 		await page.getByRole("button", { name: "Claim" }).click();
 
@@ -147,13 +147,13 @@ test.describe("server name-management permissions", () => {
 		// Nothing granted: the row says nothing worth a line. "Not permitted" on
 		// every server in the fleet advertises a feature a Canopy instance without DNS
 		// zones does not have.
-		await page.goto(`/servers/${plain.id}`);
+		await page.goto(`/fleet/applications/${plain.id}`);
 		await expect(
 			page.getByRole("heading", { level: 1, name: /unpermitted/ }),
 		).toBeVisible();
 		await expect(page.getByText("Name management")).toHaveCount(0);
 
-		await page.goto(`/servers/${granted.id}`);
+		await page.goto(`/fleet/applications/${granted.id}`);
 		await expect(page.getByText("Name management")).toBeVisible();
 		await expect(page.getByText("DNS and TLS")).toBeVisible();
 	});
@@ -165,10 +165,8 @@ test.describe("server name-management permissions", () => {
 		const group = await seedServerGroup(sql, { name: "domainless" });
 		const server = await seedServer(sql, { name: "central", groupId: group.id });
 
-		await page.goto(`/servers/${server.id}/edit`);
-		await expect(
-			page.getByRole("heading", { name: "Edit server" }),
-		).toBeVisible();
+		await page.goto(`/fleet/machines/${server.machineId}/edit`);
+		await expect(page.getByTestId("application-section")).toBeVisible();
 
 		// A grant is exercised over names beneath a domain the group controls, so
 		// without one there is nothing for it to authorise.
@@ -194,7 +192,7 @@ test.describe("server name-management permissions", () => {
 			name: "grantee",
 			groupId: group.id,
 		});
-		await page.goto(`/servers/${server.id}/edit`);
+		await page.goto(`/fleet/machines/${server.machineId}/edit`);
 
 		// The domain the group controls is named, so an operator can see what the
 		// grant would cover.
@@ -205,10 +203,15 @@ test.describe("server name-management permissions", () => {
 		await page.getByLabel("May manage its own DNS records").check();
 		await page.getByRole("button", { name: "Save" }).click();
 
+		// Saving lands on the box, whose form it is; the grant reads back on the
+		// application it belongs to. Wait for the landing first — navigating
+		// away while the form's writes are in flight races them.
+		await page.waitForURL(`**/fleet/machines/${server.machineId}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 		await expect(page.getByText("DNS only")).toBeVisible();
 
 		// And the other grant is independent of it.
-		await page.goto(`/servers/${server.id}/edit`);
+		await page.goto(`/fleet/machines/${server.machineId}/edit`);
 		await expect(
 			page.getByLabel("May manage its own DNS records"),
 		).toBeChecked();
@@ -218,6 +221,8 @@ test.describe("server name-management permissions", () => {
 		await page.getByLabel("May obtain its own TLS certificates").check();
 		await page.getByRole("button", { name: "Save" }).click();
 
+		await page.waitForURL(`**/fleet/machines/${server.machineId}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 		await expect(page.getByText("DNS and TLS")).toBeVisible();
 	});
 
@@ -240,10 +245,8 @@ test.describe("server name-management permissions", () => {
 			}),
 		);
 
-		await page.goto(`/servers/${server.id}/edit`);
-		await expect(
-			page.getByRole("heading", { name: "Edit server" }),
-		).toBeVisible();
+		await page.goto(`/fleet/machines/${server.machineId}/edit`);
+		await expect(page.getByTestId("application-section")).toBeVisible();
 		await expect(page.getByText("Name management")).toHaveCount(0);
 		await expect(
 			page.getByLabel("May manage its own DNS records"),
@@ -269,7 +272,7 @@ test.describe("server name-management permissions", () => {
 			}),
 		);
 
-		await page.goto(`/servers/${server.id}/edit`);
+		await page.goto(`/fleet/machines/${server.machineId}/edit`);
 		// Hiding it would strand a grant with no way to withdraw it.
 		const dns = page.getByLabel("May manage its own DNS records");
 		await expect(dns).toBeChecked();

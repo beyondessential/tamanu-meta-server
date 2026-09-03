@@ -18,8 +18,8 @@ use std::{collections::BTreeMap, time::Duration};
 use anyhow::{Context, Result};
 use commons_servers::{backup_secrets::BackupSecrets, recovery_vault::Recipients};
 use database::{
-	ServerBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
-	server_groups::ServerGroup, servers::Server,
+	MachineBackupCapability, ServerGroupBackupConfig, ServerGroupBackupSchedule,
+	applications::Application, server_groups::ServerGroup,
 };
 use jiff::Timestamp;
 use serde::Serialize;
@@ -89,8 +89,8 @@ struct RecoverySnapshot {
 	schema_version: u32,
 	taken_at: String,
 	groups: Vec<RecoveryGroup>,
-	servers: Vec<Server>,
-	enabled_capabilities: Vec<ServerBackupCapability>,
+	applications: Vec<Application>,
+	enabled_capabilities: Vec<MachineBackupCapability>,
 }
 
 #[derive(Serialize)]
@@ -127,9 +127,14 @@ pub async fn build_snapshot_json(
 		.collect();
 
 	let mut recovery_groups = Vec::with_capacity(groups.len());
-	let mut servers: Vec<Server> = Vec::new();
+	let mut applications: Vec<Application> = Vec::new();
 	for group in groups {
-		servers.extend(group.list_servers(db).await.context("list group servers")?);
+		applications.extend(
+			group
+				.list_servers(db)
+				.await
+				.context("list group applications")?,
+		);
 
 		let config = match configs.get(&group.id) {
 			Some(config) => {
@@ -153,18 +158,18 @@ pub async fn build_snapshot_json(
 		};
 		recovery_groups.push(RecoveryGroup { group, config });
 	}
-	servers.extend(
-		Server::list_ungrouped(db)
+	applications.extend(
+		Application::list_ungrouped(db)
 			.await
-			.context("list ungrouped servers")?,
+			.context("list ungrouped applications")?,
 	);
 
 	let snapshot = RecoverySnapshot {
 		schema_version: SCHEMA_VERSION,
 		taken_at: now.to_string(),
 		groups: recovery_groups,
-		servers,
-		enabled_capabilities: ServerBackupCapability::list_enabled(db)
+		applications,
+		enabled_capabilities: MachineBackupCapability::list_enabled(db)
 			.await
 			.context("list capabilities")?,
 	};

@@ -132,7 +132,7 @@ pub async fn for_group(
 	))
 }
 
-/// Where a group stands with respect to granting its servers name management.
+/// Where a group stands with respect to granting its applications name management.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct GrantAvailabilityView {
 	/// What an operator can do with the two grants right now:

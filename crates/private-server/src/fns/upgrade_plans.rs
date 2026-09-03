@@ -59,9 +59,9 @@ pub struct PlannedUpgrade {
 	/// Presentational: a slipping upgrade is normal operational reality.
 	pub late: bool,
 	/// Where the environment's data stands against the planned version, rolled
-	/// up from its servers: any failure makes the environment a failure, since
-	/// one server whose data breaks is enough to stop the upgrade. `null`
-	/// without a plan.
+	/// up from its applications: any failure makes the environment a failure,
+	/// since one application whose data breaks is enough to stop the upgrade.
+	/// `null` without a plan.
 	pub verdict: Option<String>,
 	/// Whether a restore attempt is under way, carried beside the verdict rather
 	/// than folded into it: a restore takes hours, so a group mid-test would
@@ -115,7 +115,7 @@ pub async fn fleet(
 		.collect();
 	let mut attempts: HashMap<Uuid, Option<crate::fns::migration_tests::AttemptState>> =
 		HashMap::new();
-	let mut members: HashMap<Uuid, Vec<database::servers::Server>> = HashMap::new();
+	let mut members: HashMap<Uuid, Vec<database::applications::Application>> = HashMap::new();
 	let newest = database::versions::Version::get_all(&mut conn)
 		.await?
 		.into_iter()
@@ -132,8 +132,9 @@ pub async fn fleet(
 			.collect();
 
 	let mut environments = ServerGroup::environments(&mut conn, &ids).await?;
-	// A plan whose environment has no live server any more still says where
-	// the group was going, and this view is the only place it can be withdrawn.
+	// A plan whose environment has no live application any more still says
+	// where the group was going, and this view is the only place it can be
+	// withdrawn.
 	for ((group_id, rank), _) in open.iter() {
 		if names.contains_key(group_id)
 			&& !environments
@@ -166,21 +167,26 @@ pub async fn fleet(
 			None => None,
 			Some(_) => {
 				if !members.contains_key(&env.group_id) {
-					let live =
-						database::servers::Server::list_live_in_group(&mut conn, env.group_id)
-							.await?;
+					let live = database::applications::Application::list_live_in_group(
+						&mut conn,
+						env.group_id,
+					)
+					.await?;
 					members.insert(env.group_id, live);
 				}
 				// An unranked member belongs to the group's headline environment.
-				let servers: Vec<_> = members[&env.group_id]
+				let applications: Vec<_> = members[&env.group_id]
 					.iter()
-					.filter(|server| {
-						server.rank.or_else(|| headline.get(&env.group_id).copied())
+					.filter(|application| {
+						application
+							.rank
+							.or_else(|| headline.get(&env.group_id).copied())
 							== Some(env.rank)
 					})
 					.cloned()
 					.collect();
-				let per_server = database::migration_tests::verdicts(&mut conn, servers).await?;
+				let per_server =
+					database::migration_tests::verdicts(&mut conn, applications).await?;
 				Some(roll_up(&per_server).to_owned())
 			}
 		};
@@ -233,7 +239,7 @@ pub async fn fleet(
 	Ok(Json(out))
 }
 
-/// The group's standing against its planned version: the worst of its servers'.
+/// The group's standing against its planned version: the worst of its applications'.
 ///
 /// One server whose data breaks the migrations is enough to stop the upgrade, so
 /// a failure anywhere is the group's answer.

@@ -7,10 +7,10 @@ use commons_types::{
 	version::{VersionStatus, VersionStr},
 };
 use database::{
+	applications::Application,
 	migration_tests::candidate_for,
 	reported_detail::ReportedDetail,
 	server_groups::ServerGroup,
-	servers::Server,
 	upgrade_plans::{PlannedWhen, UpgradePlan, close_met_plans, is_late, planned_target},
 	versions::{NewVersion, Version},
 };
@@ -23,6 +23,16 @@ use uuid::Uuid;
 struct RowId {
 	#[diesel(sql_type = sql_types::Uuid)]
 	id: Uuid,
+}
+
+/// An application and the machine it sits on: reported detail splits by grain,
+/// so recording a push names both.
+#[derive(diesel::QueryableByName)]
+struct AppRow {
+	#[diesel(sql_type = sql_types::Uuid)]
+	id: Uuid,
+	#[diesel(sql_type = sql_types::Uuid)]
+	machine_id: Uuid,
 }
 
 async fn publish(conn: &mut AsyncPgConnection, minor: i32, patch: i32) -> Version {
@@ -41,15 +51,15 @@ async fn publish(conn: &mut AsyncPgConnection, minor: i32, patch: i32) -> Versio
 		.expect("publish")
 }
 
-/// A group with one production server reporting `running`, and the group's
+/// A group with one production central reporting `running`, and the group's
 /// cached effective version recomputed through the real path.
-async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Server) {
+async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Application) {
 	let group: RowId = sql_query("INSERT INTO server_groups (name) VALUES ('kamaka') RETURNING id")
 		.get_result(conn)
 		.await
 		.expect("group");
-	let server: RowId = sql_query(
-		"INSERT INTO servers (host, kind, rank, group_id) VALUES ($1, 'central', 'production', $2) RETURNING id",
+	let server: AppRow = sql_query(
+		"WITH m AS (INSERT INTO machines (group_id) VALUES ($2) RETURNING id) INSERT INTO applications (host, type, rank, group_id, machine_id) SELECT $1, 'tamanu-central', 'production', $2, m.id FROM m RETURNING id, machine_id",
 	)
 	.bind::<sql_types::Text, _>("https://central.kamaka.example")
 	.bind::<sql_types::Uuid, _>(group.id)
@@ -57,7 +67,7 @@ async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Se
 	.await
 	.expect("server");
 
-	report(conn, server.id, running).await;
+	report(conn, server.id, server.machine_id, running).await;
 	sql_query(
 		"INSERT INTO statuses (server_id, version, healthy, health) VALUES ($1, $2, true, '[]'::jsonb)",
 	)
@@ -70,18 +80,25 @@ async fn group_running(conn: &mut AsyncPgConnection, running: &str) -> (Uuid, Se
 		.await
 		.expect("recompute");
 
-	let server = Server::get_by_id(conn, server.id)
+	let server = Application::get_by_id(conn, server.id)
 		.await
 		.expect("get server");
 	(group.id, server)
 }
 
-/// What `server` says it runs.
-async fn report(conn: &mut AsyncPgConnection, server: Uuid, running: &str) {
+/// What an application says it runs.
+async fn report(conn: &mut AsyncPgConnection, application: Uuid, machine: Uuid, running: &str) {
 	let version: VersionStr = running.parse().expect("parse");
-	ReportedDetail::record(conn, server, "test", &serde_json::json!({}), Some(&version))
-		.await
-		.expect("report");
+	ReportedDetail::record(
+		conn,
+		Some(application),
+		machine,
+		"test",
+		&serde_json::json!({}),
+		Some(&version),
+	)
+	.await
+	.expect("report");
 }
 
 /// Another member of `group` at `rank`, reporting `running`.
@@ -90,9 +107,9 @@ async fn server_at(
 	group: Uuid,
 	rank: ServerRank,
 	running: &str,
-) -> Server {
-	let server: RowId = sql_query(
-		"INSERT INTO servers (host, kind, rank, group_id) VALUES ($1, 'central', $2, $3) RETURNING id",
+) -> Application {
+	let server: AppRow = sql_query(
+		"WITH m AS (INSERT INTO machines (group_id) VALUES ($3) RETURNING id) INSERT INTO applications (host, type, rank, group_id, machine_id) SELECT $1, 'tamanu-central', $2, $3, m.id FROM m RETURNING id, machine_id",
 	)
 	.bind::<sql_types::Text, _>(format!("https://{rank}.kamaka.example"))
 	.bind::<sql_types::Text, _>(rank.to_string())
@@ -100,8 +117,8 @@ async fn server_at(
 	.get_result(conn)
 	.await
 	.expect("server");
-	report(conn, server.id, running).await;
-	Server::get_by_id(conn, server.id)
+	report(conn, server.id, server.machine_id, running).await;
+	Application::get_by_id(conn, server.id)
 		.await
 		.expect("get server")
 }
@@ -247,7 +264,7 @@ async fn canopy_closes_a_plan_once_the_group_arrives() {
 
 		// The environment lands past the target: further than planned still
 		// means the upgrade happened.
-		report(&mut conn, server.id, "2.62.0").await;
+		report(&mut conn, server.id, server.machine_id, "2.62.0").await;
 
 		// Through the periodic sweep, which is what runs in production.
 		database::backup::sweep(&mut conn).await.expect("sweep");
@@ -478,7 +495,7 @@ async fn a_met_plan_is_not_amendable() {
 		.await
 		.expect("plan");
 
-		report(&mut conn, server.id, "2.61.0").await;
+		report(&mut conn, server.id, server.machine_id, "2.61.0").await;
 		close_met_plans(&mut conn).await.expect("sweep");
 
 		let refused = UpgradePlan::amend(
@@ -948,7 +965,7 @@ async fn each_environment_goes_its_own_place() {
 		);
 
 		// The clone arrives; production has not moved.
-		report(&mut conn, clone.id, "2.61.0").await;
+		report(&mut conn, clone.id, clone.machine_id, "2.61.0").await;
 		close_met_plans(&mut conn).await.expect("sweep");
 		assert!(
 			UpgradePlan::open_for_environment(&mut conn, group, ServerRank::Clone)
@@ -969,19 +986,19 @@ async fn each_environment_goes_its_own_place() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_server_with_no_rank_follows_the_headline_environment() {
+async fn an_application_with_no_rank_follows_the_headline_environment() {
 	TestDb::run(|mut conn, _url| async move {
 		let (group, _production) = group_running(&mut conn, "2.60.0").await;
-		let unranked: RowId = sql_query(
-			"INSERT INTO servers (host, kind, group_id) VALUES ('https://x.kamaka.example', 'facility', $1) RETURNING id",
+		let unranked: AppRow = sql_query(
+			"WITH m AS (INSERT INTO machines (group_id) VALUES ($1) RETURNING id) INSERT INTO applications (host, type, group_id, machine_id) SELECT 'https://x.kamaka.example', 'tamanu-facility', $1, m.id FROM m RETURNING id, machine_id",
 		)
 		.bind::<sql_types::Uuid, _>(group)
 		.get_result(&mut conn)
 		.await
-		.expect("server");
-		let unranked = Server::get_by_id(&mut conn, unranked.id)
+		.expect("application");
+		let unranked = Application::get_by_id(&mut conn, unranked.id)
 			.await
-			.expect("get server");
+			.expect("get application");
 		let target = publish(&mut conn, 61, 0).await;
 
 		UpgradePlan::record(
@@ -1024,7 +1041,116 @@ async fn a_plan_needs_an_environment_the_group_has() {
 			"a@example.com",
 		)
 		.await;
-		assert!(refused.is_err(), "the group has no demo servers");
+		assert!(refused.is_err(), "the group has no demo applications");
+	})
+	.await
+}
+
+/// A group with two version-tracked members at different ranks and different
+/// versions. The production central carries the headline; the test facility
+/// sits behind it.
+async fn group_with_a_member_behind(conn: &mut AsyncPgConnection) -> Uuid {
+	let group: RowId =
+		sql_query("INSERT INTO server_groups (name) VALUES ('kirimati') RETURNING id")
+			.get_result(conn)
+			.await
+			.expect("group");
+
+	for (r#type, rank, running) in [
+		("tamanu-central", "production", "2.62.0"),
+		("tamanu-facility", "test", "2.58.0"),
+	] {
+		let host = format!("https://{}.example", Uuid::new_v4());
+		let app: AppRow = sql_query(
+			"WITH m AS (INSERT INTO machines (group_id) VALUES ($4) RETURNING id) INSERT INTO applications (host, type, rank, group_id, machine_id) SELECT $1, $2, $3, $4, m.id FROM m RETURNING id, machine_id",
+		)
+		.bind::<sql_types::Text, _>(host)
+		.bind::<sql_types::Text, _>(r#type)
+		.bind::<sql_types::Text, _>(rank)
+		.bind::<sql_types::Uuid, _>(group.id)
+		.get_result(conn)
+		.await
+		.expect("application");
+
+		report(conn, app.id, app.machine_id, running).await;
+		sql_query(
+			"INSERT INTO statuses (server_id, version, healthy, health) VALUES ($1, $2, true, '[]'::jsonb)",
+		)
+		.bind::<sql_types::Uuid, _>(app.id)
+		.bind::<sql_types::Text, _>(running)
+		.execute(conn)
+		.await
+		.expect("status");
+	}
+
+	ServerGroup::recompute_version(conn, group.id)
+		.await
+		.expect("recompute");
+	group.id
+}
+
+/// A plan is measured against the version its own environment presents, which
+/// is that environment's central's. Otherwise a group whose facility lags would
+/// accept a plan to go somewhere its central has already been.
+// spec: APP#versions
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plan_measures_from_its_environments_version() {
+	TestDb::run(|mut conn, _url| async move {
+		let group = group_with_a_member_behind(&mut conn).await;
+
+		use database::schema::server_groups::dsl;
+		use diesel::{ExpressionMethods, QueryDsl};
+		let headline: Option<String> = dsl::server_groups
+			.select(dsl::effective_version)
+			.filter(dsl::id.eq(group))
+			.first(&mut conn)
+			.await
+			.expect("headline");
+		assert_eq!(
+			headline.as_deref(),
+			Some("2.62.0"),
+			"the headline is the highest-ranked central's version"
+		);
+
+		// Ahead of the lagging facility, behind the production central: not a
+		// plan for production.
+		let behind = publish(&mut conn, 61, 0).await;
+		assert!(
+			UpgradePlan::record(
+				&mut conn,
+				group,
+				ServerRank::Production,
+				behind.id,
+				PlannedWhen::default(),
+				None,
+				"a@example.com",
+			)
+			.await
+			.is_err(),
+			"a member being behind is not a reason to plan backwards"
+		);
+
+		// Ahead of it: a plan.
+		let ahead = publish(&mut conn, 63, 0).await;
+		UpgradePlan::record(
+			&mut conn,
+			group,
+			ServerRank::Production,
+			ahead.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await
+		.expect("record plan");
+		assert_eq!(
+			UpgradePlan::open_for_environment(&mut conn, group, ServerRank::Production)
+				.await
+				.expect("open")
+				.expect("there is one")
+				.target_version_id,
+			ahead.id,
+		);
 	})
 	.await
 }

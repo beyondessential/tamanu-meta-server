@@ -16,29 +16,41 @@ struct RowId {
 
 async fn insert_server(conn: &mut AsyncPgConnection) -> Uuid {
 	let host = format!("http://detail.invalid/{}", Uuid::new_v4());
-	let server: RowId = sql_query("INSERT INTO servers (host) VALUES ($1) RETURNING id")
-		.bind::<sql_types::Text, _>(host)
+	let machine: RowId = sql_query("INSERT INTO machines DEFAULT VALUES RETURNING id")
 		.get_result(conn)
 		.await
-		.expect("insert server");
+		.expect("insert machine");
+	let server: RowId =
+		sql_query("INSERT INTO applications (type, host, machine_id) VALUES ('tamanu-central', $1, $2) RETURNING id")
+			.bind::<sql_types::Text, _>(host)
+			.bind::<sql_types::Uuid, _>(machine.id)
+			.get_result(conn)
+			.await
+			.expect("insert server");
 	server.id
 }
 
 async fn insert_production_server(conn: &mut AsyncPgConnection) -> Uuid {
 	let host = format!("http://prod.invalid/{}", Uuid::new_v4());
-	let server: RowId =
-		sql_query("INSERT INTO servers (host, rank) VALUES ($1, 'production') RETURNING id")
-			.bind::<sql_types::Text, _>(host)
-			.get_result(conn)
-			.await
-			.expect("insert production server");
+	let machine: RowId = sql_query("INSERT INTO machines DEFAULT VALUES RETURNING id")
+		.get_result(conn)
+		.await
+		.expect("insert machine");
+	let server: RowId = sql_query(
+		"INSERT INTO applications (type, host, rank, machine_id) VALUES ('tamanu-central', $1, 'production', $2) RETURNING id",
+	)
+	.bind::<sql_types::Text, _>(host)
+	.bind::<sql_types::Uuid, _>(machine.id)
+	.get_result(conn)
+	.await
+	.expect("insert production server");
 	server.id
 }
 
 async fn age_report(conn: &mut AsyncPgConnection, server: Uuid, interval: &str) {
 	sql_query(format!(
-		"UPDATE server_reported_detail SET reported_at = NOW() - INTERVAL '{interval}' \
-		 WHERE server_id = $1"
+		"UPDATE application_reported_detail SET reported_at = NOW() - INTERVAL '{interval}' \
+		 WHERE application_id = $1"
 	))
 	.bind::<sql_types::Uuid, _>(server)
 	.execute(conn)
@@ -54,10 +66,12 @@ async fn age_report(conn: &mut AsyncPgConnection, server: Uuid, interval: &str) 
 async fn a_version_less_report_keeps_the_last_version() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server = insert_server(&mut conn).await;
+		let m_server = machine_of(&mut conn, server).await;
 
 		ReportedDetail::record(
 			&mut conn,
-			server,
+			Some(server),
+			m_server,
 			"alertd",
 			&json!({}),
 			Some(&"2.34.1".parse().unwrap()),
@@ -66,7 +80,8 @@ async fn a_version_less_report_keeps_the_last_version() {
 		.unwrap();
 		ReportedDetail::record(
 			&mut conn,
-			server,
+			Some(server),
+			m_server,
 			"alertd",
 			&json!({"uptimeSecs": 42}),
 			None,
@@ -86,7 +101,8 @@ async fn a_version_less_report_keeps_the_last_version() {
 		// An explicit later version still supersedes it.
 		ReportedDetail::record(
 			&mut conn,
-			server,
+			Some(server),
+			m_server,
 			"alertd",
 			&json!({}),
 			Some(&"2.35.0".parse().unwrap()),
@@ -112,9 +128,11 @@ async fn a_version_less_report_keeps_the_last_version() {
 async fn last_version_is_not_bounded_by_a_lookback() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server = insert_server(&mut conn).await;
+		let m_server = machine_of(&mut conn, server).await;
 		ReportedDetail::record(
 			&mut conn,
-			server,
+			Some(server),
+			m_server,
 			"alertd",
 			&json!({}),
 			Some(&"2.34.1".parse().unwrap()),
@@ -143,9 +161,11 @@ async fn last_version_is_not_bounded_by_a_lookback() {
 async fn production_versions_counts_reporting_servers_once() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server = insert_production_server(&mut conn).await;
+		let m_server = machine_of(&mut conn, server).await;
 		ReportedDetail::record(
 			&mut conn,
-			server,
+			Some(server),
+			m_server,
 			"alertd",
 			&json!({}),
 			Some(&"2.34.1".parse().unwrap()),
@@ -157,7 +177,8 @@ async fn production_versions_counts_reporting_servers_once() {
 		age_report(&mut conn, server, "2 hours").await;
 		ReportedDetail::record(
 			&mut conn,
-			server,
+			Some(server),
+			m_server,
 			"tamanu",
 			&json!({"uptimeSecs": 42}),
 			None,
@@ -177,7 +198,7 @@ async fn production_versions_counts_reporting_servers_once() {
 	.await
 }
 
-/// Only production servers that are still reporting count as actively
+/// Only production applications that are still reporting count as actively
 /// running something.
 // spec: FIG#active-versions
 #[tokio::test(flavor = "multi_thread")]
@@ -188,9 +209,11 @@ async fn production_versions_excludes_the_quiet_and_the_unranked() {
 		let unranked = insert_server(&mut conn).await;
 
 		for (server, version) in [(live, "2.34.1"), (quiet, "2.10.0"), (unranked, "2.20.0")] {
+			let machine = machine_of(&mut conn, server).await;
 			ReportedDetail::record(
 				&mut conn,
-				server,
+				Some(server),
+				machine,
 				"alertd",
 				&json!({}),
 				Some(&version.parse().unwrap()),
@@ -223,10 +246,12 @@ async fn production_versions_excludes_the_quiet_and_the_unranked() {
 async fn a_report_replaces_its_own_source_only() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn).await;
+		let m_server_id = machine_of(&mut conn, server_id).await;
 
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
+			m_server_id,
 			"alertd",
 			&json!({"bestoolVersion": "2.9.1", "pgVersion": "PostgreSQL 16.3 on x86_64"}),
 			None,
@@ -235,7 +260,8 @@ async fn a_report_replaces_its_own_source_only() {
 		.expect("record alertd");
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
+			m_server_id,
 			"tamanu",
 			&json!({"uptimeSecs": 42}),
 			None,
@@ -246,7 +272,8 @@ async fn a_report_replaces_its_own_source_only() {
 		// alertd reports again, dropping pgVersion from its payload.
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
+			m_server_id,
 			"alertd",
 			&json!({"bestoolVersion": "2.10.5"}),
 			None,
@@ -257,7 +284,14 @@ async fn a_report_replaces_its_own_source_only() {
 		let reports = ReportedDetail::for_server(&mut conn, server_id)
 			.await
 			.expect("read reports");
-		assert_eq!(reports.len(), 2, "one row per source, not one per push");
+		// Two sources, and each contributes at both grains now that detail
+		// splits: the box's fields on the machine, the rest on the
+		// application. Still one row per (source, grain), not one per push.
+		assert_eq!(
+			reports.len(),
+			4,
+			"one row per source per grain, not one per push"
+		);
 
 		let figures = ReportedDetail::merge(&reports);
 		assert_eq!(
@@ -287,10 +321,12 @@ async fn a_report_replaces_its_own_source_only() {
 async fn figures_resolve_per_field_newest_first() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn).await;
+		let m_server_id = machine_of(&mut conn, server_id).await;
 
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
+			m_server_id,
 			"alertd",
 			&json!({"pgVersion": "PostgreSQL 16.3 (Visual C++ build 1940), 64-bit", "nodeVersion": "20.11.0"}),
 			None,
@@ -299,14 +335,21 @@ async fn figures_resolve_per_field_newest_first() {
 		.expect("record alertd");
 		// Reported later, and carries none of alertd's fields.
 		sql_query(
-			"UPDATE server_reported_detail SET reported_at = NOW() - INTERVAL '1 hour' \
-			 WHERE server_id = $1",
+			"UPDATE application_reported_detail SET reported_at = NOW() - INTERVAL '1 hour' \
+			 WHERE application_id = $1",
 		)
 		.bind::<sql_types::Uuid, _>(server_id)
 		.execute(&mut conn)
 		.await
 		.expect("age alertd's report");
-		ReportedDetail::record(&mut conn, server_id, "tamanu", &json!({"uptimeSecs": 42}), None)
+		ReportedDetail::record(
+			&mut conn,
+			Some(server_id),
+			m_server_id,
+			"tamanu",
+			&json!({"uptimeSecs": 42}),
+			None,
+		)
 			.await
 			.expect("record tamanu");
 
@@ -327,6 +370,7 @@ async fn figures_resolve_per_field_newest_first() {
 async fn munin_flag_holds_indefinitely() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn).await;
+		let m_server_id = machine_of(&mut conn, server_id).await;
 
 		let munin = async |conn: &mut AsyncPgConnection| {
 			ReportedDetail::merge(&ReportedDetail::for_server(conn, server_id).await.unwrap())
@@ -337,7 +381,8 @@ async fn munin_flag_holds_indefinitely() {
 
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
+			m_server_id,
 			"alertd",
 			&json!({"munin": true}),
 			None,
@@ -346,8 +391,8 @@ async fn munin_flag_holds_indefinitely() {
 		.expect("record munin");
 		// Long past any status-history lookback.
 		sql_query(
-			"UPDATE server_reported_detail SET reported_at = NOW() - INTERVAL '400 days' \
-			 WHERE server_id = $1",
+			"UPDATE application_reported_detail SET reported_at = NOW() - INTERVAL '400 days' \
+			 WHERE application_id = $1",
 		)
 		.bind::<sql_types::Uuid, _>(server_id)
 		.execute(&mut conn)
@@ -362,7 +407,8 @@ async fn munin_flag_holds_indefinitely() {
 		// A source that reports nothing about munin leaves it alone...
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
+			m_server_id,
 			"tamanu",
 			&json!({"uptimeSecs": 42}),
 			None,
@@ -374,7 +420,8 @@ async fn munin_flag_holds_indefinitely() {
 		// ...but an explicit later false overrides it.
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
+			m_server_id,
 			"alertd",
 			&json!({"munin": false}),
 			None,
@@ -393,9 +440,11 @@ async fn munin_flag_holds_indefinitely() {
 async fn reported_detail_is_deleted_with_its_server() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn).await;
+		let m_server_id = machine_of(&mut conn, server_id).await;
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
+			m_server_id,
 			"alertd",
 			&json!({"munin": true}),
 			None,
@@ -403,7 +452,7 @@ async fn reported_detail_is_deleted_with_its_server() {
 		.await
 		.expect("record");
 
-		sql_query("DELETE FROM servers WHERE id = $1")
+		sql_query("DELETE FROM applications WHERE id = $1")
 			.bind::<sql_types::Uuid, _>(server_id)
 			.execute(&mut conn)
 			.await
@@ -426,6 +475,7 @@ async fn reported_detail_is_deleted_with_its_server() {
 async fn platform_prefers_the_reported_operating_system() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn).await;
+		let m_server_id = machine_of(&mut conn, server_id).await;
 		let platform = async |conn: &mut AsyncPgConnection| {
 			ReportedDetail::merge(&ReportedDetail::for_server(conn, server_id).await.unwrap())
 				.platform()
@@ -434,7 +484,8 @@ async fn platform_prefers_the_reported_operating_system() {
 		// Only a PostgreSQL banner: the family is all it can give.
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
+			m_server_id,
 			"alertd",
 			&json!({"pgVersion": "PostgreSQL 16.3 (Visual C++ build 1940), 64-bit"}),
 			None,
@@ -447,7 +498,8 @@ async fn platform_prefers_the_reported_operating_system() {
 		// it. Values are as the fleet actually reports them.
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
+			m_server_id,
 			"alertd",
 			&json!({"osName": "Windows", "osVersion": "10 (17763)"}),
 			None,
@@ -462,7 +514,8 @@ async fn platform_prefers_the_reported_operating_system() {
 
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
+			m_server_id,
 			"alertd",
 			&json!({"osName": "Ubuntu", "osVersion": "24.04"}),
 			None,
@@ -474,7 +527,8 @@ async fn platform_prefers_the_reported_operating_system() {
 		// A name without a version stands alone.
 		ReportedDetail::record(
 			&mut conn,
-			server_id,
+			Some(server_id),
+			m_server_id,
 			"alertd",
 			&json!({"osName": "Debian GNU/Linux"}),
 			None,
@@ -495,11 +549,14 @@ async fn platform_prefers_the_reported_operating_system() {
 async fn merge_by_server_keeps_servers_apart() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let one = insert_server(&mut conn).await;
+		let m_one = machine_of(&mut conn, one).await;
 		let two = insert_server(&mut conn).await;
+		let m_two = machine_of(&mut conn, two).await;
 
 		ReportedDetail::record(
 			&mut conn,
-			one,
+			Some(one),
+			m_one,
 			"alertd",
 			&json!({"bestoolVersion": "2.10.5"}),
 			None,
@@ -508,7 +565,8 @@ async fn merge_by_server_keeps_servers_apart() {
 		.unwrap();
 		ReportedDetail::record(
 			&mut conn,
-			two,
+			Some(two),
+			m_two,
 			"alertd",
 			&json!({"bestoolVersion": "2.4.7"}),
 			None,
@@ -529,32 +587,301 @@ async fn merge_by_server_keeps_servers_apart() {
 	.await
 }
 
+/// The machine an application sits on. Reported detail splits by grain, so a
+/// push names both: the box's fields go to the machine, the rest here.
+async fn machine_of(conn: &mut database::diesel_async::AsyncPgConnection, app: Uuid) -> Uuid {
+	#[derive(diesel::QueryableByName)]
+	struct M {
+		#[diesel(sql_type = diesel::sql_types::Uuid)]
+		machine_id: Uuid,
+	}
+	diesel::sql_query("SELECT machine_id FROM applications WHERE id = $1")
+		.bind::<diesel::sql_types::Uuid, _>(app)
+		.get_result::<M>(conn)
+		.await
+		.expect("machine of application")
+		.machine_id
+}
+
+/// Detail splits by grain on the way in: the box's facts to the machine, the
+/// workload's to the application. A host running two workloads records its
+/// platform once rather than once per workload.
+// spec: FIG
+#[tokio::test(flavor = "multi_thread")]
+async fn detail_is_stored_at_the_grain_it_describes() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let server_id = insert_server(&mut conn).await;
+		let machine_id = machine_of(&mut conn, server_id).await;
+
+		ReportedDetail::record(
+			&mut conn,
+			Some(server_id),
+			machine_id,
+			"alertd",
+			&json!({
+				"osName": "Debian",
+				"bestoolVersion": "2.10.5",
+				"pgVersion": "PostgreSQL 16.3",
+				"tamanuVersion": "2.34.1",
+			}),
+			None,
+		)
+		.await
+		.expect("record");
+
+		#[derive(diesel::QueryableByName)]
+		struct Extra {
+			#[diesel(sql_type = sql_types::Jsonb)]
+			extra: serde_json::Value,
+		}
+		let on_machine: Extra =
+			sql_query("SELECT extra FROM machine_reported_detail WHERE machine_id = $1")
+				.bind::<sql_types::Uuid, _>(machine_id)
+				.get_result(&mut conn)
+				.await
+				.expect("machine detail");
+		assert_eq!(on_machine.extra["osName"], "Debian");
+		assert_eq!(on_machine.extra["bestoolVersion"], "2.10.5");
+		assert!(
+			on_machine.extra.get("pgVersion").is_none(),
+			"the database engine is the workload's, not the box's"
+		);
+
+		let on_application: Extra =
+			sql_query("SELECT extra FROM application_reported_detail WHERE application_id = $1")
+				.bind::<sql_types::Uuid, _>(server_id)
+				.get_result(&mut conn)
+				.await
+				.expect("application detail");
+		assert_eq!(on_application.extra["pgVersion"], "PostgreSQL 16.3");
+		assert!(
+			on_application.extra.get("osName").is_none(),
+			"the platform is the box's, and is stored once"
+		);
+
+		// A reader is not meant to care which grain holds what.
+		let figures = ReportedDetail::merge(
+			&ReportedDetail::for_server(&mut conn, server_id)
+				.await
+				.expect("read"),
+		);
+		assert_eq!(figures.platform().as_deref(), Some("Debian"));
+		assert_eq!(figures.bestool_version().as_deref(), Some("2.10.5"));
+		assert_eq!(figures.postgres_version().as_deref(), Some("16.3"));
+	})
+	.await
+}
+
+/// Two applications on one box both present its platform, and it is stored
+/// once — the failure mode the whole split exists to prevent.
+// spec: FIG
+#[tokio::test(flavor = "multi_thread")]
+async fn one_box_reports_its_platform_once_for_both_workloads() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let first = insert_server(&mut conn).await;
+		let machine_id = machine_of(&mut conn, first).await;
+		let host = format!("http://second.invalid/{}", Uuid::new_v4());
+		let second: Uuid = sql_query(
+			"INSERT INTO applications (host, type, machine_id) \
+			 VALUES ($1, 'tamanu-central', $2) RETURNING id",
+		)
+		.bind::<sql_types::Text, _>(host)
+		.bind::<sql_types::Uuid, _>(machine_id)
+		.get_result::<RowId>(&mut conn)
+		.await
+		.expect("second application on the same box")
+		.id;
+
+		for app in [first, second] {
+			ReportedDetail::record(
+				&mut conn,
+				Some(app),
+				machine_id,
+				"alertd",
+				&json!({"osName": "Debian"}),
+				None,
+			)
+			.await
+			.expect("record");
+		}
+
+		#[derive(diesel::QueryableByName)]
+		struct Count {
+			#[diesel(sql_type = sql_types::BigInt)]
+			count: i64,
+		}
+		let stored: i64 = sql_query("SELECT count(*) AS count FROM machine_reported_detail")
+			.get_result::<Count>(&mut conn)
+			.await
+			.expect("count")
+			.count;
+		assert_eq!(
+			stored, 1,
+			"the box's platform is stored once, not per workload"
+		);
+
+		for app in [first, second] {
+			let figures = ReportedDetail::merge(
+				&ReportedDetail::for_server(&mut conn, app)
+					.await
+					.expect("read"),
+			);
+			assert_eq!(
+				figures.platform().as_deref(),
+				Some("Debian"),
+				"both workloads present their box's platform"
+			);
+		}
+	})
+	.await
+}
+
+/// A body that is not an object is stored as the empty object.
+///
+/// `extra` is `JSONB NOT NULL`, which admits JSON `null`, and a stored `null`
+/// breaks every bulk read of the column: `jsonb_each` refuses a non-object and
+/// so does a `-` key delete. That surfaces far from the push that caused it —
+/// once, as a migration failing against production data. A non-object body
+/// carries no fields, so the empty object says the same thing safely.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_non_object_body_is_stored_as_an_object() {
+	#[derive(QueryableByName)]
+	struct Typeof {
+		#[diesel(sql_type = sql_types::Text)]
+		type_of: String,
+	}
+
+	async fn typeof_application(conn: &mut AsyncPgConnection, app: Uuid) -> String {
+		sql_query(
+			"SELECT jsonb_typeof(extra) AS type_of FROM application_reported_detail \
+			 WHERE application_id = $1",
+		)
+		.bind::<sql_types::Uuid, _>(app)
+		.get_result::<Typeof>(conn)
+		.await
+		.expect("read application body")
+		.type_of
+	}
+
+	async fn typeof_machine(conn: &mut AsyncPgConnection, machine: Uuid) -> String {
+		sql_query(
+			"SELECT jsonb_typeof(extra) AS type_of FROM machine_reported_detail \
+			 WHERE machine_id = $1",
+		)
+		.bind::<sql_types::Uuid, _>(machine)
+		.get_result::<Typeof>(conn)
+		.await
+		.expect("read machine body")
+		.type_of
+	}
+
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		// Every shape `NOT NULL` lets past: JSON null, and the other scalars.
+		for body in [
+			json!(null),
+			json!("a string"),
+			json!(42),
+			json!(true),
+			json!(["an", "array"]),
+		] {
+			let app = insert_server(&mut conn).await;
+			let machine = machine_of(&mut conn, app).await;
+
+			ReportedDetail::record(&mut conn, Some(app), machine, "alertd", &body, None)
+				.await
+				.expect("record a non-object body");
+
+			assert_eq!(
+				typeof_application(&mut conn, app).await,
+				"object",
+				"{body} is stored on the application as an object"
+			);
+			assert_eq!(
+				typeof_machine(&mut conn, machine).await,
+				"object",
+				"{body} is stored on the machine as an object"
+			);
+		}
+
+		// The machine-only path: no application to split into, so the whole body
+		// goes to the box and skips `split_by_grain` entirely.
+		let lone = insert_server(&mut conn).await;
+		let lone_machine = machine_of(&mut conn, lone).await;
+		ReportedDetail::record(&mut conn, None, lone_machine, "alertd", &json!(null), None)
+			.await
+			.expect("record a machine-only non-object body");
+		assert_eq!(
+			typeof_machine(&mut conn, lone_machine).await,
+			"object",
+			"a machine-only push stores an object too"
+		);
+
+		// The operation that failed in production, over every row written above.
+		let walked: i64 = sql_query(
+			"SELECT count(*) AS count FROM ( \
+			   SELECT jsonb_each(extra) FROM application_reported_detail \
+			   UNION ALL SELECT jsonb_each(extra) FROM machine_reported_detail \
+			 ) AS walked",
+		)
+		.get_result::<Count>(&mut conn)
+		.await
+		.expect("jsonb_each walks every stored body")
+		.count;
+		assert_eq!(walked, 0, "an empty body contributes no fields");
+	})
+	.await
+}
+
+#[derive(QueryableByName)]
+struct Count {
+	#[diesel(sql_type = sql_types::BigInt)]
+	count: i64,
+}
+
 /// A source that pushes without a version keeps the one it last carried, and
 /// that push must not make its older version look newer than another source's.
 #[tokio::test(flavor = "multi_thread")]
 async fn a_version_less_push_does_not_outrank_a_newer_version_from_another_source() {
-	commons_tests::db::TestDb::run(|mut conn, _url| async move {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server = insert_server(&mut conn).await;
+		let machine = machine_of(&mut conn, server).await;
 		let old: commons_types::version::VersionStr = "2.60.0".parse().expect("parse");
 		let new: commons_types::version::VersionStr = "2.62.0".parse().expect("parse");
-		ReportedDetail::record(&mut conn, server, "alertd", &json!({}), Some(&old))
-			.await
-			.expect("alertd");
+		ReportedDetail::record(
+			&mut conn,
+			Some(server),
+			machine,
+			"alertd",
+			&json!({}),
+			Some(&old),
+		)
+		.await
+		.expect("alertd");
 		sql_query(
-			"UPDATE server_reported_detail SET reported_at = reported_at - interval '2 hours', \
-			 version_reported_at = version_reported_at - interval '2 hours' WHERE server_id = $1",
+			"UPDATE application_reported_detail \
+			 SET reported_at = reported_at - interval '2 hours', \
+			     version_reported_at = version_reported_at - interval '2 hours' \
+			 WHERE application_id = $1",
 		)
 		.bind::<sql_types::Uuid, _>(server)
 		.execute(&mut conn)
 		.await
 		.expect("age");
-		ReportedDetail::record(&mut conn, server, "tamanu", &json!({}), Some(&new))
-			.await
-			.expect("tamanu");
+		ReportedDetail::record(
+			&mut conn,
+			Some(server),
+			machine,
+			"tamanu",
+			&json!({}),
+			Some(&new),
+		)
+		.await
+		.expect("tamanu");
 		sql_query(
-			"UPDATE server_reported_detail SET reported_at = reported_at - interval '1 hour', \
-			 version_reported_at = version_reported_at - interval '1 hour' \
-			 WHERE server_id = $1 AND source = 'tamanu'",
+			"UPDATE application_reported_detail \
+			 SET reported_at = reported_at - interval '1 hour', \
+			     version_reported_at = version_reported_at - interval '1 hour' \
+			 WHERE application_id = $1 AND source = 'tamanu'",
 		)
 		.bind::<sql_types::Uuid, _>(server)
 		.execute(&mut conn)
@@ -562,7 +889,7 @@ async fn a_version_less_push_does_not_outrank_a_newer_version_from_another_sourc
 		.expect("age");
 
 		// alertd speaks again, saying nothing about the version.
-		ReportedDetail::record(&mut conn, server, "alertd", &json!({}), None)
+		ReportedDetail::record(&mut conn, Some(server), machine, "alertd", &json!({}), None)
 			.await
 			.expect("alertd again");
 

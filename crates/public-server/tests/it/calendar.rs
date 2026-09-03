@@ -33,8 +33,9 @@ const SERVER: &str = "22222222-2222-2222-2222-222222222222";
 async fn seed(conn: &mut AsyncPgConnection) -> (Uuid, Version) {
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{GROUP}', 'kamaka'); \
-		 INSERT INTO servers (id, host, kind, rank, group_id) VALUES \
-			('{SERVER}', 'https://central.kamaka.example', 'central', 'production', '{GROUP}');"
+		 INSERT INTO machines (id, group_id) VALUES ('{SERVER}', '{GROUP}'); \
+		 INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES \
+			('{SERVER}', 'https://central.kamaka.example', 'tamanu-central', 'production', '{GROUP}', '{SERVER}');"
 	))
 	.await
 	.expect("seed");
@@ -42,6 +43,8 @@ async fn seed(conn: &mut AsyncPgConnection) -> (Uuid, Version) {
 	let running: VersionStr = "2.60.0".parse().expect("parse");
 	ReportedDetail::record(
 		conn,
+		Some(SERVER.parse().expect("uuid")),
+		// The fixture gives the box the same id as the application on it.
 		SERVER.parse().expect("uuid"),
 		"test",
 		&serde_json::json!({}),

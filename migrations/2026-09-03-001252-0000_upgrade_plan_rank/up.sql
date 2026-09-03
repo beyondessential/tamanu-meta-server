@@ -1,21 +1,42 @@
--- A plan is for one of a group's environments: its servers at one rank. A
+-- A plan is for one of a group's environments: its applications at one rank. A
 -- site's clone can move ahead of its production, so each environment goes its
 -- own place next.
 ALTER TABLE upgrade_plans ADD COLUMN rank TEXT;
 
--- Existing plans were about the environment the group's headline version
--- comes from, which is the rank of its canonical member. Servers still carry
--- the older spellings of production and clone, which the plan must not.
-UPDATE upgrade_plans p
-	SET rank = CASE lower(s.rank)
-		WHEN 'live' THEN 'production'
-		WHEN 'prod' THEN 'production'
-		WHEN 'staging' THEN 'clone'
-		ELSE lower(s.rank)
-	END
+-- Existing plans were about the environment the group's headline version comes
+-- from, which is the rank of its canonical member, falling back to the group's
+-- highest-ranked application where it has no canonical member at all.
+-- Applications still carry the older spellings of production and clone, which
+-- the plan must not.
+WITH ranked AS (
+	SELECT
+		g.id AS group_id,
+		CASE lower(COALESCE(canonical.rank, highest.rank))
+			WHEN 'live' THEN 'production'
+			WHEN 'prod' THEN 'production'
+			WHEN 'staging' THEN 'clone'
+			ELSE lower(COALESCE(canonical.rank, highest.rank))
+		END AS rank
 	FROM server_groups g
-	LEFT JOIN servers s ON s.id = g.version_server_id
-	WHERE g.id = p.group_id;
+	LEFT JOIN applications canonical ON canonical.id = g.version_application_id
+	LEFT JOIN LATERAL (
+		SELECT a.rank FROM applications a
+		WHERE a.group_id = g.id AND a.deleted_at IS NULL AND a.rank IS NOT NULL
+		ORDER BY CASE lower(a.rank)
+			WHEN 'live' THEN 0
+			WHEN 'prod' THEN 0
+			WHEN 'production' THEN 0
+			WHEN 'staging' THEN 1
+			WHEN 'clone' THEN 1
+			WHEN 'demo' THEN 2
+			WHEN 'test' THEN 3
+			ELSE 4
+		END
+		LIMIT 1
+	) highest ON TRUE
+)
+UPDATE upgrade_plans p SET rank = ranked.rank
+	FROM ranked WHERE ranked.group_id = p.group_id;
 UPDATE upgrade_plans SET rank = 'production' WHERE rank IS NULL;
 
 ALTER TABLE upgrade_plans

@@ -4,7 +4,6 @@ import {
 	Button,
 	Card,
 	CardContent,
-	Chip,
 	LinearProgress,
 	Link as MuiLink,
 	Stack,
@@ -15,9 +14,10 @@ import BarChartIcon from "@mui/icons-material/BarChart";
 import PersonIcon from "@mui/icons-material/Person";
 import { useMemo } from "react";
 import { Link as RouterLink } from "react-router-dom";
+import MachineEnclosure from "../components/MachineEnclosure";
 import StatusDot from "../components/StatusDot";
 import VersionIndicator from "../components/VersionIndicator";
-import { useVersionTrackingAcross } from "../hooks/useProducts";
+import { useVersionTrackingAcross } from "../hooks/useApplicationTypes";
 import {
 	HealthLegend,
 	OperatorLegend,
@@ -31,9 +31,9 @@ import {
 	type AggregatedOperator,
 	type FacilityServerStatus,
 	type ServerGroupCard,
-	SERVER_RANK_ORDER,
 	aggregateOperators,
-	compareServersByRankThenKind,
+	compareServersByRankThenType,
+	groupServersByRank,
 	isIncidentLingering,
 } from "../types";
 
@@ -132,7 +132,7 @@ function ReleaseSummary({ tick }: { tick: number }) {
 					    page answers "which servers, and what else are they on". */}
 					<Button
 						component={RouterLink}
-						to="/servers/figures"
+						to="/fleet/figures"
 						variant="outlined"
 						size="small"
 						startIcon={<BarChartIcon />}
@@ -153,27 +153,24 @@ function GroupCards({
 	tick: number;
 	openIncidentGroups: Map<string, IncidentLoudness>;
 }) {
-	const grouped = useApi(
-		"statuses",
-		"server_grouped_ids",
-		{},
-		[tick],
-	);
+	const groups = useApi("statuses", "group_ids", {}, [tick]);
 
-	if (grouped.status === "loading" || grouped.status === "idle") {
+	if (groups.status === "loading" || groups.status === "idle") {
 		return <LinearProgress />;
 	}
-	if (grouped.status === "error") {
-		return <Alert severity="error">{grouped.error.message}</Alert>;
+	if (groups.status === "error") {
+		return <Alert severity="error">{groups.error.message}</Alert>;
 	}
 
-	const sections = SERVER_RANK_ORDER.flatMap((rank) => {
-		const ids = grouped.data[rank];
-		if (!ids || ids.length === 0) return [];
-		return [{ rank, ids }];
-	});
+	// One grid, alphabetical. Each card carries its own ranks in its dot strip,
+	// so sectioning or ordering by rank sorts the page by something already
+	// written on every card — and leaves an operator looking for one group
+	// scanning for where its rank happens to start. A name is what they know it
+	// by, so a name is what the page is in order of.
+	// spec: CHK#presentation
+	const ids = groups.data;
 
-	if (sections.length === 0) {
+	if (ids.length === 0) {
 		return (
 			<Alert severity="info">
 				No server groups configured. Create one via the Servers page.
@@ -182,35 +179,27 @@ function GroupCards({
 	}
 
 	return (
-		<Stack spacing={3}>
-			{sections.map(({ rank, ids }) => (
-				<Box key={rank}>
-					<Typography
-						variant="h5"
-						component="h2"
-						sx={{ textTransform: "capitalize", mb: 1 }}
-					>
-						{rank}
-					</Typography>
-					<Box
-						sx={{
-							display: "grid",
-							gridTemplateColumns: "repeat(auto-fill, minmax(18em, 1fr))",
-							gap: 1.5,
-						}}
-					>
-						{ids.map((id) => (
-							<GroupCardLoader
-								key={id}
-								groupId={id}
-								tick={tick}
-								openIncident={openIncidentGroups.get(id) ?? null}
-							/>
-						))}
-					</Box>
-				</Box>
+		<Box
+			sx={{
+				display: "grid",
+				gridTemplateColumns: "repeat(auto-fill, minmax(16em, 1fr))",
+				gap: 1.5,
+				// One step down for the whole grid. Everything inside a card is
+				// sized in em from here — type, padding, dots, enclosures — so
+				// this is the single knob for how dense the page is, and 16em
+				// columns shrink with it.
+				fontSize: "0.9rem",
+			}}
+		>
+			{ids.map((id) => (
+				<GroupCardLoader
+					key={id}
+					groupId={id}
+					tick={tick}
+					openIncident={openIncidentGroups.get(id) ?? null}
+				/>
 			))}
-		</Stack>
+		</Box>
 	);
 }
 
@@ -255,13 +244,16 @@ function GroupCardLoader({
 	return (
 		<MuiLink
 			component={RouterLink}
-			to={`/groups/${groupId}`}
+			to={`/fleet/groups/${groupId}`}
 			underline="none"
 			color="inherit"
 		>
 			<Card
 				variant="outlined"
 				sx={{
+					// The bands run edge to edge, so the card clips them to its
+					// own rounded corners.
+					overflow: "hidden",
 					transition: "background-color 150ms",
 					bgcolor: occupied ? "action.hover" : undefined,
 					"&:hover": {
@@ -273,26 +265,35 @@ function GroupCardLoader({
 					}),
 				}}
 			>
-				<CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
-					{result.status === "loading" || result.status === "idle" ? (
+				{result.status === "loading" || result.status === "idle" ? (
+					<CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
 						<Typography variant="body2" color="text.secondary">
 							Thinking…
 						</Typography>
-					) : result.status === "error" ? (
+					</CardContent>
+				) : result.status === "error" ? (
+					<CardContent sx={{ p: 1.5, "&:last-child": { pb: 1.5 } }}>
 						<Alert severity="error">{result.error.message}</Alert>
-					) : (
-						<GroupCard
-							group={result.data}
-							operators={operators}
-							openIncident={openIncident}
-						/>
-					)}
-				</CardContent>
+					</CardContent>
+				) : (
+					<GroupCard
+						group={result.data}
+						operators={operators}
+						openIncident={openIncident}
+					/>
+				)}
 			</Card>
 		</MuiLink>
 	);
 }
 
+/// A group card, in three bands: what it is, what is in it, and what is
+/// happening to it.
+///
+/// The status band is omitted when there is neither an operator nor an
+/// incident, so a quiet card is two bands and the eye is drawn to the ones
+/// that have a third.
+/// spec: CHK#presentation
 function GroupCard({
 	group,
 	operators,
@@ -303,23 +304,32 @@ function GroupCard({
 	openIncident: IncidentLoudness | null;
 }) {
 	// The headline version comes from whichever member speaks for the group, so
-	// how to present it follows from the products its members actually have: a
+	// how to present it follows from the types its members actually have: a
 	// group with no versioned member shows no version rather than an "unknown".
 	// spec: APP#versions
 	const tracking = useVersionTrackingAcross(
-		useMemo(() => group.members.map((m) => m.product), [group.members]),
+		useMemo(() => group.members.map((m) => m.type), [group.members]),
 	);
+	const hasStatusBand = operators.length > 0 || openIncident !== null;
 	return (
-		<Stack spacing={1}>
-			<Stack
-				direction="row"
-				spacing={1}
-				sx={{ alignItems: "baseline", justifyContent: "space-between" }}
+		<Box>
+			<Box
+				sx={{
+					display: "flex",
+					alignItems: "baseline",
+					justifyContent: "space-between",
+					gap: 1,
+					px: "0.625em",
+					py: "0.5em",
+					borderBottom: 1,
+					borderColor: "divider",
+				}}
 			>
 				<Typography
-					variant="subtitle1"
 					component="h3"
 					sx={{
+						fontSize: "0.9375em",
+						fontWeight: 400,
 						overflow: "hidden",
 						textOverflow: "ellipsis",
 						whiteSpace: "nowrap",
@@ -336,43 +346,96 @@ function GroupCard({
 						addLink={false}
 					/>
 				</Box>
-			</Stack>
-			<Stack
-				direction="row"
-				spacing={1}
-				sx={{ alignItems: "center", justifyContent: "space-between" }}
-			>
-				<RankedDotStrip members={group.members} />
-				<Stack direction="row" spacing={0.5} sx={{ alignItems: "center" }}>
+			</Box>
+
+			<RankedDotStrip members={group.members} />
+
+			{hasStatusBand && (
+				<Box
+					data-testid="status-band"
+					sx={{
+						display: "flex",
+						alignItems: "stretch",
+						borderTop: 1,
+						borderColor: "divider",
+						fontSize: "0.6875em",
+					}}
+				>
 					{operators.length > 0 && (
-						<OperatorCountChip operators={operators} />
+						<OperatorSegment operators={operators} />
 					)}
-					{openIncident === "loud" && (
-						<Chip label="incident" color="error" size="small" />
-					)}
-					{openIncident === "held" && (
-						<Tooltip title="Open incident; Slack notice is still inside the per-group cooldown window">
-							<Chip label="incident (held)" color="warning" size="small" />
-						</Tooltip>
-					)}
-					{openIncident === "lingering" && (
-						<Tooltip title="Open incident whose failures have all recovered; it closes if they stay quiet through the linger window">
-							<Chip
-								label="incident (recovering)"
-								color="info"
-								size="small"
-							/>
-						</Tooltip>
-					)}
-				</Stack>
-			</Stack>
-		</Stack>
+					{/* Always present once the band is, empty or not: the
+					    incident segment is what fills the band to the card's
+					    edge, and a segment that came and went would leave the
+					    operator count floating on some cards and not others. */}
+					<IncidentSegment loudness={openIncident} />
+				</Box>
+			)}
+		</Box>
 	);
 }
 
-/// Compact "people are in here" marker on a group card: person icon +
-/// distinct operator count, tooltip naming who's on which server.
-function OperatorCountChip({
+/// The incident segment: right-aligned in whatever the operator segment leaves
+/// it, and filled with the incident's own colour rather than holding a chip.
+///
+/// The segment is the mark. A chip inside a band would be a second border
+/// inside a border, at a size that reads as a control rather than a state, and
+/// the band's whole job is to be legible in a card 16em wide.
+///
+/// What it says is not how loud the incident is: a held one is not yet in
+/// Slack, and a recovering one has had its failures clear and is waiting out
+/// the linger window.
+/// spec: CHK#presentation
+function IncidentSegment({ loudness }: { loudness: IncidentLoudness | null }) {
+	const segment = (
+		<Box
+			data-testid="incident-segment"
+			data-loudness={loudness ?? "none"}
+			sx={{
+				flex: 1,
+				display: "flex",
+				alignItems: "center",
+				justifyContent: "flex-end",
+				px: 1,
+				py: 0.5,
+				bgcolor: loudness ? `${TONE[loudness]}.main` : "action.hover",
+				color: loudness ? "common.white" : "text.secondary",
+			}}
+		>
+			{loudness ? LABEL[loudness] : ""}
+		</Box>
+	);
+	if (!loudness) return segment;
+	return <Tooltip title={EXPLANATION[loudness]}>{segment}</Tooltip>;
+}
+
+const TONE: Record<IncidentLoudness, "error" | "warning" | "info"> = {
+	loud: "error",
+	held: "warning",
+	lingering: "info",
+};
+
+// One word each. "incident (recovering)" does not fit a 16em card, and the
+// state is the word that matters — that there is an incident is said by the
+// segment being coloured at all.
+const LABEL: Record<IncidentLoudness, string> = {
+	loud: "incident",
+	held: "held",
+	lingering: "recovering",
+};
+
+const EXPLANATION: Record<IncidentLoudness, string> = {
+	loud: "Open incident",
+	held: "Open incident; Slack notice is still inside the per-group cooldown window",
+	lingering:
+		"Open incident whose failures have all recovered; it closes if they stay quiet through the linger window",
+};
+
+/// "People are in here": person icon and the distinct operator count, tooltip
+/// naming who is on which box.
+///
+/// Its own width, with a rule between it and the incident segment beside it.
+function OperatorSegment({
 	operators,
 }: {
 	operators: AggregatedOperator[];
@@ -381,104 +444,151 @@ function OperatorCountChip({
 		<Tooltip
 			title={
 				<Box>
-					{operators.map(({ op, servers }) => (
+					{operators.map(({ op, machines }) => (
 						<Box key={op.login}>
-							{op.login} · {servers.join(", ")}
+							{op.login} · {machines.join(", ")}
 						</Box>
 					))}
 				</Box>
 			}
 		>
-			<Chip
-				icon={<PersonIcon />}
-				label={operators.length}
-				size="small"
-				variant="outlined"
-			/>
+			<Box
+				data-testid="operator-segment"
+				sx={{
+					display: "flex",
+					alignItems: "center",
+					gap: 0.375,
+					px: 1,
+					py: 0.5,
+					borderRight: 1,
+					borderColor: "divider",
+					bgcolor: "action.hover",
+					color: "text.secondary",
+					flexShrink: 0,
+				}}
+			>
+				<PersonIcon sx={{ fontSize: "1.1em" }} />
+				{operators.length}
+			</Box>
 		</Tooltip>
 	);
 }
 
-/// Strip of StatusDots for a group's members, sorted by rank then kind
-/// (centrals first within a rank). A hollow right-pointing triangle
-/// separates adjacent ranks, so operators can see at a glance how the
-/// group breaks down without naming each dot.
-// Every child of the strip — dot or rank separator — sits in an identical
-// fixed-size cell, so wrapped rows always align to the same column grid no
-// matter where the line breaks fall. Spacing comes from the container's
-// `gap`, not per-dot margins (StatusDot's inline right-margin is neutralised).
+/// A group's members as rank rows of machine enclosures.
+///
+/// Rank is the outer break, highest first, since that is how an operator reads
+/// a group. Within a rank every machine is a pill holding the dots for the
+/// applications on it: a one-application box is one dot in a pill, so the
+/// presence of an enclosure never means anything on its own — only its
+/// contents do. Two dots in one pill is the case the machine grain exists for.
+/// spec: FLT
+// Every dot sits in an identical fixed-size cell, so wrapped rows align to the
+// same column grid wherever the line breaks fall. Spacing comes from the
+// container's `gap`, not per-dot margins (StatusDot's inline right-margin is
+// neutralised).
+const DIVIDER_LIGHT = "rgba(0, 0, 0, 0.06)";
+
 const dotCellSx = {
 	display: "inline-flex",
-	width: "1em",
-	height: "1em",
+	width: "0.85em",
+	height: "0.85em",
 	alignItems: "center",
 	justifyContent: "center",
 	flex: "none",
 	"& > span": { marginRight: 0 },
 } as const;
 
-export function RankedDotStrip({ members }: { members: FacilityServerStatus[] }) {
-	const sorted = [...members].sort(compareServersByRankThenKind);
-	const cells: React.ReactNode[] = [];
-	let prevRank: string | null = null;
-	for (const m of sorted) {
-		const rank = m.rank ?? "_unranked";
-		if (prevRank != null && rank !== prevRank) {
-			cells.push(
-				<Box
-					key={`sep-${rank}`}
-					component="span"
-					aria-hidden
-					data-testid="rank-separator"
-					sx={{ ...dotCellSx, color: "text.primary" }}
-				>
-					{/* Hollow play-button triangle, dot-sized; MUI's
-					    PlayArrowOutlined renders too small in a 1em cell and
-					    has sharp corners, hence the inline SVG. */}
-					<svg
-						width="1em"
-						height="1em"
-						viewBox="0 0 16 16"
-						fill="none"
-						stroke="currentColor"
-						strokeWidth={2}
-						strokeLinejoin="round"
-						strokeLinecap="round"
-					>
-						<path d="M4.5 3.2 12.8 8 4.5 12.8Z" />
-					</svg>
-				</Box>,
-			);
-		}
-		prevRank = rank;
-		cells.push(
-			<Tooltip
-				key={m.id}
-				title={`${m.name || "(unnamed)"}${
-					m.rank ? ` · ${m.rank}` : ""
-				} · ${m.kind}`}
-			>
-				<Box component="span" sx={dotCellSx}>
-					<StatusDot
-						up={m.up}
-						health={m.health}
-						monitored={m.is_monitored}
-						title={`${m.name}: ${m.up}${
-							m.health !== "healthy" ? ` (${m.health})` : ""
-						}`}
-					/>
-				</Box>
-			</Tooltip>,
-		);
+/// The machines of one group, each with the applications on it, bucketed by
+/// the rank of the highest-ranked application it carries.
+function machineRows(members: FacilityServerStatus[]) {
+	const byMachine = new Map<string, FacilityServerStatus[]>();
+	for (const m of members) {
+		const on = byMachine.get(m.machine_id);
+		if (on) on.push(m);
+		else byMachine.set(m.machine_id, [m]);
 	}
+	const boxes = [...byMachine.values()].map((on) => {
+		const sorted = [...on].sort(compareServersByRankThenType);
+		return { applications: sorted, lead: sorted[0]! };
+	});
+	return groupServersByRank(
+		boxes.map((b) => ({
+			...b,
+			rank: b.lead.rank,
+			type: b.lead.type,
+			name: b.lead.machine_name ?? b.lead.name,
+		})),
+	);
+}
+
+export function RankedDotStrip({ members }: { members: FacilityServerStatus[] }) {
+	const rows = machineRows(members);
 	return (
-		<Stack
-			direction="row"
-			spacing={0}
-			data-testid="dot-strip"
-			sx={{ flexWrap: "wrap", alignItems: "center", gap: "0.5em" }}
-		>
-			{cells}
+		<Stack data-testid="dot-strip" spacing={0.5} sx={{ minWidth: 0 }}>
+			{rows.map(([rank, boxes], index) => (
+				<Box
+					key={rank ?? "_unranked"}
+					data-testid="rank-row"
+					data-rank={rank ?? "unranked"}
+					sx={{
+						position: "relative",
+						display: "flex",
+						flexWrap: "wrap",
+						alignItems: "center",
+						gap: "0.4em",
+						px: "0.625em",
+						py: "0.4375em",
+						// Lighter than the card's own borders, so the rank break
+						// reads as subordinate to the card structure. `divider`
+						// is the card's border, so it cannot also be the rule
+						// inside it.
+						...(index > 0
+							? { borderTop: 1, borderColor: DIVIDER_LIGHT }
+							: {}),
+						// The rank spelled out behind its own row, faint enough to
+						// read only when looked for. It replaces the triangle that
+						// used to mark the break without naming it, and needs no
+						// space of its own.
+						"&::after": {
+							content: "attr(data-rank)",
+							position: "absolute",
+							right: "0.5em",
+							top: "50%",
+							transform: "translateY(-50%)",
+							fontSize: "0.9375em",
+							fontWeight: 500,
+							letterSpacing: "0.06em",
+							textTransform: "uppercase",
+							color: "rgba(0, 0, 0, 0.09)",
+							pointerEvents: "none",
+							zIndex: 0,
+						},
+					}}
+				>
+					{boxes.map((box) => (
+						<MachineEnclosure
+							key={box.lead.machine_id}
+							up={box.lead.machine_up}
+							health={box.lead.machine_health}
+							name={box.lead.machine_name}
+							maintained={box.lead.machine_maintained}
+						>
+							{box.applications.map((m) => (
+								<Box key={m.id} component="span" sx={dotCellSx}>
+									<StatusDot
+										up={m.up}
+										health={m.health}
+										monitored={m.is_monitored}
+										title={`${m.name}${
+											m.rank ? ` · ${m.rank}` : ""
+										} · ${m.type}`}
+									/>
+								</Box>
+							))}
+						</MachineEnclosure>
+					))}
+				</Box>
+			))}
 		</Stack>
 	);
 }

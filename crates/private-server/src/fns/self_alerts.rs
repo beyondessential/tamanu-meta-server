@@ -27,7 +27,7 @@ pub fn routes() -> OpenApiRouter<AppState> {
 
 /// A self-alert: a problem with canopy's own operation, such as an
 /// expiring credential or a failed notification delivery — distinct from
-/// issues raised against monitored servers.
+/// issues raised against monitored applications.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct SelfAlertView {
 	/// Unique identifier of this self-alert.
@@ -49,6 +49,11 @@ pub struct SelfAlertView {
 	pub title: Option<String>,
 	/// Full detail message describing the condition.
 	pub message: String,
+	/// Whatever structured detail the condition attached, or `null` where it
+	/// attached none. A message is for reading and this is for acting on: the
+	/// stale-healthcheck alert, for one, lists the checks it names here so the
+	/// surface can link each to its own policy page.
+	pub detail: Option<serde_json::Value>,
 	/// Whether the underlying condition is still ongoing. Becomes `false`
 	/// once the condition has cleared on its own, independently of whether
 	/// an operator has resolved the alert.
@@ -75,6 +80,7 @@ impl From<Issue> for SelfAlertView {
 			escalates: i.escalates,
 			title: i.description,
 			message: i.message,
+			detail: i.detail,
 			active: i.active,
 			first_seen: i.first_seen,
 			last_seen: i.last_seen,

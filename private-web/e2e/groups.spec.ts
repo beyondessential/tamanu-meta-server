@@ -24,7 +24,7 @@ test.describe("group detail page", () => {
 			groupId: group.id,
 		});
 
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 
 		await expect(
 			page.getByRole("heading", { name: group.name, level: 1 }),
@@ -39,21 +39,27 @@ test.describe("group detail page", () => {
 		await expect(
 			page.getByText("billing.deployment=watched-cluster"),
 		).toBeVisible();
+		// Each member sits under its own box in the tree. Matched by href:
+		// `seedServer` names the box after the workload, so a name matches both
+		// links.
 		await expect(
-			page.getByRole("link", { name: new RegExp(memberA.name) }),
+			page.locator(`a[href="/fleet/applications/${memberA.id}"]`),
 		).toBeVisible();
 		await expect(
-			page.getByRole("link", { name: new RegExp(memberB.name) }),
+			page.locator(`a[href="/fleet/applications/${memberB.id}"]`),
+		).toBeVisible();
+		await expect(
+			page.locator(`a[href="/fleet/machines/${memberA.machineId}"]`),
 		).toBeVisible();
 	});
 
 	test("an empty group lists no servers", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "lonely-group" });
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 		await expect(
 			page.getByRole("heading", { name: group.name, level: 1 }),
 		).toBeVisible();
-		await expect(page.getByText(/no servers in this group/i)).toBeVisible();
+		await expect(page.getByText(/nothing in this group yet/i)).toBeVisible();
 	});
 });
 
@@ -72,7 +78,7 @@ test.describe("group edit page", () => {
 			tags: { region: "au" },
 		});
 
-		await page.goto(`/groups/${group.id}/edit`);
+		await page.goto(`/fleet/groups/${group.id}/edit`);
 
 		// Name is marked required so MUI renders the label as "Name *".
 		await expect(page.getByLabel(/^Name\b/i)).toHaveValue(group.name);
@@ -90,7 +96,7 @@ test.describe("group edit page", () => {
 			tags: {},
 		});
 
-		await page.goto(`/groups/${group.id}/edit`);
+		await page.goto(`/fleet/groups/${group.id}/edit`);
 
 		// Starts empty.
 		await expect(page.getByText(/^no tags\.$/i)).toBeVisible();
@@ -122,7 +128,7 @@ test.describe("group edit page", () => {
 			tags: { env: "staging" },
 		});
 
-		await page.goto(`/groups/${group.id}/edit`);
+		await page.goto(`/fleet/groups/${group.id}/edit`);
 
 		const valueInput = page.getByLabel(/^Value$/i);
 		await expect(valueInput).toHaveValue("staging");
@@ -130,7 +136,7 @@ test.describe("group edit page", () => {
 		await page.getByRole("button", { name: /^save$/i }).click();
 
 		// Save navigates to detail; wait for that.
-		await page.waitForURL(`**/groups/${group.id}`);
+		await page.waitForURL(`**/fleet/groups/${group.id}`);
 
 		// DB has the new value.
 		const rows = await sql.query<{ tags: Record<string, string> }>(
@@ -149,7 +155,7 @@ test.describe("group edit page", () => {
 			tags: { env: "prod", tier: "1" },
 		});
 
-		await page.goto(`/groups/${group.id}/edit`);
+		await page.goto(`/fleet/groups/${group.id}/edit`);
 
 		await expect(page.getByLabel(/^Key$/i)).toHaveCount(2);
 		// Rows render sorted by key — "env" is first, "tier" is second.
@@ -158,7 +164,7 @@ test.describe("group edit page", () => {
 		await expect(page.getByLabel(/^Key$/i)).toHaveValue("env");
 
 		await page.getByRole("button", { name: /^save$/i }).click();
-		await page.waitForURL(`**/groups/${group.id}`);
+		await page.waitForURL(`**/fleet/groups/${group.id}`);
 
 		const rows = await sql.query<{ tags: Record<string, string> }>(
 			"SELECT tags FROM server_groups WHERE id = $1",
@@ -176,7 +182,7 @@ test.describe("group edit page", () => {
 			tags: { env: "prod" },
 		});
 
-		await page.goto(`/groups/${group.id}/edit`);
+		await page.goto(`/fleet/groups/${group.id}/edit`);
 
 		await page.getByRole("button", { name: "add tag" }).click();
 		// The new (empty-keyed) row sorts last under the existing "env" row.
@@ -184,7 +190,7 @@ test.describe("group edit page", () => {
 		await page.getByLabel(/^Value$/i).nth(1).fill("1");
 
 		await page.getByRole("button", { name: /^save$/i }).click();
-		await page.waitForURL(`**/groups/${group.id}`);
+		await page.waitForURL(`**/fleet/groups/${group.id}`);
 
 		const rows = await sql.query<{ tags: Record<string, string> }>(
 			"SELECT tags FROM server_groups WHERE id = $1",
@@ -206,7 +212,7 @@ test.describe("group edit page", () => {
 			slackCloseDelaySeconds: 240,
 		});
 
-		await page.goto(`/groups/${group.id}/edit`);
+		await page.goto(`/fleet/groups/${group.id}/edit`);
 
 		// Two "minutes" fields: the open cooldown first, the linger second.
 		const openInput = page.getByLabel(/^minutes$/i).first();
@@ -216,7 +222,7 @@ test.describe("group edit page", () => {
 		await openInput.fill("5");
 		await lingerInput.fill("7");
 		await page.getByRole("button", { name: /^save$/i }).click();
-		await page.waitForURL(`**/groups/${group.id}`);
+		await page.waitForURL(`**/fleet/groups/${group.id}`);
 
 		const rows = await sql.query<{ open: string; close: string }>(
 			"SELECT EXTRACT(EPOCH FROM slack_open_delay)::text AS open, \

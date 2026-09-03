@@ -23,7 +23,7 @@ async fn seed(conn: &mut AsyncPgConnection) -> (Uuid, Uuid) {
 	let device_id = Uuid::new_v4();
 	conn.batch_execute(&format!(
 		"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'Rot'); \
-		 INSERT INTO devices (id, role) VALUES ('{device_id}', 'server');"
+		 INSERT INTO devices (id, role) VALUES ('{device_id}', 'machine');"
 	))
 	.await
 	.expect("seed group + device");

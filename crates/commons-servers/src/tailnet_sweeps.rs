@@ -16,12 +16,12 @@ use crate::tailnet_directory::TailnetDirectory;
 pub const TAILSCALE_SOURCE: &str = "canopy";
 
 /// Ref value for the one "tailnet key will expire" issue per
-/// `(server, device)` pair.
+/// `(machine, device)` pair.
 pub const KEY_EXPIRY_REF: &str = "tailscale-key-expiry";
 
 pub const KEY_EXPIRY_DOC: &str = "## Description
 
-The server's Tailscale node key is nearing expiry (and key expiry isn't disabled for the node). When it lapses, the device drops off the tailnet and canopy loses its management path.
+The machine's Tailscale node key is nearing expiry (and key expiry isn't disabled for the node). When it lapses, the device drops off the tailnet and canopy loses its management path.
 
 ## Results
 
@@ -31,43 +31,48 @@ The server's Tailscale node key is nearing expiry (and key expiry isn't disabled
 
 Re-authenticate the node (`tailscale up`) or disable key expiry for it in the Tailscale admin console.";
 
-/// Sweep every tailnet-attached device that's wired to at least one
-/// server, and file (or close) the key-expiry check per `(server,
-/// device)` pair based on the node's `keyExpiryDisabled`. The check
-/// registers as an escalating failure — losing contact with a node is
-/// stop-the-world — but operators can regrade it from the catalog.
+/// Sweep every tailnet-bound device and file (or close) the key-expiry
+/// check per `(machine, device)` pair based on the node's
+/// `keyExpiryDisabled`. The check registers as an escalating failure —
+/// losing contact with a node is stop-the-world — but operators can
+/// regrade it from the catalog.
 ///
-/// Tailnet-attached devices with no server are intentionally skipped:
-/// the tailnet hosts plenty of nodes that aren't canopy-managed
-/// servers (operator laptops, other infra, …) and we have nothing to
-/// say about those — the sweep is scoped to the headless devices
-/// canopy actually runs.
+/// The machine is the subject. A node key expiring severs canopy's path to
+/// the box, so it is one finding about the box rather than one per workload
+/// running on it.
+///
+/// Tailnet devices bound to no machine are intentionally skipped: the
+/// tailnet hosts plenty of nodes that aren't canopy-managed boxes (operator
+/// laptops, other infra, …) and we have nothing to say about those — the
+/// sweep is scoped to the headless devices canopy actually runs.
 ///
 /// Returns the number of events filed in this pass.
+// spec: DTR, CHK
 pub async fn sweep_key_expiry(
 	db: &mut AsyncPgConnection,
 	directory: &TailnetDirectory,
 ) -> Result<usize> {
-	let pairs = Device::list_tailnet_attached_with_server(db).await?;
+	let pairs = Device::list_tailnet_bound_machines(db).await?;
 	if pairs.is_empty() {
 		return Ok(0);
 	}
 
 	let snapshot = directory.snapshot_by_node_id().await;
-	let server_ids: Vec<Uuid> = pairs.iter().map(|(_, s, _)| *s).collect();
+	let machine_ids: Vec<Uuid> = pairs.iter().map(|(_, m, _)| *m).collect();
 	let existing =
-		Issue::list_by_source_ref(db, TAILSCALE_SOURCE, KEY_EXPIRY_REF, &server_ids).await?;
-	// `list_by_source_ref` is filtered by `server_ids`, so every row is
-	// server-scoped (`server_id` is `Some`); drop any defensively.
+		Issue::list_by_source_ref_for_machines(db, TAILSCALE_SOURCE, KEY_EXPIRY_REF, &machine_ids)
+			.await?;
+	// The read is filtered by `machine_ids`, so every row is machine-scoped
+	// (`machine_id` is `Some`); drop any defensively.
 	let issue_map: std::collections::HashMap<Uuid, &Issue> = existing
 		.iter()
-		.filter_map(|i| i.server_id.map(|sid| (sid, i)))
+		.filter_map(|i| i.machine_id.map(|mid| (mid, i)))
 		.collect();
 
 	let mut filed = 0usize;
-	for (device, server_id, node_id) in &pairs {
+	for (device, machine_id, node_id) in &pairs {
 		let entry = snapshot.get(node_id);
-		let existing_issue = issue_map.get(server_id).copied();
+		let existing_issue = issue_map.get(machine_id).copied();
 
 		// Node not in the directory (left the tailnet / not yet
 		// refreshed) — leave any existing issue alone and don't file a
@@ -105,7 +110,7 @@ pub async fn sweep_key_expiry(
 			db,
 			CheckFiling {
 				source: TAILSCALE_SOURCE,
-				scope: Scope::Server(*server_id),
+				scope: Scope::Machine(*machine_id),
 				device_id: Some(device.id),
 				check: KEY_EXPIRY_REF,
 				observed,

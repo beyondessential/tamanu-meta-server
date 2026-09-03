@@ -3,9 +3,12 @@
 //! scoped skipped-ceiling. Grade-time behaviour is exercised through
 //! `file_check`; the silence CRUD through the `silenced_refs` facade.
 
+use commons_types::namespace::Namespace;
+
+use crate::helpers::app_ns;
 use commons_types::status::CheckResult;
 use database::{
-	check_policies::{CheckPolicy, EvaluationContext, ScopedCheckPolicy},
+	check_policies::{CheckPolicy, EvaluationContext, FilingScope, ScopedCheckPolicy},
 	issues::{CheckFiling, Issue, Scope, file_check},
 	silenced_refs::ServerSilencedRef,
 	statuses::CANOPY_SOURCE,
@@ -30,7 +33,7 @@ async fn insert_group(conn: &mut diesel_async::AsyncPgConnection) -> Uuid {
 
 async fn insert_server(conn: &mut diesel_async::AsyncPgConnection, group_id: Option<Uuid>) -> Uuid {
 	let row: RowId = sql_query(
-		"INSERT INTO servers (host, group_id) VALUES ('http://scoped.invalid/', $1) RETURNING id",
+		"WITH m AS (INSERT INTO machines (group_id) VALUES ($1) RETURNING id) INSERT INTO applications (type, host, group_id, machine_id) SELECT 'tamanu-central', 'http://scoped.invalid/', $1, m.id FROM m RETURNING id",
 	)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group_id)
 	.get_result(conn)
@@ -42,7 +45,7 @@ async fn insert_server(conn: &mut diesel_async::AsyncPgConnection, group_id: Opt
 fn filing(server_id: Uuid, check: &str, observed: CheckResult) -> CheckFiling<'_> {
 	CheckFiling {
 		source: CANOPY_SOURCE,
-		scope: Scope::Server(server_id),
+		scope: Scope::Application(server_id),
 		device_id: None,
 		check,
 		observed,
@@ -101,6 +104,7 @@ async fn group_silence_covers_member_servers() {
 			&mut conn,
 			Scope::Group(group_id),
 			CANOPY_SOURCE,
+			&Namespace::Flat,
 			"noisy",
 			Some("op"),
 		)
@@ -115,9 +119,15 @@ async fn group_silence_covers_member_servers() {
 
 		// Lifting the group silence restores normal grading on the next
 		// filing.
-		ScopedCheckPolicy::unsilence(&mut conn, Scope::Group(group_id), CANOPY_SOURCE, "noisy")
-			.await
-			.expect("unsilence");
+		ScopedCheckPolicy::unsilence(
+			&mut conn,
+			Scope::Group(group_id),
+			CANOPY_SOURCE,
+			&Namespace::Flat,
+			"noisy",
+		)
+		.await
+		.expect("unsilence");
 		file_check(&mut conn, filing(server_id, "noisy", CheckResult::Failed))
 			.await
 			.expect("file again");
@@ -137,6 +147,7 @@ async fn server_scoped_rule_can_upgrade_past_the_fleet_ceiling() {
 		CheckPolicy::register(
 			&mut conn,
 			CANOPY_SOURCE,
+			&Namespace::Flat,
 			"tiered",
 			CheckResult::Warning,
 			false,
@@ -150,7 +161,7 @@ async fn server_scoped_rule_can_upgrade_past_the_fleet_ceiling() {
 		// transforms; only silences are surfaced in the UI).
 		sql_query(
 			r#"
-				INSERT INTO scoped_check_policies (source, check_name, server_id, rules)
+				INSERT INTO scoped_check_policies (source, check_name, application_id, rules)
 				VALUES ($1, 'tiered', $2,
 					'{"if": [{"==": [{"var": "check.result"}, "failed"]}, "failed"]}'::jsonb)
 			"#,
@@ -172,11 +183,14 @@ async fn server_scoped_rule_can_upgrade_past_the_fleet_ceiling() {
 		let graded = CheckPolicy::apply_scoped(
 			&mut conn,
 			CANOPY_SOURCE,
+			&Namespace::Flat,
 			"tiered",
 			CheckResult::Failed,
 			&ctx,
-			Some(server_id),
-			None,
+			FilingScope {
+				application_id: Some(server_id),
+				..Default::default()
+			},
 		)
 		.await
 		.expect("apply");
@@ -191,11 +205,14 @@ async fn server_scoped_rule_can_upgrade_past_the_fleet_ceiling() {
 		let graded = CheckPolicy::apply_scoped(
 			&mut conn,
 			CANOPY_SOURCE,
+			&Namespace::Flat,
 			"tiered",
 			CheckResult::Failed,
 			&ctx,
-			Some(other),
-			None,
+			FilingScope {
+				application_id: Some(other),
+				..Default::default()
+			},
 		)
 		.await
 		.expect("apply other");
@@ -208,57 +225,99 @@ async fn server_scoped_rule_can_upgrade_past_the_fleet_ceiling() {
 async fn silence_on_a_scoped_rule_row_keeps_the_rules() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn, None).await;
+		let (subject, application_type) = app_ns().to_columns();
 		sql_query(
 			r#"
-				INSERT INTO scoped_check_policies (source, check_name, server_id, rules)
-				VALUES ('alertd', 'ruled', $1,
+				INSERT INTO scoped_check_policies
+					(source, subject, application_type, check_name, application_id, rules)
+				VALUES ('alertd', $2, $3, 'ruled', $1,
 					'{"if": [{"==": [{"var": "check.result"}, "failed"]}, "failed"]}'::jsonb)
 			"#,
 		)
 		.bind::<sql_types::Uuid, _>(server_id)
+		.bind::<sql_types::Nullable<sql_types::Text>, _>(subject)
+		.bind::<sql_types::Nullable<sql_types::Text>, _>(application_type)
 		.execute(&mut conn)
 		.await
 		.expect("scoped rule");
 
 		ScopedCheckPolicy::silence(
 			&mut conn,
-			Scope::Server(server_id),
+			Scope::Application(server_id),
 			"alertd",
+			&app_ns(),
 			"ruled",
 			Some("op"),
 		)
 		.await
 		.expect("silence");
-		let row = ScopedCheckPolicy::get(&mut conn, Scope::Server(server_id), "alertd", "ruled")
-			.await
-			.expect("get")
-			.expect("row exists");
+		let row = ScopedCheckPolicy::get(
+			&mut conn,
+			Scope::Application(server_id),
+			"alertd",
+			&app_ns(),
+			"ruled",
+		)
+		.await
+		.expect("get")
+		.expect("row exists");
 		assert_eq!(row.ceiling.as_deref(), Some("skipped"));
 		assert!(row.rules.is_some(), "silencing keeps the scoped rules");
 
 		// Unsilencing lifts the ceiling but keeps the rules row.
-		ScopedCheckPolicy::unsilence(&mut conn, Scope::Server(server_id), "alertd", "ruled")
-			.await
-			.expect("unsilence");
-		let row = ScopedCheckPolicy::get(&mut conn, Scope::Server(server_id), "alertd", "ruled")
-			.await
-			.expect("get")
-			.expect("row still exists");
+		ScopedCheckPolicy::unsilence(
+			&mut conn,
+			Scope::Application(server_id),
+			"alertd",
+			&app_ns(),
+			"ruled",
+		)
+		.await
+		.expect("unsilence");
+		let row = ScopedCheckPolicy::get(
+			&mut conn,
+			Scope::Application(server_id),
+			"alertd",
+			&app_ns(),
+			"ruled",
+		)
+		.await
+		.expect("get")
+		.expect("row still exists");
 		assert_eq!(row.ceiling, None);
 		assert!(row.rules.is_some());
 
 		// A plain silence row deletes outright on unsilence.
-		ScopedCheckPolicy::silence(&mut conn, Scope::Server(server_id), "alertd", "plain", None)
-			.await
-			.expect("plain silence");
-		ScopedCheckPolicy::unsilence(&mut conn, Scope::Server(server_id), "alertd", "plain")
-			.await
-			.expect("plain unsilence");
+		ScopedCheckPolicy::silence(
+			&mut conn,
+			Scope::Application(server_id),
+			"alertd",
+			&app_ns(),
+			"plain",
+			None,
+		)
+		.await
+		.expect("plain silence");
+		ScopedCheckPolicy::unsilence(
+			&mut conn,
+			Scope::Application(server_id),
+			"alertd",
+			&app_ns(),
+			"plain",
+		)
+		.await
+		.expect("plain unsilence");
 		assert!(
-			ScopedCheckPolicy::get(&mut conn, Scope::Server(server_id), "alertd", "plain")
-				.await
-				.expect("get")
-				.is_none()
+			ScopedCheckPolicy::get(
+				&mut conn,
+				Scope::Application(server_id),
+				"alertd",
+				&app_ns(),
+				"plain"
+			)
+			.await
+			.expect("get")
+			.is_none()
 		);
 	})
 	.await
@@ -268,29 +327,36 @@ async fn silence_on_a_scoped_rule_row_keeps_the_rules() {
 async fn decommission_clears_the_checks_silences() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn, None).await;
-		CheckPolicy::upsert_default(&mut conn, "alertd", "noisy")
+		CheckPolicy::upsert_default(&mut conn, "alertd", &app_ns(), "noisy")
 			.await
 			.expect("seed catalog");
 		ScopedCheckPolicy::silence(
 			&mut conn,
-			Scope::Server(server_id),
+			Scope::Application(server_id),
 			"alertd",
+			&app_ns(),
 			"noisy",
 			Some("op"),
 		)
 		.await
 		.expect("silence");
 
-		CheckPolicy::decommission(&mut conn, "alertd", "noisy", "op")
+		CheckPolicy::decommission(&mut conn, "alertd", &app_ns(), "noisy", "op")
 			.await
 			.expect("decommission");
 
 		// The silence row is deleted outright, not just hidden.
 		assert!(
-			ScopedCheckPolicy::get(&mut conn, Scope::Server(server_id), "alertd", "noisy")
-				.await
-				.expect("get")
-				.is_none(),
+			ScopedCheckPolicy::get(
+				&mut conn,
+				Scope::Application(server_id),
+				"alertd",
+				&app_ns(),
+				"noisy"
+			)
+			.await
+			.expect("get")
+			.is_none(),
 			"decommissioning a check clears its silences",
 		);
 	})
@@ -301,20 +367,21 @@ async fn decommission_clears_the_checks_silences() {
 async fn list_silences_excludes_orphaned_check_silences() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let server_id = insert_server(&mut conn, None).await;
-		CheckPolicy::upsert_default(&mut conn, "bestool-alertd", "sync")
+		CheckPolicy::upsert_default(&mut conn, "bestool-alertd", &app_ns(), "sync")
 			.await
 			.expect("seed catalog");
 		ScopedCheckPolicy::silence(
 			&mut conn,
-			Scope::Server(server_id),
+			Scope::Application(server_id),
 			"bestool-alertd",
+			&app_ns(),
 			"sync",
 			Some("op"),
 		)
 		.await
 		.expect("silence");
 		assert_eq!(
-			ScopedCheckPolicy::list_silences(&mut conn, Scope::Server(server_id))
+			ScopedCheckPolicy::list_silences(&mut conn, Scope::Application(server_id))
 				.await
 				.expect("list")
 				.len(),
@@ -328,7 +395,7 @@ async fn list_silences_excludes_orphaned_check_silences() {
 			.expect("orphan the check");
 
 		assert!(
-			ScopedCheckPolicy::list_silences(&mut conn, Scope::Server(server_id))
+			ScopedCheckPolicy::list_silences(&mut conn, Scope::Application(server_id))
 				.await
 				.expect("list")
 				.is_empty(),

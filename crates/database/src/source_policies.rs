@@ -1,5 +1,5 @@
 //! Operator policy per reporting source: the reachability mode (how the
-//! source's silence bears on its servers' reachability) and the ingest
+//! source's silence bears on its applications' reachability) and the ingest
 //! mode (whether the device API accepts its reports). Absent rows mean the
 //! defaults (`on`, `allow`).
 
