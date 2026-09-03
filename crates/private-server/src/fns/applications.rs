@@ -76,7 +76,7 @@ pub struct ServerDetailData {
 	/// The server's own effective `billing.*` labels
 	/// (product/deployment/stage) — the ones canopy hands the server's device,
 	/// carrying its own product and rank rather than its group's. Empty when
-	/// the server is ungrouped, there being no deployment to attribute to.
+	/// the server is ungrouped, there being no group to attribute to.
 	// spec: APP#billing-attribution
 	pub billing_labels: Vec<super::server_groups::BillingTag>,
 }
@@ -97,7 +97,7 @@ pub struct ServerInfo {
 	/// Decides which of Canopy's per-application features apply to it.
 	// spec: APP
 	pub r#type: ApplicationType,
-	/// Where this server sits in its deployment's promotion order (e.g.
+	/// Where this server sits in its group's promotion order (e.g.
 	/// production vs. staging), if applicable.
 	pub rank: Option<ServerRank>,
 	/// The server's stored URL, if any. May be absent for device-only applications.
@@ -621,7 +621,7 @@ pub async fn get_detail(
 		let status_lookup = Status::latest_for_server(&mut conn_status, server.id);
 
 		// A server detail page shouldn't 404 just because no versions are
-		// published yet (e.g. a fresh deployment); treat "no match" as "unknown
+		// published yet (e.g. a fresh Canopy instance); treat "no match" as "unknown
 		// latest" so `version_distance` falls back to None.
 		let latest_version_lookup = async {
 			match Version::get_latest_matching(&mut conn, "*".parse()?).await {

@@ -146,18 +146,18 @@ test.describe("maintenance windows", () => {
 		page,
 		sql,
 	}) => {
-		const group = await seedServerGroup(sql, { name: "whole-deployment" });
+		const group = await seedServerGroup(sql, { name: "whole-group" });
 		await seedMaintenanceWindow(sql, {
 			serverGroupId: group.id,
 			note: "Cutting over the database",
 		});
 
 		await page.goto("/maintenance");
-		const row = page.getByRole("row", { name: /whole-deployment/ });
+		const row = page.getByRole("row", { name: /whole-group/ });
 		await expect(row).toContainText("Cutting over the database");
 		await expect(row).toContainText("seed@bes.au");
 		await expect(
-			page.getByRole("link", { name: "whole-deployment" }),
+			page.getByRole("link", { name: "whole-group" }),
 		).toHaveAttribute("href", `/fleet/groups/${group.id}`);
 	});
 
@@ -169,7 +169,7 @@ test.describe("maintenance windows", () => {
 		page,
 		sql,
 	}) => {
-		const group = await seedServerGroup(sql, { name: "island-deployment" });
+		const group = await seedServerGroup(sql, { name: "island-group" });
 		const server = await seedServer(sql, {
 			name: "island-box",
 			groupId: group.id,

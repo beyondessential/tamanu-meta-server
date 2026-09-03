@@ -657,8 +657,8 @@ impl ApplicationCertificate {
 	/// This is the other half of [`Self::at_risk`], which deliberately skips paused
 	/// applications. A pause suppresses the per-server alerting that would chase a
 	/// certificate running out, so the forgetting is what has to become visible —
-	/// and against Canopy rather than the deployment, since nobody on that
-	/// deployment can lift a pause.
+	/// and against Canopy rather than the group, since nobody in that
+	/// group can lift a pause.
 	///
 	/// Entitlement is filtered the same way: a name the server is no longer
 	/// entitled to raises nothing however far past expiry it is, because Canopy
@@ -738,7 +738,7 @@ impl ApplicationCertificate {
 	}
 
 	/// Orders that have never produced a certificate and have failed repeatedly
-	/// — a deployment that never came up, as distinct from one about to go dark.
+	/// — a server that never came up, as distinct from one about to go dark.
 	pub async fn stuck_first_issuances(
 		db: &mut AsyncPgConnection,
 		min_attempts: i32,

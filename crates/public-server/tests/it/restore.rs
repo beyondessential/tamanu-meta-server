@@ -1076,7 +1076,7 @@ async fn a_group_with_no_plan_gets_no_migrate_entry() {
 
 			assert!(
 				entries.is_empty(),
-				"nobody has said this deployment is moving, so no entry: got {entries:?}"
+				"nobody has said this group is moving, so no entry: got {entries:?}"
 			);
 		},
 	)

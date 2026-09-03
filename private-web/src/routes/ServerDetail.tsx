@@ -509,7 +509,7 @@ function InfoSection({
 					/>
 				)}
 				{/* Only where something has been granted. "Not permitted" on every
-				    server in the fleet advertises a feature that a deployment
+				    server in the fleet advertises a feature that a Canopy instance
 				    without DNS zones does not have.
 				    spec: DOM#permission-for-a-server-to-manage-its-own-names */}
 				{(server.may_manage_dns || server.may_manage_tls) && (

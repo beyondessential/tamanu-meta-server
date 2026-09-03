@@ -13,7 +13,7 @@
 //! Suspension outlasts the window itself by [`SETTLE`]. A machine is back
 //! before the sources on it have reported again, and a machine whose every
 //! source is stale is unreachable, so ending suspension the instant the
-//! work finishes would report a deployment that has just come back as
+//! work finishes would report a server that has just come back as
 //! failed for as long as the work took.
 
 use std::collections::HashSet;

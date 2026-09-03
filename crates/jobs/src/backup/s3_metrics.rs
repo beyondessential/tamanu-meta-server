@@ -3,7 +3,7 @@
 //! `backup_repo_stats.bucket_bytes` (the billing basis). Best-effort: on any
 //! error, log + continue, never alert.
 //!
-//! The metric lives in the *deployment* account, so we read it with the group's
+//! The metric lives in the *group's* account, so we read it with the group's
 //! assumed maintenance role (`maintenance_role_arn` — the device role has no
 //! CloudWatch grant), mirroring the assume→creds→client-builder pattern in
 //! [`super::preflight`].
@@ -40,7 +40,7 @@ async fn bucket_bytes(
 	cfg: &ServerGroupBackupConfig,
 	now: Timestamp,
 ) -> Result<Option<i64>, String> {
-	// The metric is in the deployment account; assume the group's maintenance
+	// The metric is in the group's account; assume the group's maintenance
 	// role to read it (the CloudWatch grant lives there, not on the device role).
 	let resp = aws
 		.sts

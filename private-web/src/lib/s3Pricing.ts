@@ -40,7 +40,7 @@ export const S3_EGRESS_USD_PER_GB: Record<string, number> = {
 };
 
 /// Region assumed when a group's backup config has no explicit region set.
-/// The server resolves a NULL region to the deployment pod's own
+/// The server resolves a NULL region to the Canopy pod's own
 /// `AWS_REGION`, which the frontend can't see; the fleet is predominantly
 /// Pacific/Australia, so assume its home region and label the estimate.
 export const DEFAULT_S3_REGION = "ap-southeast-2";

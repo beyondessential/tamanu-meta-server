@@ -1,4 +1,4 @@
-//! Recording where a deployment is going, through the operator API, and reading
+//! Recording where a group is going, through the operator API, and reading
 //! the fleet view that surfaces it.
 
 use commons_tests::diesel_async::SimpleAsyncConnection;
@@ -52,7 +52,7 @@ async fn record_then_the_fleet_view_shows_it() {
 		assert_eq!(planned["current_version"], "2.60.0");
 		assert_eq!(planned["late"], true, "the planned day has passed unmet");
 
-		// A group with no plan is still listed: an unplanned deployment several
+		// A group with no plan is still listed: an unplanned group several
 		// minors behind is what the view exists to surface.
 		let unplanned = fleet
 			.iter()
@@ -348,7 +348,7 @@ async fn amend_changes_the_date_and_note_without_replacing_the_plan() {
 		assert_eq!(amended["note"], "site confirmed the window");
 		assert_eq!(
 			amended["target_version_id"], recorded["target_version_id"],
-			"amending does not move the deployment somewhere else"
+			"amending does not move the group somewhere else"
 		);
 		assert!(amended["superseded_at"].is_null());
 		assert!(!amended["amended_at"].is_null());
@@ -521,7 +521,7 @@ async fn every_version_ahead_is_offered_however_far_behind_the_group_is() {
 
 		assert!(
 			targets.iter().any(|v| v["version"] == "2.54.0"),
-			"a deployment moving to an older minor cannot pick it: offered {:?}",
+			"a group moving to an older minor cannot pick it: offered {:?}",
 			targets
 				.iter()
 				.map(|v| v["version"].as_str().unwrap_or(""))
@@ -563,7 +563,7 @@ async fn a_target_under_an_open_known_issue_is_offered_but_flagged() {
 		};
 
 		// The issue covers 2.61.1 and every later patch in that minor; a
-		// deployment may still plan for it, so it is offered rather than hidden.
+		// group may still plan for it, so it is offered rather than hidden.
 		assert!(!ready("2.61.1"));
 		// Earlier patches and other minors are untouched by it.
 		assert!(ready("2.61.0"));

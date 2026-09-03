@@ -15,7 +15,7 @@ import { useApi } from "../api";
 ///
 /// Here rather than on a server's page because that is where a misconfiguration
 /// of issuance actually shows up: nothing in the fleet can obtain a certificate
-/// when the account is wrong, so blaming any one deployment would send an
+/// when the account is wrong, so blaming any one group would send an
 /// operator to the wrong place.
 // spec: CRT#presentation
 export default function CertificateAuthority() {
@@ -102,8 +102,8 @@ export default function CertificateAuthority() {
 							>
 								A profile is the authority's name for a lifetime. Each server's is
 								set on its own page, because lifetime is a property of how a
-								deployment is run: a cloud deployment whose issuance is exercised
-								constantly can carry a short one where an on-premises deployment
+								server is run: a cloud server whose issuance is exercised
+								constantly can carry a short one where an on-premises server
 								that may be offline for days cannot. Every server takes the
 								authority's default until an operator chooses otherwise.
 							</Typography>

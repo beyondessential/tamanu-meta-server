@@ -42,7 +42,7 @@ use uuid::Uuid;
 
 use crate::{
 	backup::{
-		CredentialProcessOutput, REPO_PASSWORD_SECRET_KEY, deployment_default_region,
+		CredentialProcessOutput, REPO_PASSWORD_SECRET_KEY, instance_default_region,
 		restore_session_policy,
 	},
 	state::{AppState, BackupSecrets},
@@ -294,7 +294,7 @@ async fn worklist(
 			serde_json::from_value(d.params.clone()).unwrap_or_default();
 		let params = resolve_params(&descriptor.params, &replica_values);
 
-		let region = cfg.region.clone().unwrap_or_else(deployment_default_region);
+		let region = cfg.region.clone().unwrap_or_else(instance_default_region);
 		for machine in machines {
 			let key = (machine.id, d.name.clone());
 			if !seen.insert(key) {

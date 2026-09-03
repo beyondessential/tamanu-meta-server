@@ -66,7 +66,7 @@ impl VersionKnownIssue {
 	/// Whether an unresolved issue already blames `application_id` for this exact
 	/// version.
 	///
-	/// Snapshots arrive daily, so a version that fails against a deployment
+	/// Snapshots arrive daily, so a version that fails against a group
 	/// fails again on tomorrow's data. One issue per version and server is the
 	/// finding; a second is noise.
 	pub async fn unresolved_for_server(

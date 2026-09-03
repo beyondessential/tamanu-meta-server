@@ -1,5 +1,5 @@
 //! Canopy monitoring pod: the minute-cadence, DB-only sweeps that detect
-//! problems and file/close incidents. One loop, one deployment — every sweep
+//! problems and file/close incidents. One loop, one Canopy instance — every sweep
 //! here is a cheap read against the same DB, so there's no reason to stand up
 //! a separate pod per check.
 //!
@@ -79,7 +79,7 @@ async fn reconcile_on_startup(pool: &database::Db) {
 /// live issues rows for its whole run, blocking ingestion filings.
 ///
 /// TODO(backfill-removal): transitional; delete this (and its call
-/// below) once every deployment has run it — see
+/// below) once every Canopy instance has run it — see
 /// `database::stability::backfill_from_statuses`.
 async fn backfill_stability_on_startup(pool: &database::Db) {
 	let Ok(mut db) = pool.get().await else {
@@ -306,7 +306,7 @@ pub fn spawn() -> JoinHandle<()> {
 				Err(err) => error!("dns zone coverage sweep failed: {err}"),
 			}
 
-			// Names and certificates: what a deployment is responsible for, filed
+			// Names and certificates: what a group is responsible for, filed
 			// against its server. All DB-only reads over what the domains pod
 			// recorded, so they ride this loop rather than that one — and they keep
 			// reporting when the domains pod is the thing that is down.

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// Canopy's own inability to issue is not any one server's fault and is reported
 /// against Canopy; an order that failed on its own merits is reported against the
 /// server that asked for it. Telling them apart matters because they reach
-/// different people — a deployment's certificate running out is that deployment's
+/// different people — a server's certificate running out is that group's
 /// problem to notice, and Canopy being unable to issue at all is Canopy's.
 ///
 /// Ordered by how far the blame reaches, so the worst thing a round of orders hit

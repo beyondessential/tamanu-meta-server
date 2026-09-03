@@ -188,7 +188,7 @@ text_enum! {
 	/// distinction has no effect on how backups and restores are performed.
 	pub enum BackupPlacement {
 		/// The storage bucket and its access roles were provisioned ahead of
-		/// time in the deployment's own cloud account; Canopy only connects
+		/// time in the group's own cloud account; Canopy only connects
 		/// to it. The default.
 		External = "external",
 		/// Canopy automatically created the storage bucket in a shared
@@ -432,7 +432,7 @@ pub mod redaction_params {
 	/// `{version}` substituted by the consumer against the data it restored.
 	/// A value here is what turns redaction on for the consumer.
 	pub const MANIFEST_URL: &str = "redaction_manifest_url";
-	/// `text` — SQL reading the deployment's own version out of the restored
+	/// `text` — SQL reading the version out of the restored
 	/// database, to substitute into the manifest URL.
 	pub const VERSION_QUERY: &str = "redaction_version_query";
 	/// `boolean` — whether to retry at the `major.minor.0` base version when

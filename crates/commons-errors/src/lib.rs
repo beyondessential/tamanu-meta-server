@@ -159,7 +159,7 @@ pub enum AppError {
 
 	/// The name asked about is not within any domain the caller's group controls.
 	/// Reported the same whether the name is unclaimed or held by another group,
-	/// so the endpoint is not a directory of other deployments' names. Its own
+	/// so the endpoint is not a directory of other groups' names. Its own
 	/// problem type so an agent can tell it from a withheld grant. Maps to 403.
 	// spec: CRT#identity-and-authorisation
 	#[error("not entitled to this name: {0}")]
