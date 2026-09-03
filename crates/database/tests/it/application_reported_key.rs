@@ -171,9 +171,10 @@ async fn a_key_claims_the_application_a_unified_push_left_unkeyed() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
 		let machine = machine(&mut conn).await;
 
-		let unified = Application::from_report(&mut conn, &machine, &ApplicationType::TamanuCentral)
-			.await
-			.unwrap();
+		let unified =
+			Application::from_report(&mut conn, &machine, &ApplicationType::TamanuCentral)
+				.await
+				.unwrap();
 		assert_eq!(unified.reported_key, None);
 
 		let claimed = Application::from_report_key(
@@ -187,7 +188,10 @@ async fn a_key_claims_the_application_a_unified_push_left_unkeyed() {
 		.unwrap()
 		.unwrap();
 
-		assert_eq!(claimed.id, unified.id, "the box is carried across, not doubled");
+		assert_eq!(
+			claimed.id, unified.id,
+			"the box is carried across, not doubled"
+		);
 		assert_eq!(claimed.reported_key.as_deref(), Some("central"));
 	})
 	.await
@@ -211,9 +215,10 @@ async fn an_ignored_source_neither_creates_nor_claims() {
 		.unwrap();
 		assert!(nothing.is_none(), "nothing held, nothing created");
 
-		let unified = Application::from_report(&mut conn, &machine, &ApplicationType::TamanuCentral)
-			.await
-			.unwrap();
+		let unified =
+			Application::from_report(&mut conn, &machine, &ApplicationType::TamanuCentral)
+				.await
+				.unwrap();
 		let read = Application::from_report_key(
 			&mut conn,
 			&machine,

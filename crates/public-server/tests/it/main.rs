@@ -23,6 +23,7 @@ mod server_versions;
 mod servers_list;
 mod static_files;
 mod statuses;
+mod statuses_split;
 mod tags;
 mod timesync;
 mod versions;

@@ -731,13 +731,25 @@ An ignored source reads without creating, since it records nowhere.
 
 Enrolment is the machine's outright — see the enrolment section above, and the column that made an application look like it had an identity of its own is gone.
 
-### The push keeps the unified shape
+### The push takes the split shape, and still accepts the unified one: done
 
-`StatusPayload` is `source`, `healthy`, `health` and a flat `extra`. STA describes a source, a `machine` section and an `applications` section with per-application `detail`, and describes correlation by machine, key and type. Ingest does separate a unified push by subject and does resolve which application a unified push is about, so the split rule and the transitional correlation are both real and tested; what is missing is the explicit shape on the wire.
+`StatusPayload` carries a `machine` section and an `applications` object keyed by the reporter's own key, each target holding its own `health` array and `detail` object.
+The parse dispatches on the `machine` key: present is the current format, absent with a `health` array is a transitional unified push, absent with neither is a legacy Tamanu report.
+`applications.reported_key` is the column that made this expressible, unique per machine rather than per fleet, so the same key on two boxes is two applications and a box running two of one type is finally sayable.
 
-The explicit sections are a refinement, not a prerequisite for anything else here. A push is already addressed to a machine by its path and already names its reporter by `source`, so a box and the workloads reporting on it are both identifiable without them.
+Correlation is machine, key and type together, in `Application::from_report_key`.
+A key Canopy holds answers while it still names an application of the reported type; a different type under a held key means the old record gives the key up and stays as the application it is.
+A key Canopy does not hold claims an application of that type that no key names yet, which is what carries the fleet across the cutover: every application on it came from a unified push and has no key, so the first split push naming one by type takes it over rather than standing a duplicate up beside it.
+An ignored source reads through the same path without creating, claiming, or releasing anything.
 
-Adding them needs a reported key on `applications`, which the table has no column for: it carries `machine_id` and `type` and nothing the reporter chose. Until it does, type is the correlator everywhere on the wire, which is exactly what a box running two of one type cannot express.
+Filing takes the reporter at its word. `SubjectSplit::AsGiven` says every check in a filing belongs to the target it was filed under, so a check named like a machine check but reported under an application is that application's, and detail records where it was attached with no splitting by field name. `SubjectSplit::BySubject` is the unified path, where Canopy still separates the grains itself.
+The two grains' previously-active sets are read only by the filing that speaks for them, so an application's filing never closes the box's open checks as unmentioned.
+
+A split push is recorded as one status row per target it describes: a machine row with a null `server_id`, and one row per application carrying that application's own version. That is the grain everything downstream reads a push back at — reachability, the sample behind a check, a group's quiet members — so a single machine-only row would have regressed all three.
+
+The response is answered per target under the keys the reporter used, in `machine` and `applications`. A unified push is answered exactly as before, with neither field present, so nothing changes for a reporter in the field.
+
+The public API gains only optional request properties and optional response properties, so the compatibility bar is met and a fielded bestool keeps working unchanged.
 
 ### The reachability check is filed at one grain
 
