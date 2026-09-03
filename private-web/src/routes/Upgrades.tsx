@@ -28,6 +28,7 @@ import {
 	Table,
 	TableBody,
 	TableCell,
+	TableContainer,
 	TableHead,
 	TableRow,
 	TextField,
@@ -113,7 +114,8 @@ export default function Upgrades() {
 						No group has a recorded plan.
 					</Typography>
 				) : (
-					<Table size="small" sx={TIGHT_TABLE}>
+					<TableContainer>
+						<Table size="small" sx={TIGHT_TABLE}>
 						<TableHead>
 							<TableRow>
 								<TableCell>Environment</TableCell>
@@ -207,6 +209,7 @@ export default function Upgrades() {
 							))}
 						</TableBody>
 					</Table>
+				</TableContainer>
 				)}
 			</Paper>
 
@@ -225,7 +228,8 @@ export default function Upgrades() {
 							Every group has a plan.
 						</Typography>
 					) : (
-						<Table size="small" sx={TIGHT_TABLE}>
+						<TableContainer>
+							<Table size="small" sx={TIGHT_TABLE}>
 							<TableHead>
 								<TableRow>
 									<TableCell>Group</TableCell>
@@ -250,6 +254,7 @@ export default function Upgrades() {
 								))}
 							</TableBody>
 						</Table>
+					</TableContainer>
 					)}
 			</Disclosure>
 
@@ -1273,7 +1278,8 @@ function PastPlans({ plans }: { plans: PastPlan[] }) {
 			caption="where each group was going before, and how it ended"
 			testId="past-plans"
 		>
-			<Table size="small" sx={TIGHT_TABLE}>
+			<TableContainer>
+				<Table size="small" sx={TIGHT_TABLE}>
 				<TableHead>
 					<TableRow>
 						<TableCell>Environment</TableCell>
@@ -1328,6 +1334,7 @@ function PastPlans({ plans }: { plans: PastPlan[] }) {
 					))}
 				</TableBody>
 			</Table>
+		</TableContainer>
 		</Disclosure>
 	);
 }
