@@ -55,8 +55,10 @@ test.describe("upgrades dashboard", () => {
 	}) => {
 		const planned = await seedServerGroup(sql, { name: "kamaka" });
 		const unplanned = await seedServerGroup(sql, { name: "drifting" });
+		const current = await seedServerGroup(sql, { name: "settled" });
 		await runningAt(sql, planned.id, "2.60.0");
 		await runningAt(sql, unplanned.id, "2.60.0");
+		await runningAt(sql, current.id, "2.61.0");
 		const target = await seedVersion(sql, {
 			major: 2,
 			minor: 61,
@@ -92,13 +94,17 @@ test.describe("upgrades dashboard", () => {
 		await page
 			.getByRole("button", { name: "Show groups with no plan" })
 			.click();
-		await expect(
-			page
-				.getByTestId("unplanned-upgrade-row")
-				.filter({ hasText: "drifting" }),
-		).toBeVisible();
+		const drifting = page
+			.getByTestId("unplanned-upgrade-row")
+			.filter({ hasText: "drifting" });
+		await expect(drifting).toBeVisible();
+		await expect(drifting).toContainText("1 minor");
 		await expect(page.getByTestId("unplanned-upgrades")).not.toContainText(
 			"kamaka",
+		);
+		// A group already on the newest version has nothing to plan.
+		await expect(page.getByTestId("unplanned-upgrades")).not.toContainText(
+			"settled",
 		);
 	});
 

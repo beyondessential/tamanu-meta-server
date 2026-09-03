@@ -96,8 +96,9 @@ Where a restore attempt is under way it shows that too.
 A restore takes hours, and without this a plan that is still being tested and one the pipeline has stopped testing both read as not yet tested.
 An attempt is the group's rather than one environment's, since a restore is issued credentials for the group's backups without naming the server it will restore, so it shows on each of the group's environments that is set up for testing.
 Where nothing is declared to migrate the group's data it says so in place of the verdict, since a plan on a group with no such declaration is never dispatched and a reader would otherwise wait on a result that cannot arrive.
-Groups whose highest-ranked environment has no plan are shown too, behind a disclosure that counts them: an unplanned production several minors behind is what this view exists to surface, and the count surfaces it without the list crowding out what is moving.
-A clone or demo with no plan is not listed there, since most of them are never planned and listing them would bury the gap that matters.
+Groups whose highest-ranked environment runs behind the newest published version with no plan are shown too, with how far behind each is, behind a disclosure that counts them: an unplanned production several minors behind is what this view exists to surface, and the count surfaces it without the list crowding out what is moving.
+An environment already on the newest version has nothing to plan, and one that has reported no version cannot be placed, so neither is listed.
+A clone or demo with no plan is not listed there either, since most of them are never planned and listing them would bury the gap that matters.
 
 A plan whose date has passed without being met is presented as late, judged on the day alone rather than the hour.
 Late is a presentational state and not an incident: an upgrade slipping is normal operational reality, and Canopy has no basis for treating a date someone typed as a failure of anything.

@@ -25,7 +25,8 @@ use crate::{
 #[derive(Serialize)]
 struct PlanList {
 	plans: Vec<OpenPlan>,
-	/// Each group's highest-ranked environment where it has no open plan.
+	/// Each group's highest-ranked environment that runs behind the newest
+	/// published version with no open plan.
 	environments_without_a_plan: Vec<EnvironmentRef>,
 }
 
@@ -36,6 +37,8 @@ struct EnvironmentRef {
 	group_name: String,
 	rank: ServerRank,
 	current_version: Option<VersionStr>,
+	/// Majors times a thousand plus minors behind the newest published version.
+	behind: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -100,8 +103,8 @@ impl CanopyMcp {
 		description = "Where every environment is going: each open upgrade plan, per group and \
 		               rank, with the version that environment runs now, the version it plans to \
 		               move to, the planned date, and whether that date has passed unmet. Each \
-		               group's highest-ranked environment with nothing recorded is returned \
-		               separately."
+		               group's highest-ranked environment that is behind the newest version with \
+		               nothing recorded is returned separately."
 	)]
 	async fn list_upgrade_plans(
 		&self,
@@ -118,6 +121,13 @@ impl CanopyMcp {
 			.map(|group| (group.id, group.name))
 			.collect();
 
+		let newest = Version::get_all(&mut conn)
+			.await
+			.map_err(mcp_err)?
+			.into_iter()
+			.next()
+			.map(|version| version.as_semver());
+
 		let mut plans = Vec::new();
 		let mut unplanned = Vec::new();
 		for env in ServerGroup::environments(&mut conn, &ids)
@@ -125,6 +135,11 @@ impl CanopyMcp {
 			.map_err(mcp_err)?
 		{
 			let headline = env.headline;
+			let behind = env
+				.version
+				.as_ref()
+				.zip(newest.as_ref())
+				.map(|(current, latest)| database::statuses::version_distance(&current.0, latest));
 			let group_name = names.get(&env.group_id).cloned().unwrap_or_default();
 			let plan = UpgradePlan::open_for_environment(&mut conn, env.group_id, env.rank)
 				.await
@@ -145,12 +160,15 @@ impl CanopyMcp {
 					recorded_by: plan.created_by,
 					recorded_at: plan.created_at,
 				}),
-				None if headline => unplanned.push(EnvironmentRef {
-					group_id: env.group_id,
-					group_name,
-					rank: env.rank,
-					current_version: env.version,
-				}),
+				None if headline && behind.is_some_and(|behind| behind > 0) => {
+					unplanned.push(EnvironmentRef {
+						group_id: env.group_id,
+						group_name,
+						rank: env.rank,
+						current_version: env.version,
+						behind,
+					})
+				}
 				None => {}
 			}
 		}
@@ -178,6 +196,12 @@ impl CanopyMcp {
 		};
 
 		let versions = version_names(&mut conn).await?;
+		let newest = Version::get_all(&mut conn)
+			.await
+			.map_err(mcp_err)?
+			.into_iter()
+			.next()
+			.map(|version| version.as_semver());
 		let plans = UpgradePlan::history_for_group(&mut conn, id)
 			.await
 			.map_err(mcp_err)?
@@ -208,6 +232,13 @@ impl CanopyMcp {
 				group_id: env.group_id,
 				group_name: group.name.clone(),
 				rank: env.rank,
+				behind: env
+					.version
+					.as_ref()
+					.zip(newest.as_ref())
+					.map(|(current, latest)| {
+						database::statuses::version_distance(&current.0, latest)
+					}),
 				current_version: env.version,
 			})
 			.collect();

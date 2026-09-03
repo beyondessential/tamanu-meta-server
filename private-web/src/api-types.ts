@@ -7047,6 +7047,13 @@ export interface components {
         /** @description One row of the planned-upgrades view: one of a group's environments. */
         PlannedUpgrade: {
             attempt?: null | components["schemas"]["AttemptState"];
+            /**
+             * Format: int64
+             * @description How far that is behind the newest published version, as majors times a
+             *     thousand plus minors. Zero where it is current; `null` where it has
+             *     reported no version.
+             */
+            behind?: number | null;
             /** @description The version the environment runs now, where it has reported one. */
             current_version?: string | null;
             /**

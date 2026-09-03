@@ -77,8 +77,11 @@ export default function Upgrades() {
 	}
 
 	const planned = fleet.data.filter((row) => row.plan);
-	// A group's clone or demo going unplanned is not the gap this list is for.
-	const unplanned = fleet.data.filter((row) => !row.plan && row.headline);
+	// The gap this list is for: a production behind the newest version with
+	// nothing recorded. A clone going unplanned, or a site already current, is not.
+	const unplanned = fleet.data.filter(
+		(row) => !row.plan && row.headline && (row.behind ?? 0) > 0,
+	);
 
 	return (
 		<Stack spacing={2}>
@@ -225,7 +228,7 @@ export default function Upgrades() {
 			>
 					{unplanned.length === 0 ? (
 						<Typography variant="body2" color="text.secondary">
-							Every group has a plan.
+							Every group that is behind has a plan.
 						</Typography>
 					) : (
 						<TableContainer>
@@ -234,6 +237,7 @@ export default function Upgrades() {
 								<TableRow>
 									<TableCell>Group</TableCell>
 									<TableCell>Running</TableCell>
+									<TableCell>Behind by</TableCell>
 								</TableRow>
 							</TableHead>
 							<TableBody>
@@ -250,6 +254,7 @@ export default function Upgrades() {
 											/>
 										</TableCell>
 										<TableCell>{row.current_version ?? "unknown"}</TableCell>
+										<TableCell>{behindLabel(row.behind ?? 0)}</TableCell>
 									</TableRow>
 								))}
 							</TableBody>
@@ -264,6 +269,15 @@ export default function Upgrades() {
 }
 
 type FleetRow = ApiResponse<"upgrade_plans", "fleet">[number];
+
+/// The fleet's distance is majors times a thousand plus minors; a major behind
+/// is far enough that the minors no longer matter.
+function behindLabel(behind: number): string {
+	const majors = Math.floor(behind / 1000);
+	const minors = behind % 1000;
+	if (majors > 0) return `${majors} major${majors === 1 ? "" : "s"}`;
+	return `${minors} minor${minors === 1 ? "" : "s"}`;
+}
 
 /// How an environment is named where it is read: the group, with the rank after
 /// it unless it is the group's production.

@@ -47,6 +47,10 @@ pub struct PlannedUpgrade {
 	pub headline: bool,
 	/// The version the environment runs now, where it has reported one.
 	pub current_version: Option<String>,
+	/// How far that is behind the newest published version, as majors times a
+	/// thousand plus minors. Zero where it is current; `null` where it has
+	/// reported no version.
+	pub behind: Option<u64>,
 	/// The plan, absent for an environment with none.
 	pub plan: Option<UpgradePlan>,
 	/// The plan's target as semver.
@@ -112,6 +116,11 @@ pub async fn fleet(
 	let mut attempts: HashMap<Uuid, Option<crate::fns::migration_tests::AttemptState>> =
 		HashMap::new();
 	let mut members: HashMap<Uuid, Vec<database::servers::Server>> = HashMap::new();
+	let newest = database::versions::Version::get_all(&mut conn)
+		.await?
+		.into_iter()
+		.next()
+		.map(|version| version.as_semver());
 	let headline = ServerGroup::highest_member_ranks(&mut conn, &ids).await?;
 	// Including drafts: a target yanked since the plan was recorded still has to
 	// render as the version the environment is going to.
@@ -200,12 +209,18 @@ pub async fn fleet(
 			_ => None,
 		};
 
+		let behind = env
+			.version
+			.as_ref()
+			.zip(newest.as_ref())
+			.map(|(current, latest)| database::statuses::version_distance(&current.0, latest));
 		out.push(PlannedUpgrade {
 			group_id: env.group_id,
 			group_name: names.get(&env.group_id).cloned().unwrap_or_default(),
 			rank: env.rank,
 			headline: env.headline,
 			current_version: env.version.map(|v| v.to_string()),
+			behind,
 			plan,
 			target_version: target,
 			late,

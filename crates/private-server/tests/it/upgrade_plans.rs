@@ -67,6 +67,10 @@ async fn record_then_the_fleet_view_shows_it() {
 			.expect("the unplanned group");
 		assert!(unplanned["plan"].is_null());
 		assert_eq!(unplanned["late"], false);
+		assert_eq!(
+			unplanned["behind"], 3,
+			"2.60.0 against the newest published, 2.63.0"
+		);
 	})
 	.await;
 }
