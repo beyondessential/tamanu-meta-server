@@ -219,19 +219,19 @@ holding the version invariant.
 
 ## Build steps
 
-- [ ] `info.version` in `crates/public-server/src/openapi.rs` carries `0.0.0`, matching what
+- [x] `info.version` in `crates/public-server/src/openapi.rs` carries `0.0.0`, matching what
       is published, so release-plz computes its first bump from the same number under either
       reading of where it reads the current version from
-- [ ] The codegen stamps `version` in `crates/canopy-api/Cargo.toml` from the document's
+- [x] The codegen stamps `version` in `crates/canopy-api/Cargo.toml` from the document's
       `info.version`, touching only the `[package]` version and leaving the rest of the
       manifest alone
-- [ ] The generated source records the document it came from, as APIC requires: its version
+- [x] The generated source records the document it came from, as APIC requires: its version
       and a digest, so a document that moved without the version moving with it can be told
       from one that did not
-- [ ] `check-generated` covers `crates/canopy-api/Cargo.toml`, which is what stops the
+- [x] `check-generated` covers `crates/canopy-api/Cargo.toml`, which is what stops the
       manifest version being edited by hand
-- [ ] `just semver-checks` runs `cargo-semver-checks` against the published baseline, and a
-      CI job runs it
+- [x] `just semver-checks` runs `cargo-semver-checks` against the published baseline
+- [ ] A CI job runs it
 - [ ] `release-plz.toml` — `release_always = false`, semver checks on, tag name for a
       workspace member
 - [ ] `.github/workflows/release.yml` — a `release-pr` job under the PAT that propagates the
@@ -241,8 +241,39 @@ holding the version invariant.
       pushes to `main`
 - [ ] `just check`, `just lint`, `just fmt-check`, and the generated-files checks pass
 
+## What counts as a release, for the deploy
+
+Found while wiring this up, and it decides the shape of `release-plz.toml`.
+
+release-plz works out which packages changed by diffing each local package against the
+`.crate` published for it, attributing commits per package, and comparing manifest and
+lockfile dependencies. `bes-canopy-api` depends on no workspace-internal crate, so a change
+to `private-server` touches neither its files nor its dependencies and does not bump it.
+
+If release-plz manages only `bes-canopy-api`, then, a server-only change produces no release
+PR and no release — and with the deploy gated on a release, canopy would stop deploying for
+most of what lands. Every change that is not to the API client would sit on `main` forever.
+
+The two versions cannot simply be merged into one, either. APIC has the crate's version
+describing the crate's surface, so bumping it for an unrelated server change would republish
+an identical surface under a new number and break the correspondence the whole model rests
+on.
+
+So a release needs two tracks: the published crate, versioned from the document, and canopy
+itself, versioned from its commits and tagged rather than published. The deploy fires on any
+release, and the crate publishes only when its own version moved.
+
+Which packages carry the second track is the open question below.
+
 ## Open
 
+- **Which packages carry canopy's own release track.** `public-server` and `private-server`
+  are what the container runs, so versioning those two as a group would catch everything
+  that reaches production: a change to `database` or a `commons-*` crate moves their
+  lockfile dependencies, which release-plz counts as a change. They would be `git_only`,
+  taking their version from tags rather than the registry, since nothing publishes them.
+  That means giving them real versions in place of the frozen `6.6.6` the workspace carries
+  today, which is a decision rather than a detail.
 - **Getting the first real release to `1.0.0`.** release-plz computes the next version from
   the current manifest version via the `next_version` crate, so from a published `0.0.0` it
   gives a `0.x`; and with `release_always = false` the first release still has to come
