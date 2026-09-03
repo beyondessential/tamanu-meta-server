@@ -760,6 +760,28 @@ The public API gains only optional request properties and optional response prop
 
 `Machine::reachability` grades the dot correctly off the projection, so the box's state presents while its check never fires. That is a second definition of the same idea diverging from the first, which is exactly what retiring the graded states was meant to stop.
 
+### The reachability check is filed at one grain: done
+
+`Status::sweep_staleness` is now two halves that share their grading, one per grain.
+`sweep_application_staleness` is the old body; `sweep_machine_staleness` is its counterpart over `Machine::list_live`, reading the box's own expected sources and its own `alert_when_down_for`, and filing at `Scope::Machine`.
+The two are independent by construction: neither reads the other's targets, and nothing propagates a result from one grain to the other.
+That is not a simplification to revisit later but the rule CHK states, and it comes out right because a box that goes quiet stops reporting about its workloads by the same act, so each of them crosses its own threshold on its own account.
+
+What made the split shareable is that the grading was already one function under two callers.
+`expected_sources`, `grade_reachability` and `worth_filing` are free functions taking the target's label, threshold and sources, so the machine half is the same rule applied to a different set of rows rather than a second definition of reachability -- which is the divergence this whole section exists to stop.
+`grade_reachability` takes the grain as a word so the operator reads which of the two went quiet.
+
+The machine's backstop mirrors the application's: `Status::latest_for_machines` over the machine-stamped status rows, unioned with `MachineReportedDetail::latest_for_machines`, so a box that reports without carrying detail is not read as never having reported.
+`Issue::source_freshness_for_machines` is the machine-grain freshness read, gating on a live catalog row in `Namespace::for_machine` the way the application read gates on the application's namespace.
+
+The meta row is skipped at both grains. The application sweep already filtered the nil application; the machine backfill gave it a nil machine, which would otherwise have filed a permanently unreachable box that nobody can reach by design.
+
+Presentation needed nothing: `consolidated_checks_for` already fills a passing reachability in for a target with no state row, and reachability is canopy's own flat check, so the fill-in was grain-agnostic the moment the reader was.
+
+Coverage: the machine grain's own tests in `reachability_sweep` -- a quiet box while its application reports, a quiet application while its box reports, a box graded on its own threshold, a bare box with no application at all, per-source warning and all-stale failure at the machine grain, recovery, and the meta machine's exclusion.
+Plus the two-workload cases the card exists for: a box going quiet files three unreachabilities with no propagation step, and one workload returning with its box leaves the other unreachable.
+The existing application-grain tests keep their meaning because their fixture machine now reports, which is what a box carrying a reporting application actually does.
+
 ### An application does not see its machine's checks
 
 CHK: "Every machine check appears on every application on that machine, marked as belonging to the machine", and "An application's contributing checks include its machine's, so a box whose disk is filling makes every application on it degraded."

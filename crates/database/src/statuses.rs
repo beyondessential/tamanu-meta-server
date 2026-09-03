@@ -426,7 +426,9 @@ impl Status {
 	async fn sweep_machine_staleness(db: &mut AsyncPgConnection) -> Result<usize> {
 		use std::collections::HashMap;
 
-		let machines = crate::machines::Machine::list_live(db).await?;
+		let live = crate::machines::Machine::list_live(db).await?;
+		let machines: Vec<&crate::machines::Machine> =
+			live.iter().filter(|m| m.id != Uuid::nil()).collect();
 		if machines.is_empty() {
 			return Ok(0);
 		}
@@ -435,12 +437,23 @@ impl Status {
 		let freshness = Issue::source_freshness_for_machines(db, &machine_ids).await?;
 		let expected = expected_sources(db, freshness).await?;
 
-		// The same backstop the application sweep uses, from the machine's own
-		// current-state projection: a box with no counted source falls back to
-		// when anything last reported about it.
+		// The same backstop the application sweep uses, over the machine's own
+		// status history and current-state projection: a box with no counted
+		// source falls back to when anything last reported about it.
 		let last_reported =
 			crate::reported_detail::MachineReportedDetail::latest_for_machines(db, &machine_ids)
 				.await?;
+		let statuses = Self::latest_for_machines(db, &machine_ids).await?;
+		let last_reported: HashMap<Uuid, Timestamp> = statuses
+			.into_iter()
+			.filter_map(|s| Some((s.machine_id?, s.created_at)))
+			.chain(last_reported)
+			.fold(HashMap::new(), |mut acc, (id, at)| {
+				acc.entry(id)
+					.and_modify(|held| *held = (*held).max(at))
+					.or_insert(at);
+				acc
+			});
 
 		let existing_issues = Issue::list_by_source_ref_for_machines(
 			db,
@@ -456,7 +469,7 @@ impl Status {
 
 		let now = Timestamp::now();
 		let mut filed = 0usize;
-		for machine in &machines {
+		for machine in machines {
 			let graded = grade_reachability(
 				"Machine",
 				&machine_label(machine),
@@ -647,6 +660,31 @@ impl Status {
 			.load(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// The machine-grain equivalent of [`Self::latest_for_servers`]: when each
+	/// box last had a status row recorded against it, whatever it described.
+	pub async fn latest_for_machines(
+		db: &mut AsyncPgConnection,
+		machine_ids: &[Uuid],
+	) -> Result<Vec<Status>> {
+		if machine_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		let query = diesel::sql_query(
+			"SELECT st.* FROM unnest($1) AS m(id) \
+			 CROSS JOIN LATERAL ( \
+				SELECT * FROM statuses \
+				WHERE machine_id = m.id \
+				AND created_at >= NOW() - INTERVAL '7 days' \
+				AND id != '00000000-0000-0000-0000-000000000000' \
+				ORDER BY created_at DESC LIMIT 1 \
+			 ) st",
+		)
+		.bind::<diesel::sql_types::Array<diesel::sql_types::Uuid>, _>(machine_ids);
+
+		query.load::<Status>(db).await.map_err(AppError::from)
 	}
 
 	pub async fn latest_for_servers(

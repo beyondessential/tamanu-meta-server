@@ -40,10 +40,10 @@ is a regression.
 
 ## Reachability
 
-- [ ] A machine whose sources are all stale is unreachable (verifies spec: CHK)
-- [ ] Every application on an unreachable machine is independently unreachable, with no propagation step (verifies spec: CHK)
-- [ ] Applications recover independently when their machine reports again (verifies spec: CHK)
-- [ ] An application dropped from a live machine's report is unreachable while its machine stays reachable (verifies spec: CHK)
+- [x] A machine whose sources are all stale is unreachable (verifies spec: CHK)
+- [x] Every application on an unreachable machine is independently unreachable, with no propagation step (verifies spec: CHK)
+- [x] Applications recover independently when their machine reports again (verifies spec: CHK)
+- [x] An application dropped from a live machine's report is unreachable while its machine stays reachable (verifies spec: CHK)
 - [x] An unreachable target keeps its last observed check results and is presented as unreachable (verifies spec: CHK)
 - [ ] An application's reachability check can be silenced independently of its machine's (verifies spec: CHK)
 - [ ] A machine's reachability silence is reachable from an application on that machine (verifies spec: CHK)
