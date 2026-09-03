@@ -75,6 +75,54 @@ const MACHINE_SUBJECT_CHECKS = [
 	"uptime",
 ];
 
+/** The reported detail fields that describe the box rather than the workload
+ * on it.
+ *
+ * A snapshot of MACHINE_SUBJECT_DETAIL in crates/commons-types/src/subject.rs.
+ * `the_e2e_seed_snapshot_matches_the_detail_list`, beside that list, parses
+ * this array to hold the two together, so keep the quoting as it is. */
+const MACHINE_SUBJECT_DETAIL = [
+	"arch",
+	"bestoolVersion",
+	"cpuCores",
+	"filesystems",
+	"hostname",
+	"instanceTags",
+	"ipv4",
+	"ipv6",
+	"kernel",
+	"lanIps",
+	"munin",
+	"nat64",
+	"osKind",
+	"osName",
+	"osTimezone",
+	"osVersion",
+	"reportingSchemaVersion",
+	"services",
+	"totalMemoryBytes",
+	"uptimeSecs",
+	"virtualisation",
+	"virtualised",
+	"wanIpv4",
+	"wanIpv6",
+];
+
+/** Split a push's detail the way ingestion does: the box's fields to the
+ * machine, everything else to the application. */
+export function splitDetail(extra: Record<string, unknown>): {
+	machine: Record<string, unknown>;
+	application: Record<string, unknown>;
+} {
+	const machine: Record<string, unknown> = {};
+	const application: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(extra)) {
+		if (MACHINE_SUBJECT_DETAIL.includes(key)) machine[key] = value;
+		else application[key] = value;
+	}
+	return { machine, application };
+}
+
 /** Sources whose check names canopy curates itself. Their names mean one
  * thing fleet-wide, so they are namespaced flat. */
 const RESERVED_SOURCES = ["canopy", "manual"];
@@ -307,6 +355,10 @@ export async function seedServer(
 		 * they are for a real server. */
 		mayManageDns?: boolean;
 		mayManageTls?: boolean;
+		/** The box to put this workload on. Omit for a box of its own; pass
+		 * another application's `machineId` for the two-workloads-on-one-box
+		 * case. */
+		machineId?: string;
 	} = {},
 ): Promise<SeededServer> {
 	const id = randomUUID();
@@ -316,23 +368,26 @@ export async function seedServer(
 	const rank = opts.rank ?? "production";
 	const isMonitored = opts.isMonitored ?? false;
 	const alertWhenDownFor = opts.alertWhenDownFor ?? 600;
-	// A box of its own for each seeded workload, 1:1, carrying the same group
-	// so the machine and the application agree on which deployment they're in.
+	// A box of its own for each seeded workload unless the caller names one,
+	// carrying the same group so the machine and the application agree on
+	// which deployment they're in.
 	//
 	// An identity belongs to the box, so a seeded device binds to the machine.
 	// Anything that resolves a device to what it speaks for — backups, reports —
 	// goes through the machine.
-	const machineId = randomUUID();
-	await sql.query(
-		`INSERT INTO machines (id, name, group_id, device_id) VALUES ($1, $2, $3, $4)`,
-		// A machine is always named, whether or not the workload on it is.
-		[
-			machineId,
-			name ?? randomLabel("box"),
-			opts.groupId ?? null,
-			opts.deviceId ?? null,
-		],
-	);
+	const machineId = opts.machineId ?? randomUUID();
+	if (opts.machineId === undefined) {
+		await sql.query(
+			`INSERT INTO machines (id, name, group_id, device_id) VALUES ($1, $2, $3, $4)`,
+			// A machine is always named, whether or not the workload on it is.
+			[
+				machineId,
+				name ?? randomLabel("box"),
+				opts.groupId ?? null,
+				opts.deviceId ?? null,
+			],
+		);
+	}
 	await sql.query(
 		`INSERT INTO applications (id, name, host, type, rank, group_id, is_monitored, alert_when_down_for, notes, tags, may_manage_dns, may_manage_tls, machine_id)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12, $13)`,
@@ -398,6 +453,25 @@ export async function seedDeviceKey(
 	return { id };
 }
 
+/** A connection an identity made to canopy, carrying the User-Agent it
+ * presented.
+ *
+ * The runtime an application reports is read out of this when a push doesn't
+ * name one, so it goes on the identity bound to the application's *machine*,
+ * not on whichever identity happened to file a push. */
+export async function seedDeviceConnection(
+	sql: Sql,
+	opts: { deviceId: string; userAgent: string; ip?: string },
+): Promise<{ id: string }> {
+	const id = randomUUID();
+	await sql.query(
+		`INSERT INTO device_connections (id, device_id, ip, user_agent)
+		 VALUES ($1, $2, $3, $4)`,
+		[id, opts.deviceId, opts.ip ?? "203.0.113.7", opts.userAgent],
+	);
+	return { id };
+}
+
 export interface SeededStatus {
 	id: string;
 	createdAt: string;
@@ -447,15 +521,22 @@ export async function seedStatus(
 		params,
 	);
 
+	const machineRows = await sql.query<{ machine_id: string }>(
+		"SELECT machine_id FROM applications WHERE id = $1",
+		[opts.serverId],
+	);
+	const machineId = machineRows[0]?.machine_id ?? null;
+
 	// Mirror ingestion: the push is the source's current detail, which is what
-	// the live figures (and the Munin flag) read — they never search status
-	// history. Ordered by the status's own timestamp so out-of-order seeding
-	// still resolves newest-wins correctly.
+	// the live figures read — they never search status history. Ordered by the
+	// status's own timestamp so out-of-order seeding still resolves
+	// newest-wins correctly.
 	//
-	// Real ingestion splits this by grain, the box's fields going to
-	// `machine_reported_detail`. The seed writes the application's row alone
-	// and lets the merged read pick it up, which is the same view either way;
-	// the split itself is covered by the Rust tests.
+	// Ingestion splits the push by grain, so the seed does too: a field about
+	// the box is the machine's report, and a fleet spread that counts machines
+	// reads it there. Writing it all to the application would make a
+	// two-workload box report the same fact twice.
+	const detail = splitDetail(opts.extra ?? {});
 	await sql.query(
 		`INSERT INTO application_reported_detail (application_id, source, extra, version, reported_at)
 		 VALUES ($1, $2, $3::jsonb, $4, $5)
@@ -465,11 +546,21 @@ export async function seedStatus(
 		[
 			opts.serverId,
 			source,
-			JSON.stringify(opts.extra ?? {}),
+			JSON.stringify(detail.application),
 			opts.version ?? null,
 			rows[0]!.created_at,
 		],
 	);
+	if (machineId !== null && Object.keys(detail.machine).length > 0) {
+		await sql.query(
+			`INSERT INTO machine_reported_detail (machine_id, source, extra, reported_at)
+			 VALUES ($1, $2, $3::jsonb, $4)
+			 ON CONFLICT (machine_id, source) DO UPDATE
+			 SET extra = EXCLUDED.extra, reported_at = EXCLUDED.reported_at
+			 WHERE machine_reported_detail.reported_at <= EXCLUDED.reported_at`,
+			[machineId, source, JSON.stringify(detail.machine), rows[0]!.created_at],
+		);
+	}
 
 	// Mirror ingestion: each check in the push has a check-state row, which
 	// is what the health rollup and attention pages read. Degraded checks
@@ -481,11 +572,6 @@ export async function seedStatus(
 	// the box files against the machine, not against the workload that
 	// happened to report it. Seeded state has to land the same way or a box
 	// with two workloads reads as two sets of the same facts.
-	const machineRows = await sql.query<{ machine_id: string }>(
-		"SELECT machine_id FROM applications WHERE id = $1",
-		[opts.serverId],
-	);
-	const machineId = machineRows[0]?.machine_id ?? null;
 	for (const entry of (opts.health ?? []) as Record<string, unknown>[]) {
 		const check = entry.check;
 		if (typeof check !== "string") continue;

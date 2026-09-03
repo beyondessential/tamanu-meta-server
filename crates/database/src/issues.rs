@@ -3,6 +3,7 @@
 use commons_errors::{AppError, Result};
 use commons_types::namespace::Namespace;
 use commons_types::status::CheckResult;
+use commons_types::subject::CheckSubject;
 use diesel::prelude::*;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use jiff::{SignedDuration, Timestamp};
@@ -1793,35 +1794,85 @@ pub async fn check_detail_by_server(
 	conn: &mut AsyncPgConnection,
 	applications: &[(Uuid, Option<Uuid>)],
 ) -> Result<std::collections::HashMap<Uuid, serde_json::Map<String, serde_json::Value>>> {
+	check_detail_at_grain(conn, applications, CheckSubject::Application).await
+}
+
+/// The same, for machines: every named check filed against the box itself.
+///
+/// The fleet counts a box once however many workloads it carries, so a
+/// machine-subject check's fields spread over machines and are read from
+/// here rather than from the applications on it.
+// spec: FIG#fleet-spread
+pub async fn check_detail_by_machine(
+	conn: &mut AsyncPgConnection,
+	machines: &[(Uuid, Option<Uuid>)],
+) -> Result<std::collections::HashMap<Uuid, serde_json::Map<String, serde_json::Value>>> {
+	check_detail_at_grain(conn, machines, CheckSubject::Machine).await
+}
+
+/// Both of the above. `targets` is `(target id, its group)`; `grain` decides
+/// which column the filings are keyed by, and so which namespace a check's
+/// identity resolves in — only an application has a type.
+async fn check_detail_at_grain(
+	conn: &mut AsyncPgConnection,
+	targets: &[(Uuid, Option<Uuid>)],
+	grain: CheckSubject,
+) -> Result<std::collections::HashMap<Uuid, serde_json::Map<String, serde_json::Value>>> {
 	use crate::schema::{issues, scoped_check_policies};
 	use std::collections::{HashMap, HashSet};
 
-	if applications.is_empty() {
+	if targets.is_empty() {
 		return Ok(HashMap::new());
 	}
-	let server_ids: Vec<Uuid> = applications.iter().map(|(id, _)| *id).collect();
-	let group_of: HashMap<Uuid, Option<Uuid>> = applications.iter().copied().collect();
+	let target_ids: Vec<Uuid> = targets.iter().map(|(id, _)| *id).collect();
+	let group_of: HashMap<Uuid, Option<Uuid>> = targets.iter().copied().collect();
 
-	let rows: Vec<FleetCheckRow> = issues::table
-		.select((
-			issues::application_id,
-			issues::source,
-			issues::check_name,
-			issues::observed_result,
-			issues::effective_result,
-			issues::detail,
-		))
-		.filter(issues::application_id.eq_any(&server_ids))
-		.filter(issues::check_name.is_not_null())
-		.filter(issues::effective_result.is_not_null())
-		// Oldest first, so a later source's fields overwrite an earlier
-		// one's when both report the same check name.
-		.order(issues::updated_at.asc())
-		.load(conn)
-		.await?;
+	// Oldest first, so a later source's fields overwrite an earlier one's
+	// when both report the same check name.
+	let rows: Vec<FleetCheckRow> = match grain {
+		CheckSubject::Application => {
+			issues::table
+				.select((
+					issues::application_id,
+					issues::source,
+					issues::check_name,
+					issues::observed_result,
+					issues::effective_result,
+					issues::detail,
+				))
+				.filter(issues::application_id.eq_any(&target_ids))
+				.filter(issues::check_name.is_not_null())
+				.filter(issues::effective_result.is_not_null())
+				.order(issues::updated_at.asc())
+				.load(conn)
+				.await?
+		}
+		CheckSubject::Machine => {
+			issues::table
+				.select((
+					issues::machine_id,
+					issues::source,
+					issues::check_name,
+					issues::observed_result,
+					issues::effective_result,
+					issues::detail,
+				))
+				.filter(issues::machine_id.eq_any(&target_ids))
+				.filter(issues::check_name.is_not_null())
+				.filter(issues::effective_result.is_not_null())
+				.order(issues::updated_at.asc())
+				.load(conn)
+				.await?
+		}
+	};
 
 	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_pairs(conn).await?;
-	let types = Application::types_by_id(conn, &server_ids).await?;
+	// Only an application has a type; a machine's checks live in the machine
+	// namespace or a curated source's flat one.
+	let types = match grain {
+		CheckSubject::Application => Application::types_by_id(conn, &target_ids).await?,
+		CheckSubject::Machine => HashMap::new(),
+	};
 
 	let group_ids: Vec<Uuid> = group_of.values().filter_map(|g| *g).collect();
 	let silence_rows: Vec<(
@@ -1831,48 +1882,71 @@ pub async fn check_detail_by_server(
 		Option<String>,
 		String,
 		String,
-	)> = scoped_check_policies::table
-		.select((
-			scoped_check_policies::application_id,
-			scoped_check_policies::server_group_id,
-			scoped_check_policies::subject,
-			scoped_check_policies::application_type,
-			scoped_check_policies::source,
-			scoped_check_policies::check_name,
-		))
-		.filter(scoped_check_policies::ceiling.eq("skipped"))
-		.filter(
-			scoped_check_policies::application_id
-				.eq_any(&server_ids)
-				.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
-		)
-		.load(conn)
-		.await?;
+	)> = match grain {
+		CheckSubject::Application => {
+			scoped_check_policies::table
+				.select((
+					scoped_check_policies::application_id,
+					scoped_check_policies::server_group_id,
+					scoped_check_policies::subject,
+					scoped_check_policies::application_type,
+					scoped_check_policies::source,
+					scoped_check_policies::check_name,
+				))
+				.filter(scoped_check_policies::ceiling.eq("skipped"))
+				.filter(
+					scoped_check_policies::application_id
+						.eq_any(&target_ids)
+						.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
+				)
+				.load(conn)
+				.await?
+		}
+		CheckSubject::Machine => {
+			scoped_check_policies::table
+				.select((
+					scoped_check_policies::machine_id,
+					scoped_check_policies::server_group_id,
+					scoped_check_policies::subject,
+					scoped_check_policies::application_type,
+					scoped_check_policies::source,
+					scoped_check_policies::check_name,
+				))
+				.filter(scoped_check_policies::ceiling.eq("skipped"))
+				.filter(
+					scoped_check_policies::machine_id
+						.eq_any(&target_ids)
+						.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
+				)
+				.load(conn)
+				.await?
+		}
+	};
 	// The namespace is part of the key: a group spans several application
 	// types, so a silence on one type's `version` leaves another type's alone.
-	let mut server_silences: HashSet<(Uuid, Namespace, String, String)> = HashSet::new();
+	let mut target_silences: HashSet<(Uuid, Namespace, String, String)> = HashSet::new();
 	let mut group_silences: HashSet<(Uuid, Namespace, String, String)> = HashSet::new();
-	for (application_id, group_id, subject, ty, source, check) in silence_rows {
+	for (target_id, group_id, subject, ty, source, check) in silence_rows {
 		let Ok(ns) = Namespace::from_columns(subject.as_deref(), ty.as_deref()) else {
 			continue;
 		};
-		if let Some(sid) = application_id {
-			server_silences.insert((sid, ns, source, check));
+		if let Some(tid) = target_id {
+			target_silences.insert((tid, ns, source, check));
 		} else if let Some(gid) = group_id {
 			group_silences.insert((gid, ns, source, check));
 		}
 	}
 
-	let mut by_server: HashMap<Uuid, serde_json::Map<String, serde_json::Value>> = HashMap::new();
-	for (application_id, source, check_name, observed, effective, detail) in rows {
-		let (Some(application_id), Some(check)) = (application_id, check_name) else {
+	let mut by_target: HashMap<Uuid, serde_json::Map<String, serde_json::Value>> = HashMap::new();
+	for (target_id, source, check_name, observed, effective, detail) in rows {
+		let (Some(target_id), Some(check)) = (target_id, check_name) else {
 			continue;
 		};
 		if !crate::check_policies::CheckPolicy::live_for(
 			&cataloged,
 			&source,
 			&check,
-			types.get(&application_id),
+			types.get(&target_id),
 		) {
 			continue;
 		}
@@ -1882,14 +1956,10 @@ pub async fn check_detail_by_server(
 		else {
 			continue;
 		};
-		let silenced = match Namespace::of(&source, &check, types.get(&application_id)) {
+		let silenced = match Namespace::of(&source, &check, types.get(&target_id)) {
 			Some(ns) => {
-				server_silences.contains(&(
-					application_id,
-					ns.clone(),
-					source.clone(),
-					check.clone(),
-				)) || matches!(group_of.get(&application_id), Some(Some(gid))
+				target_silences.contains(&(target_id, ns.clone(), source.clone(), check.clone()))
+					|| matches!(group_of.get(&target_id), Some(Some(gid))
 					if group_silences.contains(&(*gid, ns.clone(), source.clone(), check.clone())))
 			}
 			None => false,
@@ -1900,8 +1970,8 @@ pub async fn check_detail_by_server(
 			stored
 		};
 
-		let entry = by_server
-			.entry(application_id)
+		let entry = by_target
+			.entry(target_id)
 			.or_default()
 			.entry(check)
 			.or_insert_with(|| serde_json::Value::Object(Default::default()));
@@ -1920,7 +1990,7 @@ pub async fn check_detail_by_server(
 		}
 	}
 
-	Ok(by_server)
+	Ok(by_target)
 }
 
 /// One consolidated check row:

@@ -7141,19 +7141,16 @@
         "tags": [
           "statuses"
         ],
-        "summary": "Get every live server's currently reported detail.",
-        "description": "One row per server, carrying the derived figures, the full resolved\npayload its sources report, and its current healthcheck state. This is\nthe data behind the fleet view, which groups it to show how each figure —\nor any field a source reports, whether server-wide or on one check — is\nspread across the fleet, and can cross two fields against each other.\n\nReads each source's current report rather than status history, so it\ncovers applications that have been quiet for any length of time. Archived\napplications and canopy's own row are excluded; a live server that has never\nreported appears with everything absent.",
+        "summary": "Get every live machine's and application's currently reported detail.",
+        "description": "One row per machine and one per application, each carrying its derived\nfigures, the full resolved payload its sources report, and its current\nhealthcheck state. This is the data behind the fleet view, which groups it\nto show how each figure — or any field a source reports, whether against\nthe target itself or on one of its checks — is spread across the fleet,\nand can cross two fields against each other.\n\nThe two populations are returned separately because a figure spreads at\nthe grain it belongs to: a box running two applications is one machine in\na platform spread and two applications in a version spread. An application\nnames the box it runs on so a crossing can put an application figure on a\nmachine axis.\n\nReads each source's current report rather than status history, so it\ncovers targets that have been quiet for any length of time. Archived\nmachines and applications, and canopy's own rows, are excluded; a live one\nthat has never reported appears with everything absent.",
         "operationId": "status_fleet_detail",
         "responses": {
           "200": {
-            "description": "Every live server's currently reported detail.",
+            "description": "Every live machine's and application's currently reported detail.",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/FleetServerDetailData"
-                  }
+                  "$ref": "#/components/schemas/FleetDetailData"
                 }
               }
             }
@@ -10592,13 +10589,35 @@
           }
         }
       },
-      "FleetServerDetailData": {
+      "FleetDetailData": {
         "type": "object",
-        "description": "One server's identity and its currently reported detail, as a row of the\nfleet view.",
+        "description": "Both populations the fleet view spreads its figures over.",
         "required": [
-          "server_id",
-          "server_name",
-          "type",
+          "machines",
+          "applications"
+        ],
+        "properties": {
+          "applications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetServerDetailData"
+            },
+            "description": "Every live application, canopy's own excluded."
+          },
+          "machines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FleetMachineDetailData"
+            },
+            "description": "Every live machine, canopy's own excluded."
+          }
+        }
+      },
+      "FleetMachineDetailData": {
+        "type": "object",
+        "description": "One machine's identity and its currently reported detail, as a row of the\nfleet view.",
+        "required": [
+          "machine_id",
           "detail",
           "checks"
         ],
@@ -10608,11 +10627,67 @@
               "string",
               "null"
             ],
-            "description": "Version of bestool, the agent reporting on the server."
+            "description": "Version of bestool, the agent reporting on the box."
           },
           "checks": {
             "type": "object",
-            "description": "The server's current healthcheck state, keyed by check name: each\ncheck's reported fields plus its graded `result` and the `observed`\nresult behind it. This is what a `check.field` lookup reads."
+            "description": "The machine's current healthcheck state, keyed by check name, in the\nsame shape as an application's."
+          },
+          "detail": {
+            "type": "object",
+            "description": "Every field the machine's sources currently report, resolved across\nthem."
+          },
+          "group_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The group the machine belongs to, if any."
+          },
+          "group_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name of that group, if any."
+          },
+          "machine_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Unique identifier for the machine."
+          },
+          "machine_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The name its operator gave it, if any."
+          },
+          "platform": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The operating system the box runs, qualified by its version where one\nis reported. A box reporting no operating system falls back to the\nfamily the database engine of an application on it gives away."
+          }
+        }
+      },
+      "FleetServerDetailData": {
+        "type": "object",
+        "description": "One application's identity and its currently reported detail, as a row of\nthe fleet view.",
+        "required": [
+          "server_id",
+          "server_name",
+          "machine_id",
+          "type",
+          "detail",
+          "checks"
+        ],
+        "properties": {
+          "checks": {
+            "type": "object",
+            "description": "The application's current healthcheck state, keyed by check name: each\ncheck's reported fields plus its graded `result` and the `observed`\nresult behind it. This is what a `check.field` lookup reads.\n\nOnly the checks filed against the application itself. A check that\nasserts something about the box is the machine's row."
           },
           "detail": {
             "type": "object",
@@ -10633,19 +10708,17 @@
             ],
             "description": "Display name of that group, if any."
           },
+          "machine_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The machine this application runs on. A machine figure is the box's\nrather than the workload's, so a row reaches its machine's figures\nthrough this rather than carrying a copy of them."
+          },
           "nodejs": {
             "type": [
               "string",
               "null"
             ],
             "description": "Reported runtime version."
-          },
-          "platform": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Operating system family, derived from the reported database engine."
           },
           "postgres": {
             "type": [
@@ -10679,7 +10752,7 @@
               "string",
               "null"
             ],
-            "description": "Reported system timezone."
+            "description": "The application's own configured timezone, as reported. The box's\noperating system timezone is a machine figure and is not this."
           },
           "type": {
             "$ref": "#/components/schemas/ApplicationType",

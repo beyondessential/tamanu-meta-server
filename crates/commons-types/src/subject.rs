@@ -273,4 +273,29 @@ mod tests {
 			 files would land in different namespaces"
 		);
 	}
+
+	/// The same for the detail split, which the seed mirrors so a seeded push
+	/// lands its fields at the grain ingestion would. A drift here puts a
+	/// box's field on the workload's report, and a fleet spread that counts
+	/// machines then reads it from a population that never had it.
+	#[test]
+	fn the_e2e_seed_snapshot_matches_the_detail_list() {
+		let ts = include_str!("../../../private-web/e2e/seed.ts");
+		let array = ts
+			.split_once("const MACHINE_SUBJECT_DETAIL = [")
+			.expect("the e2e seed no longer snapshots the machine detail list")
+			.1
+			.split_once("];")
+			.expect("the snapshot has no terminator")
+			.0;
+
+		let snapshot: Vec<&str> = array.split('"').skip(1).step_by(2).collect();
+
+		assert_eq!(
+			snapshot, MACHINE_SUBJECT_DETAIL,
+			"the e2e seed's machine-detail snapshot has drifted from the list \
+			 ingest uses, so a seeded push would split its detail differently \
+			 from a real one"
+		);
+	}
 }

@@ -12,7 +12,7 @@ use commons_types::{
 };
 use database::{
 	applications::{Application, PartialServer},
-	devices::{Device, DeviceConnection},
+	devices::Device,
 	reported_detail::ReportedDetail,
 	server_groups::ServerGroup,
 	statuses::Status,
@@ -662,19 +662,14 @@ pub async fn get_detail(
 	let figures = ReportedDetail::merge(&ReportedDetail::for_server(&mut conn, server.id).await?);
 
 	let last_status = if let Some(st) = status.as_ref() {
-		// The status usually comes from the server's own device, whose
-		// latest connection was just fetched — only fall back to a
-		// dedicated lookup when the status was pushed by a different one.
-		let connection = match st.device_id {
-			Some(did) if Some(did) == device_id => device_with_info
-				.as_ref()
-				.and_then(|d| d.latest_connection.clone()),
-			Some(did) => DeviceConnection::get_latest_from_device_ids(&mut conn, [did].into_iter())
-				.await?
-				.into_iter()
-				.next(),
-			None => None,
-		};
+		// An identity belongs to the box, so the connection whose User-Agent
+		// names a runtime is the one reporting on the application's machine,
+		// already fetched above. Whichever identity filed any one push is that
+		// push's provenance and says nothing about what the box runs.
+		// spec: FIG#figures
+		let connection = device_with_info
+			.as_ref()
+			.and_then(|d| d.latest_connection.clone());
 
 		// Prefer the payload-reported `nodeVersion`; fall back to the device
 		// connection's User-Agent.

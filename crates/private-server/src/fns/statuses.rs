@@ -21,7 +21,7 @@ use database::{
 	devices::DeviceConnection,
 	issues::Issue,
 	machines::Machine,
-	reported_detail::ReportedDetail,
+	reported_detail::{MachineReportedDetail, ReportedDetail},
 	server_groups::ServerGroup,
 	statuses::{MergedDetail, Status},
 	tailscale_users::TailscaleUser as CachedTailscaleUser,
@@ -777,22 +777,28 @@ pub async fn snapshot(
 	} = consolidated_checks_at(&mut conn, &server, args.at).await?;
 
 	// Prefer the Node.js version reported in a status payload
-	// (`nodeVersion`). Fall back to scraping the *latest* device connection's
-	// User-Agent — that metadata isn't versioned in lockstep with status
-	// pushes, so looking it up "as of" a time would mostly mislead.
+	// (`nodeVersion`). Fall back to scraping the User-Agent of the identity
+	// reporting on the application's machine: an identity belongs to the box,
+	// so what the box's reporter runs is the runtime, while whichever identity
+	// filed this push is only that push's provenance. It is the *latest*
+	// connection either way — that metadata isn't versioned in lockstep with
+	// status pushes, so looking it up "as of" a time would mostly mislead.
+	// spec: FIG#figures
 	let nodejs = match figures.node_version() {
 		Some(v) => Some(v),
-		None => {
-			if let Some(dev_id) = status.device_id {
+		None => match database::machines::Machine::get_by_id(&mut conn, server.machine_id)
+			.await?
+			.device_id
+		{
+			Some(dev_id) => {
 				DeviceConnection::get_latest_from_device_ids(&mut conn, [dev_id].into_iter())
 					.await?
 					.into_iter()
 					.next()
 					.and_then(|d| d.nodejs_version())
-			} else {
-				None
 			}
-		}
+			None => None,
+		},
 	};
 	// The embedded-browser floor is a property of a Tamanu release, so it too
 	// only means something for a product whose releases canopy holds.
@@ -904,8 +910,21 @@ async fn consolidated_checks_at(
 	// The figures come from the same set of statuses the checks do, so the
 	// snapshot presents each figure as of `at` from whichever source last
 	// reported it, rather than from whichever source happened to push last.
+	//
+	// Both grains' rows, for the reason the checks read both: a split push
+	// records the box's detail on the machine's rows, so reading only the
+	// application's would drop platform, timezone and the agent's version out
+	// of a past moment. A unified push carries them on the application's rows
+	// and files no machine rows at all, so nothing is read twice; where a
+	// source pushed both shapes across the window, newest-wins per key
+	// resolves them as it resolves any two reports.
 	// spec: FIG#point-in-time
-	let figures = MergedDetail::from_statuses(&statuses);
+	let figures = MergedDetail::from_reports(
+		statuses
+			.iter()
+			.chain(machine_statuses.iter())
+			.map(|st| (st.created_at, &st.extra)),
+	);
 
 	// Each source's raw status-level payload, keyed by source, so the
 	// snapshot's raw-payload panel is consolidated rather than one source's
@@ -1088,14 +1107,19 @@ async fn consolidated_checks_at(
 	})
 }
 
-/// One server's identity and its currently reported detail, as a row of the
-/// fleet view.
+/// One application's identity and its currently reported detail, as a row of
+/// the fleet view.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct FleetServerDetailData {
 	/// Unique identifier for the server.
 	pub server_id: Uuid,
 	/// Operator-assigned name for the server, empty when it has none.
 	pub server_name: String,
+	/// The machine this application runs on. A machine figure is the box's
+	/// rather than the workload's, so a row reaches its machine's figures
+	/// through this rather than carrying a copy of them.
+	// spec: FIG#fleet-spread
+	pub machine_id: Uuid,
 	/// The group the server belongs to, if any.
 	pub group_id: Option<Uuid>,
 	/// Display name of that group, if any.
@@ -1108,40 +1132,87 @@ pub struct FleetServerDetailData {
 	pub r#type: ApplicationType,
 	/// Application version the server reports running, if any.
 	pub version: Option<VersionStr>,
-	/// Operating system family, derived from the reported database engine.
-	pub platform: Option<String>,
 	/// Reported database engine version.
 	pub postgres: Option<String>,
 	/// Reported runtime version.
 	pub nodejs: Option<String>,
-	/// Version of bestool, the agent reporting on the server.
-	pub bestool: Option<String>,
-	/// Reported system timezone.
+	/// The application's own configured timezone, as reported. The box's
+	/// operating system timezone is a machine figure and is not this.
 	pub timezone: Option<String>,
 	/// Every field the server's sources currently report, resolved across
 	/// them — the raw material behind the derived figures above, and what an
 	/// arbitrary-field lookup reads.
 	#[schema(additional_properties = true, value_type = Object)]
 	pub detail: serde_json::Value,
-	/// The server's current healthcheck state, keyed by check name: each
+	/// The application's current healthcheck state, keyed by check name: each
 	/// check's reported fields plus its graded `result` and the `observed`
 	/// result behind it. This is what a `check.field` lookup reads.
+	///
+	/// Only the checks filed against the application itself. A check that
+	/// asserts something about the box is the machine's row.
+	// spec: FIG#fleet-spread
 	#[schema(additional_properties = true, value_type = Object)]
 	pub checks: serde_json::Value,
 }
 
-/// Get every live server's currently reported detail.
+/// One machine's identity and its currently reported detail, as a row of the
+/// fleet view.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct FleetMachineDetailData {
+	/// Unique identifier for the machine.
+	pub machine_id: Uuid,
+	/// The name its operator gave it, if any.
+	pub machine_name: Option<String>,
+	/// The group the machine belongs to, if any.
+	pub group_id: Option<Uuid>,
+	/// Display name of that group, if any.
+	pub group_name: Option<String>,
+	/// The operating system the box runs, qualified by its version where one
+	/// is reported. A box reporting no operating system falls back to the
+	/// family the database engine of an application on it gives away.
+	// spec: FIG#machine-figures
+	pub platform: Option<String>,
+	/// Version of bestool, the agent reporting on the box.
+	// spec: FIG#machine-figures
+	pub bestool: Option<String>,
+	/// Every field the machine's sources currently report, resolved across
+	/// them.
+	#[schema(additional_properties = true, value_type = Object)]
+	pub detail: serde_json::Value,
+	/// The machine's current healthcheck state, keyed by check name, in the
+	/// same shape as an application's.
+	#[schema(additional_properties = true, value_type = Object)]
+	pub checks: serde_json::Value,
+}
+
+/// Both populations the fleet view spreads its figures over.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct FleetDetailData {
+	/// Every live machine, canopy's own excluded.
+	pub machines: Vec<FleetMachineDetailData>,
+	/// Every live application, canopy's own excluded.
+	pub applications: Vec<FleetServerDetailData>,
+}
+
+/// Get every live machine's and application's currently reported detail.
 ///
-/// One row per server, carrying the derived figures, the full resolved
-/// payload its sources report, and its current healthcheck state. This is
-/// the data behind the fleet view, which groups it to show how each figure —
-/// or any field a source reports, whether server-wide or on one check — is
-/// spread across the fleet, and can cross two fields against each other.
+/// One row per machine and one per application, each carrying its derived
+/// figures, the full resolved payload its sources report, and its current
+/// healthcheck state. This is the data behind the fleet view, which groups it
+/// to show how each figure — or any field a source reports, whether against
+/// the target itself or on one of its checks — is spread across the fleet,
+/// and can cross two fields against each other.
+///
+/// The two populations are returned separately because a figure spreads at
+/// the grain it belongs to: a box running two applications is one machine in
+/// a platform spread and two applications in a version spread. An application
+/// names the box it runs on so a crossing can put an application figure on a
+/// machine axis.
 ///
 /// Reads each source's current report rather than status history, so it
-/// covers applications that have been quiet for any length of time. Archived
-/// applications and canopy's own row are excluded; a live server that has never
-/// reported appears with everything absent.
+/// covers targets that have been quiet for any length of time. Archived
+/// machines and applications, and canopy's own rows, are excluded; a live one
+/// that has never reported appears with everything absent.
 // spec: FIG#fleet-spread
 #[utoipa::path(
 	post,
@@ -1150,22 +1221,30 @@ pub struct FleetServerDetailData {
 	tag = "statuses",
 	security(("tailscale-user" = [])),
 	responses(
-		(status = 200, description = "Every live server's currently reported detail.", body = Vec<FleetServerDetailData>),
+		(status = 200, description = "Every live machine's and application's currently reported detail.", body = FleetDetailData),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
 pub async fn fleet_detail(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
-) -> Result<Json<Vec<FleetServerDetailData>>> {
+) -> Result<Json<FleetDetailData>> {
 	let mut conn = state.db_read.get().await?;
 
 	// get_all already excludes archived applications and canopy's own row.
 	let applications = Application::get_all(&mut conn, 0, None).await?;
+	// list_live excludes archived machines but not canopy's own, which is not
+	// a box and is not part of the fleet.
+	let machines: Vec<Machine> = Machine::list_live(&mut conn)
+		.await?
+		.into_iter()
+		.filter(|m| m.id != Uuid::nil())
+		.collect();
 
 	let group_ids: Vec<Uuid> = applications
 		.iter()
 		.filter_map(|s| s.group_id)
+		.chain(machines.iter().filter_map(|m| m.group_id))
 		.collect::<BTreeSet<_>>()
 		.into_iter()
 		.collect();
@@ -1175,16 +1254,63 @@ pub async fn fleet_detail(
 		.map(|g| (g.id, g.name))
 		.collect();
 
-	// One read for the whole fleet: the current-detail table is a row per
-	// (server, source), so this is a few hundred rows however much status
-	// history sits behind it.
-	let mut merged = ReportedDetail::merge_by_server(ReportedDetail::all(&mut conn).await?);
+	// One read for the whole fleet at each grain: the current-detail tables
+	// are a row per (target, source), so this is a few hundred rows however
+	// much status history sits behind them. The application read is the
+	// application's own detail, without its machine's folded in, so a box's
+	// fields don't present as each workload's and inflate a machine figure.
+	// spec: FIG#fleet-spread
+	let mut merged = ReportedDetail::merge_by_server(ReportedDetail::all_own(&mut conn).await?);
+	let mut machine_merged =
+		MachineReportedDetail::merge_by_machine(MachineReportedDetail::all(&mut conn).await?);
 
-	// Same again for check state, which is a row per (server, source, check)
+	// Same again for check state, which is a row per (target, source, check)
 	// and carries the fields each check reports.
 	let scopes: Vec<(Uuid, Option<Uuid>)> =
 		applications.iter().map(|s| (s.id, s.group_id)).collect();
 	let mut checks = database::issues::check_detail_by_server(&mut conn, &scopes).await?;
+	let machine_scopes: Vec<(Uuid, Option<Uuid>)> =
+		machines.iter().map(|m| (m.id, m.group_id)).collect();
+	let mut machine_checks =
+		database::issues::check_detail_by_machine(&mut conn, &machine_scopes).await?;
+
+	// A box that reports no operating system falls back to the family the
+	// database engine of an application on it gives away, so the fallback
+	// needs the applications gathered by machine before the rows are built.
+	// spec: FIG#machine-figures
+	let mut pg_banner_by_machine: HashMap<Uuid, String> = HashMap::new();
+	for application in &applications {
+		if let Some(banner) = merged
+			.get(&application.id)
+			.and_then(|(figures, _)| figures.pg_version_banner())
+		{
+			pg_banner_by_machine
+				.entry(application.machine_id)
+				.or_insert(banner);
+		}
+	}
+
+	let machines = machines
+		.into_iter()
+		.map(|machine| {
+			let figures = machine_merged.remove(&machine.id).unwrap_or_default();
+			let checks = machine_checks.remove(&machine.id).unwrap_or_default();
+			FleetMachineDetailData {
+				machine_id: machine.id,
+				machine_name: machine.name,
+				group_id: machine.group_id,
+				group_name: machine.group_id.and_then(|g| group_names.get(&g).cloned()),
+				platform: figures.os_platform().or_else(|| {
+					pg_banner_by_machine
+						.get(&machine.id)
+						.map(database::statuses::platform_family_of)
+				}),
+				bestool: figures.bestool_version(),
+				detail: figures.into_json(),
+				checks: serde_json::Value::Object(checks),
+			}
+		})
+		.collect();
 
 	let rows = applications
 		.into_iter()
@@ -1194,6 +1320,7 @@ pub async fn fleet_detail(
 			FleetServerDetailData {
 				server_id: server.id,
 				server_name: server.display_name(),
+				machine_id: server.machine_id,
 				group_id: server.group_id,
 				group_name: server.group_id.and_then(|g| group_names.get(&g).cloned()),
 				rank: server.rank,
@@ -1202,10 +1329,8 @@ pub async fn fleet_detail(
 				// row carries nothing for the fleet view to count.
 				// spec: APP#versions
 				version: version.filter(|_| server.r#type.has_versions()),
-				platform: figures.platform(),
 				postgres: figures.postgres_version(),
 				nodejs: figures.node_version(),
-				bestool: figures.bestool_version(),
 				timezone: figures.timezone(),
 				detail: figures.into_json(),
 				checks: serde_json::Value::Object(checks),
@@ -1213,5 +1338,8 @@ pub async fn fleet_detail(
 		})
 		.collect();
 
-	Ok(Json(rows))
+	Ok(Json(FleetDetailData {
+		machines,
+		applications: rows,
+	}))
 }

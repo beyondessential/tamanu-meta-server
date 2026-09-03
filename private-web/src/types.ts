@@ -120,6 +120,10 @@ export type StatusSnapshotData = Solidify<Schemas["StatusSnapshotData"]>;
 export type FleetServerDetailData = Solidify<
 	Schemas["FleetServerDetailData"]
 >;
+export type FleetMachineDetailData = Solidify<
+	Schemas["FleetMachineDetailData"]
+>;
+export type FleetDetailData = Solidify<Schemas["FleetDetailData"]>;
 export type ServerSilencedRef = Solidify<Schemas["ServerSilencedRef"]>;
 export type ServerGroupSilencedRef = Solidify<Schemas["ServerGroupSilencedRef"]>;
 

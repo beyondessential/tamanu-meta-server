@@ -242,16 +242,29 @@ impl ReportedDetail {
 		Ok(at.map(Timestamp::from))
 	}
 
-	/// Every source's current detail for every server that has any. Small
-	/// enough to read whole — one row per (server, source) across the fleet.
-	pub async fn all(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+	/// Every source's current detail for every application that has any, the
+	/// application's own only. Small enough to read whole — one row per
+	/// (application, source) across the fleet.
+	///
+	/// The fleet spread counts each grain separately, so the box's fields must
+	/// not present as a workload's here; [`Self::all`] merges them in for a
+	/// view that asks about one application at a time.
+	// spec: FIG#fleet-spread
+	pub async fn all_own(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
 		use crate::schema::application_reported_detail::dsl;
 
-		let mut rows: Vec<Self> = dsl::application_reported_detail
+		dsl::application_reported_detail
 			.select(Self::as_select())
 			.load(db)
 			.await
-			.map_err(AppError::from)?;
+			.map_err(AppError::from)
+	}
+
+	/// The same, with each machine's detail presented on every application it
+	/// hosts, so a caller reading one application at a time sees the box's
+	/// fields alongside the workload's.
+	pub async fn all(db: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		let mut rows = Self::all_own(db).await?;
 
 		// Each machine's detail presents on every application it hosts, the
 		// same merge `for_server` does, one application at a time.
@@ -522,6 +535,35 @@ impl MachineReportedDetail {
 			.load(db)
 			.await
 			.map_err(AppError::from)
+	}
+
+	/// Every machine's current detail resolved across the sources reporting on
+	/// it, keyed by machine. The box's counterpart of
+	/// [`ReportedDetail::merge_by_server`], carrying no version: a version is
+	/// the workload's.
+	// spec: FIG#sourcing
+	pub fn merge_by_machine(
+		reports: Vec<Self>,
+	) -> std::collections::HashMap<Uuid, crate::statuses::MergedDetail> {
+		let mut by_machine: std::collections::HashMap<Uuid, Vec<Self>> =
+			std::collections::HashMap::new();
+		for report in reports {
+			by_machine
+				.entry(report.machine_id)
+				.or_default()
+				.push(report);
+		}
+		by_machine
+			.into_iter()
+			.map(|(machine, rows)| {
+				(
+					machine,
+					crate::statuses::MergedDetail::from_reports(
+						rows.iter().map(|r| (r.reported_at, &r.extra)),
+					),
+				)
+			})
+			.collect()
 	}
 
 	/// Present this machine's detail as one of `application`'s, so the merged

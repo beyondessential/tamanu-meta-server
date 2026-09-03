@@ -3663,17 +3663,24 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Get every live server's currently reported detail.
-         * @description One row per server, carrying the derived figures, the full resolved
-         *     payload its sources report, and its current healthcheck state. This is
-         *     the data behind the fleet view, which groups it to show how each figure —
-         *     or any field a source reports, whether server-wide or on one check — is
-         *     spread across the fleet, and can cross two fields against each other.
+         * Get every live machine's and application's currently reported detail.
+         * @description One row per machine and one per application, each carrying its derived
+         *     figures, the full resolved payload its sources report, and its current
+         *     healthcheck state. This is the data behind the fleet view, which groups it
+         *     to show how each figure — or any field a source reports, whether against
+         *     the target itself or on one of its checks — is spread across the fleet,
+         *     and can cross two fields against each other.
+         *
+         *     The two populations are returned separately because a figure spreads at
+         *     the grain it belongs to: a box running two applications is one machine in
+         *     a platform spread and two applications in a version spread. An application
+         *     names the box it runs on so a crossing can put an application figure on a
+         *     machine axis.
          *
          *     Reads each source's current report rather than status history, so it
-         *     covers applications that have been quiet for any length of time. Archived
-         *     applications and canopy's own row are excluded; a live server that has never
-         *     reported appears with everything absent.
+         *     covers targets that have been quiet for any length of time. Archived
+         *     machines and applications, and canopy's own rows, are excluded; a live one
+         *     that has never reported appears with everything absent.
          */
         post: operations["status_fleet_detail"];
         delete?: never;
@@ -5738,17 +5745,63 @@ export interface components {
              */
             up: components["schemas"]["ShortStatus"];
         };
+        /** @description Both populations the fleet view spreads its figures over. */
+        FleetDetailData: {
+            /** @description Every live application, canopy's own excluded. */
+            applications: components["schemas"]["FleetServerDetailData"][];
+            /** @description Every live machine, canopy's own excluded. */
+            machines: components["schemas"]["FleetMachineDetailData"][];
+        };
         /**
-         * @description One server's identity and its currently reported detail, as a row of the
+         * @description One machine's identity and its currently reported detail, as a row of the
          *     fleet view.
          */
-        FleetServerDetailData: {
-            /** @description Version of bestool, the agent reporting on the server. */
+        FleetMachineDetailData: {
+            /** @description Version of bestool, the agent reporting on the box. */
             bestool?: string | null;
             /**
-             * @description The server's current healthcheck state, keyed by check name: each
+             * @description The machine's current healthcheck state, keyed by check name, in the
+             *     same shape as an application's.
+             */
+            checks: Record<string, never>;
+            /**
+             * @description Every field the machine's sources currently report, resolved across
+             *     them.
+             */
+            detail: Record<string, never>;
+            /**
+             * Format: uuid
+             * @description The group the machine belongs to, if any.
+             */
+            group_id?: string | null;
+            /** @description Display name of that group, if any. */
+            group_name?: string | null;
+            /**
+             * Format: uuid
+             * @description Unique identifier for the machine.
+             */
+            machine_id: string;
+            /** @description The name its operator gave it, if any. */
+            machine_name?: string | null;
+            /**
+             * @description The operating system the box runs, qualified by its version where one
+             *     is reported. A box reporting no operating system falls back to the
+             *     family the database engine of an application on it gives away.
+             */
+            platform?: string | null;
+        };
+        /**
+         * @description One application's identity and its currently reported detail, as a row of
+         *     the fleet view.
+         */
+        FleetServerDetailData: {
+            /**
+             * @description The application's current healthcheck state, keyed by check name: each
              *     check's reported fields plus its graded `result` and the `observed`
              *     result behind it. This is what a `check.field` lookup reads.
+             *
+             *     Only the checks filed against the application itself. A check that
+             *     asserts something about the box is the machine's row.
              */
             checks: Record<string, never>;
             /**
@@ -5764,10 +5817,15 @@ export interface components {
             group_id?: string | null;
             /** @description Display name of that group, if any. */
             group_name?: string | null;
+            /**
+             * Format: uuid
+             * @description The machine this application runs on. A machine figure is the box's
+             *     rather than the workload's, so a row reaches its machine's figures
+             *     through this rather than carrying a copy of them.
+             */
+            machine_id: string;
             /** @description Reported runtime version. */
             nodejs?: string | null;
-            /** @description Operating system family, derived from the reported database engine. */
-            platform?: string | null;
             /** @description Reported database engine version. */
             postgres?: string | null;
             rank?: null | components["schemas"]["ServerRank"];
@@ -5778,7 +5836,10 @@ export interface components {
             server_id: string;
             /** @description Operator-assigned name for the server, empty when it has none. */
             server_name: string;
-            /** @description Reported system timezone. */
+            /**
+             * @description The application's own configured timezone, as reported. The box's
+             *     operating system timezone is a machine figure and is not this.
+             */
             timezone?: string | null;
             /**
              * @description The application the server runs. The fleet view reads it to keep the
@@ -15291,13 +15352,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Every live server's currently reported detail. */
+            /** @description Every live machine's and application's currently reported detail. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FleetServerDetailData"][];
+                    "application/json": components["schemas"]["FleetDetailData"];
                 };
             };
             500: {

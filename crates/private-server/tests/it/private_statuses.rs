@@ -33,8 +33,6 @@ struct ServerDetailResponse {
 	group_applications: Vec<serde_json::Value>,
 	#[serde(default)]
 	group_machines: Vec<serde_json::Value>,
-	#[serde(default)]
-	munin: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -612,6 +610,8 @@ async fn get_detail_basic() {
 	.await
 }
 
+/// Munin watches the box rather than anything running on it, so the flag is the
+/// machine's and the machine's page is where it presents.
 // spec: SVC#munin-link
 #[tokio::test(flavor = "multi_thread")]
 async fn get_detail_munin_flag() {
@@ -621,36 +621,36 @@ async fn get_detail_munin_flag() {
 			('11111111-1111-1111-1111-111111111111'),
 			('22222222-2222-2222-2222-222222222222');
 
-			INSERT INTO applications (id, name, host, rank, type, machine_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'Munin Application', 'https://munin.example.com', 'production', 'tamanu-central', '11111111-1111-1111-1111-111111111111'),
-			('22222222-2222-2222-2222-222222222222', 'Plain Application', 'https://plain.example.com', 'production', 'tamanu-central', '22222222-2222-2222-2222-222222222222');
-
-			INSERT INTO statuses (server_id, extra, created_at) VALUES
-			('11111111-1111-1111-1111-111111111111', '{\"munin\": true}'::jsonb, NOW()),
-			('22222222-2222-2222-2222-222222222222', '{\"uptime\": 3600}'::jsonb, NOW());
-
-			INSERT INTO application_reported_detail (application_id, source, extra) VALUES
+			INSERT INTO machine_reported_detail (machine_id, source, extra) VALUES
 			('11111111-1111-1111-1111-111111111111', 'alertd', '{\"munin\": true}'::jsonb),
-			('22222222-2222-2222-2222-222222222222', 'alertd', '{\"uptime\": 3600}'::jsonb)",
+			('22222222-2222-2222-2222-222222222222', 'alertd', '{\"uptimeSecs\": 3600}'::jsonb)",
 		)
 		.await
 		.unwrap();
 
-		let munin_detail: ServerDetailResponse = private
-			.post("/api/servers/get_detail")
-			.json(&serde_json::json!({"server_id": "11111111-1111-1111-1111-111111111111"}))
+		#[derive(Debug, Deserialize)]
+		struct MachineMunin {
+			munin: bool,
+		}
+
+		let munin_detail: MachineMunin = private
+			.post("/api/machines/get_detail")
+			.json(&serde_json::json!({"machine_id": "11111111-1111-1111-1111-111111111111"}))
 			.await
 			.json();
-		assert!(munin_detail.munin, "server that reported munin=true exposes munin");
+		assert!(
+			munin_detail.munin,
+			"a box that reported munin=true exposes munin"
+		);
 
-		let plain_detail: ServerDetailResponse = private
-			.post("/api/servers/get_detail")
-			.json(&serde_json::json!({"server_id": "22222222-2222-2222-2222-222222222222"}))
+		let plain_detail: MachineMunin = private
+			.post("/api/machines/get_detail")
+			.json(&serde_json::json!({"machine_id": "22222222-2222-2222-2222-222222222222"}))
 			.await
 			.json();
 		assert!(
 			!plain_detail.munin,
-			"server whose status omits the flag does not expose munin"
+			"a box whose report omits the flag does not expose munin"
 		);
 	})
 	.await
@@ -987,6 +987,8 @@ struct SnapshotData {
 	#[serde(default)]
 	checks: Option<serde_json::Value>,
 	#[serde(default)]
+	platform: Option<String>,
+	#[serde(default)]
 	nodejs: Option<String>,
 	#[serde(default)]
 	postgres: Option<String>,
@@ -1073,6 +1075,48 @@ async fn snapshot_figures_survive_a_later_push_from_another_source() {
 	.await
 }
 
+/// Under the split push shape the box's detail is on the machine's own status
+/// rows, so a snapshot that read only the application's would lose the
+/// platform, the timezone and the agent's version out of a past moment.
+// spec: FIG#point-in-time
+#[tokio::test(flavor = "multi_thread")]
+async fn snapshot_figures_include_the_machines_own_rows() {
+	commons_tests::server::run(async |mut conn, _, private| {
+		conn.batch_execute(
+			"WITH m AS (INSERT INTO machines (id) VALUES ('20000000-0000-0000-0000-000000000032') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES
+			('20000000-0000-0000-0000-000000000032', 'https://split.example.com', 'tamanu-central', '20000000-0000-0000-0000-000000000032');
+
+			INSERT INTO statuses (server_id, machine_id, source, created_at, healthy, health, extra) VALUES
+			(NULL, '20000000-0000-0000-0000-000000000032', 'alertd', NOW() - INTERVAL '2 hours', true, '[]'::jsonb,
+			 '{\"bestoolVersion\":\"2.11.0\",\"osName\":\"Ubuntu\",\"osVersion\":\"22.04\"}'::jsonb),
+			('20000000-0000-0000-0000-000000000032', NULL, 'alertd', NOW() - INTERVAL '2 hours', true, '[]'::jsonb,
+			 '{\"pgVersion\":\"PostgreSQL 16.3 on x86_64-pc-linux-gnu\",\"timezone\":\"Pacific/Auckland\"}'::jsonb)",
+		)
+		.await
+		.unwrap();
+
+		let r = private
+			.post("/api/statuses/snapshot")
+			.json(&serde_json::json!({
+				"server_id": "20000000-0000-0000-0000-000000000032"
+			}))
+			.await;
+		r.assert_status_ok();
+		let data: Option<SnapshotData> = r.json();
+		let data = data.expect("snapshot returned");
+		assert_eq!(
+			data.bestool,
+			Some("2.11.0".to_string()),
+			"the agent's version is the box's and is only on the machine's rows"
+		);
+		assert_eq!(data.platform, Some("Ubuntu 22.04".to_string()));
+		// The application's own rows still answer for its own figures.
+		assert_eq!(data.postgres, Some("16.3".to_string()));
+		assert_eq!(data.timezone, Some("Pacific/Auckland".to_string()));
+	})
+	.await
+}
+
 /// A server no bestool reports on presents no bestool version.
 // spec: FIG#figures
 #[tokio::test(flavor = "multi_thread")]
@@ -1103,37 +1147,72 @@ async fn snapshot_has_no_bestool_version_when_unreported() {
 }
 
 #[derive(Debug, Deserialize)]
+struct FleetData {
+	machines: Vec<FleetMachineRow>,
+	applications: Vec<FleetRow>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FleetMachineRow {
+	machine_id: String,
+	platform: Option<String>,
+	bestool: Option<String>,
+	detail: serde_json::Value,
+	#[serde(default)]
+	checks: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
 struct FleetRow {
 	server_id: String,
 	server_name: String,
-	bestool: Option<String>,
+	machine_id: String,
 	postgres: Option<String>,
 	detail: serde_json::Value,
 	#[serde(default)]
 	checks: serde_json::Value,
 }
 
-/// The fleet view lists every live server with its currently reported detail,
-/// resolved across sources — including applications that have never reported, and
-/// excluding archived ones.
+/// The fleet view lists every live machine and every live application with its
+/// currently reported detail, resolved across sources — including targets that
+/// have never reported, and excluding archived ones.
+///
+/// Each grain carries its own figures: the agent's version is the box's and
+/// reaches the fleet through the machine, while the database engine is the
+/// workload's.
 // spec: FIG#fleet-spread
 #[tokio::test(flavor = "multi_thread")]
 async fn fleet_detail_covers_live_servers() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"WITH m AS (INSERT INTO machines (id) VALUES ('30000000-0000-0000-0000-000000000001'), ('30000000-0000-0000-0000-000000000002') RETURNING id) INSERT INTO applications (id, name, host, type, machine_id) VALUES
-			('30000000-0000-0000-0000-000000000001', 'reports', 'https://reports.example.com', 'tamanu-central', '30000000-0000-0000-0000-000000000001'),
-			('30000000-0000-0000-0000-000000000002', 'silent', 'https://silent.example.com', 'tamanu-central', '30000000-0000-0000-0000-000000000002');
+			"INSERT INTO machines (id) VALUES
+			('30000000-0000-0000-0000-000000000001'),
+			('30000000-0000-0000-0000-000000000002'),
+			('30000000-0000-0000-0000-000000000003'),
+			('30000000-0000-0000-0000-000000000004');
 
-			WITH m AS (INSERT INTO machines (id) VALUES ('30000000-0000-0000-0000-000000000003') RETURNING id) INSERT INTO applications (id, name, host, type, deleted_at, machine_id) VALUES
-			('30000000-0000-0000-0000-000000000003', 'archived', 'https://archived.example.com', 'tamanu-central', NOW(), '30000000-0000-0000-0000-000000000003');
+			INSERT INTO applications (id, name, host, type, machine_id) VALUES
+			('30000000-0000-0000-0000-000000000001', 'reports', 'https://reports.example.com', 'tamanu-central', '30000000-0000-0000-0000-000000000001'),
+			('30000000-0000-0000-0000-000000000002', 'silent', 'https://silent.example.com', 'tamanu-central', '30000000-0000-0000-0000-000000000002'),
+			('30000000-0000-0000-0000-000000000004', 'bare', 'https://bare.example.com', 'tamanu-central', '30000000-0000-0000-0000-000000000004');
+
+			INSERT INTO applications (id, name, host, type, machine_id) VALUES
+			('30000000-0000-0000-0000-000000000003', 'archived', 'https://archived.example.com', 'tamanu-central', '30000000-0000-0000-0000-000000000003');
+
+			UPDATE applications SET deleted_at = NOW() WHERE id = '30000000-0000-0000-0000-000000000003';
+
+			INSERT INTO machine_reported_detail (machine_id, source, extra, reported_at) VALUES
+			('30000000-0000-0000-0000-000000000001', 'alertd',
+			 '{\"bestoolVersion\": \"2.10.5\", \"osName\": \"Ubuntu\", \"osVersion\": \"22.04\"}'::jsonb,
+			 NOW() - INTERVAL '2 hours');
 
 			INSERT INTO application_reported_detail (application_id, source, extra, reported_at) VALUES
 			('30000000-0000-0000-0000-000000000001', 'alertd',
-			 '{\"bestoolVersion\": \"2.10.5\", \"pgVersion\": \"PostgreSQL 16.3 on x86_64-pc-linux-gnu\"}'::jsonb,
+			 '{\"pgVersion\": \"PostgreSQL 16.3 on x86_64-pc-linux-gnu\"}'::jsonb,
 			 NOW() - INTERVAL '2 hours'),
 			('30000000-0000-0000-0000-000000000001', 'tamanu', '{\"uptimeSecs\": 6038594}'::jsonb, NOW()),
-			('30000000-0000-0000-0000-000000000003', 'alertd', '{\"bestoolVersion\": \"1.0.0\"}'::jsonb, NOW())",
+			('30000000-0000-0000-0000-000000000003', 'alertd', '{\"pgVersion\": \"PostgreSQL 14.1 on x86_64-pc-linux-gnu\"}'::jsonb, NOW()),
+			('30000000-0000-0000-0000-000000000004', 'alertd', '{\"pgVersion\": \"PostgreSQL 16.3 on x86_64-pc-linux-gnu\"}'::jsonb, NOW())",
 		)
 		.await
 		.unwrap();
@@ -1143,33 +1222,78 @@ async fn fleet_detail_covers_live_servers() {
 			.json(&serde_json::json!({}))
 			.await;
 		r.assert_status_ok();
-		let rows: Vec<FleetRow> = r.json();
+		let data: FleetData = r.json();
 
 		assert!(
-			!rows.iter().any(|s| s.server_name == "archived"),
-			"an archived server is not part of the fleet",
+			!data.applications.iter().any(|s| s.server_name == "archived"),
+			"an archived application is not part of the fleet",
 		);
 
-		let reporting = rows
+		let reporting = data
+			.applications
 			.iter()
 			.find(|s| s.server_id == "30000000-0000-0000-0000-000000000001")
-			.expect("reporting server listed");
-		assert_eq!(reporting.bestool.as_deref(), Some("2.10.5"));
+			.expect("reporting application listed");
 		assert_eq!(reporting.postgres.as_deref(), Some("16.3"));
+		assert_eq!(
+			reporting.machine_id, "30000000-0000-0000-0000-000000000001",
+			"an application names the box it runs on, so a crossing can put its figure on a machine axis",
+		);
 		assert_eq!(
 			reporting.detail["uptimeSecs"], 6038594,
 			"the raw payload carries fields canopy derives no figure from",
 		);
+		assert!(
+			reporting.detail.get("bestoolVersion").is_none(),
+			"the agent's version is the box's, so it doesn't present as the workload's",
+		);
 
-		let silent = rows
+		let silent = data
+			.applications
 			.iter()
 			.find(|s| s.server_id == "30000000-0000-0000-0000-000000000002")
-			.expect("silent server listed");
-		assert_eq!(silent.bestool, None);
+			.expect("silent application listed");
+		assert_eq!(silent.postgres, None);
 		assert_eq!(
 			silent.detail,
 			serde_json::json!({}),
-			"a server that has never reported is listed with nothing reported",
+			"an application that has never reported is listed with nothing reported",
+		);
+
+		let box_ = data
+			.machines
+			.iter()
+			.find(|m| m.machine_id == "30000000-0000-0000-0000-000000000001")
+			.expect("reporting machine listed");
+		assert_eq!(box_.bestool.as_deref(), Some("2.10.5"));
+		assert_eq!(box_.platform.as_deref(), Some("Ubuntu 22.04"));
+
+		let quiet = data
+			.machines
+			.iter()
+			.find(|m| m.machine_id == "30000000-0000-0000-0000-000000000002")
+			.expect("quiet machine listed");
+		assert_eq!(quiet.bestool, None);
+		assert_eq!(
+			quiet.detail,
+			serde_json::json!({}),
+			"a machine that has never reported is listed with nothing reported",
+		);
+
+		data.machines
+			.iter()
+			.find(|m| m.machine_id == "30000000-0000-0000-0000-000000000003")
+			.expect("a live machine is listed whatever became of the workload on it");
+
+		let bare = data
+			.machines
+			.iter()
+			.find(|m| m.machine_id == "30000000-0000-0000-0000-000000000004")
+			.expect("machine with no reported platform listed");
+		assert_eq!(
+			bare.platform.as_deref(),
+			Some("Linux"),
+			"a box reporting no operating system falls back to the family the engine of an application on it gives away",
 		);
 	})
 	.await
@@ -1188,7 +1312,8 @@ async fn fleet_detail_carries_healthcheck_fields() {
 			('50000000-0000-0000-0000-000000000002', 'unchecked', 'https://unchecked.example.com', 'tamanu-central', '50000000-0000-0000-0000-000000000002');
 
 			INSERT INTO check_policies (source, subject, application_type, check_name) VALUES
-			('alertd', 'application', 'tamanu-central', 'diskspace');
+			('alertd', 'application', 'tamanu-central', 'diskspace'),
+			('alertd', 'machine', NULL, 'disk_free');
 
 			INSERT INTO issues (application_id, source, ref, check_name, observed_result, effective_result, detail, message, active) VALUES
 			('50000000-0000-0000-0000-000000000001', 'alertd', 'health/diskspace', 'diskspace',
@@ -1197,7 +1322,13 @@ async fn fleet_detail_carries_healthcheck_fields() {
 			 'disk filling up', true),
 			-- No catalog row backs this one: unmanageable, so it doesn't present.
 			('50000000-0000-0000-0000-000000000001', 'stray', 'health/nocatalog', 'nocatalog',
-			 'failed', 'failed', '{\"percent\": 5}'::jsonb, 'orphaned state', true)",
+			 'failed', 'failed', '{\"percent\": 5}'::jsonb, 'orphaned state', true);
+
+			INSERT INTO issues (machine_id, source, ref, check_name, observed_result, effective_result, detail, message, active) VALUES
+			('50000000-0000-0000-0000-000000000001', 'alertd', 'health/disk_free', 'disk_free',
+			 'warning', 'warning',
+			 '{\"check\": \"disk_free\", \"result\": \"warning\", \"freeBytes\": 512}'::jsonb,
+			 'disk filling up', true)",
 		)
 		.await
 		.unwrap();
@@ -1207,12 +1338,13 @@ async fn fleet_detail_carries_healthcheck_fields() {
 			.json(&serde_json::json!({}))
 			.await;
 		r.assert_status_ok();
-		let rows: Vec<FleetRow> = r.json();
+		let data: FleetData = r.json();
 
-		let checked = rows
+		let checked = data
+			.applications
 			.iter()
 			.find(|s| s.server_id == "50000000-0000-0000-0000-000000000001")
-			.expect("checked server listed");
+			.expect("checked application listed");
 		assert_eq!(checked.checks["diskspace"]["percent"], 91);
 		assert_eq!(checked.checks["diskspace"]["result"], "warning");
 		assert_eq!(checked.checks["diskspace"]["observed"], "warning");
@@ -1220,15 +1352,28 @@ async fn fleet_detail_carries_healthcheck_fields() {
 			checked.checks.get("nocatalog").is_none(),
 			"an orphaned check-state has no catalog row, so it isn't a field to look up",
 		);
+		assert!(
+			checked.checks.get("disk_free").is_none(),
+			"a check that asserts something about the box is not a field of the workload on it",
+		);
 
-		let unchecked = rows
+		let box_ = data
+			.machines
+			.iter()
+			.find(|m| m.machine_id == "50000000-0000-0000-0000-000000000001")
+			.expect("checked machine listed");
+		assert_eq!(box_.checks["disk_free"]["freeBytes"], 512);
+		assert_eq!(box_.checks["disk_free"]["result"], "warning");
+
+		let unchecked = data
+			.applications
 			.iter()
 			.find(|s| s.server_name == "unchecked")
-			.expect("unchecked server listed");
+			.expect("unchecked application listed");
 		assert_eq!(
 			unchecked.checks,
 			serde_json::json!({}),
-			"a server with no check state reports no check fields",
+			"an application with no check state reports no check fields",
 		);
 	})
 	.await

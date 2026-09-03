@@ -802,7 +802,7 @@ The box's reachability switch is offered on the application's edit form for the 
 
 Coverage: `consolidated_checks` covers the marked list and the rollup at the database grain, `machines.spec.ts` covers the presented list and silencing a box's check from an application, and `server-reachability-silence.spec.ts` covers the box's switch on the application and the two grains' switches staying independent.
 
-### The fleet spread is application-grained
+### The fleet spread is application-grained: done
 
 FIG: "A machine figure spreads over machines and an application figure over applications, so a box running two applications is one machine in a platform spread", and "A crossing counts machines, whatever figures are on its axes."
 
@@ -909,3 +909,18 @@ The fleet now offers Groups, Archived and Figures, and the FLT spec records that
 
 The `list_ungrouped` private endpoint and the `UngroupedServersList` route go with it, as does `Application::count_ungrouped`, which only the tab's badge used.
 `Application::list_ungrouped` stays: the recovery snapshot sweeps up everything so nothing is left out of the record, whether or not the fleet listing offers a way to reach it.
+
+**Done since the audit: the fleet spread takes both grains.**
+`fleet_detail` returns two populations rather than one fanned-out list: the machines, each with its own detail and checks, and the applications, each with its own detail and the id of the box it runs on.
+The view decides a figure's grain from the data, treating a key as machine-grained when a machine reports it, so a figure nobody has named still lands on the population that carries it.
+Machine figures spread over machines and application figures over applications, and every crossing counts machines, naming the unit it counts so the number is readable rather than inferred.
+A machine takes the *set* of values its applications give an application-grained axis, so a box whose two workloads disagree appears in each matching cell rather than being attributed to one of them, which is the failure the card exists to stop.
+
+Both figure fallbacks now cross the grain boundary deliberately rather than by accident.
+The OS family falls back to the database engine banner an application reports, since a box that reports no `osName` still gives its family away through the engine its workload runs.
+The runtime version falls back to the connection metadata of the identity bound to the *machine*, not to whichever identity filed the push: an identity belongs to the box, and a push's `device_id` is that push's provenance and says nothing about what the box runs.
+
+The snapshot reader gains the machine grain the same way, folding the box's own status rows in with the application's.
+A split push files the box's detail on the machine's rows, so reading only the application's dropped platform, timezone and the agent's version out of a past moment; a unified push files no machine rows at all, so nothing is read twice.
+
+Coverage: `fleet-figures.spec.ts` covers each spread, the crossing's unit, the shared box counting once, the disagreeing box in each cell, and the OS-family fallback; `server-figures.spec.ts` covers the runtime falling back to the box's identity while a different identity files the push; `private_statuses.rs` covers a split push's figures reaching the snapshot.

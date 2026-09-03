@@ -872,21 +872,28 @@ impl MergedDetail {
 	/// nothing.
 	// spec: FIG#figures
 	pub fn platform(&self) -> Option<String> {
-		if let Some(name) = self.string("osName") {
-			return Some(match self.string("osVersion") {
-				Some(version) => format!("{name} {version}"),
-				None => name,
-			});
-		}
+		self.os_platform()
+			.or_else(|| self.pg_version_banner().map(platform_family_of))
+	}
 
-		self.string("pgVersion").map(|pg| {
-			if pg.contains("Visual C++") || pg.contains("windows") {
-				"Windows"
-			} else {
-				"Linux"
-			}
-			.into()
+	/// The operating system as this detail reports it, with no fallback: the
+	/// name, qualified by the version where one is reported.
+	///
+	/// A machine's platform falls back to what an application on it gives
+	/// away, which is a different set of reports, so the fallback is the
+	/// caller's to apply rather than this one's.
+	// spec: FIG#machine-figures
+	pub fn os_platform(&self) -> Option<String> {
+		let name = self.string("osName")?;
+		Some(match self.string("osVersion") {
+			Some(version) => format!("{name} {version}"),
+			None => name,
 		})
+	}
+
+	/// The database engine version banner as reported, whole.
+	pub fn pg_version_banner(&self) -> Option<String> {
+		self.string("pgVersion")
 	}
 
 	pub fn postgres_version(&self) -> Option<String> {
@@ -921,6 +928,20 @@ impl MergedDetail {
 	pub fn bestool_version(&self) -> Option<String> {
 		self.string("bestoolVersion")
 	}
+}
+
+/// The operating system family a PostgreSQL version banner gives away: the
+/// banner names its build toolchain, which distinguishes a Windows build from
+/// anything else but says nothing finer.
+// spec: FIG#machine-figures
+pub fn platform_family_of(pg_version: impl AsRef<str>) -> String {
+	let pg = pg_version.as_ref();
+	if pg.contains("Visual C++") || pg.contains("windows") {
+		"Windows"
+	} else {
+		"Linux"
+	}
+	.into()
 }
 
 /// How far `current` lags behind `latest`, as `major_distance * 1000 +
