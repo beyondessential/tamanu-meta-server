@@ -120,15 +120,6 @@ so a typify upgrade or a change to the ported codegen can move the generated sur
 with the schema untouched. That needs a bump too, decided by `cargo-semver-checks` the
 same way, even though reading the version as "the API changed" does not quite fit.
 
-## Out of scope
-
-- **bestool card X1**: what `bestool-canopy` becomes. It survives; its remaining shape
-  is bestool's decision.
-- **canopy card L3**: the publish pipeline. Every workspace member is currently
-  `publish = false` and `cd.yml` only builds an image and runs Pulumi, so there is no
-  release path to publish onto. L3 also picks up the `cargo-semver-checks` gate, which
-  needs a published baseline to compare against.
-
 ## No serde_json::Value fallbacks
 
 bestool's generator degrades three of the 33 operations to `serde_json::Value`. None of
@@ -179,3 +170,12 @@ that the server imports its wire types from a published crate, it leaks `databas
 `commons-types` shapes into that crate, and it reverses the spec-to-crate direction the
 versioning model rests on. The Rust types are already correct and only the generator is
 thin, so the generator is the cheaper place to fix.
+
+## Out of scope
+
+- **bestool card X1**: what `bestool-canopy` becomes. It survives; its remaining shape
+  is bestool's decision.
+- **canopy card L3**: the publish pipeline. Every workspace member is currently
+  `publish = false` and `cd.yml` only builds an image and runs Pulumi, so there is no
+  release path to publish onto. L3 also picks up the `cargo-semver-checks` gate, which
+  needs a published baseline to compare against.
