@@ -86,6 +86,38 @@ The `rewrite_types` string substitutions (chrono to `jiff::Timestamp`, and wrapp
 defended by asserts that fail the build when a substitution stops matching, become
 canopy-side decisions at the source. Canopy knows which of its fields are secrets.
 
+## The spec's own version stays empty
+
+`crates/public-server/src/openapi.rs` sets `info.version = ""`, and it stays that way.
+Commit 9c9a5f8b emptied it deliberately, because crate versions here are frozen and
+the auto-deploy never bumps them, so the field was stale noise. This card does not
+reopen that: the version it introduces is the generated crate's, and Cargo.toml is
+where that already lives.
+
+Setting it to the api crate's version does not work anyway. The crate's version is
+derived from the crate, since `cargo-semver-checks` compares the crate generated
+before a change against the one generated after in order to decide the bump, so
+writing that version into the spec needs a value that only exists after generating a
+crate from that spec. release-plz picks the bump at release time, once the code is
+final and `gen-openapi` has long since run. It would also churn a checked-in file: the
+committed `openapi.json` would go stale on every release, which either fails the
+freshness check or forces a regenerate-and-commit into the release process.
+
+The dependency runs spec to crate, so provenance runs crate to spec. The generated
+crate records which document it came from, carrying forward what bestool did with
+`OPENAPI_BLAKE3` and `OPENAPI_SOURCE` but pointed at the committed file rather than a
+live fetch. Because the spec is committed, `git rev-parse HEAD:crates/public-server/openapi.json`
+is a blob sha that comes for free and ties to history.
+
+Note that OpenAPI 3.1 marks `info.version` REQUIRED and defines it as the version of
+the OpenAPI document, distinct from the API implementation version, so a client
+library's version would be the wrong thing to put there regardless.
+
+Optional, and not needed here: the served spec and the committed spec are different
+documents. `public-openapi-dump` could keep `""` while the running server injects the
+deploy sha at runtime, so a consumer fetching the live document can tell which deploy
+answered, at no cost to the committed file's stability.
+
 ## Out of scope
 
 - **bestool card X1**: what `bestool-canopy` becomes. It survives; its remaining shape
@@ -97,8 +129,6 @@ canopy-side decisions at the source. Canopy knows which of its fields are secret
 
 ## Open
 
-- `crates/public-server/src/openapi.rs` sets `info.version = ""`. Decide what it
-  carries once a published crate's semver is what consumers pin. Tracked in L3.
 - `request_body_type` falls back to `serde_json::Value` for open `allOf` schemas such
   as `StatusPayload`, and `response_type` does the same for non-`$ref` non-array
   responses. Those are holes the semver check cannot see through, the same class of
