@@ -3923,6 +3923,70 @@ impl Issue {
 			.collect())
 	}
 
+	/// As [`Self::source_freshness`], at the machine grain.
+	///
+	/// A machine's expected sources are its own: the agent reporting about the
+	/// box files at machine scope, and a source that only ever reports about
+	/// the workloads on it says nothing about whether the box is reachable.
+	/// Every check filed at machine scope sits in the machine namespace, so
+	/// there is no type to qualify the catalog lookup by.
+	// spec: CHK#reachability
+	pub async fn source_freshness_for_machines(
+		db: &mut AsyncPgConnection,
+		machine_ids: &[Uuid],
+	) -> Result<Vec<(Uuid, String, Timestamp)>> {
+		use crate::check_policies::CheckPolicy;
+		use crate::schema::issues::dsl;
+		use commons_types::namespace::Namespace;
+		use std::collections::HashMap;
+		if machine_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		let cataloged = CheckPolicy::live_cataloged_pairs(db).await?;
+
+		let rows: Vec<(Uuid, String, String, jiff_diesel::Timestamp)> = dsl::issues
+			.filter(
+				dsl::machine_id
+					.eq_any(machine_ids)
+					.and(
+						dsl::source
+							.ne_all([crate::statuses::CANOPY_SOURCE, crate::issues::MANUAL_SOURCE]),
+					)
+					.and(dsl::check_name.is_not_null()),
+			)
+			.select((
+				dsl::machine_id.assume_not_null(),
+				dsl::source,
+				dsl::check_name.assume_not_null(),
+				dsl::last_seen,
+			))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		let mut latest: HashMap<(Uuid, String), Timestamp> = HashMap::new();
+		for (machine, source, check, seen) in rows {
+			let namespace = Namespace::for_machine(&source, &check);
+			if !CheckPolicy::live_in(&cataloged, &source, &namespace, &check) {
+				continue;
+			}
+			let seen: Timestamp = seen.into();
+			latest
+				.entry((machine, source))
+				.and_modify(|t| {
+					if seen > *t {
+						*t = seen;
+					}
+				})
+				.or_insert(seen);
+		}
+		Ok(latest
+			.into_iter()
+			.map(|((machine, source), seen)| (machine, source, seen))
+			.collect())
+	}
+
 	/// Mark an issue as operator-resolved. Triggers incident-membership
 	/// re-evaluation (typically: leaves the incident).
 	pub async fn resolve(
