@@ -15,7 +15,7 @@ That file also holds, in the clear, the values a run must not disclose, so every
 
 ## What an inventory is
 
-An inventory covers one environment: a group's live applications at one rank (see [FLT](../servers/overview.md), "Environments").
+An inventory covers one environment: a group's live applications at one rank (see [GRP](../servers/groups.md), "Environments").
 Rank is an application's rather than its machine's, so an environment is a set of applications, and a box carrying a production workload beside a demo one sits in two of them.
 An application carrying no rank is at the default rank, so every live application belongs to exactly one of its group's environments.
 An archived application is not in it, and an application belonging to no group is in no inventory.
