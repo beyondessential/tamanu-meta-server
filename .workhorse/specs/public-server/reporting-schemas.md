@@ -146,6 +146,7 @@ It is current when the artefact the server reports having applied is the newest 
 
 The schema a server is running is reported by the server as the artefact it applied, alongside the other facts its sources report about it (see [STA](statuses.md)).
 Canopy does not read it out of the database, so a server that reports nothing is unknown rather than assumed bare, and a schema applied by hand carries no artefact to report.
+A server that reports only the version its schema was built for, as one applied by hand does, is graded behind where Canopy offers it a schema, since what it can offer is not what the server applied, and otherwise on the version alone: current when it is the version the server runs, and behind when it is not.
 
 Currency is presented per group, so whether a group's reports are running against the right schema is answered in one place.
 
@@ -157,6 +158,7 @@ Both leave its reports mismatched to the version it runs, and neither carries a 
 The check is a warning rather than a failure, and does not escalate: the servers are up and their reports return rows, and a schema written for the wrong version is for whoever maintains the reports rather than whoever is on call.
 
 A failed build raises the same check with its failure description, and settles the pair rather than retrying, since a build against a fixed version and configuration fails the same way every time.
+A replica that failed to restore or come up is the restore's own health rather than a build failure, and is dispatched again as any unhealthy restore is.
 A settled pair is dispatched again by an operator asking for a build, which is what these checks exist to prompt.
 
 ## Out of scope

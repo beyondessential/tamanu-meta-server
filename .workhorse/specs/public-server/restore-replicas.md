@@ -43,7 +43,7 @@ A restore consumer authenticates as a single device holding the `backup-restore`
 The role is generic: any future restore consumer uses the same role with its own declared replicas.
 A `backup-restore` device has no implicit server and no implicit group; it is not a member of any group it reads.
 
-The role is read-only by contract, enforced at the API:
+The role is read-only against the repo by contract, enforced at the API:
 
 - A `backup-restore` caller requesting backup (write) credentials is rejected.
   The read-only guarantee is server-enforced, so a compromised consumer cannot pivot to writing or poisoning a repo.
@@ -100,7 +100,8 @@ The recognised semantics are:
   `once` for such an intent is keyed to the snapshot and the target version together (see [Pre-upgrade migration testing](#pre-upgrade-migration-testing)).
 - **build** — the intent produces a reporting schema from the replica it restores and publishes it (see [RPT](reporting-schemas.md)).
   It carries `migrate` alongside, since a schema is built at a version the replica has to be brought to, and Canopy dispatches it for the pairs of central server and version a covered group is owed a schema for rather than for the server's candidate.
-  `once` for such an intent is keyed to the server and the version alone, so a newer snapshot does not rebuild a schema the group already has, and a failed build settles that pair.
+  `once` for such an intent is keyed to the server and the version rather than the snapshot, so a newer snapshot does not rebuild a schema the group already has, and a failed build settles that pair.
+  A settled pair is reinstated when the version's artefacts change or an operator asks for the build (see [RPT](reporting-schemas.md)).
 - **redact** — the intent can de-identify the restored data before serving it.
   Canopy offers redaction as an option on each of the intent's replicas, supplies the masking manifest for the product being restored, and holds a redacting replica to the outcome of its redaction (see [Redaction](#redaction)).
 
@@ -188,6 +189,8 @@ Canopy verifies the caller has an enabled declaration covering that `(group, typ
 - the repo password.
 
 The credentials permit reading the repo and nothing else; they cannot write, overwrite, or delete.
+A consumer whose intent carries `build` additionally obtains, for the same `(group, type)`, a short-lived credential that writes to the group's artefact prefix and reaches nothing in the repo, which is what its builds publish over (see [RPT](reporting-schemas.md)).
+The repo stays read-only to every consumer: the artefact prefix lies outside it, and a credential for one cannot touch the other.
 Each issuance is audited.
 A consumer may include an optional run correlation identifier with a credential request; Canopy records it on the issuance so the run is tied to its later health report.
 Absence of a covering declaration is a definitive refusal, not a transient error, and a consumer surfaces it as a clear failure for the operator to diagnose by inspecting the declaration in Canopy.
