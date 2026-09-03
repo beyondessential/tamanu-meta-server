@@ -735,3 +735,105 @@ async fn one_box_reports_its_platform_once_for_both_workloads() {
 	})
 	.await
 }
+
+/// A body that is not an object is stored as the empty object.
+///
+/// `extra` is `JSONB NOT NULL`, which admits JSON `null`, and a stored `null`
+/// breaks every bulk read of the column: `jsonb_each` refuses a non-object and
+/// so does a `-` key delete. That surfaces far from the push that caused it —
+/// once, as a migration failing against production data. A non-object body
+/// carries no fields, so the empty object says the same thing safely.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_non_object_body_is_stored_as_an_object() {
+	#[derive(QueryableByName)]
+	struct Typeof {
+		#[diesel(sql_type = sql_types::Text)]
+		type_of: String,
+	}
+
+	async fn typeof_application(conn: &mut AsyncPgConnection, app: Uuid) -> String {
+		sql_query(
+			"SELECT jsonb_typeof(extra) AS type_of FROM application_reported_detail \
+			 WHERE application_id = $1",
+		)
+		.bind::<sql_types::Uuid, _>(app)
+		.get_result::<Typeof>(conn)
+		.await
+		.expect("read application body")
+		.type_of
+	}
+
+	async fn typeof_machine(conn: &mut AsyncPgConnection, machine: Uuid) -> String {
+		sql_query(
+			"SELECT jsonb_typeof(extra) AS type_of FROM machine_reported_detail \
+			 WHERE machine_id = $1",
+		)
+		.bind::<sql_types::Uuid, _>(machine)
+		.get_result::<Typeof>(conn)
+		.await
+		.expect("read machine body")
+		.type_of
+	}
+
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		// Every shape `NOT NULL` lets past: JSON null, and the other scalars.
+		for body in [
+			json!(null),
+			json!("a string"),
+			json!(42),
+			json!(true),
+			json!(["an", "array"]),
+		] {
+			let app = insert_server(&mut conn).await;
+			let machine = machine_of(&mut conn, app).await;
+
+			ReportedDetail::record(&mut conn, Some(app), machine, "alertd", &body, None)
+				.await
+				.expect("record a non-object body");
+
+			assert_eq!(
+				typeof_application(&mut conn, app).await,
+				"object",
+				"{body} is stored on the application as an object"
+			);
+			assert_eq!(
+				typeof_machine(&mut conn, machine).await,
+				"object",
+				"{body} is stored on the machine as an object"
+			);
+		}
+
+		// The machine-only path: no application to split into, so the whole body
+		// goes to the box and skips `split_by_grain` entirely.
+		let lone = insert_server(&mut conn).await;
+		let lone_machine = machine_of(&mut conn, lone).await;
+		ReportedDetail::record(&mut conn, None, lone_machine, "alertd", &json!(null), None)
+			.await
+			.expect("record a machine-only non-object body");
+		assert_eq!(
+			typeof_machine(&mut conn, lone_machine).await,
+			"object",
+			"a machine-only push stores an object too"
+		);
+
+		// The operation that failed in production, over every row written above.
+		let walked: i64 = sql_query(
+			"SELECT count(*) AS count FROM ( \
+			   SELECT jsonb_each(extra) FROM application_reported_detail \
+			   UNION ALL SELECT jsonb_each(extra) FROM machine_reported_detail \
+			 ) AS walked",
+		)
+		.get_result::<Count>(&mut conn)
+		.await
+		.expect("jsonb_each walks every stored body")
+		.count;
+		assert_eq!(walked, 0, "an empty body contributes no fields");
+	})
+	.await
+}
+
+#[derive(QueryableByName)]
+struct Count {
+	#[diesel(sql_type = sql_types::BigInt)]
+	count: i64,
+}
