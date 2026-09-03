@@ -712,6 +712,9 @@ The private API drops `ServerInfo.device_id` and `ServerDataUpdate.device_id`, a
 
 The sections above tick off what landed. This one records what the specs on this branch describe and the code does not do, because a ticked plan beside a spec that overstates the system is how the gap stayed invisible.
 
+These are being closed here rather than handed on, so G3, which listed them, is cancelled.
+That makes this card responsible for the test cases covering them: the test-cases document is deleted when this merges, so an unticked case leaves nothing behind.
+
 None of it is visible today. Every machine came out of the migration 1:1 with an application, so each wrong reading agrees with the right one on the whole current fleet, and they only part company for the two-workload box the card exists to support.
 
 ### The push and the enrolment resolve the machine: done
