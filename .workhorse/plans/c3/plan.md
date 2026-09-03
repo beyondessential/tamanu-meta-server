@@ -86,37 +86,39 @@ The `rewrite_types` string substitutions (chrono to `jiff::Timestamp`, and wrapp
 defended by asserts that fail the build when a substitution stops matching, become
 canopy-side decisions at the source. Canopy knows which of its fields are secrets.
 
-## The spec's own version stays empty
+## Versioning: the spec holds the version, the crate inherits it
 
-`crates/public-server/src/openapi.rs` sets `info.version = ""`, and it stays that way.
-Commit 9c9a5f8b emptied it deliberately, because crate versions here are frozen and
-the auto-deploy never bumps them, so the field was stale noise. This card does not
-reopen that: the version it introduces is the generated crate's, and Cargo.toml is
-where that already lives.
+The crate is a pure function of the schema and the generator, so its surface moves only
+when one of those moves. Under that correspondence a single version identifies the
+document and the crate alike, and there is no reason for the two to differ:
+`info.version` carries it and the generated crate takes it as its `Cargo.toml` version.
 
-Setting it to the api crate's version does not work anyway. The crate's version is
-derived from the crate, since `cargo-semver-checks` compares the crate generated
-before a change against the one generated after in order to decide the bump, so
-writing that version into the spec needs a value that only exists after generating a
-crate from that spec. release-plz picks the bump at release time, once the code is
-final and `gen-openapi` has long since run. It would also churn a checked-in file: the
-committed `openapi.json` would go stale on every release, which either fails the
-freshness check or forces a regenerate-and-commit into the release process.
+Which one holds it is the part that matters. The spec declares the version and the
+crate inherits it, running the same direction as the derivation. The alternative, where
+release-plz owns the crate manifest and the spec trails behind, keeps them equal only
+by convention. This also puts `info.version` to the use OpenAPI 3.1 defines for it, as
+the version of the document, which is a REQUIRED field that `""` satisfies in type
+only. Commit 9c9a5f8b emptied it because crate versions here are frozen and the
+auto-deploy never bumps them, which was true then and stops being true once a
+versioned crate is published from this repo.
 
-The dependency runs spec to crate, so provenance runs crate to spec. The generated
-crate records which document it came from, carrying forward what bestool did with
-`OPENAPI_BLAKE3` and `OPENAPI_SOURCE` but pointed at the committed file rather than a
-live fetch. Because the spec is committed, `git rev-parse HEAD:crates/public-server/openapi.json`
-is a blob sha that comes for free and ties to history.
+There is no ordering cycle, because codegen does not consume the version. The sequence
+is generate, compare, stamp: generate the crate from the schema, run
+`cargo-semver-checks` against the published baseline to decide the bump, then write the
+result into the spec's literal and regenerate. release-plz already works in two phases
+like this. A bump therefore edits one literal in `crates/public-server/src/openapi.rs`,
+and the regenerated `openapi.json` and crate manifest follow from it in the same commit,
+so a freshness check stays green rather than going stale on release.
 
-Note that OpenAPI 3.1 marks `info.version` REQUIRED and defines it as the version of
-the OpenAPI document, distinct from the API implementation version, so a client
-library's version would be the wrong thing to put there regardless.
+The crate can still record a digest of the document it was generated from, carrying
+forward what bestool did with `OPENAPI_BLAKE3` but pointed at the committed file. With
+versions 1:1 that is mostly redundant, but it catches the mistake case, where a document
+changed without the version moving with it.
 
-Optional, and not needed here: the served spec and the committed spec are different
-documents. `public-openapi-dump` could keep `""` while the running server injects the
-deploy sha at runtime, so a consumer fetching the live document can tell which deploy
-answered, at no cost to the committed file's stability.
+Wrinkle worth holding: the crate is a function of the generator as well as the schema,
+so a typify upgrade or a change to the ported codegen can move the generated surface
+with the schema untouched. That needs a bump too, decided by `cargo-semver-checks` the
+same way, even though reading the version as "the API changed" does not quite fit.
 
 ## Out of scope
 
