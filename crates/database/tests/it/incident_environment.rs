@@ -9,6 +9,7 @@ use database::issues::{IncidentTarget, NewEvent, Scope};
 use database::slack_outbox::KIND_INCIDENT_OPEN;
 use diesel::{QueryableByName, sql_query, sql_types};
 use diesel_async::RunQueryDsl;
+use jiff::{SignedDuration, Timestamp};
 use uuid::Uuid;
 
 #[derive(QueryableByName)]
@@ -219,53 +220,117 @@ async fn a_groups_own_check_targets_the_group_beside_its_environments() {
 	.await
 }
 
-/// An application with no rank follows its group's headline environment, the
-/// same rule the group's version is read under, so an unranked box's trouble
-/// is never quietly filed nowhere.
+/// No rank means no environment, so an unranked application targets the group
+/// whether or not the group has environments alongside it. Its trouble still
+/// reaches an incident rather than being quietly filed nowhere.
 // spec: INC#targets
 #[tokio::test(flavor = "multi_thread")]
-async fn an_unranked_application_follows_the_headline_environment() {
+async fn an_unranked_application_targets_the_group() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let group = insert_group(&mut conn).await;
-		insert_ranked_member(&mut conn, group, Some("production"), "http://prod.invalid/").await;
-		let unranked = insert_ranked_member(&mut conn, group, None, "http://plain.invalid/").await;
-
+		let ranked_group = insert_group(&mut conn).await;
+		insert_ranked_member(
+			&mut conn,
+			ranked_group,
+			Some("production"),
+			"http://prod.invalid/",
+		)
+		.await;
+		let alongside =
+			insert_ranked_member(&mut conn, ranked_group, None, "http://plain.invalid/").await;
 		assert_eq!(
-			Scope::Application(unranked)
+			Scope::Application(alongside)
 				.resolve_incident_target(&mut conn)
 				.await
 				.expect("resolve"),
-			Some((
-				IncidentTarget::Environment(group, ServerRank::Production),
-				true
-			)),
+			Some((IncidentTarget::Group(ranked_group), true)),
+			"a group's production environment is not where its unranked members land",
 		);
-	})
-	.await
-}
 
-/// A group with nothing ranked has no environment for its members to be in,
-/// so their issues target the group and still reach an incident.
-// spec: INC#targets
-#[tokio::test(flavor = "multi_thread")]
-async fn a_member_of_a_wholly_unranked_group_targets_the_group() {
-	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let group = insert_group(&mut conn).await;
-		let member = insert_ranked_member(&mut conn, group, None, "http://plain.invalid/").await;
-
+		let bare_group = insert_group(&mut conn).await;
+		let member =
+			insert_ranked_member(&mut conn, bare_group, None, "http://bare.invalid/").await;
 		assert_eq!(
 			Scope::Application(member)
 				.resolve_incident_target(&mut conn)
 				.await
 				.expect("resolve"),
-			Some((IncidentTarget::Group(group), true)),
+			Some((IncidentTarget::Group(bare_group), true)),
 		);
 
 		fail_application(&mut conn, member, "app_down").await;
 		assert_eq!(
-			open_ranks(&mut conn, group).await,
+			open_ranks(&mut conn, bare_group).await,
 			vec![None],
-			"an unranked group's trouble still opens an incident",
+			"an unranked member's trouble still opens an incident",
+		);
+	})
+	.await
+}
+
+/// A box hosting nothing ranked is in no environment either, so its checks
+/// answer to the group.
+// spec: INC#targets
+#[tokio::test(flavor = "multi_thread")]
+async fn a_box_hosting_nothing_ranked_targets_the_group() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = insert_group(&mut conn).await;
+		insert_ranked_member(&mut conn, group, Some("production"), "http://prod.invalid/").await;
+		let machine = insert_machine(&mut conn, Some(group)).await;
+		insert_application(
+			&mut conn,
+			machine,
+			Some(group),
+			None,
+			"http://plain.invalid/",
+		)
+		.await;
+
+		assert_eq!(
+			Scope::Machine(machine)
+				.resolve_incident_target(&mut conn)
+				.await
+				.expect("resolve"),
+			Some((IncidentTarget::Group(group), true)),
+		);
+	})
+	.await
+}
+
+/// The group is where an unranked member's incident lives, so the group's own
+/// window is what quiets it. An environment window names a rank the member
+/// does not have, so it cannot reach it and cannot go quiet on a box nobody is
+/// working on.
+// spec: MNT#what-a-window-suspends
+#[tokio::test(flavor = "multi_thread")]
+async fn a_group_window_suspends_an_unranked_members_incident() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group = insert_group(&mut conn).await;
+		let machine = insert_machine(&mut conn, Some(group)).await;
+		let member = insert_application(
+			&mut conn,
+			machine,
+			Some(group),
+			None,
+			"http://plain.invalid/",
+		)
+		.await;
+
+		fail_application(&mut conn, member, "app_down").await;
+		assert_eq!(open_ranks(&mut conn, group).await, vec![None]);
+
+		database::maintenance_windows::MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group),
+			Timestamp::now() + SignedDuration::from_hours(1),
+			Some("upgrading"),
+			Some("op"),
+		)
+		.await
+		.expect("declare");
+
+		assert!(
+			open_ranks(&mut conn, group).await.is_empty(),
+			"the group's window takes its unranked member out of the incident",
 		);
 	})
 	.await

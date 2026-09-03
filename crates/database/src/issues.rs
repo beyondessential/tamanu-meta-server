@@ -519,7 +519,7 @@ impl NewEvent {
 			if let Some(gid) = server_group_id
 				&& !defer_incident_eval
 			{
-				let target = IncidentTarget::of_member(conn, gid, server_rank).await?;
+				let target = IncidentTarget::of_member(gid, server_rank);
 				re_evaluate_incident_membership(
 					conn,
 					&issue,
@@ -1017,7 +1017,7 @@ impl Scope {
 				let Some(gid) = server.group_id else {
 					return Ok(None);
 				};
-				let target = IncidentTarget::of_member(conn, gid, server.rank).await?;
+				let target = IncidentTarget::of_member(gid, server.rank);
 				Ok(Some((target, server.is_monitored)))
 			}
 			Scope::Machine(mid) => {
@@ -1027,8 +1027,8 @@ impl Scope {
 				};
 				// A box's rank is the highest of the workloads on it: a check
 				// on the box is trouble for the most important thing it runs.
-				let rank = crate::machines::Machine::highest_application_rank(conn, mid).await?;
-				let target = IncidentTarget::of_member(conn, gid, rank).await?;
+				let rank = crate::machines::Machine::rank(conn, mid).await?;
+				let target = IncidentTarget::of_member(gid, rank);
 				Ok(Some((target, machine.is_monitored)))
 			}
 			Scope::Global => Ok(Some((IncidentTarget::Global, true))),
@@ -2754,7 +2754,7 @@ pub async fn reevaluate_open_issues_for_server(
 		return Ok(());
 	};
 	let monitored = server.is_monitored;
-	let target = IncidentTarget::of_member(db, gid, server.rank).await?;
+	let target = IncidentTarget::of_member(gid, server.rank);
 
 	let open_issues: Vec<Issue> = dsl::issues
 		.select(Issue::as_select())
@@ -2821,7 +2821,7 @@ pub async fn reevaluate_incidents_for_server(
 		return Ok(());
 	};
 	let monitored = server.is_monitored;
-	let target = IncidentTarget::of_member(conn, gid, server.rank).await?;
+	let target = IncidentTarget::of_member(gid, server.rank);
 
 	let mut candidates: Vec<Issue> = issues::table
 		.select(Issue::as_select())
@@ -2916,7 +2916,7 @@ pub async fn reevaluate_open_issues_for_server_ref(
 		return Ok(());
 	};
 	let monitored = server.is_monitored;
-	let target = IncidentTarget::of_member(db, gid, server.rank).await?;
+	let target = IncidentTarget::of_member(gid, server.rank);
 
 	let open_issues: Vec<Issue> = dsl::issues
 		.select(Issue::as_select())
@@ -2955,8 +2955,8 @@ pub async fn reevaluate_open_issues_for_machine_ref(
 		return Ok(());
 	};
 	let monitored = machine.is_monitored;
-	let rank = crate::machines::Machine::highest_application_rank(db, machine_id).await?;
-	let target = IncidentTarget::of_member(db, gid, rank).await?;
+	let rank = crate::machines::Machine::rank(db, machine_id).await?;
+	let target = IncidentTarget::of_member(gid, rank);
 
 	let open_issues: Vec<Issue> = dsl::issues
 		.select(Issue::as_select())
@@ -3336,20 +3336,14 @@ impl IncidentTarget {
 	}
 
 	/// The target a member of `group_id` carrying `rank` contributes to: the
-	/// environment its rank names, or the group itself where the group has no
-	/// ranked application and so no environment to belong to.
+	/// environment its rank names, and the group itself where it carries none,
+	/// there being no environment for it to be in.
 	// spec: INC#targets
-	pub async fn of_member(
-		conn: &mut AsyncPgConnection,
-		group_id: Uuid,
-		rank: Option<ServerRank>,
-	) -> Result<Self> {
-		Ok(
-			match ServerGroup::environment_for(conn, group_id, rank).await? {
-				Some(rank) => Self::Environment(group_id, rank),
-				None => Self::Group(group_id),
-			},
-		)
+	pub fn of_member(group_id: Uuid, rank: Option<ServerRank>) -> Self {
+		match rank {
+			Some(rank) => Self::Environment(group_id, rank),
+			None => Self::Group(group_id),
+		}
 	}
 }
 
@@ -4374,11 +4368,10 @@ impl Incident {
 		let Some(gid) = application.group_id else {
 			return Ok(Vec::new());
 		};
-		let rank = ServerGroup::environment_for(db, gid, application.rank).await?;
 		let mut q = dsl::incidents
 			.select(Self::as_select())
 			.filter(dsl::server_group_id.eq(gid))
-			.filter(dsl::rank.is_not_distinct_from(rank))
+			.filter(dsl::rank.is_not_distinct_from(application.rank))
 			.into_boxed();
 		if !include_closed {
 			q = q.filter(dsl::closed_at.is_null());

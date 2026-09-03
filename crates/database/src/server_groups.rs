@@ -452,25 +452,6 @@ impl ServerGroup {
 		Ok(out)
 	}
 
-	/// The environment a member of `group_id` carrying `own` belongs to: the
-	/// rank it names, or the group's headline environment where it carries
-	/// none. `None` where the group has no ranked application, its members
-	/// then belonging to no environment.
-	// spec: INC#targets
-	pub async fn environment_for(
-		db: &mut AsyncPgConnection,
-		group_id: Uuid,
-		own: Option<ServerRank>,
-	) -> Result<Option<ServerRank>> {
-		if own.is_some() {
-			return Ok(own);
-		}
-		Ok(Self::highest_member_ranks(db, &[group_id])
-			.await?
-			.get(&group_id)
-			.copied())
-	}
-
 	/// Count of live (non-archived) applications in each group, keyed by group id.
 	/// Groups with no live members are absent (callers default to 0).
 	pub async fn live_server_counts(
