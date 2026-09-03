@@ -42,7 +42,7 @@ test.describe("servers list page", () => {
 		// The group's name shows as a link to its detail page.
 		await expect(
 			page.getByRole("link", { name: group.name }),
-		).toHaveAttribute("href", `/groups/${group.id}`);
+		).toHaveAttribute("href", `/fleet/groups/${group.id}`);
 	});
 });
 
@@ -145,6 +145,29 @@ test.describe("server detail page", () => {
 
 		await page.goto("/servers");
 		await expect(page).toHaveURL(/\/fleet$/);
+	});
+
+	/// A group is the fleet's too, so its pages moved with the rest and their
+	/// old addresses land the same way.
+	test("the old group addresses land under the fleet", async ({ page, sql }) => {
+		const group = await seedServerGroup(sql, { name: "moved-group" });
+
+		await page.goto(`/groups/${group.id}`);
+		await expect(page).toHaveURL(new RegExp(`/fleet/groups/${group.id}$`));
+		await expect(
+			page.getByRole("heading", { name: group.name }),
+		).toBeVisible();
+
+		await page.goto(`/groups/${group.id}/edit`);
+		await expect(page).toHaveURL(new RegExp(`/fleet/groups/${group.id}/edit$`));
+
+		await page.goto(`/groups/${group.id}/machines/new`);
+		await expect(page).toHaveURL(
+			new RegExp(`/fleet/groups/${group.id}/machines/new$`),
+		);
+
+		await page.goto("/groups/new");
+		await expect(page).toHaveURL(/\/fleet\/groups\/new$/);
 	});
 });
 
@@ -361,7 +384,7 @@ test.describe("archived view", () => {
 		const group = await seedServerGroup(sql, { name: "empty-grp" });
 		page.on("dialog", (d) => d.accept());
 
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 		await page.getByRole("button", { name: "Archive" }).click();
 		// Redirects to the servers list, and the group now shows under Archived.
 		await expect(page).toHaveURL(/\/fleet$/);
@@ -379,7 +402,7 @@ test.describe("archived view", () => {
 		await seedServer(sql, { name: "gone-2", type: "tamanu-facility", groupId: group.id });
 		page.on("dialog", (d) => d.accept());
 
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 		// The Archive button is offered because every member is gone.
 		await page.getByRole("button", { name: "Archive" }).click();
 		await expect(page).toHaveURL(/\/fleet$/);
@@ -418,7 +441,7 @@ test.describe("archived view", () => {
 		}
 		page.on("dialog", (d) => d.accept());
 
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 		await page.getByRole("button", { name: "Archive" }).click();
 		await expect(page).toHaveURL(/\/fleet$/);
 
@@ -446,7 +469,7 @@ test.describe("server create → setup → archive flow", () => {
 		// Create the box — the in-group route pre-selects the group, so we only
 		// set the (required) name. Nothing here names an application: what runs
 		// on the box arrives by report.
-		await page.goto(`/groups/${group.id}/machines/new`);
+		await page.goto(`/fleet/groups/${group.id}/machines/new`);
 		await page.getByLabel(/^Name(\s*\*)?$/i).fill("flow-machine");
 		await page.getByRole("button", { name: "Create machine" }).click();
 
@@ -486,6 +509,6 @@ test.describe("server create → setup → archive flow", () => {
 		const dialog = page.getByRole("dialog");
 		await expect(dialog).toBeVisible();
 		await dialog.getByRole("button", { name: "Archive", exact: true }).click();
-		await expect(page).toHaveURL(new RegExp(`/groups/${group.id}$`));
+		await expect(page).toHaveURL(new RegExp(`/fleet/groups/${group.id}$`));
 	});
 });

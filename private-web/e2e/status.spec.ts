@@ -76,21 +76,21 @@ test.describe("status page", () => {
 			page.getByRole("heading", { name: demoGroup.name }),
 		).toBeVisible();
 
-		// Each card is wrapped in a router link to /groups/<id>.
+		// Each card is wrapped in a router link to /fleet/groups/<id>.
 		await expect(
-			page.locator(`a[href="/groups/${prodGroup.id}"]`),
+			page.locator(`a[href="/fleet/groups/${prodGroup.id}"]`),
 		).toBeVisible();
 
 		// Alphabetical, so demo-cluster leads prod-cluster despite ranking
 		// below it.
-		const cards = page.locator('a[href^="/groups/"]');
+		const cards = page.locator('a[href^="/fleet/groups/"]');
 		await expect(cards.first()).toHaveAttribute(
 			"href",
-			`/groups/${demoGroup.id}`,
+			`/fleet/groups/${demoGroup.id}`,
 		);
 		await expect(cards.last()).toHaveAttribute(
 			"href",
-			`/groups/${prodGroup.id}`,
+			`/fleet/groups/${prodGroup.id}`,
 		);
 	});
 
@@ -150,7 +150,7 @@ test.describe("status page", () => {
 		for (const { id, size } of groups) {
 			// A group may surface under more than one rank bucket; every card
 			// shows the full strip, so scope to the first.
-			const card = page.locator(`a[href="/groups/${id}"]`).first();
+			const card = page.locator(`a[href="/fleet/groups/${id}"]`).first();
 			const strip = card.getByTestId("dot-strip");
 			await expect(strip).toBeVisible();
 			// Three rank rows (production, clone, dev), each a row of machine
@@ -196,7 +196,7 @@ test.describe("status page", () => {
 		await page.goto("/status");
 
 		const strip = page
-			.locator(`a[href="/groups/${group.id}"]`)
+			.locator(`a[href="/fleet/groups/${group.id}"]`)
 			.first()
 			.getByTestId("dot-strip");
 		await expect(strip).toBeVisible();
@@ -240,7 +240,7 @@ test.describe("status page", () => {
 		await page.goto("/status");
 
 		const strip = page
-			.locator(`a[href="/groups/${group.id}"]`)
+			.locator(`a[href="/fleet/groups/${group.id}"]`)
 			.first()
 			.getByTestId("dot-strip");
 		await expect(strip).toBeVisible();
@@ -285,7 +285,7 @@ test.describe("status page", () => {
 		await page.goto("/status");
 
 		const strip = page
-			.locator(`a[href="/groups/${group.id}"]`)
+			.locator(`a[href="/fleet/groups/${group.id}"]`)
 			.first()
 			.getByTestId("dot-strip");
 		await expect(strip).toBeVisible();
@@ -324,13 +324,13 @@ test.describe("status page", () => {
 		await page.goto("/status");
 
 		// The quiet card has no incident mark at all.
-		const quietCard = page.locator(`a[href="/groups/${quiet.id}"]`).first();
+		const quietCard = page.locator(`a[href="/fleet/groups/${quiet.id}"]`).first();
 		await expect(quietCard.getByText("incident", { exact: false })).toHaveCount(
 			0,
 		);
 
 		// The noisy one carries its incident in a band of its own.
-		const noisyCard = page.locator(`a[href="/groups/${noisy.id}"]`).first();
+		const noisyCard = page.locator(`a[href="/fleet/groups/${noisy.id}"]`).first();
 		await expect(
 			noisyCard.getByText("incident", { exact: false }).first(),
 		).toBeVisible();

@@ -182,7 +182,7 @@ function Header({
 							{
 								label: issue.server_group_name ?? "",
 								to: issue.server_group_id
-									? `/groups/${issue.server_group_id}`
+									? `/fleet/groups/${issue.server_group_id}`
 									: null,
 							},
 							{
@@ -203,7 +203,7 @@ function Header({
 								{
 									label: issue.server_group_name,
 									to: issue.server_group_id
-										? `/groups/${issue.server_group_id}`
+										? `/fleet/groups/${issue.server_group_id}`
 										: null,
 								},
 								{ label: "(group-wide)" },

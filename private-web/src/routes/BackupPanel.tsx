@@ -115,7 +115,7 @@ export default function BackupPanel() {
 				<Box>
 					<MuiLink
 						component={RouterLink}
-						to={`/groups/${id}`}
+						to={`/fleet/groups/${id}`}
 						variant="body2"
 						underline="hover"
 					>
@@ -130,7 +130,7 @@ export default function BackupPanel() {
 					<Box>
 						<Button
 							component={RouterLink}
-							to={`/groups/${id}/backups/config`}
+							to={`/fleet/groups/${id}/backups/config`}
 							variant="contained"
 							startIcon={<BackupIcon />}
 						>
@@ -157,7 +157,7 @@ export default function BackupPanel() {
 			<Box>
 				<MuiLink
 					component={RouterLink}
-					to={`/groups/${id}`}
+					to={`/fleet/groups/${id}`}
 					variant="body2"
 					underline="hover"
 				>
@@ -186,7 +186,7 @@ export default function BackupPanel() {
 						<Stack direction="row" spacing={1}>
 							<Button
 								component={RouterLink}
-								to={`/groups/${id}/backups/config`}
+								to={`/fleet/groups/${id}/backups/config`}
 								variant="outlined"
 								startIcon={<EditIcon />}
 							>

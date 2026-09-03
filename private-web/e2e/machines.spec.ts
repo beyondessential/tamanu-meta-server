@@ -231,7 +231,7 @@ test.describe("machine detail", () => {
 			groupId: group.id,
 		});
 
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 
 		// Both boxes are here — the one carrying a workload and the one that has
 		// not reported yet, which was invisible when the group listed workloads.
@@ -254,7 +254,7 @@ test.describe("machine detail", () => {
 	test("creating a machine lands on its own page", async ({ page, sql }) => {
 		const group = await seedServerGroup(sql, { name: "landing-group" });
 
-		await page.goto(`/groups/${group.id}/machines/new`);
+		await page.goto(`/fleet/groups/${group.id}/machines/new`);
 		await page.getByLabel(/^Name(\s*\*)?$/i).fill("landed-box");
 		await page.getByRole("button", { name: "Create machine" }).click();
 

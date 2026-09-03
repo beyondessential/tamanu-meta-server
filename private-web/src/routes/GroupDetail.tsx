@@ -134,7 +134,7 @@ export default function GroupDetail() {
 					<Stack direction="row" spacing={1}>
 						<Button
 							component={RouterLink}
-							to={`/groups/${group.id}/machines/new`}
+							to={`/fleet/groups/${group.id}/machines/new`}
 							variant="contained"
 							startIcon={<AddIcon />}
 						>
@@ -142,7 +142,7 @@ export default function GroupDetail() {
 						</Button>
 						<Button
 							component={RouterLink}
-							to={`/groups/${group.id}/edit`}
+							to={`/fleet/groups/${group.id}/edit`}
 							variant="outlined"
 							startIcon={<EditIcon />}
 						>
@@ -303,7 +303,7 @@ function BackupsCard({
 					isAdmin ? (
 						<Button
 							component={RouterLink}
-							to={`/groups/${groupId}/backups/config`}
+							to={`/fleet/groups/${groupId}/backups/config`}
 							variant="outlined"
 							startIcon={<BackupIcon />}
 						>
@@ -317,7 +317,7 @@ function BackupsCard({
 				) : (
 					<Button
 						component={RouterLink}
-						to={`/groups/${groupId}/backups`}
+						to={`/fleet/groups/${groupId}/backups`}
 						variant="outlined"
 					>
 						View backups

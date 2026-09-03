@@ -134,7 +134,7 @@ test.describe("unmonitored servers are marked", () => {
 		await page.goto("/status");
 
 		const strip = page
-			.locator(`a[href="/groups/${group.id}"]`)
+			.locator(`a[href="/fleet/groups/${group.id}"]`)
 			.first()
 			.getByTestId("dot-strip");
 		await expect(strip).toBeVisible();

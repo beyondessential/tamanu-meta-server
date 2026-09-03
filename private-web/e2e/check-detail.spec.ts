@@ -89,11 +89,11 @@ test.describe("check detail page", () => {
 			"href",
 			`/fleet/applications/${failing.id}`,
 		);
-		await expect(page.locator(`a[href="/groups/${group.id}"]`)).toHaveCount(
+		await expect(page.locator(`a[href="/fleet/groups/${group.id}"]`)).toHaveCount(
 			1,
 		);
 		await expect(
-			page.locator(`a[href="/groups/${group.id}"]`),
+			page.locator(`a[href="/fleet/groups/${group.id}"]`),
 		).toHaveText("Coral Coast");
 
 		// Standard list ordering within the group: kind then name
@@ -237,7 +237,7 @@ test.describe("check detail page", () => {
 		// group's section, labelled as the whole group.
 		await expect(page.getByText("production", { exact: true })).toBeVisible();
 		await expect(
-			page.locator(`a[href="/groups/${group.id}"]`),
+			page.locator(`a[href="/fleet/groups/${group.id}"]`),
 		).toHaveText("Backup Coast");
 		await expect(page.getByText("whole group", { exact: true })).toBeVisible();
 

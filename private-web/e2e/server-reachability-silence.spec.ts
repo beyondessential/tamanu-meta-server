@@ -60,7 +60,7 @@ test.describe("the reachability alerting switch, on both forms", () => {
 		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
 		const group = await seedServerGroup(sql, { name: "comes-and-goes" });
 
-		await page.goto(`/groups/${group.id}/machines/new`);
+		await page.goto(`/fleet/groups/${group.id}/machines/new`);
 		await page.getByLabel(/^Name(\s*\*)?$/i).fill("expected-to-vanish");
 		// On by default: a new box alerts when it goes away unless told not to.
 		await expect(page.getByLabel(MACHINE_SWITCH)).toBeChecked();
@@ -79,7 +79,7 @@ test.describe("the reachability alerting switch, on both forms", () => {
 		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
 		const group = await seedServerGroup(sql, { name: "should-stay-up" });
 
-		await page.goto(`/groups/${group.id}/machines/new`);
+		await page.goto(`/fleet/groups/${group.id}/machines/new`);
 		await page.getByLabel(/^Name(\s*\*)?$/i).fill("expected-to-stay");
 		// The switch settling is what says the form is live; clicking before
 		// that lands on markup with no handler attached yet.

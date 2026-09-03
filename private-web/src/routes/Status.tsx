@@ -244,7 +244,7 @@ function GroupCardLoader({
 	return (
 		<MuiLink
 			component={RouterLink}
-			to={`/groups/${groupId}`}
+			to={`/fleet/groups/${groupId}`}
 			underline="none"
 			color="inherit"
 		>

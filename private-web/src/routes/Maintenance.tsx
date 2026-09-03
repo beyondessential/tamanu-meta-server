@@ -70,7 +70,7 @@ export default function Maintenance() {
 								<TableRow key={window.id} hover>
 									<TableCell>
 										{window.server_group_id ? (
-											<RouterLink to={`/groups/${window.server_group_id}`}>
+											<RouterLink to={`/fleet/groups/${window.server_group_id}`}>
 												{target}
 											</RouterLink>
 										) : window.machine_id ? (

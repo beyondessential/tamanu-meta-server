@@ -253,7 +253,7 @@ function Header({
 							{
 								label: data.server.group_name ?? "",
 								to: data.server.group_id
-									? `/groups/${data.server.group_id}`
+									? `/fleet/groups/${data.server.group_id}`
 									: null,
 							},
 							{
@@ -340,7 +340,7 @@ function DeleteServerButton({
 			await action.call({ server_id: serverId });
 			setOpen(false);
 			onArchived();
-			navigate(groupId ? `/groups/${groupId}` : "/fleet");
+			navigate(groupId ? `/fleet/groups/${groupId}` : "/fleet");
 		} catch {
 			/* surfaced via action.error */
 		}
@@ -687,7 +687,7 @@ function GroupSection({
 				</Typography>
 				<MuiLink
 					component={RouterLink}
-					to={`/groups/${group.id}`}
+					to={`/fleet/groups/${group.id}`}
 					underline="hover"
 				>
 					{group.name}

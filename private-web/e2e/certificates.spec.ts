@@ -371,7 +371,7 @@ test.describe("group domain health", () => {
 			publishedAddresses: ["192.0.2.2"],
 		});
 
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 		const panel = page
 			.getByRole("heading", { name: "Domains" })
 			.locator("xpath=ancestor::div[contains(@class,'MuiPaper-root')][1]");

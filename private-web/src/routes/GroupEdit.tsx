@@ -56,7 +56,7 @@ function CreateForm() {
 		e.preventDefault();
 		try {
 			const group = await create.call({ name, notes, tags });
-			navigate(`/groups/${group.id}/machines/new`);
+			navigate(`/fleet/groups/${group.id}/machines/new`);
 		} catch {
 			/* surfaced via create.error */
 		}
@@ -164,7 +164,7 @@ function EditForm({
 					),
 				},
 			});
-			navigate(`/groups/${group.id}`);
+			navigate(`/fleet/groups/${group.id}`);
 		} catch {
 			/* surfaced via update.error */
 		}
@@ -301,7 +301,7 @@ function EditForm({
 							type="button"
 							variant="outlined"
 							color="error"
-							onClick={() => navigate(`/groups/${group.id}`)}
+							onClick={() => navigate(`/fleet/groups/${group.id}`)}
 							disabled={pending}
 						>
 							Cancel

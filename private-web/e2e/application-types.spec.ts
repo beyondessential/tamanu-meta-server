@@ -159,7 +159,7 @@ test.describe("application types", () => {
 	}) => {
 		const group = await seedServerGroup(sql, { name: "target-group" });
 
-		await page.goto(`/groups/${group.id}/machines/new`);
+		await page.goto(`/fleet/groups/${group.id}/machines/new`);
 
 		// A type is reported, never entered, so none of what used to be asked
 		// here is offered: no product, no role, no rank, no URL.
@@ -327,7 +327,7 @@ test.describe("application types", () => {
 		).toBeVisible();
 
 		// And in the listing its group presents, under the box it runs on.
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 		await expect(
 			page.getByRole("link", { name: /Tamanu central/ }).first(),
 		).toBeVisible();

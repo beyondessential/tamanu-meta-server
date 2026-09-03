@@ -229,9 +229,23 @@ export default function App() {
 						<Route path="archived" element={<ArchivedList />} />
 						<Route path="figures" element={<FleetFigures />} />
 					</Route>
+					<Route path="/fleet/groups/new" element={<GroupEdit />} />
+					<Route path="/fleet/groups/:id" element={<GroupDetail />} />
 					<Route
-						path="/groups/:id/machines/new"
+						path="/fleet/groups/:id/edit"
+						element={<GroupEdit />}
+					/>
+					<Route
+						path="/fleet/groups/:id/machines/new"
 						element={<MachineCreate />}
+					/>
+					<Route
+						path="/fleet/groups/:id/backups"
+						element={<BackupPanel />}
+					/>
+					<Route
+						path="/fleet/groups/:id/backups/config"
+						element={<BackupConfig />}
 					/>
 					<Route
 						path="/fleet/applications/:id"
@@ -289,16 +303,33 @@ export default function App() {
 						path="/machines/:id/edit"
 						element={<Moved to={(id) => `/fleet/machines/${id}/edit`} />}
 					/>
-					<Route path="/groups/new" element={<GroupEdit />} />
-					<Route path="/groups/:id" element={<GroupDetail />} />
-					<Route path="/groups/:id/edit" element={<GroupEdit />} />
+					<Route
+						path="/groups/new"
+						element={<Navigate to="/fleet/groups/new" replace />}
+					/>
+					<Route
+						path="/groups/:id"
+						element={<Moved to={(id) => `/fleet/groups/${id}`} />}
+					/>
+					<Route
+						path="/groups/:id/edit"
+						element={<Moved to={(id) => `/fleet/groups/${id}/edit`} />}
+					/>
+					<Route
+						path="/groups/:id/machines/new"
+						element={
+							<Moved to={(id) => `/fleet/groups/${id}/machines/new`} />
+						}
+					/>
 					<Route
 						path="/groups/:id/backups"
-						element={<BackupPanel />}
+						element={<Moved to={(id) => `/fleet/groups/${id}/backups`} />}
 					/>
 					<Route
 						path="/groups/:id/backups/config"
-						element={<BackupConfig />}
+						element={
+							<Moved to={(id) => `/fleet/groups/${id}/backups/config`} />
+						}
 					/>
 					<Route path="/settings" element={<Settings />}>
 						<Route

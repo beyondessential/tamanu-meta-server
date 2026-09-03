@@ -18,7 +18,7 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import { REACHABILITY_CHECK } from "../types";
 import type { TagMap, TailnetLiveInfo } from "../types";
 
-/// Operator-first machine creation, reachable at `/groups/:id/machines/new`
+/// Operator-first machine creation, reachable at `/fleet/groups/:id/machines/new`
 /// with the group preselected. A group is required — machines are always
 /// grouped.
 ///
@@ -29,7 +29,7 @@ import type { TagMap, TailnetLiveInfo } from "../types";
 export default function MachineCreate() {
 	usePageTitle("Add machine");
 	const navigate = useNavigate();
-	// When mounted under `/groups/:id/machines/new`, the route param is the
+	// When mounted under `/fleet/groups/:id/machines/new`, the route param is the
 	// group to default-select.
 	const { id: presetGroupId } = useParams<{ id?: string }>();
 	const action = useApiAction("fleet/machines", "create");

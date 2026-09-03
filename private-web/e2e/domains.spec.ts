@@ -20,7 +20,7 @@ test.describe("group domains", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "domainless" });
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 
 		await expect(
 			page.getByRole("heading", { name: "Domains" }),
@@ -54,7 +54,7 @@ test.describe("group domains", () => {
 			domain: "old.senaite.app",
 		});
 
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 
 		await expect(page.getByText("fiji.tamanu.app", { exact: true })).toBeVisible();
 		await expect(page.getByText("zone tamanu.app")).toBeVisible();
@@ -68,7 +68,7 @@ test.describe("group domains", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "samoa" });
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 
 		await page.getByLabel("Domain").fill("samoa.tamanu.app");
 		await page.getByRole("button", { name: "Claim" }).click();
@@ -91,7 +91,7 @@ test.describe("group domains", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "outside" });
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 
 		await page.getByLabel("Domain").fill("nope.example.com");
 		await page.getByRole("button", { name: "Claim" }).click();
@@ -115,7 +115,7 @@ test.describe("group domains", () => {
 		});
 		const rival = await seedServerGroup(sql, { name: "rival" });
 
-		await page.goto(`/groups/${rival.id}`);
+		await page.goto(`/fleet/groups/${rival.id}`);
 		await page.getByLabel("Domain").fill("sub.contested.tamanu.app");
 		await page.getByRole("button", { name: "Claim" }).click();
 

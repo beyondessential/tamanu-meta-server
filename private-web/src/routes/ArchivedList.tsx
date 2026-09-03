@@ -123,7 +123,7 @@ function ArchivedGroupRow({
 		>
 			<MuiLink
 				component={RouterLink}
-				to={`/groups/${id}`}
+				to={`/fleet/groups/${id}`}
 				underline="hover"
 				color="text.primary"
 				sx={{ fontWeight: 500 }}

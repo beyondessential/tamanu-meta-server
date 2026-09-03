@@ -32,7 +32,7 @@ export default function GroupsList() {
 				<Stack direction="row" spacing={1} sx={{ justifyContent: "flex-end" }}>
 					<Button
 						component={RouterLink}
-						to="/groups/new"
+						to="/fleet/groups/new"
 						variant="contained"
 						startIcon={<AddIcon />}
 					>

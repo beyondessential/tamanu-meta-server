@@ -449,7 +449,7 @@ function GroupHeaderRow({
 	const name = section.groupId ? (
 		<MuiLink
 			component={RouterLink}
-			to={`/groups/${section.groupId}`}
+			to={`/fleet/groups/${section.groupId}`}
 			underline="hover"
 			variant="subtitle2"
 		>

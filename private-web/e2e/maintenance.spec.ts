@@ -108,10 +108,10 @@ test.describe("maintenance windows", () => {
 		await expect(covering).toContainText("Cutting over the database");
 		await expect(
 			covering.getByRole("link", { name: "whole-region" }),
-		).toHaveAttribute("href", `/groups/${group.id}`);
+		).toHaveAttribute("href", `/fleet/groups/${group.id}`);
 		await expect(page.getByTestId("maintenance-marker")).toBeVisible();
 
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 		await expect(page.getByTestId("maintenance-marker")).toContainText(
 			"Under maintenance",
 		);
@@ -158,7 +158,7 @@ test.describe("maintenance windows", () => {
 		await expect(row).toContainText("seed@bes.au");
 		await expect(
 			page.getByRole("link", { name: "whole-deployment" }),
-		).toHaveAttribute("href", `/groups/${group.id}`);
+		).toHaveAttribute("href", `/fleet/groups/${group.id}`);
 	});
 
 	/// A window over a box names the box, and the name is the way to it: the

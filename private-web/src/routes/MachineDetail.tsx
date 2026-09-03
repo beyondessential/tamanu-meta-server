@@ -144,7 +144,7 @@ export default function MachineDetail() {
 							parts={[
 								{
 									label: data.group?.name ?? "",
-									to: data.group ? `/groups/${data.group.id}` : null,
+									to: data.group ? `/fleet/groups/${data.group.id}` : null,
 								},
 								{ label: machineLabel(data) ?? "Unnamed machine" },
 							]}
