@@ -71,9 +71,14 @@ Lifting a window someone else declared is the deliberate step that takes the wor
 The refusal lasts exactly as long as the window holds.
 Settling is about how Canopy grades what it observes once work is done and holds no one's work, so the inventory is served again the moment the window ends.
 
+A change someone else has just made to the environment's settings is work under way too, for a short while after it is made.
+Canopy observes such a change where it records who made it, which is a secret variable set at the environment or on one of its members; a plain variable and a server's membership record when they changed and not by whom, so they hold nothing.
+The inventory is refused while a secret variable set by someone other than the reader is newer than a recency period, the same for every environment, and the refusal names the variable, who set it, and when.
+The reader's own changes hold nothing, setting a value and then running on it being the usual order of things.
+
 ## Refusal
 
-Canopy either serves an inventory or refuses it, and a refusal names why: a group it does not have, a name answering for more than one group, an archived group, a group holding several environments with no rank named, a rank with no live server to configure, an environment someone else has declared work over, and a secret variable whose value cannot be read.
+Canopy either serves an inventory or refuses it, and a refusal names why: a group it does not have, a name answering for more than one group, an archived group, a group holding several environments with no rank named, a rank with no live server to configure, an environment someone else has work under way on, and a secret variable whose value cannot be read.
 Serving the rest of that last one would hand a run a member that looks configured and is missing a value.
 A refusal is distinguishable from a failure to answer at all, the two meaning opposite things: Canopy declining is a decision to respect, while Canopy being unreachable is the absence of one.
 
@@ -96,5 +101,4 @@ While a window someone else declared holds over the environment, the presentatio
 - Performing a configuration run, scheduling one, or triggering one.
 - The inventory format of any particular configuration-management tool: Canopy serves the environment's shape, and the caller renders it.
 - Authoring plain variables anywhere other than the tags an operator already sets.
-- Holding off a run for a settings change under way: Canopy records a change once it is made and observes no state in which one is in progress.
 - Refusing a run for want of an upgrade plan (see [UPG](upgrade-plans.md)).
