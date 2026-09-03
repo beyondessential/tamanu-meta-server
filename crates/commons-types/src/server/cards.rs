@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-	server::{kind::ServerKind, product::Product, rank::ServerRank},
+	server::{app_type::ApplicationType, rank::ServerRank},
 	status::{HealthState, OperatorPresence, ShortStatus},
 	version::VersionStr,
 };
@@ -36,11 +36,27 @@ pub struct FacilityServerStatus {
 	/// order.
 	pub rank: Option<ServerRank>,
 	/// The application the server runs, presented alongside its role.
-	// spec: APP#product-and-kind
-	pub product: Product,
-	/// The server's role within its product's topology (for Tamanu, central
-	/// or facility; standalone for a product with no internal roles).
-	pub kind: ServerKind,
+	// spec: APP
+	pub r#type: ApplicationType,
+	/// The box this application runs on. Members sharing one are presented
+	/// together, since a box carrying two workloads is the case the machine
+	/// grain exists for.
+	// spec: FLT
+	pub machine_id: Uuid,
+	/// The box's name, where an operator gave it one.
+	pub machine_name: Option<String>,
+	/// The box's own reachability, which is not this application's: a machine
+	/// that has gone quiet takes everything on it with it, and one that is fine
+	/// says nothing about whether the software on it is.
+	pub machine_up: ShortStatus,
+	/// The box's own health, from the checks filed against it.
+	pub machine_health: HealthState,
+	/// Whether a maintenance window suspends this box — its own or its
+	/// group's. A window is declared over a machine and never over an
+	/// application, so this is the box's fact and the applications on it are
+	/// suspended by it rather than carrying one of their own.
+	// spec: MNT#presentation
+	pub machine_maintained: bool,
 }
 
 /// A status-dashboard card summarising one group of equivalent servers, with
@@ -65,4 +81,13 @@ pub struct ServerGroupCard {
 	pub version_distance: Option<u64>,
 	/// Status of each server belonging to this group.
 	pub members: Vec<FacilityServerStatus>,
+	/// Whether every member of the group has been quiet for long enough that
+	/// archiving the group cascades to them.
+	///
+	/// This is the archive rule, not a reachability reading: a member that
+	/// last reported months ago is thoroughly unreachable but has still
+	/// reported, so `up` alone cannot answer it. Both this and the rule the
+	/// archive itself enforces ask the same question of the same window, so
+	/// the button offered and the outcome cannot disagree.
+	pub all_members_quiet: bool,
 }

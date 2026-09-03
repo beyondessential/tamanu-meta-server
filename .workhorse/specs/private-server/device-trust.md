@@ -4,7 +4,9 @@ id: DTR
 
 # Device trust model
 
-Every device Canopy records holds a role that grants access: administrator, server, releaser, or backup-restore.
+Every identity Canopy records holds a role that grants access: administrator, machine, releaser, backup-restore, or relay.
+The role names what the identity authenticates, so a machine role belongs to a box rather than to the software on it (see [FLT](../servers/overview.md), "Identities").
+Enrolment inputs accept `server` as an alias for the machine role, so an agent deployed before the rename keeps working.
 There is no untrusted or pending state.
 A device exists only because a deliberate act created it, and that act records the device at its role from the outset.
 
@@ -12,8 +14,8 @@ A device exists only because a deliberate act created it, and that act records t
 
 A device is recorded through one of:
 
-- Server enrolment — a box proves possession of its key against a gated enrolment token and is recorded as a server.
-- Tailnet attachment — an operator binds a known tailnet identity to a device, which is trusted as a server and thereafter authenticates by that identity.
+- Machine enrolment — a box proves possession of its key against a gated enrolment ticket and is recorded at the machine role (see [FLT](../servers/overview.md), "Machines come from operators").
+- Tailnet attachment — an operator binds a known tailnet identity to a device, which is trusted at the machine role and thereafter authenticates by that identity.
 - Provisioning — an operator has Canopy mint a credential at a chosen role (see [DPK](provisioned-credentials.md)).
 
 A device is never created merely because a client connected.
@@ -33,4 +35,5 @@ A tailnet identity may be held by at most one device; attaching one already held
 
 An operator revokes a device's access by deactivating its keys and detaching its tailnet identity.
 The device record and its role are retained as history; a revoked device simply can no longer authenticate.
-Archiving a server revokes its bound device the same way, so the box can only return through enrolment.
+Archiving a machine revokes its bound identity the same way, so the box can only return through enrolment.
+Archiving an application revokes nothing, an application holding no identity of its own.

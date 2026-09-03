@@ -129,7 +129,7 @@ function ConfigForm({
 					region: region.trim() === "" ? null : region,
 				});
 			}
-			navigate(`/groups/${groupId}/backups`);
+			navigate(`/fleet/groups/${groupId}/backups`);
 		} catch {
 			/* surfaced via the action errors */
 		}
@@ -143,7 +143,7 @@ function ConfigForm({
 				server_group_id: groupId,
 				region: region.trim() === "" ? null : region,
 			});
-			navigate(`/groups/${groupId}/backups`);
+			navigate(`/fleet/groups/${groupId}/backups`);
 		} catch {
 			/* surfaced via createShared.error */
 		}
@@ -183,7 +183,7 @@ function ConfigForm({
 						<Button
 							variant="outlined"
 							color="error"
-							onClick={() => navigate(`/groups/${groupId}/backups`)}
+							onClick={() => navigate(`/fleet/groups/${groupId}/backups`)}
 							disabled={pending}
 						>
 							Cancel
@@ -245,7 +245,7 @@ function ConfigForm({
 						<Button
 							variant="outlined"
 							color="error"
-							onClick={() => navigate(`/groups/${groupId}/backups`)}
+							onClick={() => navigate(`/fleet/groups/${groupId}/backups`)}
 							disabled={createShared.pending}
 						>
 							Cancel
@@ -337,7 +337,7 @@ function ConfigForm({
 							<Button
 								variant="outlined"
 								color="error"
-								onClick={() => navigate(`/groups/${groupId}/backups`)}
+								onClick={() => navigate(`/fleet/groups/${groupId}/backups`)}
 								disabled={probeAction.pending}
 							>
 								Cancel
@@ -408,7 +408,7 @@ function ProbeReview({
 				This bucket + prefix is already configured for another group.{" "}
 				<MuiLink
 					component={RouterLink}
-					to={`/groups/${probe.already_configured}/backups`}
+					to={`/fleet/groups/${probe.already_configured}/backups`}
 				>
 					View that config
 				</MuiLink>

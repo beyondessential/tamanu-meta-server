@@ -24,8 +24,10 @@ import HealthChip from "./HealthChip";
 import TimeAgo from "./TimeAgo";
 import TimezoneTooltip from "./TimezoneTooltip";
 import VersionIndicator from "./VersionIndicator";
-import { useProductCaps } from "../hooks/useProducts";
-import { PRODUCT_LABELS } from "../types";
+import {
+	useApplicationTypeCaps,
+	useApplicationTypeLabel,
+} from "../hooks/useApplicationTypes";
 import {
 	CHECK_RESULT_INTENT,
 	type CheckResult,
@@ -122,16 +124,17 @@ function PanelBody({
 }
 
 function CuratedFields({ snap }: { snap: StatusSnapshotData }) {
-	const caps = useProductCaps(snap.product);
+	const caps = useApplicationTypeCaps(snap.type);
+	const label = useApplicationTypeLabel(snap.type);
 	const tracking = caps?.version_tracking;
 	return (
 		<Stack direction="row" spacing={3} sx={{ flexWrap: "wrap" }} useFlexGap>
-			{/* A product with no application version shows no version field at
+			{/* A type with no application version shows no version field at
 			    all — label included, since an empty "Version" reads as a
 			    reporting failure rather than an absence.
 			    spec: APP#versions */}
 			{tracking !== undefined && tracking !== "absent" && (
-				<Field label={PRODUCT_LABELS[snap.product]}>
+				<Field label={label}>
 					<VersionIndicator
 						version={snap.version}
 						tracking={tracking}
@@ -148,6 +151,9 @@ function CuratedFields({ snap }: { snap: StatusSnapshotData }) {
 				</Field>
 			)}
 			{snap.postgres && <Field label="PostgreSQL" value={snap.postgres} mono />}
+			{snap.reporting_schema && (
+				<Field label="Reporting schema" value={snap.reporting_schema} mono />
+			)}
 			{snap.nodejs && <Field label="Node.js" value={snap.nodejs} mono />}
 			{snap.bestool && <Field label="bestool" value={snap.bestool} mono />}
 			{snap.min_chrome_version != null && (

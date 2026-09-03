@@ -62,7 +62,8 @@ async fn status_create_requires_server_auth() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		// Create a server
 		conn.batch_execute(
-			"INSERT INTO servers (id, host, kind) VALUES ('11111111-1111-1111-1111-111111111111', 'https://test.com', 'tamanu')",
+			"INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111');
+			INSERT INTO applications (id, host, type, machine_id) VALUES ('11111111-1111-1111-1111-111111111111', 'https://test.com', 'tamanu-central', '11111111-1111-1111-1111-111111111111')",
 		)
 		.await
 		.unwrap();
@@ -214,8 +215,9 @@ async fn status_unauthorized_server_device_mismatch() {
 	commons_tests::server::run(async |mut conn, public, _| {
 		// Create server without device association
 		conn.batch_execute(
-			"INSERT INTO servers (id, host, kind, device_id) VALUES
-			('11111111-1111-1111-1111-111111111111', 'https://test.com', 'tamanu', null)",
+			"INSERT INTO machines (id) VALUES ('11111111-1111-1111-1111-111111111111');
+			INSERT INTO applications (id, host, type, machine_id) VALUES
+			('11111111-1111-1111-1111-111111111111', 'https://test.com', 'tamanu-central', '11111111-1111-1111-1111-111111111111')",
 		)
 		.await
 		.unwrap();

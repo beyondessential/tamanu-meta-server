@@ -8,7 +8,7 @@ use database::Db;
 #[cfg(feature = "ui")]
 use tera::Tera;
 
-/// The per-group repo-password Secret store now lives in `commons-servers`;
+/// The per-group repo-password Secret store now lives in `commons-applications`;
 /// re-exported so existing `public_server::state::BackupSecrets` consumers (and
 /// the `AppState.kube` field) keep working.
 pub use commons_servers::backup_secrets::BackupSecrets;

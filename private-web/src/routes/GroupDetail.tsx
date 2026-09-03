@@ -14,36 +14,31 @@ import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
 import BackupIcon from "@mui/icons-material/Backup";
 import EditIcon from "@mui/icons-material/Edit";
 import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
-import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import GroupDomainsSection from "../components/GroupDomainsSection";
 import MigrationTestsSection from "../components/MigrationTestsSection";
 import { OperatorAvatar, connectedFor } from "../components/OperatorAvatars";
-import ServerShorty from "../components/ServerShorty";
+import ActiveIncidentCard from "../components/ActiveIncidentCard";
+import GroupTree from "../components/GroupTree";
 import MaintenanceSection from "../components/MaintenanceSection";
 import SilencedRefsSection from "../components/SilencedRefsSection";
-import TimeAgo from "../components/TimeAgo";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
-import { useIsNotificationHeld } from "../hooks/useIsNotificationHeld";
 import { usePageTitle } from "../hooks/usePageTitle";
 import {
 	BACKUP_STATUS_INTENT,
 	BACKUP_STATUS_LABEL,
 	type BackupConfigStatus,
 	aggregateOperators,
-	groupServersByRank,
-	isIncidentLingering,
 	type AggregatedOperator,
-	type IncidentData,
 } from "../types";
 
 export default function GroupDetail() {
 	const { id = "" } = useParams<{ id: string }>();
 	const navigate = useNavigate();
-	const detail = useApi("server_groups", "get", { server_group_id: id }, [id]);
+	const detail = useApi("fleet/groups", "get", { server_group_id: id }, [id]);
 	const admin = useIsAdmin() === true;
-	const archive = useApiAction("server_groups", "delete");
+	const archive = useApiAction("fleet/groups", "delete");
 	// Only the currently-open incident matters for the active-incident
 	// section; closed ones live behind the /incidents filter route.
 	const activeIncidents = useApi(
@@ -69,7 +64,7 @@ export default function GroupDetail() {
 		return <Alert severity="error">{detail.error.message}</Alert>;
 	}
 
-	const { group, servers, billing_labels } = detail.data;
+	const { group, applications, machines, billing_labels } = detail.data;
 	const tagEntries = Object.entries(group.tags ?? {});
 	const operators =
 		groupStatuses.status === "ok"
@@ -80,13 +75,17 @@ export default function GroupDetail() {
 			? activeIncidents.data[0]
 			: null;
 
-	// A group archives when empty, or when all its members are "gone" (no
-	// recent status) — in which case archiving cascades to those servers.
-	const allGone = servers.every((s) => s.up === "gone");
+	// A group archives when empty, or when every member has gone quiet, in
+	// which case archiving cascades to those servers. The card carries that
+	// fact: it is the same windowed question the archive itself enforces, and
+	// a member unreachable for months is quiet without reading as "gone".
+	const allQuiet =
+		applications.length === 0 ||
+		(groupStatuses.status === "ok" && groupStatuses.data.all_members_quiet);
 	const onArchive = async () => {
 		const cascade =
-			servers.length > 0
-				? ` This also archives its ${servers.length} gone server${servers.length === 1 ? "" : "s"}.`
+			applications.length > 0
+				? ` This also archives its ${applications.length} quiet server${applications.length === 1 ? "" : "s"}.`
 				: "";
 		if (
 			!confirm(
@@ -96,7 +95,7 @@ export default function GroupDetail() {
 			return;
 		try {
 			await archive.call({ server_group_id: group.id });
-			navigate("/servers");
+			navigate("/fleet");
 		} catch {
 			/* surfaced via archive.error */
 		}
@@ -135,21 +134,21 @@ export default function GroupDetail() {
 					<Stack direction="row" spacing={1}>
 						<Button
 							component={RouterLink}
-							to={`/groups/${group.id}/servers/new`}
+							to={`/fleet/groups/${group.id}/machines/new`}
 							variant="contained"
 							startIcon={<AddIcon />}
 						>
-							Add server
+							Add machine
 						</Button>
 						<Button
 							component={RouterLink}
-							to={`/groups/${group.id}/edit`}
+							to={`/fleet/groups/${group.id}/edit`}
 							variant="outlined"
 							startIcon={<EditIcon />}
 						>
 							Edit
 						</Button>
-						{allGone && !group.deleted_at && (
+						{allQuiet && !group.deleted_at && (
 							<Button
 								variant="outlined"
 								color="error"
@@ -227,40 +226,21 @@ export default function GroupDetail() {
 
 			<Box>
 				<Typography variant="h5" component="h2" gutterBottom>
-					Servers ({servers.length})
+					Machines ({machines.length})
 				</Typography>
-				{servers.length === 0 ? (
+				{machines.length === 0 ? (
 					<Alert severity="info">
-						No servers in this group yet. Use “Add server” above to enroll
-						one into this group.
+						Nothing in this group yet. Add a machine; the applications on it
+						arrive by report.
 					</Alert>
 				) : (
-					<Stack spacing={2}>
-						{groupServersByRank(servers).map(([rank, members]) => (
-							<Box key={rank ?? "_unranked"}>
-								{rank && (
-									<Typography
-										variant="overline"
-										color="text.secondary"
-										sx={{ display: "block", mb: 0.5 }}
-									>
-										{rank}
-									</Typography>
-								)}
-								<Stack spacing={1}>
-									{members.map((s) => (
-										<ServerShorty key={s.id} server={s} />
-									))}
-								</Stack>
-							</Box>
-						))}
-					</Stack>
+					<GroupTree machines={machines} applications={applications} />
 				)}
 			</Box>
 
 			<BackupsCard groupId={group.id} isAdmin={admin} />
 
-			<MigrationTestsSection groupId={group.id} servers={servers} />
+			<MigrationTestsSection groupId={group.id} servers={applications} />
 
 			<GroupDomainsSection groupId={group.id} />
 
@@ -323,7 +303,7 @@ function BackupsCard({
 					isAdmin ? (
 						<Button
 							component={RouterLink}
-							to={`/groups/${groupId}/backups/config`}
+							to={`/fleet/groups/${groupId}/backups/config`}
 							variant="outlined"
 							startIcon={<BackupIcon />}
 						>
@@ -337,7 +317,7 @@ function BackupsCard({
 				) : (
 					<Button
 						component={RouterLink}
-						to={`/groups/${groupId}/backups`}
+						to={`/fleet/groups/${groupId}/backups`}
 						variant="outlined"
 					>
 						View backups
@@ -348,10 +328,10 @@ function BackupsCard({
 	);
 }
 
-/// Distinct people connected across the group's servers right now (from
-/// each member's `external_users` check, deduped by Tailscale login).
-/// The same aggregate the status-page card chip counts. Hidden entirely
-/// when nobody's connected.
+/// Distinct people connected across the group's boxes right now (from each
+/// member's `external_users` check, deduped by Tailscale login). The same
+/// aggregate the status-page card chip counts. Hidden entirely when nobody's
+/// connected.
 function OperatorsSection({
 	operators,
 }: {
@@ -361,10 +341,10 @@ function OperatorsSection({
 		<Paper variant="outlined" sx={{ p: 2 }}>
 			<Typography variant="h6" component="h2" gutterBottom>
 				{operators.length} operator{operators.length === 1 ? "" : "s"} in
-				the servers right now
+				the group right now
 			</Typography>
 			<Stack spacing={1}>
-				{operators.map(({ op, servers }) => {
+				{operators.map(({ op, machines }) => {
 					const dur = connectedFor(op.connected_since);
 					return (
 						<Stack
@@ -379,7 +359,7 @@ function OperatorsSection({
 									{op.name ? `${op.name} (${op.login})` : op.login}
 								</Typography>
 								<Typography variant="caption" color="text.secondary">
-									{[dur && `connected ${dur}`, `on ${servers.join(", ")}`]
+									{[dur && `connected ${dur}`, `on ${machines.join(", ")}`]
 										.filter(Boolean)
 										.join(" · ")}
 								</Typography>
@@ -392,71 +372,6 @@ function OperatorsSection({
 	);
 }
 
-function ActiveIncidentCard({ incident }: { incident: IncidentData }) {
-	const held = useIsNotificationHeld(incident.notification_held_until);
-	const lingering = isIncidentLingering(incident);
-	const tone = lingering ? "info" : held ? "warning" : "error";
-	return (
-		<Paper
-			variant="outlined"
-			sx={{
-				p: 2,
-				borderColor: `${tone}.main`,
-				borderWidth: 2,
-			}}
-		>
-			<Stack
-				direction="row"
-				spacing={2}
-				sx={{ alignItems: "center", justifyContent: "space-between" }}
-			>
-				<Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
-					<WarningAmberIcon color={tone} />
-					<Box>
-						<Typography variant="h6" component="h2">
-							Active incident
-							<Box
-								component="span"
-								sx={{
-									ml: 1,
-									fontFamily: "monospace",
-									color: "text.secondary",
-									fontWeight: "normal",
-									fontSize: "0.85em",
-								}}
-							>
-								{incident.id.slice(0, 8)}
-							</Box>
-						</Typography>
-						<Typography variant="body2" color="text.secondary">
-							opened <TimeAgo timestamp={incident.opened_at} />
-						</Typography>
-						{lingering && incident.lingering_since && (
-							<Typography variant="body2" sx={{ color: "info.main" }}>
-								Recovering; last failure cleared{" "}
-								<TimeAgo timestamp={incident.lingering_since} />
-							</Typography>
-						)}
-						{!lingering && held && incident.notification_held_until && (
-							<Typography variant="body2" sx={{ color: "warning.main" }}>
-								Holding; posting{" "}
-								<TimeAgo timestamp={incident.notification_held_until} />
-							</Typography>
-						)}
-					</Box>
-				</Stack>
-				<Button
-					component={RouterLink}
-					to={`/incidents/${incident.id}`}
-					variant="outlined"
-					color={tone}
-				>
-					Open
-				</Button>
-			</Stack>
-		</Paper>
-	);
-}
 
 function ArchivedGroupBanner({
 	groupId,
@@ -467,7 +382,7 @@ function ArchivedGroupBanner({
 	isAdmin: boolean;
 	onRestored: () => void;
 }) {
-	const action = useApiAction("server_groups", "restore");
+	const action = useApiAction("fleet/groups", "restore");
 	const onRestore = async () => {
 		try {
 			await action.call({ server_group_id: groupId });
@@ -498,3 +413,4 @@ function ArchivedGroupBanner({
 		</Alert>
 	);
 }
+

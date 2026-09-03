@@ -36,10 +36,15 @@ async fn make_config(conn: &mut AsyncPgConnection, group_id: Uuid, status: &str)
 	.expect("insert config");
 }
 
+/// A machine and the one application on it, sharing an id.
+///
+/// The shared id is deliberate: it lets a test name one value where the code
+/// wants a machine (a replica, a report) or an application (a candidate
+/// version) without threading two around.
 async fn make_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uuid {
 	let server_id = Uuid::new_v4();
 	let host = format!("https://srv-{server_id}.example.com");
-	sql_query("INSERT INTO servers (id, host, kind, group_id) VALUES ($1, $2, 'central', $3)")
+	sql_query("WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES ($1, $2, 'tamanu-central', $3, $1)")
 		.bind::<sql_types::Uuid, _>(server_id)
 		.bind::<sql_types::Text, _>(host)
 		.bind::<sql_types::Uuid, _>(group_id)
@@ -58,7 +63,7 @@ async fn make_success_run(
 	snapshot_id: &str,
 ) {
 	sql_query(
-		"INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, snapshot_id) \
+		"INSERT INTO backup_runs (id, device_id, group_id, machine_id, type, purpose, outcome, snapshot_id) \
 		 VALUES ($1, $2, $3, $4, 'tamanu-postgres', 'backup', 'success', $5)",
 	)
 	.bind::<sql_types::Uuid, _>(Uuid::new_v4())
@@ -95,16 +100,16 @@ async fn declare_replica_server(
 	conn: &mut AsyncPgConnection,
 	consumer: Uuid,
 	group_id: Uuid,
-	server_id: Uuid,
+	machine_id: Uuid,
 	intent: &str,
 ) {
 	sql_query(
-		"INSERT INTO restore_replicas (consumer_device_id, group_id, server_id, type, intent, name) \
+		"INSERT INTO restore_replicas (consumer_device_id, group_id, machine_id, type, intent, name) \
 		 VALUES ($1, $2, $3, 'tamanu-postgres', $4, $5)",
 	)
 	.bind::<sql_types::Uuid, _>(consumer)
 	.bind::<sql_types::Uuid, _>(group_id)
-	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Uuid, _>(machine_id)
 	.bind::<sql_types::Text, _>(intent)
 	.bind::<sql_types::Text, _>(format!("{intent}-server-decl"))
 	.execute(conn)
@@ -145,7 +150,7 @@ async fn capabilities_register_then_worklist_filters_by_intent() {
 			// Only the `verify` declaration is dispatched; `analytics` is a gap.
 			assert_eq!(entries.len(), 1, "got {entries:?}");
 			assert_eq!(entries[0]["intent"], "verify");
-			assert_eq!(entries[0]["server_id"], server.to_string());
+			assert_eq!(entries[0]["machine_id"], server.to_string());
 			assert_eq!(entries[0]["snapshot_id"], "snap-1");
 			assert_eq!(entries[0]["bucket"], "grp-bucket");
 		},
@@ -187,7 +192,7 @@ async fn worklist_expands_group_wide_to_each_server() {
 				.iter()
 				.map(|e| {
 					(
-						e["server_id"].as_str().unwrap().to_owned(),
+						e["machine_id"].as_str().unwrap().to_owned(),
 						e["snapshot_id"].as_str().unwrap().to_owned(),
 					)
 				})
@@ -236,7 +241,11 @@ async fn worklist_dispatches_every_named_replica_of_a_server() {
 			// Two named replicas of that server, so two entries: the name is what
 			// tells them apart, and neither stands in for the other.
 			assert_eq!(entries.len(), 2, "got {entries:?}");
-			assert!(entries.iter().all(|e| e["server_id"] == server.to_string()));
+			assert!(
+				entries
+					.iter()
+					.all(|e| e["machine_id"] == server.to_string())
+			);
 			let mut names: Vec<&str> = entries
 				.iter()
 				.map(|e| e["name"].as_str().unwrap())
@@ -308,7 +317,7 @@ async fn worklist_once_suppresses_verified_snapshot_until_newer() {
 				.json(&serde_json::json!({
 					"replica_id": entries[0]["replica_id"],
 					"group": group,
-					"server_id": server,
+					"machine_id": server,
 					"type": "tamanu-postgres",
 					"intent": "verify",
 					"snapshot_id": "snap-1",
@@ -384,14 +393,14 @@ async fn worklist_resolves_params_with_defaults_and_nulls() {
 	.await;
 }
 
-/// A server of a product with no masking manifest, so a redacting
+/// A server of a type with no masking manifest, so a redacting
 /// declaration covering it has nothing to redact with.
 async fn make_senaite_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uuid {
 	let server_id = Uuid::new_v4();
 	let host = format!("https://lims-{server_id}.example.com");
 	sql_query(
-		"INSERT INTO servers (id, host, kind, product, group_id) \
-		 VALUES ($1, $2, 'standalone', 'senaite', $3)",
+		"WITH m AS (INSERT INTO machines (id, group_id) VALUES ($1, $3) RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) \
+		 VALUES ($1, $2, 'senaite', $3, $1)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
 	.bind::<sql_types::Text, _>(host)
@@ -528,7 +537,7 @@ async fn a_server_whose_product_has_no_manifest_is_withheld() {
 				.json();
 			assert_eq!(entries.len(), 1, "got {entries:?}");
 			assert_eq!(
-				entries[0]["server_id"],
+				entries[0]["machine_id"],
 				tamanu.to_string(),
 				"only the server with a manifest is dispatched"
 			);
@@ -623,7 +632,7 @@ async fn restore_verification_without_declaration_is_403() {
 					// declaration this names is ever looked for.
 					"replica_id": Uuid::new_v4(),
 					"group": group,
-					"server_id": server,
+					"machine_id": server,
 					"type": "tamanu-postgres",
 					"intent": "verify",
 					"outcome": "failure",
@@ -664,7 +673,7 @@ async fn restore_verification_naming_a_retired_declaration_is_404() {
 				.json(&serde_json::json!({
 					"replica_id": retired,
 					"group": group,
-					"server_id": server,
+					"machine_id": server,
 					"type": "tamanu-postgres",
 					"intent": "analytics",
 					"outcome": "failure",
@@ -714,7 +723,7 @@ async fn restore_verification_naming_another_consumers_declaration_is_403() {
 				.json(&serde_json::json!({
 					"replica_id": theirs,
 					"group": group,
-					"server_id": server,
+					"machine_id": server,
 					"type": "tamanu-postgres",
 					"intent": "analytics",
 					"outcome": "failure",
@@ -754,7 +763,7 @@ async fn restore_verification_records_and_raises_alert() {
 				.json(&serde_json::json!({
 					"replica_id": replica,
 					"group": group,
-					"server_id": server,
+					"machine_id": server,
 					"type": "tamanu-postgres",
 					"intent": "verify",
 					"snapshot_id": "snap-1",
@@ -786,8 +795,8 @@ async fn restore_verification_records_and_raises_alert() {
 				count(
 					&mut conn,
 					"SELECT count(*) AS count FROM issues i \
-					 JOIN servers s ON s.id = i.server_id \
-					 WHERE s.group_id = $1 AND i.ref = 'restore-verification' AND i.active = true",
+					 JOIN machines m ON m.id = i.machine_id \
+					 WHERE m.group_id = $1 AND i.ref = 'restore-verification' AND i.active = true",
 					group,
 				)
 				.await,
@@ -797,8 +806,8 @@ async fn restore_verification_records_and_raises_alert() {
 				count(
 					&mut conn,
 					"SELECT count(*) AS count FROM issues i \
-					 JOIN servers s ON s.id = i.server_id \
-					 WHERE s.group_id = $1 AND i.ref = 'redaction'",
+					 JOIN machines m ON m.id = i.machine_id \
+					 WHERE m.group_id = $1 AND i.ref = 'redaction'",
 					group,
 				)
 				.await,
@@ -827,7 +836,7 @@ async fn a_partial_redaction_warns_while_the_restore_stays_healthy() {
 				.json(&serde_json::json!({
 					"replica_id": replica,
 					"group": group,
-					"server_id": server,
+					"machine_id": server,
 					"type": "tamanu-postgres",
 					"intent": "analytics",
 					"snapshot_id": "snap-1",
@@ -864,8 +873,8 @@ async fn a_partial_redaction_warns_while_the_restore_stays_healthy() {
 				count(
 					&mut conn,
 					"SELECT count(*) AS count FROM issues i \
-					 JOIN servers s ON s.id = i.server_id \
-					 WHERE s.group_id = $1 AND i.ref = 'redaction' AND i.active = true",
+					 JOIN machines m ON m.id = i.machine_id \
+					 WHERE m.group_id = $1 AND i.ref = 'redaction' AND i.active = true",
 					group,
 				)
 				.await,
@@ -876,8 +885,8 @@ async fn a_partial_redaction_warns_while_the_restore_stays_healthy() {
 				count(
 					&mut conn,
 					"SELECT count(*) AS count FROM issues i \
-					 JOIN servers s ON s.id = i.server_id \
-					 WHERE s.group_id = $1 AND i.ref = 'restore-verification' AND i.active = true",
+					 JOIN machines m ON m.id = i.machine_id \
+					 WHERE m.group_id = $1 AND i.ref = 'restore-verification' AND i.active = true",
 					group,
 				)
 				.await,
@@ -905,7 +914,7 @@ async fn a_failed_redaction_warns_and_then_recovers_when_it_applies() {
 				serde_json::json!({
 					"replica_id": replica,
 					"group": group,
-					"server_id": server,
+					"machine_id": server,
 					"type": "tamanu-postgres",
 					"intent": "analytics",
 					"snapshot_id": "snap-1",
@@ -927,8 +936,8 @@ async fn a_failed_redaction_warns_and_then_recovers_when_it_applies() {
 				.expect("sweep");
 
 			const ACTIVE_REDACTION_CHECKS: &str = "SELECT count(*) AS count FROM issues i \
-				 JOIN servers s ON s.id = i.server_id \
-				 WHERE s.group_id = $1 AND i.ref = 'redaction' AND i.active = true";
+				 JOIN machines m ON m.id = i.machine_id \
+				 WHERE m.group_id = $1 AND i.ref = 'redaction' AND i.active = true";
 			assert_eq!(
 				count(&mut conn, ACTIVE_REDACTION_CHECKS, group).await,
 				1,
@@ -975,7 +984,7 @@ async fn publish_version(conn: &mut AsyncPgConnection, minor: i32, patch: i32) -
 /// measured against.
 async fn report_version(conn: &mut AsyncPgConnection, server_id: Uuid, version: &str) {
 	sql_query(
-		"INSERT INTO server_reported_detail (server_id, source, extra, version)
+		"INSERT INTO application_reported_detail (application_id, source, extra, version)
 		 VALUES ($1, 'test', '{}'::jsonb, $2)",
 	)
 	.bind::<sql_types::Uuid, _>(server_id)
@@ -1105,7 +1114,7 @@ async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
 					replica_name: None,
 					consumer_device_id: device_id,
 					group_id: group,
-					server_id: Some(server),
+					machine_id: Some(server),
 					r#type: commons_types::backup::BackupType::TamanuPostgres,
 					intent: commons_types::backup::RestoreIntent::from("verify"),
 					snapshot_id: Some("snap-1".into()),
@@ -1128,6 +1137,7 @@ async fn a_failed_verdict_settles_the_snapshot_and_version_pair() {
 					redaction_error: None,
 				},
 				database::migration_tests::NewMigrationTest {
+					application_id: server,
 					target_version_id: planned,
 					total_elapsed: database::pg_duration::PgDuration(
 						jiff::SignedDuration::from_secs(30),
@@ -1186,7 +1196,7 @@ async fn a_reported_migration_test_lands_and_settles_the_entry() {
 				.json(&serde_json::json!({
 					"replica_id": entry["replica_id"],
 					"group": group,
-					"server_id": server,
+					"machine_id": server,
 					"type": "tamanu-postgres",
 					"intent": "verify",
 					"snapshot_id": entry["snapshot_id"],
@@ -1259,7 +1269,7 @@ async fn a_migration_report_by_version_id_still_lands() {
 				.json(&serde_json::json!({
 					"replica_id": entry["replica_id"],
 					"group": group,
-					"server_id": server,
+					"machine_id": server,
 					"type": "tamanu-postgres",
 					"intent": "verify",
 					"snapshot_id": entry["snapshot_id"],
@@ -1318,7 +1328,7 @@ async fn a_migration_report_naming_no_version_is_refused() {
 				.json(&serde_json::json!({
 					"replica_id": entry["replica_id"],
 					"group": group,
-					"server_id": server,
+					"machine_id": server,
 					"type": "tamanu-postgres",
 					"intent": "verify",
 					"snapshot_id": entry["snapshot_id"],
@@ -1369,7 +1379,7 @@ async fn a_migration_report_with_an_unknown_version_is_refused() {
 				.json(&serde_json::json!({
 					"replica_id": entry["replica_id"],
 					"group": group,
-					"server_id": server,
+					"machine_id": server,
 					"type": "tamanu-postgres",
 					"intent": "verify",
 					"snapshot_id": entry["snapshot_id"],
@@ -1386,6 +1396,319 @@ async fn a_migration_report_with_an_unknown_version_is_refused() {
 				}))
 				.await
 				.assert_status(http::StatusCode::NOT_FOUND);
+		},
+	)
+	.await;
+}
+
+/// A box running two workloads is one machine, so a whole-group declaration
+/// gives it one replica of its one snapshot. Expanding over applications gave
+/// it two, both restoring the same backup.
+// spec: RST#declared-replicas
+#[tokio::test(flavor = "multi_thread")]
+async fn a_two_workload_box_gets_one_replica_not_one_per_workload() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let machine = make_server(&mut conn, group).await;
+
+			// A second workload on the same box.
+			let second = Uuid::new_v4();
+			sql_query(
+				"INSERT INTO applications (id, host, type, group_id, machine_id) \
+				 VALUES ($1, $2, 'tamanu-central', $3, $4)",
+			)
+			.bind::<sql_types::Uuid, _>(second)
+			.bind::<sql_types::Text, _>(format!("https://second-{second}.example.com"))
+			.bind::<sql_types::Uuid, _>(group)
+			.bind::<sql_types::Uuid, _>(machine)
+			.execute(&mut conn)
+			.await
+			.expect("second application");
+
+			make_success_run(&mut conn, device_id, group, machine, "snap-a").await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
+			public
+				.post("/restore-capabilities")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(
+					&serde_json::json!({ "intents": [{"intent": "verify", "semantics": ["check"]}] }),
+				)
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			let resp = public
+				.get("/restore-worklist")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.await;
+			resp.assert_status_ok();
+			let entries: Vec<serde_json::Value> = resp.json();
+			assert_eq!(
+				entries.len(),
+				1,
+				"one box, one snapshot, one replica — not one per workload: {entries:?}"
+			);
+			assert_eq!(entries[0]["machine_id"], machine.to_string());
+			assert_eq!(entries[0]["snapshot_id"], "snap-a");
+		},
+	)
+	.await;
+}
+
+/// The one place the grains genuinely interleave: a migrate entry names the
+/// machine whose snapshot it restores *and* the type of application whose
+/// candidate it carries, because a snapshot is a box's and a version is a
+/// workload's. The workload is named by its type, Canopy's own identifier for
+/// an application being internal and never on the wire.
+// spec: RST#dispatching-a-migration-test
+#[tokio::test(flavor = "multi_thread")]
+async fn a_migrate_entry_names_both_the_machine_and_the_candidates_application() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let machine = make_server(&mut conn, group).await;
+			make_success_run(&mut conn, device_id, group, machine, "snap-1").await;
+			report_version(&mut conn, machine, "2.62.0").await;
+			let planned = publish_version(&mut conn, 63, 2).await;
+			plan_upgrade(&mut conn, group, planned).await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
+			register_migrate_intent(&public, &cert).await;
+
+			let dispatched: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.await
+				.json();
+			assert_eq!(dispatched.len(), 1, "got {dispatched:?}");
+			let entry = &dispatched[0];
+
+			assert_eq!(
+				entry["machine_id"],
+				machine.to_string(),
+				"the data under test is the box's snapshot"
+			);
+			assert_eq!(
+				entry["application_type"], "tamanu-central",
+				"and the version under test is the workload's candidate"
+			);
+			assert_eq!(entry["snapshot_id"], "snap-1");
+			assert_eq!(entry["target_version"], "2.63.2");
+		},
+	)
+	.await;
+}
+
+/// A consumer built before a machine and the software on it became separate
+/// records knows the restored box as `server_id`. Both sides of that exchange
+/// keep working: the worklist still names it, and a report that names only it
+/// is understood.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_earlier_server_id_shape_still_works_end_to_end() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let server = make_server(&mut conn, group).await;
+			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
+
+			public
+				.post("/restore-capabilities")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"intents": [{"intent": "verify", "semantics": ["check", "once"]}]
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			let entries: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.await
+				.json();
+			assert_eq!(entries.len(), 1, "got {entries:?}");
+			// The entry carries both names for the one box, so a consumer on
+			// either shape finds what to restore.
+			assert_eq!(entries[0]["machine_id"], server.to_string());
+			assert_eq!(entries[0]["server_id"], server.to_string());
+
+			// A report in the earlier shape settles the replica exactly as one
+			// naming `machine_id` does.
+			public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"replica_id": entries[0]["replica_id"],
+					"group": group,
+					"server_id": server,
+					"type": "tamanu-postgres",
+					"intent": "verify",
+					"snapshot_id": "snap-1",
+					"outcome": "success",
+					"replica_healthy": true,
+					"observed_at": "2026-06-30T00:00:00Z",
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			let entries: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.await
+				.json();
+			assert!(
+				entries.is_empty(),
+				"a report on the earlier shape verified the snapshot: {entries:?}"
+			);
+		},
+	)
+	.await;
+}
+
+/// Naming the box twice is refused rather than resolved by preference: a
+/// reporter that disagrees with itself about what it restored has not been
+/// understood, and guessing would grade a replica on the wrong restore.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_report_naming_both_machine_and_server_is_refused() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let server = make_server(&mut conn, group).await;
+			make_success_run(&mut conn, device_id, group, server, "snap-1").await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
+
+			public
+				.post("/restore-capabilities")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"intents": [{"intent": "verify", "semantics": ["check", "once"]}]
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			let entries: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.await
+				.json();
+
+			for body in [
+				serde_json::json!({"machine_id": server, "server_id": server}),
+				serde_json::json!({}),
+			] {
+				let mut args = serde_json::json!({
+					"replica_id": entries[0]["replica_id"],
+					"group": group,
+					"type": "tamanu-postgres",
+					"intent": "verify",
+					"snapshot_id": "snap-1",
+					"outcome": "success",
+					"replica_healthy": true,
+					"observed_at": "2026-06-30T00:00:00Z",
+				});
+				for (k, v) in body.as_object().unwrap() {
+					args[k] = v.clone();
+				}
+				public
+					.post("/restore-verification")
+					.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+					.json(&args)
+					.await
+					.assert_status(http::StatusCode::BAD_REQUEST);
+			}
+		},
+	)
+	.await;
+}
+
+/// A consumer that predates the worklist entry carrying the application sends a
+/// migration report without one. The box runs two workloads, so the sole-
+/// application shortcut does not apply and the finding is resolved from the
+/// machine and the version instead.
+// spec: RST#dispatching-a-migration-test
+#[tokio::test(flavor = "multi_thread")]
+async fn a_migration_report_omitting_the_application_resolves_it_from_machine_and_version() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			let group = make_group(&mut conn).await;
+			make_config(&mut conn, group, "ready").await;
+			let machine = make_server(&mut conn, group).await;
+
+			// A second workload on the same box, of a product with no upgrade
+			// train through Tamanu's migrations.
+			let second = Uuid::new_v4();
+			sql_query(
+				"INSERT INTO applications (id, host, type, group_id, machine_id) \
+				 VALUES ($1, $2, 'senaite', $3, $4)",
+			)
+			.bind::<sql_types::Uuid, _>(second)
+			.bind::<sql_types::Text, _>(format!("https://second-{second}.example.com"))
+			.bind::<sql_types::Uuid, _>(group)
+			.bind::<sql_types::Uuid, _>(machine)
+			.execute(&mut conn)
+			.await
+			.expect("second application");
+
+			make_success_run(&mut conn, device_id, group, machine, "snap-1").await;
+			report_version(&mut conn, machine, "2.62.0").await;
+			let planned = publish_version(&mut conn, 63, 2).await;
+			plan_upgrade(&mut conn, group, planned).await;
+			declare_replica(&mut conn, device_id, group, "verify").await;
+			register_migrate_intent(&public, &cert).await;
+
+			let dispatched: Vec<serde_json::Value> = public
+				.get("/restore-worklist")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.await
+				.json();
+			let entry = &dispatched[0];
+
+			public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"replica_id": entry["replica_id"],
+					"group": group,
+					"machine_id": machine,
+					"type": "tamanu-postgres",
+					"intent": "verify",
+					"snapshot_id": entry["snapshot_id"],
+					"outcome": "success",
+					"replica_healthy": true,
+					"observed_at": "2026-07-30T00:00:00Z",
+					"migration": {
+						"target_version": entry["target_version"],
+						"total_elapsed_seconds": 60,
+						"data_bytes_before": 10,
+						"data_bytes_after": 10,
+						"timings": [],
+					},
+				}))
+				.await
+				.assert_status(http::StatusCode::NO_CONTENT);
+
+			assert_eq!(
+				database::migration_tests::verdict(&mut conn, machine, planned)
+					.await
+					.expect("verdict"),
+				database::migration_tests::Verdict::Passed,
+				"the finding lands on the workload whose candidate the version is",
+			);
+			assert_eq!(
+				database::migration_tests::verdict(&mut conn, second, planned)
+					.await
+					.expect("verdict"),
+				database::migration_tests::Verdict::NotTested,
+				"and not on the other workload sharing the box",
+			);
 		},
 	)
 	.await;

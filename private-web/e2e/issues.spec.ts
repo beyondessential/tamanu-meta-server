@@ -8,7 +8,7 @@ import {
 import { expect, test } from "./test-fixtures";
 
 // Group-scoped issues (server_id NULL, server_group_id set) must not render a
-// per-server link (`/servers/null`) or a per-server silence action — both only
+// per-server link (`/fleet/applications/null`) or a per-server silence action — both only
 // make sense for server-scoped issues.
 test.describe("issue check documentation", () => {
 	test.beforeEach(async ({ sql }) => {
@@ -53,7 +53,7 @@ test.describe("issue status snapshot", () => {
 	}) => {
 		const server = await seedServer(sql, {
 			name: "snapshot-issue-server",
-			kind: "central",
+			type: "tamanu-central",
 		});
 		// Two sources reported around the issue's time, each with its own
 		// check and its own raw payload. Inserted directly (not via
@@ -73,9 +73,13 @@ test.describe("issue status snapshot", () => {
 		// Both checks need a live catalog row to present (mirrors ingestion,
 		// which upserts one per reported check); the snapshot excludes
 		// orphaned check-states with no catalog policy.
+		// Both name the workload, and the server reporting them is a Tamanu
+		// central, so both land in that type's namespace.
 		await sql.query(
-			`INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'postgres'), ('tamanu', 'tasks')
-			 ON CONFLICT (source, check_name) DO NOTHING`,
+			`INSERT INTO check_policies (source, subject, application_type, check_name) VALUES
+			 ('alertd', 'application', 'tamanu-central', 'postgres'),
+			 ('tamanu', 'application', 'tamanu-central', 'tasks')
+			 ON CONFLICT (source, subject, application_type, check_name) DO NOTHING`,
 		);
 		// The issue provides the row (and its last_seen is the snapshot's `at`).
 		await seedIssue(sql, {
@@ -110,7 +114,7 @@ test.describe("group-scoped issue rendering", () => {
 		await resetSeededTables(sql);
 	});
 
-	test("a group-scoped issue has no /servers/null link", async ({
+	test("a group-scoped issue has no /fleet/applications/null link", async ({
 		page,
 		sql,
 	}) => {
@@ -126,7 +130,7 @@ test.describe("group-scoped issue rendering", () => {
 		await expect(page.getByText("group-wide backup issue")).toBeVisible();
 
 		// No broken server link is rendered for the group-scoped issue.
-		await expect(page.locator('a[href="/servers/null"]')).toHaveCount(0);
+		await expect(page.locator('a[href="/fleet/applications/null"]')).toHaveCount(0);
 	});
 
 	test("a group-scoped issue offers no per-server silence button", async ({
@@ -172,11 +176,11 @@ test.describe("manual conditions", () => {
 		const group = await seedServerGroup(sql, { name: "ManualGroup" });
 		const server = await seedServer(sql, {
 			name: "manual-target",
-			kind: "central",
+			type: "tamanu-central",
 			groupId: group.id,
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 		await page.getByRole("button", { name: /new incident/i }).click();
 
 		const dialog = page.getByRole("dialog");

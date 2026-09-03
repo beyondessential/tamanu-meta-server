@@ -2,9 +2,10 @@
 
 use commons_types::{Uuid, status::CheckResult};
 use database::{
+	applications::Application,
+	diesel_async::AsyncPgConnection,
 	issues::{Incident, IncidentStatusFilter, Issue, IssueListFilters},
 	server_groups::ServerGroup,
-	servers::Server,
 	slack_outbox::SlackOutbox,
 };
 use jiff::Timestamp;
@@ -51,10 +52,16 @@ pub struct FindIssuesArgs {
 	/// Filter to issues whose latest effective result is one of these:
 	/// `failed`, `warning`, `broken`, `passed`, `skipped`.
 	pub results: Option<Vec<String>>,
-	/// Restrict to issues whose server is in this group's id.
+	/// Restrict to issues whose target is in this group's id: its
+	/// applications', its machines', and the group's own.
 	pub group_id: Option<String>,
-	/// Restrict to one server's id.
-	pub server_id: Option<String>,
+	/// Restrict to one application's id. Returns the issues of the machine it
+	/// runs on among its own, matching what that application presents: a box's
+	/// disk filling degrades the software on it.
+	pub application_id: Option<String>,
+	/// Restrict to one machine's id, its own issues only. Ask this to find out
+	/// what is wrong with a box rather than with any workload on it.
+	pub machine_id: Option<String>,
 	/// Only issues last seen within this many days.
 	pub since_days: Option<u32>,
 	/// Max issues to return (default 100).
@@ -73,6 +80,12 @@ pub struct CheckDocArgs {
 struct CheckDocOut {
 	source: String,
 	check_name: String,
+	/// How the check presents: `<type>.<check>` where it is one application
+	/// type's, the bare name otherwise.
+	qualified_name: String,
+	/// The application type this entry is for, or `null` where the check is the
+	/// machine's or a curated source's.
+	application_type: Option<String>,
 	ceiling: CheckResult,
 	escalates: bool,
 	/// Operator-authored markdown, or `null` if nobody has documented
@@ -99,8 +112,8 @@ pub struct CheckStabilityArgs {
 	/// The (source, check) pairs to fetch stability for. Up to 32.
 	pub checks: Vec<CheckRefArg>,
 	/// Restrict to one server's id.
-	pub server_id: Option<String>,
-	/// Restrict to one group's id (its servers plus its group-scoped
+	pub application_id: Option<String>,
+	/// Restrict to one group's id (its applications plus its group-scoped
 	/// checks).
 	pub group_id: Option<String>,
 }
@@ -110,7 +123,7 @@ struct CheckStabilityRow {
 	issue_id: Uuid,
 	/// The server the state belongs to; `null` for group- or canopy-wide
 	/// states.
-	server_id: Option<Uuid>,
+	application_id: Option<Uuid>,
 	server_name: Option<String>,
 	/// The group for group-scoped states; `null` otherwise.
 	group_id: Option<Uuid>,
@@ -168,6 +181,89 @@ struct IncidentList {
 	incidents: Vec<IncidentSummary>,
 }
 
+/// The display names every grain an issue can be filed at, for a batch of them.
+///
+/// One resolver so the incident view and the issue list cannot disagree about
+/// what a scope is called, and so adding a grain is one change rather than two.
+async fn scope_labels(
+	conn: &mut AsyncPgConnection,
+	issues: &[&Issue],
+) -> Result<
+	(
+		std::collections::HashMap<Uuid, (Option<String>, Option<String>)>,
+		std::collections::HashMap<Uuid, Option<String>>,
+		std::collections::HashMap<Uuid, String>,
+	),
+	McpError,
+> {
+	let applications = Application::names_by_ids(
+		conn,
+		&unique(issues.iter().filter_map(|i| i.application_id)),
+	)
+	.await
+	.map_err(mcp_err)?;
+	let machines = database::machines::Machine::names_by_ids(
+		conn,
+		&unique(issues.iter().filter_map(|i| i.machine_id)),
+	)
+	.await
+	.map_err(mcp_err)?;
+	let groups = group_names(
+		conn,
+		&unique(issues.iter().filter_map(|i| i.server_group_id)),
+	)
+	.await?;
+	Ok((applications, machines, groups))
+}
+
+/// What an issue is filed against, and what that thing is called.
+///
+/// One tagged value rather than a row of nullable ids: a client asking "whose
+/// failure is this" gets the grain and the name together, and cannot read a
+/// machine's issue as an unattributed one because `application_id` was null.
+// spec: MCP#incidents-and-issues
+#[derive(Serialize)]
+#[serde(tag = "grain", rename_all = "snake_case")]
+enum IssueScopeOut {
+	/// The software: a version, a database connection, a service of its own.
+	Application { id: Uuid, name: Option<String> },
+	/// The box: its disks, its memory, its clock, its reachability.
+	Machine { id: Uuid, name: Option<String> },
+	/// The group as a whole, rather than any one of its parts.
+	Group { id: Uuid, name: Option<String> },
+	/// Canopy watching itself.
+	Canopy,
+}
+
+impl IssueScopeOut {
+	fn of(
+		issue: &Issue,
+		applications: &std::collections::HashMap<Uuid, (Option<String>, Option<String>)>,
+		machines: &std::collections::HashMap<Uuid, Option<String>>,
+		groups: &std::collections::HashMap<Uuid, String>,
+	) -> Self {
+		match database::issues::Scope::from_columns(
+			issue.application_id,
+			issue.machine_id,
+			issue.server_group_id,
+		) {
+			database::issues::Scope::Application(id) => Self::Application {
+				id,
+				name: applications.get(&id).and_then(|(n, _)| n.clone()),
+			},
+			database::issues::Scope::Machine(id) => Self::Machine {
+				id,
+				name: machines.get(&id).cloned().flatten(),
+			},
+			database::issues::Scope::Group(id) => Self::Group {
+				id,
+				name: groups.get(&id).cloned(),
+			},
+			database::issues::Scope::Global => Self::Canopy,
+		}
+	}
+}
+
 #[derive(Serialize)]
 struct IncidentIssueOut {
 	issue_id: Uuid,
@@ -183,8 +279,9 @@ struct IncidentIssueOut {
 	description: Option<String>,
 	message: String,
 	active: bool,
-	server_id: Option<Uuid>,
-	server_name: Option<String>,
+	/// Whose failure this is: the box, the software on it, the group, or
+	/// Canopy itself.
+	scope: IssueScopeOut,
 	first_seen: Timestamp,
 	last_seen: Timestamp,
 	joined_at: Timestamp,
@@ -217,9 +314,9 @@ struct IncidentDetail {
 #[derive(Serialize)]
 struct IssueSummary {
 	id: Uuid,
-	server_id: Option<Uuid>,
-	server_name: Option<String>,
-	group_id: Option<Uuid>,
+	/// Whose failure this is: the box, the software on it, the group, or
+	/// Canopy itself.
+	scope: IssueScopeOut,
 	source: String,
 	r#ref: String,
 	observed_result: Option<CheckResult>,
@@ -250,7 +347,7 @@ struct IncidentRefOut {
 #[derive(Serialize)]
 struct IssueDetail {
 	id: Uuid,
-	server_id: Option<Uuid>,
+	application_id: Option<Uuid>,
 	server_name: Option<String>,
 	group_id: Option<Uuid>,
 	source: String,
@@ -370,12 +467,8 @@ impl CanopyMcp {
 			.await
 			.map_err(mcp_err)?
 			.contains(&incident.id);
-		let names = Server::names_by_ids(
-			&mut conn,
-			&unique(rows.iter().filter_map(|(_, i)| i.server_id)),
-		)
-		.await
-		.map_err(mcp_err)?;
+		let (names, machine_names, group_names_map) =
+			scope_labels(&mut conn, &rows.iter().map(|(_, i)| i).collect::<Vec<_>>()).await?;
 
 		let issues = rows
 			.iter()
@@ -389,11 +482,7 @@ impl CanopyMcp {
 				description: iss.description.clone(),
 				message: iss.message.clone(),
 				active: iss.active,
-				server_id: iss.server_id,
-				server_name: iss
-					.server_id
-					.and_then(|s| names.get(&s))
-					.and_then(|(n, _)| n.clone()),
+				scope: IssueScopeOut::of(iss, &names, &machine_names, &group_names_map),
 				first_seen: iss.first_seen,
 				last_seen: iss.last_seen,
 				joined_at: link.joined_at,
@@ -432,7 +521,8 @@ impl CanopyMcp {
 		let mut conn = self.conn().await?;
 		let results = parse_results(&args.results)?;
 		let group = parse_opt_uuid(&args.group_id, "group_id")?;
-		let server = parse_opt_uuid(&args.server_id, "server_id")?;
+		let server = parse_opt_uuid(&args.application_id, "application_id")?;
+		let machine = parse_opt_uuid(&args.machine_id, "machine_id")?;
 		let since = args.since_days.map(since_from_days);
 		let limit = args.limit.unwrap_or(100);
 
@@ -442,7 +532,8 @@ impl CanopyMcp {
 				active_only: args.active_only.unwrap_or(true),
 				results,
 				server_group_id: group,
-				server_id: server,
+				application_id: server,
+				machine_id: machine,
 				since,
 			},
 			limit,
@@ -450,14 +541,12 @@ impl CanopyMcp {
 		.await
 		.map_err(mcp_err)?;
 
-		let names = Server::names_by_ids(
-			&mut conn,
-			&unique(issues.iter().filter_map(|i| i.server_id)),
-		)
-		.await
-		.map_err(mcp_err)?;
-		let summaries: Vec<IssueSummary> =
-			issues.iter().map(|i| issue_summary(i, &names)).collect();
+		let (names, machine_names, group_names_map) =
+			scope_labels(&mut conn, &issues.iter().collect::<Vec<_>>()).await?;
+		let summaries: Vec<IssueSummary> = issues
+			.iter()
+			.map(|i| issue_summary(i, &names, &machine_names, &group_names_map))
+			.collect();
 		ok_json(&IssueList {
 			count: summaries.len(),
 			issues: summaries,
@@ -479,8 +568,8 @@ impl CanopyMcp {
 		let inc = Incident::for_issues(&mut conn, &[id])
 			.await
 			.map_err(mcp_err)?;
-		let server_name = match issue.server_id {
-			Some(sid) => Server::names_by_ids(&mut conn, &[sid])
+		let server_name = match issue.application_id {
+			Some(sid) => Application::names_by_ids(&mut conn, &[sid])
 				.await
 				.map_err(mcp_err)?
 				.get(&sid)
@@ -501,7 +590,7 @@ impl CanopyMcp {
 
 		ok_json(&IssueDetail {
 			id: issue.id,
-			server_id: issue.server_id,
+			application_id: issue.application_id,
 			server_name,
 			group_id: issue.server_group_id,
 			source: issue.source.clone(),
@@ -534,22 +623,41 @@ impl CanopyMcp {
 	) -> Result<CallToolResult, McpError> {
 		use database::check_policies::CheckPolicy;
 		let mut conn = self.conn().await?;
-		let Some(policy) = CheckPolicy::get(&mut conn, &args.source, &args.check_name)
-			.await
-			.map_err(mcp_err)?
-		else {
+		// A name can be several entries: an application-subject check is one per
+		// type, each with its own ceiling and documentation. Return them all
+		// rather than picking one, so the caller sees what it is choosing between.
+		let policies =
+			CheckPolicy::get_across_namespaces(&mut conn, &args.source, &args.check_name)
+				.await
+				.map_err(mcp_err)?;
+		if policies.is_empty() {
 			return Ok(not_found(format!(
 				"no catalog entry for ({}, {}) — that source has never reported that check",
 				args.source, args.check_name
 			)));
-		};
-		ok_json(&CheckDocOut {
-			source: policy.source,
-			check_name: policy.check_name,
-			ceiling: policy.ceiling,
-			escalates: policy.escalates,
-			documentation: policy.documentation,
-		})
+		}
+		let out: Vec<CheckDocOut> = policies
+			.into_iter()
+			.map(|policy| {
+				let namespace = policy.namespace().ok();
+				CheckDocOut {
+					qualified_name: namespace.as_ref().map_or_else(
+						|| policy.check_name.clone(),
+						|ns| ns.qualified_name(&policy.check_name),
+					),
+					application_type: namespace
+						.as_ref()
+						.and_then(|ns| ns.application_type())
+						.map(|t| t.to_string()),
+					source: policy.source,
+					check_name: policy.check_name,
+					ceiling: policy.ceiling,
+					escalates: policy.escalates,
+					documentation: policy.documentation,
+				}
+			})
+			.collect();
+		ok_json(&out)
 	}
 
 	#[tool(
@@ -578,7 +686,7 @@ impl CanopyMcp {
 				None,
 			));
 		}
-		let server_id = parse_opt_uuid(&args.server_id, "server_id")?;
+		let application_id = parse_opt_uuid(&args.application_id, "application_id")?;
 		let group_id = parse_opt_uuid(&args.group_id, "group_id")?;
 		let pairs: Vec<(String, String)> = args
 			.checks
@@ -587,12 +695,13 @@ impl CanopyMcp {
 			.collect();
 
 		let mut conn = self.conn().await?;
-		let states = database::stability::states_for_checks(&mut conn, &pairs, server_id, group_id)
-			.await
-			.map_err(mcp_err)?;
+		let states =
+			database::stability::states_for_checks(&mut conn, &pairs, application_id, group_id)
+				.await
+				.map_err(mcp_err)?;
 
-		let server_ids: Vec<Uuid> = unique(states.iter().filter_map(|(st, _)| st.server_id));
-		let names = Server::names_by_ids(&mut conn, &server_ids)
+		let server_ids: Vec<Uuid> = unique(states.iter().filter_map(|(st, _)| st.application_id));
+		let names = Application::names_by_ids(&mut conn, &server_ids)
 			.await
 			.map_err(mcp_err)?;
 		let now = Timestamp::now();
@@ -600,9 +709,9 @@ impl CanopyMcp {
 			.into_iter()
 			.map(|(st, stability)| CheckStabilityRow {
 				issue_id: st.id,
-				server_id: st.server_id,
+				application_id: st.application_id,
 				server_name: st
-					.server_id
+					.application_id
 					.and_then(|sid| names.get(&sid))
 					.and_then(|(n, _)| n.clone()),
 				group_id: st.server_group_id,
@@ -655,15 +764,12 @@ fn parse_results(v: &Option<Vec<String>>) -> Result<Option<Vec<CheckResult>>, Mc
 fn issue_summary(
 	i: &Issue,
 	names: &std::collections::HashMap<Uuid, (Option<String>, Option<String>)>,
+	machines: &std::collections::HashMap<Uuid, Option<String>>,
+	groups: &std::collections::HashMap<Uuid, String>,
 ) -> IssueSummary {
 	IssueSummary {
 		id: i.id,
-		server_id: i.server_id,
-		server_name: i
-			.server_id
-			.and_then(|s| names.get(&s))
-			.and_then(|(n, _)| n.clone()),
-		group_id: i.server_group_id,
+		scope: IssueScopeOut::of(i, names, machines, groups),
 		source: i.source.clone(),
 		r#ref: i.r#ref.clone(),
 		observed_result: i.observed_result,

@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
 	CanopyMcp,
-	servers::{Retained, ServerSummary, summarize},
+	applications::{Retained, ServerSummary, summarize},
 	util::{mcp_err, not_found, ok_json, parse_uuid},
 };
 
@@ -162,7 +162,10 @@ impl CanopyMcp {
 		let statuses = Status::latest_for_servers(&mut conn, &mids)
 			.await
 			.map_err(mcp_err)?;
-		let st_by: HashMap<Uuid, &Status> = statuses.iter().map(|s| (s.server_id, s)).collect();
+		let st_by: HashMap<Uuid, &Status> = statuses
+			.iter()
+			.filter_map(|s| Some((s.server_id?, s)))
+			.collect();
 		// Same retained-version resolution as `find_servers`: a member quiet
 		// for more than the status window still ran something last time
 		// anyone heard from it.
@@ -172,6 +175,9 @@ impl CanopyMcp {
 			.filter(|id| !st_by.contains_key(id))
 			.collect();
 		let last_versions = ReportedDetail::last_versions(&mut conn, &missed)
+			.await
+			.map_err(mcp_err)?;
+		let last_reported = ReportedDetail::last_reported_ats(&mut conn, &mids)
 			.await
 			.map_err(mcp_err)?;
 		let member_groups: Vec<(Uuid, Option<Uuid>)> =
@@ -187,6 +193,7 @@ impl CanopyMcp {
 					st_by.get(&s.id).copied(),
 					Retained {
 						version: last_versions.get(&s.id).cloned(),
+						last_reported_at: last_reported.get(&s.id).copied(),
 					},
 					Some(group.name.clone()),
 					health.get(&s.id).copied().unwrap_or_default(),

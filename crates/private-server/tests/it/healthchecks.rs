@@ -3,13 +3,26 @@
 use commons_tests::diesel_async::SimpleAsyncConnection;
 use serde_json::json;
 
+/// The application type the seeded catalog rows belong to.
+///
+/// `alertd` is a structured source, so every check it reports about an
+/// application is namespaced by that application's type. Seeding these rows
+/// flat would catalogue entries ingest can never produce, and the API calls
+/// below would then be editing a namespace nothing files into.
+const TYPE: &str = "tamanu-central";
+
+/// The namespace those rows live in, as the API names it.
+fn ns() -> serde_json::Value {
+	json!({"subject": "application", "application_type": TYPE})
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn list_returns_catalog_rows_with_pending_review_flag() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO check_policies (source, check_name, ceiling) VALUES \
-				('alertd', 'disk_space', 'warning'), \
-				('alertd', 'reviewed_check', 'failed'); \
+			"INSERT INTO check_policies (source, subject, application_type, check_name, ceiling) VALUES \
+				('alertd', 'application', 'tamanu-central', 'disk_space', 'warning'), \
+				('alertd', 'application', 'tamanu-central', 'reviewed_check', 'failed'); \
 			 UPDATE check_policies \
 			   SET reviewed_at = NOW(), reviewed_by = 'alice@example.com' \
 			   WHERE check_name = 'reviewed_check';",
@@ -31,6 +44,10 @@ async fn list_returns_catalog_rows_with_pending_review_flag() {
 
 		assert_eq!(body[0]["source"], "alertd");
 		assert_eq!(body[0]["check_name"], "disk_space");
+		// The name is stored bare and the namespace beside it; the qualified
+		// form is presentation the listing derives.
+		assert_eq!(body[0]["namespace"], ns());
+		assert_eq!(body[0]["qualified_name"], format!("{TYPE}.disk_space"));
 		assert_eq!(body[0]["ceiling"], "warning");
 		assert_eq!(body[0]["pending_review"], true);
 		assert!(body[0]["reviewed_at"].is_null());
@@ -44,6 +61,9 @@ async fn list_returns_catalog_rows_with_pending_review_flag() {
 		// condition warrants rather than the default warning ceiling.
 		assert_eq!(body[2]["source"], "canopy");
 		assert_eq!(body[2]["check_name"], "reachability");
+		// Canopy curates its own names, so they are unqualified.
+		assert_eq!(body[2]["namespace"]["subject"], serde_json::Value::Null);
+		assert_eq!(body[2]["qualified_name"], "reachability");
 		assert_eq!(body[2]["ceiling"], "failed");
 		assert_eq!(body[2]["pending_review"], false);
 	})
@@ -54,7 +74,8 @@ async fn list_returns_catalog_rows_with_pending_review_flag() {
 async fn update_changes_policy_and_stamps_review_metadata() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'disk_space');",
+			"INSERT INTO check_policies (source, subject, application_type, check_name) \
+			 VALUES ('alertd', 'application', 'tamanu-central', 'disk_space');",
 		)
 		.await
 		.unwrap();
@@ -64,6 +85,7 @@ async fn update_changes_policy_and_stamps_review_metadata() {
 			.json(&json!({
 				"source": "alertd",
 				"check_name": "disk_space",
+				"namespace": ns(),
 				"ceiling": "failed",
 				"escalates": true
 			}))
@@ -89,7 +111,8 @@ async fn update_changes_policy_and_stamps_review_metadata() {
 async fn update_rejects_unknown_ceiling() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'disk_space');",
+			"INSERT INTO check_policies (source, subject, application_type, check_name) \
+			 VALUES ('alertd', 'application', 'tamanu-central', 'disk_space');",
 		)
 		.await
 		.unwrap();
@@ -99,6 +122,7 @@ async fn update_rejects_unknown_ceiling() {
 			.json(&json!({
 				"source": "alertd",
 				"check_name": "disk_space",
+				"namespace": ns(),
 				"ceiling": "extremely_critical"
 			}))
 			.await;
@@ -111,7 +135,8 @@ async fn update_rejects_unknown_ceiling() {
 async fn update_marks_reviewed_even_when_policy_unchanged() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'noisy_check');",
+			"INSERT INTO check_policies (source, subject, application_type, check_name) \
+			 VALUES ('alertd', 'application', 'tamanu-central', 'noisy_check');",
 		)
 		.await
 		.unwrap();
@@ -122,6 +147,7 @@ async fn update_marks_reviewed_even_when_policy_unchanged() {
 			.json(&json!({
 				"source": "alertd",
 				"check_name": "noisy_check",
+				"namespace": ns(),
 				"ceiling": "warning"
 			}))
 			.await;
@@ -141,11 +167,11 @@ async fn update_marks_reviewed_even_when_policy_unchanged() {
 async fn list_returns_rules_and_rule_count() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO check_policies (source, check_name, rules) VALUES \
-				('alertd', 'no_rules', NULL), \
-				('alertd', 'one_rule', '{\"if\": [{\"==\": [{\"var\": \"check.x\"}, 1]}, \"failed\"]}'::jsonb), \
-				('alertd', 'two_rules', '{\"if\": [{\"==\": [{\"var\": \"check.x\"}, 1]}, \"failed\", {\"==\": [{\"var\": \"check.x\"}, 2]}, \"warning\"]}'::jsonb), \
-				('alertd', 'garbage_rules', '{\"and\": [true]}'::jsonb);",
+			"INSERT INTO check_policies (source, subject, application_type, check_name, rules) VALUES \
+				('alertd', 'application', 'tamanu-central', 'no_rules', NULL), \
+				('alertd', 'application', 'tamanu-central', 'one_rule', '{\"if\": [{\"==\": [{\"var\": \"check.x\"}, 1]}, \"failed\"]}'::jsonb), \
+				('alertd', 'application', 'tamanu-central', 'two_rules', '{\"if\": [{\"==\": [{\"var\": \"check.x\"}, 1]}, \"failed\", {\"==\": [{\"var\": \"check.x\"}, 2]}, \"warning\"]}'::jsonb), \
+				('alertd', 'application', 'tamanu-central', 'garbage_rules', '{\"and\": [true]}'::jsonb);",
 		)
 		.await
 		.unwrap();
@@ -180,7 +206,8 @@ async fn list_returns_rules_and_rule_count() {
 async fn update_rules_accepts_valid_ladder() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'disk_space');",
+			"INSERT INTO check_policies (source, subject, application_type, check_name) \
+			 VALUES ('alertd', 'application', 'tamanu-central', 'disk_space');",
 		)
 		.await
 		.unwrap();
@@ -190,6 +217,7 @@ async fn update_rules_accepts_valid_ladder() {
 			.json(&json!({
 				"source": "alertd",
 				"check_name": "disk_space",
+				"namespace": ns(),
 				"rules": {"if": [
 					{">": [{"var": "check.used_pct"}, 95]}, "failed"
 				]}
@@ -209,15 +237,20 @@ async fn update_rules_accepts_valid_ladder() {
 async fn update_rules_with_null_clears_the_column() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO check_policies (source, check_name, rules) VALUES \
-				('alertd', 'disk_space', '{\"if\": [{\"==\": [{\"var\": \"check.x\"}, 1]}, \"failed\"]}'::jsonb);",
+			"INSERT INTO check_policies (source, subject, application_type, check_name, rules) VALUES \
+				('alertd', 'application', 'tamanu-central', 'disk_space', '{\"if\": [{\"==\": [{\"var\": \"check.x\"}, 1]}, \"failed\"]}'::jsonb);",
 		)
 		.await
 		.unwrap();
 
 		let response = private
 			.post("/api/healthchecks/update_rules")
-			.json(&json!({"source": "alertd", "check_name": "disk_space", "rules": null}))
+			.json(&json!({
+					"source": "alertd",
+					"check_name": "disk_space",
+					"namespace": ns(),
+					"rules": null,
+				}))
 			.await;
 		response.assert_status_ok();
 		let body: serde_json::Value = response.json();
@@ -231,7 +264,8 @@ async fn update_rules_with_null_clears_the_column() {
 async fn update_rules_normalises_empty_ladder_to_null() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'disk_space');",
+			"INSERT INTO check_policies (source, subject, application_type, check_name) \
+			 VALUES ('alertd', 'application', 'tamanu-central', 'disk_space');",
 		)
 		.await
 		.unwrap();
@@ -239,7 +273,12 @@ async fn update_rules_normalises_empty_ladder_to_null() {
 		// normalise it to null at write time.
 		let response = private
 			.post("/api/healthchecks/update_rules")
-			.json(&json!({"source": "alertd", "check_name": "disk_space", "rules": {"if": []}}))
+			.json(&json!({
+				"source": "alertd",
+				"check_name": "disk_space",
+				"namespace": ns(),
+				"rules": {"if": []},
+			}))
 			.await;
 		// Either the API rejects an empty ladder OR normalises it. Both
 		// land at `rule_count == 0` and a null rules column.
@@ -258,7 +297,8 @@ async fn update_rules_normalises_empty_ladder_to_null() {
 async fn update_rules_rejects_malformed_shapes() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'disk_space');",
+			"INSERT INTO check_policies (source, subject, application_type, check_name) \
+			 VALUES ('alertd', 'application', 'tamanu-central', 'disk_space');",
 		)
 		.await
 		.unwrap();
@@ -281,7 +321,12 @@ async fn update_rules_rejects_malformed_shapes() {
 		for (rules, label) in cases {
 			let response = private
 				.post("/api/healthchecks/update_rules")
-				.json(&json!({"source": "alertd", "check_name": "disk_space", "rules": rules}))
+				.json(&json!({
+					"source": "alertd",
+					"check_name": "disk_space",
+					"namespace": ns(),
+					"rules": rules,
+				}))
 				.await;
 			assert!(
 				!response.status_code().is_success(),
@@ -298,13 +343,18 @@ async fn update_rules_rejects_malformed_shapes() {
 async fn sample_returns_null_when_no_server_has_reported_the_check() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO check_policies (source, check_name) VALUES ('alertd', 'uncharted_check');",
+			"INSERT INTO check_policies (source, subject, application_type, check_name) \
+			 VALUES ('alertd', 'application', 'tamanu-central', 'uncharted_check');",
 		)
 		.await
 		.unwrap();
 		let response = private
 			.post("/api/healthchecks/sample")
-			.json(&json!({"source": "alertd", "check_name": "uncharted_check"}))
+			.json(&json!({
+				"source": "alertd",
+				"check_name": "uncharted_check",
+				"namespace": ns(),
+			}))
 			.await;
 		response.assert_status_ok();
 		let body: serde_json::Value = response.json();
@@ -320,9 +370,10 @@ async fn sample_materialises_latest_push_for_this_check() {
 		conn.batch_execute(
 			"INSERT INTO server_groups (id, name, tags) VALUES \
 				('11111111-1111-1111-1111-111111111111', 'prod', '{\"env\": \"prod\"}'::jsonb); \
-			 INSERT INTO servers (id, host, name, kind, group_id, tags) VALUES \
-				('22222222-2222-2222-2222-222222222222', 'https://prod-host', 'Prod Central', 'central', \
-				 '11111111-1111-1111-1111-111111111111', '{\"region\": \"au\"}'::jsonb); \
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('22222222-2222-2222-2222-222222222222', \
+				 '11111111-1111-1111-1111-111111111111') RETURNING id) INSERT INTO applications (id, host, name, type, group_id, tags, machine_id) VALUES \
+				('22222222-2222-2222-2222-222222222222', 'https://prod-host', 'Prod Central', 'tamanu-central', \
+				 '11111111-1111-1111-1111-111111111111', '{\"region\": \"au\"}'::jsonb, '22222222-2222-2222-2222-222222222222'); \
 			 INSERT INTO statuses (server_id, healthy, health, extra, created_at) VALUES \
 				('22222222-2222-2222-2222-222222222222', false, \
 				 '[{\"check\": \"disk_space\", \"healthy\": false, \"used_pct\": 97}, {\"check\": \"other\", \"healthy\": true}]'::jsonb, \
@@ -334,7 +385,11 @@ async fn sample_materialises_latest_push_for_this_check() {
 
 		let response = private
 			.post("/api/healthchecks/sample")
-			.json(&json!({"source": "alertd", "check_name": "disk_space"}))
+			.json(&json!({
+				"source": "alertd",
+				"check_name": "disk_space",
+				"namespace": ns(),
+			}))
 			.await;
 		response.assert_status_ok();
 		let body: serde_json::Value = response.json();
@@ -375,8 +430,8 @@ async fn sample_materialises_latest_push_for_this_check() {
 async fn sample_normalises_result_form_entries() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO servers (id, host, kind) VALUES \
-				('55555555-5555-5555-5555-555555555555', 'https://result-host', 'central'); \
+			"WITH m AS (INSERT INTO machines (id) VALUES ('55555555-5555-5555-5555-555555555555') RETURNING id) INSERT INTO applications (id, host, type, machine_id) VALUES \
+				('55555555-5555-5555-5555-555555555555', 'https://result-host', 'tamanu-central', '55555555-5555-5555-5555-555555555555'); \
 			 INSERT INTO statuses (server_id, healthy, health, extra) VALUES \
 				('55555555-5555-5555-5555-555555555555', true, \
 				 '[{\"check\": \"queue_depth\", \"result\": \"warning\", \"depth\": 120}]'::jsonb, \
@@ -387,7 +442,11 @@ async fn sample_normalises_result_form_entries() {
 
 		let response = private
 			.post("/api/healthchecks/sample")
-			.json(&json!({"source": "alertd", "check_name": "queue_depth"}))
+			.json(&json!({
+				"source": "alertd",
+				"check_name": "queue_depth",
+				"namespace": ns(),
+			}))
 			.await;
 		response.assert_status_ok();
 		let body: serde_json::Value = response.json();
@@ -402,9 +461,12 @@ async fn sample_normalises_result_form_entries() {
 async fn sample_picks_the_most_recent_push_across_servers() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		conn.batch_execute(
-			"INSERT INTO servers (id, host, kind) VALUES \
-				('33333333-3333-3333-3333-333333333333', 'https://older-host', 'central'), \
-				('44444444-4444-4444-4444-444444444444', 'https://newer-host', 'central'); \
+			"WITH m AS (INSERT INTO machines (id) VALUES \
+				('33333333-3333-3333-3333-333333333333'), \
+				('44444444-4444-4444-4444-444444444444') RETURNING id) \
+			 INSERT INTO applications (id, host, type, machine_id) VALUES \
+				('33333333-3333-3333-3333-333333333333', 'https://older-host', 'tamanu-central', '33333333-3333-3333-3333-333333333333'), \
+				('44444444-4444-4444-4444-444444444444', 'https://newer-host', 'tamanu-central', '44444444-4444-4444-4444-444444444444'); \
 			 INSERT INTO statuses (server_id, healthy, health, extra, created_at) VALUES \
 				('33333333-3333-3333-3333-333333333333', false, \
 				 '[{\"check\": \"cert_expiry\", \"healthy\": false, \"days_remaining\": 30}]'::jsonb, \
@@ -418,7 +480,11 @@ async fn sample_picks_the_most_recent_push_across_servers() {
 
 		let response = private
 			.post("/api/healthchecks/sample")
-			.json(&json!({"source": "alertd", "check_name": "cert_expiry"}))
+			.json(&json!({
+				"source": "alertd",
+				"check_name": "cert_expiry",
+				"namespace": ns(),
+			}))
 			.await;
 		response.assert_status_ok();
 		let body: serde_json::Value = response.json();

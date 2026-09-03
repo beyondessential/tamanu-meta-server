@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 
 use axum::Json;
 use axum::extract::State;
@@ -6,22 +6,23 @@ use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleUser;
 use commons_types::{
+	namespace::{Namespace, NamespaceRef},
 	server::{
+		app_type::ApplicationType,
 		cards::{FacilityServerStatus, ServerGroupCard},
-		kind::ServerKind,
-		product::Product,
 		rank::ServerRank,
 	},
 	status::{CheckResult, OperatorPresence, ShortStatus},
 	version::VersionStr,
 };
 use database::{
+	applications::Application,
 	check_policies::CheckPolicy,
 	devices::DeviceConnection,
 	issues::Issue,
-	reported_detail::ReportedDetail,
+	machines::Machine,
+	reported_detail::{MachineReportedDetail, ReportedDetail},
 	server_groups::ServerGroup,
-	servers::Server,
 	statuses::{MergedDetail, Status},
 	tailscale_users::TailscaleUser as CachedTailscaleUser,
 	versions::Version,
@@ -63,15 +64,15 @@ pub struct SummaryData {
 /// endpoint in this API.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ServerDetailsData {
-	/// Server id.
+	/// Application id.
 	pub id: String,
-	/// Server display name.
+	/// Application display name.
 	pub name: String,
-	/// Server kind.
+	/// The application's role within its type.
 	pub kind: String,
-	/// Server rank (e.g. production, test, dev).
+	/// Application rank (e.g. production, test, dev).
 	pub rank: String,
-	/// Server hostname or address.
+	/// Application hostname or address.
 	pub host: String,
 }
 
@@ -98,7 +99,7 @@ pub struct ServerStatusData {
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(summary))
-		.routes(routes!(server_grouped_ids))
+		.routes(routes!(group_ids))
 		.routes(routes!(group_details))
 		.routes(routes!(snapshot))
 		.routes(routes!(check_detail))
@@ -144,46 +145,42 @@ pub async fn summary(State(state): State<AppState>) -> Result<Json<SummaryData>>
 	}))
 }
 
-/// List server group ids, bucketed by rank.
+/// List the server group ids the status page shows, ordered by name.
 ///
-/// Each group is bucketed under the highest rank held by any of its member
-/// servers (production outranks clone, which outranks demo, then test,
-/// then dev). Groups whose members are all unranked are omitted entirely.
-/// Within each rank bucket, groups are ordered alphabetically by name.
+/// Alphabetical, because the card carries its own ranks: a rank row per rank,
+/// each labelled. Ordering the cards by rank as well would sort the page by
+/// something already written on every card, and leave an operator looking for
+/// one group scanning for where its rank happens to start. A name is what they
+/// know it by.
+///
+/// A group with no ranked member at all is omitted, as it always has been:
+/// nothing in it has a place in the fleet's promotion order yet.
+// spec: CHK#presentation
 #[utoipa::path(
 	post,
-	path = "/server_grouped_ids",
+	path = "/group_ids",
 	tag = "statuses",
 	responses(
-		(status = 200, description = "Server group IDs grouped by highest-ranked member's rank.", body = BTreeMap<ServerRank, Vec<Uuid>>),
+		(status = 200, description = "Application group IDs, ordered by group name.", body = Vec<Uuid>),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
-pub async fn server_grouped_ids(
-	State(state): State<AppState>,
-) -> Result<Json<BTreeMap<ServerRank, Vec<Uuid>>>> {
+pub async fn group_ids(State(state): State<AppState>) -> Result<Json<Vec<Uuid>>> {
 	let mut conn = state.db_read.get().await?;
 	let groups = ServerGroup::list_all(&mut conn).await?;
 	if groups.is_empty() {
-		return Ok(Json(BTreeMap::new()));
+		return Ok(Json(Vec::new()));
 	}
-	let group_ids: Vec<Uuid> = groups.iter().map(|g| g.id).collect();
-	let top_rank = ServerGroup::highest_member_ranks(&mut conn, &group_ids).await?;
+	let all: Vec<Uuid> = groups.iter().map(|g| g.id).collect();
+	let top_rank = ServerGroup::highest_member_ranks(&mut conn, &all).await?;
 
-	let mut by_rank: BTreeMap<ServerRank, Vec<(String, Uuid)>> = BTreeMap::new();
-	for g in groups {
-		if let Some(rank) = top_rank.get(&g.id) {
-			by_rank.entry(*rank).or_default().push((g.name, g.id));
-		}
-	}
-	let map: BTreeMap<ServerRank, Vec<Uuid>> = by_rank
+	let mut ranked: Vec<(String, Uuid)> = groups
 		.into_iter()
-		.map(|(rank, mut list)| {
-			list.sort_by(|a, b| a.0.cmp(&b.0));
-			(rank, list.into_iter().map(|(_, id)| id).collect())
-		})
+		.filter(|g| top_rank.contains_key(&g.id))
+		.map(|g| (g.name, g.id))
 		.collect();
-	Ok(Json(map))
+	ranked.sort_by(|a, b| a.0.cmp(&b.0));
+	Ok(Json(ranked.into_iter().map(|(_, id)| id).collect()))
 }
 
 /// Identifies the server group whose status details to fetch.
@@ -216,30 +213,72 @@ pub async fn group_details(
 ) -> Result<Json<ServerGroupCard>> {
 	let mut conn = state.db_read.get().await?;
 	let group = ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
-	let servers = group.list_servers(&mut conn).await?;
+	let applications = group.list_servers(&mut conn).await?;
 
 	// A group card shouldn't 404 just because no versions are published yet
-	// (e.g. a fresh Canopy instance, or every version still draft); treat "no match"
+	// (e.g. a fresh deployment, or every version still draft); treat "no match"
 	// as "unknown latest" so `version_distance` falls back to None. Same as
-	// `servers::get_detail` and `statuses::snapshot`.
+	// `applications::get_detail` and `statuses::snapshot`.
 	let latest_version = match Version::get_latest_matching(&mut conn, "*".parse()?).await {
 		Ok(v) => Some(v.as_semver()),
 		Err(AppError::NoMatchingVersions) => None,
 		Err(e) => return Err(e),
 	};
 
-	let server_ids: Vec<Uuid> = servers.iter().map(|s| s.id).collect();
+	let server_ids: Vec<Uuid> = applications.iter().map(|s| s.id).collect();
 	let status_map: HashMap<Uuid, Status> = Status::latest_for_servers(&mut conn, &server_ids)
 		.await?
 		.into_iter()
-		.map(|s| (s.server_id, s))
+		.filter_map(|s| Some((s.server_id?, s)))
 		.collect();
+	// The archive affordance asks the same question `ServerGroup::soft_delete`
+	// enforces: has every member been quiet for longer than the status window.
+	// A member unreachable for months has still reported, so member
+	// reachability cannot answer it, and the card carries the fact rather than
+	// letting the UI infer it from dots that no longer mean that.
+	let all_members_quiet = !server_ids.is_empty() && status_map.is_empty();
+	// Reachability is graded on this rather than on the status window, so a
+	// member quiet for longer than the window reads as unreachable rather than
+	// as never heard from.
+	// spec: CHK#reachability
+	let last_reported =
+		database::reported_detail::ReportedDetail::last_reported_ats(&mut conn, &server_ids)
+			.await?;
 	// Member health rolls up current check state across every source
 	// (silenced checks already skipped in the rollup).
 	let member_groups: Vec<(Uuid, Option<Uuid>)> =
-		servers.iter().map(|s| (s.id, s.group_id)).collect();
+		applications.iter().map(|s| (s.id, s.group_id)).collect();
 	let member_health =
 		database::issues::health_from_check_state(&mut conn, &member_groups).await?;
+
+	// The boxes the members run on: their own reachability and health, which a
+	// card presents on the enclosure around each machine's dots.
+	// spec: FLT
+	let machine_ids: Vec<Uuid> = applications.iter().map(|s| s.machine_id).collect();
+	let machines: HashMap<Uuid, database::machines::Machine> =
+		database::machines::Machine::get_many(&mut conn, &machine_ids)
+			.await?
+			.into_iter()
+			.map(|m| (m.id, m))
+			.collect();
+	let machine_health = database::issues::machine_health_from_check_state(
+		&mut conn,
+		&applications
+			.iter()
+			.map(|s| (s.machine_id, s.group_id))
+			.collect::<Vec<_>>(),
+	)
+	.await?;
+	let machine_reports = database::reported_detail::MachineReportedDetail::latest_for_machines(
+		&mut conn,
+		&machine_ids,
+	)
+	.await?;
+	// One read for the whole card: a window is over a machine or a group, and
+	// a box is suspended by either.
+	// spec: MNT#presentation
+	let (maintained_machines, maintained_groups) =
+		database::maintenance_windows::MaintenanceWindow::suspended_targets(&mut conn).await?;
 
 	// The card's headline version is the cached last reported version of the
 	// group's canonical member (highest rank, then highest kind), maintained by
@@ -251,30 +290,44 @@ pub async fn group_details(
 		.zip(latest_version.as_ref())
 		.map(|(current, latest)| database::statuses::version_distance(&current.0, latest));
 
-	let mut members: Vec<FacilityServerStatus> = servers
+	let mut members: Vec<FacilityServerStatus> = applications
 		.into_iter()
 		.map(|s| {
 			let st = status_map.get(&s.id);
-			let up = st.map(|s| s.short_status()).unwrap_or_default();
-			// Active presence only: a server that's stopped reporting may
-			// well still have those sessions, but we can't assert "in the
-			// server right now" from a stale push.
+			let up = s.reachability(
+				last_reported
+					.get(&s.id)
+					.copied()
+					.max(st.map(|st| st.created_at)),
+			);
+			// Active presence only: an application that has stopped reporting
+			// may well still have those sessions, but we cannot assert "in the
+			// server right now" from a report that is past its own threshold.
 			let operators = match up {
-				ShortStatus::Up | ShortStatus::Blip => {
-					st.map(|s| s.operators()).unwrap_or_default()
-				}
-				_ => Vec::new(),
+				ShortStatus::Up => st.map(|s| s.operators()).unwrap_or_default(),
+				ShortStatus::Down | ShortStatus::Gone => Vec::new(),
 			};
 			FacilityServerStatus {
 				id: s.id,
-				name: s.name.clone().unwrap_or_default(),
+				name: s.display_name(),
 				up,
 				health: member_health.get(&s.id).copied().unwrap_or_default(),
 				is_monitored: s.is_monitored,
 				operators,
 				rank: s.rank,
-				product: s.product,
-				kind: s.kind,
+				r#type: s.r#type,
+				machine_id: s.machine_id,
+				machine_name: machines.get(&s.machine_id).and_then(|m| m.name.clone()),
+				machine_up: machines.get(&s.machine_id).map_or(ShortStatus::Gone, |m| {
+					m.reachability(machine_reports.get(&s.machine_id).copied())
+				}),
+				machine_health: machine_health
+					.get(&s.machine_id)
+					.copied()
+					.unwrap_or_default(),
+				machine_maintained: maintained_machines.contains(&s.machine_id)
+					|| s.group_id
+						.is_some_and(|gid| maintained_groups.contains(&gid)),
 			}
 		})
 		.collect();
@@ -291,6 +344,7 @@ pub async fn group_details(
 		version: card_version,
 		version_distance,
 		members,
+		all_members_quiet,
 	}))
 }
 
@@ -298,7 +352,7 @@ pub async fn group_details(
 /// for [`check_detail`].
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CheckDetailServerData {
-	/// The server's id — the UI links to `/servers/{server_id}`.
+	/// The server's id — the UI links to `/applications/{server_id}`.
 	pub server_id: Uuid,
 	/// The server's display name; empty string when the server has none.
 	pub server_name: String,
@@ -309,17 +363,17 @@ pub struct CheckDetailServerData {
 	pub group_name: Option<String>,
 	/// The server's rank, for the standard rank-bucket grouping.
 	pub rank: Option<ServerRank>,
-	/// The server's kind, for the standard within-rank ordering.
-	pub kind: ServerKind,
+	/// The application's type, for the standard within-rank ordering.
+	pub r#type: ApplicationType,
 	/// The check's observed result on its latest report. The UI shows
-	/// warning/failed/broken servers by default and puts passed/skipped
+	/// warning/failed/broken applications by default and puts passed/skipped
 	/// ones behind a "show healthy" toggle.
 	pub result: CheckResult,
 	/// The check's own fields from its latest report, verbatim, so the
 	/// row can expand to the same per-check detail the server page shows.
 	pub data: serde_json::Value,
 	/// When the check's current degradation streak began. `None` for
-	/// servers currently reporting the check healthy.
+	/// applications currently reporting the check healthy.
 	pub failing_since: Option<Timestamp>,
 	/// When the check state last updated (the check's latest report).
 	pub status_created_at: Timestamp,
@@ -380,6 +434,12 @@ pub struct CheckDetailArgs {
 	/// The healthcheck name to look up, exactly as reported by devices in
 	/// `health[].check` (an arbitrary, device/plugin-defined string).
 	pub check: String,
+	/// Which catalog entry is meant, as returned in the entry's `namespace`.
+	/// Two application types reporting this name are two checks with separate
+	/// pages; omitted is the unqualified namespace a curated source's checks
+	/// live in.
+	#[serde(default)]
+	pub namespace: NamespaceRef,
 }
 
 /// Response for [`check_detail`]: the queried check's catalog policy
@@ -406,7 +466,7 @@ pub struct CheckDetailData {
 	/// warning, broken, passed, skipped (most urgent first), then by
 	/// group name then server name. The client filters out the
 	/// passed/skipped tail unless the "show healthy" toggle is on.
-	pub servers: Vec<CheckDetailServerData>,
+	pub applications: Vec<CheckDetailServerData>,
 	/// Group-scoped states of this check, ordered by group name. The
 	/// client files each under its group in the list.
 	pub groups: Vec<CheckDetailGroupData>,
@@ -428,7 +488,7 @@ fn check_result_rank(result: CheckResult) -> u8 {
 	}
 }
 
-/// List the servers whose check state reports one (source, check).
+/// List the applications whose check state reports one (source, check).
 ///
 /// Everything the per-healthcheck page needs: the catalog's configured
 /// policy for the (source, check) (if any) plus every live server's
@@ -436,7 +496,7 @@ fn check_result_rank(result: CheckResult) -> u8 {
 /// carrying `failing_since` (the start of its current degradation
 /// streak). This is the data behind the `/healthchecks/:source/:check`
 /// "who's affected" page, which doubles as an operator TODO list and as
-/// a way to correlate servers sharing the same issue during a
+/// a way to correlate applications sharing the same issue during a
 /// fleet-wide incident.
 #[utoipa::path(
 	post,
@@ -445,7 +505,7 @@ fn check_result_rank(result: CheckResult) -> u8 {
 	tag = "statuses",
 	request_body = CheckDetailArgs,
 	responses(
-		(status = 200, description = "The check's catalog policy and the servers currently reporting it.", body = CheckDetailData),
+		(status = 200, description = "The check's catalog policy and the applications currently reporting it.", body = CheckDetailData),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
@@ -454,25 +514,28 @@ pub async fn check_detail(
 	Json(args): Json<CheckDetailArgs>,
 ) -> Result<Json<CheckDetailData>> {
 	let mut conn = state.db_read.get().await?;
-	let states = Issue::check_state_for_check(&mut conn, &args.source, &args.check).await?;
+	let namespace = Namespace::try_from(&args.namespace)
+		.map_err(|e| commons_errors::AppError::BadRequest(e.to_string()))?;
+	let states =
+		Issue::check_state_for_check(&mut conn, &args.source, &namespace, &args.check).await?;
 
-	// Live servers only: archived servers and canopy's own row never
+	// Live applications only: archived applications and canopy's own row never
 	// appear on the check detail page.
 	let server_ids: Vec<Uuid> = states
 		.iter()
-		.filter_map(|st| st.server_id)
+		.filter_map(|st| st.application_id)
 		.collect::<BTreeSet<_>>()
 		.into_iter()
 		.collect();
-	let live: HashMap<Uuid, database::servers::Server> =
-		database::servers::Server::get_by_ids(&mut conn, &server_ids)
+	let live: HashMap<Uuid, database::applications::Application> =
+		database::applications::Application::get_by_ids(&mut conn, &server_ids)
 			.await?
 			.into_iter()
 			.filter(|s| s.deleted_at.is_none() && s.id != Uuid::nil())
 			.map(|s| (s.id, s))
 			.collect();
 	// Group names (and, for group-scoped states, rank buckets) cover both
-	// the member servers' groups and the groups with their own state.
+	// the member applications' groups and the groups with their own state.
 	let group_ids: Vec<Uuid> = live
 		.values()
 		.filter_map(|s| s.group_id)
@@ -506,7 +569,7 @@ pub async fn check_detail(
 			.then_some(st.degraded_since.unwrap_or(st.first_seen))
 	};
 
-	let mut servers: Vec<CheckDetailServerData> = Vec::new();
+	let mut applications: Vec<CheckDetailServerData> = Vec::new();
 	let mut groups: Vec<CheckDetailGroupData> = Vec::new();
 	let mut canopy: Option<CheckDetailCanopyData> = None;
 	for st in states {
@@ -516,18 +579,18 @@ pub async fn check_detail(
 		let row_stability = stability
 			.get(&st.id)
 			.map(|row| database::stability::StabilityData::from_row(row, now));
-		match (st.server_id, st.server_group_id) {
+		match (st.application_id, st.server_group_id) {
 			(Some(sid), _) => {
 				let Some(server) = live.get(&sid) else {
 					continue;
 				};
-				servers.push(CheckDetailServerData {
+				applications.push(CheckDetailServerData {
+					r#type: server.r#type.clone(),
 					server_id: server.id,
-					server_name: server.name.clone().unwrap_or_default(),
+					server_name: server.display_name(),
 					group_id: server.group_id,
 					group_name: server.group_id.and_then(|g| group_names.get(&g).cloned()),
 					rank: server.rank,
-					kind: server.kind,
 					result,
 					data: st.detail.clone().unwrap_or_else(|| serde_json::json!({})),
 					failing_since: failing_since(&st),
@@ -558,7 +621,7 @@ pub async fn check_detail(
 			}
 		}
 	}
-	servers.sort_by(|a, b| {
+	applications.sort_by(|a, b| {
 		check_result_rank(a.result)
 			.cmp(&check_result_rank(b.result))
 			.then_with(|| a.group_name.cmp(&b.group_name))
@@ -566,7 +629,7 @@ pub async fn check_detail(
 	});
 	groups.sort_by(|a, b| a.group_name.cmp(&b.group_name));
 
-	let policy = CheckPolicy::get(&mut conn, &args.source, &args.check).await?;
+	let policy = CheckPolicy::get(&mut conn, &args.source, &namespace, &args.check).await?;
 
 	Ok(Json(CheckDetailData {
 		source: args.source,
@@ -574,7 +637,7 @@ pub async fn check_detail(
 		ceiling: policy.as_ref().map(|p| p.ceiling),
 		escalates: policy.as_ref().is_some_and(|p| p.escalates),
 		documentation: policy.and_then(|p| p.documentation),
-		servers,
+		applications,
 		groups,
 		canopy,
 	}))
@@ -596,7 +659,7 @@ pub struct StatusSnapshotData {
 	/// consumer can tell a product with no version from one that has yet to
 	/// report one.
 	// spec: APP#versions
-	pub product: Product,
+	pub r#type: ApplicationType,
 	/// Software version reported in this push.
 	pub version: Option<VersionStr>,
 	/// How many releases behind the latest published version this push's
@@ -617,6 +680,9 @@ pub struct StatusSnapshotData {
 	pub bestool: Option<String>,
 	/// Reported system timezone.
 	pub timezone: Option<String>,
+	/// Version the server's reporting schema was built for. Absent until a
+	/// server runs a schema that stamps one (spec: RPT#currency).
+	pub reporting_schema: Option<String>,
 	/// Additional unstructured data reported alongside the snapshot, keyed
 	/// by source (`{ [source]: { …fields } }`) so a multi-source snapshot's
 	/// raw payloads stay attributed rather than merged. Sources whose
@@ -676,18 +742,18 @@ pub async fn snapshot(
 	let Some(status) = status else {
 		return Ok(Json(None));
 	};
-	let server = Server::get_by_id(&mut conn, args.server_id).await?;
+	let server = Application::get_by_id(&mut conn, args.server_id).await?;
 
 	// Grading a version means measuring it against a release train canopy
 	// holds, so it applies only to a product that has one. A canopy instance
 	// reports its own build version and would otherwise be measured against
 	// Tamanu's releases, yielding a distance that means nothing.
 	//
-	// If the Canopy instance has no published versions yet, we just skip
+	// If the deployment has no published versions yet, we just skip
 	// the distance computation rather than 404'ing the whole
 	// snapshot — the call still wants to surface everything else.
 	// spec: APP#versions
-	let version_distance = if server.product.tracks_versions() {
+	let version_distance = if server.r#type.tracks_versions() {
 		match Version::get_latest_matching(&mut conn, "*".parse()?).await {
 			Ok(v) => status.distance_from_version(&v.as_semver()),
 			Err(_) => None,
@@ -707,29 +773,35 @@ pub async fn snapshot(
 	} = consolidated_checks_at(&mut conn, &server, args.at).await?;
 
 	// Prefer the Node.js version reported in a status payload
-	// (`nodeVersion`). Fall back to scraping the *latest* device connection's
-	// User-Agent — that metadata isn't versioned in lockstep with status
-	// pushes, so looking it up "as of" a time would mostly mislead.
+	// (`nodeVersion`). Fall back to scraping the User-Agent of the identity
+	// reporting on the application's machine: an identity belongs to the box,
+	// so what the box's reporter runs is the runtime, while whichever identity
+	// filed this push is only that push's provenance. It is the *latest*
+	// connection either way — that metadata isn't versioned in lockstep with
+	// status pushes, so looking it up "as of" a time would mostly mislead.
+	// spec: FIG#figures
 	let nodejs = match figures.node_version() {
 		Some(v) => Some(v),
-		None => {
-			if let Some(dev_id) = status.device_id {
+		None => match database::machines::Machine::get_by_id(&mut conn, server.machine_id)
+			.await?
+			.device_id
+		{
+			Some(dev_id) => {
 				DeviceConnection::get_latest_from_device_ids(&mut conn, [dev_id].into_iter())
 					.await?
 					.into_iter()
 					.next()
 					.and_then(|d| d.nodejs_version())
-			} else {
-				None
 			}
-		}
+			None => None,
+		},
 	};
 	// The embedded-browser floor is a property of a Tamanu release, so it too
 	// only means something for a product whose releases canopy holds.
 	// spec: APP#versions
 	let min_chrome_version = match &status.version {
-		Some(v) if server.product.tracks_versions() => {
-			super::servers::compute_min_chrome_version(&mut conn, v).await
+		Some(v) if server.r#type.tracks_versions() => {
+			super::applications::compute_min_chrome_version(&mut conn, v).await
 		}
 		_ => None,
 	};
@@ -739,13 +811,15 @@ pub async fn snapshot(
 	Ok(Json(Some(StatusSnapshotData {
 		id: status.id,
 		created_at: status.created_at,
-		server_id: status.server_id,
+		// The row was selected by this application, so it is the one the push
+		// was read for, whether or not the push also carried a machine.
+		server_id: args.server_id,
 		device_id: status.device_id,
-		product: server.product,
+		r#type: server.r#type.clone(),
 		// A product with no application version presents none, as against the
 		// `unknown` a versioned server shows before it has reported one.
 		// spec: APP#versions
-		version: status.version.filter(|_| server.product.has_versions()),
+		version: status.version.filter(|_| server.r#type.has_versions()),
 		version_distance,
 		min_chrome_version,
 		platform: figures.platform(),
@@ -753,6 +827,7 @@ pub async fn snapshot(
 		nodejs,
 		bestool: figures.bestool_version(),
 		timezone: figures.timezone(),
+		reporting_schema: figures.reporting_schema_version(),
 		extra: by_source_extra,
 		operators,
 		checks,
@@ -811,19 +886,41 @@ struct SnapshotState {
 /// of the consolidated checks view.
 async fn consolidated_checks_at(
 	conn: &mut database::diesel_async::AsyncPgConnection,
-	server: &Server,
+	server: &Application,
 	at: Option<Timestamp>,
 ) -> commons_errors::Result<SnapshotState> {
 	use commons_types::status::{CheckResult, ConsolidatedCheck, ConsolidatedChecks, HealthState};
+	use commons_types::subject::CheckSubject;
 	use database::check_policies::{CheckPolicy, EvaluationContext, ScopedCheckPolicy};
 
 	let statuses = Status::latest_per_source_at(conn, server.id, at).await?;
+	// The box's own reports. A split push files the machine's checks at machine
+	// scope rather than on any workload, so they are only here; a reporter
+	// still pushing the unified shape files none of these rows and its machine
+	// checks are recognised by subject in the application's own. Either shape
+	// reconstructs the same list.
+	// spec: CHK#a-machines-checks-present-on-its-applications
+	let machine = Machine::get_by_id(conn, server.machine_id).await?;
+	let machine_statuses = Status::machine_latest_per_source_at(conn, machine.id, at).await?;
 
 	// The figures come from the same set of statuses the checks do, so the
 	// snapshot presents each figure as of `at` from whichever source last
 	// reported it, rather than from whichever source happened to push last.
+	//
+	// Both grains' rows, for the reason the checks read both: a split push
+	// records the box's detail on the machine's rows, so reading only the
+	// application's would drop platform, timezone and the agent's version out
+	// of a past moment. A unified push carries them on the application's rows
+	// and files no machine rows at all, so nothing is read twice; where a
+	// source pushed both shapes across the window, newest-wins per key
+	// resolves them as it resolves any two reports.
 	// spec: FIG#point-in-time
-	let figures = MergedDetail::from_statuses(&statuses);
+	let figures = MergedDetail::from_reports(
+		statuses
+			.iter()
+			.chain(machine_statuses.iter())
+			.map(|st| (st.created_at, &st.extra)),
+	);
 
 	// Each source's raw status-level payload, keyed by source, so the
 	// snapshot's raw-payload panel is consolidated rather than one source's
@@ -838,13 +935,16 @@ async fn consolidated_checks_at(
 	}
 
 	// Tags for rule evaluation, as private-server's other rule-eval sites
-	// resolve them.
-	let tag_map = server.tags_merged_with_group(conn).await?;
-	let tags: std::collections::HashMap<String, serde_json::Value> = tag_map
-		.0
-		.into_iter()
-		.map(|(k, v)| (k, serde_json::Value::String(v)))
-		.collect();
+	// resolve them. Each grain grades against its own: a rule predicating on a
+	// tag reads the box's tags for the box's checks.
+	let tags_for = |map: commons_types::server::TagMap| -> std::collections::HashMap<String, serde_json::Value> {
+		map.0
+			.into_iter()
+			.map(|(k, v)| (k, serde_json::Value::String(v)))
+			.collect()
+	};
+	let tags = tags_for(server.tags_merged_with_group(conn).await?);
+	let machine_tags = tags_for(machine.tags_merged_with_group(conn).await?);
 	// Only present checks backed by a live catalog row, matching the live
 	// consolidated view: this drops decommissioned checks and orphaned
 	// check-states (a source's catalog rows removed out from under its
@@ -854,18 +954,52 @@ async fn consolidated_checks_at(
 	// dozens of checks, and re-querying the catalog and the scoped chain for
 	// each one turned this reconstruction into a few hundred round-trips.
 	let grading = CheckPolicy::grading_table(conn).await?;
-	let chains =
-		ScopedCheckPolicy::chains_for_scope(conn, Some(server.id), server.group_id).await?;
+	// One chain per grain. An application's checks are graded through the
+	// application and group chains; the box's through its own and its group's,
+	// which need not be the same group.
+	let chains = ScopedCheckPolicy::chains_for_scope(
+		conn,
+		database::check_policies::FilingScope {
+			application_id: Some(server.id),
+			group_id: server.group_id,
+			covering_machine: Some(server.machine_id),
+			..Default::default()
+		},
+	)
+	.await?;
+	let machine_chains = ScopedCheckPolicy::chains_for_scope(
+		conn,
+		database::check_policies::FilingScope {
+			machine_id: Some(machine.id),
+			group_id: machine.group_id,
+			covering_machine: Some(machine.id),
+			..Default::default()
+		},
+	)
+	.await?;
 
 	let mut checks: Vec<ConsolidatedCheck> = Vec::new();
-	for status in &statuses {
+	for (status, from_machine_row) in statuses
+		.iter()
+		.map(|s| (s, false))
+		.chain(machine_statuses.iter().map(|s| (s, true)))
+	{
 		let Some(arr) = status.health.as_array() else {
 			continue;
 		};
-		let silenced = database::silenced_refs::silenced_health_checks_for_server(
+		let application_silenced = database::silenced_refs::silenced_health_checks_for_server(
 			conn,
-			server.id,
+			Some(server.id),
+			server.machine_id,
 			server.group_id,
+			&status.source,
+		)
+		.await?;
+		let machine_silenced = database::silenced_refs::silenced_health_checks_for_server(
+			conn,
+			None,
+			machine.id,
+			machine.group_id,
 			&status.source,
 		)
 		.await?;
@@ -876,7 +1010,21 @@ async fn consolidated_checks_at(
 			let Some(name) = obj.get("check").and_then(|v| v.as_str()) else {
 				continue;
 			};
-			if !cataloged.contains(&(status.source.clone(), name.to_string())) {
+			// What this reading asserts about. A row the box filed is the
+			// box's whatever it names; on a unified push the name decides,
+			// which is the same rule ingestion applies.
+			// spec: STA
+			let subject = if from_machine_row {
+				CheckSubject::Machine
+			} else {
+				CheckSubject::of(name)
+			};
+			// Which catalog entry this reading belongs to follows the
+			// reporting application's type, the same as it does on ingest: a
+			// machine-subject name lands in the box's entry whatever workload
+			// carried it up.
+			let namespace = Namespace::for_application(&status.source, name, &server.r#type);
+			if !cataloged.contains(&(status.source.clone(), namespace.clone(), name.to_string())) {
 				continue;
 			}
 			let Some(observed) = CheckResult::from_entry(obj) else {
@@ -895,13 +1043,22 @@ async fn consolidated_checks_at(
 			let ctx = EvaluationContext {
 				status_extra: &status_extra,
 				check_extra: &check_extra,
-				tags: &tags,
+				tags: if subject.is_machine() {
+					&machine_tags
+				} else {
+					&tags
+				},
 			};
-			let key = (status.source.clone(), name.to_string());
+			let key = (status.source.clone(), namespace.clone(), name.to_string());
 			let fleet = CheckPolicy::grade(grading.get(&key), &status.source, name, observed, &ctx);
+			let scoped = if subject.is_machine() {
+				&machine_chains
+			} else {
+				&chains
+			};
 			let graded = CheckPolicy::chain_scoped(
 				fleet,
-				chains.get(&key).map_or(&[][..], Vec::as_slice),
+				scoped.get(&key).map_or(&[][..], Vec::as_slice),
 				&ctx,
 			);
 			// The check's own detail fields, verbatim.
@@ -909,13 +1066,21 @@ async fn consolidated_checks_at(
 			detail.remove("check");
 			detail.remove("healthy");
 			detail.remove("result");
+			let silenced = if subject.is_machine() {
+				&machine_silenced
+			} else {
+				&application_silenced
+			};
 			checks.push(ConsolidatedCheck {
 				silenced: silenced.contains(name),
+				qualified_name: namespace.qualified_name(name),
+				namespace: (&namespace).into(),
 				source: status.source.clone(),
 				check: name.to_string(),
 				observed: Some(observed),
 				effective: graded.effective,
 				detail: serde_json::Value::Object(detail),
+				subject,
 			});
 		}
 	}
@@ -938,62 +1103,112 @@ async fn consolidated_checks_at(
 	})
 }
 
-/// One server's identity and its currently reported detail, as a row of the
-/// fleet view.
+/// One application's identity and its currently reported detail, as a row of
+/// the fleet view.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct FleetServerDetailData {
 	/// Unique identifier for the server.
 	pub server_id: Uuid,
 	/// Operator-assigned name for the server, empty when it has none.
 	pub server_name: String,
+	/// The machine this application runs on. A machine figure is the box's
+	/// rather than the workload's, so a row reaches its machine's figures
+	/// through this rather than carrying a copy of them.
+	// spec: FIG#fleet-spread
+	pub machine_id: Uuid,
 	/// The group the server belongs to, if any.
 	pub group_id: Option<Uuid>,
 	/// Display name of that group, if any.
 	pub group_name: Option<String>,
-	/// The server's environment tier within its group, if set.
+	/// Where the server sits in its deployment's promotion order, if set.
 	pub rank: Option<ServerRank>,
 	/// The application the server runs. The fleet view reads it to keep the
-	/// application-version spread to servers that have one to report.
+	/// application-version spread to applications that have one to report.
 	// spec: APP#versions
-	pub product: Product,
-	/// The server's role within its product's topology.
-	pub kind: ServerKind,
+	pub r#type: ApplicationType,
 	/// Application version the server reports running, if any.
 	pub version: Option<VersionStr>,
-	/// Operating system family, derived from the reported database engine.
-	pub platform: Option<String>,
 	/// Reported database engine version.
 	pub postgres: Option<String>,
 	/// Reported runtime version.
 	pub nodejs: Option<String>,
-	/// Version of bestool, the agent reporting on the server.
-	pub bestool: Option<String>,
-	/// Reported system timezone.
+	/// The application's own configured timezone, as reported. The box's
+	/// operating system timezone is a machine figure and is not this.
 	pub timezone: Option<String>,
 	/// Every field the server's sources currently report, resolved across
 	/// them — the raw material behind the derived figures above, and what an
 	/// arbitrary-field lookup reads.
 	#[schema(additional_properties = true, value_type = Object)]
 	pub detail: serde_json::Value,
-	/// The server's current healthcheck state, keyed by check name: each
+	/// The application's current healthcheck state, keyed by check name: each
 	/// check's reported fields plus its graded `result` and the `observed`
 	/// result behind it. This is what a `check.field` lookup reads.
+	///
+	/// Only the checks filed against the application itself. A check that
+	/// asserts something about the box is the machine's row.
+	// spec: FIG#fleet-spread
 	#[schema(additional_properties = true, value_type = Object)]
 	pub checks: serde_json::Value,
 }
 
-/// Get every live server's currently reported detail.
+/// One machine's identity and its currently reported detail, as a row of the
+/// fleet view.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct FleetMachineDetailData {
+	/// Unique identifier for the machine.
+	pub machine_id: Uuid,
+	/// The name its operator gave it, if any.
+	pub machine_name: Option<String>,
+	/// The group the machine belongs to, if any.
+	pub group_id: Option<Uuid>,
+	/// Display name of that group, if any.
+	pub group_name: Option<String>,
+	/// The operating system the box runs, qualified by its version where one
+	/// is reported. A box reporting no operating system falls back to the
+	/// family the database engine of an application on it gives away.
+	// spec: FIG#machine-figures
+	pub platform: Option<String>,
+	/// Version of bestool, the agent reporting on the box.
+	// spec: FIG#machine-figures
+	pub bestool: Option<String>,
+	/// Every field the machine's sources currently report, resolved across
+	/// them.
+	#[schema(additional_properties = true, value_type = Object)]
+	pub detail: serde_json::Value,
+	/// The machine's current healthcheck state, keyed by check name, in the
+	/// same shape as an application's.
+	#[schema(additional_properties = true, value_type = Object)]
+	pub checks: serde_json::Value,
+}
+
+/// Both populations the fleet view spreads its figures over.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct FleetDetailData {
+	/// Every live machine, canopy's own excluded.
+	pub machines: Vec<FleetMachineDetailData>,
+	/// Every live application, canopy's own excluded.
+	pub applications: Vec<FleetServerDetailData>,
+}
+
+/// Get every live machine's and application's currently reported detail.
 ///
-/// One row per server, carrying the derived figures, the full resolved
-/// payload its sources report, and its current healthcheck state. This is
-/// the data behind the fleet view, which groups it to show how each figure —
-/// or any field a source reports, whether server-wide or on one check — is
-/// spread across the fleet, and can cross two fields against each other.
+/// One row per machine and one per application, each carrying its derived
+/// figures, the full resolved payload its sources report, and its current
+/// healthcheck state. This is the data behind the fleet view, which groups it
+/// to show how each figure — or any field a source reports, whether against
+/// the target itself or on one of its checks — is spread across the fleet,
+/// and can cross two fields against each other.
+///
+/// The two populations are returned separately because a figure spreads at
+/// the grain it belongs to: a box running two applications is one machine in
+/// a platform spread and two applications in a version spread. An application
+/// names the box it runs on so a crossing can put an application figure on a
+/// machine axis.
 ///
 /// Reads each source's current report rather than status history, so it
-/// covers servers that have been quiet for any length of time. Archived
-/// servers and canopy's own row are excluded; a live server that has never
-/// reported appears with everything absent.
+/// covers targets that have been quiet for any length of time. Archived
+/// machines and applications, and canopy's own rows, are excluded; a live one
+/// that has never reported appears with everything absent.
 // spec: FIG#fleet-spread
 #[utoipa::path(
 	post,
@@ -1002,22 +1217,30 @@ pub struct FleetServerDetailData {
 	tag = "statuses",
 	security(("tailscale-user" = [])),
 	responses(
-		(status = 200, description = "Every live server's currently reported detail.", body = Vec<FleetServerDetailData>),
+		(status = 200, description = "Every live machine's and application's currently reported detail.", body = FleetDetailData),
 		(status = 500, body = ProblemDetailsSchema),
 	),
 )]
 pub async fn fleet_detail(
 	State(state): State<AppState>,
 	_user: TailscaleUser,
-) -> Result<Json<Vec<FleetServerDetailData>>> {
+) -> Result<Json<FleetDetailData>> {
 	let mut conn = state.db_read.get().await?;
 
-	// get_all already excludes archived servers and canopy's own row.
-	let servers = Server::get_all(&mut conn, 0, None).await?;
+	// get_all already excludes archived applications and canopy's own row.
+	let applications = Application::get_all(&mut conn, 0, None).await?;
+	// list_live excludes archived machines but not canopy's own, which is not
+	// a box and is not part of the fleet.
+	let machines: Vec<Machine> = Machine::list_live(&mut conn)
+		.await?
+		.into_iter()
+		.filter(|m| m.id != Uuid::nil())
+		.collect();
 
-	let group_ids: Vec<Uuid> = servers
+	let group_ids: Vec<Uuid> = applications
 		.iter()
 		.filter_map(|s| s.group_id)
+		.chain(machines.iter().filter_map(|m| m.group_id))
 		.collect::<BTreeSet<_>>()
 		.into_iter()
 		.collect();
@@ -1027,37 +1250,83 @@ pub async fn fleet_detail(
 		.map(|g| (g.id, g.name))
 		.collect();
 
-	// One read for the whole fleet: the current-detail table is a row per
-	// (server, source), so this is a few hundred rows however much status
-	// history sits behind it.
-	let mut merged = ReportedDetail::merge_by_server(ReportedDetail::all(&mut conn).await?);
+	// One read for the whole fleet at each grain: the current-detail tables
+	// are a row per (target, source), so this is a few hundred rows however
+	// much status history sits behind them. The application read is the
+	// application's own detail, without its machine's folded in, so a box's
+	// fields don't present as each workload's and inflate a machine figure.
+	// spec: FIG#fleet-spread
+	let mut merged = ReportedDetail::merge_by_server(ReportedDetail::all_own(&mut conn).await?);
+	let mut machine_merged =
+		MachineReportedDetail::merge_by_machine(MachineReportedDetail::all(&mut conn).await?);
 
-	// Same again for check state, which is a row per (server, source, check)
+	// Same again for check state, which is a row per (target, source, check)
 	// and carries the fields each check reports.
-	let scopes: Vec<(Uuid, Option<Uuid>)> = servers.iter().map(|s| (s.id, s.group_id)).collect();
+	let scopes: Vec<(Uuid, Option<Uuid>)> =
+		applications.iter().map(|s| (s.id, s.group_id)).collect();
 	let mut checks = database::issues::check_detail_by_server(&mut conn, &scopes).await?;
+	let machine_scopes: Vec<(Uuid, Option<Uuid>)> =
+		machines.iter().map(|m| (m.id, m.group_id)).collect();
+	let mut machine_checks =
+		database::issues::check_detail_by_machine(&mut conn, &machine_scopes).await?;
 
-	let rows = servers
+	// A box that reports no operating system falls back to the family the
+	// database engine of an application on it gives away, so the fallback
+	// needs the applications gathered by machine before the rows are built.
+	// spec: FIG#machine-figures
+	let mut pg_banner_by_machine: HashMap<Uuid, String> = HashMap::new();
+	for application in &applications {
+		if let Some(banner) = merged
+			.get(&application.id)
+			.and_then(|(figures, _)| figures.pg_version_banner())
+		{
+			pg_banner_by_machine
+				.entry(application.machine_id)
+				.or_insert(banner);
+		}
+	}
+
+	let machines = machines
+		.into_iter()
+		.map(|machine| {
+			let figures = machine_merged.remove(&machine.id).unwrap_or_default();
+			let checks = machine_checks.remove(&machine.id).unwrap_or_default();
+			FleetMachineDetailData {
+				machine_id: machine.id,
+				machine_name: machine.name,
+				group_id: machine.group_id,
+				group_name: machine.group_id.and_then(|g| group_names.get(&g).cloned()),
+				platform: figures.os_platform().or_else(|| {
+					pg_banner_by_machine
+						.get(&machine.id)
+						.map(database::statuses::platform_family_of)
+				}),
+				bestool: figures.bestool_version(),
+				detail: figures.into_json(),
+				checks: serde_json::Value::Object(checks),
+			}
+		})
+		.collect();
+
+	let rows = applications
 		.into_iter()
 		.map(|server| {
 			let (figures, version) = merged.remove(&server.id).unwrap_or_default();
 			let checks = checks.remove(&server.id).unwrap_or_default();
 			FleetServerDetailData {
 				server_id: server.id,
-				server_name: server.name.unwrap_or_default(),
+				server_name: server.display_name(),
+				machine_id: server.machine_id,
 				group_id: server.group_id,
 				group_name: server.group_id.and_then(|g| group_names.get(&g).cloned()),
 				rank: server.rank,
-				product: server.product,
-				kind: server.kind,
+				r#type: server.r#type.clone(),
 				// A product with no application version reports none, so the
 				// row carries nothing for the fleet view to count.
 				// spec: APP#versions
-				version: version.filter(|_| server.product.has_versions()),
-				platform: figures.platform(),
+				version: version.filter(|_| server.r#type.has_versions()),
 				postgres: figures.postgres_version(),
 				nodejs: figures.node_version(),
-				bestool: figures.bestool_version(),
 				timezone: figures.timezone(),
 				detail: figures.into_json(),
 				checks: serde_json::Value::Object(checks),
@@ -1065,5 +1334,8 @@ pub async fn fleet_detail(
 		})
 		.collect();
 
-	Ok(Json(rows))
+	Ok(Json(FleetDetailData {
+		machines,
+		applications: rows,
+	}))
 }

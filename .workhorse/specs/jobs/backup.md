@@ -31,7 +31,7 @@ Like maintenance, rotation is Canopy's to do; operators never run it.
 
 ## Recovery escrow
 
-Because Canopy holds the only copy of every passphrase, it continuously escrows the state needed to recover access without it: the per-group passphrases and repo coordinates, and the group, server, configuration, schedule, and capability records that frame them.
+Because Canopy holds the only copy of every passphrase, it continuously escrows the state needed to recover access without it: the per-group passphrases and repo coordinates, and the group, machine, configuration, schedule, and capability records that frame them.
 The escrow is encrypted to a set of offline recipient keys whose private halves Canopy never holds, and written to versioned, object-locked storage.
 So Canopy can write the escrow but never read it back — a full Canopy compromise cannot disclose the escrowed secrets, and object-lock keeps past versions undeletable until they expire.
 Recipients are mandatory: Canopy refuses to run without them, so there is never a silent recovery gap.
@@ -62,12 +62,12 @@ Pruning is fleet-wide and independent of any group's maintenance, so it never wa
 
 Canopy reconciles three sources — what a device reported, what credentials were issued, and what actually landed in the repo — and surfaces where they disagree:
 
-- **staleness** — a server with a prior successful backup but none recent, or one that has never backed up though it has been expected long enough. Recency is the age of the *data*, measured from the moment the backup froze what it captured (see [BAK](../public-server/backup.md)), falling back to the run's report time when it reported no such moment. So a backup that took many hours to upload is aged from when it was taken, and a server whose data is a day old is not counted fresh because its upload finished minutes ago. Both which run counts as the latest success and how old that success is use the same measure, so a server's freshness never travels backwards as new runs arrive.
+- **staleness** — a machine with a prior successful backup but none recent, or one that has never backed up though it has been expected long enough. Expectation for one that has never backed up starts from the later of its group's backup configuration and when the machine was enrolled, so a machine onboarded into an existing configuration is not stale the moment it appears. Recency is the age of the *data*, measured from the moment the backup froze what it captured (see [BAK](../public-server/backup.md)), falling back to the run's report time when it reported no such moment. So a backup that took many hours to upload is aged from when it was taken, and a machine whose data is a day old is not counted fresh because its upload finished minutes ago. Both which run counts as the latest success and how old that success is use the same measure, so a machine's freshness never travels backwards as new runs arrive.
 - **reconcile** — a device reported a successful backup naming the snapshot it created and the repository does not hold that snapshot (the report is false or the upload didn't persist), or a fresh snapshot exists but no recent report (the reporting path is broken).
   These assert that the reporting path itself is working rather than anything about the age of the data.
   A snapshot's absence is only evidence once someone has looked: no verdict is reached from an inventory older than the run it would contradict, and a run whose snapshot could have been expired by retention since it was reported is not judged at all.
-  Where a verdict cannot be reached the signal is neither passing nor failing, and one that cannot be reached for any of a server's backup types leaves whatever was already raised standing rather than clearing it.
-- **snapshot recency** — the newest snapshot the repository holds for a server's source is older than the moment the device's latest run says it froze its data.
+  Where a verdict cannot be reached the signal is neither passing nor failing, and one that cannot be reached for any of a machine's backup types leaves whatever was already raised standing rather than clearing it.
+- **snapshot recency** — the newest snapshot the repository holds for a machine's source is older than the moment the device's latest run says it froze its data.
   Backups and repository inspection run on independent cadences, so this compares two observations that are routinely out of step with nothing wrong; it is recorded and presented for context but never alerts, and it is only reached where the run reported the moment its data was frozen and the source has been inspected since.
 - **size** — a device reported a snapshot size that disagrees with the size the same snapshot occupies in the repo; only compared when both sizes are known and non-zero.
 - **maintenance** — a group whose maintenance is overdue, or whose most recent maintenance failed.
@@ -87,17 +87,17 @@ Snapshot recency is one, and its wording says what was observed rather than what
 
 Backup alerts are raised at one of two scopes:
 
-- **Per-server** signals (staleness, never-backed-up, the report-gap, the size discrepancy, the missing-snapshot reconciliation, and restore-verification — see the managed restore replicas spec, `RST`) are subject to the server's monitoring gate: still recorded for visibility, but they contribute to an incident only when the server is monitored, because some servers are intentionally intermittent.
-- **Group-level** signals (repo corruption, maintenance failure, preflight failures) page regardless of any member's monitoring state, because they are control-plane concerns that belong to no single server.
+- **Per-machine** signals (staleness, never-backed-up, the report-gap, the size discrepancy, the missing-snapshot reconciliation, and restore-verification — see the managed restore replicas spec, `RST`) are subject to the machine's monitoring gate: still recorded for visibility, but they contribute to an incident only when the machine is monitored, because some machines are intentionally intermittent.
+- **Group-level** signals (repo corruption, maintenance failure, preflight failures) page regardless of any member's monitoring state, because they are control-plane concerns that belong to no single machine.
 
-A signal about one server is raised against that server, even when the condition it detects is a disagreement between the device's report and the group's repository.
-Two servers in a group failing the same check hold two separate alerts, and one server's recovery never clears another's.
+A signal about one machine is raised against that machine, even when the condition it detects is a disagreement between the agent's report and the group's repository.
+Two machines in a group failing the same check hold two separate alerts, and one machine's recovery never clears another's.
 
-Each signal is one check, whatever the group backs up.
-A server backing up its database, its configuration, and its reverse-proxy configuration has one staleness signal, not one per backup type — the types it is stale for are carried in the signal's detail and named in its text, and the signal is graded per type before it settles on the most urgent of them, as any check with instances is (see [CHK](../monitoring/checks.md)).
+Each signal is one check, whatever the deployment backs up.
+A machine backing up its database, its configuration, and its reverse-proxy configuration has one staleness signal, not one per backup type — the types it is stale for are carried in the signal's detail and named in its text, and the signal is graded per type before it settles on the most urgent of them, as any check with instances is (see [CHK](../monitoring/checks.md)).
 So an operator configures staleness once for the fleet and, where a particular type warrants different treatment, writes a rule for that type rather than acquiring another check to configure.
 The same holds for the restore signals, which have both a backup type and a restore intent.
 
 Each signal has a stable key by which operators silence or snooze it and by which the interface and notifications refer to it; the keys are a contract and are not renamed without migrating stored silences.
-Where an alert's text names the server it concerns, it names it the way an operator knows it, falling back to an identifier only when the server has neither a name nor a host.
+Where an alert's text names the machine it concerns, it names it the way an operator knows it, falling back to an identifier only when the machine has no name.
 A signal recovers when the condition that raised it clears.

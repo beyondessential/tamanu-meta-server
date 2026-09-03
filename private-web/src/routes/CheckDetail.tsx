@@ -36,8 +36,10 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import { useReloadInterval } from "../hooks/useReloadInterval";
 import {
 	SERVER_RANK_ORDER,
-	compareServersByRankThenKind,
+	compareServersByRankThenType,
 	healthcheckSettingsPath,
+	namespaceFromSegment,
+	qualifiedCheckName,
 	type CheckDetailData,
 	type CheckDetailGroupData,
 	type CheckDetailServerData,
@@ -48,8 +50,8 @@ import {
 
 const HEALTHY_RESULTS: readonly string[] = ["passed", "skipped"];
 
-/// Detail page for a single healthcheck — one (source, check), since
-/// that pair is the check's identity. Three sections: the operator
+/// Detail page for a single healthcheck — one (source, namespace, check),
+/// since that triple is the check's identity. Three sections: the operator
 /// documentation, the check's fleet-wide stability rollup, and the
 /// needs-attention list — every live server whose *current* state from
 /// that source flags it, most urgent first, with the servers reporting
@@ -59,16 +61,30 @@ const HEALTHY_RESULTS: readonly string[] = ["passed", "skipped"];
 /// Linked from wherever a check name shows up — server detail, issue
 /// rows, and the healthchecks settings catalog.
 export default function CheckDetail() {
-	const { source, check } = useParams<{ source: string; check: string }>();
-	usePageTitle(check ?? "Healthcheck");
+	const { source, namespace: segment, check } = useParams<{
+		source: string;
+		namespace: string;
+		check: string;
+	}>();
+	const namespace = namespaceFromSegment(segment ?? "-");
+	const title = qualifiedCheckName(namespace ?? undefined, check ?? "");
+	usePageTitle(title || "Healthcheck");
 	const tick = useReloadInterval(30_000, "canopy-data-changed");
 	const [showHealthy, setShowHealthy] = useState(false);
 	const result = useApi(
 		"statuses",
 		"check_detail",
-		{ source: source ?? "", check: check ?? "" },
-		[source, check, tick],
+		{ source: source ?? "", namespace: namespace ?? {}, check: check ?? "" },
+		[source, segment, check, tick],
 	);
+
+	if (!namespace) {
+		return (
+			<Alert severity="error">
+				<code>{segment}</code> is not a check namespace.
+			</Alert>
+		);
+	}
 
 	return (
 		<Stack spacing={2}>
@@ -78,7 +94,7 @@ export default function CheckDetail() {
 				</Typography>
 				<Stack direction="row" spacing={1} sx={{ alignItems: "center", mt: 0.5 }}>
 					<Typography variant="h6" component="h2" sx={{ fontFamily: "monospace" }}>
-						{check}
+						{title}
 					</Typography>
 					<Typography variant="body2" color="text.secondary">
 						reported by {source}
@@ -99,7 +115,7 @@ export default function CheckDetail() {
 				<Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
 					<MuiLink
 						component={RouterLink}
-						to={healthcheckSettingsPath(source ?? "", check ?? "")}
+						to={healthcheckSettingsPath(source ?? "", namespace, check ?? "")}
 					>
 						Configure ceiling / rules / documentation
 					</MuiLink>
@@ -160,7 +176,7 @@ export default function CheckDetail() {
 /// even when no single target stands out. Hidden until at least one
 /// target has a record.
 function FleetStability({ data }: { data: CheckDetailData }) {
-	const serverRecords = data.servers.flatMap((s) =>
+	const serverRecords = data.applications.flatMap((s) =>
 		s.stability ? [s.stability] : [],
 	);
 	const groupRecords = data.groups.flatMap((g) =>
@@ -226,8 +242,8 @@ function AttentionList({
 }) {
 	const healthy = (result: string) => HEALTHY_RESULTS.includes(result);
 	const servers = showHealthy
-		? data.servers
-		: data.servers.filter((s) => !healthy(s.result));
+		? data.applications
+		: data.applications.filter((s) => !healthy(s.result));
 	const groups = showHealthy
 		? data.groups
 		: data.groups.filter((g) => !healthy(g.result));
@@ -238,7 +254,7 @@ function AttentionList({
 
 	if (servers.length === 0 && groups.length === 0 && !canopy) {
 		const healthyCount =
-			data.servers.length + data.groups.length + (data.canopy ? 1 : 0);
+			data.applications.length + data.groups.length + (data.canopy ? 1 : 0);
 		return (
 			<Alert severity="success">
 				Nothing currently flags <code>{check}</code>.
@@ -287,7 +303,7 @@ function AttentionList({
 		}
 		return agg;
 	};
-	for (const s of data.servers) {
+	for (const s of data.applications) {
 		if (s.group_id && s.stability) {
 			const agg = aggFor(s.group_id);
 			agg.records.push(s.stability);
@@ -351,17 +367,17 @@ function AttentionList({
 										/>
 									)}
 									{[...section.servers]
-										.sort(compareServersByRankThenKind_)
+										.sort(compareServersByRankThenType_)
 										.map((server) => (
 											<StateRow
 												key={server.server_id}
 												label={
 													<MuiLink
 														component={RouterLink}
-														to={`/servers/${server.server_id}`}
+														to={`/fleet/applications/${server.server_id}`}
 														underline="hover"
 													>
-														{server.server_name || "(unnamed)"}
+														{server.server_name}
 													</MuiLink>
 												}
 												state={server}
@@ -398,15 +414,15 @@ function AttentionList({
 	);
 }
 
-/// The servers within a section share a rank bucket; ordering reduces to
-/// the standard kind-then-name comparison.
-function compareServersByRankThenKind_(
+/// The applications within a section share a rank bucket; ordering reduces to
+/// the standard type-then-name comparison.
+function compareServersByRankThenType_(
 	a: CheckDetailServerData,
 	b: CheckDetailServerData,
 ): number {
-	return compareServersByRankThenKind(
-		{ rank: a.rank, kind: a.kind, name: a.server_name },
-		{ rank: b.rank, kind: b.kind, name: b.server_name },
+	return compareServersByRankThenType(
+		{ rank: a.rank, type: a.type, name: a.server_name },
+		{ rank: b.rank, type: b.type, name: b.server_name },
 	);
 }
 
@@ -433,7 +449,7 @@ function GroupHeaderRow({
 	const name = section.groupId ? (
 		<MuiLink
 			component={RouterLink}
-			to={`/groups/${section.groupId}`}
+			to={`/fleet/groups/${section.groupId}`}
 			underline="hover"
 			variant="subtitle2"
 		>

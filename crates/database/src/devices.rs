@@ -109,7 +109,7 @@ impl Device {
 			.map_err(AppError::from)
 	}
 
-	/// Create a device with an initial key. The device is a `Server`: this is
+	/// Create a device with an initial key. The device is a `Application`: this is
 	/// the enrollment path, which only ever mints server devices (other roles
 	/// are provisioned through [`create_at_role`]).
 	pub async fn create(db: &mut AsyncPgConnection, key: Vec<u8>) -> Result<Self> {
@@ -117,7 +117,7 @@ impl Device {
 
 		// Create the device first
 		let device: Self = diesel::insert_into(devices::table)
-			.values(devices::role.eq(DeviceRole::Server))
+			.values(devices::role.eq(DeviceRole::Machine))
 			.returning(Self::as_select())
 			.get_result(db)
 			.await
@@ -169,7 +169,7 @@ impl Device {
 
 	/// Insert a tailnet device at `role`, identified by its Tailscale identity
 	/// with no mTLS key yet (`device_keys` left empty). Used by the operator
-	/// attach/create flows, which trust the tailnet identity as a `Server`.
+	/// attach/create flows, which trust the tailnet identity as a `Application`.
 	pub async fn create_with_tailscale(
 		db: &mut AsyncPgConnection,
 		identity: TailscaleIdentity,
@@ -258,9 +258,9 @@ impl Device {
 	///
 	/// - Both source and target hold a tailscale identity. The
 	///   operator must `detach_tailscale` on one side first.
-	/// - Both source and target are attached to a server
-	///   (`servers.device_id`). The operator must clear one
-	///   `servers.device_id` first; otherwise the unique constraint
+	/// - Both source and target are bound to a machine
+	///   (`machines.device_id`). The operator must clear one
+	///   `machines.device_id` first; otherwise the unique constraint
 	///   would fail during the rewrite.
 	///
 	/// Target wins for `role` and for `tailscale_*` (if it already
@@ -272,8 +272,8 @@ impl Device {
 		target_id: Uuid,
 	) -> Result<()> {
 		use crate::schema::{
-			artifacts, device_connections, device_keys, device_server_associations, devices,
-			issues, servers, statuses, versions,
+			artifacts, device_connections, device_keys, devices, issues, machines, statuses,
+			versions,
 		};
 
 		if source_id == target_id {
@@ -301,20 +301,20 @@ impl Device {
 				return Err(AppError::DeviceMergeConflict);
 			}
 
-			// Conflict: both attached to a (possibly different) server.
-			let source_server_count: i64 = servers::table
-				.filter(servers::device_id.eq(source_id))
+			// Conflict: both bound to a (possibly different) machine.
+			let source_machine_count: i64 = machines::table
+				.filter(machines::device_id.eq(source_id))
 				.count()
 				.get_result(conn)
 				.await
 				.map_err(AppError::from)?;
-			let target_server_count: i64 = servers::table
-				.filter(servers::device_id.eq(target_id))
+			let target_machine_count: i64 = machines::table
+				.filter(machines::device_id.eq(target_id))
 				.count()
 				.get_result(conn)
 				.await
 				.map_err(AppError::from)?;
-			if source_server_count > 0 && target_server_count > 0 {
+			if source_machine_count > 0 && target_machine_count > 0 {
 				return Err(AppError::DeviceMergeConflict);
 			}
 
@@ -383,44 +383,14 @@ impl Device {
 				.await
 				.map_err(AppError::from)?;
 
-			// servers.device_id is UNIQUE. We already ruled out the
-			// both-attached case above; here the only writers are
-			// source-attached (rewrite to target) or neither (no-op).
-			diesel::update(servers::table.filter(servers::device_id.eq(source_id)))
-				.set(servers::device_id.eq(target_id))
+			// machines.device_id is UNIQUE. We already ruled out the
+			// both-bound case above; here the only writers are source-bound
+			// (rewrite to target) or neither (no-op).
+			diesel::update(machines::table.filter(machines::device_id.eq(source_id)))
+				.set(machines::device_id.eq(target_id))
 				.execute(conn)
 				.await
 				.map_err(AppError::from)?;
-
-			// device_server_associations has composite PK (device_id, server_id).
-			// Two cases:
-			// 1. source has an association for a server that target doesn't —
-			//    rewrite source's device_id to target.
-			// 2. source has an association for a server that target also has —
-			//    collapse: keep target's row, drop source's. (Operator-facing
-			//    semantics: the timeline is now under the target id.)
-			diesel::sql_query(
-				"UPDATE device_server_associations \
-					 SET device_id = $1 \
-					 WHERE device_id = $2 \
-					   AND NOT EXISTS ( \
-					     SELECT 1 FROM device_server_associations target_dsa \
-					     WHERE target_dsa.device_id = $1 \
-					       AND target_dsa.server_id = device_server_associations.server_id \
-					   )",
-			)
-			.bind::<diesel::sql_types::Uuid, _>(target_id)
-			.bind::<diesel::sql_types::Uuid, _>(source_id)
-			.execute(conn)
-			.await
-			.map_err(AppError::from)?;
-			diesel::delete(
-				device_server_associations::table
-					.filter(device_server_associations::device_id.eq(source_id)),
-			)
-			.execute(conn)
-			.await
-			.map_err(AppError::from)?;
 
 			// Finally, delete the source device row.
 			diesel::delete(devices::table.filter(devices::id.eq(source_id)))
@@ -638,7 +608,7 @@ impl Device {
 	}
 
 	/// Bulk-fetch the Tailscale hostname (`tailscale_node_name`) for each given
-	/// device that has one. Used to derive a display URL for servers that have
+	/// device that has one. Used to derive a display URL for applications that have
 	/// no stored URL but are bound to a tailnet node.
 	pub async fn tailscale_names_by_ids(
 		db: &mut AsyncPgConnection,
@@ -1088,23 +1058,28 @@ impl Device {
 		Self::get_with_info(db, device.id).await.map(Some)
 	}
 
-	/// Every `(device, attached_server_id, node_id)` triple for devices
-	/// that have a Tailscale node id and at least one attached server.
-	/// Drives the key-expiry sweep: the tailnet carries plenty of nodes
-	/// that aren't canopy-managed servers (operator laptops, other
-	/// infra, …), and the sweep deliberately ignores those — it's
-	/// scoped to the headless devices canopy actually runs.
-	pub async fn list_tailnet_attached_with_server(
+	/// Every `(device, machine_id, node_id)` triple for devices that have a
+	/// Tailscale node id and are bound to a machine. Drives the key-expiry
+	/// sweep: the tailnet carries plenty of nodes that aren't canopy-managed
+	/// boxes (operator laptops, other infra, …), and the sweep deliberately
+	/// ignores those — it's scoped to the headless devices canopy actually
+	/// runs.
+	///
+	/// The machine is the subject: a node's key expiring is a fact about the
+	/// box, not about any one workload on it.
+	// spec: DTR
+	pub async fn list_tailnet_bound_machines(
 		db: &mut AsyncPgConnection,
 	) -> Result<Vec<(Self, Uuid, String)>> {
-		use crate::schema::{devices, servers};
+		use crate::schema::{devices, machines};
 
 		let rows: Vec<(Self, Uuid, String)> = devices::table
-			.inner_join(servers::table.on(servers::device_id.eq(devices::id.nullable())))
+			.inner_join(machines::table.on(machines::device_id.eq(devices::id.nullable())))
 			.filter(devices::tailscale_node_id.is_not_null())
+			.filter(machines::deleted_at.is_null())
 			.select((
 				Self::as_select(),
-				servers::id,
+				machines::id,
 				devices::tailscale_node_id.assume_not_null(),
 			))
 			.load(db)

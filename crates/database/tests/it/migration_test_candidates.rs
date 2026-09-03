@@ -1,8 +1,8 @@
 //! Candidate derivation: which version a server is asked to be tested against.
-//! The version its group's open plan names, and only for Tamanu servers.
+//! The version its group's open plan names, and only for Tamanu applications.
 
 use commons_tests::db::TestDb;
-use commons_types::{server::product::Product, version::VersionStatus};
+use commons_types::{server::app_type::ApplicationType, version::VersionStatus};
 use database::{
 	migration_tests::{Candidate, candidates},
 	upgrade_plans::{PlannedWhen, UpgradePlan},
@@ -52,16 +52,23 @@ async fn insert_server(
 	conn: &mut diesel_async::AsyncPgConnection,
 	group: Uuid,
 	host: &str,
-	product: Product,
+	r#type: ApplicationType,
 ) -> Uuid {
-	let server: RowId =
-		sql_query("INSERT INTO servers (host, group_id, product) VALUES ($1, $2, $3) RETURNING id")
-			.bind::<sql_types::Text, _>(host)
-			.bind::<sql_types::Uuid, _>(group)
-			.bind::<sql_types::Text, _>(product.to_string())
-			.get_result(conn)
-			.await
-			.expect("server");
+	let machine: RowId = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
+		.bind::<sql_types::Uuid, _>(group)
+		.get_result(conn)
+		.await
+		.expect("machine");
+	let server: RowId = sql_query(
+		"INSERT INTO applications (host, group_id, type, machine_id) VALUES ($1, $2, $3, $4) RETURNING id",
+	)
+	.bind::<sql_types::Text, _>(host)
+	.bind::<sql_types::Uuid, _>(group)
+	.bind::<sql_types::Text, _>(r#type.to_string())
+	.bind::<sql_types::Uuid, _>(machine.id)
+	.get_result(conn)
+	.await
+	.expect("server");
 	server.id
 }
 
@@ -87,14 +94,14 @@ async fn every_server_in_a_planned_group_is_a_candidate() {
 			&mut conn,
 			group,
 			"https://central.kamaka.example",
-			Product::Tamanu,
+			ApplicationType::TamanuCentral,
 		)
 		.await;
 		let facility = insert_server(
 			&mut conn,
 			group,
 			"https://facility.kamaka.example",
-			Product::Tamanu,
+			ApplicationType::TamanuFacility,
 		)
 		.await;
 		plan(&mut conn, group, &target).await;
@@ -127,7 +134,7 @@ async fn a_group_with_no_plan_has_no_candidates() {
 			&mut conn,
 			group,
 			"https://central.drifting.example",
-			Product::Tamanu,
+			ApplicationType::TamanuCentral,
 		)
 		.await;
 
@@ -148,7 +155,7 @@ async fn a_withdrawn_plan_stops_the_testing() {
 			&mut conn,
 			group,
 			"https://central.kamaka.example",
-			Product::Tamanu,
+			ApplicationType::TamanuCentral,
 		)
 		.await;
 		plan(&mut conn, group, &target).await;
@@ -178,14 +185,14 @@ async fn only_tamanu_servers() {
 			&mut conn,
 			group,
 			"https://central.kamaka.example",
-			Product::Tamanu,
+			ApplicationType::TamanuCentral,
 		)
 		.await;
 		let senaite = insert_server(
 			&mut conn,
 			group,
 			"https://lims.kamaka.example",
-			Product::Senaite,
+			ApplicationType::Senaite,
 		)
 		.await;
 		plan(&mut conn, group, &target).await;

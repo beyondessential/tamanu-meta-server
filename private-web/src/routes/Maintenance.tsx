@@ -69,15 +69,17 @@ export default function Maintenance() {
 							{rows.map(({ window, target }) => (
 								<TableRow key={window.id} hover>
 									<TableCell>
-										<RouterLink
-											to={
-												window.server_id
-													? `/servers/${window.server_id}`
-													: `/groups/${window.server_group_id}`
-											}
-										>
-											{target}
-										</RouterLink>
+										{window.server_group_id ? (
+											<RouterLink to={`/fleet/groups/${window.server_group_id}`}>
+												{target}
+											</RouterLink>
+										) : window.machine_id ? (
+											<RouterLink to={`/fleet/machines/${window.machine_id}`}>
+												{target}
+											</RouterLink>
+										) : (
+											target
+										)}
 									</TableCell>
 									<TableCell>
 										<TimeAgo timestamp={window.expected_end} />

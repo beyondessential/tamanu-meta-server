@@ -2,6 +2,7 @@
 //! freshness that drives per-server staleness must ignore decommissioned
 //! checks, so a source whose every check is retired stops being expected.
 
+use crate::helpers::app_ns;
 use commons_types::status::{CheckResult, HealthState};
 use database::check_policies::CheckPolicy;
 use database::issues::{CheckFiling, Issue, Scope, file_check, health_from_check_state};
@@ -17,7 +18,7 @@ fn filing_result<'a>(
 ) -> CheckFiling<'a> {
 	CheckFiling {
 		source,
-		scope: Scope::Server(server_id),
+		scope: Scope::Application(server_id),
 		device_id: None,
 		check,
 		observed,
@@ -37,18 +38,25 @@ struct RowId {
 }
 
 async fn insert_server(conn: &mut diesel_async::AsyncPgConnection) -> Uuid {
-	let row: RowId =
-		sql_query("INSERT INTO servers (host) VALUES ('http://liveness.invalid/') RETURNING id")
-			.get_result(conn)
-			.await
-			.expect("insert server");
+	let machine: RowId = sql_query("INSERT INTO machines DEFAULT VALUES RETURNING id")
+		.get_result(conn)
+		.await
+		.expect("insert machine");
+	let row: RowId = sql_query(
+		"INSERT INTO applications (type, host, machine_id) \
+		 VALUES ('tamanu-central', 'http://liveness.invalid/', $1) RETURNING id",
+	)
+	.bind::<sql_types::Uuid, _>(machine.id)
+	.get_result(conn)
+	.await
+	.expect("insert server");
 	row.id
 }
 
 fn filing<'a>(server_id: Uuid, source: &'a str, check: &'a str) -> CheckFiling<'a> {
 	CheckFiling {
 		source,
-		scope: Scope::Server(server_id),
+		scope: Scope::Application(server_id),
 		device_id: None,
 		check,
 		observed: CheckResult::Passed,
@@ -141,7 +149,7 @@ async fn orphaned_source_drops_out_of_freshness() {
 
 		// Strand the check-state by deleting its catalog row — a superseded
 		// source whose issue rows linger with no catalog entry. It must stop
-		// being "expected", or it would hold servers into a reachability
+		// being "expected", or it would hold applications into a reachability
 		// warning forever with no catalog row to silence or decommission.
 		sql_query("DELETE FROM check_policies WHERE source = 'bestool-alertd'")
 			.execute(&mut conn)
@@ -290,7 +298,7 @@ async fn decommission_resolves_states_and_marks_catalog() {
 			HealthState::Unhealthy,
 		);
 
-		CheckPolicy::decommission(&mut conn, "alertd", "x", "op")
+		CheckPolicy::decommission(&mut conn, "alertd", &app_ns(), "x", "op")
 			.await
 			.expect("decommission");
 

@@ -64,7 +64,7 @@ export default function Incidents() {
 		{},
 		[refreshTick],
 	);
-	const groups = useApi("server_groups", "list", {}, []);
+	const groups = useApi("fleet/groups", "list", {}, []);
 	const issues = useApi(
 		"issues",
 		"list",
@@ -156,7 +156,7 @@ function FilterBar({
 	setResults: (v: CheckResult[]) => void;
 	groupId: string;
 	setGroupId: (v: string) => void;
-	groups: ReturnType<typeof useApi<"server_groups", "list">>;
+	groups: ReturnType<typeof useApi<"fleet/groups", "list">>;
 	onRefresh: () => void;
 }) {
 	return (

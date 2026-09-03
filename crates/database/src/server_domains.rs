@@ -1,4 +1,4 @@
-//! Server group domains (DOM): the DNS names each group controls.
+//! Application group domains (DOM): the DNS names each group controls.
 //!
 //! A claim is exclusive within Canopy — no two claims overlap, so at most one
 //! group controls any given name — but says nothing about the wider DNS, where

@@ -11,7 +11,7 @@ import {
 import { useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import { useApi } from "../api";
-import { healthcheckSettingsPath } from "../types";
+import { healthcheckSettingsPath, sameNamespace, type NamespaceRef } from "../types";
 import Markdown from "./Markdown";
 
 /** `?` affordance shown next to a check name wherever its state is
@@ -23,12 +23,15 @@ import Markdown from "./Markdown";
  * for no discoverable reason. */
 export default function CheckDocButton({
 	source,
+	namespace,
 	check,
 }: {
 	/** The source that reports this check. Documentation is keyed per
-	 * (source, check); only that exact entry is shown — a same-named
-	 * check from another source may describe something else entirely. */
+	 * (source, namespace, check); only that exact entry is shown — a
+	 * same-named check from another source, or from another application
+	 * type, may describe something else entirely. */
 	source: string;
+	namespace: NamespaceRef | undefined;
 	check: string;
 }) {
 	const [anchor, setAnchor] = useState<HTMLElement | null>(null);
@@ -57,7 +60,9 @@ export default function CheckDocButton({
 				onClick={(e) => e.stopPropagation()}
 				slotProps={{ paper: { sx: { maxWidth: 480, p: 2 } } }}
 			>
-				{anchor !== null && <DocContent source={source} check={check} />}
+				{anchor !== null && (
+					<DocContent source={source} namespace={namespace} check={check} />
+				)}
 			</Popover>
 		</>
 	);
@@ -65,7 +70,15 @@ export default function CheckDocButton({
 
 /** Mounted only while the popover is open, so the catalog fetch is
  * lazy: nothing is requested until the operator first asks. */
-function DocContent({ source, check }: { source: string; check: string }) {
+function DocContent({
+	source,
+	namespace,
+	check,
+}: {
+	source: string;
+	namespace: NamespaceRef | undefined;
+	check: string;
+}) {
 	const list = useApi("healthchecks", "list");
 	if (list.status === "loading" || list.status === "idle") {
 		return <LinearProgress sx={{ width: 200 }} />;
@@ -77,12 +90,17 @@ function DocContent({ source, check }: { source: string; check: string }) {
 			</Typography>
 		);
 	}
-	// Documentation is keyed per (source, check): only the reporting
-	// source's own entry applies. A same-named check from another source
-	// may describe something else entirely, so no fallback.
+	// Documentation is keyed per (source, namespace, check): only the
+	// reporting source's own entry, in this check's own namespace, applies. A
+	// same-named check from another source or another application type may
+	// describe something else entirely, so no fallback.
 	const documentation =
-		list.data.find((r) => r.source === source && r.check_name === check)
-			?.documentation ?? null;
+		list.data.find(
+			(r) =>
+				r.source === source &&
+				r.check_name === check &&
+				sameNamespace(r.namespace, namespace),
+		)?.documentation ?? null;
 	return (
 		<Box>
 			{documentation ? (
@@ -95,7 +113,7 @@ function DocContent({ source, check }: { source: string; check: string }) {
 			<Typography variant="caption" sx={{ display: "block", mt: 1 }}>
 				<MuiLink
 					component={RouterLink}
-					to={healthcheckSettingsPath(source, check)}
+					to={healthcheckSettingsPath(source, namespace, check)}
 				>
 					{documentation ? "Edit documentation" : "Write it"}
 				</MuiLink>

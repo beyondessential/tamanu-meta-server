@@ -1,4 +1,4 @@
-//! Server-side minting of device keypairs for operator-provisioned
+//! Application-side minting of device keypairs for operator-provisioned
 //! credentials (see spec DPK). Canopy generates the keypair, keeps only the
 //! public [`GeneratedDeviceKey::spki_der`], and hands the private key back to
 //! the operator once. The private PEM here is sensitive — never persist or log

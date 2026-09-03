@@ -139,7 +139,7 @@ pub struct Issued {
 }
 
 /// A revocation reason as the authority names it.
-/// `database::server_certificates::RevocationReason` maps onto this by name;
+/// `database::application_certificates::RevocationReason` maps onto this by name;
 /// kept separate so the database model does not depend on an ACME client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RevokeFor {

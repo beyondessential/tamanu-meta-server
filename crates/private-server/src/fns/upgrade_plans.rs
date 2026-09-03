@@ -45,7 +45,7 @@ pub struct PlannedUpgrade {
 	/// Presentational: a slipping upgrade is normal operational reality.
 	pub late: bool,
 	/// Where the group's data stands against the planned version, rolled up from
-	/// its servers: any failure makes the group a failure, since one server
+	/// its applications: any failure makes the group a failure, since one server
 	/// whose data breaks is enough to stop the upgrade. `null` without a plan.
 	pub verdict: Option<String>,
 	/// Whether a restore attempt is under way, carried beside the verdict rather
@@ -144,7 +144,7 @@ pub async fn fleet(
 	Ok(Json(out))
 }
 
-/// The group's standing against its planned version: the worst of its servers'.
+/// The group's standing against its planned version: the worst of its applications'.
 ///
 /// One server whose data breaks the migrations is enough to stop the upgrade, so
 /// a failure anywhere is the group's answer.

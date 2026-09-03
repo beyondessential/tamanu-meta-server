@@ -20,7 +20,7 @@ export default function GroupEdit() {
 	const isCreate = id == null;
 	usePageTitle(isCreate ? "New group" : "Edit group");
 	const result = useApi(
-		"server_groups",
+		"fleet/groups",
 		"get",
 		{ server_group_id: id ?? "" },
 		[id ?? ""],
@@ -37,7 +37,7 @@ export default function GroupEdit() {
 	return (
 		<EditForm
 			group={result.data.group}
-			memberCount={result.data.servers.length}
+			memberCount={result.data.applications.length}
 		/>
 	);
 }
@@ -47,7 +47,7 @@ export default function GroupEdit() {
 /// add-server flow for the freshly-created group.
 function CreateForm() {
 	const navigate = useNavigate();
-	const create = useApiAction("server_groups", "create");
+	const create = useApiAction("fleet/groups", "create");
 	const [name, setName] = useState("");
 	const [notes, setNotes] = useState("");
 	const [tags, setTags] = useState<TagMap>({});
@@ -56,7 +56,7 @@ function CreateForm() {
 		e.preventDefault();
 		try {
 			const group = await create.call({ name, notes, tags });
-			navigate(`/groups/${group.id}/servers/new`);
+			navigate(`/fleet/groups/${group.id}/machines/new`);
 		} catch {
 			/* surfaced via create.error */
 		}
@@ -107,7 +107,7 @@ function CreateForm() {
 						type="button"
 						variant="outlined"
 						color="error"
-						onClick={() => navigate("/servers")}
+						onClick={() => navigate("/fleet")}
 						disabled={create.pending}
 					>
 						Cancel
@@ -126,8 +126,8 @@ function EditForm({
 	memberCount: number;
 }) {
 	const navigate = useNavigate();
-	const update = useApiAction("server_groups", "update");
-	const remove = useApiAction("server_groups", "delete");
+	const update = useApiAction("fleet/groups", "update");
+	const remove = useApiAction("fleet/groups", "delete");
 
 	const [name, setName] = useState(group.name);
 	const [notes, setNotes] = useState(group.notes ?? "");
@@ -164,7 +164,7 @@ function EditForm({
 					),
 				},
 			});
-			navigate(`/groups/${group.id}`);
+			navigate(`/fleet/groups/${group.id}`);
 		} catch {
 			/* surfaced via update.error */
 		}
@@ -185,7 +185,7 @@ function EditForm({
 			return;
 		try {
 			await remove.call({ server_group_id: group.id });
-			navigate("/servers");
+			navigate("/fleet");
 		} catch {
 			/* surfaced via remove.error */
 		}
@@ -301,7 +301,7 @@ function EditForm({
 							type="button"
 							variant="outlined"
 							color="error"
-							onClick={() => navigate(`/groups/${group.id}`)}
+							onClick={() => navigate(`/fleet/groups/${group.id}`)}
 							disabled={pending}
 						>
 							Cancel

@@ -124,7 +124,7 @@ export default function RestoreReplicasSection({
 				id: r.id,
 				consumer_device_id: r.consumer_device_id,
 				group_id: r.group_id,
-				server_id: r.server_id,
+				machine_id: r.machine_id,
 				type: r.type,
 				intent: r.intent,
 				name: r.name,
@@ -202,7 +202,7 @@ export default function RestoreReplicasSection({
 										{r.consumer_name ?? r.consumer_device_id.slice(0, 8)}
 									</TableCell>
 									<TableCell>
-										{r.server_id ? "one server" : "whole group"}
+										{r.machine_id ? "one machine" : "whole group"}
 									</TableCell>
 									<TableCell>{r.type}</TableCell>
 									<TableCell>
@@ -273,7 +273,7 @@ export default function RestoreReplicasSection({
 							<TableRow>
 								<TableCell padding="checkbox" />
 								<TableCell>When</TableCell>
-								<TableCell>Server</TableCell>
+								<TableCell>Machine</TableCell>
 								<TableCell>Type</TableCell>
 								<TableCell>Intent</TableCell>
 								<TableCell>Outcome</TableCell>
@@ -451,7 +451,7 @@ function RedactionCell({
 			c.redaction_outcome != null &&
 			c.type === replica.type &&
 			c.intent === replica.intent &&
-			(replica.server_id == null || c.server_id === replica.server_id),
+			(replica.machine_id == null || c.machine_id === replica.machine_id),
 	);
 	const state = reported?.redaction_outcome;
 	return (
@@ -580,15 +580,17 @@ function wireParamsToValues(
  * against, shared by the declare and edit dialogs. */
 function useGroupScopeData(groupId: string) {
 	const detail = useApi(
-		"server_groups",
+		"fleet/groups",
 		"get",
 		{ server_group_id: groupId },
 		[groupId],
 	);
 	const typeDefaults = useApi("backups", "type_defaults");
+	// Machines, not applications: a declaration is over the box whose snapshot
+	// gets restored.
 	const servers =
 		detail.status === "ok"
-			? detail.data.servers.filter((s) => !s.archived)
+			? detail.data.machines.map((m) => ({ id: m.id, name: m.name }))
 			: [];
 	const typeOptions =
 		typeDefaults.status === "ok" && typeDefaults.data.length > 0
@@ -598,7 +600,7 @@ function useGroupScopeData(groupId: string) {
 	return { servers, typeOptions, groupName };
 }
 
-type ScopeServer = { id: string; name?: string | null; display_host?: string | null };
+type ScopeServer = { id: string; name?: string | null };
 
 /** The intents a consumer advertises, and the schema for the one currently
  * selected — shared by the declare and edit dialogs so param fields re-derive
@@ -698,17 +700,17 @@ function ScopeFields({
 			</FormControl>
 
 			<FormControl fullWidth size="small">
-				<InputLabel id="server-label">Server</InputLabel>
+				<InputLabel id="server-label">Machine</InputLabel>
 				<Select
 					labelId="server-label"
-					label="Server"
+					label="Machine"
 					value={serverId}
 					onChange={(e) => onServerChange(e.target.value)}
 				>
-					<MenuItem value="">All servers in the group</MenuItem>
+					<MenuItem value="">All machines in the group</MenuItem>
 					{servers.map((s) => (
 						<MenuItem key={s.id} value={s.id}>
-							{s.name ?? s.display_host ?? s.id}
+							{s.name ?? s.id}
 						</MenuItem>
 					))}
 				</Select>
@@ -818,7 +820,7 @@ function CreateReplicaDialog({
 	// server would suggest a name already taken.
 	const selectedServer = servers.find((s) => s.id === serverId);
 	const serverName = selectedServer
-		? (selectedServer.name ?? selectedServer.display_host ?? selectedServer.id)
+		? (selectedServer.name ?? selectedServer.id)
 		: "";
 	const baseName = kebabCase(
 		[groupName, serverName, intent].filter(Boolean).join("-"),
@@ -854,7 +856,7 @@ function CreateReplicaDialog({
 			await callApi("restore_replicas", "create", {
 				consumer_device_id: consumerId,
 				group_id: groupId,
-				server_id: serverId || null,
+				machine_id: serverId || null,
 				type,
 				intent,
 				name: name.trim(),
@@ -967,7 +969,7 @@ function EditReplicaDialog({
 	const { servers, typeOptions } = useGroupScopeData(groupId);
 
 	const [consumerId, setConsumerId] = useState(replica.consumer_device_id);
-	const [serverId, setServerId] = useState(replica.server_id ?? ""); // "" = whole group
+	const [serverId, setServerId] = useState(replica.machine_id ?? ""); // "" = whole group
 	const [type, setType] = useState(replica.type);
 	const [intent, setIntent] = useState(replica.intent);
 	const [name, setName] = useState(replica.name);
@@ -1029,7 +1031,7 @@ function EditReplicaDialog({
 				id: replica.id,
 				consumer_device_id: consumerId,
 				group_id: groupId,
-				server_id: serverId || null,
+				machine_id: serverId || null,
 				type,
 				intent,
 				name: name.trim(),
@@ -1242,7 +1244,9 @@ function CheckRow({ check }: { check: RestoreActivity }) {
 				<TableCell>
 					<TimeAgo timestamp={check.at} />
 				</TableCell>
-				<TableCell>{check.server_id ? check.server_id.slice(0, 8) : "—"}</TableCell>
+				<TableCell>
+					{check.machine_id ? check.machine_id.slice(0, 8) : "—"}
+				</TableCell>
 				<TableCell>{check.type}</TableCell>
 				<TableCell>{check.intent ?? "—"}</TableCell>
 				<TableCell>

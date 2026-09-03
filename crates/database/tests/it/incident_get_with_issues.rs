@@ -20,12 +20,12 @@ async fn get_with_issues_dedupes_repeat_join_rows() {
 		let incident_id = Uuid::new_v4();
 
 		conn.batch_execute(&format!(
-			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'server'); \
+			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'machine'); \
 			 INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'g'); \
-			 INSERT INTO servers (id, host, kind, device_id, group_id) VALUES \
-				('{server_id}', 'https://example.com', 'central', '{device_id}', '{group_id}'); \
+			 WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ('{server_id}', '{group_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{server_id}', 'https://example.com', 'tamanu-central', '{group_id}', '{server_id}'); \
 			 INSERT INTO issues \
-				(id, server_id, device_id, source, ref, check_name, observed_result, effective_result, message, active, first_seen, last_seen) \
+				(id, application_id, device_id, source, ref, check_name, observed_result, effective_result, message, active, first_seen, last_seen) \
 			   VALUES \
 				('{issue_a}', '{server_id}', '{device_id}', 'test', 'a', 'a', 'failed', 'failed', 'm', true, NOW(), NOW()), \
 				('{issue_b}', '{server_id}', '{device_id}', 'test', 'b', 'b', 'failed', 'failed', 'm', true, NOW(), NOW()); \

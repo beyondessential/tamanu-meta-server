@@ -33,7 +33,7 @@ export default function ManualEventForm({
 	const submit = async () => {
 		try {
 			await action.call({
-				serverId,
+				applicationId: serverId,
 				// Each manual submission is its own issue. Operators that need to
 				// add context to an existing issue use the notes panel instead.
 				ref: crypto.randomUUID(),

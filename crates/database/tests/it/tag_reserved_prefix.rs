@@ -1,15 +1,16 @@
 //! The reserved `canopy:` tag namespace is owned by the synthetic tags the
-//! public `/tags` endpoint injects, so operator-driven tag writes on servers
+//! public `/tags` endpoint injects, so operator-driven tag writes on applications
 //! and server groups must reject keys under it.
 
 use std::collections::BTreeMap;
 
 use commons_errors::AppError;
-use commons_types::server::{TagMap, kind::ServerKind, product::Product};
+use commons_types::server::{TagMap, app_type::ApplicationType};
 use database::{
+	applications::{Application, PartialServer},
+	machines::{Machine, NewMachine},
 	pg_duration::PgDuration,
 	server_groups::{NewServerGroup, PartialServerGroup, ServerGroup},
-	servers::{PartialServer, Server},
 	url_field::UrlField,
 };
 use jiff::SignedDuration;
@@ -21,15 +22,15 @@ fn reserved_tags() -> TagMap {
 	TagMap(map)
 }
 
-fn new_server(host: &str) -> Server {
-	Server {
+fn new_server(host: &str, machine_id: Uuid) -> Application {
+	Application {
 		id: Uuid::new_v4(),
 		name: Some("t".into()),
 		host: Some(UrlField(host.parse().unwrap())),
-		product: Product::Tamanu,
-		kind: ServerKind::Central,
+		r#type: ApplicationType::TamanuCentral,
 		rank: None,
-		device_id: None,
+		machine_id,
+		reported_key: None,
 		group_id: None,
 		public_name: None,
 		cloud: None,
@@ -40,8 +41,6 @@ fn new_server(host: &str) -> Server {
 		tags: TagMap::default(),
 		deleted_at: None,
 		registered_at: None,
-		restore_allowed_until: None,
-		restore_allowed_by: None,
 		may_manage_dns: false,
 		may_manage_tls: false,
 		certificate_profile: None,
@@ -61,9 +60,12 @@ fn assert_bad_request<T: std::fmt::Debug>(result: Result<T, AppError>) {
 #[tokio::test(flavor = "multi_thread")]
 async fn server_create_rejects_reserved_tag_keys() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let mut s = new_server("https://create.example/");
+		let machine = Machine::create(&mut conn, NewMachine::default())
+			.await
+			.unwrap();
+		let mut s = new_server("https://create.example/", machine.id);
 		s.tags = reserved_tags();
-		assert_bad_request(Server::create(&mut conn, s).await);
+		assert_bad_request(Application::create(&mut conn, s).await);
 	})
 	.await
 }
@@ -71,17 +73,18 @@ async fn server_create_rejects_reserved_tag_keys() {
 #[tokio::test(flavor = "multi_thread")]
 async fn server_update_rejects_reserved_tag_keys() {
 	commons_tests::db::TestDb::run(async |mut conn, _url| {
-		let server = Server::create(&mut conn, new_server("https://update.example/"))
+		let machine = Machine::create(&mut conn, NewMachine::default())
 			.await
 			.unwrap();
+		let server =
+			Application::create(&mut conn, new_server("https://update.example/", machine.id))
+				.await
+				.unwrap();
 		let updates = PartialServer {
 			id: server.id,
 			name: None,
-			product: None,
-			kind: None,
 			rank: None,
 			host: None,
-			device_id: None,
 			group_id: None,
 			public_name: None,
 			cloud: None,
@@ -93,7 +96,7 @@ async fn server_update_rejects_reserved_tag_keys() {
 			may_manage_dns: None,
 			may_manage_tls: None,
 		};
-		assert_bad_request(Server::update(&mut conn, server.id, updates).await);
+		assert_bad_request(Application::update(&mut conn, server.id, updates).await);
 	})
 	.await
 }
