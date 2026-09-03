@@ -66,9 +66,45 @@ export default function ServerEdit() {
 	if (silences.status === "error")
 		return <Alert severity="error">{silences.error.message}</Alert>;
 	return (
-		<EditForm
+		<MachineSilenceGate
 			info={info.data}
 			reachabilitySilenced={silences.data.some(
+				(s) =>
+					s.source === REACHABILITY_CHECK.source &&
+					s.ref === REACHABILITY_CHECK.ref,
+			)}
+		/>
+	);
+}
+
+/// The box's reachability silence is offered here as well as on the box, so an
+/// operator quiets a host expected to be down from whichever record they are
+/// looking at. It can only be read once the application names its machine, so
+/// it waits behind the info load.
+// spec: CHK#operator-controls
+function MachineSilenceGate({
+	info,
+	reachabilitySilenced,
+}: {
+	info: ServerInfo;
+	reachabilitySilenced: boolean;
+}) {
+	const machineSilences = useApi(
+		"silenced_refs",
+		"list_for_machine",
+		{ machine_id: info.machine_id },
+		[info.machine_id],
+	);
+
+	if (machineSilences.status === "loading" || machineSilences.status === "idle")
+		return <LinearProgress />;
+	if (machineSilences.status === "error")
+		return <Alert severity="error">{machineSilences.error.message}</Alert>;
+	return (
+		<EditForm
+			info={info}
+			reachabilitySilenced={reachabilitySilenced}
+			machineReachabilitySilenced={machineSilences.data.some(
 				(s) =>
 					s.source === REACHABILITY_CHECK.source &&
 					s.ref === REACHABILITY_CHECK.ref,
@@ -80,14 +116,18 @@ export default function ServerEdit() {
 function EditForm({
 	info,
 	reachabilitySilenced,
+	machineReachabilitySilenced,
 }: {
 	info: ServerInfo;
 	reachabilitySilenced: boolean;
+	machineReachabilitySilenced: boolean;
 }) {
 	const navigate = useNavigate();
 	const action = useApiAction("servers", "update");
 	const silence = useApiAction("silenced_refs", "silence_server");
 	const unsilence = useApiAction("silenced_refs", "unsilence_server");
+	const silenceMachine = useApiAction("silenced_refs", "silence_machine");
+	const unsilenceMachine = useApiAction("silenced_refs", "unsilence_machine");
 
 	const [name, setName] = useState(info.name ?? "");
 	const [host, setHost] = useState(info.host ?? "");
@@ -109,6 +149,14 @@ function EditForm({
 	const [alertWhenUnreachable, setAlertWhenUnreachable] = useState(
 		alertsWhenUnreachableInitially,
 	);
+	// The box's own switch, shared with every application on it and with the
+	// machine's page. Offered here so quieting a host expected to be down
+	// doesn't mean working out which record owns the switch.
+	// spec: CHK#operator-controls
+	const machineAlertsWhenUnreachableInitially = !machineReachabilitySilenced;
+	const [alertWhenMachineUnreachable, setAlertWhenMachineUnreachable] = useState(
+		machineAlertsWhenUnreachableInitially,
+	);
 	const [alertWhenDownMinutes, setAlertWhenDownMinutes] = useState<string>(
 		Math.max(1, Math.round(info.alert_when_down_for / 60)).toString(),
 	);
@@ -123,8 +171,18 @@ function EditForm({
 	const [mayManageDns, setMayManageDns] = useState(info.may_manage_dns);
 	const [mayManageTls, setMayManageTls] = useState(info.may_manage_tls);
 
-	const pending = action.pending || silence.pending || unsilence.pending;
-	const error = action.error ?? silence.error ?? unsilence.error;
+	const pending =
+		action.pending ||
+		silence.pending ||
+		unsilence.pending ||
+		silenceMachine.pending ||
+		unsilenceMachine.pending;
+	const error =
+		action.error ??
+		silence.error ??
+		unsilence.error ??
+		silenceMachine.error ??
+		unsilenceMachine.error;
 
 	const onSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -166,6 +224,18 @@ function EditForm({
 				await (alertWhenUnreachable
 					? unsilence.call(ref)
 					: silence.call(ref));
+			}
+			if (
+				alertWhenMachineUnreachable !== machineAlertsWhenUnreachableInitially
+			) {
+				const ref = {
+					machine_id: info.machine_id,
+					source: REACHABILITY_CHECK.source,
+					ref: REACHABILITY_CHECK.ref,
+				};
+				await (alertWhenMachineUnreachable
+					? unsilenceMachine.call(ref)
+					: silenceMachine.call(ref));
 			}
 			navigate(`/servers/${info.id}`);
 		} catch {
@@ -291,6 +361,24 @@ function EditForm({
 					going away is quiet. This is the same as silencing the
 					reachability check on this server, and either place reflects the
 					other.
+				</Typography>
+
+				<FormControlLabel
+					control={
+						<Checkbox
+							checked={alertWhenMachineUnreachable}
+							onChange={(e) =>
+								setAlertWhenMachineUnreachable(e.target.checked)
+							}
+							disabled={pending}
+						/>
+					}
+					label="Alert when the machine this runs on is unreachable"
+				/>
+				<Typography variant="caption" color="text.secondary">
+					The box's own switch, offered here so you don't have to go
+					looking for it. Turning it off quiets the box going away for
+					every application on it, and shows as off on the machine too.
 				</Typography>
 
 				<Stack

@@ -1024,3 +1024,55 @@ async fn applications_recover_independently_of_their_machine() {
 	})
 	.await
 }
+
+/// A workload that has fallen over while its box keeps reporting has not gone
+/// away: the box is still saying what it sees, and what it sees is bad. That
+/// is a failing check, and unreachable would say the opposite — that nothing
+/// is being heard about it.
+// spec: CHK#reachability
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dead_application_on_a_live_machine_is_unhealthy_not_unreachable() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let id = insert_server(&mut conn, "http://dead-app.invalid/", 600).await;
+		let machine = machine_of(&mut conn, id).await;
+		// Both grains reported just now, the box carrying the application's
+		// report as it always does.
+		insert_status_at(&mut conn, id, 0).await;
+		insert_machine_detail_at(&mut conn, machine, 0).await;
+		database::issues::file_check(
+			&mut conn,
+			database::issues::CheckFiling {
+				source: "alertd",
+				scope: database::issues::Scope::Application(id),
+				device_id: None,
+				check: "tamanu_api",
+				observed: CheckResult::Failed,
+				title: None,
+				message: "the API is not answering",
+				detail: None,
+				default_ceiling: CheckResult::Failed,
+				default_escalates: false,
+				documentation: None,
+			},
+		)
+		.await
+		.expect("file the failing check");
+
+		let filed = Status::sweep_staleness(&mut conn).await.expect("sweep");
+		assert_eq!(filed, 0, "nothing has gone quiet");
+		assert!(
+			issue_for(&mut conn, id).await.is_none(),
+			"a failing workload is not an unreachable one",
+		);
+		assert!(issue_for_machine(&mut conn, machine).await.is_none());
+
+		let health = database::issues::health_from_check_state(&mut conn, &[(id, None)])
+			.await
+			.expect("rollup");
+		assert_eq!(
+			health.get(&id).copied(),
+			Some(commons_types::status::HealthState::Unhealthy),
+		);
+	})
+	.await
+}

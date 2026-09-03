@@ -41,6 +41,10 @@ async function reachabilitySilences(sql: Sql, serverId: string): Promise<number>
 
 const SWITCH = "Alert when this server is unreachable";
 
+/** The box's switch, offered on the application so an operator quieting a
+ * host expected to be down doesn't have to find which record owns it. */
+const BOX_SWITCH = "Alert when the machine this runs on is unreachable";
+
 // spec: CHK#operator-controls
 test.describe("the reachability alerting switch, on both forms", () => {
 	test.beforeEach(async ({ sql }) => {
@@ -136,6 +140,59 @@ test.describe("the reachability alerting switch, on both forms", () => {
 		expect(await reachabilitySilences(sql, server.id)).toBe(1);
 		// And the check itself now shows as silenced, so the two surfaces agree.
 		await expect(page.getByText("silenced (application)")).toBeVisible();
+	});
+
+	// spec: CHK#operator-controls
+	test("the box's switch is offered on an application, and quiets only the box", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "box-switch-group" });
+		const server = await seedServer(sql, {
+			name: "on-a-box-going-away",
+			groupId: group.id,
+		});
+
+		await page.goto(`/servers/${server.id}/edit`);
+		await expect(page.getByLabel(BOX_SWITCH)).toBeChecked();
+		await page.getByLabel(BOX_SWITCH).uncheck();
+		await page.getByRole("button", { name: /^save$/i }).click();
+		await page.waitForURL(`**/servers/${server.id}`);
+
+		// The box is quiet, and the application it carries is not: each grain
+		// has its own reachability and its own switch.
+		expect(await machineReachabilitySilences(sql, server.machineId)).toBe(1);
+		expect(await reachabilitySilences(sql, server.id)).toBe(0);
+
+		// And the box's own page reads the same state back.
+		await page.goto(`/machines/${server.machineId}`);
+		await expect(
+			page.getByText(
+				"— issues with these refs on this machine don't open incidents.",
+			),
+		).toBeVisible();
+		await expect(page.getByText("reachability").first()).toBeVisible();
+	});
+
+	// spec: CHK#reachability
+	test("silencing an application's reachability leaves its box alerting", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "app-only-hush-group" });
+		const server = await seedServer(sql, {
+			name: "workload-expected-to-stop",
+			groupId: group.id,
+		});
+
+		await page.goto(`/servers/${server.id}/edit`);
+		await expect(page.getByLabel(SWITCH)).toBeChecked();
+		await page.getByLabel(SWITCH).uncheck();
+		await page.getByRole("button", { name: /^save$/i }).click();
+		await page.waitForURL(`**/servers/${server.id}`);
+
+		expect(await reachabilitySilences(sql, server.id)).toBe(1);
+		expect(await machineReachabilitySilences(sql, server.machineId)).toBe(0);
 	});
 
 	test("saving with the switch untouched leaves the silence alone", async ({

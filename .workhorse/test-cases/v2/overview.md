@@ -45,14 +45,14 @@ is a regression.
 - [x] Applications recover independently when their machine reports again (verifies spec: CHK)
 - [x] An application dropped from a live machine's report is unreachable while its machine stays reachable (verifies spec: CHK)
 - [x] An unreachable target keeps its last observed check results and is presented as unreachable (verifies spec: CHK)
-- [ ] An application's reachability check can be silenced independently of its machine's (verifies spec: CHK)
-- [ ] A machine's reachability silence is reachable from an application on that machine (verifies spec: CHK)
+- [x] An application's reachability check can be silenced independently of its machine's (verifies spec: CHK)
+- [x] A machine's reachability silence is reachable from an application on that machine (verifies spec: CHK)
 - [x] Reachability is measured against the target's own threshold, not a fixed one (verifies spec: CHK)
 - [x] A gap inside the threshold is simply reachable, with no intermediate state (verifies spec: CHK)
 - [x] A target quiet for longer than the status lookback window is unreachable, not never reported (verifies spec: CHK)
 - [x] A target with no report at all is never reported, on every surface that presents one (verifies spec: CHK)
 - [x] A group whose members all reported long ago still offers the archive that cascades to them (verifies spec: FLT)
-- [ ] A dead application on a live machine is unhealthy rather than unreachable (verifies spec: CHK)
+- [x] A dead application on a live machine is unhealthy rather than unreachable (verifies spec: CHK)
 
 ## Checks
 
@@ -208,7 +208,7 @@ cover the runtime half of that, which the spec diff cannot see.
 
 - [x] The group page lists rank, then machine, then applications
 - [ ] Both detail pages end with the group's tree, with the current page highlighted
-- [ ] The application page presents its own and its machine's checks in one list
+- [x] The application page presents its own and its machine's checks in one list
 - [ ] The application page carries no backups and no identity
 - [x] The machine page carries no URL
 - [x] A machine's page presents what the box reports: platform, processors, memory, bestool

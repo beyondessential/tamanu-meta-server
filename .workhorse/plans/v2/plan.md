@@ -754,12 +754,6 @@ The response is answered per target under the keys the reporter used, in `machin
 
 The public API gains only optional request properties and optional response properties, so the compatibility bar is met and a fielded bestool keeps working unchanged.
 
-### The reachability check is filed at one grain
-
-`Status::sweep_staleness` reads `Application::get_all` and files `Scope::Application`; no `Scope::Machine` reachability filing exists anywhere in the tree. CHK says Canopy "keeps one `reachability` check per target" and that machines and applications each have reachability computed the same way.
-
-`Machine::reachability` grades the dot correctly off the projection, so the box's state presents while its check never fires. That is a second definition of the same idea diverging from the first, which is exactly what retiring the graded states was meant to stop.
-
 ### The reachability check is filed at one grain: done
 
 `Status::sweep_staleness` is now two halves that share their grading, one per grain.
@@ -782,14 +776,36 @@ Coverage: the machine grain's own tests in `reachability_sweep` -- a quiet box w
 Plus the two-workload cases the card exists for: a box going quiet files three unreachabilities with no propagation step, and one workload returning with its box leaves the other unreachable.
 The existing application-grain tests keep their meaning because their fixture machine now reports, which is what a box carrying a reporting application actually does.
 
-### An application does not see its machine's checks
+### An application sees its machine's checks: done
 
-CHK: "Every machine check appears on every application on that machine, marked as belonging to the machine", and "An application's contributing checks include its machine's, so a box whose disk is filling makes every application on it degraded."
+The merge happens in two places, because one without the other lets the headline and the list disagree.
 
-`consolidated_checks_for` answers for the one target it is given, and the machine wrapper's own doc comment scopes it to "the box's own, not those of the applications on it". Nothing merges the machine's set into an application's list or its rollup.
+`consolidated_checks_for` reads the box's checks from where they were filed and extends the application's list with them.
+The former body of that function is now `checks_at_scope`, called once per grain, so the catalog gate, the silence pass and the grading are the same work at both and cannot drift.
+Each entry carries the grain it was filed against in a new `subject` field, which is what marks a box's check in an application's list: one filing seen from each workload the box carries, not a copy per workload.
+
+`health_from_check_state` folds each application's machine rollup in with `HealthState::worse_of`.
+Rolling the two sets up separately and taking the worse of the pair is the same answer as classifying their union, which is what lets one machine grading be read from N applications rather than graded N times.
+`Application::machines_by_id` asks for the whole set's machines in one query so the fleet list does not go per-application.
+
+Reachability is left out of the merge, in the list and in the rollup.
+CHK carves it out, each grain having its own, and a box that goes quiet has already made every application on it unreachable in its own right.
+Including the box's as well would say the same thing twice from one silence control.
+`machine_health_rollup` takes that as a parameter: the box's reachability counts when the box is being graded and not when an application on it is.
+
+The point-in-time path reads both push shapes.
+`Status::machine_latest_per_source_at` is the machine-grain counterpart of `latest_per_source_at`, so a split push's machine rows are read back at their own grain; a unified push files its machine checks in the application's rows, where `CheckSubject::of` recognises them by name.
+A given source pushes one shape or the other, so per source there is nothing to double-count.
+
+The application's page marks the box's rows with a `machine` chip, and silencing one from there writes the machine-scoped silence, so the operator triages in one place without working out which record owns the switch.
+The box's reachability switch is offered on the application's edit form for the same reason, alongside the application's own.
+
+Coverage: `consolidated_checks` covers the marked list and the rollup at the database grain, `machines.spec.ts` covers the presented list and silencing a box's check from an application, and `server-reachability-silence.spec.ts` covers the box's switch on the application and the two grains' switches staying independent.
 
 ### The fleet spread is application-grained
 
 FIG: "A machine figure spreads over machines and an application figure over applications, so a box running two applications is one machine in a platform spread", and "A crossing counts machines, whatever figures are on its axes."
 
 `fleet_detail` returns one row per application with no machine on it, and `ReportedDetail::all` fans each machine's detail onto every application it hosts. A two-application box therefore counts twice on platform, bestool version and every crossing. The fan-out is right for a detail page, which asks about one application, and wrong for a spread, which counts.
+
+The snapshot reader has the mirror-image problem. `MergedDetail::from_statuses` reads only the application's status rows, so under a split push the machine figures -- platform, timezone, bestool version -- are absent from a past snapshot rather than doubled. Both are the same missing step: the reader has to name which grain a figure comes from. Neither is started; this needs a decision on how far the figure split goes before either is worth touching.
