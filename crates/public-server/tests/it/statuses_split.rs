@@ -414,6 +414,75 @@ async fn a_split_push_takes_over_the_application_a_unified_push_created() {
 	.await
 }
 
+/// Takeover is by type: a split push naming a type the box has no application
+/// of stands one up beside what is already there. The keyless record a unified
+/// push created is a Tamanu central and stays one, whatever else turns up on
+/// the box.
+/// spec: APP, STA#identifying-an-application
+#[tokio::test(flavor = "multi_thread")]
+async fn a_split_push_naming_another_type_stands_it_beside_the_migrated_one() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let machine_id = machine_for(&mut conn, device_id).await;
+
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"health": [{ "check": "db", "result": "passed" }],
+					"tamanuServerKind": "central",
+					"tamanuVersion": "2.4.1",
+				}))
+				.await
+				.assert_status_ok();
+
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&serde_json::json!({
+					"source": "alertd",
+					"machine": { "health": [] },
+					"applications": {
+						"facility": {
+							"type": "tamanu-facility",
+							"health": [{ "check": "db", "result": "passed" }],
+						},
+					},
+				}))
+				.await
+				.assert_status_ok();
+
+			#[derive(QueryableByName)]
+			struct Row {
+				#[diesel(sql_type = sql_types::Text)]
+				r#type: String,
+				#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+				reported_key: Option<String>,
+			}
+			let rows: Vec<Row> = sql_query(
+				"SELECT type, reported_key FROM applications \
+				 WHERE machine_id = $1 ORDER BY type",
+			)
+			.bind::<sql_types::Uuid, _>(machine_id)
+			.load(&mut conn)
+			.await
+			.expect("the box's applications");
+
+			assert_eq!(rows.len(), 2, "stood beside, not taken over");
+			assert_eq!(rows[0].r#type, "tamanu-central");
+			assert_eq!(
+				rows[0].reported_key, None,
+				"the central is still waiting for a reporter to claim it"
+			);
+			assert_eq!(rows[1].r#type, "tamanu-facility");
+			assert_eq!(rows[1].reported_key.as_deref(), Some("facility"));
+		},
+	)
+	.await
+}
+
 /// A split push is answered per target, under the keys the reporter used. A
 /// unified push is answered exactly as it was before the split shape existed,
 /// so nothing changes for a reporter in the field.

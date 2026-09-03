@@ -180,10 +180,10 @@ cover the runtime half of that, which the spec diff cannot see.
 
 ## Migration
 
-- [ ] Every existing server becomes one application and one machine (verifies spec: FLT)
-- [ ] `alert_when_down_for`, the group and the identity link land on the machine (verifies spec: FLT)
-- [ ] A migrated application, having no key, is taken over by the first split push naming its type, and a push naming a different type stands a new application beside it (verifies spec: APP, STA)
-- [ ] Existing silences, incidents and check states survive the rename intact
+- [x] Every existing server becomes one application and one machine (verifies spec: FLT)
+- [x] `alert_when_down_for`, the group and the identity link land on the machine (verifies spec: FLT)
+- [x] A migrated application, having no key, is taken over by the first split push naming its type, and a push naming a different type stands a new application beside it (verifies spec: APP, STA)
+- [x] Existing silences, incidents and check states survive the rename intact
 - [x] Each application type that reported a check gets its own catalog entry, with its own first and last seen (verifies spec: CHK)
 - [x] A machine-subject name from a structured source is re-keyed, not multiplied (verifies spec: CHK)
 - [x] Curated sources' catalog entries pass through the fan-out untouched (verifies spec: CHK)

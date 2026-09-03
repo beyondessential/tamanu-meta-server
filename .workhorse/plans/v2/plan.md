@@ -867,3 +867,14 @@ It now splits by subject the way `file_health_events` does, so seeded state and 
 `detail` is a section of its own, so a reporter field named `source`, `health`, `check` or `result` inside it is an ordinary field: recorded verbatim on both grains, with the envelope's reporter and the `health` arrays' checks unmoved.
 A key is an address rather than a label, so a payload repeating one describes one application, the last write standing; `applications` being a JSON object is what makes two under one key inexpressible.
 Both covered in `statuses_split.rs`.
+
+**Done since the audit: migration replay.**
+The split lands as a run of migrations rather than one, and `add_machines` cannot be replayed on its own: its `down.sql` drops `machines` outright while eighteen later migrations hold foreign keys to it.
+`core_split_migration.rs` therefore drives the migration harness instead of a single migration's SQL, reverting until the newest applied version is older than `rename_servers_to_applications`, seeding `servers` in the shape it had that morning, and running the whole run forward again.
+
+It asserts what the backfill owes: each server becomes exactly one application on exactly one box, the two servers do not share a box, and the box carries the group, the identity and `alert_when_down_for` while the identity's role reads `machine`.
+It also asserts the history survives the rename: the check state still names its application and is still active, the silence is one row still naming it, and the incident still holds that check state.
+Canopy's own nil record predates the split and is excluded, the way fleet queries exclude it.
+
+A migrated application carries no reporter key, which is what lets a split push claim it.
+Takeover by type was already covered; the other half was not, so `statuses_split.rs` gains a push naming a type the box has no application of, which stands one beside the keyless record rather than renaming it.

@@ -19,6 +19,7 @@ mod check_severity_map;
 mod check_stability;
 mod chrome_releases;
 mod consolidated_checks;
+mod core_split_migration;
 mod event_validation;
 mod fleet_check_detail;
 mod health_rollup;
