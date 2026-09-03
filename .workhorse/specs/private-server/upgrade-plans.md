@@ -37,7 +37,7 @@ An operator records, per environment, a group's servers at one rank (see [GRP](.
 
 A planned time requires a planned date and a timezone.
 Canopy holds no timezone for a group, and the fleet spans enough of the world that a wall-clock time without a zone means nothing to anyone but whoever typed it.
-Most plans record a date and no time, because the night an upgrade happens is usually settled well before the hour it starts.
+The time and window are optional, so a plan can be recorded before its window has been estimated and gain one when it is.
 
 A close needs an open to bound, and one earlier in the day than the open is the following morning: an upgrade from 22:00 to 02:00 is one night's window rather than a plan that runs backwards.
 A close at the hour it opens is refused, since it reads as either no window at all or a whole day.
