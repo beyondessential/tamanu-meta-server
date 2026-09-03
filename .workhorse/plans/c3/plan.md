@@ -218,9 +218,10 @@ just gen-api` and committing the regenerated client.
 
 - **bestool card X1**: what `bestool-canopy` becomes. It survives; its remaining shape
   is bestool's decision.
-- **canopy card L3**: the publish pipeline, and the first publish. Every workspace
-  member is currently `publish = false` and `cd.yml` only builds an image and runs
-  Pulumi, so there is no release path to publish onto. This card therefore lands the
-  crate unpublished, and L3 flips it, publishes it, implements the version stamping,
-  and adds the `cargo-semver-checks` gate, which needs a published baseline to compare
-  against. L3 carries the detail.
+- **canopy card L3**: the release pipeline and the first publish. The crate is marked
+  publishable here, because publishability is a property of the crate rather than a
+  record of whether a pipeline exists yet, and its manifest version is a placeholder
+  for release-plz to compute. Nothing in this repository publishes it though: there is
+  no crates.io token and no release workflow. L3 adds those, stamps the manifest
+  version from the document, and adds the `cargo-semver-checks` gate, which needs a
+  published baseline to compare against. L3 carries the detail.
