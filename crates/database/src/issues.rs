@@ -2378,6 +2378,9 @@ pub async fn get_global_issue(conn: &mut AsyncPgConnection, r#ref: &str) -> Resu
 ///   stop counting. The same applies if the check is silenced at server
 ///   or group scope — see [`crate::silenced_refs`] — or if a maintenance
 ///   window suspends the target, see [`crate::maintenance_windows`].
+///   An issue holding a live membership on another target's incident also
+///   leaves that one, whatever else it does: a rank or group change moves
+///   which target it answers to, and it cannot be in two.
 /// - **Join**: not leaving, AND one of:
 ///   - the state opens incidents on its own — an effective failure (see
 ///     [`Issue::opens_incident`]); or
@@ -2463,9 +2466,9 @@ async fn re_evaluate_incident_membership(
 	// would turn "join the open incident" into "open a new one" — a Slack page
 	// for a Warning.
 	lock_target(conn, target).await?;
-	// An issue whose target changed — a rank set, or a move between groups —
-	// is still a live member of the incident on the target it has left, and
-	// comes out of that one before it can join the one it now belongs to.
+	// An issue whose target changed (a rank set, or a move between groups) is
+	// still a live member of the incident on the target it has left, and comes
+	// out of that one before it can join the one it now belongs to.
 	// spec: INC#membership
 	let mut was_in = held.is_some();
 	if let Some(held) = held.as_ref().map(IncidentTarget::of_incident)
@@ -2599,7 +2602,7 @@ async fn leave_open_incident(
 	by: Option<&str>,
 	check_recovery: bool,
 ) -> Result<()> {
-	use crate::schema::{incident_issues, incidents};
+	use crate::schema::{incident_issues, incidents, issues};
 
 	// Must match `open_incident_holding`'s definition of live
 	// membership, incident `closed_at` included: an issue can hold an
@@ -2630,7 +2633,7 @@ async fn leave_open_incident(
 	// its own in-flight left_at update but not the other's)
 	// and skip the close, leaving the incident in "no live
 	// issues but closed_at IS NULL" with no Slack fired.
-	let held: Incident = incidents::table
+	let incident: Incident = incidents::table
 		.select(Incident::as_select())
 		.filter(incidents::id.eq(open_link.incident_id))
 		.for_update()
@@ -2654,9 +2657,7 @@ async fn leave_open_incident(
 
 	// Only count contributors that *currently* open an incident
 	// (effective failures). Lesser contributors stay attached for
-	// context but don't hold the incident open on their own; see
-	// the function doc-comment for the rationale.
-	use crate::schema::issues;
+	// context but don't hold the incident open on their own.
 	let remaining_open: i64 = incident_issues::table
 		.inner_join(issues::table.on(issues::id.eq(incident_issues::issue_id)))
 		.filter(
@@ -2670,9 +2671,8 @@ async fn leave_open_incident(
 		.await?;
 	if remaining_open == 0 {
 		// A zero linger window is the operator opting out of lingering.
-		let window = linger_window(conn, IncidentTarget::of_incident(&held)).await?;
+		let window = linger_window(conn, IncidentTarget::of_incident(&incident)).await?;
 		if by.is_some() || !check_recovery || window.is_zero() {
-			//
 			// Filter on `closed_at IS NULL` so that when a stranded
 			// lesser contributor eventually leaves an already-closed
 			// incident (because the failure-filter close above already

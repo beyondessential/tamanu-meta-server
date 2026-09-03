@@ -20,7 +20,7 @@ An application-scoped issue belongs to the environment its application is in: th
 A machine-scoped issue belongs to the environment of the highest-ranked application on the box, which is the rank the machine's stage is derived from (see [FLT](../servers/overview.md), "Environments"), and to its group's headline environment where nothing on it is ranked.
 So an environment's trouble is one incident whether it began on a box or in the software on it, and a machine's failure is not split across the applications it hosts.
 
-A group-scoped issue belongs to the group itself, a target beside its environments rather than one of them, because what a group check asserts is held once for the group however many environments it has: its backups are one repository (see [GRP](../servers/groups.md)).
+A group-scoped issue belongs to the group itself, which is a target of its own beside the group's environments, because what a group check asserts is held once for the group however many environments it has: its backups are one repository (see [GRP](../servers/groups.md)).
 A member of a group with no ranked application is in no environment, so its issues target the group as well.
 Canopy-wide issues belong to the Canopy target.
 An issue on an application or a machine belonging to no group belongs to no target and cannot contribute to incidents.

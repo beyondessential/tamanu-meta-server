@@ -2577,8 +2577,9 @@ export interface paths {
         put?: never;
         /**
          * List incidents for a server group.
-         * @description Returns the group's incidents. By default only open incidents are
-         *     returned; set `include_closed` to also include closed ones.
+         * @description Returns the group's own incidents and those of every environment in it. By
+         *     default only open incidents are returned; set `include_closed` to also
+         *     include closed ones.
          */
         post: operations["incident_list_for_group"];
         delete?: never;
@@ -2598,9 +2599,9 @@ export interface paths {
         put?: never;
         /**
          * List incidents involving a server.
-         * @description Returns incidents that issues on the given server have contributed to.
-         *     By default only open incidents are returned; set `include_closed` to
-         *     also include closed ones.
+         * @description Returns the incidents on the environment the application is in, and the
+         *     group's own where it belongs to no environment. By default only open
+         *     incidents are returned; set `include_closed` to also include closed ones.
          */
         post: operations["incident_list_for_server"];
         delete?: never;

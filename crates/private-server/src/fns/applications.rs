@@ -834,8 +834,8 @@ pub async fn update(
 	// Capture the server's pre-update state when this request touches one of
 	// the fields whose transitions warrant an incident catch-up: `group_id`
 	// (ungrouped → grouped opens pending issues into incidents),
-	// `is_monitored` (un/monitored toggles incident eligibility symmetrically
-	// — on enrols open issues, off cascades them out), and `rank` (which
+	// `is_monitored` (un/monitored toggles incident eligibility symmetrically:
+	// on enrols open issues, off cascades them out), and `rank` (which
 	// environment the issues belong to).
 	let touches_catchup_field = args.data.group_id.is_some()
 		|| args.data.is_monitored.is_some()

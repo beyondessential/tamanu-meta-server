@@ -5149,7 +5149,7 @@
           "incidents"
         ],
         "summary": "List incidents for a server group.",
-        "description": "Returns the group's incidents. By default only open incidents are\nreturned; set `include_closed` to also include closed ones.",
+        "description": "Returns the group's own incidents and those of every environment in it. By\ndefault only open incidents are returned; set `include_closed` to also\ninclude closed ones.",
         "operationId": "incident_list_for_group",
         "requestBody": {
           "content": {
@@ -5189,7 +5189,7 @@
           "incidents"
         ],
         "summary": "List incidents involving a server.",
-        "description": "Returns incidents that issues on the given server have contributed to.\nBy default only open incidents are returned; set `include_closed` to\nalso include closed ones.",
+        "description": "Returns the incidents on the environment the application is in, and the\ngroup's own where it belongs to no environment. By default only open\nincidents are returned; set `include_closed` to also include closed ones.",
         "operationId": "incident_list_for_server",
         "requestBody": {
           "content": {

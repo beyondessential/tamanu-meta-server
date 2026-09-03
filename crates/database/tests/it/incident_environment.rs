@@ -1,7 +1,8 @@
-//! An incident targets one of a group's environments — its applications at
-//! one rank — rather than the group as a whole, so a site's test box and its
-//! production central are separate incidents. A group's own checks, and the
-//! members of a group with nothing ranked, target the group itself.
+//! An incident targets one of a group's environments, meaning its
+//! applications at one rank, rather than the group as a whole, so a site's
+//! test box and its production central are separate incidents. A group's own
+//! checks, and the members of a group with nothing ranked, target the group
+//! itself.
 
 use commons_types::{server::rank::ServerRank, status::CheckResult};
 use database::issues::{IncidentTarget, NewEvent, Scope};
