@@ -83,6 +83,56 @@ test.describe("server detail page", () => {
 		await page.goto("/applications/00000000-0000-0000-0000-000000000000");
 		await expect(page.getByRole("alert")).toBeVisible();
 	});
+
+	/// The page moved off `/servers` because that word named the box and the
+	/// workload at once. A link into Canopy outlives the rename — a bookmark, a
+	/// Slack message, an incident writeup — so the old address still lands, and
+	/// lands on the page rather than on a router that shrugs.
+	///
+	/// spec: FLT#navigating-the-two-grains
+	test("the old /servers address lands on the application", async ({
+		page,
+		sql,
+	}) => {
+		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
+		const server = await seedServer(sql, {
+			name: "moved-target",
+			type: "tamanu-central",
+		});
+
+		await page.goto(`/servers/${server.id}`);
+
+		await expect(page).toHaveURL(new RegExp(`/applications/${server.id}$`));
+		await expect(
+			page.getByRole("heading", {
+				level: 1,
+				name: new RegExp(server.name),
+			}),
+		).toBeVisible();
+	});
+
+	test("the old /servers edit address lands on the edit form", async ({
+		page,
+		sql,
+	}) => {
+		const server = await seedServer(sql, { name: "moved-edit-target" });
+
+		await page.goto(`/servers/${server.id}/edit`);
+
+		await expect(page).toHaveURL(
+			new RegExp(`/applications/${server.id}/edit$`),
+		);
+	});
+
+	/// The fleet index is not an application, and shares only a word with the
+	/// pages that moved. A greedy redirect would swallow its tabs.
+	test("the fleet index tabs are not redirected", async ({ page }) => {
+		await page.goto("/servers/figures");
+		await expect(page).toHaveURL(/\/servers\/figures$/);
+
+		await page.goto("/servers/archived");
+		await expect(page).toHaveURL(/\/servers\/archived$/);
+	});
 });
 
 test.describe("server edit page", () => {
