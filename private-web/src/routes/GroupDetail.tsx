@@ -36,9 +36,9 @@ import {
 export default function GroupDetail() {
 	const { id = "" } = useParams<{ id: string }>();
 	const navigate = useNavigate();
-	const detail = useApi("server_groups", "get", { server_group_id: id }, [id]);
+	const detail = useApi("fleet/groups", "get", { server_group_id: id }, [id]);
 	const admin = useIsAdmin() === true;
-	const archive = useApiAction("server_groups", "delete");
+	const archive = useApiAction("fleet/groups", "delete");
 	// Only the currently-open incident matters for the active-incident
 	// section; closed ones live behind the /incidents filter route.
 	const activeIncidents = useApi(
@@ -95,7 +95,7 @@ export default function GroupDetail() {
 			return;
 		try {
 			await archive.call({ server_group_id: group.id });
-			navigate("/servers");
+			navigate("/fleet");
 		} catch {
 			/* surfaced via archive.error */
 		}
@@ -382,7 +382,7 @@ function ArchivedGroupBanner({
 	isAdmin: boolean;
 	onRestored: () => void;
 }) {
-	const action = useApiAction("server_groups", "restore");
+	const action = useApiAction("fleet/groups", "restore");
 	const onRestore = async () => {
 		try {
 			await action.call({ server_group_id: groupId });

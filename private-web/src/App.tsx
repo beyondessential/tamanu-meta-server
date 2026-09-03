@@ -45,6 +45,7 @@ import Maintenance from "./routes/Maintenance";
 import Status from "./routes/Status";
 import MachineCreate from "./routes/MachineCreate";
 import MachineDetail from "./routes/MachineDetail";
+import MachineEdit from "./routes/MachineEdit";
 import ServerDetail from "./routes/ServerDetail";
 import ServerEdit from "./routes/ServerEdit";
 import ArchivedList from "./routes/ArchivedList";
@@ -61,19 +62,24 @@ interface NavItem {
 	to: string;
 }
 
-/// Send an old `/servers/:id` link to the application it now names.
+/// Send an address from before the fleet was namespaced to where it lives now.
+///
+/// `servers` named the box and the workload at once, and the fleet's own pages
+/// sat beside its records — so `/servers/figures` and `/servers/{id}` were told
+/// apart only by route ranking. Everything the fleet holds is under `/fleet`
+/// now: its listings, its applications, its machines.
 ///
 /// Replaces rather than pushes, so the back button goes where the operator came
 /// from instead of bouncing off the redirect.
-function LegacyApplication({ edit = false }: { edit?: boolean }) {
+function Moved({ to }: { to: (id: string) => string }) {
 	const { id = "" } = useParams<{ id: string }>();
-	return <Navigate to={`/applications/${id}${edit ? "/edit" : ""}`} replace />;
+	return <Navigate to={to(id)} replace />;
 }
 
 const BASE_NAV: NavItem[] = [
 	{ label: "Status", to: "/status" },
 	{ label: "Incidents", to: "/incidents" },
-	{ label: "Fleet", to: "/servers" },
+	{ label: "Fleet", to: "/fleet" },
 	{ label: "Versions", to: "/versions" },
 	{ label: "Upgrades", to: "/upgrades" },
 	{ label: "Maintenance", to: "/maintenance" },
@@ -218,7 +224,7 @@ export default function App() {
 					<Route path="/maintenance" element={<Maintenance />} />
 					<Route path="/versions" element={<Versions />} />
 					<Route path="/versions/:version" element={<VersionDetail />} />
-					<Route path="/servers" element={<Servers />}>
+					<Route path="/fleet" element={<Servers />}>
 						<Route index element={<GroupsList />} />
 						<Route path="archived" element={<ArchivedList />} />
 						<Route path="figures" element={<FleetFigures />} />
@@ -227,21 +233,61 @@ export default function App() {
 						path="/groups/:id/machines/new"
 						element={<MachineCreate />}
 					/>
-					<Route path="/applications/:id" element={<ServerDetail />} />
 					<Route
-						path="/applications/:id/edit"
+						path="/fleet/applications/:id"
+						element={<ServerDetail />}
+					/>
+					<Route
+						path="/fleet/applications/:id/edit"
 						element={<ServerEdit />}
 					/>
-					<Route path="/machines/:id" element={<MachineDetail />} />
-					{/* The old prefix. `servers` named the box and the workload
-					    at once, and each has its own word now — but a link into
-					    Canopy outlives the rename, so the old one still lands.
-					    Below the `/servers` index routes, which are the fleet's
-					    and are not going anywhere. */}
-					<Route path="/servers/:id" element={<LegacyApplication />} />
+					<Route
+						path="/fleet/machines/:id"
+						element={<MachineDetail />}
+					/>
+					<Route
+						path="/fleet/machines/:id/edit"
+						element={<MachineEdit />}
+					/>
+
+					{/* Where the fleet used to live. A link into Canopy outlives
+					    a rename — a bookmark, a Slack message, an incident
+					    writeup — so every old address still lands. */}
+					<Route
+						path="/servers"
+						element={<Navigate to="/fleet" replace />}
+					/>
+					<Route
+						path="/servers/archived"
+						element={<Navigate to="/fleet/archived" replace />}
+					/>
+					<Route
+						path="/servers/figures"
+						element={<Navigate to="/fleet/figures" replace />}
+					/>
+					<Route
+						path="/servers/:id"
+						element={<Moved to={(id) => `/fleet/applications/${id}`} />}
+					/>
 					<Route
 						path="/servers/:id/edit"
-						element={<LegacyApplication edit />}
+						element={<Moved to={(id) => `/fleet/applications/${id}/edit`} />}
+					/>
+					<Route
+						path="/applications/:id"
+						element={<Moved to={(id) => `/fleet/applications/${id}`} />}
+					/>
+					<Route
+						path="/applications/:id/edit"
+						element={<Moved to={(id) => `/fleet/applications/${id}/edit`} />}
+					/>
+					<Route
+						path="/machines/:id"
+						element={<Moved to={(id) => `/fleet/machines/${id}`} />}
+					/>
+					<Route
+						path="/machines/:id/edit"
+						element={<Moved to={(id) => `/fleet/machines/${id}/edit`} />}
 					/>
 					<Route path="/groups/new" element={<GroupEdit />} />
 					<Route path="/groups/:id" element={<GroupDetail />} />

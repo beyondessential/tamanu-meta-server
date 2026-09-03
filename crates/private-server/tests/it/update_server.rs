@@ -18,7 +18,7 @@ async fn update_server_basic_fields() {
 			.unwrap();
 
 		let response = private
-			.post("/api/applications/update")
+			.post("/api/fleet/applications/update")
 			.json(&json!({
 				"server_id": "22222222-2222-2222-2222-222222222222",
 				"data": {
@@ -49,7 +49,7 @@ async fn update_server_partial_update() {
 			.unwrap();
 
 		let response = private
-			.post("/api/applications/update")
+			.post("/api/fleet/applications/update")
 			.json(&json!({
 				"server_id": "33333333-3333-3333-3333-333333333333",
 				"data": {
@@ -85,7 +85,7 @@ async fn update_server_device_id() {
 			.unwrap();
 
 		let response = private
-			.post("/api/applications/update")
+			.post("/api/fleet/applications/update")
 			.json(&json!({
 				"server_id": "55555555-5555-5555-5555-555555555555",
 				"data": {
@@ -114,7 +114,7 @@ async fn update_server_invalid_rank() {
 			.unwrap();
 
 		let response = private
-			.post("/api/applications/update")
+			.post("/api/fleet/applications/update")
 			.json(&json!({
 				"server_id": "22222222-2222-2222-2222-222222222222",
 				"data": {
@@ -136,7 +136,7 @@ async fn update_server_not_found() {
 			.unwrap();
 
 		let response = private
-			.post("/api/applications/update")
+			.post("/api/fleet/applications/update")
 			.json(&json!({
 				"server_id": "77777777-7777-7777-7777-777777777777",
 				"data": {}
@@ -164,7 +164,7 @@ async fn update_server_group_id() {
 		.unwrap();
 
 		let response = private
-			.post("/api/applications/update")
+			.post("/api/fleet/applications/update")
 			.json(&json!({
 				"server_id": "99999999-9999-9999-9999-999999999999",
 				"data": {
@@ -201,7 +201,7 @@ async fn update_server_clear_group_id() {
 		.unwrap();
 
 		let response = private
-			.post("/api/applications/update")
+			.post("/api/fleet/applications/update")
 			.json(&json!({
 				"server_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
 				"data": {
@@ -233,7 +233,7 @@ async fn update_server_notes_and_tags() {
 		.unwrap();
 
 		let response = private
-			.post("/api/applications/update")
+			.post("/api/fleet/applications/update")
 			.json(&json!({
 				"server_id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
 				"data": {
@@ -279,7 +279,7 @@ async fn update_server_leaves_the_machine_identity_alone() {
 			.unwrap();
 
 		let response = private
-			.post("/api/applications/update")
+			.post("/api/fleet/applications/update")
 			.json(&json!({
 				"server_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
 				"data": {
@@ -331,7 +331,7 @@ async fn update_server_name_management_grants() {
 		assert!(!server.may_manage_tls, "withheld until granted");
 
 		private
-			.post("/api/applications/update")
+			.post("/api/fleet/applications/update")
 			.json(&json!({"server_id": id, "data": {"may_manage_dns": true}}))
 			.await
 			.assert_status_ok();
@@ -344,7 +344,7 @@ async fn update_server_name_management_grants() {
 
 		// An update touching neither leaves both alone.
 		private
-			.post("/api/applications/update")
+			.post("/api/fleet/applications/update")
 			.json(&json!({"server_id": id, "data": {"name": "Renamed"}}))
 			.await
 			.assert_status_ok();
@@ -358,7 +358,7 @@ async fn update_server_name_management_grants() {
 
 		// Revoked again.
 		private
-			.post("/api/applications/update")
+			.post("/api/fleet/applications/update")
 			.json(
 				&json!({"server_id": id, "data": {"may_manage_dns": false, "may_manage_tls": true}}),
 			)

@@ -58,7 +58,7 @@ import {
 export default function ServerDetail() {
 	const { id = "" } = useParams<{ id: string }>();
 	const detail = useApi(
-		"applications",
+		"fleet/applications",
 		"get_detail",
 		{ server_id: id },
 		[id],
@@ -134,7 +134,7 @@ export default function ServerDetail() {
 						This server hasn't checked in yet.{" "}
 						<MuiLink
 							component={RouterLink}
-							to={`/machines/${data.server.machine_id}`}
+							to={`/fleet/machines/${data.server.machine_id}`}
 						>
 							Enrol its machine
 						</MuiLink>{" "}
@@ -258,7 +258,7 @@ function Header({
 							},
 							{
 								label: data.machine_name ?? "",
-								to: `/machines/${data.server.machine_id}`,
+								to: `/fleet/machines/${data.server.machine_id}`,
 							},
 							{ label: applicationName(data.server) },
 						]}
@@ -292,8 +292,13 @@ function Header({
 							onSubmitted={onEventSubmitted}
 							action
 						/>
+						{/* One form per machine, holding this application's own
+						    section — so Edit goes to the box rather than to a
+						    second form that would answer "where do I edit
+						    this" differently. */}
+						{/* spec: FLT#groups */}
 						<ActionButton
-							to={`/applications/${data.server.id}/edit`}
+							to={`/fleet/machines/${data.server.machine_id}/edit`}
 							icon={<EditIcon />}
 							label="Edit"
 							color="primary"
@@ -327,7 +332,7 @@ function DeleteServerButton({
 	onArchived: () => void;
 }) {
 	const navigate = useNavigate();
-	const action = useApiAction("applications", "delete");
+	const action = useApiAction("fleet/applications", "delete");
 	const [open, setOpen] = useState(false);
 
 	const onConfirm = async () => {
@@ -335,7 +340,7 @@ function DeleteServerButton({
 			await action.call({ server_id: serverId });
 			setOpen(false);
 			onArchived();
-			navigate(groupId ? `/groups/${groupId}` : "/servers");
+			navigate(groupId ? `/groups/${groupId}` : "/fleet");
 		} catch {
 			/* surfaced via action.error */
 		}
@@ -392,7 +397,7 @@ function ArchivedBanner({
 	isAdmin: boolean;
 	onRestored: () => void;
 }) {
-	const action = useApiAction("applications", "restore");
+	const action = useApiAction("fleet/applications", "restore");
 	const onRestore = async () => {
 		try {
 			await action.call({ server_id: serverId });
@@ -483,7 +488,7 @@ function InfoSection({
 				<InfoItem label="Machine">
 					<MuiLink
 						component={RouterLink}
-						to={`/machines/${server.machine_id}`}
+						to={`/fleet/machines/${server.machine_id}`}
 						variant="body2"
 					>
 						This box

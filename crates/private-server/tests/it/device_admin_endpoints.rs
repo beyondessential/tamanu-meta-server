@@ -400,7 +400,7 @@ async fn machine_attach_tailscale_is_404_for_an_unresolvable_identifier() {
 		.expect("insert machine");
 
 		let resp = private
-			.post("/api/machines/attach_tailscale_device")
+			.post("/api/fleet/machines/attach_tailscale_device")
 			.json(&serde_json::json!({
 				"machine_id": machine_id,
 				"identifier": "100.64.99.99",

@@ -174,7 +174,7 @@ function AttachMachineDeviceDialog({
 	const [preview, setPreview] = useState<TailnetLiveInfo | null>(null);
 	const [previewError, setPreviewError] = useState<string | null>(null);
 	const [previewLoading, setPreviewLoading] = useState(false);
-	const attachAction = useApiAction("machines", "attach_tailscale_device");
+	const attachAction = useApiAction("fleet/machines", "attach_tailscale_device");
 
 	useEffect(() => {
 		if (!open) {

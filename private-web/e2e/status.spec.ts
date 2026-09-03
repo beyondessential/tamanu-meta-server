@@ -342,6 +342,27 @@ test.describe("status page", () => {
 		).toHaveCount(1);
 	});
 
+	/// Two dots in one pill is the case the machine grain exists for, and an
+	/// operator who has never seen a shared box has no way to know it means one
+	/// host rather than two dots that happen to be adjacent. So the legend
+	/// shows one.
+	///
+	/// spec: CHK#presentation
+	test("the legend shows a machine carrying two applications", async ({
+		page,
+		sql,
+	}) => {
+		await seedServer(sql, { name: "legend-one", rank: "production" });
+
+		await page.goto("/status");
+
+		const entry = page
+			.getByText("Two applications on one machine")
+			.locator("xpath=..");
+		await expect(entry).toBeVisible();
+		await expect(entry.getByTestId("status-dot")).toHaveCount(2);
+	});
+
 	// spec: FIG#active-versions
 	test("counts the release branches production is actively running", async ({
 		page,
@@ -385,7 +406,7 @@ test.describe("status page", () => {
 		// The card answers "which branches"; the figures page answers "which
 		// servers, and what else are they running".
 		await page.getByRole("link", { name: "Fleet figures" }).click();
-		await expect(page).toHaveURL(/\/servers\/figures$/);
+		await expect(page).toHaveURL(/\/fleet\/figures$/);
 		await expect(page.getByRole("group", { name: "Tamanu" })).toBeVisible();
 	});
 });

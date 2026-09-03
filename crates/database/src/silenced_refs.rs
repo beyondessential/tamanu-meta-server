@@ -317,6 +317,33 @@ impl ServerSilencedRef {
 				.collect(),
 		)
 	}
+
+	/// Every application-scoped silence across these applications.
+	///
+	/// The plural of [`Self::list_for_server`], for the machine's edit form:
+	/// one form holds a section per application on the box, and each section's
+	/// unreachability switch is that application's own silence. Asking per
+	/// section would put a round trip on every workload.
+	// spec: FLT#navigating-the-two-grains
+	pub async fn list_for_servers(
+		db: &mut AsyncPgConnection,
+		application_ids: &[Uuid],
+	) -> Result<Vec<Self>> {
+		use crate::schema::scoped_check_policies::dsl;
+		use commons_types::status::CheckResult;
+		if application_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+		let rows: Vec<ScopedCheckPolicy> = dsl::scoped_check_policies
+			.select(ScopedCheckPolicy::as_select())
+			.filter(dsl::application_id.eq_any(application_ids))
+			.filter(dsl::ceiling.eq(CheckResult::Skipped.to_string()))
+			.order(dsl::created_at.desc())
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(rows.into_iter().filter_map(Self::from_policy).collect())
+	}
 }
 
 impl ServerGroupSilencedRef {

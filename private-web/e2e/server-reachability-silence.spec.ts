@@ -39,11 +39,13 @@ async function reachabilitySilences(sql: Sql, serverId: string): Promise<number>
 	return Number(rows[0]!.n);
 }
 
-const SWITCH = "Alert when this server is unreachable";
+/** The workload's own switch, in its section of the machine's form. */
+const SWITCH = "Alert when this application is unreachable";
 
-/** The box's switch, offered on the application so an operator quieting a
- * host expected to be down doesn't have to find which record owns it. */
-const BOX_SWITCH = "Alert when the machine this runs on is unreachable";
+/** The box's switch, in the machine section of the same form — one form holds
+ * both, so quieting a host expected to be down and quieting one workload on it
+ * are two controls in one place rather than two forms. */
+const BOX_SWITCH = "Alert when this machine is unreachable";
 
 // spec: CHK#operator-controls
 test.describe("the reachability alerting switch, on both forms", () => {
@@ -105,14 +107,14 @@ test.describe("the reachability alerting switch, on both forms", () => {
 			ref: "reachability",
 		});
 
-		await page.goto(`/applications/${server.id}/edit`);
+		await page.goto(`/fleet/machines/${server.machineId}/edit`);
 		// The switch reads the silence, so the form doesn't quietly write the
 		// operator's earlier decision away on the next unrelated save.
-		await expect(page.getByLabel(SWITCH)).not.toBeChecked();
+		await expect(page.getByTestId("application-section").getByLabel(SWITCH)).not.toBeChecked();
 
-		await page.getByLabel(SWITCH).check();
+		await page.getByTestId("application-section").getByLabel(SWITCH).check();
 		await page.getByRole("button", { name: /^save$/i }).click();
-		await page.waitForURL(`**/applications/${server.id}`);
+		await page.waitForURL(`**/fleet/machines/${server.machineId}`);
 
 		expect(await reachabilitySilences(sql, server.id)).toBe(0);
 	});
@@ -131,19 +133,22 @@ test.describe("the reachability alerting switch, on both forms", () => {
 		});
 		await seedStatus(sql, { serverId: server.id, healthy: true });
 
-		await page.goto(`/applications/${server.id}/edit`);
-		await expect(page.getByLabel(SWITCH)).toBeChecked();
-		await page.getByLabel(SWITCH).uncheck();
+		await page.goto(`/fleet/machines/${server.machineId}/edit`);
+		const own = page.getByTestId("application-section").getByLabel(SWITCH);
+		await expect(own).toBeChecked();
+		await own.uncheck();
 		await page.getByRole("button", { name: /^save$/i }).click();
-		await page.waitForURL(`**/applications/${server.id}`);
+		await page.waitForURL(`**/fleet/machines/${server.machineId}`);
 
 		expect(await reachabilitySilences(sql, server.id)).toBe(1);
-		// And the check itself now shows as silenced, so the two surfaces agree.
+		// And the check itself now shows as silenced on the application, so the
+		// switch and the check's own control are one state seen twice.
+		await page.goto(`/fleet/applications/${server.id}`);
 		await expect(page.getByText("silenced (application)")).toBeVisible();
 	});
 
 	// spec: CHK#operator-controls
-	test("the box's switch is offered on an application, and quiets only the box", async ({
+	test("the box's switch sits in the machine's own section, and quiets only the box", async ({
 		page,
 		sql,
 	}) => {
@@ -153,11 +158,14 @@ test.describe("the reachability alerting switch, on both forms", () => {
 			groupId: group.id,
 		});
 
-		await page.goto(`/applications/${server.id}/edit`);
-		await expect(page.getByLabel(BOX_SWITCH)).toBeChecked();
-		await page.getByLabel(BOX_SWITCH).uncheck();
+		await page.goto(`/fleet/machines/${server.machineId}/edit`);
+		const boxSwitch = page
+			.getByTestId("machine-section")
+			.getByLabel(BOX_SWITCH);
+		await expect(boxSwitch).toBeChecked();
+		await boxSwitch.uncheck();
 		await page.getByRole("button", { name: /^save$/i }).click();
-		await page.waitForURL(`**/applications/${server.id}`);
+		await page.waitForURL(`**/fleet/machines/${server.machineId}`);
 
 		// The box is quiet, and the application it carries is not: each grain
 		// has its own reachability and its own switch.
@@ -165,7 +173,6 @@ test.describe("the reachability alerting switch, on both forms", () => {
 		expect(await reachabilitySilences(sql, server.id)).toBe(0);
 
 		// And the box's own page reads the same state back.
-		await page.goto(`/machines/${server.machineId}`);
 		await expect(
 			page.getByText(
 				"— issues with these refs on this machine don't open incidents.",
@@ -185,11 +192,12 @@ test.describe("the reachability alerting switch, on both forms", () => {
 			groupId: group.id,
 		});
 
-		await page.goto(`/applications/${server.id}/edit`);
-		await expect(page.getByLabel(SWITCH)).toBeChecked();
-		await page.getByLabel(SWITCH).uncheck();
+		await page.goto(`/fleet/machines/${server.machineId}/edit`);
+		const own = page.getByTestId("application-section").getByLabel(SWITCH);
+		await expect(own).toBeChecked();
+		await own.uncheck();
 		await page.getByRole("button", { name: /^save$/i }).click();
-		await page.waitForURL(`**/applications/${server.id}`);
+		await page.waitForURL(`**/fleet/machines/${server.machineId}`);
 
 		expect(await reachabilitySilences(sql, server.id)).toBe(1);
 		expect(await machineReachabilitySilences(sql, server.machineId)).toBe(0);
@@ -210,10 +218,13 @@ test.describe("the reachability alerting switch, on both forms", () => {
 			ref: "reachability",
 		});
 
-		await page.goto(`/applications/${server.id}/edit`);
-		await page.getByLabel(/^Name(\s*\*)?$/i).fill("leave-me-be-renamed");
+		await page.goto(`/fleet/machines/${server.machineId}/edit`);
+		await page
+			.getByTestId("application-section")
+			.getByLabel(/^Name(\s*\*)?$/i)
+			.fill("leave-me-be-renamed");
 		await page.getByRole("button", { name: /^save$/i }).click();
-		await page.waitForURL(`**/applications/${server.id}`);
+		await page.waitForURL(`**/fleet/machines/${server.machineId}`);
 
 		expect(await reachabilitySilences(sql, server.id)).toBe(1);
 	});

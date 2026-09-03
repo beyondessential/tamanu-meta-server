@@ -132,7 +132,7 @@ function ReleaseSummary({ tick }: { tick: number }) {
 					    page answers "which servers, and what else are they on". */}
 					<Button
 						component={RouterLink}
-						to="/servers/figures"
+						to="/fleet/figures"
 						variant="outlined"
 						size="small"
 						startIcon={<BarChartIcon />}

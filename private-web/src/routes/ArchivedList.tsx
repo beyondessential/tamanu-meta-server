@@ -21,8 +21,8 @@ import { compareServersByRankThenType } from "../types";
 export default function ArchivedList() {
 	usePageTitle("Archived");
 	const admin = useIsAdmin() === true;
-	const groups = useApi("server_groups", "list_archived", {}, []);
-	const servers = useApi("applications", "list_archived", {}, []);
+	const groups = useApi("fleet/groups", "list_archived", {}, []);
+	const servers = useApi("fleet/applications", "list_archived", {}, []);
 
 	if (
 		groups.status === "loading" ||
@@ -107,7 +107,7 @@ function ArchivedGroupRow({
 	admin: boolean;
 	onRestored: () => void;
 }) {
-	const action = useApiAction("server_groups", "restore");
+	const action = useApiAction("fleet/groups", "restore");
 	const onRestore = async () => {
 		try {
 			await action.call({ server_group_id: id });
@@ -153,7 +153,7 @@ function ArchivedServerRow({
 	admin: boolean;
 	onRestored: () => void;
 }) {
-	const action = useApiAction("applications", "restore");
+	const action = useApiAction("fleet/applications", "restore");
 	const onRestore = async () => {
 		try {
 			await action.call({ server_id: server.id });

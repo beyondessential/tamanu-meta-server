@@ -86,7 +86,7 @@ export default function BackupPanel() {
 		[id, tick],
 	);
 	const group = useApi(
-		"server_groups",
+		"fleet/groups",
 		"get",
 		{ server_group_id: id },
 		[id],
@@ -1769,7 +1769,7 @@ function ServersPanel({
 	const machineLink = (box: RankedMachine) => (
 		<MuiLink
 			component={RouterLink}
-			to={`/machines/${box.machine.id}#backups`}
+			to={`/fleet/machines/${box.machine.id}#backups`}
 			variant="body2"
 			underline="hover"
 		>

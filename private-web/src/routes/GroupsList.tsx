@@ -8,8 +8,8 @@ import { usePageTitle } from "../hooks/usePageTitle";
 
 export default function GroupsList() {
 	usePageTitle("Server groups");
-	const groups = useApi("server_groups", "list", {}, []);
-	const counts = useApi("server_groups", "server_counts", {}, []);
+	const groups = useApi("fleet/groups", "list", {}, []);
+	const counts = useApi("fleet/groups", "server_counts", {}, []);
 	const admin = useIsAdmin() === true;
 
 	if (groups.status === "loading" || groups.status === "idle") {

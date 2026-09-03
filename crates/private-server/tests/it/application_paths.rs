@@ -1,17 +1,55 @@
-//! The application endpoints live under `/api/applications`, and the prefix
-//! they used to live under still lands.
+//! The fleet's endpoints live under `/api/fleet`, and every address they used
+//! to answer at still lands.
 //!
-//! `servers` named the box and the workload at once. Each has its own word
-//! now, so the endpoints about a workload moved — and a link or a script
-//! written against the old prefix outlives the rename.
+//! `servers` named the box and the workload at once, and the fleet's records
+//! were spread across three top-level prefixes. Each has its own word now, all
+//! three under one.
 
 use axum::http::StatusCode;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_application_endpoints_answer_under_applications() {
+async fn the_fleets_endpoints_answer_under_fleet() {
+	commons_tests::server::run(async |_conn, _, private| {
+		for path in [
+			"/api/fleet/applications/list",
+			"/api/fleet/machines/list",
+			"/api/fleet/groups/list",
+		] {
+			let response = private.post(path).json(&serde_json::json!({})).await;
+			response.assert_status_ok();
+		}
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn every_old_prefix_redirects_permanently() {
+	commons_tests::server::run(async |_conn, _, private| {
+		for (from, to) in [
+			// `servers` was the applications' prefix before the split.
+			("/api/servers/list", "/api/fleet/applications/list"),
+			("/api/applications/list", "/api/fleet/applications/list"),
+			("/api/machines/list", "/api/fleet/machines/list"),
+			("/api/server_groups/list", "/api/fleet/groups/list"),
+		] {
+			let response = private.post(from).json(&serde_json::json!({})).await;
+			// Permanent, not temporary: these are POSTs, and only the permanent
+			// form obliges the caller to repeat the method and body rather than
+			// retrying as a GET.
+			response.assert_status(StatusCode::PERMANENT_REDIRECT);
+			response.assert_header("location", to);
+		}
+	})
+	.await
+}
+
+/// The redirects must not shadow what they point at, which a route matching
+/// the new prefix as well as the old would do — as a loop.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_new_prefix_is_not_itself_redirected() {
 	commons_tests::server::run(async |_conn, _, private| {
 		let response = private
-			.post("/api/applications/list")
+			.post("/api/fleet/applications/list")
 			.json(&serde_json::json!({}))
 			.await;
 		response.assert_status_ok();
@@ -20,27 +58,11 @@ async fn the_application_endpoints_answer_under_applications() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_old_prefix_redirects_permanently() {
+async fn the_fleet_pages_are_left_to_the_spa() {
 	commons_tests::server::run(async |_conn, _, private| {
-		let response = private
-			.post("/api/servers/list")
-			.json(&serde_json::json!({}))
-			.await;
-		// Permanent, not temporary: the caller has to repeat the POST and its
-		// body rather than retrying as a GET, which is what a 302 would turn
-		// this into.
-		response.assert_status(StatusCode::PERMANENT_REDIRECT);
-		response.assert_header("location", "/api/applications/list");
-	})
-	.await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn the_fleet_index_is_not_redirected_out_from_under_the_spa() {
-	commons_tests::server::run(async |_conn, _, private| {
-		// `/servers` without the `/api` prefix is the SPA's own fleet route,
-		// and shares only a word with the endpoints that moved.
-		let response = private.get("/servers/figures").await;
+		// `/fleet/figures` without the `/api` prefix is the SPA's own route, and
+		// shares only a word with the endpoints.
+		let response = private.get("/fleet/figures").await;
 		response.assert_status_ok();
 		response.assert_header("content-type", "text/html; charset=utf-8");
 	})

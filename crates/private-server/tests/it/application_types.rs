@@ -84,7 +84,7 @@ async fn types_endpoint_describes_every_type() {
 async fn detail_billing_labels_are_the_servers_own() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		let group = private
-			.post("/api/server_groups/create")
+			.post("/api/fleet/groups/create")
 			.json(&json!({ "name": "Pacific" }))
 			.await;
 		group.assert_status_ok();
@@ -99,7 +99,7 @@ async fn detail_billing_labels_are_the_servers_own() {
 			.to_string();
 
 		let response = private
-			.post("/api/applications/get_detail")
+			.post("/api/fleet/applications/get_detail")
 			.json(&json!({ "server_id": lims_id }))
 			.await;
 		response.assert_status_ok();
@@ -144,7 +144,7 @@ async fn detail_billing_labels_are_the_servers_own() {
 async fn a_machines_labels_carry_no_type_and_take_the_highest_rank_on_it() {
 	commons_tests::server::run(async |mut conn, _, private| {
 		let group = private
-			.post("/api/server_groups/create")
+			.post("/api/fleet/groups/create")
 			.json(&json!({ "name": "Pacific" }))
 			.await;
 		group.assert_status_ok();
@@ -169,7 +169,7 @@ async fn a_machines_labels_carry_no_type_and_take_the_highest_rank_on_it() {
 		}
 
 		let response = private
-			.post("/api/machines/get_detail")
+			.post("/api/fleet/machines/get_detail")
 			.json(&json!({ "machine_id": machine.to_string() }))
 			.await;
 		response.assert_status_ok();

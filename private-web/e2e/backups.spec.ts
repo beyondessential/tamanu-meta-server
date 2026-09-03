@@ -294,7 +294,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		const panel = page
 			.getByRole("heading", { name: "Machines", exact: true })
 			.locator("..");
-		await expect(panel.locator('a[href^="/machines/"]')).toHaveText([
+		await expect(panel.locator('a[href^="/fleet/machines/"]')).toHaveText([
 			"zzz-prod-central",
 			"aaa-prod-facility",
 			"ccc-clone",
@@ -983,7 +983,7 @@ test.describe("backups ready: stats + backup-now", () => {
 		// workload on it.
 		await page.getByRole("link", { name: "linky-srv" }).click();
 		await expect(page).toHaveURL(
-			new RegExp(`/machines/${server.machineId}#backups$`),
+			new RegExp(`/fleet/machines/${server.machineId}#backups$`),
 		);
 
 		// That backup section links back to the group's backup page.
@@ -1047,7 +1047,7 @@ test.describe("machine backup capabilities", () => {
 			groupId: group.id,
 		});
 
-		await page.goto(`/machines/${server.machineId}`);
+		await page.goto(`/fleet/machines/${server.machineId}`);
 		await expect(
 			page.getByText(/no backup types registered for this machine/i),
 		).toBeVisible();
@@ -1078,7 +1078,7 @@ test.describe("machine backup capabilities", () => {
 			snapshotId: "k0123456789abcdef0123",
 		});
 
-		await page.goto(`/machines/${server.machineId}`);
+		await page.goto(`/fleet/machines/${server.machineId}`);
 		const backups = page.locator("#backups");
 		await expect(backups.getByText(/k0123456789/)).toBeVisible();
 		await expect(backups.getByText(/2\.0 KiB/)).toBeVisible();
@@ -1102,7 +1102,7 @@ test.describe("machine backup capabilities", () => {
 			type: "tamanu-postgres",
 		});
 
-		await page.goto(`/machines/${server.machineId}`);
+		await page.goto(`/fleet/machines/${server.machineId}`);
 		const backups = page.locator("#backups");
 		await expect(backups.getByText(/no snapshot yet/i)).toBeVisible();
 	});
@@ -1127,7 +1127,7 @@ test.describe("machine backup capabilities", () => {
 			issuedAgoSecs: 600,
 		});
 
-		await page.goto(`/machines/${server.machineId}`);
+		await page.goto(`/fleet/machines/${server.machineId}`);
 		const backups = page.locator("#backups");
 		await expect(backups.getByText(/backing up…/i)).toBeVisible();
 
@@ -1159,7 +1159,7 @@ test.describe("machine backup capabilities", () => {
 			type: "tamanu-postgres",
 		});
 
-		await page.goto(`/machines/${server.machineId}`);
+		await page.goto(`/fleet/machines/${server.machineId}`);
 		const backups = page.locator("#backups");
 		// The message explains the toggles are inert.
 		await expect(backups.getByText(/aren't set up for this group/i)).toBeVisible();
@@ -1189,7 +1189,7 @@ test.describe("machine backup capabilities", () => {
 			enabled: false,
 		});
 
-		await page.goto(`/machines/${server.machineId}`);
+		await page.goto(`/fleet/machines/${server.machineId}`);
 		const toggle = page.getByRole("switch", {
 			name: /enable tamanu-postgres backups/i,
 		});
@@ -1464,7 +1464,7 @@ test.describe("restore window", () => {
 			status: "ready",
 		});
 
-		await page.goto(`/machines/${server.machineId}`);
+		await page.goto(`/fleet/machines/${server.machineId}`);
 		const backups = page.locator("#backups");
 
 		await backups.getByRole("button", { name: /allow restores/i }).click();

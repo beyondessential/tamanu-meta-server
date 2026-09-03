@@ -108,7 +108,7 @@ function MachineBlock({
 						</Box>
 					))}
 				</MachineEnclosure>
-				<Name to={current ? null : `/machines/${machine.id}`}>{name}</Name>
+				<Name to={current ? null : `/fleet/machines/${machine.id}`}>{name}</Name>
 				<Meta>{machine.platform ?? ""}</Meta>
 			</Row>
 			{applications.length === 0 ? (
@@ -148,7 +148,7 @@ function MachineBlock({
 								to={
 									application.id === currentApplicationId
 										? null
-										: `/applications/${application.id}`
+										: `/fleet/applications/${application.id}`
 								}
 							>
 								{applicationName(application)}

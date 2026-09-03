@@ -3,6 +3,7 @@ import {
 	resetSeededTables,
 	seedApplicationReport,
 	seedDevice,
+	seedMachine,
 	seedServer,
 	seedServerGroup,
 	seedVersion,
@@ -24,7 +25,7 @@ test.describe("servers list page", () => {
 			groupId: group.id,
 		});
 
-		await page.goto("/servers");
+		await page.goto("/fleet");
 
 		await expect(
 			page.getByRole("tab", { name: "Groups" }),
@@ -59,7 +60,7 @@ test.describe("server detail page", () => {
 			groupId: group.id,
 		});
 
-		await page.goto(`/applications/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 
 		// The page renders two h1s (app bar "Canopy" + page heading);
 		// scope to the heading whose accessible name includes the server
@@ -80,14 +81,14 @@ test.describe("server detail page", () => {
 	});
 
 	test("nonexistent UUID surfaces an error alert", async ({ page }) => {
-		await page.goto("/applications/00000000-0000-0000-0000-000000000000");
+		await page.goto("/fleet/applications/00000000-0000-0000-0000-000000000000");
 		await expect(page.getByRole("alert")).toBeVisible();
 	});
 
-	/// The page moved off `/servers` because that word named the box and the
-	/// workload at once. A link into Canopy outlives the rename — a bookmark, a
-	/// Slack message, an incident writeup — so the old address still lands, and
-	/// lands on the page rather than on a router that shrugs.
+	/// The page moved under `/fleet` because `servers` named the box and the
+	/// workload at once, and the fleet's listings sat beside its records. A link
+	/// into Canopy outlives a rename — a bookmark, a Slack message, an incident
+	/// writeup — so the old address still lands.
 	///
 	/// spec: FLT#navigating-the-two-grains
 	test("the old /servers address lands on the application", async ({
@@ -102,7 +103,7 @@ test.describe("server detail page", () => {
 
 		await page.goto(`/servers/${server.id}`);
 
-		await expect(page).toHaveURL(new RegExp(`/applications/${server.id}$`));
+		await expect(page).toHaveURL(new RegExp(`/fleet/applications/${server.id}$`));
 		await expect(
 			page.getByRole("heading", {
 				level: 1,
@@ -111,7 +112,10 @@ test.describe("server detail page", () => {
 		).toBeVisible();
 	});
 
-	test("the old /servers edit address lands on the edit form", async ({
+	/// Two hops: the old address names the application, and the application's
+	/// form is its machine's. An operator following an old bookmark lands on
+	/// the form that edits the thing they meant, wherever that form now lives.
+	test("the old /servers edit address lands on the form that edits it", async ({
 		page,
 		sql,
 	}) => {
@@ -120,27 +124,41 @@ test.describe("server detail page", () => {
 		await page.goto(`/servers/${server.id}/edit`);
 
 		await expect(page).toHaveURL(
-			new RegExp(`/applications/${server.id}/edit$`),
+			new RegExp(`/fleet/machines/${server.machineId}/edit$`),
 		);
+		await expect(
+			page.getByTestId("application-section").getByLabel(/^Name(\s*\*)?$/i),
+		).toHaveValue(server.name);
 	});
 
-	/// The fleet index is not an application, and shares only a word with the
-	/// pages that moved. A greedy redirect would swallow its tabs.
-	test("the fleet index tabs are not redirected", async ({ page }) => {
+	/// The fleet's listings moved with its records, so the old addresses for
+	/// those land too — and land on the listing rather than being read as an
+	/// application id, which is what route ranking used to have to prevent.
+	test("the old fleet listing addresses land on the listings", async ({
+		page,
+	}) => {
 		await page.goto("/servers/figures");
-		await expect(page).toHaveURL(/\/servers\/figures$/);
+		await expect(page).toHaveURL(/\/fleet\/figures$/);
 
 		await page.goto("/servers/archived");
-		await expect(page).toHaveURL(/\/servers\/archived$/);
+		await expect(page).toHaveURL(/\/fleet\/archived$/);
+
+		await page.goto("/servers");
+		await expect(page).toHaveURL(/\/fleet$/);
 	});
 });
 
-test.describe("server edit page", () => {
+test.describe("the machine's edit form", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
 	});
 
-	test("pre-fills the form with the seeded server's name", async ({
+	/// One form per machine, holding the box's section and one section per
+	/// application on it. A machine fact has one place to be edited, and a
+	/// shared box is edited where everything sharing it is visible.
+	///
+	/// spec: FLT#groups
+	test("editing an application hands over to its machine's form", async ({
 		page,
 		sql,
 	}) => {
@@ -149,33 +167,38 @@ test.describe("server edit page", () => {
 			type: "tamanu-central",
 		});
 
-		await page.goto(`/applications/${server.id}/edit`);
+		await page.goto(`/fleet/applications/${server.id}/edit`);
 
-		// The label carries a required-field asterisk ("Name *"), and the central
-		// edit form also has a "Name in Tamanu Mobile app" field — so match "Name"
-		// with an optional trailing asterisk, anchored to exclude the latter.
-		await expect(page.getByLabel(/^Name(\s*\*)?$/i)).toHaveValue(server.name);
+		await expect(page).toHaveURL(
+			new RegExp(`/fleet/machines/${server.machineId}/edit$`),
+		);
+		// The application is a section of that form, pre-filled.
+		const section = page.getByTestId("application-section");
+		await expect(section.getByLabel(/^Name(\s*\*)?$/i)).toHaveValue(
+			server.name,
+		);
 	});
 
-	test("saving a renamed server persists the change", async ({
+	test("saving a renamed application persists the change", async ({
 		page,
 		sql,
 	}) => {
-		// Saving requires a group, so seed one and put the server in it.
 		const group = await seedServerGroup(sql, { name: "edit-group" });
 		const server = await seedServer(sql, {
 			name: "edit-save-target",
 			groupId: group.id,
 		});
 
-		await page.goto(`/applications/${server.id}/edit`);
+		await page.goto(`/fleet/machines/${server.machineId}/edit`);
 
-		const nameField = page.getByLabel(/^Name(\s*\*)?$/i);
-		await nameField.fill("edit-save-renamed");
+		await page
+			.getByTestId("application-section")
+			.getByLabel(/^Name(\s*\*)?$/i)
+			.fill("edit-save-renamed");
 		await page.getByRole("button", { name: /^save$/i }).click();
 
-		// Save navigates to the detail page.
-		await page.waitForURL(`**/applications/${server.id}`);
+		// Save navigates to the box, that being whose form it is.
+		await page.waitForURL(`**/fleet/machines/${server.machineId}`);
 
 		const rows = await sql.query<{ name: string }>(
 			"SELECT name FROM applications WHERE id = $1",
@@ -184,8 +207,70 @@ test.describe("server edit page", () => {
 		expect(rows[0]!.name).toBe("edit-save-renamed");
 	});
 
-	// The identity belongs to the box, so it is offered on the machine's form
-	// and nowhere else. An application editing it would be editing the box's.
+	/// A group is the machine's, and the applications on it take it, so it is
+	/// offered once — on the box — and not per workload.
+	///
+	/// spec: FLT#groups
+	test("the group is offered on the machine and not on its applications", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "edit-group-once" });
+		const server = await seedServer(sql, {
+			name: "edit-group-target",
+			groupId: group.id,
+		});
+
+		await page.goto(`/fleet/machines/${server.machineId}/edit`);
+
+		await expect(page.getByLabel(/^Group/i)).toHaveCount(1);
+		await expect(
+			page.getByTestId("application-section").getByLabel(/^Group/i),
+		).toHaveCount(0);
+	});
+
+	/// Renaming the box writes the box, not the workload that happens to share
+	/// its name — the two Name fields are different fields.
+	test("the machine's own name saves against the machine", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "edit-box-group" });
+		const machine = await seedMachine(sql, {
+			name: "box-before",
+			groupId: group.id,
+		});
+		await seedServer(sql, {
+			name: "on-the-box",
+			groupId: group.id,
+			machineId: machine.id,
+		});
+
+		await page.goto(`/fleet/machines/${machine.id}/edit`);
+
+		// The box's Name is the one outside any application section.
+		await page
+			.getByTestId("machine-section")
+			.getByLabel(/^Name(\s*\*)?$/i)
+			.fill("box-after");
+		await page.getByRole("button", { name: /^save$/i }).click();
+		await page.waitForURL(`**/fleet/machines/${machine.id}`);
+
+		const machines = await sql.query<{ name: string }>(
+			"SELECT name FROM machines WHERE id = $1",
+			[machine.id],
+		);
+		expect(machines[0]!.name).toBe("box-after");
+		const apps = await sql.query<{ name: string }>(
+			"SELECT name FROM applications WHERE machine_id = $1",
+			[machine.id],
+		);
+		expect(apps[0]!.name).toBe("on-the-box");
+	});
+
+	// The identity belongs to the box and is bound by enrolment, not by
+	// editing a form — so it is offered on neither section.
+	// spec: FLT#identities
 	test("offers no identity field", async ({ page, sql }) => {
 		const device = await seedDevice(sql);
 		const server = await seedServer(sql, {
@@ -193,9 +278,45 @@ test.describe("server edit page", () => {
 			deviceId: device.id,
 		});
 
-		await page.goto(`/applications/${server.id}/edit`);
-		await expect(page.getByLabel(/^Name(\s*\*)?$/i)).toHaveValue(server.name);
+		await page.goto(`/fleet/machines/${server.machineId}/edit`);
+		await expect(
+			page.getByTestId("application-section").getByLabel(/^Name(\s*\*)?$/i),
+		).toHaveValue(server.name);
 		await expect(page.getByLabel(/device/i)).toHaveCount(0);
+	});
+
+	/// A box carrying two workloads is the case the one-form rule exists for:
+	/// both are edited in one place, so a change to the box is visibly a
+	/// change to both.
+	///
+	/// spec: FLT#groups
+	test("a shared box holds a section for each application on it", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "shared-edit-group" });
+		const machine = await seedMachine(sql, {
+			name: "shared-edit-box",
+			groupId: group.id,
+		});
+		await seedServer(sql, {
+			name: "shared-central",
+			type: "tamanu-central",
+			groupId: group.id,
+			machineId: machine.id,
+		});
+		await seedServer(sql, {
+			name: "shared-facility",
+			type: "tamanu-facility",
+			groupId: group.id,
+			machineId: machine.id,
+		});
+
+		await page.goto(`/fleet/machines/${machine.id}/edit`);
+
+		await expect(page.getByTestId("application-section")).toHaveCount(2);
+		await expect(page.getByText("shared-central")).toBeVisible();
+		await expect(page.getByText("shared-facility")).toBeVisible();
 	});
 });
 
@@ -218,7 +339,7 @@ test.describe("archived view", () => {
 			server.id,
 		]);
 
-		await page.goto("/servers/archived");
+		await page.goto("/fleet/archived");
 
 		// Both archived items are discoverable here (and nowhere else).
 		await expect(page.getByRole("link", { name: "arch-group" })).toBeVisible();
@@ -243,8 +364,8 @@ test.describe("archived view", () => {
 		await page.goto(`/groups/${group.id}`);
 		await page.getByRole("button", { name: "Archive" }).click();
 		// Redirects to the servers list, and the group now shows under Archived.
-		await expect(page).toHaveURL(/\/servers$/);
-		await page.goto("/servers/archived");
+		await expect(page).toHaveURL(/\/fleet$/);
+		await page.goto("/fleet/archived");
 		await expect(page.getByRole("link", { name: "empty-grp" })).toBeVisible();
 	});
 
@@ -261,10 +382,10 @@ test.describe("archived view", () => {
 		await page.goto(`/groups/${group.id}`);
 		// The Archive button is offered because every member is gone.
 		await page.getByRole("button", { name: "Archive" }).click();
-		await expect(page).toHaveURL(/\/servers$/);
+		await expect(page).toHaveURL(/\/fleet$/);
 
 		// The group and both servers are now archived.
-		await page.goto("/servers/archived");
+		await page.goto("/fleet/archived");
 		await expect(page.getByRole("link", { name: "gone-grp" })).toBeVisible();
 		await expect(page.getByText(/gone-1/)).toBeVisible();
 		await expect(page.getByText(/gone-2/)).toBeVisible();
@@ -299,9 +420,9 @@ test.describe("archived view", () => {
 
 		await page.goto(`/groups/${group.id}`);
 		await page.getByRole("button", { name: "Archive" }).click();
-		await expect(page).toHaveURL(/\/servers$/);
+		await expect(page).toHaveURL(/\/fleet$/);
 
-		await page.goto("/servers/archived");
+		await page.goto("/fleet/archived");
 		await expect(page.getByRole("link", { name: "quiet-grp" })).toBeVisible();
 		await expect(page.getByText(/quiet-1/)).toBeVisible();
 		await expect(page.getByText(/quiet-2/)).toBeVisible();
@@ -348,7 +469,7 @@ test.describe("server create → setup → archive flow", () => {
 			name: "flow-server",
 			groupId: group.id,
 		});
-		await page.goto(`/applications/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 		await expect(
 			page.getByRole("heading", { level: 1, name: /flow-server/ }),
 		).toBeVisible();

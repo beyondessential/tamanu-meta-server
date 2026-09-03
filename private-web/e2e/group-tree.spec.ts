@@ -50,27 +50,27 @@ test.describe("the group's tree on the detail pages", () => {
 	}) => {
 		const { shared, centralId, facilityId, solo } = await seedTree(sql);
 
-		await page.goto(`/applications/${centralId}`);
+		await page.goto(`/fleet/applications/${centralId}`);
 
 		const tree = page.getByTestId("group-tree");
 		await expect(tree).toBeVisible();
 
 		// The box this workload is on, and the other box in the group, are both
 		// reachable from here: the tree is a map of the deployment.
-		await expect(tree.locator(`a[href="/machines/${shared.id}"]`)).toBeVisible();
+		await expect(tree.locator(`a[href="/fleet/machines/${shared.id}"]`)).toBeVisible();
 		await expect(
-			tree.locator(`a[href="/machines/${solo.machineId}"]`),
+			tree.locator(`a[href="/fleet/machines/${solo.machineId}"]`),
 		).toBeVisible();
 
 		// The workload sharing its box, and the one on the other box, are named
 		// and linked.
-		await expect(tree.locator(`a[href="/applications/${facilityId}"]`)).toBeVisible();
-		await expect(tree.locator(`a[href="/applications/${solo.id}"]`)).toBeVisible();
+		await expect(tree.locator(`a[href="/fleet/applications/${facilityId}"]`)).toBeVisible();
+		await expect(tree.locator(`a[href="/fleet/applications/${solo.id}"]`)).toBeVisible();
 
 		// This page is in the tree, but marked in place rather than linking back
 		// to where the operator already is.
 		await expect(tree.getByText("central-on-shared")).toBeVisible();
-		await expect(tree.locator(`a[href="/applications/${centralId}"]`)).toHaveCount(0);
+		await expect(tree.locator(`a[href="/fleet/applications/${centralId}"]`)).toHaveCount(0);
 	});
 
 	test("the machine page ends with the same tree, marking itself in place", async ({
@@ -79,22 +79,22 @@ test.describe("the group's tree on the detail pages", () => {
 	}) => {
 		const { shared, centralId, facilityId, solo } = await seedTree(sql);
 
-		await page.goto(`/machines/${shared.id}`);
+		await page.goto(`/fleet/machines/${shared.id}`);
 
 		const tree = page.getByTestId("group-tree");
 		await expect(tree).toBeVisible();
 
 		// Both workloads on this box, and the workload on the other one.
-		await expect(tree.locator(`a[href="/applications/${centralId}"]`)).toBeVisible();
-		await expect(tree.locator(`a[href="/applications/${facilityId}"]`)).toBeVisible();
-		await expect(tree.locator(`a[href="/applications/${solo.id}"]`)).toBeVisible();
+		await expect(tree.locator(`a[href="/fleet/applications/${centralId}"]`)).toBeVisible();
+		await expect(tree.locator(`a[href="/fleet/applications/${facilityId}"]`)).toBeVisible();
+		await expect(tree.locator(`a[href="/fleet/applications/${solo.id}"]`)).toBeVisible();
 
 		// The other box links; this one is named without linking back.
 		await expect(
-			tree.locator(`a[href="/machines/${solo.machineId}"]`),
+			tree.locator(`a[href="/fleet/machines/${solo.machineId}"]`),
 		).toBeVisible();
 		await expect(tree.getByText("shared-box")).toBeVisible();
-		await expect(tree.locator(`a[href="/machines/${shared.id}"]`)).toHaveCount(
+		await expect(tree.locator(`a[href="/fleet/machines/${shared.id}"]`)).toHaveCount(
 			0,
 		);
 	});
@@ -110,7 +110,7 @@ test.describe("the group's tree on the detail pages", () => {
 	}) => {
 		const { shared, centralId } = await seedTree(sql);
 
-		await page.goto(`/applications/${centralId}`);
+		await page.goto(`/fleet/applications/${centralId}`);
 		await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 		await expect(
 			page
@@ -119,7 +119,7 @@ test.describe("the group's tree on the detail pages", () => {
 				.getByTestId("status-dot"),
 		).toHaveCount(0);
 
-		await page.goto(`/machines/${shared.id}`);
+		await page.goto(`/fleet/machines/${shared.id}`);
 		await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
 		await expect(
 			page

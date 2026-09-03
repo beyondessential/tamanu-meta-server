@@ -79,7 +79,7 @@ export default function ServerShorty({
 			) : (
 				<MuiLink
 					component={RouterLink}
-					to={`/applications/${server.id}`}
+					to={`/fleet/applications/${server.id}`}
 					underline="hover"
 					color="text.primary"
 					sx={{ fontWeight: 500 }}

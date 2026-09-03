@@ -22,7 +22,7 @@ test.describe("reachability presents before anything is wrong", () => {
 		const server = await seedServer(sql, { name: "never-quiet" });
 		await seedStatus(sql, { serverId: server.id, healthy: true });
 
-		await page.goto(`/applications/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 
 		// The check is there with nothing filed against it, so its silence
 		// control is reachable before the server has ever gone away.
@@ -47,7 +47,7 @@ test.describe("reachability presents before anything is wrong", () => {
 			ref: "reachability",
 		});
 
-		await page.goto(`/applications/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 
 		await expect(
 			page.getByRole("link", { name: "reachability", exact: true }),
@@ -79,7 +79,7 @@ test.describe("unmonitored servers are marked", () => {
 			health: [{ check: "database", result: "failed" }],
 		});
 
-		await page.goto(`/applications/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 
 		// The state is still true and still says Unhealthy — what's off is the
 		// alerting, and the marker is what says so.
@@ -102,7 +102,7 @@ test.describe("unmonitored servers are marked", () => {
 			health: [{ check: "database", result: "failed" }],
 		});
 
-		await page.goto(`/applications/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 
 		await expect(page.getByText("Unhealthy", { exact: true })).toBeVisible();
 		await expect(page.getByTestId("unmonitored-marker")).toHaveCount(0);

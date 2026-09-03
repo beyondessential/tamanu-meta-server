@@ -95,7 +95,7 @@ export default function MigrationTestsSection({
 							<TableCell>
 								<MuiLink
 									component={RouterLink}
-									to={`/applications/${row.server_id}`}
+									to={`/fleet/applications/${row.server_id}`}
 									underline="hover"
 									color="text.primary"
 								>

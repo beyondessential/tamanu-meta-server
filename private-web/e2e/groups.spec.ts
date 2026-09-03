@@ -43,13 +43,13 @@ test.describe("group detail page", () => {
 		// `seedServer` names the box after the workload, so a name matches both
 		// links.
 		await expect(
-			page.locator(`a[href="/applications/${memberA.id}"]`),
+			page.locator(`a[href="/fleet/applications/${memberA.id}"]`),
 		).toBeVisible();
 		await expect(
-			page.locator(`a[href="/applications/${memberB.id}"]`),
+			page.locator(`a[href="/fleet/applications/${memberB.id}"]`),
 		).toBeVisible();
 		await expect(
-			page.locator(`a[href="/machines/${memberA.machineId}"]`),
+			page.locator(`a[href="/fleet/machines/${memberA.machineId}"]`),
 		).toBeVisible();
 	});
 

@@ -61,7 +61,7 @@ test.describe("lingering incidents", () => {
 	}) => {
 		const { server, incident } = await seedLingering(sql);
 
-		await page.goto(`/applications/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 		const button = page.getByRole("link", {
 			name: new RegExp(`incident ${incident.id.slice(0, 8)}.*recovering`, "i"),
 		});

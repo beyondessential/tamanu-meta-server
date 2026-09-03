@@ -243,14 +243,14 @@ test.describe("Silences follow the namespace", () => {
 		});
 
 		// The central's postgres is quiet, and says so at the group scope.
-		await page.goto(`/applications/${central.id}`);
+		await page.goto(`/fleet/applications/${central.id}`);
 		await page
 			.getByRole("button", { name: "Manage silence for postgres" })
 			.click();
 		await expect(page.getByText("Silenced for this group")).toBeVisible();
 
 		// The facility's postgres is untouched, and still offers the silence.
-		await page.goto(`/applications/${facility.id}`);
+		await page.goto(`/fleet/applications/${facility.id}`);
 		await page.getByRole("button", { name: "Silence postgres" }).click();
 		await expect(
 			page.getByRole("button", { name: "For this group" }),

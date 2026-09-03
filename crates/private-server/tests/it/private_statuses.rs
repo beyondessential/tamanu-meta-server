@@ -591,7 +591,7 @@ async fn get_detail_basic() {
 		.unwrap();
 
 		let response = private
-			.post("/api/applications/get_detail")
+			.post("/api/fleet/applications/get_detail")
 			.json(&serde_json::json!({"server_id": "11111111-1111-1111-1111-111111111111"}))
 			.await;
 		response.assert_status_ok();
@@ -634,7 +634,7 @@ async fn get_detail_munin_flag() {
 		}
 
 		let munin_detail: MachineMunin = private
-			.post("/api/machines/get_detail")
+			.post("/api/fleet/machines/get_detail")
 			.json(&serde_json::json!({"machine_id": "11111111-1111-1111-1111-111111111111"}))
 			.await
 			.json();
@@ -644,7 +644,7 @@ async fn get_detail_munin_flag() {
 		);
 
 		let plain_detail: MachineMunin = private
-			.post("/api/machines/get_detail")
+			.post("/api/fleet/machines/get_detail")
 			.json(&serde_json::json!({"machine_id": "22222222-2222-2222-2222-222222222222"}))
 			.await
 			.json();
@@ -684,7 +684,7 @@ async fn get_detail_with_status() {
 		.unwrap();
 
 		let response = private
-			.post("/api/applications/get_detail")
+			.post("/api/fleet/applications/get_detail")
 			.json(&serde_json::json!({"server_id": "11111111-1111-1111-1111-111111111111"}))
 			.await;
 		response.assert_status_ok();
@@ -737,7 +737,7 @@ async fn get_detail_figures_resolve_across_sources() {
 		.unwrap();
 
 		let detail: ServerDetailResponse = private
-			.post("/api/applications/get_detail")
+			.post("/api/fleet/applications/get_detail")
 			.json(&serde_json::json!({"server_id": "11111111-1111-1111-1111-111111111111"}))
 			.await
 			.json();
@@ -752,7 +752,7 @@ async fn get_detail_figures_resolve_across_sources() {
 		assert_eq!(status.timezone, Some("Pacific/Auckland".to_string()));
 
 		let plain: ServerDetailResponse = private
-			.post("/api/applications/get_detail")
+			.post("/api/fleet/applications/get_detail")
 			.json(&serde_json::json!({"server_id": "22222222-2222-2222-2222-222222222222"}))
 			.await
 			.json();
@@ -790,7 +790,7 @@ async fn get_detail_with_device() {
 		.unwrap();
 
 		let response = private
-			.post("/api/applications/get_detail")
+			.post("/api/fleet/applications/get_detail")
 			.json(&serde_json::json!({"server_id": "11111111-1111-1111-1111-111111111111"}))
 			.await;
 		response.assert_status_ok();
@@ -821,7 +821,7 @@ async fn get_detail_with_device() {
 async fn get_detail_not_found() {
 	commons_tests::server::run(async |_conn, _, private| {
 		let response = private
-			.post("/api/applications/get_detail")
+			.post("/api/fleet/applications/get_detail")
 			.json(&serde_json::json!({"server_id": "99999999-9999-9999-9999-999999999999"}))
 			.await;
 		// AppError maps DatabaseQuery::NotFound to 404
@@ -834,7 +834,7 @@ async fn get_detail_not_found() {
 async fn get_detail_invalid_id() {
 	commons_tests::server::run(async |_conn, _, private| {
 		let response = private
-			.post("/api/applications/get_detail")
+			.post("/api/fleet/applications/get_detail")
 			.json(&serde_json::json!({"server_id": "not-a-uuid"}))
 			.await;
 		// axum's Json extractor rejects malformed bodies with 422
@@ -1992,7 +1992,7 @@ async fn get_detail_health_excludes_silenced_checks() {
 
 		let detail = async || {
 			let response = private
-				.post("/api/applications/get_detail")
+				.post("/api/fleet/applications/get_detail")
 				.json(&serde_json::json!({"server_id": "11111111-1111-1111-1111-111111111111"}))
 				.await;
 			response.assert_status_ok();

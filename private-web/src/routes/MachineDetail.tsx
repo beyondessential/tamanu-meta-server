@@ -7,6 +7,7 @@ import {
 	Stack,
 	Typography,
 } from "@mui/material";
+import EditIcon from "@mui/icons-material/Edit";
 import InsightsIcon from "@mui/icons-material/Insights";
 import { useEffect, useState } from "react";
 import { useLocation, useParams } from "react-router-dom";
@@ -49,7 +50,7 @@ export default function MachineDetail() {
 	const isAdmin = useIsAdmin() === true;
 	const [refreshTick, setRefreshTick] = useState(0);
 	const bumpRefresh = () => setRefreshTick((t) => t + 1);
-	const detail = useApi("machines", "get_detail", { machine_id: id }, [
+	const detail = useApi("fleet/machines", "get_detail", { machine_id: id }, [
 		id,
 		refreshTick,
 	]);
@@ -167,6 +168,14 @@ export default function MachineDetail() {
 						groupId={data.group?.id ?? null}
 						refreshKey={refreshTick}
 					/>
+					{isAdmin && (
+						<ActionButton
+							to={`/fleet/machines/${data.machine.id}/edit`}
+							icon={<EditIcon />}
+							label="Edit"
+							color="primary"
+						/>
+					)}
 				</Stack>
 			</Stack>
 

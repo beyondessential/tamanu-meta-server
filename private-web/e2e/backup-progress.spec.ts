@@ -338,7 +338,7 @@ test.describe("in-flight backup progress", () => {
 			bytesEstimated: 1024 * MIB,
 		});
 
-		await page.goto(`/machines/${server.machineId}#backups`);
+		await page.goto(`/fleet/machines/${server.machineId}#backups`);
 		await expect(page.getByText("backing up…")).toBeVisible();
 		const progress = page.getByTestId("capability-progress").first();
 		await expect(progress).toContainText("400.0 MiB");
@@ -359,7 +359,7 @@ test.describe("in-flight backup progress", () => {
 			enabled: true,
 		});
 
-		await page.goto(`/machines/${server.machineId}#backups`);
+		await page.goto(`/fleet/machines/${server.machineId}#backups`);
 		// Still visibly running, but nothing invented.
 		await expect(page.getByText("backing up…")).toBeVisible();
 		await expect(page.getByTestId("capability-progress")).toHaveCount(0);

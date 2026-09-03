@@ -153,7 +153,7 @@ function Header({
 			{issue.application_id != null ? (
 				<MuiLink
 					component={RouterLink}
-					to={`/applications/${issue.application_id}`}
+					to={`/fleet/applications/${issue.application_id}`}
 					underline="hover"
 					color="text.primary"
 					sx={{ fontWeight: 500, flexShrink: 0 }}
@@ -187,7 +187,7 @@ function Header({
 							},
 							{
 								label: issue.machine_name?.trim() || "(machine)",
-								to: `/machines/${issue.machine_id}`,
+								to: `/fleet/machines/${issue.machine_id}`,
 							},
 						]}
 					/>

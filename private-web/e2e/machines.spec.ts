@@ -36,7 +36,7 @@ test.describe("machine detail", () => {
 			},
 		});
 
-		await page.goto(`/machines/${machine.id}`);
+		await page.goto(`/fleet/machines/${machine.id}`);
 
 		await expect(
 			page.getByRole("heading", { level: 1, name: /big-box/ }),
@@ -66,7 +66,7 @@ test.describe("machine detail", () => {
 			[group.id, machine.id],
 		);
 
-		await page.goto(`/machines/${machine.id}`);
+		await page.goto(`/fleet/machines/${machine.id}`);
 
 		// The box's own section, rather than the group tree the page ends with,
 		// which lists every workload in the group.
@@ -90,7 +90,7 @@ test.describe("machine detail", () => {
 			groupId: group.id,
 		});
 
-		await page.goto(`/machines/${machine.id}`);
+		await page.goto(`/fleet/machines/${machine.id}`);
 
 		await expect(page.getByText(/hasn't checked in yet/i)).toBeVisible();
 		await expect(
@@ -119,7 +119,7 @@ test.describe("machine detail", () => {
 			groupId: group.id,
 		});
 
-		await page.goto(`/machines/${machine.id}`);
+		await page.goto(`/fleet/machines/${machine.id}`);
 
 		await expect(
 			page.getByRole("heading", { name: "Set up this machine" }),
@@ -152,7 +152,7 @@ test.describe("machine detail", () => {
 		});
 		await seedMachineReport(sql, { machineId: machine.id });
 
-		await page.goto(`/machines/${machine.id}`);
+		await page.goto(`/fleet/machines/${machine.id}`);
 
 		await page.getByRole("button", { name: "Identity" }).click();
 		await expect(
@@ -173,15 +173,15 @@ test.describe("machine detail", () => {
 			groupId: group.id,
 		});
 
-		await page.goto(`/applications/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 		await page.getByRole("link", { name: "This box" }).click();
-		await expect(page).toHaveURL(new RegExp(`/machines/${server.machineId}$`));
+		await expect(page).toHaveURL(new RegExp(`/fleet/machines/${server.machineId}$`));
 
 		await page
 			.getByTestId("applications-on-box")
 			.getByRole("link", { name: "round-trip-app" })
 			.click();
-		await expect(page).toHaveURL(new RegExp(`/applications/${server.id}$`));
+		await expect(page).toHaveURL(new RegExp(`/fleet/applications/${server.id}$`));
 	});
 
 	/// Backups are taken of a box and an identity speaks for a box, so both are
@@ -203,7 +203,7 @@ test.describe("machine detail", () => {
 			deviceId: device.id,
 		});
 
-		await page.goto(`/applications/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 		await expect(page.getByRole("heading", { name: "grain-app" })).toBeVisible();
 		await expect(
 			page.getByRole("heading", { name: "Backups" }),
@@ -212,7 +212,7 @@ test.describe("machine detail", () => {
 		await expect(page.getByRole("button", { name: "Identity" })).toHaveCount(0);
 
 		// Both are on the box, one page away.
-		await page.goto(`/machines/${server.machineId}`);
+		await page.goto(`/fleet/machines/${server.machineId}`);
 		await expect(page.getByRole("heading", { name: "Backups" })).toBeVisible();
 		await expect(page.getByRole("button", { name: "Identity" })).toBeVisible();
 	});
@@ -244,11 +244,11 @@ test.describe("machine detail", () => {
 		// own href: `seedServer` names the box after the workload, so the two
 		// links share a label.
 		await expect(
-			page.locator(`a[href="/applications/${server.id}"]`),
+			page.locator(`a[href="/fleet/applications/${server.id}"]`),
 		).toBeVisible();
 
 		await page.getByRole("link", { name: "tree-empty-box" }).click();
-		await expect(page).toHaveURL(new RegExp(`/machines/${empty.id}$`));
+		await expect(page).toHaveURL(new RegExp(`/fleet/machines/${empty.id}$`));
 	});
 
 	test("creating a machine lands on its own page", async ({ page, sql }) => {
@@ -285,7 +285,7 @@ test.describe("machine detail", () => {
 			message: "Disk nearly full",
 		});
 
-		await page.goto(`/machines/${machine.id}`);
+		await page.goto(`/fleet/machines/${machine.id}`);
 
 		// The check is here, and the scopes offered are the box and its group —
 		// the ones this check applies at, and nothing above them.
@@ -353,7 +353,7 @@ test.describe("machine detail", () => {
 			message: "Behind the release train",
 		});
 
-		await page.goto(`/applications/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 
 		// Both are here, and only the box's is marked as the box's.
 		await expect(page.getByText("disk_free")).toBeVisible();
@@ -388,7 +388,7 @@ test.describe("machine detail", () => {
 			message: "Disk nearly full",
 		});
 
-		await page.goto(`/applications/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 
 		// The scopes offered are the box's, not the workload's: this check is
 		// filed against the box.
@@ -405,7 +405,7 @@ test.describe("machine detail", () => {
 		).toBeVisible();
 
 		// And it lands on the box, where the same check now reads as silenced.
-		await page.goto(`/machines/${server.machineId}`);
+		await page.goto(`/fleet/machines/${server.machineId}`);
 		await expect(
 			page.getByRole("button", { name: "Manage silence for disk_free" }),
 		).toBeVisible();
