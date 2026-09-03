@@ -128,7 +128,10 @@ Reports are retained indefinitely as an audit trail.
 
 ## Applying
 
-A central server applies the newest schema Canopy offers it for the version it runs, with no operator moving a file: it obtains the artefact over its own credential, applies it, and stamps the schema with what it applied.
+A server applies the newest schema Canopy offers it for the version it runs, with no operator moving a file: it obtains the artefact over its own credential, applies it, and stamps the schema with what it applied.
+
+A facility server is offered its group's schema as a central server is, since a schema follows the group and the version rather than the server it was built from, and a facility runs the reports the same views serve.
+Where a facility's database is the one its central server uses, it is already applied and the facility stamps nothing of its own.
 It applies one when its stamp and the offered artefact differ, and does nothing when they match, so an upgrade that emptied the schema is repaired by the server itself.
 A schema is applied by replacing it whole, which cannot proceed under an open report, so a server applies before its reporting connections are serving rather than beneath them.
 
@@ -138,7 +141,7 @@ A server that cannot obtain or apply one keeps what it has and reports that, whi
 
 ## Currency
 
-Canopy grades a central server's reporting schema as current, behind, or unknown.
+Canopy grades the reporting schema of every server that reports one, as current, behind, or unknown.
 It is current when the artefact the server reports having applied is the newest Canopy offers it for the version it reports running, behind when it is an earlier artefact or one built for another version, and unknown when the server reports no schema at all.
 
 The schema a server is running is reported by the server as the artefact it applied, alongside the other facts its sources report about it (see [STA](statuses.md)).
@@ -148,7 +151,7 @@ Currency is presented per group, so whether a group's reports are running agains
 
 ## Alerting
 
-A central server whose schema is behind, or which owes a build nothing has produced, raises a reporting-schema check on itself (see [CHK](../monitoring/checks.md)).
+A server whose schema is behind raises a reporting-schema check on itself, as does a central server owed a build nothing has produced (see [CHK](../monitoring/checks.md)).
 Both leave its reports mismatched to the version it runs, and neither carries a time bound of its own: the plan that made a version a candidate already carries the date it is wanted by.
 
 The check is a warning rather than a failure, and does not escalate: the servers are up and their reports return rows, and a schema written for the wrong version is for whoever maintains the reports rather than whoever is on call.
