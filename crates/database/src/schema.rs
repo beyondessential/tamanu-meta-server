@@ -431,6 +431,7 @@ diesel::table! {
 		server_group_id -> Nullable<Uuid>,
 		escalated_at -> Nullable<Timestamptz>,
 		closing_at -> Nullable<Timestamptz>,
+		rank -> Nullable<Text>,
 	}
 }
 

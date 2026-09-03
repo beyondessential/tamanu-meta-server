@@ -807,10 +807,11 @@ pub struct ServerUpdateArgs {
 /// Update a server's fields.
 ///
 /// Applies a partial update — only the fields present in `data` are
-/// changed. Moving a previously-ungrouped server into a group, or toggling
-/// `is_monitored`, re-evaluates the server's open issues so incidents catch
-/// up with the new state. Returns 400 if the update is rejected (e.g. an
-/// invalid host value, or a role the target product doesn't define).
+/// changed. Moving a previously-ungrouped server into a group, toggling
+/// `is_monitored`, or changing the rank re-evaluates the server's open issues
+/// so incidents catch up with the new state. Returns 400 if the update is
+/// rejected (e.g. an invalid host value, or a role the target product doesn't
+/// define).
 #[utoipa::path(
 	post,
 	path = "/update",
@@ -830,12 +831,15 @@ pub async fn update(
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
 
-	// Capture the server's pre-update state when this request touches either
-	// of the two fields whose transitions warrant an incident catch-up:
-	// `group_id` (ungrouped → grouped opens pending issues into incidents)
-	// and `is_monitored` (un/monitored toggles incident eligibility
-	// symmetrically — on enrols open issues, off cascades them out).
-	let touches_catchup_field = args.data.group_id.is_some() || args.data.is_monitored.is_some();
+	// Capture the server's pre-update state when this request touches one of
+	// the fields whose transitions warrant an incident catch-up: `group_id`
+	// (ungrouped → grouped opens pending issues into incidents),
+	// `is_monitored` (un/monitored toggles incident eligibility symmetrically
+	// — on enrols open issues, off cascades them out), and `rank` (which
+	// environment the issues belong to).
+	let touches_catchup_field = args.data.group_id.is_some()
+		|| args.data.is_monitored.is_some()
+		|| args.data.rank.is_some();
 	let before = if touches_catchup_field {
 		Some(Application::get_by_id(&mut conn, args.server_id).await?)
 	} else {
@@ -900,8 +904,26 @@ pub async fn update(
 		(Some(b), Some(new_value)) => b.is_monitored != new_value,
 		_ => false,
 	};
+	let rank_changed = match (before.as_ref(), args.data.rank) {
+		(Some(b), Some(new_value)) => b.rank != Some(new_value),
+		_ => false,
+	};
 	if group_just_set || monitored_toggled {
 		database::issues::reevaluate_open_issues_for_server(&mut conn, args.server_id).await?;
+	}
+	if rank_changed {
+		// A box's environment is the highest rank among the workloads on it,
+		// so a rank change moves the machine's own issues too.
+		// spec: INC#targets
+		let machine_id = Application::get_by_id(&mut conn, args.server_id)
+			.await?
+			.machine_id;
+		database::issues::reevaluate_open_issues_for_scope(
+			&mut conn,
+			database::issues::Scope::Machine(machine_id),
+			None,
+		)
+		.await?;
 	}
 	Ok(Json(()))
 }

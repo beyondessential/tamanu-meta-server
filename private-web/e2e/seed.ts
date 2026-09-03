@@ -924,6 +924,8 @@ export async function seedIncident(
 	opts: {
 		/** Group the incident targets; null/absent seeds a canopy-wide one. */
 		serverGroupId?: string | null;
+		/** Which of the group's environments; absent targets the group itself. */
+		rank?: ServerRank | null;
 		/** ISO 8601; defaults to NOW(). */
 		openedAt?: string;
 		/** ISO 8601; sets the incident lingering since this time. */
@@ -938,9 +940,15 @@ export async function seedIncident(
 ): Promise<SeededIncident> {
 	const id = randomUUID();
 	await sql.query(
-		`INSERT INTO incidents (id, server_group_id, opened_at, closing_at)
-		 VALUES ($1, $2, COALESCE($3::timestamptz, NOW()), $4::timestamptz)`,
-		[id, opts.serverGroupId ?? null, opts.openedAt ?? null, opts.closingAt ?? null],
+		`INSERT INTO incidents (id, server_group_id, rank, opened_at, closing_at)
+		 VALUES ($1, $2, $3, COALESCE($4::timestamptz, NOW()), $5::timestamptz)`,
+		[
+			id,
+			opts.serverGroupId ?? null,
+			opts.rank ?? null,
+			opts.openedAt ?? null,
+			opts.closingAt ?? null,
+		],
 	);
 	for (const link of opts.issues ?? []) {
 		await sql.query(

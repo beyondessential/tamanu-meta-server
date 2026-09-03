@@ -498,6 +498,28 @@ impl Machine {
 			.map_err(AppError::from)
 	}
 
+	/// The highest rank among the live applications on this box, which is the
+	/// rank its stage derives from. `None` where nothing on it is ranked,
+	/// including a box that has yet to report anything.
+	// spec: FLT#environments
+	pub async fn highest_application_rank(
+		db: &mut AsyncPgConnection,
+		machine_id: Uuid,
+	) -> Result<Option<commons_types::server::rank::ServerRank>> {
+		use crate::schema::applications::dsl;
+		let ranks: Vec<Option<String>> = dsl::applications
+			.select(dsl::rank)
+			.filter(dsl::machine_id.eq(machine_id))
+			.filter(dsl::deleted_at.is_null())
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+		Ok(ranks
+			.into_iter()
+			.filter_map(|r| r.and_then(|r| r.parse().ok()))
+			.min_by_key(|r| crate::server_groups::rank_priority(Some(*r))))
+	}
+
 	/// This machine's tags over its group's, so a check filed against a
 	/// machine is graded by policy against the tags of its own target rather
 	/// than against some application that happens to run on it.

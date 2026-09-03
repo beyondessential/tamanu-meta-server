@@ -39,6 +39,16 @@ fn higher_rank(a: ServerRank, b: ServerRank) -> ServerRank {
 	}
 }
 
+/// How an environment is named where it is read: the group's name, with the
+/// rank after it unless it is production.
+// spec: INC#notification
+pub fn environment_name(group: &str, rank: ServerRank) -> String {
+	match rank {
+		ServerRank::Production => group.to_owned(),
+		rank => format!("{group} {rank}"),
+	}
+}
+
 /// A group of applications managed together: incidents roll up across the group,
 /// members share tags, and the group carries its own notes and
 /// notification settings.
@@ -440,6 +450,25 @@ impl ServerGroup {
 			out.insert(gid, better);
 		}
 		Ok(out)
+	}
+
+	/// The environment a member of `group_id` carrying `own` belongs to: the
+	/// rank it names, or the group's headline environment where it carries
+	/// none. `None` where the group has no ranked application, its members
+	/// then belonging to no environment.
+	// spec: INC#targets
+	pub async fn environment_for(
+		db: &mut AsyncPgConnection,
+		group_id: Uuid,
+		own: Option<ServerRank>,
+	) -> Result<Option<ServerRank>> {
+		if own.is_some() {
+			return Ok(own);
+		}
+		Ok(Self::highest_member_ranks(db, &[group_id])
+			.await?
+			.get(&group_id)
+			.copied())
 	}
 
 	/// Count of live (non-archived) applications in each group, keyed by group id.

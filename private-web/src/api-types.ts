@@ -1813,10 +1813,11 @@ export interface paths {
         /**
          * Update a server's fields.
          * @description Applies a partial update — only the fields present in `data` are
-         *     changed. Moving a previously-ungrouped server into a group, or toggling
-         *     `is_monitored`, re-evaluates the server's open issues so incidents catch
-         *     up with the new state. Returns 400 if the update is rejected (e.g. an
-         *     invalid host value, or a role the target product doesn't define).
+         *     changed. Moving a previously-ungrouped server into a group, toggling
+         *     `is_monitored`, or changing the rank re-evaluates the server's open issues
+         *     so incidents catch up with the new state. Returns 400 if the update is
+         *     rejected (e.g. an invalid host value, or a role the target product doesn't
+         *     define).
          */
         post: operations["server_update"];
         delete?: never;
@@ -6259,12 +6260,13 @@ export interface components {
             incident_id: string;
         };
         /**
-         * @description An operational incident: a group-scoped roll-up of related issues.
+         * @description An operational incident: a roll-up of the related issues on one target,
+         *     which is one of a group's environments, the group itself, or canopy.
          *
-         *     An incident opens when an issue on a server in the group crosses the
-         *     severity threshold, gathers further contributing issues while open, and
-         *     closes automatically once the last serious contributor clears. Operators
-         *     can additionally mark an incident resolved with a reason.
+         *     An incident opens when an issue on its target crosses the severity
+         *     threshold, gathers further contributing issues while open, and closes
+         *     automatically once the last serious contributor clears. Operators can
+         *     additionally mark an incident resolved with a reason.
          */
         IncidentData: {
             /**
@@ -6319,6 +6321,7 @@ export interface components {
              * @description When the incident opened.
              */
             opened_at: string;
+            rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: date-time
              * @description When an operator marked the incident resolved; null if it has not
@@ -6338,7 +6341,7 @@ export interface components {
             resolved_reason?: string | null;
             /**
              * Format: uuid
-             * @description Identifier of the server group the incident belongs to, or null for
+             * @description Identifier of the group the incident belongs to, or null for
              *     a canopy-wide incident (aggregating canopy's self-alerts).
              */
             server_group_id?: string | null;

@@ -46,6 +46,9 @@ import {
 /// Drives the error/warning/info colouring on the Status page and elsewhere.
 export type IncidentLoudness = "held" | "loud" | "lingering";
 
+/// Loudest first, for rolling several of a group's incidents into one mark.
+const LOUDNESS_ORDER: IncidentLoudness[] = ["loud", "held", "lingering"];
+
 export default function Status() {
 	usePageTitle("Status");
 	const tick = useReloadInterval(60_000, "canopy-reload-status");
@@ -56,25 +59,32 @@ export default function Status() {
 	// rather than asserting a held state we can't verify. The 60s tick
 	// re-evaluates this naturally.
 	const now = Date.now();
-	const openIncidentGroups = new Map<string, IncidentLoudness>(
-		incidents.status === "ok"
-			? incidents.data
-					// Canopy-wide incidents (no group) surface via the
-					// self-alerts banner, not the group cards.
-					.filter((i) => i.server_group_id != null)
-					.map((i): [string, IncidentLoudness] => [
-						i.server_group_id as string,
-						// Lingering wins: the group is currently green, so
-						// painting it red/yellow would overstate the trouble.
-						isIncidentLingering(i)
-							? "lingering"
-							: i.notification_held_until &&
-									Date.parse(i.notification_held_until) > now
-								? "held"
-								: "loud",
-					])
-			: [],
-	);
+	const openIncidentGroups = new Map<string, IncidentLoudness>();
+	if (incidents.status === "ok") {
+		for (const i of incidents.data) {
+			// Canopy-wide incidents (no group) surface via the self-alerts
+			// banner, not the group cards.
+			if (i.server_group_id == null) continue;
+			// Lingering wins over held and loud for one incident: it is
+			// currently green, so painting it red/yellow would overstate the
+			// trouble.
+			const loudness: IncidentLoudness = isIncidentLingering(i)
+				? "lingering"
+				: i.notification_held_until &&
+						Date.parse(i.notification_held_until) > now
+					? "held"
+					: "loud";
+			// A group holds one incident per environment plus its own, so the
+			// card carries the loudest of them.
+			const seen = openIncidentGroups.get(i.server_group_id);
+			if (
+				seen == null ||
+				LOUDNESS_ORDER.indexOf(loudness) < LOUDNESS_ORDER.indexOf(seen)
+			) {
+				openIncidentGroups.set(i.server_group_id, loudness);
+			}
+		}
+	}
 	return (
 		<Stack spacing={3}>
 			<ReleaseSummary tick={tick} />
