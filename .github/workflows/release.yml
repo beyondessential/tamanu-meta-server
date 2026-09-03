@@ -175,7 +175,7 @@ jobs:
             crates/public-server/src/openapi.rs
           grep -q "version = \"$version\"," crates/public-server/src/openapi.rs
 
-          npm ci --prefix private-web
+          (cd private-web && npm ci)
           just gen-openapi
           just gen-api
 
@@ -186,5 +186,5 @@ jobs:
 
           git config user.name "$(git log -1 --format='%an' HEAD)"
           git config user.email "$(git log -1 --format='%ae' HEAD)"
-          git commit -am "chore: declare $version in the OpenAPI document"
+          git commit -am "release: declare $version in the OpenAPI document"
           git push
