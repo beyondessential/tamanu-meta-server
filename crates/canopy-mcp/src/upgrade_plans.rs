@@ -65,7 +65,8 @@ struct OpenPlan {
 struct PlanHistory {
 	group_id: Uuid,
 	group_name: String,
-	current_version: Option<VersionStr>,
+	/// The group's environments and what each runs now.
+	environments: Vec<EnvironmentRef>,
 	plans: Vec<HistoricPlan>,
 }
 
@@ -119,12 +120,11 @@ impl CanopyMcp {
 
 		let mut plans = Vec::new();
 		let mut unplanned = Vec::new();
-		let mut seen = std::collections::HashSet::new();
 		for env in ServerGroup::environments(&mut conn, &ids)
 			.await
 			.map_err(mcp_err)?
 		{
-			let headline = seen.insert(env.group_id);
+			let headline = env.headline;
 			let group_name = names.get(&env.group_id).cloned().unwrap_or_default();
 			let plan = UpgradePlan::open_for_environment(&mut conn, env.group_id, env.rank)
 				.await
@@ -200,10 +200,22 @@ impl CanopyMcp {
 			})
 			.collect();
 
+		let environments = ServerGroup::environments(&mut conn, &[group.id])
+			.await
+			.map_err(mcp_err)?
+			.into_iter()
+			.map(|env| EnvironmentRef {
+				group_id: env.group_id,
+				group_name: group.name.clone(),
+				rank: env.rank,
+				current_version: env.version,
+			})
+			.collect();
+
 		ok_json(&PlanHistory {
 			group_id: group.id,
 			group_name: group.name,
-			current_version: group.effective_version,
+			environments,
 			plans,
 		})
 	}

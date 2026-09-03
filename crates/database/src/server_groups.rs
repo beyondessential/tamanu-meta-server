@@ -54,6 +54,9 @@ fn higher_rank(a: ServerRank, b: ServerRank) -> ServerRank {
 pub struct Environment {
 	pub group_id: Uuid,
 	pub rank: ServerRank,
+	/// The group's highest-ranked environment, the one its own version is read
+	/// from and the one an unranked member belongs to.
+	pub headline: bool,
 	pub version: Option<VersionStr>,
 }
 
@@ -462,12 +465,13 @@ impl ServerGroup {
 				.filter(|(group, _)| group == group_id)
 				.map(|(_, rank)| *rank)
 				.collect();
-			ranks.sort();
-			for rank in ranks {
+			ranks.sort_by_key(|rank| rank_priority(Some(*rank)));
+			for (position, rank) in ranks.into_iter().enumerate() {
 				let server = &canonical[&(*group_id, rank)];
 				out.push(Environment {
 					group_id: *group_id,
 					rank,
+					headline: position == 0,
 					version: versions.get(&server.id).cloned(),
 				});
 			}
@@ -475,17 +479,37 @@ impl ServerGroup {
 		Ok(out)
 	}
 
-	/// What one environment runs: the version its canonical member reports.
-	pub async fn environment_version(
+	/// One of a group's environments, if the group has servers at that rank.
+	pub async fn environment(
 		db: &mut AsyncPgConnection,
 		group_id: Uuid,
 		rank: ServerRank,
-	) -> Result<Option<VersionStr>> {
+	) -> Result<Option<Environment>> {
 		Ok(Self::environments(db, &[group_id])
 			.await?
 			.into_iter()
-			.find(|env| env.rank == rank)
-			.and_then(|env| env.version))
+			.find(|env| env.rank == rank))
+	}
+
+	/// The environment a server belongs to: its own rank, or for a server with
+	/// none, its group's headline environment, which is where the group's own
+	/// version is read from. `None` for a server in no group, or in a group
+	/// with no ranked member.
+	// spec: GRP#environments
+	pub async fn environment_of(
+		db: &mut AsyncPgConnection,
+		server: &Server,
+	) -> Result<Option<ServerRank>> {
+		if let Some(rank) = server.rank {
+			return Ok(Some(rank));
+		}
+		let Some(group_id) = server.group_id else {
+			return Ok(None);
+		};
+		Ok(Self::highest_member_ranks(db, &[group_id])
+			.await?
+			.get(&group_id)
+			.copied())
 	}
 
 	/// The product each group's live members agree on, keyed by group id.

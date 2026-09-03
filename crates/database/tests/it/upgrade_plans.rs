@@ -969,7 +969,7 @@ async fn each_environment_goes_its_own_place() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_server_with_no_rank_is_in_no_environment() {
+async fn a_server_with_no_rank_follows_the_headline_environment() {
 	TestDb::run(|mut conn, _url| async move {
 		let (group, _production) = group_running(&mut conn, "2.60.0").await;
 		let unranked: RowId = sql_query(
@@ -996,13 +996,35 @@ async fn a_server_with_no_rank_is_in_no_environment() {
 		.await
 		.expect("plan");
 
-		assert!(
+		assert_eq!(
 			candidate_for(&mut conn, &unranked)
 				.await
 				.expect("candidate")
-				.is_none(),
-			"no rank, no environment, nothing to test against"
+				.map(|v| v.id),
+			Some(target.id),
+			"an unranked facility is tested with the production it belongs to"
 		);
+	})
+	.await
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_plan_needs_an_environment_the_group_has() {
+	TestDb::run(|mut conn, _url| async move {
+		let (group, _production) = group_running(&mut conn, "2.60.0").await;
+		let target = publish(&mut conn, 61, 0).await;
+
+		let refused = UpgradePlan::record(
+			&mut conn,
+			group,
+			ServerRank::Demo,
+			target.id,
+			PlannedWhen::default(),
+			None,
+			"a@example.com",
+		)
+		.await;
+		assert!(refused.is_err(), "the group has no demo servers");
 	})
 	.await
 }

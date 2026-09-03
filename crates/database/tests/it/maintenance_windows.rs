@@ -4,7 +4,7 @@
 //! window by the settle period so a server that is back but has not
 //! reported yet is not called unreachable.
 
-use commons_types::status::CheckResult;
+use commons_types::{server::rank::ServerRank, status::CheckResult};
 use database::{
 	issues::{CheckFiling, Issue, Scope, file_check},
 	maintenance_windows::{MaintenanceWindow, SETTLE},
@@ -40,6 +40,22 @@ async fn insert_server(conn: &mut diesel_async::AsyncPgConnection, group_id: Opt
 		"INSERT INTO servers (host, group_id) VALUES ('http://maint.invalid/', $1) RETURNING id",
 	)
 	.bind::<sql_types::Nullable<sql_types::Uuid>, _>(group_id)
+	.get_result(conn)
+	.await
+	.expect("insert server");
+	row.id
+}
+
+async fn insert_ranked_server(
+	conn: &mut diesel_async::AsyncPgConnection,
+	group_id: Uuid,
+	rank: &str,
+) -> Uuid {
+	let row: RowId = sql_query(
+		"INSERT INTO servers (host, group_id, rank) VALUES ('http://maint.invalid/', $1, $2) RETURNING id",
+	)
+	.bind::<sql_types::Uuid, _>(group_id)
+	.bind::<sql_types::Text, _>(rank)
 	.get_result(conn)
 	.await
 	.expect("insert server");
@@ -126,6 +142,7 @@ async fn a_window_grades_every_check_on_its_target_to_skipped() {
 		MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Server(server_id),
+			None,
 			in_an_hour(),
 			Some("upgrading"),
 			Some("op"),
@@ -177,6 +194,7 @@ async fn declaring_takes_the_target_out_of_its_open_incident() {
 		MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Server(server_id),
+			None,
 			in_an_hour(),
 			None,
 			Some("op"),
@@ -206,6 +224,7 @@ async fn a_group_window_covers_its_servers_and_the_group_itself() {
 		MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Group(group_id),
+			None,
 			in_an_hour(),
 			None,
 			Some("op"),
@@ -248,6 +267,7 @@ async fn the_window_ends_at_its_expected_end_and_suspension_outlasts_it() {
 		let window = MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Server(server_id),
+			None,
 			in_an_hour(),
 			None,
 			Some("op"),
@@ -306,6 +326,7 @@ async fn a_failure_after_the_settle_period_opens_an_incident_again() {
 		let window = MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Server(server_id),
+			None,
 			in_an_hour(),
 			None,
 			Some("op"),
@@ -353,6 +374,7 @@ async fn declaring_over_an_open_window_amends_it() {
 		let first = MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Server(server_id),
+			None,
 			in_an_hour(),
 			Some("upgrading"),
 			Some("op"),
@@ -364,6 +386,7 @@ async fn declaring_over_an_open_window_amends_it() {
 		let second = MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Server(server_id),
+			None,
 			later,
 			Some("still upgrading"),
 			Some("other"),
@@ -396,6 +419,7 @@ async fn lifting_records_the_operator_and_is_idempotent() {
 		let window = MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Server(server_id),
+			None,
 			in_an_hour(),
 			None,
 			Some("op"),
@@ -448,6 +472,7 @@ async fn declaring_and_ending_notify_operators() {
 		let window = MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Server(server_id),
+			None,
 			in_an_hour(),
 			Some("swapping the disk"),
 			Some("op"),
@@ -477,6 +502,7 @@ async fn a_window_expiring_notifies_as_the_expected_end_passing() {
 		let window = MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Server(server_id),
+			None,
 			in_an_hour(),
 			None,
 			Some("op"),
@@ -521,6 +547,7 @@ async fn an_incident_closed_by_a_declaration_says_so() {
 		MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Server(server_id),
+			None,
 			in_an_hour(),
 			None,
 			Some("op"),
@@ -552,9 +579,16 @@ async fn an_incident_closed_by_a_declaration_says_so() {
 async fn a_server_joining_a_group_under_a_window_is_covered() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn).await;
-		MaintenanceWindow::declare(&mut conn, Scope::Group(group_id), in_an_hour(), None, None)
-			.await
-			.expect("declare");
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			None,
+			in_an_hour(),
+			None,
+			None,
+		)
+		.await
+		.expect("declare");
 
 		// Joins while the window holds.
 		let server_id = insert_server(&mut conn, Some(group_id)).await;
@@ -582,12 +616,20 @@ async fn canopy_wide_checks_are_never_suspended() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn).await;
 		let server_id = insert_server(&mut conn, Some(group_id)).await;
-		MaintenanceWindow::declare(&mut conn, Scope::Group(group_id), in_an_hour(), None, None)
-			.await
-			.expect("declare group window");
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			None,
+			in_an_hour(),
+			None,
+			None,
+		)
+		.await
+		.expect("declare group window");
 		MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Server(server_id),
+			None,
 			in_an_hour(),
 			None,
 			None,
@@ -615,6 +657,94 @@ async fn canopy_wide_checks_are_never_suspended() {
 			row.effective_result.as_deref(),
 			Some("failed"),
 			"a window over a server or a group never suspends canopy's own checks"
+		);
+	})
+	.await
+}
+
+/// An upgrade rehearsed on a site's clone leaves its production, and the
+/// group's own checks, watched.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_environment_window_covers_only_its_rank() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let production = insert_ranked_server(&mut conn, group_id, "production").await;
+		let clone = insert_ranked_server(&mut conn, group_id, "clone").await;
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			Some(ServerRank::Clone),
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare");
+
+		file_check(
+			&mut conn,
+			filing(clone, "reachability", CheckResult::Failed),
+		)
+		.await
+		.expect("file clone check");
+		assert_eq!(
+			state_for(&mut conn, clone, "reachability")
+				.await
+				.effective_result,
+			Some(CheckResult::Skipped),
+			"the clone is under the window"
+		);
+
+		file_check(
+			&mut conn,
+			filing(production, "reachability", CheckResult::Failed),
+		)
+		.await
+		.expect("file production check");
+		assert_eq!(
+			state_for(&mut conn, production, "reachability")
+				.await
+				.effective_result,
+			Some(CheckResult::Failed),
+			"production is not"
+		);
+
+		let mut group_filing = filing(production, "backup-staleness", CheckResult::Failed);
+		group_filing.scope = Scope::Group(group_id);
+		file_check(&mut conn, group_filing)
+			.await
+			.expect("file group check");
+		assert!(
+			open_incidents(&mut conn, group_id).await >= 1,
+			"the group's own checks are watched through a clone's window"
+		);
+
+		let (servers, groups) = MaintenanceWindow::suspended_targets(&mut conn)
+			.await
+			.expect("suspended");
+		assert!(servers.contains(&clone) && !servers.contains(&production));
+		assert!(
+			!groups.contains(&group_id),
+			"an environment's window is not the group's"
+		);
+
+		// The group's own window is a distinct target beside the clone's.
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			None,
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare group-wide");
+		assert!(
+			MaintenanceWindow::open_for(&mut conn, Scope::Group(group_id), Some(ServerRank::Clone))
+				.await
+				.expect("open")
+				.is_some(),
+			"declaring over the group does not amend the clone's window"
 		);
 	})
 	.await

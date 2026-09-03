@@ -785,11 +785,16 @@ pub async fn get_detail(
 	let maintenance_settling = maintained && {
 		use database::issues::Scope;
 		use database::maintenance_windows::MaintenanceWindow;
-		let mut open = MaintenanceWindow::open_for(&mut conn, Scope::Server(args.server_id))
+		let mut open = MaintenanceWindow::open_for(&mut conn, Scope::Server(args.server_id), None)
 			.await?
 			.is_some();
 		if !open && let Some(gid) = server.group_id {
-			open = MaintenanceWindow::open_for(&mut conn, Scope::Group(gid))
+			open = MaintenanceWindow::open_for(&mut conn, Scope::Group(gid), None)
+				.await?
+				.is_some();
+		}
+		if !open && let (Some(gid), Some(rank)) = (server.group_id, server.rank) {
+			open = MaintenanceWindow::open_for(&mut conn, Scope::Group(gid), Some(rank))
 				.await?
 				.is_some();
 		}

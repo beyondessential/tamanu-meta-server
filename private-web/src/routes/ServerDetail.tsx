@@ -239,6 +239,7 @@ export default function ServerDetail() {
 				targetLabel={data.server.name ?? data.server.display_host}
 				groupId={data.group?.id ?? null}
 				groupName={data.group?.name ?? null}
+				rank={data.server.rank ?? null}
 				onChanged={() => detail.reload()}
 			/>
 			<SilencedRefsSection

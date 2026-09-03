@@ -4,7 +4,7 @@ id: MNT
 
 # Maintenance windows
 
-A maintenance window is an operator's declaration that a server or a group is being worked on, so what Canopy observes while the work runs raises nothing.
+A maintenance window is an operator's declaration that a server, a group, or one of a group's environments is being worked on, so what Canopy observes while the work runs raises nothing.
 A window is bounded in time, ends itself, and records who declared it and what for, so a quiet part of the fleet is always attributable to a decision someone made.
 
 ## Why it exists
@@ -18,7 +18,7 @@ Turning a server's monitoring off is unbounded, and a switch with nothing to tur
 
 ## Declaring
 
-An operator declares a window over one server or one group, giving the time it is expected to end and, optionally, a note saying what is being done.
+An operator declares a window over one server, one group, or one of a group's environments, its servers at one rank (see [GRP](../servers/groups.md)), giving the time it is expected to end and, optionally, a note saying what is being done.
 Canopy records who declared it and when, alongside the expected end and the note.
 Declaring, amending, and lifting are administrative actions and are audited (see [ADM](../private-server/admin-access.md)).
 
@@ -28,7 +28,7 @@ A server covered by its own window and by its group's stays suspended until the 
 A target has at most one open window: declaring over one that already has a window amends it, recording who amended and when.
 
 Canopy never opens a window by itself.
-A group is offered the declaration from each of its environments' open upgrade plans, prefilled with that plan's window and note, so declaring is one action at the moment the work starts (see [UPG](../private-server/upgrade-plans.md)).
+An environment with an open upgrade plan is offered the declaration over itself from that plan, prefilled with the plan's window and note, so declaring is one action at the moment the work starts (see [UPG](../private-server/upgrade-plans.md)).
 An hour someone typed in advance is not evidence that work began, so a planned window suspends nothing on its own.
 An open incident offers the declaration over its target too, so an operator who recognises an alert as their own work declares from where they are reading it.
 
@@ -38,6 +38,9 @@ While a window holds over a target, every check on that target has an effective 
 Observed results are recorded throughout, and sources are expected to report and told to run their checks exactly as they were before, so a window changes how Canopy grades what it sees and nothing else.
 
 A skipped check is not an issue, so a target under a window contributes nothing to incidents and raises no notification.
+
+A window over an environment covers the servers at that rank and nothing else of the group: an upgrade rehearsed on a site's clone leaves its production, and the group's own checks such as its backups, watched.
+A group's own window covers every environment in it.
 An issue in an open incident leaves it when the window is declared, and an incident whose last effective failure leaves this way closes immediately, as it does for any operator action (see [INC](incidents.md), "Membership").
 Where that close is notified, the notice says maintenance was declared, so a reader does not take it as the problem having gone away.
 

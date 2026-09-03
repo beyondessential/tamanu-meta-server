@@ -7,11 +7,11 @@ ALTER TABLE upgrade_plans ADD COLUMN rank TEXT;
 -- comes from, which is the rank of its canonical member. Servers still carry
 -- the older spellings of production and clone, which the plan must not.
 UPDATE upgrade_plans p
-	SET rank = CASE s.rank
+	SET rank = CASE lower(s.rank)
 		WHEN 'live' THEN 'production'
 		WHEN 'prod' THEN 'production'
 		WHEN 'staging' THEN 'clone'
-		ELSE s.rank
+		ELSE lower(s.rank)
 	END
 	FROM server_groups g
 	LEFT JOIN servers s ON s.id = g.version_server_id

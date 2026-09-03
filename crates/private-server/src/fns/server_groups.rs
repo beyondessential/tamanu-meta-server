@@ -210,6 +210,7 @@ pub async fn get(
 		&& database::maintenance_windows::MaintenanceWindow::open_for(
 			&mut conn,
 			database::issues::Scope::Group(args.server_group_id),
+			None,
 		)
 		.await?
 		.is_none();

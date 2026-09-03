@@ -2288,7 +2288,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Declare that a server or a group is being worked on.
+         * Declare that a server, a group, or one of a group's environments is being
+         *     worked on.
          * @description Every check on the target grades to skipped while the window holds and
          *     for a settle period after it ends, so nothing on it opens or joins an
          *     incident. Issues already in an open incident leave it, closing the
@@ -5019,9 +5020,10 @@ export interface components {
             expected_end: string;
             /** @description What is being done. */
             note?: string | null;
+            rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: uuid
-             * @description The group, for a window over a whole group.
+             * @description The group, for a window over a whole group or one of its environments.
              */
             server_group_id?: string | null;
             /**
@@ -6481,7 +6483,10 @@ export interface components {
          * @enum {string}
          */
         MaintenanceKind: "quick" | "full";
-        /** @description A declaration that a server or a group is being worked on. */
+        /**
+         * @description A declaration that a server, a group, or one of a group's environments is
+         *     being worked on.
+         */
         MaintenanceWindow: {
             /**
              * Format: date-time
@@ -6525,6 +6530,7 @@ export interface components {
             id: string;
             /** @description What is being done, where the operator said. */
             note?: string | null;
+            rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: uuid
              * @description Set for a window over a group, covering the group's own checks and
@@ -9312,11 +9318,11 @@ export interface components {
             /** @description The tailnet (Tailscale network) this node belongs to. */
             tailnet: string;
         };
-        /** @description The target a window covers: exactly one of the two is set. */
+        /** @description The target a window covers: exactly one of the two ids is set. */
         TargetArgs: {
             /**
              * Format: uuid
-             * @description The group, for a window over a whole group.
+             * @description The group, for a window over a whole group or one of its environments.
              */
             server_group_id?: string | null;
             /**

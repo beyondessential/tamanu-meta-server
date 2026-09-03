@@ -48,7 +48,8 @@ An environment moves to one place next, so a second plan for it replaces the fir
 A plan for a group's clone leaves its production's plan where it was.
 
 What an environment runs is what its canonical member reports: the highest kind among the group's live servers at that rank, so a site's production reads from its production central server and its clone from the clone's.
-A server with no rank belongs to no environment, so nothing can be planned for it and nothing tests it.
+A server with no rank belongs to its group's highest-ranked environment, since that is the environment the group's own version is read from.
+A plan names an environment the group has servers at; one cannot be recorded for a rank the group holds nothing at.
 
 An open plan's date, time, and note can be amended, and an amendment records who made it and when.
 A corrected date or a reworded note is the same plan better described, so it stays one plan rather than entering the history as a second.
@@ -80,7 +81,7 @@ Recording a plan is what asks for the testing, and no restore is spent on a vers
 
 A plan changes what is tested, so changing one invalidates nothing already recorded: earlier verdicts stand against the versions they named, and the new target simply becomes the one that has not been tested yet.
 
-Declaring maintenance reads the open plan for its prefill: an operator starting the work is offered a window carrying the plan's window and note (see [MNT](../monitoring/maintenance.md)).
+Declaring maintenance reads the open plan for its prefill: an operator starting the work is offered a window over the plan's environment, carrying the plan's window and note (see [MNT](../monitoring/maintenance.md)).
 The plan is read at the moment someone declares, so a planned hour arriving suspends nothing on its own.
 
 ## The dashboard

@@ -4488,7 +4488,7 @@
         "tags": [
           "maintenance"
         ],
-        "summary": "Declare that a server or a group is being worked on.",
+        "summary": "Declare that a server, a group, or one of a group's environments is being\nworked on.",
         "description": "Every check on the target grades to skipped while the window holds and\nfor a settle period after it ends, so nothing on it opens or joins an\nincident. Issues already in an open incident leave it, closing the\nincident where nothing else holds it open. A target that already has an\nopen window has that window amended rather than a second opened.\nRequires admin access.",
         "operationId": "declare",
         "requestBody": {
@@ -9416,13 +9416,24 @@
             ],
             "description": "What is being done."
           },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "With the group, the rank of the environment the window covers: the\ngroup's servers at that rank, and nothing else of the group. Absent for\na window over the whole group."
+              }
+            ]
+          },
           "server_group_id": {
             "type": [
               "string",
               "null"
             ],
             "format": "uuid",
-            "description": "The group, for a window over a whole group."
+            "description": "The group, for a window over a whole group or one of its environments."
           },
           "server_id": {
             "type": [
@@ -11706,7 +11717,7 @@
       },
       "MaintenanceWindow": {
         "type": "object",
-        "description": "A declaration that a server or a group is being worked on.",
+        "description": "A declaration that a server, a group, or one of a group's environments is\nbeing worked on.",
         "required": [
           "id",
           "expected_end",
@@ -11778,6 +11789,17 @@
               "null"
             ],
             "description": "What is being done, where the operator said."
+          },
+          "rank": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ServerRank",
+                "description": "Set with `server_group_id` for a window over one of the group's\nenvironments: its servers at this rank, and nothing else of the group."
+              }
+            ]
           },
           "server_group_id": {
             "type": [
@@ -16242,7 +16264,7 @@
       },
       "TargetArgs": {
         "type": "object",
-        "description": "The target a window covers: exactly one of the two is set.",
+        "description": "The target a window covers: exactly one of the two ids is set.",
         "properties": {
           "server_group_id": {
             "type": [
@@ -16250,7 +16272,7 @@
               "null"
             ],
             "format": "uuid",
-            "description": "The group, for a window over a whole group."
+            "description": "The group, for a window over a whole group or one of its environments."
           },
           "server_id": {
             "type": [

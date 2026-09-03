@@ -194,7 +194,8 @@ export default function Upgrades() {
 												/>
 												<DeclareFromPlan
 													groupId={row.group_id}
-													groupName={row.group_name}
+													rank={row.rank}
+													groupName={environmentName(row.group_name, row.rank)}
 													plannedTime={row.plan?.planned_time ?? null}
 													plannedEnd={row.plan?.planned_end_time ?? null}
 													note={row.plan?.note ?? null}
@@ -2206,12 +2207,13 @@ function plannedHours(time: string | null, end: string | null): number {
 	return (span > 0 ? span : span + 24 * 60) / 60;
 }
 
-/** Declare maintenance for a group from its open plan, carrying the plan's
- * window length and note. The plan supplies the prefill and triggers
+/** Declare maintenance over an environment from its open plan, carrying the
+ * plan's window length and note. The plan supplies the prefill and triggers
  * nothing: this is an operator saying the work is starting now. */
 // spec: MNT#declaring
 function DeclareFromPlan({
 	groupId,
+	rank,
 	groupName,
 	plannedTime,
 	plannedEnd,
@@ -2219,6 +2221,7 @@ function DeclareFromPlan({
 	onDeclared,
 }: {
 	groupId: string;
+	rank: ServerRank;
 	groupName: string;
 	plannedTime: string | null;
 	plannedEnd: string | null;
@@ -2229,7 +2232,7 @@ function DeclareFromPlan({
 	const hours = plannedHours(plannedTime, plannedEnd);
 	return (
 		<>
-			<Tooltip title="Declare maintenance: suspend this group's alerting while the upgrade runs">
+			<Tooltip title="Declare maintenance: suspend this environment's alerting while the upgrade runs">
 				<IconButton
 					size="small"
 					aria-label={`Declare maintenance for ${groupName}`}
@@ -2243,6 +2246,7 @@ function DeclareFromPlan({
 				onClose={() => setOpen(false)}
 				scope="group"
 				id={groupId}
+				rank={rank}
 				targetLabel={groupName}
 				prefill={{
 					expectedEnd: new Date(

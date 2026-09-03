@@ -252,6 +252,8 @@ test.describe("maintenance windows", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const server = await seedServer(sql, { groupId: group.id, rank: "production" });
+		await seedStatus(sql, { serverId: server.id, version: "2.60.0" });
 		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
 		// 22:00 to 02:00 is a four-hour window that wraps midnight, which is
 		// what an upgrade slot usually looks like.
@@ -289,14 +291,73 @@ test.describe("maintenance windows", () => {
 
 		await expect
 			.poll(async () => {
-				const rows = await sql.query<{ note: string | null }>(
-					"SELECT note FROM maintenance_windows \
+				const rows = await sql.query<{ note: string | null; rank: string }>(
+					"SELECT note, rank FROM maintenance_windows \
 					 WHERE server_group_id = $1 AND ended_at IS NULL",
 					[group.id],
 				);
-				return rows.map((r) => r.note);
+				return rows.map((r) => [r.note, r.rank]);
 			})
-			.toEqual(["site can absorb 2.61 only"]);
+			.toEqual([["site can absorb 2.61 only", "production"]]);
+	});
+
+	// spec: MNT#declaring, MNT#what-a-window-suspends
+	test("declaring from a clone's plan covers the clone and not production", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		const production = await seedServer(sql, {
+			name: "kamaka-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		await seedStatus(sql, { serverId: production.id, version: "2.60.0" });
+		const clone = await seedServer(sql, {
+			name: "kamaka-clone",
+			groupId: group.id,
+			rank: "clone",
+		});
+		await seedStatus(sql, { serverId: clone.id, version: "2.60.0" });
+		const target = await seedVersion(sql, { major: 2, minor: 61, patch: 0 });
+		await seedUpgradePlan(sql, {
+			groupId: group.id,
+			rank: "clone",
+			targetVersionId: target.id,
+			note: "rehearsing 2.61 on the clone",
+		});
+
+		await page.goto("/upgrades");
+		await page
+			.getByRole("button", { name: "Declare maintenance for kamaka clone" })
+			.click();
+		await expect(
+			page.getByRole("heading", { name: "Declare maintenance — kamaka clone" }),
+		).toBeVisible();
+		await page.getByRole("button", { name: "Declare", exact: true }).click();
+
+		await expect
+			.poll(async () => {
+				const rows = await sql.query<{ rank: string | null }>(
+					"SELECT rank FROM maintenance_windows \
+					 WHERE server_group_id = $1 AND ended_at IS NULL",
+					[group.id],
+				);
+				return rows.map((r) => r.rank);
+			})
+			.toEqual(["clone"]);
+
+		// The clone's page says it is covered through the group; production's
+		// does not.
+		await page.goto(`/servers/${clone.id}`);
+		await expect(page.getByTestId("covering-group-window")).toBeVisible();
+		await page.goto(`/servers/${production.id}`);
+		await expect(page.getByTestId("maintenance-section")).toBeVisible();
+		await expect(page.getByTestId("covering-group-window")).toHaveCount(0);
+
+		// The group's page shows the environment's window apart from its own.
+		await page.goto(`/groups/${group.id}`);
+		await expect(page.getByTestId("environment-window")).toContainText("clone");
 	});
 
 	// spec: MNT#presentation

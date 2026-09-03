@@ -416,6 +416,7 @@ diesel::table! {
 		settled_at -> Nullable<Timestamptz>,
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
+		rank -> Nullable<Text>,
 	}
 }
 

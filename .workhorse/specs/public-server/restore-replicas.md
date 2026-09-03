@@ -231,7 +231,7 @@ Canopy knows the version each server reports running and the upgrade path it wou
 Canopy decides which versions are tested against which servers, rather than an operator naming each pair.
 
 A server's candidate is the version its environment's open plan moves it to: the plan for its group at its rank (see [UPG](../private-server/upgrade-plans.md)).
-An environment with no open plan has no candidate, so none of its servers are tested, and a server with no rank is in no environment and has none either.
+An environment with no open plan has no candidate, so none of its servers are tested; a server with no rank follows its group's highest-ranked environment.
 
 Recording a plan is what asks for the testing.
 A run costs hours of a consumer's capacity per server, and which minor a group moves to is not something Canopy can derive, so aiming at whatever is newest would spend that capacity on versions nobody has decided to take.

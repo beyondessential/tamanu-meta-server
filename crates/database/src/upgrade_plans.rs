@@ -121,8 +121,9 @@ impl PlannedWhen {
 impl UpgradePlan {
 	/// Record where an environment is going, retiring any plan it already had.
 	///
-	/// The target must be published and ahead of what the environment runs: a
-	/// plan to move somewhere it has already been is not a plan.
+	/// The environment must exist, and the target must be published and ahead
+	/// of what the environment runs: a plan to move somewhere it has already
+	/// been is not a plan.
 	// spec: UPG#a-plan
 	pub async fn record(
 		db: &mut AsyncPgConnection,
@@ -142,7 +143,14 @@ impl UpgradePlan {
 				"an unpublished version cannot be planned for".into(),
 			));
 		}
-		if let Some(running) = ServerGroup::environment_version(db, group_id, rank).await?
+		let group = ServerGroup::get_by_id(db, group_id).await?;
+		let Some(environment) = ServerGroup::environment(db, group_id, rank).await? else {
+			return Err(AppError::BadRequest(format!(
+				"{} has no {rank} environment",
+				group.name
+			)));
+		};
+		if let Some(running) = environment.version
 			&& target.as_semver() <= running.0
 		{
 			return Err(AppError::BadRequest(format!(
@@ -401,10 +409,18 @@ pub fn ended_at(plan: &UpgradePlan) -> Option<Timestamp> {
 pub async fn close_met_plans(db: &mut AsyncPgConnection) -> Result<usize> {
 	use crate::schema::upgrade_plans::dsl;
 
+	let open = UpgradePlan::all_open(db).await?;
+	let group_ids: Vec<Uuid> = open.iter().map(|plan| plan.group_id).collect();
+	let running: std::collections::HashMap<(Uuid, ServerRank), VersionStr> =
+		ServerGroup::environments(db, &group_ids)
+			.await?
+			.into_iter()
+			.filter_map(|env| env.version.map(|v| ((env.group_id, env.rank), v)))
+			.collect();
+
 	let mut closed = 0;
-	for plan in UpgradePlan::all_open(db).await? {
-		let Some(running) = ServerGroup::environment_version(db, plan.group_id, plan.rank).await?
-		else {
+	for plan in open {
+		let Some(running) = running.get(&(plan.group_id, plan.rank)) else {
 			continue;
 		};
 		let target = Version::get_by_id(db, plan.target_version_id).await?;

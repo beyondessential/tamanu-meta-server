@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use axum::Json;
 use axum::extract::State;
@@ -104,12 +104,35 @@ pub async fn fleet(
 		.into_iter()
 		.map(|group| (group.id, group.name))
 		.collect();
+	let mut open: HashMap<(Uuid, ServerRank), UpgradePlan> = UpgradePlan::all_open(&mut conn)
+		.await?
+		.into_iter()
+		.map(|plan| ((plan.group_id, plan.rank), plan))
+		.collect();
+	let mut attempts: HashMap<Uuid, Option<crate::fns::migration_tests::AttemptState>> =
+		HashMap::new();
+
+	let mut environments = ServerGroup::environments(&mut conn, &ids).await?;
+	// A plan whose environment has no live server any more still says where
+	// the group was going, and this view is the only place it can be withdrawn.
+	for ((group_id, rank), _) in open.iter() {
+		if names.contains_key(group_id)
+			&& !environments
+				.iter()
+				.any(|env| env.group_id == *group_id && env.rank == *rank)
+		{
+			environments.push(database::server_groups::Environment {
+				group_id: *group_id,
+				rank: *rank,
+				headline: false,
+				version: None,
+			});
+		}
+	}
 
 	let mut out = Vec::new();
-	let mut seen = HashSet::new();
-	for env in ServerGroup::environments(&mut conn, &ids).await? {
-		let headline = seen.insert(env.group_id);
-		let plan = UpgradePlan::open_for_environment(&mut conn, env.group_id, env.rank).await?;
+	for env in environments {
+		let plan = open.remove(&(env.group_id, env.rank));
 		let target = match &plan {
 			Some(plan) => Some(
 				database::upgrade_plans::target_version_str(&mut conn, plan)
@@ -140,15 +163,25 @@ pub async fn fleet(
 
 		let testable = match &plan {
 			None => None,
-			Some(_) => Some(database::restore::group_migrates(&mut conn, env.group_id).await?),
+			Some(_) => Some(
+				database::restore::environment_migrates(&mut conn, env.group_id, env.rank).await?,
+			),
 		};
 
 		// Issuances carry no intent, so another intent's restore traffic would
-		// read as a test under way.
+		// read as a test under way. They carry no rank either, so an attempt is
+		// the group's.
 		let attempt = match testable {
-			Some(true) => {
-				crate::fns::migration_tests::attempt_state(&mut conn, env.group_id, now_ts).await?
-			}
+			Some(true) => match attempts.get(&env.group_id) {
+				Some(attempt) => *attempt,
+				None => {
+					let attempt =
+						crate::fns::migration_tests::attempt_state(&mut conn, env.group_id, now_ts)
+							.await?;
+					attempts.insert(env.group_id, attempt);
+					attempt
+				}
+			},
 			_ => None,
 		};
 
@@ -156,7 +189,7 @@ pub async fn fleet(
 			group_id: env.group_id,
 			group_name: names.get(&env.group_id).cloned().unwrap_or_default(),
 			rank: env.rank,
-			headline,
+			headline: env.headline,
 			current_version: env.version.map(|v| v.to_string()),
 			plan,
 			target_version: target,
@@ -348,7 +381,15 @@ pub async fn targets(
 	Json(args): Json<TargetsArgs>,
 ) -> Result<Json<Vec<PlannableVersion>>> {
 	let mut conn = state.db.get().await?;
-	let running = ServerGroup::environment_version(&mut conn, args.group_id, args.rank).await?;
+	let group = ServerGroup::get_by_id(&mut conn, args.group_id).await?;
+	let Some(environment) = ServerGroup::environment(&mut conn, args.group_id, args.rank).await?
+	else {
+		return Err(commons_errors::AppError::BadRequest(format!(
+			"{} has no {} environment",
+			group.name, args.rank
+		)));
+	};
+	let running = environment.version;
 
 	// get_all is already newest-first; keep that for the picker.
 	let ahead: Vec<database::versions::Version> = database::versions::Version::get_all(&mut conn)

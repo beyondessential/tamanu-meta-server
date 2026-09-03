@@ -36,7 +36,7 @@ pub struct Candidate {
 /// Its environment's open plan names it (see [`crate::upgrade_plans`]), and an
 /// environment with no plan has no candidate: a restore costs hours, and it is
 /// only worth spending on a version an environment has said it intends to
-/// apply. An unranked server is in no environment, so it has none.
+/// apply. A server with no rank follows its group's headline environment.
 ///
 /// Tamanu servers only: the migrations under test are Tamanu's, so no other
 /// product's server has an upgrade path through them.
@@ -46,7 +46,10 @@ pub async fn candidate_for(db: &mut AsyncPgConnection, server: &Server) -> Resul
 		return Ok(None);
 	}
 
-	let (Some(group_id), Some(rank)) = (server.group_id, server.rank) else {
+	let Some(group_id) = server.group_id else {
+		return Ok(None);
+	};
+	let Some(rank) = crate::server_groups::ServerGroup::environment_of(db, server).await? else {
 		return Ok(None);
 	};
 
@@ -500,11 +503,12 @@ pub async fn verdicts_for_environment(
 	group_id: Uuid,
 	rank: ServerRank,
 ) -> Result<Vec<GroupVerdict>> {
-	let servers = Server::list_live_in_group(db, group_id)
-		.await?
-		.into_iter()
-		.filter(|server| server.rank == Some(rank))
-		.collect();
+	let mut servers = Vec::new();
+	for server in Server::list_live_in_group(db, group_id).await? {
+		if crate::server_groups::ServerGroup::environment_of(db, &server).await? == Some(rank) {
+			servers.push(server);
+		}
+	}
 	verdicts(db, servers).await
 }
 
