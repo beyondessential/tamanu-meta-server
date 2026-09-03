@@ -71,6 +71,13 @@ jobs:
     name: Deploy
     needs: [release]
     if: needs.release.outputs.canopy-version != ''
+    # A called workflow's jobs get at most what the calling job holds, so these are
+    # stated here rather than left to whatever this repository's default happens to
+    # be. cd.yml needs the image registry and Tailscale's OIDC.
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     uses: ./.github/workflows/cd.yml
     with:
       version: ${{ needs.release.outputs.canopy-version }}
@@ -82,6 +89,10 @@ jobs:
     name: Release PR
     runs-on: ubuntu-24.04
     if: ${{ github.repository_owner == 'beyondessential' }}
+    # After the release job, not beside it: release-plz reads the registry to work
+    # out the current version, so proposing the next one while a publish is still
+    # in flight can compute against a state that is about to change.
+    needs: [release]
     permissions:
       contents: write # push to the release PR's branch
       pull-requests: write # open and update the release PR
@@ -135,12 +146,19 @@ jobs:
       # release-plz has no hook at this point in its run, which is why this is
       # steps of this job rather than configuration.
       - name: Propagate the version into the OpenAPI document
-        if: steps.release-plz.outputs.prs_created == 'true'
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
           PR: ${{ steps.release-plz.outputs.pr }}
         run: |
           set -euo pipefail
+
+          # Deliberately not keyed on `prs_created`: that reports whether a PR was
+          # opened, and a PR release-plz updated rather than opened needs the same
+          # propagation. The PR output being empty is the honest "nothing to do".
+          if [ -z "${PR:-}" ] || [ "$PR" = "null" ]; then
+            echo "no release PR in this run; nothing to propagate"
+            exit 0
+          fi
 
           version="$(jq -r '[.releases[] | select(.package_name == "bes-canopy-api") | .version][0] // ""' <<<"$PR")"
           if [ -z "$version" ]; then

@@ -76,18 +76,26 @@ fn main() -> ExitCode {
 /// Write `version` into the `[package]` section of the crate's manifest.
 ///
 /// The document declares the version and the crate takes it, so the manifest is
-/// an output of generation rather than a second place the number is kept. Only
-/// the package's own version line is touched: dependency versions live in their
-/// own sections and are none of generation's business.
+/// an output of generation rather than a second place the number is kept.
 fn stamp_version(manifest: &PathBuf, version: &str) -> Result<(), String> {
 	let text = fs::read_to_string(manifest).map_err(|err| err.to_string())?;
+	let stamped = stamp(&text, version)?;
+	if stamped == text {
+		return Ok(());
+	}
+	fs::write(manifest, stamped).map_err(|err| err.to_string())
+}
 
+/// Replace the `[package]` section's version line, and only that line.
+///
+/// Dependency versions live in their own sections and are none of generation's
+/// business, so the search is bounded to the `[package]` table.
+fn stamp(text: &str, version: &str) -> Result<String, String> {
 	let package = text
 		.find("[package]")
 		.ok_or("manifest has no [package] section")?;
-	let body = &text[package..];
 	// The section runs to the next table header, or to the end of the file.
-	let end = body[1..]
+	let end = text[package + 1..]
 		.find("\n[")
 		.map(|at| package + at + 2)
 		.unwrap_or(text.len());
@@ -101,15 +109,74 @@ fn stamp_version(manifest: &PathBuf, version: &str) -> Result<(), String> {
 		.map(|at| line + at)
 		.unwrap_or(text.len());
 
-	let stamped = format!(
+	Ok(format!(
 		"{}version = {version:?}{}",
 		&text[..line],
 		&text[line_end..]
-	);
-	if stamped == text {
-		return Ok(());
+	))
+}
+
+#[cfg(test)]
+mod tests {
+	use super::stamp;
+
+	const MANIFEST: &str = "\
+[package]
+publish = true
+name = \"bes-canopy-api\"
+version = \"0.0.0\"
+edition = \"2024\"
+
+[dependencies]
+serde_json = \"1.0.150\"
+version = \"not-a-real-key\"
+";
+
+	#[test]
+	fn stamps_the_package_version() {
+		let out = stamp(MANIFEST, "1.2.3").unwrap();
+		assert!(out.contains("version = \"1.2.3\"\nedition"));
 	}
-	fs::write(manifest, stamped).map_err(|err| err.to_string())
+
+	#[test]
+	fn leaves_dependency_versions_alone() {
+		let out = stamp(MANIFEST, "1.2.3").unwrap();
+		assert!(out.contains("serde_json = \"1.0.150\""));
+		// A `version` key in a later table is not the package's version, even
+		// though it matches the same pattern.
+		assert!(out.contains("version = \"not-a-real-key\""));
+	}
+
+	#[test]
+	fn is_idempotent() {
+		let once = stamp(MANIFEST, "1.2.3").unwrap();
+		assert_eq!(stamp(&once, "1.2.3").unwrap(), once);
+	}
+
+	#[test]
+	fn stamping_the_same_version_changes_nothing() {
+		assert_eq!(stamp(MANIFEST, "0.0.0").unwrap(), MANIFEST);
+	}
+
+	#[test]
+	fn refuses_a_manifest_with_no_package_version() {
+		let err = stamp("[package]\nname = \"x\"\n", "1.0.0").unwrap_err();
+		assert!(err.contains("declares no version"), "{err}");
+	}
+
+	#[test]
+	fn refuses_a_manifest_with_no_package_section() {
+		let err = stamp("[workspace]\nmembers = []\n", "1.0.0").unwrap_err();
+		assert!(err.contains("no [package] section"), "{err}");
+	}
+
+	#[test]
+	fn a_package_section_at_the_end_of_the_file_is_still_found() {
+		let text = "[dependencies]\nserde = \"1\"\n\n[package]\nversion = \"0.0.0\"\n";
+		let out = stamp(text, "2.0.0").unwrap();
+		assert!(out.contains("[package]\nversion = \"2.0.0\""), "{out}");
+		assert!(out.contains("serde = \"1\""), "{out}");
+	}
 }
 
 fn generate(input: &PathBuf) -> Result<(String, String), String> {
