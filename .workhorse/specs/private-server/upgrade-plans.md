@@ -49,6 +49,7 @@ An environment moves to one place next, so a second plan for it replaces the fir
 A plan for a group's clone leaves its production's plan where it was.
 
 What an environment runs is what its canonical member reports: the highest kind among the group's live servers at that rank, so a site's production reads from its production central server and its clone from the clone's.
+Wherever an environment is named, it is named by its group with the rank after it, except a group's production, which is named by the group alone.
 A server with no rank belongs to its group's highest-ranked environment, since that is the environment the group's own version is read from.
 A plan names an environment the group has servers at; one cannot be recorded for a rank the group holds nothing at.
 
@@ -89,7 +90,7 @@ The plan is read at the moment someone declares, so a planned hour arriving susp
 
 Canopy presents planned upgrades across the fleet in one view, so the question "what is moving, and when" is answered without reading each group.
 
-For each environment with an open plan it shows the group, the rank where it is not production, the target version, the version the environment is on now, the planned date and window where there are ones, and the pre-upgrade verdict for that target, so an operator sees both the intent and whether the environment's data survives it.
+For each environment with an open plan it shows the environment, the target version, the version the environment is on now, the planned date and window where there are ones, and the pre-upgrade verdict for that target, so an operator sees both the intent and whether the environment's data survives it.
 The window is shown with its timezone abbreviated, so a reader can tell which site's midnight it is.
 Where a restore attempt is under way it shows that too.
 A restore takes hours, and without this a plan that is still being tested and one the pipeline has stopped testing both read as not yet tested.
@@ -127,7 +128,6 @@ The calendar carries the plans that name a day, while a plan is where the enviro
 A replaced or withdrawn plan leaves the calendar, since the environment is no longer going there; a met one stays as the record of what landed.
 
 An entry names the environment and the version it is going to, and carries what the plan records beyond the day: the version the environment is on now and the note, or for a met plan the day it landed.
-An environment is named by its group, with the rank after it unless it is the group's production, so a site's production reads as the site alone and its clone as the site and the word clone.
 It does not carry who recorded the plan: the feed is read by anyone holding its URL, and an operator's address is no part of what a calendar needs.
 A plan that names an hour is an entry at that hour, resolved from the zone the plan is a wall clock in so every subscriber reads the same instant whatever their own zone; a plan with only a day is an all-day entry.
 The entry runs until the hour the plan closes the window, or for an hour where the plan names no close: the entry marks the start of the window rather than claiming to know how long the upgrade takes.
