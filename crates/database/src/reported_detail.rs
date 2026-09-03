@@ -20,6 +20,7 @@ use diesel::prelude::*;
 use diesel_async::{AsyncPgConnection, RunQueryDsl};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use uuid::Uuid;
 
 use crate::statuses::MergedDetail;
@@ -108,6 +109,9 @@ impl ReportedDetail {
 		version: Option<&VersionStr>,
 	) -> Result<()> {
 		use crate::schema::application_reported_detail::dsl;
+
+		let extra = object_body(extra);
+		let extra = extra.as_ref();
 
 		diesel::insert_into(dsl::application_reported_detail)
 			.values((
@@ -417,13 +421,35 @@ impl ReportedDetail {
 	}
 }
 
+/// Coerce a pushed body to an object, so that storing one cannot plant a value
+/// its readers reject.
+///
+/// A body is `JSONB NOT NULL`, which does not make it an object: JSON `null` is
+/// a value, so the column admits it. Anything that walks the column then breaks
+/// on it — `jsonb_each` refuses a non-object, and so does a `-` key delete — and
+/// that break surfaces wherever the body is next read in bulk rather than at the
+/// push that stored it. A non-object body carries no fields, so the empty object
+/// says the same thing and every reader can handle it.
+///
+/// Applied at each point a body is stored rather than at each entry point, so no
+/// caller can route around it.
+fn object_body(extra: &serde_json::Value) -> Cow<'_, serde_json::Value> {
+	if extra.is_object() {
+		Cow::Borrowed(extra)
+	} else {
+		Cow::Owned(serde_json::json!({}))
+	}
+}
+
 /// Split a pushed detail body into the box's fields and the workload's.
 fn split_by_grain(extra: &serde_json::Value) -> (serde_json::Value, serde_json::Value) {
 	use commons_types::subject::CheckSubject;
 	let Some(obj) = extra.as_object() else {
-		// Not an object: nothing to attribute to the box, so it stays whole
-		// with the application rather than being silently dropped.
-		return (serde_json::json!({}), extra.clone());
+		// Not an object, so there are no fields to attribute to either grain.
+		// Passing the body on whole would hand a scalar to the application's
+		// row; `object_body` would flatten it there anyway, and an empty pair
+		// says the same thing without relying on that.
+		return (serde_json::json!({}), serde_json::json!({}));
 	};
 	let mut machine = serde_json::Map::new();
 	let mut application = serde_json::Map::new();
@@ -467,6 +493,9 @@ impl MachineReportedDetail {
 		extra: &serde_json::Value,
 	) -> Result<()> {
 		use crate::schema::machine_reported_detail::dsl;
+
+		let extra = object_body(extra);
+		let extra = extra.as_ref();
 
 		diesel::insert_into(dsl::machine_reported_detail)
 			.values((
