@@ -2,67 +2,70 @@
 id: ART
 ---
 
-# Version artefacts
+# Version artifacts
 
-An artefact is a file published for a version that Canopy records the location of and does not hold: an installer, a package, a set of migrations, a manifest.
-Canopy is the index rather than the store: a server or the infrastructure acting on a version's behalf learns from Canopy where a file is and fetches it from there, and where the location is not one that caller may read, Canopy passes the bytes through on request rather than keeping a copy.
+An artifact is a file published for a version: an installer, a package, a set of migrations, a manifest.
+Canopy is the index of them: it holds where each one is, what it is, and whom it is for, and a server or the infrastructure acting on a version's behalf learns from Canopy which files a version has and fetches them from where they rest.
+An artifact may be for one group alone, and Canopy offers it only to a caller whose group it is.
 
-## What an artefact belongs to
+## What an artifact belongs to
 
-An artefact belongs to one exact version, or to a range of versions given as a semver pattern, and never to both.
-A range artefact covers every version its pattern matches, so a file that does not change between releases is published once instead of per release.
+An artifact belongs to one exact version, or to a range of versions given as a semver pattern, and never to both.
+A range artifact covers every version its pattern matches, so a file that does not change between releases is published once instead of per release.
 
-An artefact carries a type and a platform, which together say what it is and what it is for.
-A version's artefacts are the exact-version ones plus every range artefact whose pattern matches it.
+An artifact carries a type and a platform, which together say what it is and what it is for.
+A version's artifacts are the exact-version ones plus every range artifact whose pattern matches it.
+
+An artifact may belong to a group, and one that does is for that group alone.
+An artifact belonging to no group is for every group.
+A group scope exists because some artifacts are derived from a group's own data and are wrong for anyone else.
+
+## Where an artifact rests
+
+An artifact belonging to no group rests at a URL, which whoever is offered the artifact fetches directly.
+
+A group-scoped artifact rests as an object in its own group's storage, under a prefix of its own apart from the group's backup repo, and a registration placing one anywhere else is refused.
+Canopy reads it on a caller's behalf by assuming the group's storage role confined to reading that prefix (see [BAK](../public-server/backup.md)), and streams the bytes to the caller, so the file rests only in the group's storage and is readable only through Canopy.
+The boundary is therefore enforced on the read rather than resting on a location being hard to guess.
+
+Canopy issues a publisher short-lived credentials for writing into a group's artifact prefix the way it issues backup credentials: by assuming the group's storage role under a session policy confined to that prefix, recorded before they are returned, and only to a caller authorised to register artifacts for that group (see [Registration](#registration)).
+The prefix is apart from the backup repo so that a credential which writes artifacts reaches no backup.
 
 ## What a version offers
 
-Canopy offers one artefact per type and platform, choosing the most specific of those that match.
-An exact-version artefact is more specific than any range artefact; between two ranges, the narrower is more specific.
+Canopy offers a caller one artifact per type and platform, chosen from the artifacts that caller may see: those belonging to no group, and those scoped to the caller's group where that group is known.
+Where several match, the most specific is offered.
+An artifact scoped to the caller's group is more specific than one belonging to no group.
+Among artifacts of the same scope, an exact-version artifact is more specific than any range artifact, and between two ranges the narrower is more specific.
+A group-scoped artifact and an unscoped one of the same type and platform are therefore both held, each group is offered the one for it, and no caller is offered both.
 A pattern Canopy cannot parse matches nothing rather than everything, so a malformed range withholds a file instead of offering it to the whole fleet.
 
-The full set, including the artefacts specificity passed over, is available to operators.
+The full set, including the artifacts specificity passed over, is available to operators.
 What resolution hides is a fact about how a version was published and an operator has to be able to see it.
 
-## Group-scoped artefacts
+## Who is offered a group-scoped artifact
 
-An artefact may belong to a group, and one that does is offered only to that group.
-An artefact belonging to no group is offered to every group, which is what a version's installers, migrations, and manifests are: properties of the version and of nothing narrower.
-
-Belonging to a group is therefore an addition rather than a requirement, and the artefacts published today are unaffected.
-Resolution keys on type, platform, and group together, so a group-scoped artefact and an unscoped one of the same type do not displace each other and each group is offered its own.
-
-A group-scoped artefact is offered only where the caller's group is known.
-A caller whose credential carries a group, a server device being the case that matters, never names one and is answered for its own group alone, so a server cannot ask what another group is offered.
-A caller carrying no group of its own names the group it asks about and is answered only for a group it is authorised for, which is how a build reads what it is about to replace and how an operator reads the fleet.
-A read carrying no identity at all is answered with the unscoped artefacts alone, so giving an artefact a group narrows who is offered it rather than widening what an open path serves.
-A group-scoped artefact's existence is disclosed only to a caller it is offered to: a caller that names or guesses one it is not offered is answered as though it did not exist, so which groups hold one is not enumerable through the artefact surface.
-
-A group scope exists because some artefacts are derived from a group's own data and are wrong for anyone else, a reporting schema being the case that motivates it (see [RPT](../public-server/reporting-schemas.md)).
-Such an artefact is published into that group's own object storage, over a credential Canopy issues the publisher for the run, and is read back through Canopy, which passes it only to a caller the artefact is offered to.
-The boundary is therefore enforced on the read rather than resting on a location being hard to guess.
+A caller whose credential is bound to a server has that server's group, where the server has one.
+It never names a group and is answered for its own alone, so a server cannot ask what another group is offered.
+A caller carrying no group of its own names the group it asks about and is answered for a group it is authorised for: an operator for any group, and a component that produces or applies a group's artifacts for that group, as defined with those artifacts.
+A read carrying no identity, or naming no group, is answered with the unscoped artifacts alone, so giving an artifact a group narrows who is offered it rather than widening what an open path serves.
+A group-scoped artifact's existence is disclosed only to a caller it is offered to: a caller that names or guesses one it is not offered is answered as though it did not exist, so which groups hold one is not enumerable through the artifact surface.
+Canopy passes a group-scoped artifact's bytes only to a caller it is offered to.
 
 ## Registration
 
-A releaser device registers artefacts against a version over its own credential, which is what a product's release automation uses when it publishes.
-Registering a group-scoped artefact requires being authorised for that group, and the group is named on the registration rather than inferred from the caller.
-A restore consumer registers the artefacts its builds produce for the groups its own declarations authorise it to read, so a build needs no releaser credential to publish what it made.
-A releaser credential carries no group and registers unscoped artefacts alone, which is what a version's installers, migrations, and manifests are.
-An operator may also record one directly.
-Canopy records which device registered an artefact and, where the registration names one, the run that produced it, so an artefact that arrived by automation is distinguishable from one entered by hand and traceable to what made it.
+A registration names the version or range, the type, the platform, the location, and the group where the artifact has one.
+The group is named on the registration rather than inferred from the caller.
 
-## What Canopy does not know
+A releaser device registers unscoped artifacts, and carries no authorisation for any group.
+An operator registers either.
+A component that produces a group-scoped artifact registers it for that group under an authorisation defined with that artifact, and is authorised for no other.
+A registration naming a group the caller is not authorised for is refused.
+Credentials for writing into a group's storage are issued on the same authorisation, so a caller that may not register for a group cannot publish into it either.
 
-Canopy holds where an artefact is published and not what it contains.
-It does not go looking for the file to check it, so an artefact whose location stops resolving is not detected until something tries to read it, and two artefacts published to the same location with no digest between them are the same artefact to Canopy however their contents differ.
+Canopy records which device registered an artifact and, where the registration names one, the run that produced it, so an artifact that arrived by automation is distinguishable from one entered by hand and traceable to what made it.
 
-An artefact carries a digest where whoever registers it records one, and a group-scoped artefact carries one always, because what a server has applied is graded against the artefact Canopy holds and successive builds for one version are otherwise indistinguishable (see [RPT](../public-server/reporting-schemas.md)).
-Where Canopy passes an artefact through and holds a digest for it, it verifies the bytes against that digest and refuses them on a mismatch, so a file replaced at its published location fails the read rather than reaching a server as the artefact it is not.
+## Digests
 
-A version's publication is corroborated against the artefacts Canopy holds for it rather than against the files themselves, which is enough to say a version has published what it needs to and not enough to say those files are good.
-
-## Out of scope
-
-- Hosting or retaining the files themselves: Canopy passes bytes through on request and keeps no copy of them.
-- What any artefact contains, and whether it is fit for what fetches it.
-- Which artefacts a product must publish to be considered released.
+An artifact carries a digest where whoever registers it records one, and a group-scoped artifact carries one always, since its bytes reach a caller through Canopy and are verified on the way.
+Where Canopy passes an artifact through and holds a digest for it, it verifies the bytes against that digest and refuses them on a mismatch, so a file replaced at its published location fails the read rather than reaching a server as the artifact it is not.
