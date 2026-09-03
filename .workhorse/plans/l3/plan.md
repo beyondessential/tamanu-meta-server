@@ -107,12 +107,13 @@ useful a release earlier. The baseline on crates.io is then the crate's actual s
 the first comparison judges something; against an empty stub every lint would pass
 vacuously.
 
-Taking the version from the repository does put the bootstrap in a sequence, where the
-out-of-band stub had none. The `0.0.0` on crates.io has to be published while the manifest
-still reads `0.0.0`, which means before the version-stamping change lands and rewrites the
-manifest from `info.version`. So: publish, configure the trusted publisher, then merge this
-card. Landing the card first would leave the manual publish carrying whatever version the
-stamping chose, and the `1.0.0` question below has no answer that survives that.
+**Done.** `0.0.0` is published and the trusted publisher is configured.
+
+Taking the version from the repository did put the bootstrap in a sequence, where the
+out-of-band stub had none: the `0.0.0` had to reach crates.io while the manifest still read
+`0.0.0`, and so before the version-stamping change rewrites it from `info.version`. That
+ordering held, so the constraint is spent rather than outstanding, and the card is free to
+land whatever version stamping decides.
 
 With the name reserved, the trusted publisher is configured on crates.io and CI publishes
 tokenlessly from then on. release-plz does the OIDC exchange itself, so
@@ -185,6 +186,25 @@ reversible without touching crates.io.
 
 The PAT does not change how the deploy is triggered. Outputs still drive that, because it is
 ordering within one workflow rather than a cross-workflow event, and it needs no credential.
+
+### `RELEASE_PLZ_TOKEN`, repository-wide
+
+The secret is `RELEASE_PLZ_TOKEN`, the name release-plz's own docs use, so anyone reading
+those docs maps them onto this repo without translating.
+
+It is a repository-wide Actions secret, not a secret of the `release` environment, because
+the job that needs it is not the publishing job. The PAT is read by `release-pr`, which
+opens the PR and pushes the propagation commit; the environment exists for `release`, which
+publishes. Scoping the PAT to that environment would force `release-pr` to declare it, which
+conflates opening a PR with releasing and sets a trap: adding required reviewers later to
+gate publishing would also gate PR creation.
+
+The blast radius is bounded on the token instead of on who can read the secret. A
+fine-grained PAT, scoped to this repository alone, with Contents and Pull requests
+read/write and owned by a machine user, grants a reader essentially what write access to
+this repo already grants. Environment scoping would buy little against that, and costs
+either the conflation above or a second environment whose only purpose is holding one
+secret.
 
 ### The release PR is briefly inconsistent, and that is tolerable
 
