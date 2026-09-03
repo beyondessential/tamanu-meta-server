@@ -129,9 +129,53 @@ same way, even though reading the version as "the API changed" does not quite fi
   release path to publish onto. L3 also picks up the `cargo-semver-checks` gate, which
   needs a published baseline to compare against.
 
-## Open
+## No serde_json::Value fallbacks
 
-- `request_body_type` falls back to `serde_json::Value` for open `allOf` schemas such
-  as `StatusPayload`, and `response_type` does the same for non-`$ref` non-array
-  responses. Those are holes the semver check cannot see through, the same class of
-  blind spot the `API` spec already notes for map values.
+bestool's generator degrades three of the 33 operations to `serde_json::Value`. None of
+them is lossy in the schema or in the Rust types, so the ported generator types all
+three.
+
+`POST /status/{server_id}` takes `StatusPayload`, whose Rust form is a typed struct
+plus a flattened catch-all:
+
+```rust
+#[serde(flatten)]
+#[schema(additional_properties = true, value_type = Object)]
+pub extra: serde_json::Map<String, serde_json::Value>,
+```
+
+utoipa renders that flatten as an `allOf` with a free-form member, and
+`is_open_schema` pattern-matches the shape and gives up. The generator emits the typed
+struct with its own `extra` map field instead.
+
+`GET /bestool/snippets` and `GET /status/{server_id}/check-severities` are typed maps
+already. The handler returns `Json<BTreeMap<String, CheckSeverity>>` and the schema
+says `additionalProperties` with a `$ref` and `propertyNames` of string. They degrade
+only because `response_type` handles `$ref` and `type: array` and lets everything else
+fall through. The generator maps `additionalProperties` to `HashMap<String, T>`.
+
+This is a usability fix before it is a compatibility one. `HealthCheck` carries the
+same flatten, and typify drops the free-form part, so a client built from today's
+generator cannot express per-check extra fields at all: no latency, no free disk, no
+certificate expiry. That is why the whole status push body falls back to `Value`, on
+the endpoint reporters use most.
+
+On the compatibility side, typing the maps makes their value types visible to
+`cargo-semver-checks`, so a change to `CheckSeverity` or `SnippetResponse` stops being
+invisible. It does not close the map blind spot the `API` spec notes, which is about
+dynamic keys: check names are operator-defined, so the key set stays a hand-maintained
+promise. Half the gap.
+
+The reason the fallbacks exist is that bestool was downstream, consuming whatever
+arrived and unable to change either end. Both ends are canopy's now, so a shape the
+generator cannot type is a bug to fix at whichever end is wrong.
+
+## Considered: share the Rust types instead of generating
+
+If both ends are ours, the JSON round-trip is optional: the wire types could live in
+`bes-canopy-api` directly, with public-server depending on it and using them in its
+handlers, leaving no generator to be deficient. Not taken. It inverts the dependency so
+that the server imports its wire types from a published crate, it leaks `database` and
+`commons-types` shapes into that crate, and it reverses the spec-to-crate direction the
+versioning model rests on. The Rust types are already correct and only the generator is
+thin, so the generator is the cheaper place to fix.
