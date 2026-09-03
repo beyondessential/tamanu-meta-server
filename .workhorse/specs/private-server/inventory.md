@@ -55,9 +55,25 @@ A credential Canopy issues to a device is provisioned rather than set as a varia
 A server's address is the tailnet name of the device bound to it, or its recorded host where no device is bound.
 A variable of the server's own overrides that, and which account a run connects as is a variable like any other.
 
+## Work under way
+
+A configuration run begins by reading the inventory, so the read is where two runs on one environment are kept apart.
+Canopy refuses an inventory while a maintenance window declared by someone other than the reader holds over the environment: over its group, or over any server the environment comprises (see [MNT](../monitoring/maintenance.md)).
+The refusal names who declared the window, when it is expected to end, and its note, so the reader knows who to talk to and what they are in the middle of.
+
+A window over one member refuses the whole environment, since a run acts on the environment as a whole and serving the rest would configure around a server someone is part-way through changing.
+A window over a server at another rank refuses nothing, that server being in no environment the inventory covers.
+
+A window is the declaration that a deployment is being worked on, and declaring one is one action at the moment work starts, so an operator about to run declares theirs first and is served the inventory their own window covers.
+A target holds at most one open window, so a second operator's declaration amends the first's rather than opening one of their own, and the inventory stays refused to them.
+Lifting a window someone else declared is the deliberate step that takes the work over, audited as every lift is, so a run never proceeds over another operator's work by accident.
+
+The refusal lasts exactly as long as the window holds.
+Settling is about how Canopy grades what it observes once work is done and holds no one's work, so the inventory is served again the moment the window ends.
+
 ## Refusal
 
-Canopy either serves an inventory or refuses it, and a refusal names why: a group it does not have, a name answering for more than one group, an archived group, a group holding several environments with no rank named, a rank with no live server to configure, and a secret variable whose value cannot be read.
+Canopy either serves an inventory or refuses it, and a refusal names why: a group it does not have, a name answering for more than one group, an archived group, a group holding several environments with no rank named, a rank with no live server to configure, an environment someone else has declared work over, and a secret variable whose value cannot be read.
 Serving the rest of that last one would hand a run a member that looks configured and is missing a value.
 A refusal is distinguishable from a failure to answer at all, the two meaning opposite things: Canopy declining is a decision to respect, while Canopy being unreachable is the absence of one.
 
@@ -73,9 +89,12 @@ What it is assembled from stays as readable as it was: any operator Canopy authe
 A group presents, for each environment it holds, the inventory Canopy serves for it: each server with its address and its effective variables.
 An operator reads there what a run would receive, with a value inherited from the environment distinguished from one the server sets itself, so a variable that is not taking effect is diagnosed where it is set.
 A secret variable appears by name, with the scope it is set at and when it last changed, and never its value.
+While a window someone else declared holds over the environment, the presentation says a run would be refused and names the window, so an operator reads why a run is being held without starting one.
 
 ## Out of scope
 
 - Performing a configuration run, scheduling one, or triggering one.
 - The inventory format of any particular configuration-management tool: Canopy serves the environment's shape, and the caller renders it.
 - Authoring plain variables anywhere other than the tags an operator already sets.
+- Holding off a run for a settings change under way: Canopy records a change once it is made and observes no state in which one is in progress.
+- Refusing a run for want of an upgrade plan (see [UPG](upgrade-plans.md)).
