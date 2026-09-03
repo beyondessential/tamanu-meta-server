@@ -5,10 +5,17 @@
 -- duplication the split removed. Lossless for the 1:1 fleet the split started
 -- from.
 
+-- The fold is guarded on the body being an object. `up.sql` leaves every body
+-- one, so this only catches a row written between the two by a binary whose
+-- writer does not yet coerce. It matters because `||` does not fail on a
+-- scalar — `'null'::jsonb || '{"a":1}'` is `[null, {"a": 1}]` — so an
+-- unguarded fold would quietly turn such a row into an array. Skipping it
+-- leaves it as it was, which is the recoverable outcome.
 UPDATE application_reported_detail d
 SET extra = m.extra || d.extra
 FROM applications a, machine_reported_detail m
-WHERE a.id = d.application_id AND m.machine_id = a.machine_id AND m.source = d.source;
+WHERE a.id = d.application_id AND m.machine_id = a.machine_id AND m.source = d.source
+	AND jsonb_typeof(d.extra) = 'object';
 
 DROP TABLE machine_reported_detail;
 

@@ -272,3 +272,104 @@ async fn a_migrated_application_carries_no_reporter_key() {
 	})
 	.await;
 }
+
+/// A body that is not an object becomes the empty object, and does not stop the
+/// run.
+///
+/// `extra` is `JSONB NOT NULL`, which admits JSON `null` and every other
+/// scalar, and nothing constrained it before the split. Such rows existed in
+/// the field and failed a production deploy: `jsonb_each` refuses a non-object,
+/// and so does the `-` key delete on the statement after it. The split
+/// therefore flattens a non-object first — it carries no fields, so the empty
+/// object says the same thing and every reader can walk it, which a preserved
+/// scalar could not.
+// spec: FIG
+#[tokio::test(flavor = "multi_thread")]
+async fn detail_that_is_not_an_object_becomes_an_empty_object() {
+	commons_tests::db::TestDb::run(async |mut conn, url| {
+		revert_the_split(&url).await;
+
+		conn.batch_execute(
+			"INSERT INTO servers (id, name, host, product, kind) \
+			 VALUES ('88888888-8888-8888-8888-888888888888', 'odd-box', \
+			         'https://odd.invalid/', 'tamanu', 'central');
+
+			 INSERT INTO server_reported_detail (server_id, source, extra) \
+			 VALUES \
+			   ('88888888-8888-8888-8888-888888888888', 'alertd', \
+			    '{\"osName\": \"Ubuntu\", \"pgVersion\": \"16.3\"}'::jsonb), \
+			   ('88888888-8888-8888-8888-888888888888', 'scalar', \
+			    '\"not an object\"'::jsonb), \
+			   ('88888888-8888-8888-8888-888888888888', 'listy', \
+			    '[1, 2, 3]'::jsonb), \
+			   ('88888888-8888-8888-8888-888888888888', 'nully', \
+			    'null'::jsonb)",
+		)
+		.await
+		.expect("seed detail of assorted shapes");
+
+		apply_the_split(&url).await;
+
+		#[derive(Debug, diesel::QueryableByName)]
+		struct Detail {
+			#[diesel(sql_type = sql_types::Text)]
+			source: String,
+			#[diesel(sql_type = sql_types::Jsonb)]
+			extra: serde_json::Value,
+		}
+
+		// Only the object row had a field belonging to the box.
+		let machine: Vec<Detail> =
+			diesel::sql_query("SELECT source, extra FROM machine_reported_detail ORDER BY source")
+				.load(&mut conn)
+				.await
+				.expect("the box's detail");
+		assert_eq!(
+			machine.len(),
+			1,
+			"a non-object row has no field to give the box: {machine:?}",
+		);
+		assert_eq!(machine[0].source, "alertd");
+		assert_eq!(machine[0].extra, serde_json::json!({"osName": "Ubuntu"}));
+
+		let application: Vec<Detail> = diesel::sql_query(
+			"SELECT source, extra FROM application_reported_detail ORDER BY source",
+		)
+		.load(&mut conn)
+		.await
+		.expect("the workload's detail");
+		let by_source: std::collections::HashMap<&str, &serde_json::Value> = application
+			.iter()
+			.map(|d| (d.source.as_str(), &d.extra))
+			.collect();
+
+		assert_eq!(
+			by_source.get("alertd"),
+			Some(&&serde_json::json!({"pgVersion": "16.3"})),
+			"the box's field left the workload's row and the workload's own stayed",
+		);
+		for source in ["scalar", "listy", "nully"] {
+			assert_eq!(
+				by_source.get(source),
+				Some(&&serde_json::json!({})),
+				"{source} was flattened rather than kept as a body no reader can walk",
+			);
+		}
+
+		// The operation the deploy died on, over every row the split produced.
+		let walked: Count = diesel::sql_query(
+			"SELECT count(*) AS n FROM ( \
+			   SELECT jsonb_each(extra) FROM application_reported_detail \
+			   UNION ALL SELECT jsonb_each(extra) FROM machine_reported_detail \
+			 ) AS walked",
+		)
+		.get_result(&mut conn)
+		.await
+		.expect("jsonb_each walks every body the split produced");
+		assert_eq!(
+			walked.n, 2,
+			"the two fields of the one object row, and nothing from the rest",
+		);
+	})
+	.await;
+}
