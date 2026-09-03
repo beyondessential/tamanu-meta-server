@@ -4,7 +4,7 @@ id: APIC
 
 # Public API client crate
 
-Canopy publishes a Rust client for its public API, generated from the OpenAPI document Canopy holds for that API.
+Canopy publishes `bes-canopy-api`, a Rust client for its public API, generated from the OpenAPI document Canopy holds for that API.
 A consumer reaching Canopy from Rust depends on the published crate rather than describing the API itself, so the wire types it works with are the ones Canopy declares.
 
 ## Generated in the Canopy repository
@@ -18,6 +18,9 @@ Regenerating from an unchanged document produces an unchanged crate.
 
 The document and the crate carry the same version, because the crate is derived from the document and its surface moves only when the document or the generator moves.
 The document declares the version and the crate takes it, so the two cannot drift apart.
+
+The version describes the crate's surface.
+A change in what the generator emits raises it as a change to the document would, even where the API the document describes is untouched.
 
 The version is not an input to generation.
 A release generates the crate, judges the change against the published crate as [API](api-compatibility.md) defines, and then records the resulting version, so the version is settled after the change it describes is final.

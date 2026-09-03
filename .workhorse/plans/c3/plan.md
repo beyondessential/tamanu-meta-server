@@ -115,10 +115,13 @@ forward what bestool did with `OPENAPI_BLAKE3` but pointed at the committed file
 versions 1:1 that is mostly redundant, but it catches the mistake case, where a document
 changed without the version moving with it.
 
-Wrinkle worth holding: the crate is a function of the generator as well as the schema,
-so a typify upgrade or a change to the ported codegen can move the generated surface
-with the schema untouched. That needs a bump too, decided by `cargo-semver-checks` the
-same way, even though reading the version as "the API changed" does not quite fit.
+The version describes the crate's surface rather than the API's shape, which settles the
+case where the crate is a function of the generator as well as the schema: a typify
+upgrade or a change to the ported codegen that moves the generated surface raises the
+document's version too, even though the API it describes is untouched. The bump is
+decided by `cargo-semver-checks` either way.
+
+The crate is named `bes-canopy-api`.
 
 ## No serde_json::Value fallbacks
 
