@@ -23,7 +23,7 @@ test.describe("server detail health indicator", () => {
 		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
 		const server = await seedServer(sql, {
 			name: "sick-server",
-			kind: "central",
+			type: "tamanu-central",
 		});
 		await seedStatus(sql, {
 			serverId: server.id,
@@ -47,7 +47,7 @@ test.describe("server detail health indicator", () => {
 		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
 		const server = await seedServer(sql, {
 			name: "ok-server",
-			kind: "central",
+			type: "tamanu-central",
 		});
 		await seedStatus(sql, {
 			serverId: server.id,
@@ -73,7 +73,7 @@ test.describe("server detail checks table", () => {
 		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
 		const server = await seedServer(sql, {
 			name: "checked-server",
-			kind: "central",
+			type: "tamanu-central",
 		});
 		await seedStatus(sql, {
 			serverId: server.id,
@@ -106,7 +106,7 @@ test.describe("server detail checks table", () => {
 		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
 		const server = await seedServer(sql, {
 			name: "multi-source-server",
-			kind: "central",
+			type: "tamanu-central",
 		});
 		// alertd reports a failing check (via a status push).
 		await seedStatus(sql, {
@@ -141,7 +141,7 @@ test.describe("server detail checks table", () => {
 		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
 		const server = await seedServer(sql, {
 			name: "documented-server",
-			kind: "central",
+			type: "tamanu-central",
 		});
 		await seedStatus(sql, {
 			serverId: server.id,
@@ -196,7 +196,7 @@ test.describe("server detail checks table", () => {
 		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
 		const server = await seedServer(sql, {
 			name: "skip-server",
-			kind: "central",
+			type: "tamanu-central",
 		});
 		// Names are chosen so alphabetical order is the reverse of the
 		// expected result order: a discriminator proving the sort is by
@@ -240,7 +240,7 @@ test.describe("silenced healthchecks", () => {
 		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
 		const server = await seedServer(sql, {
 			name: "hushed-server",
-			kind: "central",
+			type: "tamanu-central",
 		});
 		// Named so alphabetical order would put the silenced check first:
 		// its position after the passing check proves silenced sorts with
@@ -266,13 +266,17 @@ test.describe("silenced healthchecks", () => {
 			page.getByText("Unhealthy", { exact: true }),
 		).not.toBeVisible();
 
-		// The row is still listed and flagged as silenced. Exact matching:
-		// the Silenced refs section also shows the full
-		// "status/health/a-silenced" ref, which substring-matches.
+		// The row is still listed and flagged as silenced. The row labels the
+		// check by its namespace, an application check being namespaced to
+		// the type that reported it. Exact matching: the Silenced refs
+		// section also shows the full "alertd/health/a-silenced" ref, which
+		// substring-matches the bare name.
 		await expect(
-			page.getByText("a-silenced", { exact: true }),
+			page.getByText("tamanu-central.a-silenced", { exact: true }),
 		).toBeVisible();
-		await expect(page.getByText("silenced (server)")).toBeVisible();
+		await expect(
+			page.getByText("silenced (application)"),
+		).toBeVisible();
 		await expect(
 			page.getByRole("button", { name: "Manage silence for a-silenced" }),
 		).toBeVisible();
@@ -283,8 +287,12 @@ test.describe("silenced healthchecks", () => {
 		await expect(page.getByTestId("CancelIcon")).toHaveCount(0);
 
 		// And it sorts with the skipped tail, after passing checks.
-		const passed = page.getByText("m-passes", { exact: true });
-		const silenced = page.getByText("a-silenced", { exact: true });
+		const passed = page.getByText("tamanu-central.m-passes", {
+			exact: true,
+		});
+		const silenced = page.getByText("tamanu-central.a-silenced", {
+			exact: true,
+		});
 		const passedY = (await passed.boundingBox())!.y;
 		const silencedY = (await silenced.boundingBox())!.y;
 		expect(passedY).toBeLessThan(silencedY);
@@ -298,7 +306,7 @@ test.describe("silenced healthchecks", () => {
 		const group = await seedServerGroup(sql, { name: "hushed-group" });
 		const server = await seedServer(sql, {
 			name: "grouped-hushed-server",
-			kind: "central",
+			type: "tamanu-central",
 			groupId: group.id,
 		});
 		await seedStatus(sql, {

@@ -19,7 +19,7 @@ import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import GroupDomainsSection from "../components/GroupDomainsSection";
 import MigrationTestsSection from "../components/MigrationTestsSection";
 import { OperatorAvatar, connectedFor } from "../components/OperatorAvatars";
-import ServerShorty from "../components/ServerShorty";
+import GroupTree from "../components/GroupTree";
 import MaintenanceSection from "../components/MaintenanceSection";
 import SilencedRefsSection from "../components/SilencedRefsSection";
 import TimeAgo from "../components/TimeAgo";
@@ -32,7 +32,6 @@ import {
 	BACKUP_STATUS_LABEL,
 	type BackupConfigStatus,
 	aggregateOperators,
-	groupServersByRank,
 	isIncidentLingering,
 	type AggregatedOperator,
 	type IncidentData,
@@ -69,7 +68,7 @@ export default function GroupDetail() {
 		return <Alert severity="error">{detail.error.message}</Alert>;
 	}
 
-	const { group, servers, billing_labels } = detail.data;
+	const { group, applications, machines, billing_labels } = detail.data;
 	const tagEntries = Object.entries(group.tags ?? {});
 	const operators =
 		groupStatuses.status === "ok"
@@ -80,13 +79,17 @@ export default function GroupDetail() {
 			? activeIncidents.data[0]
 			: null;
 
-	// A group archives when empty, or when all its members are "gone" (no
-	// recent status) — in which case archiving cascades to those servers.
-	const allGone = servers.every((s) => s.up === "gone");
+	// A group archives when empty, or when every member has gone quiet, in
+	// which case archiving cascades to those servers. The card carries that
+	// fact: it is the same windowed question the archive itself enforces, and
+	// a member unreachable for months is quiet without reading as "gone".
+	const allQuiet =
+		applications.length === 0 ||
+		(groupStatuses.status === "ok" && groupStatuses.data.all_members_quiet);
 	const onArchive = async () => {
 		const cascade =
-			servers.length > 0
-				? ` This also archives its ${servers.length} gone server${servers.length === 1 ? "" : "s"}.`
+			applications.length > 0
+				? ` This also archives its ${applications.length} quiet server${applications.length === 1 ? "" : "s"}.`
 				: "";
 		if (
 			!confirm(
@@ -135,11 +138,11 @@ export default function GroupDetail() {
 					<Stack direction="row" spacing={1}>
 						<Button
 							component={RouterLink}
-							to={`/groups/${group.id}/servers/new`}
+							to={`/groups/${group.id}/machines/new`}
 							variant="contained"
 							startIcon={<AddIcon />}
 						>
-							Add server
+							Add machine
 						</Button>
 						<Button
 							component={RouterLink}
@@ -149,7 +152,7 @@ export default function GroupDetail() {
 						>
 							Edit
 						</Button>
-						{allGone && !group.deleted_at && (
+						{allQuiet && !group.deleted_at && (
 							<Button
 								variant="outlined"
 								color="error"
@@ -227,40 +230,21 @@ export default function GroupDetail() {
 
 			<Box>
 				<Typography variant="h5" component="h2" gutterBottom>
-					Servers ({servers.length})
+					Machines ({machines.length})
 				</Typography>
-				{servers.length === 0 ? (
+				{machines.length === 0 ? (
 					<Alert severity="info">
-						No servers in this group yet. Use “Add server” above to enroll
-						one into this group.
+						Nothing in this group yet. Add a machine; the applications on it
+						arrive by report.
 					</Alert>
 				) : (
-					<Stack spacing={2}>
-						{groupServersByRank(servers).map(([rank, members]) => (
-							<Box key={rank ?? "_unranked"}>
-								{rank && (
-									<Typography
-										variant="overline"
-										color="text.secondary"
-										sx={{ display: "block", mb: 0.5 }}
-									>
-										{rank}
-									</Typography>
-								)}
-								<Stack spacing={1}>
-									{members.map((s) => (
-										<ServerShorty key={s.id} server={s} />
-									))}
-								</Stack>
-							</Box>
-						))}
-					</Stack>
+					<GroupTree machines={machines} applications={applications} />
 				)}
 			</Box>
 
 			<BackupsCard groupId={group.id} isAdmin={admin} />
 
-			<MigrationTestsSection groupId={group.id} servers={servers} />
+			<MigrationTestsSection groupId={group.id} servers={applications} />
 
 			<GroupDomainsSection groupId={group.id} />
 
@@ -348,10 +332,10 @@ function BackupsCard({
 	);
 }
 
-/// Distinct people connected across the group's servers right now (from
-/// each member's `external_users` check, deduped by Tailscale login).
-/// The same aggregate the status-page card chip counts. Hidden entirely
-/// when nobody's connected.
+/// Distinct people connected across the group's boxes right now (from each
+/// member's `external_users` check, deduped by Tailscale login). The same
+/// aggregate the status-page card chip counts. Hidden entirely when nobody's
+/// connected.
 function OperatorsSection({
 	operators,
 }: {
@@ -361,10 +345,10 @@ function OperatorsSection({
 		<Paper variant="outlined" sx={{ p: 2 }}>
 			<Typography variant="h6" component="h2" gutterBottom>
 				{operators.length} operator{operators.length === 1 ? "" : "s"} in
-				the servers right now
+				the group right now
 			</Typography>
 			<Stack spacing={1}>
-				{operators.map(({ op, servers }) => {
+				{operators.map(({ op, machines }) => {
 					const dur = connectedFor(op.connected_since);
 					return (
 						<Stack
@@ -379,7 +363,7 @@ function OperatorsSection({
 									{op.name ? `${op.name} (${op.login})` : op.login}
 								</Typography>
 								<Typography variant="caption" color="text.secondary">
-									{[dur && `connected ${dur}`, `on ${servers.join(", ")}`]
+									{[dur && `connected ${dur}`, `on ${machines.join(", ")}`]
 										.filter(Boolean)
 										.join(" · ")}
 								</Typography>
@@ -498,3 +482,4 @@ function ArchivedGroupBanner({
 		</Alert>
 	);
 }
+

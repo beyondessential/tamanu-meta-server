@@ -21,9 +21,12 @@ use commons_servers::csr::validate_csr;
 use commons_servers::device_auth::ServerDevice;
 use commons_types::Uuid;
 use commons_types::dns::{ManagedZone, is_within, match_zone, normalize_domain};
+use commons_types::server::app_type::ApplicationType;
+use database::application_certificates::OrderState;
 use database::diesel_async::AsyncPgConnection;
-use database::server_certificates::OrderState;
-use database::{ServerCertificate, ServerGroupDomain, ServerName, servers::Server};
+use database::{
+	ApplicationCertificate, ApplicationName, ServerGroupDomain, applications::Application,
+};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -50,7 +53,7 @@ enum Grant {
 }
 
 impl Grant {
-	fn held_by(self, server: &Server) -> bool {
+	fn held_by(self, server: &Application) -> bool {
 		match self {
 			Self::Dns => server.may_manage_dns,
 			Self::Tls => server.may_manage_tls,
@@ -67,7 +70,7 @@ impl Grant {
 
 /// The server a request is for, having passed every check in CRT's fixed order.
 struct Authorised {
-	server: Server,
+	server: Application,
 	name: String,
 }
 
@@ -86,14 +89,42 @@ async fn authorise(
 ) -> Result<Authorised> {
 	let name = normalize_domain(name)?;
 
-	// 1. A device attached to a live server.
-	let server = Server::live_by_device_id(conn, device_id)
+	// 1. An identity belonging to a live machine. An identity is the box's, not
+	// the software's, so the credential says which machine is asking and
+	// nothing about which workload the request concerns.
+	let machine = database::machines::Machine::get_by_device_id(conn, device_id)
 		.await?
-		.into_iter()
-		.next()
+		.filter(|m| m.deleted_at.is_none())
 		.ok_or(AppError::DeviceHasNoServer)?;
+	let on_machine = machine.applications(conn).await?;
 
-	// 2. Paused before grants: a paused server is being looked into, and telling
+	// 2. The application on that machine declaring the requested name. Which
+	// application a request concerns is resolved from the name, not from the
+	// credential, and a name is held by one application fleet-wide, so this is
+	// unambiguous however many workloads the box hosts.
+	//
+	// A machine hosting exactly one application resolves to it even for a name
+	// nothing declares yet, because there is nothing to disambiguate and the
+	// agent's own registration is still how a name first gets declared. The
+	// moment a box hosts two, an undeclared name is genuinely ambiguous and is
+	// refused rather than guessed at.
+	//
+	// TRAP: this refusal must not distinguish "declared by an application
+	// elsewhere" from "declared by nobody". The fleet-wide unique index makes
+	// the former cheap to detect, which is exactly the temptation; reporting it
+	// would turn this endpoint into a directory of what other machines serve.
+	// spec: CRT#identity-and-authorisation
+	let declared = ApplicationName::for_name(conn, &name).await?;
+	let server = match declared {
+		Some(row) => on_machine.into_iter().find(|a| a.id == row.application_id),
+		None if on_machine.len() == 1 => on_machine.into_iter().next(),
+		None => None,
+	}
+	.ok_or_else(|| {
+		AppError::NameNotEntitled(format!("no application on this machine declares {name}"))
+	})?;
+
+	// 3. Paused before grants: a paused server is being looked into, and telling
 	// it about a missing grant would send an operator chasing the wrong thing.
 	if server.name_management_paused() {
 		return Err(AppError::NameManagementPaused(format!(
@@ -110,7 +141,7 @@ async fn authorise(
 		)));
 	}
 
-	// 3. The grant this request needs.
+	// 4. The grant this request needs.
 	if !grant.held_by(&server) {
 		return Err(AppError::AuthInsufficientPermissions {
 			required: format!(
@@ -120,7 +151,7 @@ async fn authorise(
 		});
 	}
 
-	// 4. The name has to sit under a domain this server's *own* group controls.
+	// 5. The name has to sit under a domain this application's *own* group controls.
 	// A name another group controls is refused exactly as an unclaimed one is, so
 	// the endpoint is not a directory of other deployments' names.
 	let entitled = match server.group_id {
@@ -136,7 +167,7 @@ async fn authorise(
 		)));
 	}
 
-	// 5. And Canopy has to be able to act on it at all.
+	// 6. And Canopy has to be able to act on it at all.
 	if match_zone(&name, zones).is_none() {
 		return Err(AppError::Conflict(format!(
 			"no DNS zone Canopy manages covers {name}, so it can publish nothing there; this is a \
@@ -167,6 +198,40 @@ pub struct Entitlements {
 	pub registered_names: Vec<String>,
 	/// The certificates Canopy holds for this server.
 	pub certificates: Vec<HeldCertificate>,
+	/// One entry per application on the asking machine.
+	///
+	/// An identity belongs to a machine, so an agent asks on behalf of the box
+	/// and gets an answer for every workload on it. The flat fields above
+	/// describe a single-application machine, which is every machine today;
+	/// on a machine hosting several they are left at their defaults and this
+	/// list is the answer.
+	// spec: CRT#what-an-application-may-act-on
+	#[serde(default)]
+	pub applications: Vec<ApplicationEntitlements>,
+}
+
+/// What one application on the asking machine may act on.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ApplicationEntitlements {
+	/// The type of application these entitlements belong to.
+	///
+	/// A reporter correlates an entry to a workload it runs by the machine it
+	/// asked as and this type. Canopy's own identifier for the application is
+	/// internal and never on the wire.
+	// spec: STA#push
+	pub r#type: ApplicationType,
+	/// Whether this application may manage its own DNS records.
+	pub may_manage_dns: bool,
+	/// Whether this application may obtain its own TLS certificates.
+	pub may_manage_tls: bool,
+	/// Whether Canopy is currently making no new changes on its behalf.
+	pub paused: bool,
+	/// The domains its group controls.
+	pub domains: Vec<String>,
+	/// The names it has registered addresses for.
+	pub registered_names: Vec<String>,
+	/// The certificates Canopy holds for it.
+	pub certificates: Vec<HeldCertificate>,
 }
 
 /// A certificate Canopy holds for the asking server, as the server needs to see
@@ -194,7 +259,7 @@ pub struct HeldCertificate {
 	pub key_must_be_replaced: bool,
 }
 
-fn held(cert: &ServerCertificate) -> HeldCertificate {
+fn held(cert: &ApplicationCertificate) -> HeldCertificate {
 	HeldCertificate {
 		name: cert.name.clone(),
 		key_fingerprint: cert.key_fingerprint.clone(),
@@ -232,25 +297,61 @@ pub async fn entitlements(
 	ServerDevice(auth): ServerDevice,
 ) -> Result<Json<Entitlements>> {
 	let mut conn = state.db.get().await?;
-	let server = Server::live_by_device_id(&mut conn, auth.0.id)
+	// An identity belongs to a box, so the answer is the box's: every workload
+	// on it, whether that is one, several, or none.
+	let machine = database::machines::Machine::get_by_device_id(&mut conn, auth.0.id)
 		.await?
-		.into_iter()
-		.next()
 		.ok_or(AppError::DeviceHasNoServer)?;
 
 	Ok(Json(
-		entitlements_for(&mut conn, &server, &state.dns_zones).await?,
+		entitlements_for(&mut conn, &machine, &state.dns_zones).await?,
 	))
 }
 
-/// Build a server's entitlements. Shared with the status-push response, so an
-/// agent that already reports status learns of a new domain without asking.
-// spec: CRT#what-a-server-may-act-on
+/// Build the entitlements answer for the machine `server` sits on.
+///
+/// Shared with the status-push response, so an agent that already reports
+/// status learns of a new domain without asking. The answer carries an entry
+/// per application on the box; the flat fields describe `server` itself, which
+/// on a single-application machine is the whole answer.
+// spec: CRT#what-an-application-may-act-on
 pub async fn entitlements_for(
 	conn: &mut AsyncPgConnection,
-	server: &Server,
+	machine: &database::machines::Machine,
 	zones: &[ManagedZone],
 ) -> Result<Entitlements> {
+	let mut applications = Vec::new();
+	for application in machine.applications(conn).await? {
+		applications.push(one_applications_entitlements(conn, &application, zones).await?);
+	}
+	// A box running exactly one workload is described by the flat fields, which
+	// is what every reporter in the field reads. Running none or several, no
+	// single set of them is the answer, so they stay at their defaults and the
+	// list is.
+	let flat = match applications.as_slice() {
+		[only] => Some(only.clone()),
+		_ => None,
+	};
+	Ok(Entitlements {
+		may_manage_dns: flat.as_ref().is_some_and(|f| f.may_manage_dns),
+		may_manage_tls: flat.as_ref().is_some_and(|f| f.may_manage_tls),
+		paused: flat.as_ref().is_some_and(|f| f.paused),
+		domains: flat.as_ref().map(|f| f.domains.clone()).unwrap_or_default(),
+		registered_names: flat
+			.as_ref()
+			.map(|f| f.registered_names.clone())
+			.unwrap_or_default(),
+		certificates: flat.map(|f| f.certificates).unwrap_or_default(),
+		applications,
+	})
+}
+
+/// One application's own entitlements.
+async fn one_applications_entitlements(
+	conn: &mut AsyncPgConnection,
+	server: &Application,
+	zones: &[ManagedZone],
+) -> Result<ApplicationEntitlements> {
 	// Only domains Canopy can actually act in are offered: naming one whose zone
 	// has gone would have an agent request a name that cannot be fulfilled.
 	let domains: Vec<String> = match server.group_id {
@@ -263,19 +364,20 @@ pub async fn entitlements_for(
 			.collect(),
 	};
 
-	let registered_names = ServerName::for_server(conn, server.id)
+	let registered_names = ApplicationName::for_server(conn, server.id)
 		.await?
 		.into_iter()
 		.map(|row| row.name)
 		.collect();
 
-	let certificates = ServerCertificate::for_server(conn, server.id)
+	let certificates = ApplicationCertificate::for_server(conn, server.id)
 		.await?
 		.iter()
 		.map(held)
 		.collect();
 
-	Ok(Entitlements {
+	Ok(ApplicationEntitlements {
+		r#type: server.r#type.clone(),
 		may_manage_dns: server.may_manage_dns,
 		may_manage_tls: server.may_manage_tls,
 		paused: server.name_management_paused(),
@@ -355,7 +457,7 @@ pub async fn register_name(
 	)
 	.await?;
 
-	let row = ServerName::register(
+	let row = ApplicationName::register(
 		&mut conn,
 		authorised.server.id,
 		&authorised.name,
@@ -413,7 +515,7 @@ pub struct CertificateResponse {
 	pub last_error: Option<String>,
 }
 
-fn certificate_response(cert: &ServerCertificate) -> CertificateResponse {
+fn certificate_response(cert: &ApplicationCertificate) -> CertificateResponse {
 	CertificateResponse {
 		name: cert.name.clone(),
 		state: cert.state.clone(),
@@ -478,7 +580,7 @@ pub async fn request_certificate(
 	// for, so a normalisation difference can't slip a different name through.
 	let csr = validate_csr(&der, &authorised.name)?;
 
-	let cert = ServerCertificate::request(
+	let cert = ApplicationCertificate::request(
 		&mut conn,
 		authorised.server.id,
 		&csr.name,

@@ -249,7 +249,8 @@ Look at each server named in the alert. Finish whatever the pause was for — th
 /// only the second means something has already stopped working.
 // spec: CRT#pausing-a-server
 pub async fn sweep_forgotten_pauses(conn: &mut AsyncPgConnection) -> Result<Option<Issue>> {
-	let lapsing = crate::server_certificates::ServerCertificate::lapsing_under_pause(conn).await?;
+	let lapsing =
+		crate::application_certificates::ApplicationCertificate::lapsing_under_pause(conn).await?;
 
 	if lapsing.is_empty() {
 		return recover(
@@ -260,9 +261,9 @@ pub async fn sweep_forgotten_pauses(conn: &mut AsyncPgConnection) -> Result<Opti
 		.await;
 	}
 
-	let mut servers: Vec<&str> = lapsing.iter().map(|l| l.server_name.as_str()).collect();
-	servers.sort_unstable();
-	servers.dedup();
+	let mut applications: Vec<&str> = lapsing.iter().map(|l| l.server_name.as_str()).collect();
+	applications.sort_unstable();
+	applications.dedup();
 
 	let expired = lapsing.iter().filter(|l| l.expired).count();
 	let listed: Vec<String> = lapsing
@@ -290,7 +291,7 @@ pub async fn sweep_forgotten_pauses(conn: &mut AsyncPgConnection) -> Result<Opti
 			format!(
 				"{expired} certificate(s) have expired under a pause across {} server(s), and {} \
 				 more are overdue for renewal{}",
-				servers.len(),
+				applications.len(),
 				lapsing.len() - expired,
 				list_suffix(&listed),
 			),
@@ -302,7 +303,7 @@ pub async fn sweep_forgotten_pauses(conn: &mut AsyncPgConnection) -> Result<Opti
 				"{} certificate(s) are past renewal under a pause across {} server(s), and nothing \
 				 renews while a server is paused{}",
 				lapsing.len(),
-				servers.len(),
+				applications.len(),
 				list_suffix(&listed),
 			),
 		)
@@ -616,7 +617,12 @@ pub async fn list(conn: &mut AsyncPgConnection, limit: i64) -> Result<Vec<Issue>
 
 	dsl::issues
 		.select(Issue::as_select())
-		.filter(dsl::server_id.is_null().and(dsl::server_group_id.is_null()))
+		.filter(
+			dsl::application_id
+				.is_null()
+				.and(dsl::machine_id.is_null())
+				.and(dsl::server_group_id.is_null()),
+		)
 		.order(dsl::last_seen.desc())
 		.limit(limit)
 		.load(conn)

@@ -16,9 +16,9 @@ use commons_types::status::CheckResult;
 use diesel_async::AsyncPgConnection;
 use uuid::Uuid;
 
+use crate::application_certificates::{ApplicationCertificate, Risk};
+use crate::application_names::ApplicationName;
 use crate::issues::{CheckFiling, Issue, Scope, file_check};
-use crate::server_certificates::{Risk, ServerCertificate};
-use crate::server_names::ServerName;
 
 /// The source Canopy files its own determinations under.
 pub const CANOPY_SOURCE: &str = "canopy";
@@ -75,7 +75,7 @@ Canopy retries every pass and keeps the server's stated intent, so nothing is lo
 
 ## Solve
 
-Read the recorded error on the server's page in Canopy. Usually either the zone the name sits under is not in Canopy's configuration, or Canopy's credentials for that zone have stopped working — the latter affects every name in the zone and is worth checking against the other servers in the group.";
+Read the recorded error on the server's page in Canopy. Usually either the zone the name sits under is not in Canopy's configuration, or Canopy's credentials for that zone have stopped working — the latter affects every name in the zone and is worth checking against the other applications in the group.";
 
 /// File (or close) the per-server certificate-expiry check.
 ///
@@ -84,17 +84,17 @@ Read the recorded error on the server's page in Canopy. Usually either the zone 
 /// certificates need attention" is one thing to act on rather than several.
 // spec: CRT#when-issuance-fails
 pub async fn sweep_certificate_expiry(db: &mut AsyncPgConnection) -> Result<usize> {
-	let at_risk = ServerCertificate::at_risk(db).await?;
+	let at_risk = ApplicationCertificate::at_risk(db).await?;
 	let previously = Issue::active_server_ids_by_source_ref(db, CANOPY_SOURCE, EXPIRY_REF).await?;
 
 	// Grouped in memory: the work list is small (a fleet's worth of certificates
 	// in trouble at once), and grouping in SQL would mean re-deriving `risk()`,
 	// which is deliberately Rust so the fractions live in one place.
-	let mut by_server: std::collections::HashMap<Uuid, Vec<(ServerCertificate, Risk)>> =
+	let mut by_server: std::collections::HashMap<Uuid, Vec<(ApplicationCertificate, Risk)>> =
 		std::collections::HashMap::new();
 	for (cert, risk) in at_risk {
 		by_server
-			.entry(cert.server_id)
+			.entry(cert.application_id)
 			.or_default()
 			.push((cert, risk));
 	}
@@ -136,7 +136,7 @@ pub async fn sweep_certificate_expiry(db: &mut AsyncPgConnection) -> Result<usiz
 			db,
 			CheckFiling {
 				source: CANOPY_SOURCE,
-				scope: Scope::Server(*server_id),
+				scope: Scope::Application(*server_id),
 				device_id: None,
 				check: EXPIRY_REF,
 				observed,
@@ -168,7 +168,7 @@ pub async fn sweep_certificate_expiry(db: &mut AsyncPgConnection) -> Result<usiz
 			db,
 			CheckFiling {
 				source: CANOPY_SOURCE,
-				scope: Scope::Server(server_id),
+				scope: Scope::Application(server_id),
 				device_id: None,
 				check: EXPIRY_REF,
 				observed: CheckResult::Passed,
@@ -197,14 +197,14 @@ pub const STUCK_AFTER_ATTEMPTS: i32 = 6;
 /// File (or close) the per-server first-issuance check.
 // spec: CRT#when-issuance-fails
 pub async fn sweep_stuck_issuance(db: &mut AsyncPgConnection) -> Result<usize> {
-	let stuck = ServerCertificate::stuck_first_issuances(db, STUCK_AFTER_ATTEMPTS).await?;
+	let stuck = ApplicationCertificate::stuck_first_issuances(db, STUCK_AFTER_ATTEMPTS).await?;
 	let previously =
 		Issue::active_server_ids_by_source_ref(db, CANOPY_SOURCE, ISSUANCE_REF).await?;
 
-	let mut by_server: std::collections::HashMap<Uuid, Vec<ServerCertificate>> =
+	let mut by_server: std::collections::HashMap<Uuid, Vec<ApplicationCertificate>> =
 		std::collections::HashMap::new();
 	for cert in stuck {
-		by_server.entry(cert.server_id).or_default().push(cert);
+		by_server.entry(cert.application_id).or_default().push(cert);
 	}
 
 	let mut filed = 0;
@@ -227,7 +227,7 @@ pub async fn sweep_stuck_issuance(db: &mut AsyncPgConnection) -> Result<usize> {
 			db,
 			CheckFiling {
 				source: CANOPY_SOURCE,
-				scope: Scope::Server(*server_id),
+				scope: Scope::Application(*server_id),
 				device_id: None,
 				check: ISSUANCE_REF,
 				observed: CheckResult::Failed,
@@ -254,7 +254,7 @@ pub async fn sweep_stuck_issuance(db: &mut AsyncPgConnection) -> Result<usize> {
 			db,
 			CheckFiling {
 				source: CANOPY_SOURCE,
-				scope: Scope::Server(server_id),
+				scope: Scope::Application(server_id),
 				device_id: None,
 				check: ISSUANCE_REF,
 				observed: CheckResult::Passed,
@@ -276,13 +276,13 @@ pub async fn sweep_stuck_issuance(db: &mut AsyncPgConnection) -> Result<usize> {
 /// File (or close) the per-server address-records check.
 // spec: CRT#addresses
 pub async fn sweep_address_records(db: &mut AsyncPgConnection) -> Result<usize> {
-	let failing = ServerName::failing_to_publish(db).await?;
+	let failing = ApplicationName::failing_to_publish(db).await?;
 	let previously = Issue::active_server_ids_by_source_ref(db, CANOPY_SOURCE, ADDRESS_REF).await?;
 
-	let mut by_server: std::collections::HashMap<Uuid, Vec<ServerName>> =
+	let mut by_server: std::collections::HashMap<Uuid, Vec<ApplicationName>> =
 		std::collections::HashMap::new();
 	for row in failing {
-		by_server.entry(row.server_id).or_default().push(row);
+		by_server.entry(row.application_id).or_default().push(row);
 	}
 
 	let mut filed = 0;
@@ -304,7 +304,7 @@ pub async fn sweep_address_records(db: &mut AsyncPgConnection) -> Result<usize> 
 			db,
 			CheckFiling {
 				source: CANOPY_SOURCE,
-				scope: Scope::Server(*server_id),
+				scope: Scope::Application(*server_id),
 				device_id: None,
 				check: ADDRESS_REF,
 				observed: CheckResult::Failed,
@@ -330,7 +330,7 @@ pub async fn sweep_address_records(db: &mut AsyncPgConnection) -> Result<usize> 
 			db,
 			CheckFiling {
 				source: CANOPY_SOURCE,
-				scope: Scope::Server(server_id),
+				scope: Scope::Application(server_id),
 				device_id: None,
 				check: ADDRESS_REF,
 				observed: CheckResult::Passed,

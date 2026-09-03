@@ -73,11 +73,12 @@ export type Solidify<T> = T extends readonly unknown[]
 
 export type ShortStatus = Solidify<Schemas["ShortStatus"]>;
 export type HealthState = Solidify<Schemas["HealthState"]>;
-export type ServerKind = Solidify<Schemas["ServerKind"]>;
-export type Product = Solidify<Schemas["Product"]>;
+export type ApplicationType = Solidify<Schemas["ApplicationType"]>;
 export type VersionTracking = Solidify<Schemas["VersionTracking"]>;
 export type Caps = Solidify<Schemas["Caps"]>;
-export type ProductInfo = Solidify<Schemas["ProductInfo"]>;
+export type ApplicationTypeInfo = Solidify<Schemas["ApplicationTypeInfo"]>;
+export type MachineDetailData = Solidify<Schemas["MachineDetailData"]>;
+export type GroupMachine = Solidify<Schemas["GroupMachine"]>;
 export type ServerRank = Solidify<Schemas["ServerRank"]>;
 export type VersionStatus = Solidify<Schemas["VersionStatus"]>;
 export type DeviceRole = Solidify<Schemas["DeviceRole"]>;
@@ -95,6 +96,7 @@ export type ServerGroup = Solidify<Schemas["ServerGroup"]>;
 export type GroupDetail = Solidify<Schemas["GroupDetail"]>;
 export type SummaryData = Solidify<Schemas["SummaryData"]>;
 export type CheckDetailData = Solidify<Schemas["CheckDetailData"]>;
+export type NamespaceRef = Solidify<Schemas["NamespaceRef"]>;
 export type CheckDetailServerData = Solidify<
 	Schemas["CheckDetailServerData"]
 >;
@@ -118,6 +120,10 @@ export type StatusSnapshotData = Solidify<Schemas["StatusSnapshotData"]>;
 export type FleetServerDetailData = Solidify<
 	Schemas["FleetServerDetailData"]
 >;
+export type FleetMachineDetailData = Solidify<
+	Schemas["FleetMachineDetailData"]
+>;
+export type FleetDetailData = Solidify<Schemas["FleetDetailData"]>;
 export type ServerSilencedRef = Solidify<Schemas["ServerSilencedRef"]>;
 export type ServerGroupSilencedRef = Solidify<Schemas["ServerGroupSilencedRef"]>;
 
@@ -182,8 +188,8 @@ export type ParamSpec = Solidify<Schemas["BTreeMap"][string]>;
 export type ParamType = Solidify<Schemas["ParamType"]>;
 export type BackupMaintenanceRun = Solidify<Schemas["BackupMaintenanceRun"]>;
 export type PendingRequestRow = Solidify<Schemas["PendingRequestRow"]>;
-export type ServerBackupCapabilityView = Solidify<
-	Schemas["ServerBackupCapabilityView"]
+export type MachineBackupCapabilityView = Solidify<
+	Schemas["MachineBackupCapabilityView"]
 >;
 export type RestoreWindowRow = Solidify<Schemas["RestoreWindowRow"]>;
 export type RestoreWindowView = Solidify<Schemas["RestoreWindowView"]>;
@@ -243,55 +249,67 @@ export const SERVER_RANK_ORDER: ServerRank[] = [
 	"dev",
 ];
 
-/// Human-readable product names. The wire values are lowercase identifiers;
-/// these are how a product is written in the UI.
-export const PRODUCT_LABELS: Record<Product, string> = {
-	tamanu: "Tamanu",
-	senaite: "SENAITE",
-	canopy: "Canopy",
-};
-
-/// Display order for server kinds — centrals first, then facilities,
-/// then standalone. Used as a tiebreak within a single rank in
-/// status-dot lists / group detail views.
-export const SERVER_KIND_ORDER: ServerKind[] = [
-	"central",
-	"facility",
-	"standalone",
-];
-
-/// Sort key combining rank index (with `null` ranks pushed last) and
-/// kind index. Stable per-rank ordering matches what the UI grouping
-/// expects.
-export function serverSortKey(s: {
-	rank?: ServerRank | null;
-	kind: ServerKind;
-}): [number, number] {
+/// Sort key for a rank, with `null` ranks pushed last. Ranks are an ordered
+/// set; types are not, so a type tiebreak sorts alphabetically at the
+/// comparison rather than through a table here.
+export function serverSortKey(s: { rank?: ServerRank | null }): number {
 	const rankIndex =
 		s.rank == null ? Infinity : SERVER_RANK_ORDER.indexOf(s.rank);
-	const rankKey = rankIndex === -1 ? SERVER_RANK_ORDER.length : rankIndex;
-	const kindIndex = SERVER_KIND_ORDER.indexOf(s.kind);
-	const kindKey = kindIndex === -1 ? SERVER_KIND_ORDER.length : kindIndex;
-	return [rankKey, kindKey];
+	return rankIndex === -1 ? SERVER_RANK_ORDER.length : rankIndex;
 }
 
-export function compareServersByRankThenKind<
-	T extends { rank?: ServerRank | null; kind: ServerKind; name?: string | null },
+/// How a type reads when nothing has named the application: the sentence case
+/// of the type, so `tamanu-central` reads as "Tamanu central".
+///
+/// The backend derives the catalogue's label by the same rule, so the two
+/// agree and a name is never blank while the catalogue is still loading.
+/// spec: FLT#naming
+export function applicationTypeLabel(type: ApplicationType): string {
+	const words = type.replace(/-/g, " ");
+	return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/// What an application is called. An application's name is optional and an
+/// operator's alone to set; one with no name presents as its type.
+/// spec: FLT#naming
+export function applicationName(application: {
+	name?: string | null;
+	type: ApplicationType;
+}): string {
+	return application.name || applicationTypeLabel(application.type);
+}
+
+/// Rank first, then type alphabetically, then name.
+///
+/// Application types are a flat, open set: a deployment can report a type
+/// Canopy has never seen, so there is no precedence to consult and an invented
+/// one would be surprising to read. Alphabetical is the rule everywhere types
+/// are listed.
+/// spec: APP#where-a-type-comes-from
+export function compareServersByRankThenType<
+	T extends {
+		rank?: ServerRank | null;
+		type: ApplicationType;
+		name?: string | null;
+	},
 >(a: T, b: T): number {
-	const [ar, ak] = serverSortKey(a);
-	const [br, bk] = serverSortKey(b);
+	const ar = serverSortKey(a);
+	const br = serverSortKey(b);
 	if (ar !== br) return ar - br;
-	if (ak !== bk) return ak - bk;
-	const an = a.name ?? "";
-	const bn = b.name ?? "";
-	return an.localeCompare(bn);
+	const byType = a.type.localeCompare(b.type);
+	if (byType !== 0) return byType;
+	return (a.name ?? "").localeCompare(b.name ?? "");
 }
 
-/// Group a flat server list into rank buckets in display order, with
-/// each bucket internally sorted by kind (centrals first) then name.
-/// Servers without a rank land in a trailing `null` bucket.
+/// Group a flat application list into rank buckets in display order, with
+/// each bucket internally sorted by type (centrals first) then name.
+/// Applications without a rank land in a trailing `null` bucket.
 export function groupServersByRank<
-	T extends { rank?: ServerRank | null; kind: ServerKind; name?: string | null },
+	T extends {
+		rank?: ServerRank | null;
+		type: ApplicationType;
+		name?: string | null;
+	},
 >(servers: readonly T[]): Array<[ServerRank | null, T[]]> {
 	const buckets = new Map<ServerRank | null, T[]>();
 	for (const s of servers) {
@@ -305,11 +323,56 @@ export function groupServersByRank<
 	for (const rank of order) {
 		const list = buckets.get(rank);
 		if (list && list.length > 0) {
-			list.sort(compareServersByRankThenKind);
+			list.sort(compareServersByRankThenType);
 			result.push([rank, list]);
 		}
 	}
 	return result;
+}
+
+/// A machine carrying the applications on it, ranked so it can go through the
+/// same bucketing as a workload.
+export interface RankedMachine {
+	machine: GroupMachine;
+	applications: ServerInfo[];
+	rank: ServerRank | null;
+	type: ApplicationType;
+	name: string;
+}
+
+/// Give each machine the rank of its highest-ranked workload, so a box sorts
+/// into the same bands the fleet uses everywhere else.
+///
+/// Rank is a workload's property, so a box shared by a production and a test
+/// workload is a production box. A machine carrying nothing yet has no rank to
+/// take and sorts last: awaiting check-in, not an error.
+/// spec: FLT
+export function rankMachines(
+	machines: readonly GroupMachine[],
+	applications: readonly ServerInfo[],
+): RankedMachine[] {
+	const byMachine = new Map<string, ServerInfo[]>();
+	for (const application of applications) {
+		const list = byMachine.get(application.machine_id);
+		if (list) list.push(application);
+		else byMachine.set(application.machine_id, [application]);
+	}
+	return machines.map((machine) => {
+		const on = [...(byMachine.get(machine.id) ?? [])].sort(
+			compareServersByRankThenType,
+		);
+		const [best] = on;
+		return {
+			machine,
+			applications: on,
+			rank: best?.rank ?? null,
+			// A box carrying nothing has no type to take. It has no rank
+			// either, so it sorts last on rank alone and this never decides an
+			// ordering — naming a type here would be inventing one.
+			type: best?.type ?? "",
+			name: machine.name ?? "",
+		};
+	});
 }
 
 /// Per-check result vocabulary. Hand-written mirror of the Rust
@@ -380,23 +443,82 @@ export function checkResultOf(
 	return null;
 }
 
+/// A namespace as one URL segment: `-` for a curated source's unqualified
+/// entry, `machine` for the box's, `application.<type>` for one application
+/// type's.
+///
+/// The subject leads even though the type alone would usually be enough,
+/// because the type set is open: a deployment can report an application type
+/// called `machine`, and `application.machine` is still unmistakably that
+/// type rather than the box.
+export function namespaceSegment(namespace: NamespaceRef | undefined): string {
+	const subject = namespace?.subject ?? null;
+	if (subject === null) return "-";
+	if (subject === "application") {
+		return `application.${encodeURIComponent(namespace?.application_type ?? "")}`;
+	}
+	return encodeURIComponent(subject);
+}
+
+/// The namespace a URL segment names, or `null` if it names none of the three
+/// shapes an entry can have. A bad segment is a broken link to report, not one
+/// to guess at.
+export function namespaceFromSegment(segment: string): NamespaceRef | null {
+	if (segment === "-") return { subject: null, application_type: null };
+	if (segment === "machine") return { subject: "machine", application_type: null };
+	const type = segment.startsWith("application.") ? segment.slice(12) : null;
+	if (type) {
+		return { subject: "application", application_type: decodeURIComponent(type) };
+	}
+	return null;
+}
+
+/// Whether two namespace refs name the same catalog entry. An absent field
+/// and an explicit `null` are the same absence, so they compare equal.
+export function sameNamespace(a: NamespaceRef | undefined, b: NamespaceRef | undefined): boolean {
+	return (
+		(a?.subject ?? null) === (b?.subject ?? null) &&
+		(a?.application_type ?? null) === (b?.application_type ?? null)
+	);
+}
+
+/// How a check reads to an operator: `<type>.<check>` where it is one
+/// application type's, the bare name otherwise. The qualification is
+/// presentation — the name is stored on its own.
+export function qualifiedCheckName(
+	namespace: NamespaceRef | undefined,
+	check: string,
+): string {
+	return namespace?.subject === "application" && namespace.application_type
+		? `${namespace.application_type}.${check}`
+		: check;
+}
+
 /// Route to the per-healthcheck "who's affected" page for `check`. Check
 /// names are arbitrary strings reported by devices (not restricted to
 /// URL-safe characters), so every link builder must go through this
-/// instead of interpolating the name directly. A check's identity is
-/// the (source, check) pair — same-named checks from different sources
-/// are different checks.
-export function healthcheckPath(source: string, check: string): string {
-	return `/healthchecks/${encodeURIComponent(source)}/${encodeURIComponent(check)}`;
+/// instead of interpolating the name directly. A check's identity is the
+/// (source, namespace, check) triple — a same-named check from another
+/// source, or from another application type, is a different check.
+export function healthcheckPath(
+	source: string,
+	namespace: NamespaceRef | undefined,
+	check: string,
+): string {
+	return `/healthchecks/${encodeURIComponent(source)}/${namespaceSegment(namespace)}/${encodeURIComponent(check)}`;
 }
 
 /// Route to the policy editor for `check`. Like [`healthcheckPath`], a
-/// check's identity is the (source, check) pair — the editor is scoped to
-/// one such pair, so every link builder must carry the source and go
+/// check's identity is the (source, namespace, check) triple — the editor is
+/// scoped to one such entry, so every link builder must carry all three and go
 /// through this instead of interpolating the (arbitrary, not necessarily
 /// URL-safe) name directly.
-export function healthcheckSettingsPath(source: string, check: string): string {
-	return `/settings/healthchecks/${encodeURIComponent(source)}/${encodeURIComponent(check)}`;
+export function healthcheckSettingsPath(
+	source: string,
+	namespace: NamespaceRef | undefined,
+	check: string,
+): string {
+	return `/settings/healthchecks/${encodeURIComponent(source)}/${namespaceSegment(namespace)}/${encodeURIComponent(check)}`;
 }
 
 /// Route to the Sources page — the per-source reachability/ingest policy
@@ -430,6 +552,20 @@ export function silenceRef(source: string, check: string): string {
 	return RESERVED_SOURCES.includes(source) ? check : `health/${check}`;
 }
 
+/// A silence ref as it reads to an operator: the `health/` prefix, where the
+/// source has one, then the qualified check name. Two application types
+/// silenced for one check name are two rows, and only the qualifier tells
+/// them apart.
+export function qualifiedSilenceRef(
+	namespace: NamespaceRef | undefined,
+	ref: string,
+): string {
+	const slash = ref.indexOf("/");
+	const prefix = slash === -1 ? "" : ref.slice(0, slash + 1);
+	const check = slash === -1 ? ref : ref.slice(slash + 1);
+	return `${prefix}${qualifiedCheckName(namespace, check)}`;
+}
+
 /// Canopy's per-server reachability check, with the ref its silence is
 /// keyed by. The server form's "alert when unreachable" switch and the
 /// check's own silence button both write this one silence.
@@ -439,32 +575,42 @@ export const REACHABILITY_CHECK = {
 	ref: silenceRef("canopy", "reachability"),
 } as const;
 
-/// One person connected somewhere in a server group, with the names of
-/// the member servers they're on. Produced by [`aggregateOperators`].
+/// One person connected somewhere in a server group, with the boxes they're
+/// logged in to. Produced by [`aggregateOperators`].
 export type AggregatedOperator = {
 	op: OperatorPresence;
-	servers: string[];
+	machines: string[];
 };
 
 /// Aggregate per-member operator presence into distinct people across the
 /// group: deduped by login, keeping the earliest `connected_since` and
-/// collecting which member servers each person is connected to. Shared by
-/// the status-page group cards and the group detail page so both show the
-/// same numbers.
+/// collecting which boxes each person is logged in to. Shared by the
+/// status-page group cards and the group detail page so both show the same
+/// numbers.
+///
+/// A person is logged in to a box, not to the software on it, so a box
+/// running two applications is one place a person is rather than two.
+// spec: FLT
 export function aggregateOperators(
 	members: FacilityServerStatus[],
 ): AggregatedOperator[] {
 	const byLogin = new Map<string, AggregatedOperator>();
+	const seenOn = new Map<string, Set<string>>();
 	for (const m of members) {
+		// An unnamed box reads as the application leading it, the same
+		// fallback the dot strip's enclosures use.
+		const machineName = m.machine_name ?? m.name;
 		for (const op of m.operators) {
-			const serverName = m.name || "(unnamed)";
 			const existing = byLogin.get(op.login);
 			if (!existing) {
-				byLogin.set(op.login, { op, servers: [serverName] });
+				byLogin.set(op.login, { op, machines: [machineName] });
+				seenOn.set(op.login, new Set([m.machine_id]));
 				continue;
 			}
-			if (!existing.servers.includes(serverName)) {
-				existing.servers.push(serverName);
+			const on = seenOn.get(op.login)!;
+			if (!on.has(m.machine_id)) {
+				on.add(m.machine_id);
+				existing.machines.push(machineName);
 			}
 			if (
 				op.connected_since &&

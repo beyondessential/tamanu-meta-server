@@ -58,7 +58,7 @@ test.describe("restore replicas", () => {
 		await seedRestoreCheck(sql, {
 			consumerDeviceId: consumer.id,
 			groupId,
-			serverId: server.id,
+			machineId: server.machineId,
 			intent: "verify",
 			outcome: "success",
 			replicaHealthy: true,
@@ -197,7 +197,7 @@ test.describe("restore replicas", () => {
 		await seedRestoreCheck(sql, {
 			consumerDeviceId: consumer,
 			groupId,
-			serverId: server.id,
+			machineId: server.machineId,
 			replicaId: replica.id,
 			intent: "analytics",
 			snapshotId: "snap-1",
@@ -239,8 +239,7 @@ test.describe("restore replicas", () => {
 		await seedServer(sql, {
 			groupId,
 			name: "lims-srv",
-			product: "senaite",
-			kind: "standalone",
+			type: "senaite",
 		});
 		await seedRestoreReplica(sql, {
 			consumerDeviceId: consumer,
@@ -290,7 +289,7 @@ test.describe("restore replicas", () => {
 		await seedRestoreCheck(sql, {
 			consumerDeviceId: consumer.id,
 			groupId,
-			serverId: server.id,
+			machineId: server.machineId,
 			replicaId: replica.id,
 			snapshotId: "snap-1",
 		});
@@ -357,7 +356,7 @@ test.describe("restore replicas", () => {
 		await seedRestoreCheck(sql, {
 			consumerDeviceId: consumer.id,
 			groupId,
-			serverId: server.id,
+			machineId: server.machineId,
 			outcome: "failure",
 			replicaHealthy: false,
 			error: "restore blew up",
@@ -378,7 +377,7 @@ test.describe("restore replicas", () => {
 		await seedRestoreCheck(sql, {
 			consumerDeviceId: consumer.id,
 			groupId,
-			serverId: server.id,
+			machineId: server.machineId,
 			outcome: "success",
 			replicaHealthy: true,
 			postgresVersion: "16.3",
@@ -449,8 +448,8 @@ test.describe("restore replicas", () => {
 		// Name defaults to the kebab-cased group name and intent (whole-group
 		// scope).
 		await expect(dialog.getByLabel("Name")).toHaveValue("solo-group-verify");
-		// Picking a server folds the server name into the default.
-		await dialog.getByLabel("Server").click();
+		// Picking a machine folds its name into the default.
+		await dialog.getByLabel("Machine").click();
 		await page.getByRole("option", { name: "srv-a" }).click();
 		await expect(dialog.getByLabel("Name")).toHaveValue(
 			"solo-group-srv-a-verify",
@@ -902,7 +901,7 @@ test.describe("restore replicas", () => {
 		await seedRestoreCheck(sql, {
 			consumerDeviceId: consumer.id,
 			groupId,
-			serverId: server.id,
+			machineId: server.machineId,
 			outcome: "success",
 			replicaHealthy: true,
 			healthDetails: { url: "https://replica.example.test/db" },

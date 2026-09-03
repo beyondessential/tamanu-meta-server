@@ -22,7 +22,7 @@ async fn server_reference_survives_as_provenance() {
 				.await
 				.expect("group");
 		let server: RowId =
-			sql_query("INSERT INTO servers (host, group_id) VALUES ($1, $2) RETURNING id")
+			sql_query("WITH m AS (INSERT INTO machines (group_id) VALUES ($2) RETURNING id) INSERT INTO applications (type, host, group_id, machine_id) SELECT 'tamanu-central', $1, $2, m.id FROM m RETURNING id")
 				.bind::<sql_types::Text, _>("kamaka-central")
 				.bind::<sql_types::Uuid, _>(group.id)
 				.get_result(&mut conn)
@@ -38,7 +38,7 @@ async fn server_reference_survives_as_provenance() {
 		)
 		.await
 		.expect("add with provenance");
-		assert_eq!(filed.server_id, Some(server.id));
+		assert_eq!(filed.application_id, Some(server.id));
 
 		assert!(
 			!VersionKnownIssue::version_is_ready(&mut conn, 2, 63, 0)
@@ -47,7 +47,7 @@ async fn server_reference_survives_as_provenance() {
 			"a filed issue holds the version back"
 		);
 
-		sql_query("DELETE FROM servers WHERE id = $1")
+		sql_query("DELETE FROM applications WHERE id = $1")
 			.bind::<sql_types::Uuid, _>(server.id)
 			.execute(&mut conn)
 			.await
@@ -61,7 +61,7 @@ async fn server_reference_survives_as_provenance() {
 			.find(|issue| issue.id == filed.id)
 			.expect("the issue outlives the server");
 		assert_eq!(
-			still_there.server_id, None,
+			still_there.application_id, None,
 			"provenance clears rather than cascading the issue away"
 		);
 	})
@@ -80,7 +80,7 @@ async fn operator_filed_issue_names_no_server() {
 		)
 		.await
 		.expect("add without provenance");
-		assert_eq!(filed.server_id, None);
+		assert_eq!(filed.application_id, None);
 	})
 	.await
 }

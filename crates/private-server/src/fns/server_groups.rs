@@ -50,16 +50,16 @@ pub async fn list(
 	Ok(Json(groups))
 }
 
-/// The number of live servers in one server group.
+/// The number of live applications in one server group.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct GroupServerCount {
 	/// Identifier of the server group.
 	pub server_group_id: Uuid,
-	/// Number of live (non-archived) servers currently in the group.
+	/// Number of live (non-archived) applications currently in the group.
 	pub server_count: i64,
 }
 
-/// Count live servers per group.
+/// Count live applications per group.
 ///
 /// Returns one entry per server group that has at least one live
 /// (non-archived) member server. Groups with no live members are omitted, so
@@ -127,12 +127,15 @@ pub(crate) async fn group_billing_labels(
 		.await?
 		.get(&group.id)
 		.copied();
-	let product = ServerGroup::sole_member_products(conn, &[group.id])
+	// A group names a product only when its members agree on one; naming one
+	// of several would attribute shared cost to whichever happened to be
+	// picked. A central and a facility are both Tamanu, so the pair agrees.
+	// spec: APP#billing-attribution
+	let software = ServerGroup::sole_member_software(conn, &[group.id])
 		.await?
-		.get(&group.id)
-		.copied();
+		.remove(&group.id);
 	Ok(
-		BillingLabels::from_group(&group.tags, &group.name, product, highest_rank)
+		BillingLabels::from_group(&group.tags, &group.name, software, highest_rank)
 			.into_tags()
 			.into_iter()
 			.map(|(key, value)| BillingTag { key, value })
@@ -140,14 +143,19 @@ pub(crate) async fn group_billing_labels(
 	)
 }
 
-/// A server group together with its member servers and billing labels.
+/// A server group together with its member applications and billing labels.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct GroupDetail {
 	/// The group itself.
 	pub group: ServerGroup,
-	/// The group's member servers, sorted by name, with current status and
+	/// The group's member applications, sorted by name, with current status and
 	/// display host included.
-	pub servers: Vec<super::servers::ServerInfo>,
+	pub applications: Vec<super::applications::ServerInfo>,
+	/// The group's member machines, sorted by name. A restore replica and a
+	/// maintenance window are both declared over a machine, so an operator
+	/// surface offering either needs the boxes rather than the workloads.
+	// spec: RST#declared-replicas
+	pub machines: Vec<GroupMachine>,
 	/// The group's effective `billing.*` labels (product/deployment/stage).
 	pub billing_labels: Vec<BillingTag>,
 	/// Whether a maintenance window (or its settle period) suspends the group.
@@ -157,9 +165,18 @@ pub struct GroupDetail {
 	pub maintenance_settling: bool,
 }
 
+/// One of a group's machines, as an operator picks it out of a list.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct GroupMachine {
+	/// Unique identifier of the machine.
+	pub id: Uuid,
+	/// The operator-assigned name, where it has one.
+	pub name: Option<String>,
+}
+
 /// Get a server group with its members.
 ///
-/// Returns the group, its member servers (sorted by name, with current status
+/// Returns the group, its member applications (sorted by name, with current status
 /// and display host), and the group's effective billing labels. Responds 404
 /// if no group exists with the given identifier.
 #[utoipa::path(
@@ -181,24 +198,7 @@ pub async fn get(
 ) -> Result<Json<GroupDetail>> {
 	let mut conn = state.db.get().await?;
 	let group = ServerGroup::get_by_id(&mut conn, args.server_group_id).await?;
-	let members = group.list_servers(&mut conn).await?;
-	let group_name = group.name.clone();
-	let mut servers: Vec<super::servers::ServerInfo> = members
-		.into_iter()
-		.map(|s| {
-			let mut info = super::servers::server_to_info(s);
-			info.group_name = Some(group_name.clone());
-			info
-		})
-		.collect();
-	servers.sort_by(|a, b| {
-		a.name
-			.as_deref()
-			.unwrap_or("")
-			.cmp(b.name.as_deref().unwrap_or(""))
-	});
-	super::servers::decorate_with_status(&mut conn, &mut servers).await?;
-	super::servers::fill_display_hosts(&mut conn, &mut servers).await?;
+	let (applications, machines) = tree_members(&mut conn, &group).await?;
 	let billing_labels = group_billing_labels(&mut conn, &group).await?;
 	let maintained = database::maintenance_windows::MaintenanceWindow::suspends(
 		&mut conn,
@@ -213,13 +213,57 @@ pub async fn get(
 		)
 		.await?
 		.is_none();
+
 	Ok(Json(GroupDetail {
 		group,
-		servers,
+		applications,
+		machines,
 		maintained,
 		maintenance_settling,
 		billing_labels,
 	}))
+}
+
+/// A group's whole membership, in the shape the group tree renders it: every
+/// live application in the group, decorated with its status and display host,
+/// and every machine in it.
+///
+/// Both detail pages end with the same tree the group page shows, so all three
+/// read the membership from here rather than each assembling its own.
+// spec: FLT
+pub async fn tree_members(
+	conn: &mut database::diesel_async::AsyncPgConnection,
+	group: &ServerGroup,
+) -> Result<(Vec<super::applications::ServerInfo>, Vec<GroupMachine>)> {
+	let members = group.list_servers(conn).await?;
+	let group_name = group.name.clone();
+	let mut applications: Vec<super::applications::ServerInfo> = members
+		.into_iter()
+		.map(|s| {
+			let mut info = super::applications::server_to_info(s);
+			info.group_name = Some(group_name.clone());
+			info
+		})
+		.collect();
+	applications.sort_by(|a, b| {
+		a.name
+			.as_deref()
+			.unwrap_or("")
+			.cmp(b.name.as_deref().unwrap_or(""))
+	});
+	super::applications::decorate_with_status(conn, &mut applications).await?;
+	super::applications::fill_display_hosts(conn, &mut applications).await?;
+
+	let machines = database::machines::Machine::list_for_group(conn, group.id)
+		.await?
+		.into_iter()
+		.map(|m| GroupMachine {
+			id: m.id,
+			name: m.name,
+		})
+		.collect();
+
+	Ok((applications, machines))
 }
 
 /// Request to create a new server group.
@@ -328,7 +372,7 @@ pub async fn update(
 ///
 /// Soft-deletes the group: it disappears from live listings but is kept and
 /// can be restored later. Requires the caller to be on the admin allow-list.
-/// Responds 409 if the group still has live member servers; move or archive
+/// Responds 409 if the group still has live member applications; move or archive
 /// those first.
 #[utoipa::path(
 	post,

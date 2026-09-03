@@ -1,19 +1,26 @@
 import { expect, test } from "./test-fixtures";
-import { resetSeededTables, seedServer, seedServerGroup, seedVersion } from "./seed";
+import {
+	resetSeededTables,
+	seedApplicationReport,
+	seedDevice,
+	seedServer,
+	seedServerGroup,
+	seedVersion,
+} from "./seed";
 
 test.describe("servers list page", () => {
 	test.beforeEach(async ({ sql }) => {
 		await resetSeededTables(sql);
 	});
 
-	test("renders the groups/ungrouped tabs and the seeded group row", async ({
+	test("renders the fleet tabs and the seeded group row", async ({
 		page,
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "cluster-uno" });
 		await seedServer(sql, {
 			name: "in-group",
-			kind: "central",
+			type: "tamanu-central",
 			groupId: group.id,
 		});
 
@@ -22,40 +29,19 @@ test.describe("servers list page", () => {
 		await expect(
 			page.getByRole("tab", { name: "Groups" }),
 		).toHaveAttribute("aria-selected", "true");
-		await expect(
-			page.getByRole("tab", { name: "Ungrouped" }),
-		).toBeVisible();
+		await expect(page.getByRole("tab", { name: "Archived" })).toBeVisible();
+		await expect(page.getByRole("tab", { name: "Figures" })).toBeVisible();
+
+		// The fleet is browsed by group, and every machine is in one, so there
+		// is no ungrouped listing to offer.
+		// spec: FLT
+		await expect(page.getByRole("tab", { name: "Ungrouped" })).toHaveCount(0);
+		await expect(page.getByRole("tab")).toHaveCount(3);
 
 		// The group's name shows as a link to its detail page.
 		await expect(
 			page.getByRole("link", { name: group.name }),
 		).toHaveAttribute("href", `/groups/${group.id}`);
-	});
-
-	test("ungrouped tab switches the URL and lists servers without a group", async ({
-		page,
-		sql,
-	}) => {
-		const group = await seedServerGroup(sql, { name: "the-group" });
-		const grouped = await seedServer(sql, {
-			name: "is-grouped",
-			groupId: group.id,
-		});
-		const orphan = await seedServer(sql, {
-			name: "no-group",
-			groupId: null,
-		});
-
-		await page.goto("/servers");
-		await page.getByRole("tab", { name: "Ungrouped" }).click();
-		await expect(page).toHaveURL(/\/servers\/ungrouped$/);
-
-		await expect(
-			page.getByRole("link", { name: new RegExp(orphan.name) }),
-		).toBeVisible();
-		await expect(
-			page.getByRole("link", { name: new RegExp(grouped.name) }),
-		).not.toBeVisible();
 	});
 });
 
@@ -69,7 +55,7 @@ test.describe("server detail page", () => {
 		const group = await seedServerGroup(sql, { name: "host-group" });
 		const server = await seedServer(sql, {
 			name: "detail-target",
-			kind: "central",
+			type: "tamanu-central",
 			groupId: group.id,
 		});
 
@@ -110,7 +96,7 @@ test.describe("server edit page", () => {
 	}) => {
 		const server = await seedServer(sql, {
 			name: "edit-target",
-			kind: "central",
+			type: "tamanu-central",
 		});
 
 		await page.goto(`/servers/${server.id}/edit`);
@@ -142,10 +128,24 @@ test.describe("server edit page", () => {
 		await page.waitForURL(`**/servers/${server.id}`);
 
 		const rows = await sql.query<{ name: string }>(
-			"SELECT name FROM servers WHERE id = $1",
+			"SELECT name FROM applications WHERE id = $1",
 			[server.id],
 		);
 		expect(rows[0]!.name).toBe("edit-save-renamed");
+	});
+
+	// The identity belongs to the box, so it is offered on the machine's form
+	// and nowhere else. An application editing it would be editing the box's.
+	test("offers no identity field", async ({ page, sql }) => {
+		const device = await seedDevice(sql);
+		const server = await seedServer(sql, {
+			name: "edit-no-identity",
+			deviceId: device.id,
+		});
+
+		await page.goto(`/servers/${server.id}/edit`);
+		await expect(page.getByLabel(/^Name(\s*\*)?$/i)).toHaveValue(server.name);
+		await expect(page.getByLabel(/device/i)).toHaveCount(0);
 	});
 });
 
@@ -159,12 +159,12 @@ test.describe("archived view", () => {
 		sql,
 	}) => {
 		const group = await seedServerGroup(sql, { name: "arch-group" });
-		const server = await seedServer(sql, { name: "arch-server", kind: "central" });
+		const server = await seedServer(sql, { name: "arch-server", type: "tamanu-central" });
 		// Archive both directly (the UI paths are covered elsewhere).
 		await sql.query("UPDATE server_groups SET deleted_at = now() WHERE id = $1", [
 			group.id,
 		]);
-		await sql.query("UPDATE servers SET deleted_at = now() WHERE id = $1", [
+		await sql.query("UPDATE applications SET deleted_at = now() WHERE id = $1", [
 			server.id,
 		]);
 
@@ -204,8 +204,8 @@ test.describe("archived view", () => {
 	}) => {
 		const group = await seedServerGroup(sql, { name: "gone-grp" });
 		// No statuses seeded → both servers are "gone".
-		await seedServer(sql, { name: "gone-1", kind: "central", groupId: group.id });
-		await seedServer(sql, { name: "gone-2", kind: "facility", groupId: group.id });
+		await seedServer(sql, { name: "gone-1", type: "tamanu-central", groupId: group.id });
+		await seedServer(sql, { name: "gone-2", type: "tamanu-facility", groupId: group.id });
 		page.on("dialog", (d) => d.accept());
 
 		await page.goto(`/groups/${group.id}`);
@@ -218,6 +218,43 @@ test.describe("archived view", () => {
 		await expect(page.getByRole("link", { name: "gone-grp" })).toBeVisible();
 		await expect(page.getByText(/gone-1/)).toBeVisible();
 		await expect(page.getByText(/gone-2/)).toBeVisible();
+	});
+
+	test("a group whose servers reported long ago still archives", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "quiet-grp" });
+		const one = await seedServer(sql, {
+			name: "quiet-1",
+			type: "tamanu-central",
+			groupId: group.id,
+		});
+		const two = await seedServer(sql, {
+			name: "quiet-2",
+			type: "tamanu-facility",
+			groupId: group.id,
+		});
+		// Both reported months ago and nothing since, so both are unreachable
+		// rather than never heard from. Archiving is still the right call: the
+		// button asks whether every member has gone quiet, not what colour its
+		// dot is.
+		for (const s of [one, two]) {
+			await seedApplicationReport(sql, {
+				applicationId: s.id,
+				reportedAt: "NOW() - INTERVAL '90 days'",
+			});
+		}
+		page.on("dialog", (d) => d.accept());
+
+		await page.goto(`/groups/${group.id}`);
+		await page.getByRole("button", { name: "Archive" }).click();
+		await expect(page).toHaveURL(/\/servers$/);
+
+		await page.goto("/servers/archived");
+		await expect(page.getByRole("link", { name: "quiet-grp" })).toBeVisible();
+		await expect(page.getByText(/quiet-1/)).toBeVisible();
+		await expect(page.getByText(/quiet-2/)).toBeVisible();
 	});
 });
 
@@ -235,23 +272,42 @@ test.describe("server create → setup → archive flow", () => {
 		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
 		const group = await seedServerGroup(sql, { name: "flow-group" });
 
-		// Create — the in-group route pre-selects the group, so we only set the
-		// (required) name. Default kind is facility, so there's a single "Name"
-		// field (no "Name in Tamanu Mobile app").
-		await page.goto(`/groups/${group.id}/servers/new`);
-		await page.getByLabel(/^Name(\s*\*)?$/i).fill("flow-server");
-		await page.getByRole("button", { name: "Create server" }).click();
+		// Create the box — the in-group route pre-selects the group, so we only
+		// set the (required) name. Nothing here names an application: what runs
+		// on the box arrives by report.
+		await page.goto(`/groups/${group.id}/machines/new`);
+		await page.getByLabel(/^Name(\s*\*)?$/i).fill("flow-machine");
+		await page.getByRole("button", { name: "Create machine" }).click();
 
-		// Lands on the new server's detail page.
-		await expect(page).toHaveURL(/\/servers\/[0-9a-f-]{36}$/);
+		// Lands on the new box's own page.
+		await expect(page).toHaveURL(/\/machines\/[0-9a-f-]{36}$/);
+
+		// Setup — enrolment admits the box, so an unenrolled machine auto-mints
+		// a ticket and shows the bestool register command for the operator to
+		// run. No application is involved: nothing runs here until the enrolled
+		// agent reports it.
+		await expect(page.getByText(/hasn't checked in yet/i)).toBeVisible();
+		await expect(page.getByText(/bestool canopy register/)).toBeVisible();
+		await expect(
+			page.getByRole("heading", { name: "Set up this machine" }),
+		).toBeVisible();
+
+		// The workload on it is reported, not entered, so seed one and carry on
+		// through its lifecycle.
+		const server = await seedServer(sql, {
+			name: "flow-server",
+			groupId: group.id,
+		});
+		await page.goto(`/servers/${server.id}`);
 		await expect(
 			page.getByRole("heading", { level: 1, name: /flow-server/ }),
 		).toBeVisible();
 
-		// Setup — an unregistered server auto-mints an enrollment ticket, showing
-		// the bestool register command for the operator to run.
-		await expect(page.getByText(/hasn't checked in yet/i)).toBeVisible();
-		await expect(page.getByText(/bestool canopy register/)).toBeVisible();
+		// An application never mints a ticket. It points at its box instead.
+		await expect(page.getByText(/bestool canopy register/)).toHaveCount(0);
+		await page.getByRole("link", { name: "Enrol its machine" }).click();
+		await expect(page).toHaveURL(/\/machines\/[0-9a-f-]{36}$/);
+		await page.goBack();
 
 		// Archive — confirm the dialog; since the server is in a group, it
 		// redirects to that group's page (not the servers list).

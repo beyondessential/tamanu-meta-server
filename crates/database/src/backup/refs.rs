@@ -29,33 +29,33 @@ pub use crate::statuses::CANOPY_SOURCE;
 // --- per-server (obey the is_monitored gate via NewEvent::save) ---
 
 /// A prior successful backup exists but none recent (success older than 2×
-/// the expected interval). Server-scoped, `Warning`.
+/// the expected interval). Application-scoped, `Warning`.
 pub const STALENESS: &str = "backup-staleness";
 
 /// No successful backup ever, and the server has been expected long enough
 /// (past the `max(min_first_seen, schedule_created)` anchor + grace).
-/// Server-scoped, `Warning`.
+/// Application-scoped, `Warning`.
 pub const NEVER: &str = "backup-never";
 
 /// A fresh repo snapshot exists for the server's source but no recent run was
-/// reported — the *reporting* path is broken, not the backup. Server-scoped,
+/// reported — the *reporting* path is broken, not the backup. Application-scoped,
 /// `Warning` (non-paging on its own).
 pub const RECONCILE_REPORT_GAP: &str = "backup-reconcile-report-gap";
 
 /// A device reported a snapshot size that disagrees with the size the same
 /// snapshot occupies in the repo (compared only when both are known and
-/// non-zero). Server-scoped, `Warning` (non-paging on its own).
+/// non-zero). Application-scoped, `Warning` (non-paging on its own).
 pub const RECONCILE_SIZE_MISMATCH: &str = "backup-reconcile-size-mismatch";
 
 /// A run reported a snapshot id the group's repository does not hold — the
 /// device claimed a snapshot that isn't there, so either the report was false
-/// or the upload didn't persist. Server-scoped, `Warning`. Detecting it takes
+/// or the upload didn't persist. Application-scoped, `Warning`. Detecting it takes
 /// the group's repo inventory, but the finding is about the one server whose
 /// report didn't hold up, so it is filed against that server.
 pub const RECONCILE_MISSING: &str = "backup-reconcile-missing";
 
 /// The repository holds no snapshot for a server's source as new as the run it
-/// reported. Server-scoped, and registered at a `Passed` ceiling: recorded and
+/// reported. Application-scoped, and registered at a `Passed` ceiling: recorded and
 /// visible, never alerting. It compares timestamps across two independent
 /// cadences and so means "something looks off", not "a backup is missing" —
 /// [`RECONCILE_MISSING`] is the one that establishes that.
@@ -105,7 +105,7 @@ pub const PREFLIGHT_ASSUME: &str = "preflight-assume";
 pub const PREFLIGHT_OBJECT_LOCK: &str = "preflight-object-lock";
 
 /// A restore replica reported unhealthy, or has gone past its overdue bound.
-/// Server-scoped, `Warning`. One check per server: each of its replicas is an
+/// Application-scoped, `Warning`. One check per server: each of its replicas is an
 /// instance carrying its own `type`, `intent`, and replica name in the detail,
 /// so an operator configures restore-verification once rather than once per
 /// `(type, intent)` pair. Filed only by `crate::restore::sweep_restore_checks`.
@@ -113,12 +113,12 @@ pub const RESTORE_VERIFICATION: &str = "restore-verification";
 
 /// A candidate version's migrations failed against a replica of a server's
 /// data, or have not been tried within the replica's overdue bound.
-/// Server-scoped, `Warning`, one check per server with its replicas as
+/// Application-scoped, `Warning`, one check per server with its replicas as
 /// instances.
 pub const MIGRATION_TEST: &str = "migration-test";
 
 /// The masking manifest for a redacting replica did not fully apply.
-/// Server-scoped, `Warning`, does not escalate. One check per server with its
+/// Application-scoped, `Warning`, does not escalate. One check per server with its
 /// redacting replicas as instances.
 pub const REDACTION: &str = "redaction";
 

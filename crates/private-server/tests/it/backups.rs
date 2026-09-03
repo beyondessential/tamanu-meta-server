@@ -379,18 +379,18 @@ async fn probe_reports_state_and_already_configured() {
 #[tokio::test(flavor = "multi_thread")]
 async fn request_now_upserts_and_cancel_deletes() {
 	commons_tests::server::run(async |mut conn, _public, private| {
-		// Server in a group so we can read the pending request back via stats.
+		// Application in a group so we can read the pending request back via stats.
 		let group_id = seed_group(&mut conn).await;
-		let server_id = Uuid::new_v4();
+		let machine_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind, group_id) VALUES \
-				('{server_id}', 'https://e.test', 'central', '{group_id}');"
+			"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{machine_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{machine_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{machine_id}');"
 		))
 		.await
 		.expect("seed server");
 
 		let req = serde_json::json!({
-			"server_id": server_id,
+			"machine_id": machine_id,
 			"type": "tamanu-postgres",
 			"purpose": "backup",
 		});
@@ -442,15 +442,15 @@ async fn request_now_upserts_and_cancel_deletes() {
 async fn allow_disallow_restore_window_round_trip() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;
-		let server_id = Uuid::new_v4();
+		let machine_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind, group_id) VALUES \
-				('{server_id}', 'https://e.test', 'central', '{group_id}');"
+			"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{machine_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{machine_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{machine_id}');"
 		))
 		.await
 		.expect("seed server");
 
-		let args = serde_json::json!({ "server_id": server_id });
+		let args = serde_json::json!({ "machine_id": machine_id });
 
 		// Initially closed: no window, and stats lists no open windows.
 		let win = private
@@ -487,7 +487,7 @@ async fn allow_disallow_restore_window_round_trip() {
 			.cloned()
 			.unwrap();
 		assert_eq!(windows.len(), 1, "one open window");
-		assert_eq!(windows[0]["server_id"], serde_json::json!(server_id));
+		assert_eq!(windows[0]["machine_id"], serde_json::json!(machine_id));
 
 		// Disallow → closed again, and dropped from stats.
 		private
@@ -601,16 +601,16 @@ async fn stats_includes_runs_and_pending_requests() {
 		let group_id = seed_group(&mut conn).await;
 		let device_id = Uuid::new_v4();
 		let consumer_id = Uuid::new_v4();
-		let server_id = Uuid::new_v4();
+		let machine_id = Uuid::new_v4();
 		let run_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'server');
-			 INSERT INTO servers (id, host, kind, group_id, device_id) VALUES \
-				('{server_id}', 'https://e.test', 'central', '{group_id}', '{device_id}');
+			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'machine');
+			 WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ('{machine_id}', '{group_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{machine_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{machine_id}');
 			 INSERT INTO backup_repo_stats (group_id, snapshot_count, source_count, logical_bytes, physical_bytes, bucket_bytes, bucket_bytes_observed_at) \
 				VALUES ('{group_id}', 12, 3, 1000, 800, 2000, now() - interval '1 day');
-			 INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, bytes_uploaded) \
-				VALUES ('{run_id}', '{device_id}', '{group_id}', '{server_id}', 'tamanu-postgres', 'backup', 'success', 500);
+			 INSERT INTO backup_runs (id, device_id, group_id, machine_id, type, purpose, outcome, bytes_uploaded) \
+				VALUES ('{run_id}', '{device_id}', '{group_id}', '{machine_id}', 'tamanu-postgres', 'backup', 'success', 500);
 			 -- The issuance that started the backup 5 minutes before it reported, so
 			 -- the run carries a Canopy-measured duration of ~300s.
 			 INSERT INTO backup_credential_issuances \
@@ -630,10 +630,10 @@ async fn stats_includes_runs_and_pending_requests() {
 				(device_id, group_id, type, issued_at, expires_at, purpose, sts_assumed_role, bucket, prefix) \
 				VALUES ('{consumer_id}', '{group_id}', 'tamanu-postgres', now() - interval '30 seconds', \
 					now() + interval '3570 seconds', 'restore', 'arn:test', 'b', '');
-			 INSERT INTO backup_requests (server_id, type, purpose) VALUES \
-				('{server_id}', 'tamanu-postgres', 'backup');
-			 INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES \
-				('{server_id}', 'tamanu-postgres', true);"
+			 INSERT INTO backup_requests (machine_id, type, purpose) VALUES \
+				('{machine_id}', 'tamanu-postgres', 'backup');
+			 INSERT INTO machine_backup_capabilities (machine_id, type, enabled) VALUES \
+				('{machine_id}', 'tamanu-postgres', true);"
 		))
 		.await
 		.expect("seed stats");
@@ -676,7 +676,7 @@ async fn stats_includes_runs_and_pending_requests() {
 		// The member's declared capabilities ride along so the "back up now"
 		// panel knows which types to offer per server.
 		assert_eq!(body["capabilities"].as_array().unwrap().len(), 1);
-		assert_eq!(body["capabilities"][0]["server_id"], server_id.to_string());
+		assert_eq!(body["capabilities"][0]["machine_id"], machine_id.to_string());
 		assert_eq!(body["capabilities"][0]["type"], "tamanu-postgres");
 		assert_eq!(body["capabilities"][0]["enabled"], true);
 	})
@@ -688,7 +688,7 @@ async fn stats_restore_run_resolves_snapshot_size_from_the_producing_backup() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;
 		let device_id = Uuid::new_v4();
-		let server_id = Uuid::new_v4();
+		let machine_id = Uuid::new_v4();
 		let backup_run_id = Uuid::new_v4();
 		let restore_run_id = Uuid::new_v4();
 		// The backup that produced snapshot snap-1 was sized when it ran; the
@@ -696,16 +696,16 @@ async fn stats_restore_run_resolves_snapshot_size_from_the_producing_backup() {
 		// not swept since it reported). Its snapshot size must resolve from the
 		// producing backup immediately, not wait for the backfill.
 		conn.batch_execute(&format!(
-			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'server');
-			 INSERT INTO servers (id, host, kind, group_id, device_id) VALUES \
-				('{server_id}', 'https://e.test', 'central', '{group_id}', '{device_id}');
-			 INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, \
+			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'machine');
+			 WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ('{machine_id}', '{group_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{machine_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{machine_id}');
+			 INSERT INTO backup_runs (id, device_id, group_id, machine_id, type, purpose, outcome, \
 				bytes_uploaded, snapshot_id, reported_at) \
-				VALUES ('{backup_run_id}', '{device_id}', '{group_id}', '{server_id}', 'tamanu-postgres', \
+				VALUES ('{backup_run_id}', '{device_id}', '{group_id}', '{machine_id}', 'tamanu-postgres', \
 					'backup', 'success', 8192, 'snap-1', now() - interval '1 hour');
-			 INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, \
+			 INSERT INTO backup_runs (id, device_id, group_id, machine_id, type, purpose, outcome, \
 				snapshot_id, s3_received_payload_bytes) \
-				VALUES ('{restore_run_id}', '{device_id}', '{group_id}', '{server_id}', 'tamanu-postgres', \
+				VALUES ('{restore_run_id}', '{device_id}', '{group_id}', '{machine_id}', 'tamanu-postgres', \
 					'restore', 'success', 'snap-1', 4096);"
 		))
 		.await
@@ -743,18 +743,18 @@ async fn group_schedules_reports_next_run_from_last_success_plus_interval() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;
 		let device_id = Uuid::new_v4();
-		let server_id = Uuid::new_v4();
+		let machine_id = Uuid::new_v4();
 		conn.batch_execute(&format!(
-			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'server');
-			 INSERT INTO servers (id, host, kind, group_id, device_id) VALUES \
-				('{server_id}', 'https://e.test', 'central', '{group_id}', '{device_id}');
-			 INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES \
-				('{server_id}', 'tamanu-postgres', true);
+			"INSERT INTO devices (id, role) VALUES ('{device_id}', 'machine');
+			 WITH m AS (INSERT INTO machines (id, group_id, device_id) VALUES ('{machine_id}', '{group_id}', '{device_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{machine_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{machine_id}');
+			 INSERT INTO machine_backup_capabilities (machine_id, type, enabled) VALUES \
+				('{machine_id}', 'tamanu-postgres', true);
 			 -- A 1h scheduled interval and a successful backup at a known time.
 			 INSERT INTO server_group_backup_schedule (group_id, type, expected_interval) VALUES \
 				('{group_id}', 'tamanu-postgres', INTERVAL '3600 seconds');
-			 INSERT INTO backup_runs (id, device_id, group_id, server_id, type, purpose, outcome, reported_at) VALUES \
-				('{}', '{device_id}', '{group_id}', '{server_id}', 'tamanu-postgres', 'backup', 'success', '2026-06-01T00:00:00Z');",
+			 INSERT INTO backup_runs (id, device_id, group_id, machine_id, type, purpose, outcome, reported_at) VALUES \
+				('{}', '{device_id}', '{group_id}', '{machine_id}', 'tamanu-postgres', 'backup', 'success', '2026-06-01T00:00:00Z');",
 			Uuid::new_v4()
 		))
 		.await
@@ -779,14 +779,14 @@ async fn group_schedules_reports_next_run_from_last_success_plus_interval() {
 async fn group_schedules_reports_manual_only_override_as_no_schedule() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;
-		let server_id = Uuid::new_v4();
+		let machine_id = Uuid::new_v4();
 		// An override row with a NULL interval is manual-only, even though
 		// `tamanu-postgres` has a canopy-wide 6h default to inherit from.
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind, group_id) VALUES \
-				('{server_id}', 'https://e.test', 'central', '{group_id}');
-			 INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES \
-				('{server_id}', 'tamanu-postgres', true);
+			"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{machine_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{machine_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{machine_id}');
+			 INSERT INTO machine_backup_capabilities (machine_id, type, enabled) VALUES \
+				('{machine_id}', 'tamanu-postgres', true);
 			 INSERT INTO server_group_backup_schedule (group_id, type, expected_interval) VALUES \
 				('{group_id}', 'tamanu-postgres', NULL);"
 		))
@@ -818,14 +818,14 @@ async fn group_schedules_reports_manual_only_override_as_no_schedule() {
 async fn group_schedules_includes_disabled_declared_types() {
 	commons_tests::server::run(async |mut conn, _public, private| {
 		let group_id = seed_group(&mut conn).await;
-		let server_id = Uuid::new_v4();
+		let machine_id = Uuid::new_v4();
 		// A *declared but disabled* type (manual-only): retention still applies, so
 		// it must surface in schedule/retention as a manual-only entry.
 		conn.batch_execute(&format!(
-			"INSERT INTO servers (id, host, kind, group_id) VALUES \
-				('{server_id}', 'https://e.test', 'central', '{group_id}');
-			 INSERT INTO server_backup_capabilities (server_id, type, enabled) VALUES \
-				('{server_id}', 'files', false);"
+			"WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{machine_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, group_id, machine_id) VALUES \
+				('{machine_id}', 'https://e.test', 'tamanu-central', '{group_id}', '{machine_id}');
+			 INSERT INTO machine_backup_capabilities (machine_id, type, enabled) VALUES \
+				('{machine_id}', 'files', false);"
 		))
 		.await
 		.expect("seed disabled capability");

@@ -47,6 +47,9 @@ import {
 	CHECK_RESULT_INTENT,
 	CHECK_RESULT_ORDER,
 	healthcheckPath,
+	namespaceFromSegment,
+	qualifiedCheckName,
+	sameNamespace,
 	type Ceiling,
 	type CheckPolicyData,
 	type CheckResult,
@@ -189,20 +192,38 @@ function valueToInputText(value: unknown): string {
 // ── Page ──────────────────────────────────────────────────────────────────
 
 export default function HealthcheckSettings() {
-	const { source, checkName } = useParams<{ source: string; checkName: string }>();
-	usePageTitle(checkName ?? "Healthcheck");
+	const { source, namespace: segment, checkName } = useParams<{
+		source: string;
+		namespace: string;
+		checkName: string;
+	}>();
+	const namespace = namespaceFromSegment(segment ?? "-");
+	const title = qualifiedCheckName(namespace ?? undefined, checkName ?? "");
+	usePageTitle(title || "Healthcheck");
 	const isAdmin = useIsAdmin() === true;
 	const list = useApi("healthchecks", "list");
 
-	// A check's identity is the (source, check) pair, so the editor targets
-	// exactly one catalog entry — never an aggregate across same-named checks
-	// from different sources, which are unrelated checks.
+	// A check's identity is the (source, namespace, check) triple, so the
+	// editor targets exactly one catalog entry — never an aggregate across
+	// same-named checks from different sources or different application
+	// types, which are unrelated checks.
 	const row: CheckPolicyData | null =
-		list.status === "ok"
+		list.status === "ok" && namespace
 			? (list.data.find(
-					(r) => r.source === source && r.check_name === checkName,
+					(r) =>
+						r.source === source &&
+						r.check_name === checkName &&
+						sameNamespace(r.namespace, namespace),
 				) ?? null)
 			: null;
+
+	if (!namespace) {
+		return (
+			<Alert severity="error">
+				<code>{segment}</code> is not a check namespace.
+			</Alert>
+		);
+	}
 
 	return (
 		<Stack spacing={2}>
@@ -211,7 +232,7 @@ export default function HealthcheckSettings() {
 					<RouterLink to="/settings/healthchecks">← All healthchecks</RouterLink>
 				</Typography>
 				<Typography variant="h6" component="h2" sx={{ fontFamily: "monospace" }}>
-					{checkName}
+					{title}
 				</Typography>
 				<Typography
 					variant="body2"
@@ -228,14 +249,14 @@ export default function HealthcheckSettings() {
 				<Alert severity="error">{list.error.message}</Alert>
 			) : row === null ? (
 				<Alert severity="warning">
-					No healthcheck <code>{checkName}</code> reported by{" "}
+					No healthcheck <code>{title}</code> reported by{" "}
 					<code>{source}</code> in the catalog yet — it'll appear here once that
 					source reports it.
 				</Alert>
 			) : (
 				<Stack spacing={2}>
 					<Typography variant="body2">
-						<RouterLink to={healthcheckPath(row.source, row.check_name)}>
+						<RouterLink to={healthcheckPath(row.source, row.namespace, row.check_name)}>
 							See servers currently flagging this check
 						</RouterLink>
 					</Typography>
@@ -295,6 +316,7 @@ function CeilingCard({
 		try {
 			await update.call({
 				source: row.source,
+				namespace: row.namespace,
 				check_name: row.check_name,
 				ceiling,
 				escalates: effectiveEscalates,
@@ -398,6 +420,7 @@ function NotesCard({
 		try {
 			await update.call({
 				source: row.source,
+				namespace: row.namespace,
 				check_name: row.check_name,
 				ceiling: row.ceiling,
 				escalates: row.escalates,
@@ -476,6 +499,7 @@ function DocumentationCard({
 		try {
 			await update.call({
 				source: row.source,
+				namespace: row.namespace,
 				check_name: row.check_name,
 				documentation: draft.trim() === "" ? null : draft,
 			});
@@ -575,6 +599,7 @@ function RulesCard({
 	// Fetched lazily; the dialog handles a null sample gracefully.
 	const sampleResp = useApi("healthchecks", "sample", {
 		source: row.source,
+		namespace: row.namespace,
 		check_name: row.check_name,
 	});
 	const sample: HealthcheckSample | null =
@@ -595,6 +620,7 @@ function RulesCard({
 		try {
 			await update.call({
 				source: row.source,
+				namespace: row.namespace,
 				check_name: row.check_name,
 				rules: serializeRules(branches),
 			});
@@ -606,7 +632,12 @@ function RulesCard({
 	const deleteAll = async () => {
 		setBranches([]);
 		try {
-			await update.call({ source: row.source, check_name: row.check_name, rules: null });
+			await update.call({
+				source: row.source,
+				namespace: row.namespace,
+				check_name: row.check_name,
+				rules: null,
+			});
 			onChanged();
 		} catch {
 			setBranches(parsed.branches);

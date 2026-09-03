@@ -8,6 +8,86 @@ diesel::table! {
 }
 
 diesel::table! {
+	application_certificates (id) {
+		id -> Uuid,
+		application_id -> Uuid,
+		name -> Text,
+		key_fingerprint -> Text,
+		csr -> Bytea,
+		state -> Text,
+		chain -> Nullable<Text>,
+		not_after -> Nullable<Timestamptz>,
+		issued_at -> Nullable<Timestamptz>,
+		renewing -> Bool,
+		attempts -> Int4,
+		next_attempt_at -> Timestamptz,
+		last_error -> Nullable<Text>,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+		profile -> Nullable<Text>,
+		renew_after -> Nullable<Timestamptz>,
+		revoked_at -> Nullable<Timestamptz>,
+		revoked_by -> Nullable<Text>,
+		revocation_reason -> Nullable<Text>,
+	}
+}
+
+diesel::table! {
+	application_names (id) {
+		id -> Uuid,
+		application_id -> Uuid,
+		name -> Text,
+		addresses -> Array<Nullable<Inet>>,
+		published_addresses -> Array<Nullable<Inet>>,
+		published_at -> Nullable<Timestamptz>,
+		last_error -> Nullable<Text>,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
+	application_reported_detail (application_id, source) {
+		application_id -> Uuid,
+		source -> Text,
+		extra -> Jsonb,
+		version -> Nullable<Text>,
+		reported_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
+	applications (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+		name -> Nullable<Text>,
+		rank -> Nullable<Text>,
+		host -> Nullable<Text>,
+		cloud -> Nullable<Bool>,
+		geolocation -> Nullable<Array<Nullable<Float8>>>,
+		alert_when_down_for -> Interval,
+		group_id -> Nullable<Uuid>,
+		notes -> Text,
+		tags -> Jsonb,
+		public_name -> Nullable<Text>,
+		is_monitored -> Bool,
+		deleted_at -> Nullable<Timestamptz>,
+		registered_at -> Nullable<Timestamptz>,
+		may_manage_dns -> Bool,
+		may_manage_tls -> Bool,
+		certificate_profile -> Nullable<Text>,
+		name_management_paused_at -> Nullable<Timestamptz>,
+		name_management_paused_by -> Nullable<Text>,
+		name_management_pause_reason -> Nullable<Text>,
+		machine_id -> Uuid,
+		#[sql_name = "type"]
+		type_ -> Text,
+		reported_key -> Nullable<Text>,
+	}
+}
+
+diesel::table! {
 	artifacts (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -41,14 +121,6 @@ diesel::table! {
 }
 
 diesel::table! {
-	backup_recovery_verifications (id) {
-		id -> Int8,
-		verified_at -> Timestamptz,
-		recipients -> Jsonb,
-	}
-}
-
-diesel::table! {
 	backup_maintenance_runs (id) {
 		id -> Int8,
 		group_id -> Uuid,
@@ -58,6 +130,14 @@ diesel::table! {
 		outcome -> Nullable<Text>,
 		error -> Nullable<Text>,
 		bytes_reclaimed -> Nullable<Int8>,
+	}
+}
+
+diesel::table! {
+	backup_recovery_verifications (id) {
+		id -> Int8,
+		verified_at -> Timestamptz,
+		recipients -> Jsonb,
 	}
 }
 
@@ -75,7 +155,7 @@ diesel::table! {
 	backup_repo_snapshots (group_id, source) {
 		group_id -> Uuid,
 		source -> Text,
-		server_id -> Nullable<Uuid>,
+		machine_id -> Nullable<Uuid>,
 		#[sql_name = "type"]
 		type_ -> Nullable<Text>,
 		latest_snapshot_at -> Nullable<Timestamptz>,
@@ -97,8 +177,8 @@ diesel::table! {
 }
 
 diesel::table! {
-	backup_requests (server_id, type_, purpose) {
-		server_id -> Uuid,
+	backup_requests (machine_id, type_, purpose) {
+		machine_id -> Uuid,
 		#[sql_name = "type"]
 		type_ -> Text,
 		purpose -> Text,
@@ -113,7 +193,7 @@ diesel::table! {
 		replica_id -> Nullable<Uuid>,
 		consumer_device_id -> Uuid,
 		group_id -> Uuid,
-		server_id -> Nullable<Uuid>,
+		machine_id -> Nullable<Uuid>,
 		#[sql_name = "type"]
 		type_ -> Text,
 		intent -> Text,
@@ -145,7 +225,7 @@ diesel::table! {
 		run_id -> Uuid,
 		device_id -> Uuid,
 		group_id -> Uuid,
-		server_id -> Nullable<Uuid>,
+		machine_id -> Nullable<Uuid>,
 		#[sql_name = "type"]
 		type_ -> Text,
 		purpose -> Text,
@@ -174,7 +254,7 @@ diesel::table! {
 		id -> Uuid,
 		device_id -> Uuid,
 		group_id -> Uuid,
-		server_id -> Nullable<Uuid>,
+		machine_id -> Nullable<Uuid>,
 		#[sql_name = "type"]
 		type_ -> Text,
 		purpose -> Text,
@@ -217,7 +297,7 @@ diesel::table! {
 }
 
 diesel::table! {
-	check_policies (source, check_name) {
+	check_policies (id) {
 		source -> Text,
 		check_name -> Text,
 		ceiling -> Text,
@@ -232,6 +312,9 @@ diesel::table! {
 		last_seen -> Nullable<Timestamptz>,
 		decommissioned_at -> Nullable<Timestamptz>,
 		decommissioned_by -> Nullable<Text>,
+		subject -> Nullable<Text>,
+		application_type -> Nullable<Text>,
+		id -> Uuid,
 	}
 }
 
@@ -298,15 +381,6 @@ diesel::table! {
 }
 
 diesel::table! {
-	device_server_associations (device_id, server_id) {
-		device_id -> Uuid,
-		server_id -> Uuid,
-		first_seen -> Timestamptz,
-		last_seen -> Timestamptz,
-	}
-}
-
-diesel::table! {
 	devices (id) {
 		id -> Uuid,
 		created_at -> Timestamptz,
@@ -338,8 +412,8 @@ diesel::table! {
 }
 
 diesel::table! {
-	incident_reeval_queue (server_id) {
-		server_id -> Uuid,
+	incident_reeval_queue (application_id) {
+		application_id -> Uuid,
 		enqueued_at -> Timestamptz,
 	}
 }
@@ -375,7 +449,7 @@ diesel::table! {
 		id -> Uuid,
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
-		server_id -> Nullable<Uuid>,
+		application_id -> Nullable<Uuid>,
 		device_id -> Nullable<Uuid>,
 		source -> Text,
 		#[sql_name = "ref"]
@@ -397,13 +471,78 @@ diesel::table! {
 		degraded_since -> Nullable<Timestamptz>,
 		last_degraded_at -> Nullable<Timestamptz>,
 		escalates -> Bool,
+		machine_id -> Nullable<Uuid>,
+	}
+}
+
+diesel::table! {
+	machine_backup_capabilities (machine_id, type_) {
+		machine_id -> Uuid,
+		#[sql_name = "type"]
+		type_ -> Text,
+		enabled -> Bool,
+		registered_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
+	machine_enrollment_challenges (id) {
+		id -> Uuid,
+		machine_id -> Uuid,
+		token_hash -> Bytea,
+		public_key -> Bytea,
+		nonce -> Bytea,
+		created_at -> Timestamptz,
+		expires_at -> Timestamptz,
+		used_at -> Nullable<Timestamptz>,
+	}
+}
+
+diesel::table! {
+	machine_enrollment_tokens (id) {
+		id -> Uuid,
+		machine_id -> Uuid,
+		token_hash -> Bytea,
+		created_at -> Timestamptz,
+		expires_at -> Timestamptz,
+		consumed_at -> Nullable<Timestamptz>,
+	}
+}
+
+diesel::table! {
+	machine_reported_detail (machine_id, source) {
+		machine_id -> Uuid,
+		source -> Text,
+		extra -> Jsonb,
+		reported_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
+	machines (id) {
+		id -> Uuid,
+		created_at -> Timestamptz,
+		updated_at -> Timestamptz,
+		name -> Nullable<Text>,
+		group_id -> Nullable<Uuid>,
+		device_id -> Nullable<Uuid>,
+		cloud -> Nullable<Bool>,
+		geolocation -> Nullable<Array<Nullable<Float8>>>,
+		alert_when_down_for -> Interval,
+		is_monitored -> Bool,
+		notes -> Text,
+		tags -> Jsonb,
+		deleted_at -> Nullable<Timestamptz>,
+		registered_at -> Nullable<Timestamptz>,
+		restore_allowed_until -> Nullable<Timestamptz>,
+		restore_allowed_by -> Nullable<Text>,
 	}
 }
 
 diesel::table! {
 	maintenance_windows (id) {
 		id -> Uuid,
-		server_id -> Nullable<Uuid>,
+		machine_id -> Nullable<Uuid>,
 		server_group_id -> Nullable<Uuid>,
 		expected_end -> Timestamptz,
 		note -> Nullable<Text>,
@@ -440,6 +579,7 @@ diesel::table! {
 		failed_migration -> Nullable<Text>,
 		data_bytes_before -> Int8,
 		data_bytes_after -> Int8,
+		application_id -> Nullable<Uuid>,
 	}
 }
 
@@ -476,7 +616,7 @@ diesel::table! {
 		id -> Uuid,
 		consumer_device_id -> Uuid,
 		group_id -> Uuid,
-		server_id -> Nullable<Uuid>,
+		machine_id -> Nullable<Uuid>,
 		#[sql_name = "type"]
 		type_ -> Text,
 		intent -> Text,
@@ -498,45 +638,14 @@ diesel::table! {
 		updated_at -> Timestamptz,
 		source -> Text,
 		check_name -> Text,
-		server_id -> Nullable<Uuid>,
+		application_id -> Nullable<Uuid>,
 		server_group_id -> Nullable<Uuid>,
 		ceiling -> Nullable<Text>,
 		rules -> Nullable<Jsonb>,
 		created_by -> Nullable<Text>,
-	}
-}
-
-diesel::table! {
-	server_backup_capabilities (server_id, type_) {
-		server_id -> Uuid,
-		#[sql_name = "type"]
-		type_ -> Text,
-		enabled -> Bool,
-		registered_at -> Timestamptz,
-	}
-}
-
-diesel::table! {
-	server_enrollment_challenges (id) {
-		id -> Uuid,
-		server_id -> Uuid,
-		token_hash -> Bytea,
-		public_key -> Bytea,
-		nonce -> Bytea,
-		created_at -> Timestamptz,
-		expires_at -> Timestamptz,
-		used_at -> Nullable<Timestamptz>,
-	}
-}
-
-diesel::table! {
-	server_enrollment_tokens (id) {
-		id -> Uuid,
-		server_id -> Uuid,
-		token_hash -> Bytea,
-		created_at -> Timestamptz,
-		expires_at -> Timestamptz,
-		consumed_at -> Nullable<Timestamptz>,
+		machine_id -> Nullable<Uuid>,
+		subject -> Nullable<Text>,
+		application_type -> Nullable<Text>,
 	}
 }
 
@@ -546,7 +655,6 @@ diesel::table! {
 		bucket -> Text,
 		prefix -> Text,
 		target_role_arn -> Text,
-		maintenance_role_arn -> Text,
 		region -> Nullable<Text>,
 		repo_password_ref -> Text,
 		status -> Text,
@@ -554,6 +662,7 @@ diesel::table! {
 		updated_at -> Timestamptz,
 		mode -> Text,
 		last_init_error -> Nullable<Text>,
+		maintenance_role_arn -> Text,
 		placement -> Text,
 		force_full_maintenance_at -> Nullable<Timestamptz>,
 		force_full_maintenance_by -> Nullable<Text>,
@@ -572,31 +681,6 @@ diesel::table! {
 		created_at -> Timestamptz,
 		updated_at -> Timestamptz,
 		allow_below_floor -> Bool,
-	}
-}
-
-diesel::table! {
-	server_certificates (id) {
-		id -> Uuid,
-		server_id -> Uuid,
-		name -> Text,
-		key_fingerprint -> Text,
-		csr -> Bytea,
-		state -> Text,
-		chain -> Nullable<Text>,
-		not_after -> Nullable<Timestamptz>,
-		issued_at -> Nullable<Timestamptz>,
-		renewing -> Bool,
-		attempts -> Int4,
-		next_attempt_at -> Timestamptz,
-		last_error -> Nullable<Text>,
-		created_at -> Timestamptz,
-		updated_at -> Timestamptz,
-		profile -> Nullable<Text>,
-		renew_after -> Nullable<Timestamptz>,
-		revoked_at -> Nullable<Timestamptz>,
-		revoked_by -> Nullable<Text>,
-		revocation_reason -> Nullable<Text>,
 	}
 }
 
@@ -620,66 +704,10 @@ diesel::table! {
 		notes -> Text,
 		tags -> Jsonb,
 		slack_open_delay -> Interval,
-		version_server_id -> Nullable<Uuid>,
+		version_application_id -> Nullable<Uuid>,
 		effective_version -> Nullable<Text>,
 		deleted_at -> Nullable<Timestamptz>,
 		slack_close_delay -> Interval,
-	}
-}
-
-diesel::table! {
-	server_reported_detail (server_id, source) {
-		server_id -> Uuid,
-		source -> Text,
-		extra -> Jsonb,
-		version -> Nullable<Text>,
-		reported_at -> Timestamptz,
-	}
-}
-
-diesel::table! {
-	server_names (id) {
-		id -> Uuid,
-		server_id -> Uuid,
-		name -> Text,
-		addresses -> Array<Nullable<Inet>>,
-		published_addresses -> Array<Nullable<Inet>>,
-		published_at -> Nullable<Timestamptz>,
-		last_error -> Nullable<Text>,
-		created_at -> Timestamptz,
-		updated_at -> Timestamptz,
-	}
-}
-
-diesel::table! {
-	servers (id) {
-		id -> Uuid,
-		created_at -> Timestamptz,
-		updated_at -> Timestamptz,
-		name -> Nullable<Text>,
-		rank -> Nullable<Text>,
-		host -> Nullable<Text>,
-		device_id -> Nullable<Uuid>,
-		kind -> Text,
-		cloud -> Nullable<Bool>,
-		geolocation -> Nullable<Array<Nullable<Float8>>>,
-		alert_when_down_for -> Interval,
-		group_id -> Nullable<Uuid>,
-		notes -> Text,
-		tags -> Jsonb,
-		public_name -> Nullable<Text>,
-		is_monitored -> Bool,
-		deleted_at -> Nullable<Timestamptz>,
-		registered_at -> Nullable<Timestamptz>,
-		restore_allowed_until -> Nullable<Timestamptz>,
-		restore_allowed_by -> Nullable<Text>,
-		product -> Text,
-		may_manage_dns -> Bool,
-		may_manage_tls -> Bool,
-		certificate_profile -> Nullable<Text>,
-		name_management_paused_at -> Nullable<Timestamptz>,
-		name_management_paused_by -> Nullable<Text>,
-		name_management_pause_reason -> Nullable<Text>,
 	}
 }
 
@@ -702,15 +730,6 @@ diesel::table! {
 }
 
 diesel::table! {
-	sql_playground_history (id) {
-		id -> Uuid,
-		query -> Text,
-		tailscale_user -> Text,
-		created_at -> Timestamptz,
-	}
-}
-
-diesel::table! {
 	source_policies (source) {
 		source -> Text,
 		reachability -> Text,
@@ -721,16 +740,26 @@ diesel::table! {
 }
 
 diesel::table! {
+	sql_playground_history (id) {
+		id -> Uuid,
+		query -> Text,
+		tailscale_user -> Text,
+		created_at -> Timestamptz,
+	}
+}
+
+diesel::table! {
 	statuses (id, created_at) {
 		id -> Uuid,
 		created_at -> Timestamptz,
-		server_id -> Uuid,
+		server_id -> Nullable<Uuid>,
 		version -> Nullable<Text>,
 		extra -> Jsonb,
 		device_id -> Nullable<Uuid>,
 		healthy -> Bool,
 		health -> Jsonb,
 		source -> Text,
+		machine_id -> Nullable<Uuid>,
 	}
 }
 
@@ -780,7 +809,7 @@ diesel::table! {
 		max_major -> Nullable<Int4>,
 		max_minor -> Nullable<Int4>,
 		max_patch -> Nullable<Int4>,
-		server_id -> Nullable<Uuid>,
+		application_id -> Nullable<Uuid>,
 	}
 }
 
@@ -798,78 +827,87 @@ diesel::table! {
 	}
 }
 
+diesel::joinable!(application_certificates -> applications (application_id));
+diesel::joinable!(application_names -> applications (application_id));
+diesel::joinable!(application_reported_detail -> applications (application_id));
+diesel::joinable!(applications -> machines (machine_id));
 diesel::joinable!(artifacts -> devices (device_id));
 diesel::joinable!(artifacts -> versions (version_id));
 diesel::joinable!(backup_credential_issuances -> devices (device_id));
 diesel::joinable!(backup_credential_issuances -> server_groups (group_id));
 diesel::joinable!(backup_maintenance_runs -> server_groups (group_id));
 diesel::joinable!(backup_repo_observed_snapshots -> server_groups (group_id));
+diesel::joinable!(backup_repo_snapshots -> machines (machine_id));
 diesel::joinable!(backup_repo_snapshots -> server_groups (group_id));
-diesel::joinable!(backup_repo_snapshots -> servers (server_id));
 diesel::joinable!(backup_repo_stats -> server_groups (group_id));
-diesel::joinable!(backup_requests -> servers (server_id));
+diesel::joinable!(backup_requests -> machines (machine_id));
 diesel::joinable!(backup_restore_checks -> devices (consumer_device_id));
+diesel::joinable!(backup_restore_checks -> machines (machine_id));
 diesel::joinable!(backup_restore_checks -> restore_replicas (replica_id));
 diesel::joinable!(backup_restore_checks -> server_groups (group_id));
-diesel::joinable!(backup_restore_checks -> servers (server_id));
 diesel::joinable!(backup_run_progress -> devices (device_id));
+diesel::joinable!(backup_run_progress -> machines (machine_id));
 diesel::joinable!(backup_run_progress -> server_groups (group_id));
-diesel::joinable!(backup_run_progress -> servers (server_id));
 diesel::joinable!(backup_runs -> devices (device_id));
+diesel::joinable!(backup_runs -> machines (machine_id));
 diesel::joinable!(backup_runs -> server_groups (group_id));
-diesel::joinable!(backup_runs -> servers (server_id));
+diesel::joinable!(check_stability -> issues (issue_id));
+diesel::joinable!(compromised_keys -> application_certificates (certificate_id));
 diesel::joinable!(device_connections -> devices (device_id));
 diesel::joinable!(device_keys -> devices (device_id));
-diesel::joinable!(device_server_associations -> devices (device_id));
-diesel::joinable!(device_server_associations -> servers (server_id));
-diesel::joinable!(check_stability -> issues (issue_id));
 diesel::joinable!(incident_issues -> incidents (incident_id));
 diesel::joinable!(incident_issues -> issues (issue_id));
 diesel::joinable!(incident_notes -> incidents (incident_id));
-diesel::joinable!(incident_reeval_queue -> servers (server_id));
+diesel::joinable!(incident_reeval_queue -> applications (application_id));
 diesel::joinable!(incidents -> server_groups (server_group_id));
 diesel::joinable!(issue_notes -> issues (issue_id));
+diesel::joinable!(issues -> applications (application_id));
 diesel::joinable!(issues -> devices (device_id));
+diesel::joinable!(issues -> machines (machine_id));
 diesel::joinable!(issues -> server_groups (server_group_id));
+diesel::joinable!(machine_backup_capabilities -> machines (machine_id));
+diesel::joinable!(machine_enrollment_challenges -> machines (machine_id));
+diesel::joinable!(machine_enrollment_tokens -> machines (machine_id));
+diesel::joinable!(machine_reported_detail -> machines (machine_id));
+diesel::joinable!(machines -> devices (device_id));
+diesel::joinable!(machines -> server_groups (group_id));
+diesel::joinable!(maintenance_windows -> machines (machine_id));
+diesel::joinable!(maintenance_windows -> server_groups (server_group_id));
+diesel::joinable!(migration_tests -> applications (application_id));
 diesel::joinable!(migration_tests -> backup_restore_checks (check_id));
 diesel::joinable!(migration_tests -> versions (target_version_id));
 diesel::joinable!(migration_timings -> migration_tests (check_id));
-diesel::joinable!(issues -> servers (server_id));
 diesel::joinable!(restore_consumer_capabilities -> devices (consumer_device_id));
 diesel::joinable!(restore_replicas -> devices (consumer_device_id));
+diesel::joinable!(restore_replicas -> machines (machine_id));
 diesel::joinable!(restore_replicas -> server_groups (group_id));
-diesel::joinable!(restore_replicas -> servers (server_id));
-diesel::joinable!(maintenance_windows -> server_groups (server_group_id));
-diesel::joinable!(maintenance_windows -> servers (server_id));
+diesel::joinable!(scoped_check_policies -> applications (application_id));
+diesel::joinable!(scoped_check_policies -> machines (machine_id));
 diesel::joinable!(scoped_check_policies -> server_groups (server_group_id));
-diesel::joinable!(scoped_check_policies -> servers (server_id));
-diesel::joinable!(server_backup_capabilities -> servers (server_id));
-diesel::joinable!(server_enrollment_challenges -> servers (server_id));
-diesel::joinable!(server_enrollment_tokens -> servers (server_id));
 diesel::joinable!(server_group_backup_config -> server_groups (group_id));
 diesel::joinable!(server_group_backup_schedule -> server_groups (group_id));
-diesel::joinable!(compromised_keys -> server_certificates (certificate_id));
-diesel::joinable!(server_certificates -> servers (server_id));
 diesel::joinable!(server_group_domains -> server_groups (group_id));
-diesel::joinable!(server_names -> servers (server_id));
-diesel::joinable!(server_reported_detail -> servers (server_id));
-diesel::joinable!(servers -> devices (device_id));
 diesel::joinable!(slack_outbox -> incident_notes (note_id));
 diesel::joinable!(slack_outbox -> incidents (incident_id));
 diesel::joinable!(slack_outbox -> issues (issue_id));
+diesel::joinable!(statuses -> applications (server_id));
 diesel::joinable!(statuses -> devices (device_id));
-diesel::joinable!(statuses -> servers (server_id));
+diesel::joinable!(statuses -> machines (machine_id));
 diesel::joinable!(upgrade_plans -> server_groups (group_id));
 diesel::joinable!(upgrade_plans -> versions (target_version_id));
-diesel::joinable!(version_known_issues -> servers (server_id));
+diesel::joinable!(version_known_issues -> applications (application_id));
 diesel::joinable!(versions -> devices (device_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
 	admins,
+	application_certificates,
+	application_names,
+	application_reported_detail,
+	applications,
 	artifacts,
 	backup_credential_issuances,
-	backup_recovery_verifications,
 	backup_maintenance_runs,
+	backup_recovery_verifications,
 	backup_repo_observed_snapshots,
 	backup_repo_snapshots,
 	backup_repo_stats,
@@ -886,7 +924,6 @@ diesel::allow_tables_to_appear_in_same_query!(
 	compromised_keys,
 	device_connections,
 	device_keys,
-	device_server_associations,
 	devices,
 	incident_issues,
 	incident_notes,
@@ -894,6 +931,11 @@ diesel::allow_tables_to_appear_in_same_query!(
 	incidents,
 	issue_notes,
 	issues,
+	machine_backup_capabilities,
+	machine_enrollment_challenges,
+	machine_enrollment_tokens,
+	machine_reported_detail,
+	machines,
 	maintenance_windows,
 	mcp_tokens,
 	migration_tests,
@@ -902,18 +944,12 @@ diesel::allow_tables_to_appear_in_same_query!(
 	restore_consumer_capabilities,
 	restore_replicas,
 	scoped_check_policies,
-	server_backup_capabilities,
-	server_enrollment_challenges,
-	server_enrollment_tokens,
 	server_group_backup_config,
-	server_certificates,
 	server_group_backup_schedule,
 	server_group_domains,
 	server_groups,
-	server_names,
-	server_reported_detail,
-	servers,
 	slack_outbox,
+	source_policies,
 	sql_playground_history,
 	statuses,
 	tailscale_users,

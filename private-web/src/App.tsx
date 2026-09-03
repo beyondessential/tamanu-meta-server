@@ -12,7 +12,7 @@ import { NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { useApi } from "./api";
 import AdminProbeBanner from "./components/AdminProbeBanner";
 import { AdminProvider } from "./hooks/useIsAdmin";
-import { ProductsProvider } from "./hooks/useProducts";
+import { ApplicationTypesProvider } from "./hooks/useApplicationTypes";
 import { useReloadInterval } from "./hooks/useReloadInterval";
 import Admins from "./routes/Admins";
 import BackupConfig from "./routes/BackupConfig";
@@ -35,6 +35,7 @@ import GroupDetail from "./routes/GroupDetail";
 import GroupEdit from "./routes/GroupEdit";
 import GroupsList from "./routes/GroupsList";
 import CheckDetail from "./routes/CheckDetail";
+import CheckRedirect from "./routes/CheckRedirect";
 import HealthcheckSettings from "./routes/HealthcheckSettings";
 import Healthchecks from "./routes/Healthchecks";
 import SourcesSettings from "./routes/SourcesSettings";
@@ -42,7 +43,8 @@ import IncidentDetail from "./routes/IncidentDetail";
 import Incidents from "./routes/Incidents";
 import Maintenance from "./routes/Maintenance";
 import Status from "./routes/Status";
-import ServerCreate from "./routes/ServerCreate";
+import MachineCreate from "./routes/MachineCreate";
+import MachineDetail from "./routes/MachineDetail";
 import ServerDetail from "./routes/ServerDetail";
 import ServerEdit from "./routes/ServerEdit";
 import ArchivedList from "./routes/ArchivedList";
@@ -50,7 +52,6 @@ import FleetFigures from "./routes/FleetFigures";
 import Servers from "./routes/Servers";
 import Settings from "./routes/Settings";
 import Sql from "./routes/Sql";
-import UngroupedServersList from "./routes/UngroupedServersList";
 import VersionDetail from "./routes/VersionDetail";
 import Upgrades from "./routes/Upgrades";
 import Versions from "./routes/Versions";
@@ -106,7 +107,7 @@ export default function App() {
 
 	return (
 		<AdminProvider>
-		<ProductsProvider>
+		<ApplicationTypesProvider>
 		<Box>
 			<AppBar position="static" color="default" elevation={1}>
 				<Toolbar variant="dense" sx={{ gap: 2 }}>
@@ -129,7 +130,7 @@ export default function App() {
 							aria-hidden
 							sx={{ height: 24, width: 24 }}
 						/>
-						<Typography variant="h6" component="h1">
+						<Typography variant="h6" component="span">
 							Canopy
 						</Typography>
 					</Box>
@@ -196,22 +197,29 @@ export default function App() {
 					<Route path="/alerts" element={<SelfAlerts />} />
 					<Route path="/incidents" element={<Incidents />} />
 					<Route path="/incidents/:id" element={<IncidentDetail />} />
-					<Route path="/healthchecks/:source/:check" element={<CheckDetail />} />
+					<Route
+						path="/healthchecks/:source/:namespace/:check"
+						element={<CheckDetail />}
+					/>
+					<Route
+						path="/healthchecks/:source/:check"
+						element={<CheckRedirect settings={false} />}
+					/>
 					<Route path="/upgrades" element={<Upgrades />} />
 					<Route path="/maintenance" element={<Maintenance />} />
 					<Route path="/versions" element={<Versions />} />
 					<Route path="/versions/:version" element={<VersionDetail />} />
 					<Route path="/servers" element={<Servers />}>
 						<Route index element={<GroupsList />} />
-						<Route path="ungrouped" element={<UngroupedServersList />} />
 						<Route path="archived" element={<ArchivedList />} />
 						<Route path="figures" element={<FleetFigures />} />
 					</Route>
 					<Route
-						path="/groups/:id/servers/new"
-						element={<ServerCreate />}
+						path="/groups/:id/machines/new"
+						element={<MachineCreate />}
 					/>
 					<Route path="/servers/:id" element={<ServerDetail />} />
+					<Route path="/machines/:id" element={<MachineDetail />} />
 					<Route path="/servers/:id/edit" element={<ServerEdit />} />
 					<Route path="/groups/new" element={<GroupEdit />} />
 					<Route path="/groups/:id" element={<GroupDetail />} />
@@ -238,8 +246,12 @@ export default function App() {
 							element={<SourcesSettings />}
 						/>
 						<Route
-							path="healthchecks/:source/:checkName"
+							path="healthchecks/:source/:namespace/:checkName"
 							element={<HealthcheckSettings />}
+						/>
+						<Route
+							path="healthchecks/:source/:check"
+							element={<CheckRedirect settings />}
 						/>
 						<Route path="restore-consumers" element={<RestoreConsumers />} />
 						<Route path="mcp-tokens" element={<McpTokens />} />
@@ -268,7 +280,7 @@ export default function App() {
 				</Routes>
 			</Container>
 		</Box>
-		</ProductsProvider>
+		</ApplicationTypesProvider>
 		</AdminProvider>
 	);
 }

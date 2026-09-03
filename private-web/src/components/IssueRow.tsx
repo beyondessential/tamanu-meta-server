@@ -95,9 +95,9 @@ export default function IssueRow({
 				headerSnapshotOpen={headerSnapshotOpen}
 				toggleHeaderSnapshot={() => setHeaderSnapshotOpen((v) => !v)}
 			/>
-			{headerSnapshotOpen && issue.server_id && (
+			{headerSnapshotOpen && issue.application_id && (
 				<StatusSnapshotPanel
-					serverId={issue.server_id}
+					serverId={issue.application_id}
 					at={issue.last_seen}
 					onClose={() => setHeaderSnapshotOpen(false)}
 				/>
@@ -150,10 +150,10 @@ function Header({
 					<ExpandMoreIcon fontSize="small" />
 				)}
 			</IconButton>
-			{issue.server_id != null ? (
+			{issue.application_id != null ? (
 				<MuiLink
 					component={RouterLink}
-					to={`/servers/${issue.server_id}`}
+					to={`/servers/${issue.application_id}`}
 					underline="hover"
 					color="text.primary"
 					sx={{ fontWeight: 500, flexShrink: 0 }}
@@ -167,8 +167,20 @@ function Header({
 						}
 					/>
 				</MuiLink>
+			) : issue.machine_id != null ? (
+				// A machine's issue: the box's own, so it names the box rather
+				// than reading as group-wide. No link yet — the machine detail
+				// page arrives with the frontend step.
+				// spec: CHK#reachability
+				<Box sx={{ fontWeight: 500, flexShrink: 0 }}>
+					<ServerNameWithGroup
+						groupName={issue.server_group_name}
+						groupId={issue.server_group_id ?? undefined}
+						serverName={issue.machine_name?.trim() || "(machine)"}
+					/>
+				</Box>
 			) : (
-				// Group-scoped issue (no server): link the group instead of a
+				// Group-scoped issue (no target): link the group instead of a
 				// bogus `/servers/null`. Falls back to a plain label when the
 				// issue carries no group name.
 				<Box sx={{ fontWeight: 500, flexShrink: 0 }}>
@@ -230,6 +242,7 @@ function Header({
 				<Box sx={{ flexShrink: 0 }}>
 					<CheckDocButton
 						source={issue.source}
+						namespace={issue.namespace ?? undefined}
 						check={headerCheckName(issue) as string}
 					/>
 				</Box>
@@ -351,6 +364,7 @@ function IssueActions({
 	const snooze = useApiAction("issues", "snooze");
 	const unsnooze = useApiAction("issues", "unsnooze");
 	const silenceServer = useApiAction("silenced_refs", "silence_server");
+	const silenceMachine = useApiAction("silenced_refs", "silence_machine");
 	const silenceGroup = useApiAction("silenced_refs", "silence_group");
 
 	const [resolveOpen, setResolveOpen] = useState(false);
@@ -374,6 +388,7 @@ function IssueActions({
 		?? snooze.error
 		?? unsnooze.error
 		?? silenceServer.error
+		?? silenceMachine.error
 		?? silenceGroup.error;
 
 	return (
@@ -517,7 +532,7 @@ function IssueActions({
 						join incidents. Manage and un-silence from the detail page.
 					</Typography>
 					<Stack direction="row" spacing={1}>
-						{issue.server_id != null && (
+						{issue.application_id != null && (
 							<Button
 								variant="outlined"
 								size="small"
@@ -525,7 +540,7 @@ function IssueActions({
 								onClick={() =>
 									wrap(() =>
 										silenceServer.call({
-											server_id: issue.server_id,
+											server_id: issue.application_id,
 											source: issue.source,
 											ref: issue.ref,
 										}),
@@ -533,6 +548,24 @@ function IssueActions({
 								}
 							>
 								For this server
+							</Button>
+						)}
+						{issue.machine_id != null && (
+							<Button
+								variant="outlined"
+								size="small"
+								startIcon={<NotificationsOffOutlinedIcon />}
+								onClick={() =>
+									wrap(() =>
+										silenceMachine.call({
+											machine_id: issue.machine_id,
+											source: issue.source,
+											ref: issue.ref,
+										}),
+									).then(() => setSilenceOpen(false))
+								}
+							>
+								For this machine
 							</Button>
 						)}
 						{issue.server_group_id && (
@@ -546,6 +579,11 @@ function IssueActions({
 											server_group_id: issue.server_group_id!,
 											source: issue.source,
 											ref: issue.ref,
+											// A group spans several application types,
+											// so the silence names the one this issue's
+											// check belongs to.
+											application_type:
+												issue.namespace?.application_type ?? null,
 										}),
 									).then(() => setSilenceOpen(false))
 								}
@@ -593,7 +631,10 @@ function IssueMeta({ issue }: { issue: IssueData }) {
 				sx={{ fontFamily: "monospace", fontSize: "0.9em" }}
 			>
 				{checkName ? (
-					<MuiLink component={RouterLink} to={healthcheckPath(issue.source, checkName)}>
+					<MuiLink
+						component={RouterLink}
+						to={healthcheckPath(issue.source, issue.namespace ?? undefined, checkName)}
+					>
 						{issue.ref}
 					</MuiLink>
 				) : (

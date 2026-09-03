@@ -29,6 +29,7 @@ import {
 	CEILINGS,
 	HEALTHCHECK_SOURCES_PATH,
 	healthcheckSettingsPath,
+	namespaceSegment,
 	type Ceiling,
 	type CheckPolicyData,
 } from "../types";
@@ -151,7 +152,7 @@ export default function Healthchecks() {
 							<TableBody>
 								{visible.map((row) => (
 									<HealthcheckRow
-										key={`${row.source}:${row.check_name}`}
+										key={`${row.source}:${namespaceSegment(row.namespace)}:${row.check_name}`}
 										row={row}
 										canEdit={isAdmin}
 										onChanged={() => list.reload()}
@@ -218,7 +219,7 @@ function HealthcheckRow({
 	const doDecommission = async () => {
 		if (
 			!window.confirm(
-				`Decommission ${row.source}/${row.check_name}? Its states across all ` +
+				`Decommission ${row.source}/${row.qualified_name}? Its states across all ` +
 					`servers will be resolved and it will stop counting toward health ` +
 					`and staleness. It returns pending review if reported again.`,
 			)
@@ -227,6 +228,7 @@ function HealthcheckRow({
 		try {
 			await decommission.call({
 				source: row.source,
+				namespace: row.namespace,
 				check_name: row.check_name,
 			});
 			onChanged();
@@ -239,6 +241,7 @@ function HealthcheckRow({
 		try {
 			await update.call({
 				source: row.source,
+				namespace: row.namespace,
 				check_name: row.check_name,
 				ceiling: localCeiling,
 				escalates: localEscalates,
@@ -259,15 +262,15 @@ function HealthcheckRow({
 		<TableRow hover>
 			<TableCell sx={{ fontFamily: "monospace" }}>{row.source}</TableCell>
 			<TableCell sx={{ fontFamily: "monospace" }}>
-				<RouterLink to={healthcheckSettingsPath(row.source, row.check_name)}>
-					{row.check_name}
+				<RouterLink to={healthcheckSettingsPath(row.source, row.namespace, row.check_name)}>
+					{row.qualified_name}
 				</RouterLink>
 			</TableCell>
 			<TableCell>
 				{hasRules ? (
 					<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
 						<Typography variant="body2">
-							<RouterLink to={healthcheckSettingsPath(row.source, row.check_name)}>
+							<RouterLink to={healthcheckSettingsPath(row.source, row.namespace, row.check_name)}>
 								Custom rules ({row.rule_count})
 							</RouterLink>
 						</Typography>
@@ -325,7 +328,7 @@ function HealthcheckRow({
 						)}
 						<Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
 							·{" "}
-							<RouterLink to={healthcheckSettingsPath(row.source, row.check_name)}>
+							<RouterLink to={healthcheckSettingsPath(row.source, row.namespace, row.check_name)}>
 								Add custom rules
 							</RouterLink>
 						</Typography>

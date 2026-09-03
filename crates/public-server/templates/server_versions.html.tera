@@ -223,7 +223,7 @@
 			<p>Latest version: <a class="version-text" href="/versions/{{ latest_version }}">{{ latest_version }}</a>
 		</div>
 		<div class="servers-grid">
-			{% for server in servers %}
+			{% for server in applications %}
 			<div class="server-card">
 				<a href="{{ server.host }}" class="host-link" target="_blank" title="{{ server.host }}">🌐</a>
 				<h3 class="server-name">{{ server.name }}</h3>

@@ -19,7 +19,7 @@ struct RowId {
 
 async fn insert_server(conn: &mut AsyncPgConnection) -> Uuid {
 	let host = format!("http://test.invalid/{}", Uuid::new_v4());
-	sql_query("INSERT INTO servers (host, kind) VALUES ($1, 'central') RETURNING id")
+	sql_query("WITH m AS (INSERT INTO machines DEFAULT VALUES RETURNING id) INSERT INTO applications (host, type, machine_id) SELECT $1, 'tamanu-central', m.id FROM m RETURNING id")
 		.bind::<sql_types::Text, _>(host)
 		.get_result::<RowId>(conn)
 		.await
@@ -27,14 +27,19 @@ async fn insert_server(conn: &mut AsyncPgConnection) -> Uuid {
 		.id
 }
 
-/// Insert an active issue for `server_id`, with `last_seen` backdated by
+/// Insert an active issue for `application_id`, with `last_seen` backdated by
 /// `age_secs` so the ordering the limit applies to is controllable.
-async fn insert_issue(conn: &mut AsyncPgConnection, server_id: Uuid, r#ref: &str, age_secs: i64) {
+async fn insert_issue(
+	conn: &mut AsyncPgConnection,
+	application_id: Uuid,
+	r#ref: &str,
+	age_secs: i64,
+) {
 	sql_query(
-		"INSERT INTO issues (server_id, source, \"ref\", message, active, last_seen, last_degraded_at) \
+		"INSERT INTO issues (application_id, source, \"ref\", message, active, last_seen, last_degraded_at) \
 		 VALUES ($1, 'test', $2, 'boom', true, NOW() - ($3 || ' seconds')::INTERVAL, NOW())",
 	)
-	.bind::<sql_types::Uuid, _>(server_id)
+	.bind::<sql_types::Uuid, _>(application_id)
 	.bind::<sql_types::Text, _>(r#ref)
 	.bind::<sql_types::Text, _>(age_secs.to_string())
 	.execute(conn)
@@ -58,7 +63,7 @@ async fn the_server_filter_is_applied_before_the_limit() {
 		let found = Issue::list(
 			&mut conn,
 			IssueListFilters {
-				server_id: Some(quiet),
+				application_id: Some(quiet),
 				..Default::default()
 			},
 			5,
@@ -87,7 +92,7 @@ async fn the_server_filter_excludes_other_servers() {
 		let found = Issue::list(
 			&mut conn,
 			IssueListFilters {
-				server_id: Some(a),
+				application_id: Some(a),
 				..Default::default()
 			},
 			100,
@@ -95,7 +100,7 @@ async fn the_server_filter_excludes_other_servers() {
 		.await
 		.expect("list");
 		assert_eq!(found.len(), 1);
-		assert_eq!(found[0].server_id, Some(a));
+		assert_eq!(found[0].application_id, Some(a));
 	})
 	.await;
 }

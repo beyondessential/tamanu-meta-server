@@ -9,21 +9,21 @@ Canopy generates the keypair, records the public key against a new or existing d
 
 ## Why it exists
 
-Some trusted roles are not tied to a server enrolment, and some are operated by hand rather than by an agent on a managed server.
+Some trusted roles are not tied to a machine enrolment, and some are operated by hand rather than by an agent on a managed machine.
 Obtaining a credential for one of those roles otherwise means generating a keypair off-platform and registering its public key by hand.
 Provisioning the credential centrally removes that manual step: Canopy already holds and trusts the public key by the time the operator has the private key.
 
 ## Scope
 
 This spec covers the operator-facing provisioning surface: creating or selecting a device, minting its credential, the one-time delivery of the private key, and the trust and lifecycle rules for provisioned keys.
-It does not cover the server enrolment handshake, which remains the path for agent-managed servers.
+It does not cover the machine enrolment handshake, which is the path for agent-managed machines.
 
 ## Provisioning
 
 Provisioning is available to operators only.
 
 The operator either creates a new device at a chosen role, or provisions an additional credential onto an existing device.
-Any trustable role may be provisioned: administrator, server, releaser, and backup-restore.
+Any trustable role may be provisioned: administrator, machine, releaser, backup-restore, and relay (see [DTR](device-trust.md)).
 
 On provisioning, Canopy generates a fresh device keypair and records its public key as an active key on the device.
 The key material and its representation match what device authentication accepts over mutual TLS: an elliptic-curve P-256 keypair, whose public half is stored as the subject public key info that authentication matches against.

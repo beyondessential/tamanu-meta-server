@@ -39,11 +39,17 @@ test.describe("group detail page", () => {
 		await expect(
 			page.getByText("billing.deployment=watched-cluster"),
 		).toBeVisible();
+		// Each member sits under its own box in the tree. Matched by href:
+		// `seedServer` names the box after the workload, so a name matches both
+		// links.
 		await expect(
-			page.getByRole("link", { name: new RegExp(memberA.name) }),
+			page.locator(`a[href="/servers/${memberA.id}"]`),
 		).toBeVisible();
 		await expect(
-			page.getByRole("link", { name: new RegExp(memberB.name) }),
+			page.locator(`a[href="/servers/${memberB.id}"]`),
+		).toBeVisible();
+		await expect(
+			page.locator(`a[href="/machines/${memberA.machineId}"]`),
 		).toBeVisible();
 	});
 
@@ -53,7 +59,7 @@ test.describe("group detail page", () => {
 		await expect(
 			page.getByRole("heading", { name: group.name, level: 1 }),
 		).toBeVisible();
-		await expect(page.getByText(/no servers in this group/i)).toBeVisible();
+		await expect(page.getByText(/nothing in this group yet/i)).toBeVisible();
 	});
 });
 

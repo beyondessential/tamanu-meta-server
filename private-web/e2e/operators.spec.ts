@@ -1,6 +1,9 @@
+import { randomUUID } from "node:crypto";
+
 import { expect, test } from "./test-fixtures";
 import {
 	resetSeededTables,
+	seedMachineReport,
 	seedServer,
 	seedServerGroup,
 	seedStatus,
@@ -67,7 +70,7 @@ test.describe("operator presence", () => {
 
 		// Deduped headline: alice's two sessions count once.
 		await expect(
-			page.getByText("2 operators in the server right now"),
+			page.getByText("2 operators in the machine right now"),
 		).toBeVisible();
 
 		// The check row formats sessions instead of dumping `users` JSON:
@@ -99,7 +102,7 @@ test.describe("operator presence", () => {
 		await expect(page.getByText("bob@example.com")).toBeVisible();
 		// …but a 45-minutes-old push can't claim "right now".
 		await expect(
-			page.getByText(/operators? in the server right now/),
+			page.getByText(/operators? in the machine right now/),
 		).not.toBeVisible();
 	});
 
@@ -126,7 +129,7 @@ test.describe("operator presence", () => {
 			.locator(".MuiCard-root");
 		await expect(card.getByText("2", { exact: true })).toBeVisible();
 
-		// Tooltip names who's on which server.
+		// Tooltip names who's on which box.
 		await card.getByText("2", { exact: true }).hover();
 		await expect(
 			page.getByText("alice@example.com · occupied-member"),
@@ -177,7 +180,7 @@ test.describe("operator presence", () => {
 
 		await expect(
 			page.getByRole("heading", {
-				name: "2 operators in the servers right now",
+				name: "2 operators in the group right now",
 			}),
 		).toBeVisible();
 		await expect(
@@ -185,6 +188,144 @@ test.describe("operator presence", () => {
 		).toBeVisible();
 		await expect(page.getByText(/on member-one, member-two/)).toBeVisible();
 		await expect(page.getByText(/on member-two, member-one/)).not.toBeVisible();
+	});
+
+	/// A person is logged in to a box, not to the software on it. Two workloads
+	/// on one box is one place someone is, so the count and the tooltip both
+	/// speak of the box.
+	///
+	/// spec: FLT
+	test("a person on two workloads of one box counts once, and names the box", async ({
+		page,
+		sql,
+	}) => {
+		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
+		const group = await seedServerGroup(sql, { name: "one-box-cluster" });
+		const central = await seedServer(sql, {
+			name: "central-on-box",
+			rank: "production",
+			groupId: group.id,
+		});
+		// A second workload sharing the first's box, which is what makes this
+		// one place rather than two.
+		const facilityId = randomUUID();
+		await sql.query(
+			`INSERT INTO applications (id, name, host, type, rank, group_id, machine_id)
+			 VALUES ($1, 'facility-on-box', 'https://f.e2e.invalid',
+			         'tamanu-facility', 'production', $2, $3)`,
+			[facilityId, group.id, central.machineId],
+		);
+		// The same person is reported logged in by both workloads, because
+		// both are reading the same box's sessions.
+		await seedStatus(sql, {
+			serverId: central.id,
+			health: EXTERNAL_USERS_HEALTH,
+		});
+		await seedStatus(sql, {
+			serverId: facilityId,
+			health: EXTERNAL_USERS_HEALTH,
+		});
+
+		await page.goto("/status");
+
+		const card = page
+			.locator(`a[href="/groups/${group.id}"]`)
+			.locator(".MuiCard-root");
+		// Two people on one box, not four sessions and not two boxes' worth.
+		await expect(card.getByText("2", { exact: true })).toBeVisible();
+
+		await card.getByText("2", { exact: true }).hover();
+		const tooltip = page.getByRole("tooltip");
+		// The box is named once. The workloads on it are not what someone is
+		// logged in to, so neither appears.
+		await expect(
+			tooltip.getByText("alice@example.com · central-on-box", { exact: true }),
+		).toBeVisible();
+		await expect(tooltip.getByText(/facility-on-box/)).toHaveCount(0);
+	});
+
+	/// Across boxes the tooltip names each of them, so "where is this person"
+	/// is answered by the tooltip alone.
+	///
+	/// spec: FLT
+	test("the tooltip names every box a person is on", async ({ page, sql }) => {
+		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
+		const group = await seedServerGroup(sql, { name: "two-box-cluster" });
+		const one = await seedServer(sql, {
+			name: "box-one",
+			rank: "production",
+			groupId: group.id,
+		});
+		const two = await seedServer(sql, {
+			name: "box-two",
+			rank: "production",
+			groupId: group.id,
+		});
+		await seedStatus(sql, { serverId: one.id, health: EXTERNAL_USERS_HEALTH });
+		await seedStatus(sql, {
+			serverId: two.id,
+			health: [
+				{
+					check: "external_users",
+					result: "passed",
+					count: 1,
+					users: [
+						{
+							name: "ubuntu",
+							line: "pts/0",
+							source: "100.64.0.1",
+							tailscale: "alice@example.com",
+							connected_since: "2026-06-01T05:00:00Z",
+						},
+					],
+				},
+			],
+		});
+
+		await page.goto("/status");
+
+		const card = page
+			.locator(`a[href="/groups/${group.id}"]`)
+			.locator(".MuiCard-root");
+		await expect(card.getByText("2", { exact: true })).toBeVisible();
+
+		await card.getByText("2", { exact: true }).hover();
+		const tooltip = page.getByRole("tooltip");
+		await expect(
+			tooltip.getByText("alice@example.com · box-one, box-two", {
+				exact: true,
+			}),
+		).toBeVisible();
+		// Bob is only on the one box, and reads as such.
+		await expect(
+			tooltip.getByText("bob@example.com · box-one", { exact: true }),
+		).toBeVisible();
+	});
+
+	/// A session is on the box, so the box's own page is where "who is here"
+	/// is answered, whichever workload happened to report it.
+	///
+	/// spec: FLT
+	test("machine detail shows the people on the box", async ({ page, sql }) => {
+		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
+		await seedTailscaleUser(sql, {
+			login: "alice@example.com",
+			name: "Alice Example",
+		});
+		const server = await seedServer(sql, { name: "occupied-box" });
+		// The box is reporting, so "right now" holds.
+		await seedMachineReport(sql, { machineId: server.machineId });
+		await seedStatus(sql, {
+			serverId: server.id,
+			health: EXTERNAL_USERS_HEALTH,
+		});
+
+		await page.goto(`/machines/${server.machineId}`);
+
+		await expect(
+			page.getByText("2 operators in the machine right now"),
+		).toBeVisible();
+		await expect(page.getByText("bob@example.com")).toBeVisible();
 	});
 
 	test("server detail header links to the group page", async ({

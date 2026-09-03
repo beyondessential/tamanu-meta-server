@@ -8,9 +8,9 @@ use database::pg_duration::PgDuration;
 use database::{
 	BackupConfigStatus, BackupCredentialIssuance, BackupMaintenanceRunFilters, BackupPurpose,
 	BackupRepoSnapshot, BackupRepoStats, BackupRequest, BackupRun, BackupRunFilters,
-	BackupRunProgress, BackupType, BackupTypeDefault, MaintenanceKind, MaintenanceOutcomeFilter,
-	NewBackupCredentialIssuance, NewBackupRun, NewBackupRunProgress, NewBackupTypeDefault,
-	NewServerGroupBackupConfig, NewServerGroupBackupSchedule, RunOutcome, ServerBackupCapability,
+	BackupRunProgress, BackupType, BackupTypeDefault, MachineBackupCapability, MaintenanceKind,
+	MaintenanceOutcomeFilter, NewBackupCredentialIssuance, NewBackupRun, NewBackupRunProgress,
+	NewBackupTypeDefault, NewServerGroupBackupConfig, NewServerGroupBackupSchedule, RunOutcome,
 	ServerGroupBackupConfig, ServerGroupBackupSchedule, backups::BackupMaintenanceRun,
 };
 use diesel::{sql_query, sql_types};
@@ -35,19 +35,32 @@ async fn insert_group(conn: &mut AsyncPgConnection, name: &str) -> Uuid {
 		.id
 }
 
+/// A box with one workload on it, returning the *machine*: a backup is the
+/// box's, so that is what these tests key on.
+// spec: BAK
 async fn insert_server(conn: &mut AsyncPgConnection, group_id: Uuid) -> Uuid {
-	let host = format!("http://test.invalid/{}", Uuid::new_v4());
-	sql_query("INSERT INTO servers (host, kind, group_id) VALUES ($1, 'central', $2) RETURNING id")
-		.bind::<sql_types::Text, _>(host)
+	let machine = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
 		.bind::<sql_types::Uuid, _>(group_id)
 		.get_result::<RowId>(conn)
 		.await
-		.expect("insert server")
-		.id
+		.expect("insert machine")
+		.id;
+	let host = format!("http://test.invalid/{}", Uuid::new_v4());
+	sql_query(
+		"INSERT INTO applications (host, type, group_id, machine_id) \
+		 VALUES ($1, 'tamanu-central', $2, $3) RETURNING id",
+	)
+	.bind::<sql_types::Text, _>(host)
+	.bind::<sql_types::Uuid, _>(group_id)
+	.bind::<sql_types::Uuid, _>(machine)
+	.execute(conn)
+	.await
+	.expect("insert application");
+	machine
 }
 
 async fn insert_device(conn: &mut AsyncPgConnection) -> Uuid {
-	sql_query("INSERT INTO devices (role) VALUES ('server') RETURNING id")
+	sql_query("INSERT INTO devices (role) VALUES ('machine') RETURNING id")
 		.get_result::<RowId>(conn)
 		.await
 		.expect("insert device")
@@ -170,7 +183,7 @@ async fn type_defaults_retention_must_be_object() {
 async fn hard_deleting_a_group_with_backup_rows_is_blocked() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id).await;
+		let machine_id = insert_server(&mut conn, group_id).await;
 		let device_id = insert_device(&mut conn).await;
 
 		ServerGroupBackupConfig::upsert(&mut conn, new_config(group_id, None))
@@ -182,7 +195,7 @@ async fn hard_deleting_a_group_with_backup_rows_is_blocked() {
 				Uuid::new_v4(),
 				device_id,
 				group_id,
-				Some(server_id),
+				Some(machine_id),
 				BackupPurpose::Backup,
 				RunOutcome::Success,
 			),
@@ -190,7 +203,7 @@ async fn hard_deleting_a_group_with_backup_rows_is_blocked() {
 		.await
 		.unwrap();
 
-		// Groups/servers are archived, never hard-deleted; the FKs are plain
+		// Groups/applications are archived, never hard-deleted; the FKs are plain
 		// references (no cascade), so a hard DELETE is blocked rather than
 		// silently cascading the config/audit away.
 		let res = sql_query("DELETE FROM server_groups WHERE id = $1")
@@ -211,7 +224,7 @@ fn new_run(
 	id: Uuid,
 	device_id: Uuid,
 	group_id: Uuid,
-	server_id: Option<Uuid>,
+	machine_id: Option<Uuid>,
 	purpose: BackupPurpose,
 	outcome: RunOutcome,
 ) -> NewBackupRun {
@@ -219,7 +232,7 @@ fn new_run(
 		id,
 		device_id,
 		group_id,
-		server_id,
+		machine_id,
 		r#type: BackupType::TamanuPostgres,
 		purpose,
 		outcome,
@@ -238,7 +251,7 @@ fn new_run(
 async fn backup_run_client_uuid_and_duplicate_is_conflict() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id).await;
+		let machine_id = insert_server(&mut conn, group_id).await;
 		let device_id = insert_device(&mut conn).await;
 
 		let run_id = Uuid::new_v4();
@@ -248,7 +261,7 @@ async fn backup_run_client_uuid_and_duplicate_is_conflict() {
 				run_id,
 				device_id,
 				group_id,
-				Some(server_id),
+				Some(machine_id),
 				BackupPurpose::Backup,
 				RunOutcome::Success,
 			),
@@ -264,7 +277,7 @@ async fn backup_run_client_uuid_and_duplicate_is_conflict() {
 				run_id,
 				device_id,
 				group_id,
-				Some(server_id),
+				Some(machine_id),
 				BackupPurpose::Backup,
 				RunOutcome::Failure,
 			),
@@ -280,7 +293,7 @@ async fn backup_run_client_uuid_and_duplicate_is_conflict() {
 async fn backfill_snapshot_logical_bytes_writes_once() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id).await;
+		let machine_id = insert_server(&mut conn, group_id).await;
 		let device_id = insert_device(&mut conn).await;
 
 		let id = Uuid::new_v4();
@@ -290,7 +303,7 @@ async fn backfill_snapshot_logical_bytes_writes_once() {
 				id,
 				device_id,
 				group_id,
-				Some(server_id),
+				Some(machine_id),
 				BackupPurpose::Backup,
 				RunOutcome::Success,
 			),
@@ -341,7 +354,7 @@ async fn snapshot_sizes_by_id_resolves_from_producing_backups_only() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;
 		let other_group = insert_group(&mut conn, "other").await;
-		let server_id = insert_server(&mut conn, group_id).await;
+		let machine_id = insert_server(&mut conn, group_id).await;
 		let other_server = insert_server(&mut conn, other_group).await;
 		let device_id = insert_device(&mut conn).await;
 
@@ -353,7 +366,7 @@ async fn snapshot_sizes_by_id_resolves_from_producing_backups_only() {
 				Uuid::new_v4(),
 				device_id,
 				group_id,
-				Some(server_id),
+				Some(machine_id),
 				BackupPurpose::Backup,
 				RunOutcome::Success,
 			),
@@ -369,7 +382,7 @@ async fn snapshot_sizes_by_id_resolves_from_producing_backups_only() {
 					Uuid::new_v4(),
 					device_id,
 					group_id,
-					Some(server_id),
+					Some(machine_id),
 					BackupPurpose::Restore,
 					RunOutcome::Success,
 				)
@@ -416,7 +429,7 @@ async fn snapshot_sizes_by_id_resolves_from_producing_backups_only() {
 async fn latest_sized_lists_only_runs_with_both_sizes() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id).await;
+		let machine_id = insert_server(&mut conn, group_id).await;
 		let device_id = insert_device(&mut conn).await;
 
 		BackupRun::record(
@@ -425,7 +438,7 @@ async fn latest_sized_lists_only_runs_with_both_sizes() {
 				Uuid::new_v4(),
 				device_id,
 				group_id,
-				Some(server_id),
+				Some(machine_id),
 				BackupPurpose::Backup,
 				RunOutcome::Success,
 			),
@@ -434,7 +447,7 @@ async fn latest_sized_lists_only_runs_with_both_sizes() {
 		.expect("record");
 
 		// Reported size present but not yet inspected → not comparable.
-		let map = BackupRun::latest_sized_by_server_type_for_group(&mut conn, group_id)
+		let map = BackupRun::latest_sized_by_machine_type_for_group(&mut conn, group_id)
 			.await
 			.unwrap();
 		assert!(map.is_empty(), "no observed size yet → nothing to compare");
@@ -447,11 +460,11 @@ async fn latest_sized_lists_only_runs_with_both_sizes() {
 		)
 		.await
 		.expect("backfill");
-		let map = BackupRun::latest_sized_by_server_type_for_group(&mut conn, group_id)
+		let map = BackupRun::latest_sized_by_machine_type_for_group(&mut conn, group_id)
 			.await
 			.unwrap();
 		assert_eq!(
-			map.get(&(server_id, BackupType::TamanuPostgres)),
+			map.get(&(machine_id, BackupType::TamanuPostgres)),
 			Some(&(42, 1490)),
 			"reported 42 (new_run), observed 1490",
 		);
@@ -463,7 +476,7 @@ async fn latest_sized_lists_only_runs_with_both_sizes() {
 async fn latest_success_ignores_restore_and_failure() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id).await;
+		let machine_id = insert_server(&mut conn, group_id).await;
 		let device_id = insert_device(&mut conn).await;
 		let pg = BackupType::TamanuPostgres;
 
@@ -475,7 +488,7 @@ async fn latest_success_ignores_restore_and_failure() {
 				good,
 				device_id,
 				group_id,
-				Some(server_id),
+				Some(machine_id),
 				BackupPurpose::Backup,
 				RunOutcome::Success,
 			),
@@ -490,7 +503,7 @@ async fn latest_success_ignores_restore_and_failure() {
 				Uuid::new_v4(),
 				device_id,
 				group_id,
-				Some(server_id),
+				Some(machine_id),
 				BackupPurpose::Restore,
 				RunOutcome::Success,
 			),
@@ -505,7 +518,7 @@ async fn latest_success_ignores_restore_and_failure() {
 				Uuid::new_v4(),
 				device_id,
 				group_id,
-				Some(server_id),
+				Some(machine_id),
 				BackupPurpose::Backup,
 				RunOutcome::Failure,
 			),
@@ -513,7 +526,7 @@ async fn latest_success_ignores_restore_and_failure() {
 		.await
 		.unwrap();
 
-		let latest = BackupRun::latest_success_for_server(&mut conn, server_id, &pg)
+		let latest = BackupRun::latest_success_for_machine(&mut conn, machine_id, &pg)
 			.await
 			.unwrap()
 			.expect("a successful backup exists");
@@ -522,10 +535,10 @@ async fn latest_success_ignores_restore_and_failure() {
 			"latest successful *backup* is the original, not the restore/failure"
 		);
 
-		let map = BackupRun::latest_success_by_server_type_for_group(&mut conn, group_id)
+		let map = BackupRun::latest_success_by_machine_type_for_group(&mut conn, group_id)
 			.await
 			.unwrap();
-		assert_eq!(map.get(&(server_id, pg)).map(|r| r.id), Some(good));
+		assert_eq!(map.get(&(machine_id, pg)).map(|r| r.id), Some(good));
 	})
 	.await;
 }
@@ -535,14 +548,14 @@ async fn s3_traffic_this_month_sums_raw_bytes_within_the_month_window() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;
 		let other_group_id = insert_group(&mut conn, "other").await;
-		let server_id = insert_server(&mut conn, group_id).await;
+		let machine_id = insert_server(&mut conn, group_id).await;
 		let device_id = insert_device(&mut conn).await;
 
 		async fn insert_run_with_s3(
 			conn: &mut AsyncPgConnection,
 			group_id: Uuid,
 			device_id: Uuid,
-			server_id: Uuid,
+			machine_id: Uuid,
 			sent: Option<i64>,
 			received: Option<i64>,
 			age: Option<SignedDuration>,
@@ -554,7 +567,7 @@ async fn s3_traffic_this_month_sums_raw_bytes_within_the_month_window() {
 					id,
 					device_id,
 					group_id,
-					server_id: Some(server_id),
+					machine_id: Some(machine_id),
 					r#type: BackupType::TamanuPostgres,
 					purpose: BackupPurpose::Backup,
 					outcome: RunOutcome::Success,
@@ -589,7 +602,7 @@ async fn s3_traffic_this_month_sums_raw_bytes_within_the_month_window() {
 			&mut conn,
 			group_id,
 			device_id,
-			server_id,
+			machine_id,
 			Some(100),
 			Some(10),
 			None,
@@ -599,7 +612,7 @@ async fn s3_traffic_this_month_sums_raw_bytes_within_the_month_window() {
 			&mut conn,
 			group_id,
 			device_id,
-			server_id,
+			machine_id,
 			Some(200),
 			Some(20),
 			None,
@@ -607,14 +620,14 @@ async fn s3_traffic_this_month_sums_raw_bytes_within_the_month_window() {
 		.await;
 		// A run with no S3 tally at all (e.g. a backup type the proxy didn't
 		// instrument) contributes nothing, not an error.
-		insert_run_with_s3(&mut conn, group_id, device_id, server_id, None, None, None).await;
+		insert_run_with_s3(&mut conn, group_id, device_id, machine_id, None, None, None).await;
 		// A run reported last month is out of the window (40 days always crosses
 		// a calendar-month boundary, regardless of today's date).
 		insert_run_with_s3(
 			&mut conn,
 			group_id,
 			device_id,
-			server_id,
+			machine_id,
 			Some(9_999),
 			Some(9_999),
 			Some(SignedDuration::from_hours(24 * 40)),
@@ -811,11 +824,11 @@ async fn list_filtered_narrows_by_every_field() {
 		.unwrap();
 		assert_eq!(for_a.len(), 2);
 
-		// server_id.
+		// machine_id.
 		let for_server_b = BackupRun::list_filtered(
 			&mut conn,
 			BackupRunFilters {
-				server_id: Some(server_b),
+				machine_id: Some(server_b),
 				..Default::default()
 			},
 			10,
@@ -823,7 +836,7 @@ async fn list_filtered_narrows_by_every_field() {
 		.await
 		.unwrap();
 		assert_eq!(for_server_b.len(), 1);
-		assert_eq!(for_server_b[0].server_id, Some(server_b));
+		assert_eq!(for_server_b[0].machine_id, Some(server_b));
 
 		// type.
 		let files_only = BackupRun::list_filtered(
@@ -1124,9 +1137,9 @@ async fn maintenance_latest_successful_finished_at() {
 async fn repo_snapshot_upsert_in_place() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id).await;
+		let machine_id = insert_server(&mut conn, group_id).await;
 		let pg = BackupType::TamanuPostgres;
-		let source = format!("canopy@{server_id}:/data");
+		let source = format!("canopy@{machine_id}:/data");
 
 		// Fixed microsecond-precision timestamps: Postgres timestamptz truncates
 		// to microseconds, so a nanosecond `Timestamp::now()` wouldn't round-trip
@@ -1136,7 +1149,7 @@ async fn repo_snapshot_upsert_in_place() {
 			&mut conn,
 			group_id,
 			&source,
-			Some(server_id),
+			Some(machine_id),
 			Some(&pg),
 			Some(t1),
 		)
@@ -1155,7 +1168,7 @@ async fn repo_snapshot_upsert_in_place() {
 			&mut conn,
 			group_id,
 			&source,
-			Some(server_id),
+			Some(machine_id),
 			Some(&pg),
 			Some(t2),
 		)
@@ -1174,7 +1187,7 @@ async fn repo_snapshot_upsert_in_place() {
 async fn latest_backup_and_last_inspected_for_group() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id).await;
+		let machine_id = insert_server(&mut conn, group_id).await;
 		let device_id = insert_device(&mut conn).await;
 
 		// Nothing reported / inspected yet.
@@ -1198,7 +1211,7 @@ async fn latest_backup_and_last_inspected_for_group() {
 				Uuid::new_v4(),
 				device_id,
 				group_id,
-				Some(server_id),
+				Some(machine_id),
 				BackupPurpose::Backup,
 				RunOutcome::Failure,
 			),
@@ -1211,7 +1224,7 @@ async fn latest_backup_and_last_inspected_for_group() {
 				Uuid::new_v4(),
 				device_id,
 				group_id,
-				Some(server_id),
+				Some(machine_id),
 				BackupPurpose::Restore,
 				RunOutcome::Success,
 			),
@@ -1233,7 +1246,7 @@ async fn latest_backup_and_last_inspected_for_group() {
 				Uuid::new_v4(),
 				device_id,
 				group_id,
-				Some(server_id),
+				Some(machine_id),
 				BackupPurpose::Backup,
 				RunOutcome::Success,
 			),
@@ -1259,8 +1272,8 @@ async fn latest_backup_and_last_inspected_for_group() {
 		BackupRepoSnapshot::upsert(
 			&mut conn,
 			group_id,
-			&format!("canopy@{server_id}:/data"),
-			Some(server_id),
+			&format!("canopy@{machine_id}:/data"),
+			Some(machine_id),
 			Some(&BackupType::TamanuPostgres),
 			Some(t),
 		)
@@ -1369,37 +1382,37 @@ async fn repo_stats_split_writers_do_not_clobber() {
 async fn capability_register_seeds_once_then_operator_controls() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id).await;
+		let machine_id = insert_server(&mut conn, group_id).await;
 		let pg = BackupType::TamanuPostgres;
 
 		// First registration seeds enabled from the type default.
-		let cap = ServerBackupCapability::register(&mut conn, server_id, &pg, true)
+		let cap = MachineBackupCapability::register(&mut conn, machine_id, &pg, true)
 			.await
 			.unwrap();
 		assert!(cap.enabled);
 
 		// Operator turns it off.
-		ServerBackupCapability::set_enabled(&mut conn, server_id, &pg, false)
+		MachineBackupCapability::set_enabled(&mut conn, machine_id, &pg, false)
 			.await
 			.unwrap();
 
 		// Re-registration must NOT re-seed enabled — operator's choice sticks.
-		let cap = ServerBackupCapability::register(&mut conn, server_id, &pg, true)
+		let cap = MachineBackupCapability::register(&mut conn, machine_id, &pg, true)
 			.await
 			.unwrap();
 		assert!(!cap.enabled, "re-register keeps the operator-set enabled");
 
 		assert!(
-			ServerBackupCapability::list_enabled(&mut conn)
+			MachineBackupCapability::list_enabled(&mut conn)
 				.await
 				.unwrap()
 				.is_empty()
 		);
-		ServerBackupCapability::set_enabled(&mut conn, server_id, &pg, true)
+		MachineBackupCapability::set_enabled(&mut conn, machine_id, &pg, true)
 			.await
 			.unwrap();
 		assert_eq!(
-			ServerBackupCapability::list_enabled(&mut conn)
+			MachineBackupCapability::list_enabled(&mut conn)
 				.await
 				.unwrap()
 				.len(),
@@ -1558,12 +1571,12 @@ async fn effective_interval_precedence() {
 async fn requests_enqueue_clear_list() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id).await;
+		let machine_id = insert_server(&mut conn, group_id).await;
 		let pg = BackupType::TamanuPostgres;
 
 		BackupRequest::enqueue(
 			&mut conn,
-			server_id,
+			machine_id,
 			&pg,
 			BackupPurpose::Backup,
 			Some("op@bes"),
@@ -1573,35 +1586,35 @@ async fn requests_enqueue_clear_list() {
 		// Re-enqueue is an upsert on (server, type, purpose) — still one row.
 		BackupRequest::enqueue(
 			&mut conn,
-			server_id,
+			machine_id,
 			&pg,
 			BackupPurpose::Backup,
 			Some("op2@bes"),
 		)
 		.await
 		.unwrap();
-		let pending = BackupRequest::pending_for_server(&mut conn, server_id)
+		let pending = BackupRequest::pending_for_machine(&mut conn, machine_id)
 			.await
 			.unwrap();
 		assert_eq!(pending.len(), 1);
 		assert_eq!(pending[0].requested_by.as_deref(), Some("op2@bes"));
 
 		// A different purpose is a distinct row.
-		BackupRequest::enqueue(&mut conn, server_id, &pg, BackupPurpose::Restore, None)
+		BackupRequest::enqueue(&mut conn, machine_id, &pg, BackupPurpose::Restore, None)
 			.await
 			.unwrap();
 		assert_eq!(
-			BackupRequest::pending_for_server(&mut conn, server_id)
+			BackupRequest::pending_for_machine(&mut conn, machine_id)
 				.await
 				.unwrap()
 				.len(),
 			2
 		);
 
-		BackupRequest::clear(&mut conn, server_id, &pg, BackupPurpose::Backup)
+		BackupRequest::clear(&mut conn, machine_id, &pg, BackupPurpose::Backup)
 			.await
 			.unwrap();
-		let pending = BackupRequest::pending_for_server(&mut conn, server_id)
+		let pending = BackupRequest::pending_for_machine(&mut conn, machine_id)
 			.await
 			.unwrap();
 		assert_eq!(pending.len(), 1);
@@ -1616,14 +1629,14 @@ fn new_progress(
 	run_id: Uuid,
 	device_id: Uuid,
 	group_id: Uuid,
-	server_id: Uuid,
+	machine_id: Uuid,
 	bytes_uploaded: Option<i64>,
 ) -> NewBackupRunProgress {
 	NewBackupRunProgress {
 		run_id,
 		device_id,
 		group_id,
-		server_id: Some(server_id),
+		machine_id: Some(machine_id),
 		r#type: BackupType::TamanuPostgres,
 		purpose: BackupPurpose::Backup,
 		snapshot_taken_at: None,
@@ -1651,13 +1664,13 @@ fn new_progress(
 async fn progress_records_without_a_run_row() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id).await;
+		let machine_id = insert_server(&mut conn, group_id).await;
 		let device_id = insert_device(&mut conn).await;
 		let run_id = Uuid::new_v4();
 
 		BackupRunProgress::record(
 			&mut conn,
-			new_progress(run_id, device_id, group_id, server_id, Some(10)),
+			new_progress(run_id, device_id, group_id, machine_id, Some(10)),
 		)
 		.await
 		.expect("a sample for an unknown run must be accepted");
@@ -1675,14 +1688,14 @@ async fn progress_records_without_a_run_row() {
 async fn progress_series_is_oldest_first_and_latest_is_newest() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id).await;
+		let machine_id = insert_server(&mut conn, group_id).await;
 		let device_id = insert_device(&mut conn).await;
 		let run_id = Uuid::new_v4();
 
 		for uploaded in [1_i64, 2, 3] {
 			BackupRunProgress::record(
 				&mut conn,
-				new_progress(run_id, device_id, group_id, server_id, Some(uploaded)),
+				new_progress(run_id, device_id, group_id, machine_id, Some(uploaded)),
 			)
 			.await
 			.unwrap();
@@ -1711,7 +1724,7 @@ async fn progress_series_is_oldest_first_and_latest_is_newest() {
 async fn earliest_snapshot_moment_ignores_later_null_samples() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id).await;
+		let machine_id = insert_server(&mut conn, group_id).await;
 		let device_id = insert_device(&mut conn).await;
 		let run_id = Uuid::new_v4();
 		let taken: Timestamp = "2026-07-01T04:12:00Z".parse().unwrap();
@@ -1720,14 +1733,14 @@ async fn earliest_snapshot_moment_ignores_later_null_samples() {
 			&mut conn,
 			NewBackupRunProgress {
 				snapshot_taken_at: Some(taken),
-				..new_progress(run_id, device_id, group_id, server_id, Some(1))
+				..new_progress(run_id, device_id, group_id, machine_id, Some(1))
 			},
 		)
 		.await
 		.unwrap();
 		BackupRunProgress::record(
 			&mut conn,
-			new_progress(run_id, device_id, group_id, server_id, Some(2)),
+			new_progress(run_id, device_id, group_id, machine_id, Some(2)),
 		)
 		.await
 		.unwrap();
@@ -1760,14 +1773,14 @@ async fn earliest_snapshot_moment_ignores_later_null_samples() {
 async fn progress_batch_loaders_key_by_run_and_short_circuit_empty() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id).await;
+		let machine_id = insert_server(&mut conn, group_id).await;
 		let device_id = insert_device(&mut conn).await;
 		let (run_a, run_b) = (Uuid::new_v4(), Uuid::new_v4());
 
 		for (run, uploaded) in [(run_a, 5_i64), (run_a, 9), (run_b, 100)] {
 			BackupRunProgress::record(
 				&mut conn,
-				new_progress(run, device_id, group_id, server_id, Some(uploaded)),
+				new_progress(run, device_id, group_id, machine_id, Some(uploaded)),
 			)
 			.await
 			.unwrap();
@@ -1810,19 +1823,19 @@ async fn progress_batch_loaders_key_by_run_and_short_circuit_empty() {
 async fn progress_prune_deletes_only_past_the_cutoff() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id).await;
+		let machine_id = insert_server(&mut conn, group_id).await;
 		let device_id = insert_device(&mut conn).await;
 		let (old_run, fresh_run) = (Uuid::new_v4(), Uuid::new_v4());
 
 		let old = BackupRunProgress::record(
 			&mut conn,
-			new_progress(old_run, device_id, group_id, server_id, Some(1)),
+			new_progress(old_run, device_id, group_id, machine_id, Some(1)),
 		)
 		.await
 		.unwrap();
 		BackupRunProgress::record(
 			&mut conn,
-			new_progress(fresh_run, device_id, group_id, server_id, Some(2)),
+			new_progress(fresh_run, device_id, group_id, machine_id, Some(2)),
 		)
 		.await
 		.unwrap();
@@ -1869,7 +1882,7 @@ async fn insert_success_with_moments(
 	conn: &mut AsyncPgConnection,
 	device_id: Uuid,
 	group_id: Uuid,
-	server_id: Uuid,
+	machine_id: Uuid,
 	reported_age: SignedDuration,
 	taken_age: Option<SignedDuration>,
 ) -> Uuid {
@@ -1882,7 +1895,7 @@ async fn insert_success_with_moments(
 				id,
 				device_id,
 				group_id,
-				Some(server_id),
+				Some(machine_id),
 				BackupPurpose::Backup,
 				RunOutcome::Success,
 			)
@@ -1907,7 +1920,7 @@ async fn insert_success_with_moments(
 async fn anchor_prefers_the_freeze_moment_over_the_report() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id).await;
+		let machine_id = insert_server(&mut conn, group_id).await;
 		let device_id = insert_device(&mut conn).await;
 		let pg = BackupType::TamanuPostgres;
 
@@ -1916,13 +1929,13 @@ async fn anchor_prefers_the_freeze_moment_over_the_report() {
 			&mut conn,
 			device_id,
 			group_id,
-			server_id,
+			machine_id,
 			SignedDuration::from_hours(1),
 			Some(SignedDuration::from_hours(22)),
 		)
 		.await;
 
-		let run = BackupRun::latest_success_for_server(&mut conn, server_id, &pg)
+		let run = BackupRun::latest_success_for_machine(&mut conn, machine_id, &pg)
 			.await
 			.unwrap()
 			.unwrap();
@@ -1941,7 +1954,7 @@ async fn anchor_prefers_the_freeze_moment_over_the_report() {
 async fn anchor_falls_back_to_the_report_time() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id).await;
+		let machine_id = insert_server(&mut conn, group_id).await;
 		let device_id = insert_device(&mut conn).await;
 		let pg = BackupType::TamanuPostgres;
 
@@ -1949,13 +1962,13 @@ async fn anchor_falls_back_to_the_report_time() {
 			&mut conn,
 			device_id,
 			group_id,
-			server_id,
+			machine_id,
 			SignedDuration::from_hours(3),
 			None,
 		)
 		.await;
 
-		let run = BackupRun::latest_success_for_server(&mut conn, server_id, &pg)
+		let run = BackupRun::latest_success_for_machine(&mut conn, machine_id, &pg)
 			.await
 			.unwrap()
 			.unwrap();
@@ -1971,7 +1984,7 @@ async fn anchor_falls_back_to_the_report_time() {
 async fn latest_success_selects_by_data_age_not_report_order() {
 	TestDb::run(|mut conn, _url| async move {
 		let group_id = insert_group(&mut conn, "g").await;
-		let server_id = insert_server(&mut conn, group_id).await;
+		let machine_id = insert_server(&mut conn, group_id).await;
 		let device_id = insert_device(&mut conn).await;
 		let pg = BackupType::TamanuPostgres;
 
@@ -1980,7 +1993,7 @@ async fn latest_success_selects_by_data_age_not_report_order() {
 			&mut conn,
 			device_id,
 			group_id,
-			server_id,
+			machine_id,
 			SignedDuration::from_hours(2),
 			Some(SignedDuration::from_hours(3)),
 		)
@@ -1990,13 +2003,13 @@ async fn latest_success_selects_by_data_age_not_report_order() {
 			&mut conn,
 			device_id,
 			group_id,
-			server_id,
+			machine_id,
 			SignedDuration::from_hours(1),
 			Some(SignedDuration::from_hours(20)),
 		)
 		.await;
 
-		let picked = BackupRun::latest_success_for_server(&mut conn, server_id, &pg)
+		let picked = BackupRun::latest_success_for_machine(&mut conn, machine_id, &pg)
 			.await
 			.unwrap()
 			.unwrap();
@@ -2005,13 +2018,128 @@ async fn latest_success_selects_by_data_age_not_report_order() {
 			"must pick the run with the newest data, not the newest report (b={b})",
 		);
 
-		let map = BackupRun::latest_success_by_server_type_for_group(&mut conn, group_id)
+		let map = BackupRun::latest_success_by_machine_type_for_group(&mut conn, group_id)
 			.await
 			.unwrap();
 		assert_eq!(
-			map.get(&(server_id, pg)).map(|r| r.id),
+			map.get(&(machine_id, pg)).map(|r| r.id),
 			Some(a),
 			"the batch loader must agree with the single-server query",
+		);
+	})
+	.await;
+}
+
+// --- participation follows the machine --------------------------------------
+
+/// Add another workload to a box that already carries one.
+async fn add_application(conn: &mut AsyncPgConnection, group_id: Uuid, machine_id: Uuid) {
+	let host = format!("http://test.invalid/{}", Uuid::new_v4());
+	sql_query(
+		"INSERT INTO applications (host, type, group_id, machine_id) \
+		 VALUES ($1, 'tamanu-facility', $2, $3)",
+	)
+	.bind::<sql_types::Text, _>(host)
+	.bind::<sql_types::Uuid, _>(group_id)
+	.bind::<sql_types::Uuid, _>(machine_id)
+	.execute(conn)
+	.await
+	.expect("insert application");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn capability_and_participation_follow_the_machine() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "kiritimati").await;
+		let machine_id = insert_server(&mut conn, group_id).await;
+		add_application(&mut conn, group_id, machine_id).await;
+
+		let pg = BackupType::TamanuPostgres;
+		let files = BackupType::Custom("tamanu-files".into());
+		MachineBackupCapability::register(&mut conn, machine_id, &pg, true)
+			.await
+			.unwrap();
+		MachineBackupCapability::register(&mut conn, machine_id, &files, false)
+			.await
+			.unwrap();
+
+		let caps = MachineBackupCapability::list_for_machine(&mut conn, machine_id)
+			.await
+			.unwrap();
+		assert_eq!(
+			caps.len(),
+			2,
+			"the box declares its own types, not one set per workload",
+		);
+
+		let enabled = MachineBackupCapability::enabled_types_for_group(&mut conn, group_id)
+			.await
+			.unwrap();
+		assert_eq!(
+			enabled,
+			vec![pg.clone()],
+			"a two-application box is one participant, so its enabled type appears once",
+		);
+
+		let mut declared = MachineBackupCapability::declared_types_for_group(&mut conn, group_id)
+			.await
+			.unwrap();
+		declared.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+		assert_eq!(
+			declared,
+			vec![files, pg],
+			"every declared type reaches the group exactly once",
+		);
+	})
+	.await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_request_resolves_identity_to_machine_to_group() {
+	TestDb::run(|mut conn, _url| async move {
+		let group_id = insert_group(&mut conn, "rarotonga").await;
+
+		// A box carrying no workload at all: resolution must still land on it.
+		let machine_id = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
+			.bind::<sql_types::Uuid, _>(group_id)
+			.get_result::<RowId>(&mut conn)
+			.await
+			.expect("insert machine")
+			.id;
+		let device_id = insert_device(&mut conn).await;
+		database::Machine::bind_device(&mut conn, machine_id, device_id)
+			.await
+			.unwrap();
+
+		let resolved = database::Machine::get_by_device_id(&mut conn, device_id)
+			.await
+			.unwrap()
+			.expect("the identity resolves to the box it is enrolled as");
+		assert_eq!(resolved.id, machine_id);
+		assert_eq!(
+			resolved.group_id,
+			Some(group_id),
+			"the group comes from the machine, not from an application on it",
+		);
+
+		// The request enqueued against that machine is the one the box sees.
+		let pg = BackupType::TamanuPostgres;
+		BackupRequest::enqueue(&mut conn, machine_id, &pg, BackupPurpose::Backup, None)
+			.await
+			.unwrap();
+		let pending = BackupRequest::pending_for_machine(&mut conn, resolved.id)
+			.await
+			.unwrap();
+		assert_eq!(pending.len(), 1);
+
+		// An identity bound to no machine resolves to nothing, rather than to
+		// some application's box.
+		let stray = insert_device(&mut conn).await;
+		assert!(
+			database::Machine::get_by_device_id(&mut conn, stray)
+				.await
+				.unwrap()
+				.is_none(),
 		);
 	})
 	.await;

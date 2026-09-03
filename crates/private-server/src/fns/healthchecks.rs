@@ -8,10 +8,11 @@ use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{AppError, ProblemDetailsSchema, Result};
 use commons_servers::tailscale_auth::TailscaleAdmin;
+use commons_types::namespace::{Namespace, NamespaceRef, is_reserved};
 use commons_types::source::{IngestMode, ReachabilityMode};
 use commons_types::status::CheckResult;
+use database::applications::Application;
 use database::check_policies::{CheckPolicy, IfLadder};
-use database::servers::Server;
 use database::source_policies::SourcePolicy;
 use database::statuses::Status;
 use jiff::Timestamp;
@@ -43,8 +44,17 @@ pub fn routes() -> OpenApiRouter<AppState> {
 pub struct CheckPolicyData {
 	/// The source that reports this check.
 	pub source: String,
-	/// The healthcheck's name, exactly as reported by monitored servers.
+	/// The healthcheck's name, exactly as reported by monitored applications.
+	/// Two application types reporting this name are two entries, told apart
+	/// by `namespace`.
 	pub check_name: String,
+	/// Which catalog entry this is: the box's, one application type's, or a
+	/// curated source's unqualified one. Send it back verbatim to name this
+	/// entry in an edit.
+	pub namespace: NamespaceRef,
+	/// How the entry reads to an operator: `<type>.<check>` where it is one
+	/// application type's, the bare name otherwise.
+	pub qualified_name: String,
 	/// The maximum effective result for this check when no conditional
 	/// rule (see `rules`) overrides it: an observed result more urgent
 	/// than the ceiling grades down to it. One of `failed`, `warning`,
@@ -119,6 +129,13 @@ pub struct CheckPolicyData {
 	pub rule_count: u32,
 }
 
+/// The namespace a request names, refused if the pair is not one of the three
+/// shapes a catalog entry can have. A request naming a shape the schema will
+/// not store is a mistake to report, not one to interpret.
+fn namespace_of(r: &NamespaceRef) -> Result<Namespace> {
+	Namespace::try_from(r).map_err(|e| AppError::BadRequest(e.to_string()))
+}
+
 fn rule_count(rules: &Option<JsonValue>) -> u32 {
 	let Some(v) = rules else { return 0 };
 	serde_json::from_value::<IfLadder>(v.clone())
@@ -130,9 +147,16 @@ impl From<CheckPolicy> for CheckPolicyData {
 	fn from(h: CheckPolicy) -> Self {
 		let pending_review = h.reviewed_at.is_none();
 		let rule_count = rule_count(&h.rules);
+		let qualified_name = h.qualified_name();
+		let namespace = NamespaceRef {
+			subject: h.subject,
+			application_type: h.application_type,
+		};
 		Self {
 			source: h.source,
 			check_name: h.check_name,
+			namespace,
+			qualified_name,
 			ceiling: h.ceiling,
 			escalates: h.escalates,
 			first_seen: h.first_seen,
@@ -183,7 +207,7 @@ pub async fn list(
 pub struct SourceData {
 	/// The source name, as reported by devices.
 	pub source: String,
-	/// How this source's silence bears on its servers' reachability: `on`
+	/// How this source's silence bears on its applications' reachability: `on`
 	/// (a stale source warns, all-stale is unreachable), `quiet` (never
 	/// warns, still counts toward unreachable), or `off` (excluded).
 	pub reachability: ReachabilityMode,
@@ -243,7 +267,7 @@ pub struct SetSourceReachabilityArgs {
 
 /// Set a source's reachability mode.
 ///
-/// Governs how the source's silence bears on its servers' reachability:
+/// Governs how the source's silence bears on its applications' reachability:
 /// `on` warns, `quiet` never warns but still counts toward unreachable,
 /// `off` is excluded. The reserved `canopy`/`manual` names are rejected.
 #[utoipa::path(
@@ -265,7 +289,7 @@ pub async fn set_source_reachability(
 	_admin: TailscaleAdmin,
 	Json(args): Json<SetSourceReachabilityArgs>,
 ) -> Result<Json<()>> {
-	if args.source == "canopy" || args.source == "manual" {
+	if is_reserved(&args.source) {
 		return Err(AppError::BadRequest(
 			"the reserved canopy/manual sources have no reachability policy".into(),
 		));
@@ -309,7 +333,7 @@ pub async fn set_source_ingest(
 	_admin: TailscaleAdmin,
 	Json(args): Json<SetSourceIngestArgs>,
 ) -> Result<Json<()>> {
-	if args.source == "canopy" || args.source == "manual" {
+	if is_reserved(&args.source) {
 		return Err(AppError::BadRequest(
 			"the reserved canopy/manual sources have no ingest policy".into(),
 		));
@@ -327,6 +351,10 @@ pub struct HealthcheckUpdateArgs {
 	/// The healthcheck name to update; must already exist in the
 	/// catalog.
 	pub check_name: String,
+	/// Which catalog entry is meant, as returned in the entry's `namespace`.
+	/// Omitted is the unqualified namespace a curated source's checks live in.
+	#[serde(default)]
+	pub namespace: NamespaceRef,
 	/// The ceiling to apply to this check's observed results when no
 	/// conditional rule overrides it: one of `failed`, `warning`,
 	/// `passed`, or `skipped`.
@@ -380,6 +408,7 @@ pub async fn update(
 	let row = CheckPolicy::update(
 		&mut conn,
 		&args.source,
+		&namespace_of(&args.namespace)?,
 		&args.check_name,
 		args.ceiling,
 		args.escalates,
@@ -398,6 +427,10 @@ pub struct DecommissionArgs {
 	/// The healthcheck name to decommission; must already exist in the
 	/// catalog.
 	pub check_name: String,
+	/// Which catalog entry is meant, as returned in the entry's `namespace`.
+	/// Omitted is the unqualified namespace a curated source's checks live in.
+	#[serde(default)]
+	pub namespace: NamespaceRef,
 }
 
 /// Decommission a check fleet-wide.
@@ -426,7 +459,14 @@ pub async fn decommission(
 	Json(args): Json<DecommissionArgs>,
 ) -> Result<Json<()>> {
 	let mut conn = state.db.get().await?;
-	CheckPolicy::decommission(&mut conn, &args.source, &args.check_name, &admin.0.login).await?;
+	CheckPolicy::decommission(
+		&mut conn,
+		&args.source,
+		&namespace_of(&args.namespace)?,
+		&args.check_name,
+		&admin.0.login,
+	)
+	.await?;
 	Ok(Json(()))
 }
 
@@ -438,6 +478,10 @@ pub struct UpdateDocumentationArgs {
 	/// The healthcheck name to document; must already exist in the
 	/// catalog.
 	pub check_name: String,
+	/// Which catalog entry is meant, as returned in the entry's `namespace`.
+	/// Omitted is the unqualified namespace a curated source's checks live in.
+	#[serde(default)]
+	pub namespace: NamespaceRef,
 	/// The new markdown document, or `null` (or blank) to clear it.
 	#[serde(default)]
 	pub documentation: Option<String>,
@@ -473,9 +517,14 @@ pub async fn update_documentation(
 		.map(str::trim)
 		.filter(|d| !d.is_empty());
 	let mut conn = state.db.get().await?;
-	let row =
-		CheckPolicy::update_documentation(&mut conn, &args.source, &args.check_name, documentation)
-			.await?;
+	let row = CheckPolicy::update_documentation(
+		&mut conn,
+		&args.source,
+		&namespace_of(&args.namespace)?,
+		&args.check_name,
+		documentation,
+	)
+	.await?;
 	Ok(Json(row.into()))
 }
 
@@ -487,6 +536,10 @@ pub struct UpdateRulesArgs {
 	/// The healthcheck name whose rules to replace; must already exist
 	/// in the catalog.
 	pub check_name: String,
+	/// Which catalog entry is meant, as returned in the entry's `namespace`.
+	/// Omitted is the unqualified namespace a curated source's checks live in.
+	#[serde(default)]
+	pub namespace: NamespaceRef,
 	/// The new conditional rules to store, or `null` to remove all
 	/// conditional rules and rely solely on the ceiling. Same shape as
 	/// the `rules` field returned when listing checks. A ladder with no
@@ -540,6 +593,7 @@ pub async fn update_rules(
 	let row = CheckPolicy::update_rules(
 		&mut conn,
 		&args.source,
+		&namespace_of(&args.namespace)?,
 		&args.check_name,
 		ladder.as_ref(),
 		&admin.0.login,
@@ -557,11 +611,15 @@ pub struct SampleArgs {
 	pub source: String,
 	/// The healthcheck name to sample.
 	pub check_name: String,
+	/// Which catalog entry is meant, as returned in the entry's `namespace`.
+	/// Omitted is the unqualified namespace a curated source's checks live in.
+	#[serde(default)]
+	pub namespace: NamespaceRef,
 }
 
 /// A real-world sample of the data a conditional rule can reference for a
 /// given healthcheck, taken from the most recent status report (across
-/// all servers) from the check's own source that included it.
+/// all applications) from the check's own source that included it.
 #[derive(Serialize, ToSchema)]
 pub struct HealthcheckSample {
 	/// Additional top-level fields submitted with the status report that
@@ -621,15 +679,33 @@ pub async fn sample(
 	Json(args): Json<SampleArgs>,
 ) -> Result<Json<HealthcheckSampleResponse>> {
 	let mut conn = state.db.get().await?;
-	let Some(status) =
-		Status::latest_for_check_name(&mut conn, &args.source, &args.check_name).await?
+	// Sampled from a push by an application of the entry's own type: another
+	// type's same-named check carries different fields, and a rule written
+	// against those would grade nothing.
+	let namespace = namespace_of(&args.namespace)?;
+	let Some(status) = Status::latest_for_check_name(
+		&mut conn,
+		&args.source,
+		&args.check_name,
+		namespace.application_type(),
+	)
+	.await?
 	else {
 		return Ok(Json(HealthcheckSampleResponse {
 			check_name: args.check_name,
 			sample: None,
 		}));
 	};
-	let server = Server::get_by_id(&mut conn, status.server_id).await?;
+	// A push from a box Canopy holds no application for is the box's in full,
+	// so the sample's context is the box's: its tags, its name, and no host.
+	let server = match status.server_id {
+		Some(id) => Some(Application::get_by_id(&mut conn, id).await?),
+		None => None,
+	};
+	let machine = match status.machine_id {
+		Some(id) => Some(database::machines::Machine::get_by_id(&mut conn, id).await?),
+		None => None,
+	};
 
 	// Top-level extras — the column is always an object after our
 	// ingestion path strips reserved keys.
@@ -665,7 +741,11 @@ pub async fn sample(
 		})
 		.unwrap_or_default();
 
-	let tag_map = server.tags_merged_with_group(&mut conn).await?;
+	let tag_map = match (&server, &machine) {
+		(Some(server), _) => server.tags_merged_with_group(&mut conn).await?,
+		(None, Some(machine)) => machine.tags_merged_with_group(&mut conn).await?,
+		(None, None) => Default::default(),
+	};
 	let tags: HashMap<String, String> = tag_map.0.into_iter().collect();
 
 	Ok(Json(HealthcheckSampleResponse {
@@ -675,11 +755,13 @@ pub async fn sample(
 			check_extra,
 			tags,
 			server_host: server
-				.host
 				.as_ref()
+				.and_then(|s| s.host.as_ref())
 				.map(|h| h.0.to_string())
 				.unwrap_or_default(),
-			server_name: server.name,
+			server_name: server
+				.map(|s| s.display_name())
+				.or_else(|| machine.and_then(|m| m.name)),
 			seen_at: status.created_at,
 		}),
 	}))

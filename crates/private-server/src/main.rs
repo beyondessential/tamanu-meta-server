@@ -58,7 +58,7 @@ async fn main() -> miette::Result<()> {
 			),
 			addr,
 		) => {
-			tracing::info!("Server exited");
+			tracing::info!("Application exited");
 			res?;
 		}
 	}

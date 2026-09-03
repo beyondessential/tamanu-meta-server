@@ -1,14 +1,16 @@
 //! Issues, events, incidents.
 
 use commons_errors::{AppError, Result};
+use commons_types::namespace::Namespace;
 use commons_types::status::CheckResult;
+use commons_types::subject::CheckSubject;
 use diesel::prelude::*;
 use diesel_async::{AsyncConnection, AsyncPgConnection, RunQueryDsl};
 use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{devices::Device, server_groups::ServerGroup, servers::Server};
+use crate::{applications::Application, devices::Device, server_groups::ServerGroup};
 
 /// A tracked problem or condition on a server, or on a server group as a
 /// whole. An issue is opened the first time its source reports it and stays
@@ -18,7 +20,7 @@ use crate::{devices::Device, server_groups::ServerGroup, servers::Server};
 #[derive(
 	Clone, Debug, Serialize, Deserialize, Queryable, Selectable, Associations, utoipa::ToSchema,
 )]
-#[diesel(belongs_to(Server))]
+#[diesel(belongs_to(Application))]
 #[diesel(belongs_to(Device))]
 #[diesel(table_name = crate::schema::issues)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -31,14 +33,19 @@ pub struct Issue {
 	/// When this issue was last modified.
 	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
 	pub updated_at: Timestamp,
-	/// The server this issue is attached to. `None` for a group-scoped issue
-	/// (see `server_group_id`) — exactly one of the two is always set.
-	pub server_id: Option<Uuid>,
+	/// The application this issue is attached to. `None` unless this is an
+	/// application-scoped issue; at most one of the three scope columns is set,
+	/// and all three null is canopy-wide.
+	pub application_id: Option<Uuid>,
+	/// The machine this issue is attached to, for a check that asserts
+	/// something about the box rather than about a workload on it — disk,
+	/// memory, clock, the tailnet. One degraded machine check is one issue at
+	/// machine scope, not one per application on the host.
+	pub machine_id: Option<Uuid>,
 	/// The server group this issue is attached to, for a control-plane issue
 	/// (e.g. backup corruption, a failed preflight check) that isn't tied to
-	/// any single server. `None` for an ordinary server-scoped issue.
-	/// Group-scoped issues are always considered even if an individual
-	/// server in the group has monitoring turned off.
+	/// any single application or machine. Group-scoped issues are always
+	/// considered even if an individual member has monitoring turned off.
 	pub server_group_id: Option<Uuid>,
 	/// The device that reported this issue, if it was raised by a device
 	/// push. `None` for issues raised by an operator or by the platform
@@ -258,10 +265,14 @@ pub struct IssueListFilters {
 	pub active_only: bool,
 	/// Restrict to issues whose latest effective result is one of these.
 	pub results: Option<Vec<CheckResult>>,
-	/// Restrict to issues whose server belongs to this group.
+	/// Restrict to issues whose target belongs to this group.
 	pub server_group_id: Option<Uuid>,
-	/// Restrict to issues raised against this server.
-	pub server_id: Option<Uuid>,
+	/// Restrict to issues raised against this application, together with those
+	/// of the machine it runs on: a box's disk filling is the application's
+	/// problem too, and is presented against it (see CHK, "Health rollup").
+	pub application_id: Option<Uuid>,
+	/// Restrict to issues raised against this machine, its own only.
+	pub machine_id: Option<Uuid>,
 	/// When `Some`, restrict to issues last seen at or after this time.
 	pub since: Option<Timestamp>,
 }
@@ -334,11 +345,11 @@ async fn stamp_check_state(
 
 impl NewEvent {
 	/// Persist this event push:
-	/// 1. find-or-create the issue keyed by (server_id, source, ref),
+	/// 1. find-or-create the issue keyed by (application_id, source, ref),
 	///    updating its state from this report,
 	/// 2. if the server is in a group: (re)evaluate incident contribution.
 	///
-	/// `server_id` is the server the issue is attached to: derived from the
+	/// `application_id` is the server the issue is attached to: derived from the
 	/// device for public submissions, supplied by the operator for manual.
 	/// `device_id` is `None` for manual events.
 	///
@@ -346,16 +357,16 @@ impl NewEvent {
 	/// row goes in just like any other push — but the incident
 	/// flow is skipped (`server_group_id` would have nowhere to point).
 	/// When the operator later assigns the server to a group,
-	/// [`Server::assign_to_group`] runs `reevaluate_open_issues_for_server`
+	/// [`Application::assign_to_group`] runs `reevaluate_open_issues_for_server`
 	/// over the now-grouped issues so anything that should have opened an
 	/// incident does so retroactively.
 	pub async fn save(
 		self,
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		application_id: Uuid,
 		device_id: Option<Uuid>,
 	) -> Result<Issue> {
-		self.save_with_state(db, server_id, device_id, None, false)
+		self.save_with_state(db, application_id, device_id, None, false)
 			.await
 	}
 
@@ -365,7 +376,7 @@ impl NewEvent {
 	pub async fn save_with_state(
 		self,
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		application_id: Uuid,
 		device_id: Option<Uuid>,
 		state: Option<&CheckStateStamp>,
 		defer_incident_eval: bool,
@@ -395,7 +406,7 @@ impl NewEvent {
 		// catch-up path. `monitored` gates the incident workflow the same
 		// way: ungrouped *or* unmonitored → issue/event still recorded,
 		// but no incident contribution.
-		let server = Server::get_by_id(db, server_id).await?;
+		let server = Application::get_by_id(db, application_id).await?;
 		let server_group_id = server.group_id;
 		let monitored = server.is_monitored;
 
@@ -405,8 +416,8 @@ impl NewEvent {
 			let existing: Option<Issue> = issues::table
 				.select(Issue::as_select())
 				.filter(
-					issues::server_id
-						.eq(server_id)
+					issues::application_id
+						.eq(application_id)
 						.and(issues::source.eq(&self.source))
 						.and(issues::ref_.eq(&self.r#ref)),
 				)
@@ -470,7 +481,7 @@ impl NewEvent {
 			} else {
 				let inserted: Issue = diesel::insert_into(issues::table)
 					.values((
-						issues::server_id.eq(server_id),
+						issues::application_id.eq(application_id),
 						issues::device_id.eq(device_id),
 						issues::source.eq(&self.source),
 						issues::ref_.eq(&self.r#ref),
@@ -526,8 +537,8 @@ impl NewEvent {
 /// state; scope is not the lever for making something page.
 ///
 /// Mirrors [`NewEvent::save`] but keys the issue on
-/// `(server_group_id, source, ref)` instead of `(server_id, …)`:
-/// 1. find-or-create the group-scoped issue (server_id = NULL),
+/// `(server_group_id, source, ref)` instead of `(application_id, …)`:
+/// 1. find-or-create the group-scoped issue (application_id = NULL),
 ///    updating its state from this report,
 /// 2. run incident membership evaluation with `monitored = true` so the
 ///    incident opens/pages regardless of any member server's monitored flag.
@@ -666,6 +677,143 @@ pub async fn raise_group_event_with_state(
 	.await
 }
 
+/// Open (or recover) a **machine-scoped** issue: one keyed
+/// `(machine_id, source = canopy, ref)` under the machine partial unique
+/// index.
+///
+/// A degraded machine check is one issue at machine scope, not one per
+/// application on the box. The applications present it — it is theirs to
+/// show, not theirs to own — so a two-workload host raises a single disk
+/// failure rather than two.
+///
+/// Unlike its group and canopy-wide siblings, this takes the `source` rather
+/// than assuming `canopy`. Those two file conditions canopy determines for
+/// itself; a machine's checks arrive from a reporter like `alertd`, and
+/// recording them under `canopy` would break per-source silences, the
+/// `check_severities` a push answers with, source staleness, and the rule that
+/// a source's push only recovers its own checks.
+///
+/// Mirrors [`raise_group_event_with_state`]'s find-or-create. Incident
+/// evaluation resolves through the machine's group and carries the machine's
+/// own `is_monitored`, so excusing a box from monitoring does not quiet the
+/// applications on it.
+// spec: CHK
+#[allow(clippy::too_many_arguments)]
+pub async fn raise_machine_event_with_state(
+	conn: &mut AsyncPgConnection,
+	machine_id: Uuid,
+	source: &str,
+	device_id: Option<Uuid>,
+	r#ref: &str,
+	description: Option<&str>,
+	message: &str,
+	active: bool,
+	state: Option<&CheckStateStamp>,
+) -> Result<Issue> {
+	use crate::schema::issues;
+
+	if let Some(d) = description
+		&& d.contains('\n')
+	{
+		return Err(AppError::BadRequest(
+			"description must be a single line (no newlines); use `message` for body text".into(),
+		));
+	}
+
+	let now = Timestamp::now();
+
+	conn.transaction::<_, AppError, _>(async |conn| {
+		let existing: Option<Issue> = issues::table
+			.select(Issue::as_select())
+			.filter(
+				issues::machine_id
+					.eq(machine_id)
+					.and(issues::source.eq(source))
+					.and(issues::ref_.eq(r#ref)),
+			)
+			.for_update()
+			.first(conn)
+			.await
+			.optional()?;
+
+		let prior_state = existing
+			.as_ref()
+			.map(|e| (e.degraded_since, e.last_degraded_at));
+		let issue: Issue = if let Some(existing) = existing {
+			let new_last_seen = if now > existing.last_seen {
+				now
+			} else {
+				existing.last_seen
+			};
+			let clear_resolved = active && existing.resolved_at.is_some();
+			diesel::update(issues::table.filter(issues::id.eq(existing.id)))
+				.set((
+					issues::description.eq(description),
+					issues::message.eq(message),
+					issues::active.eq(active),
+					issues::last_seen.eq(jiff_diesel::Timestamp::from(new_last_seen)),
+					issues::resolved_at.eq(diesel::dsl::sql::<
+						diesel::sql_types::Nullable<diesel::sql_types::Timestamptz>,
+					>(if clear_resolved {
+						"NULL"
+					} else {
+						"issues.resolved_at"
+					})),
+					issues::resolved_by.eq(diesel::dsl::sql::<
+						diesel::sql_types::Nullable<diesel::sql_types::Text>,
+					>(if clear_resolved {
+						"NULL"
+					} else {
+						"issues.resolved_by"
+					})),
+					issues::resolved_reason.eq(diesel::dsl::sql::<
+						diesel::sql_types::Nullable<diesel::sql_types::Text>,
+					>(if clear_resolved {
+						"NULL"
+					} else {
+						"issues.resolved_reason"
+					})),
+				))
+				.returning(Issue::as_select())
+				.get_result(conn)
+				.await?
+		} else {
+			diesel::insert_into(issues::table)
+				.values((
+					issues::machine_id.eq(machine_id),
+					issues::device_id.eq(device_id),
+					issues::source.eq(source),
+					issues::ref_.eq(r#ref),
+					issues::description.eq(description),
+					issues::message.eq(message),
+					issues::active.eq(active),
+					issues::first_seen.eq(jiff_diesel::Timestamp::from(now)),
+					issues::last_seen.eq(jiff_diesel::Timestamp::from(now)),
+				))
+				.returning(Issue::as_select())
+				.get_result(conn)
+				.await?
+		};
+
+		let issue = match state {
+			Some(stamp) => stamp_check_state(conn, issue.id, prior_state, stamp, now).await?,
+			None => issue,
+		};
+
+		// An ungrouped machine has no incident target, exactly as an ungrouped
+		// application has none.
+		if let Some((target, monitored)) = Scope::Machine(machine_id)
+			.resolve_incident_target(conn)
+			.await?
+		{
+			re_evaluate_incident_membership(conn, &issue, target, monitored, now, None).await?;
+		}
+
+		Ok(issue)
+	})
+	.await
+}
+
 /// Open (or recover) a **canopy-wide** issue: one scoped to neither a
 /// server nor a group, keyed `(source = canopy, ref)` under the global
 /// partial unique index. This is the state store for canopy monitoring
@@ -710,7 +858,7 @@ pub async fn raise_global_event_with_state(
 		let existing: Option<Issue> = issues::table
 			.select(Issue::as_select())
 			.filter(
-				issues::server_id
+				issues::application_id
 					.is_null()
 					.and(issues::server_group_id.is_null())
 					.and(issues::source.eq(source))
@@ -793,55 +941,79 @@ pub async fn raise_global_event_with_state(
 }
 
 /// The scope a check-state, issue, or scoped policy attaches to: one
-/// server, a server group, or canopy as a whole. This is the single scope
-/// vocabulary for check state — do not reintroduce a parallel scope enum or
-/// an ad-hoc `match (server_id, server_group_id)`; map through the methods
-/// here. Provenance (which device reported a filing) is a separate concern
-/// (see `CheckFiling::device_id`), not part of scope.
+/// application, one machine, a server group, or canopy as a whole. This is the
+/// single scope vocabulary for check state — do not reintroduce a parallel
+/// scope enum or an ad-hoc `match (application_id, machine_id,
+/// server_group_id)`; map through the methods here. Provenance (which device
+/// reported a filing) is a separate concern (see `CheckFiling::device_id`), not
+/// part of scope.
+///
+/// A machine is a target in its own right because a host's disk, memory and
+/// clock assert something about the box, not about any one workload on it.
+// spec: CHK
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scope {
-	Server(Uuid),
+	Application(Uuid),
+	Machine(Uuid),
 	Group(Uuid),
 	Global,
 }
 
 impl Scope {
-	/// The `(server_id, server_group_id)` storage columns for this scope.
-	pub fn to_columns(self) -> (Option<Uuid>, Option<Uuid>) {
+	/// The `(application_id, machine_id, server_group_id)` storage columns for
+	/// this scope.
+	pub fn to_columns(self) -> (Option<Uuid>, Option<Uuid>, Option<Uuid>) {
 		match self {
-			Scope::Server(id) => (Some(id), None),
-			Scope::Group(id) => (None, Some(id)),
-			Scope::Global => (None, None),
+			Scope::Application(id) => (Some(id), None, None),
+			Scope::Machine(id) => (None, Some(id), None),
+			Scope::Group(id) => (None, None, Some(id)),
+			Scope::Global => (None, None, None),
 		}
 	}
 
-	/// The scope encoded by a `(server_id, server_group_id)` pair. A set
-	/// group wins (the storage CHECK allows at most one set; both null is
-	/// canopy-wide).
-	pub fn from_columns(server_id: Option<Uuid>, server_group_id: Option<Uuid>) -> Self {
-		match (server_id, server_group_id) {
-			(_, Some(gid)) => Scope::Group(gid),
-			(Some(sid), None) => Scope::Server(sid),
-			(None, None) => Scope::Global,
+	/// The scope encoded by an `(application_id, machine_id, server_group_id)`
+	/// triple. The storage CHECK allows at most one to be set, so the arms are
+	/// mutually exclusive in practice; the order below only decides what a row
+	/// that violated the CHECK would read as, and all-null is canopy-wide.
+	pub fn from_columns(
+		application_id: Option<Uuid>,
+		machine_id: Option<Uuid>,
+		server_group_id: Option<Uuid>,
+	) -> Self {
+		match (application_id, machine_id, server_group_id) {
+			(_, _, Some(gid)) => Scope::Group(gid),
+			(_, Some(mid), None) => Scope::Machine(mid),
+			(Some(sid), None, None) => Scope::Application(sid),
+			(None, None, None) => Scope::Global,
 		}
 	}
 
 	/// Resolve this scope to the incident target it contributes to and
-	/// whether that contribution is monitored. A server maps to its group,
-	/// carrying the server's `is_monitored`; a group targets itself and a
-	/// canopy-wide scope the global target, both always monitored. An
-	/// ungrouped server has no target and no incident path.
+	/// whether that contribution is monitored. An application or a machine
+	/// maps to its group, carrying that target's own `is_monitored`; a group
+	/// targets itself and a canopy-wide scope the global target, both always
+	/// monitored. An ungrouped application or machine has no target and no
+	/// incident path.
+	///
+	/// A machine carries its own monitoring switch, so excusing a box from
+	/// monitoring does not quiet the applications on it, and vice versa.
 	pub async fn resolve_incident_target(
 		self,
 		conn: &mut AsyncPgConnection,
 	) -> Result<Option<(IncidentTarget, bool)>> {
 		match self {
 			Scope::Group(gid) => Ok(Some((IncidentTarget::Group(gid), true))),
-			Scope::Server(sid) => {
-				let server = Server::get_by_id(conn, sid).await?;
+			Scope::Application(sid) => {
+				let server = Application::get_by_id(conn, sid).await?;
 				Ok(server
 					.group_id
 					.map(|gid| (IncidentTarget::Group(gid), server.is_monitored)))
+			}
+			Scope::Machine(mid) => {
+				let machine = crate::machines::Machine::get_by_id(conn, mid).await?;
+				Ok(machine
+					.group_id
+					.map(|gid| (IncidentTarget::Group(gid), machine.is_monitored)))
 			}
 			Scope::Global => Ok(Some((IncidentTarget::Global, true))),
 		}
@@ -849,7 +1021,10 @@ impl Scope {
 }
 
 /// The source operator-raised manual conditions file under.
-pub const MANUAL_SOURCE: &str = "manual";
+///
+/// Defined with the check namespace, since being curated by canopy is what
+/// makes this source's names unqualified.
+pub use commons_types::namespace::MANUAL_SOURCE;
 
 /// One canopy-determined or operator-raised check result to file:
 /// reachability, backup health, key expiry, self-monitoring, manual
@@ -988,36 +1163,31 @@ pub async fn file_check_instances(
 	filing: InstancedCheckFiling<'_>,
 	message: &(dyn Fn(&[GradedInstance]) -> String + Sync),
 ) -> Result<Issue> {
-	use crate::check_policies::{CheckPolicy, EvaluationContext, ScopedCheckPolicy};
+	use crate::check_policies::{CheckPolicy, EvaluationContext, FilingScope, ScopedCheckPolicy};
 
 	let source = filing.source;
 	debug_assert!(
-		matches!(filing.scope, Scope::Server(_)) || source == crate::statuses::CANOPY_SOURCE,
-		"group- and canopy-wide filings are canopy's own",
+		matches!(filing.scope, Scope::Application(_) | Scope::Machine(_))
+			|| source == crate::statuses::CANOPY_SOURCE,
+		"group- and canopy-wide filings are canopy's own; a machine's come from its reporter",
 	);
 	debug_assert!(
 		!filing.instances.is_empty(),
 		"a filing with no instances says nothing; skip the call instead",
 	);
-	CheckPolicy::register(
-		conn,
-		source,
-		filing.check,
-		filing.default_ceiling,
-		filing.default_escalates,
-		filing.documentation,
-	)
-	.await?;
-
 	let status_extra = serde_json::Map::new();
-	let (tags, scope_server, scope_group): (
+	// The application type comes out of the same load the tags do, because the
+	// check's namespace needs it: an application-subject check from a structured
+	// source is one catalog entry per type.
+	let mut application_type = None;
+	let (tags, scope): (
 		std::collections::HashMap<String, serde_json::Value>,
-		Option<Uuid>,
-		Option<Uuid>,
+		FilingScope,
 	) = match filing.scope {
-		Scope::Server(server_id) => {
-			let server = Server::get_by_id(conn, server_id).await?;
+		Scope::Application(application_id) => {
+			let server = Application::get_by_id(conn, application_id).await?;
 			let group_id = server.group_id;
+			application_type = Some(server.r#type.clone());
 			let tags = server
 				.tags_merged_with_group(conn)
 				.await?
@@ -1025,18 +1195,73 @@ pub async fn file_check_instances(
 				.into_iter()
 				.map(|(k, v)| (k, serde_json::Value::String(v)))
 				.collect();
-			(tags, Some(server_id), group_id)
+			(
+				tags,
+				FilingScope {
+					application_id: Some(application_id),
+					group_id,
+					// An application is covered by the window over its box.
+					covering_machine: Some(server.machine_id),
+					..Default::default()
+				},
+			)
 		}
-		Scope::Group(group_id) => (Default::default(), None, Some(group_id)),
-		Scope::Global => (Default::default(), None, None),
+		// Graded against the machine's own tags, not against any application
+		// that happens to run on it.
+		Scope::Machine(machine_id) => {
+			let machine = crate::machines::Machine::get_by_id(conn, machine_id).await?;
+			let group_id = machine.group_id;
+			let tags = machine
+				.tags_merged_with_group(conn)
+				.await?
+				.0
+				.into_iter()
+				.map(|(k, v)| (k, serde_json::Value::String(v)))
+				.collect();
+			(
+				tags,
+				FilingScope {
+					machine_id: Some(machine_id),
+					group_id,
+					covering_machine: Some(machine_id),
+					..Default::default()
+				},
+			)
+		}
+		Scope::Group(group_id) => (
+			Default::default(),
+			FilingScope {
+				group_id: Some(group_id),
+				..Default::default()
+			},
+		),
+		Scope::Global => (Default::default(), FilingScope::default()),
 	};
+
+	let namespace =
+		Namespace::of(source, filing.check, application_type.as_ref()).ok_or_else(|| {
+			AppError::Custom(format!(
+				"{} from {source} is an application check, so it cannot be filed against {:?}",
+				filing.check, filing.scope
+			))
+		})?;
+
+	CheckPolicy::register(
+		conn,
+		source,
+		&namespace,
+		filing.check,
+		filing.default_ceiling,
+		filing.default_escalates,
+		filing.documentation,
+	)
+	.await?;
 
 	// The catalog entry and the scoped chain are properties of the check, not
 	// of any one instance: read them once and grade purely from there, so a
 	// server with a dozen backup types still costs two queries.
-	let fleet = CheckPolicy::fleet_grading(conn, source, filing.check).await?;
-	let chain =
-		ScopedCheckPolicy::chain_for(conn, source, filing.check, scope_server, scope_group).await?;
+	let fleet = CheckPolicy::fleet_grading(conn, source, &namespace, filing.check).await?;
+	let chain = ScopedCheckPolicy::chain_for(conn, source, &namespace, filing.check, scope).await?;
 
 	let mut graded_instances: Vec<GradedInstance> = Vec::with_capacity(filing.instances.len());
 	let mut escalates = false;
@@ -1134,7 +1359,7 @@ pub async fn file_check_instances(
 	};
 
 	match filing.scope {
-		Scope::Server(server_id) => {
+		Scope::Application(application_id) => {
 			NewEvent {
 				source: source.to_string(),
 				r#ref: filing.check.to_string(),
@@ -1143,7 +1368,21 @@ pub async fn file_check_instances(
 				active: Some(active),
 				occurred_at: None,
 			}
-			.save_with_state(conn, server_id, filing.device_id, Some(&stamp), false)
+			.save_with_state(conn, application_id, filing.device_id, Some(&stamp), false)
+			.await
+		}
+		Scope::Machine(machine_id) => {
+			raise_machine_event_with_state(
+				conn,
+				machine_id,
+				source,
+				filing.device_id,
+				filing.check,
+				description,
+				filing.message,
+				active,
+				Some(&stamp),
+			)
 			.await
 		}
 		Scope::Group(gid) => {
@@ -1215,7 +1454,16 @@ fn instance_detail(
 	}))
 }
 
-/// One rollup input row: `(server_id, source, check_name, effective_result)`.
+/// Whether a `(source, check)` pair is Canopy's own reachability determination.
+///
+/// Reachability is the one check every grain determines for itself, so it is
+/// the one check an application does not take from its machine.
+// spec: CHK#reachability
+fn is_reachability(source: &str, check: &str) -> bool {
+	source == crate::statuses::CANOPY_SOURCE && check == crate::statuses::REACHABILITY_REF
+}
+
+/// One rollup input row: `(application_id, source, check_name, effective_result)`.
 type HealthCheckRow = (Option<Uuid>, String, Option<String>, Option<String>);
 
 /// Per-server health rollup from current check state: the worst
@@ -1226,26 +1474,26 @@ type HealthCheckRow = (Option<Uuid>, String, Option<String>, Option<String>);
 /// matching the "no signal" semantics).
 pub async fn health_from_check_state(
 	conn: &mut AsyncPgConnection,
-	servers: &[(Uuid, Option<Uuid>)],
+	applications: &[(Uuid, Option<Uuid>)],
 ) -> Result<std::collections::HashMap<Uuid, commons_types::status::HealthState>> {
 	use crate::schema::{issues, scoped_check_policies};
 	use commons_types::status::HealthState;
 	use std::collections::{HashMap, HashSet};
 
-	if servers.is_empty() {
+	if applications.is_empty() {
 		return Ok(HashMap::new());
 	}
-	let server_ids: Vec<Uuid> = servers.iter().map(|(id, _)| *id).collect();
-	let group_of: HashMap<Uuid, Option<Uuid>> = servers.iter().copied().collect();
+	let server_ids: Vec<Uuid> = applications.iter().map(|(id, _)| *id).collect();
+	let group_of: HashMap<Uuid, Option<Uuid>> = applications.iter().copied().collect();
 
 	let rows: Vec<HealthCheckRow> = issues::table
 		.select((
-			issues::server_id,
+			issues::application_id,
 			issues::source,
 			issues::check_name,
 			issues::effective_result,
 		))
-		.filter(issues::server_id.eq_any(&server_ids))
+		.filter(issues::application_id.eq_any(&server_ids))
 		.filter(issues::check_name.is_not_null())
 		.filter(issues::effective_result.is_not_null())
 		// Only states currently contributing count: an operator-resolved
@@ -1261,52 +1509,242 @@ pub async fn health_from_check_state(
 	// backs it: this skips decommissioned checks and orphaned check-states
 	// (no catalog row at all) fleet-wide. See `live_cataloged_pairs`.
 	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_pairs(conn).await?;
+	// Which catalog row backs a state follows the application's type, so a check
+	// decommissioned for one type stops counting there and nowhere else.
+	let types = Application::types_by_id(conn, &server_ids).await?;
 
 	let group_ids: Vec<Uuid> = group_of.values().filter_map(|g| *g).collect();
-	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
-		scoped_check_policies::table
-			.select((
-				scoped_check_policies::server_id,
-				scoped_check_policies::server_group_id,
-				scoped_check_policies::source,
-				scoped_check_policies::check_name,
-			))
-			.filter(scoped_check_policies::ceiling.eq("skipped"))
-			.filter(
-				scoped_check_policies::server_id
-					.eq_any(&server_ids)
-					.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
-			)
-			.load(conn)
-			.await?;
-	let mut server_silences: HashSet<(Uuid, String, String)> = HashSet::new();
-	let mut group_silences: HashSet<(Uuid, String, String)> = HashSet::new();
-	for (server_id, group_id, source, check) in silence_rows {
-		if let Some(sid) = server_id {
-			server_silences.insert((sid, source, check));
+	let silence_rows: Vec<(
+		Option<Uuid>,
+		Option<Uuid>,
+		Option<String>,
+		Option<String>,
+		String,
+		String,
+	)> = scoped_check_policies::table
+		.select((
+			scoped_check_policies::application_id,
+			scoped_check_policies::server_group_id,
+			scoped_check_policies::subject,
+			scoped_check_policies::application_type,
+			scoped_check_policies::source,
+			scoped_check_policies::check_name,
+		))
+		.filter(scoped_check_policies::ceiling.eq("skipped"))
+		.filter(
+			scoped_check_policies::application_id
+				.eq_any(&server_ids)
+				.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
+		)
+		.load(conn)
+		.await?;
+	// The namespace is part of the key: a group spans several application
+	// types, so a silence on one type's `version` leaves another type's alone.
+	let mut server_silences: HashSet<(Uuid, Namespace, String, String)> = HashSet::new();
+	let mut group_silences: HashSet<(Uuid, Namespace, String, String)> = HashSet::new();
+	for (application_id, group_id, subject, ty, source, check) in silence_rows {
+		let Ok(ns) = Namespace::from_columns(subject.as_deref(), ty.as_deref()) else {
+			continue;
+		};
+		if let Some(sid) = application_id {
+			server_silences.insert((sid, ns, source, check));
 		} else if let Some(gid) = group_id {
-			group_silences.insert((gid, source, check));
+			group_silences.insert((gid, ns, source, check));
 		}
 	}
 
 	// Collect each server's surviving effective results, then roll up
 	// through the one shared classifier — the same rules everywhere.
 	let mut contributing: HashMap<Uuid, Vec<CheckResult>> = HashMap::new();
-	for (server_id, source, check_name, effective) in rows {
-		let Some(server_id) = server_id else {
+	for (application_id, source, check_name, effective) in rows {
+		let Some(application_id) = application_id else {
 			continue;
 		};
 		let Some(check_name) = check_name else {
 			continue;
 		};
-		let key = (server_id, source, check_name);
-		if !cataloged.contains(&(key.1.clone(), key.2.clone())) {
+		let key = (application_id, source, check_name);
+		if !crate::check_policies::CheckPolicy::live_for(
+			&cataloged,
+			&key.1,
+			&key.2,
+			types.get(&application_id),
+		) {
 			continue;
 		}
-		if server_silences.contains(&key) {
+		let Some(ns) = Namespace::of(&key.1, &key.2, types.get(&application_id)) else {
+			continue;
+		};
+		if server_silences.contains(&(key.0, ns.clone(), key.1.clone(), key.2.clone())) {
 			continue;
 		}
-		if let Some(Some(gid)) = group_of.get(&server_id)
+		if let Some(Some(gid)) = group_of.get(&application_id)
+			&& group_silences.contains(&(*gid, ns, key.1.clone(), key.2.clone()))
+		{
+			continue;
+		}
+		let Some(result) = effective
+			.as_deref()
+			.and_then(|e| e.parse::<CheckResult>().ok())
+		else {
+			continue;
+		};
+		contributing.entry(application_id).or_default().push(result);
+	}
+
+	let mut health: HashMap<Uuid, HealthState> = contributing
+		.into_iter()
+		.map(|(application_id, results)| (application_id, HealthState::from_results(results)))
+		.collect();
+
+	// An application's contributing checks include its machine's, so a box
+	// whose disk is filling makes every application on it degraded.
+	//
+	// The two rollups combine by taking the worse of the pair, which is the
+	// same answer as classifying the union: `HealthState::from_results` is the
+	// worst result over its input, and worst-of is associative. So the box's
+	// checks are graded once for the box and read from each application on it,
+	// rather than counted once per workload.
+	// spec: CHK#health-rollup
+	let machine_of = Application::machines_by_id(conn, &server_ids).await?;
+	let mut machine_groups: Vec<(Uuid, Option<Uuid>)> = Vec::new();
+	if !machine_of.is_empty() {
+		let machine_ids: Vec<Uuid> = {
+			let mut ids: Vec<Uuid> = machine_of.values().copied().collect();
+			ids.sort_unstable();
+			ids.dedup();
+			ids
+		};
+		// A machine carries its own group, which is the group its silences are
+		// read against; an application's need not be the same one.
+		let rows: Vec<(Uuid, Option<Uuid>)> = crate::schema::machines::table
+			.select((
+				crate::schema::machines::id,
+				crate::schema::machines::group_id,
+			))
+			.filter(crate::schema::machines::id.eq_any(&machine_ids))
+			.load(conn)
+			.await?;
+		machine_groups = rows;
+	}
+	let machine_health = machine_health_rollup(conn, &machine_groups, false).await?;
+	for (application_id, machine_id) in machine_of {
+		let Some(from_machine) = machine_health.get(&machine_id).copied() else {
+			continue;
+		};
+		health
+			.entry(application_id)
+			.and_modify(|held| *held = held.worse_of(from_machine))
+			.or_insert(from_machine);
+	}
+
+	Ok(health)
+}
+
+/// The same rollup for machines, from the checks filed at machine scope.
+///
+/// A sibling of [`health_from_check_state`] rather than a generalisation of it:
+/// the query differs only in which column names the target, and both end at
+/// `HealthState::from_results`, so the two grains classify identically. A
+/// machine's own health is its own checks; what an application makes of its
+/// machine's checks is the application's rollup (see CHK, "Health rollup").
+// spec: CHK#health-rollup
+pub async fn machine_health_from_check_state(
+	conn: &mut AsyncPgConnection,
+	machines: &[(Uuid, Option<Uuid>)],
+) -> Result<std::collections::HashMap<Uuid, commons_types::status::HealthState>> {
+	machine_health_rollup(conn, machines, true).await
+}
+
+/// The machine rollup, with a say over whether the box's own reachability
+/// counts.
+///
+/// It counts when the box is being graded, and does not when an application on
+/// it is: each grain has its own reachability, and a box that goes quiet has
+/// already made every application on it unreachable on its own account. Adding
+/// the box's to theirs would say the same thing twice from the one silence
+/// control. See CHK, "A machine's checks present on its applications".
+// spec: CHK#a-machines-checks-present-on-its-applications
+async fn machine_health_rollup(
+	conn: &mut AsyncPgConnection,
+	machines: &[(Uuid, Option<Uuid>)],
+	include_reachability: bool,
+) -> Result<std::collections::HashMap<Uuid, commons_types::status::HealthState>> {
+	use crate::schema::{issues, scoped_check_policies};
+	use commons_types::status::HealthState;
+	use std::collections::{HashMap, HashSet};
+
+	if machines.is_empty() {
+		return Ok(HashMap::new());
+	}
+	let machine_ids: Vec<Uuid> = machines.iter().map(|(id, _)| *id).collect();
+	let group_of: HashMap<Uuid, Option<Uuid>> = machines.iter().copied().collect();
+
+	let rows: Vec<HealthCheckRow> = issues::table
+		.select((
+			issues::machine_id,
+			issues::source,
+			issues::check_name,
+			issues::effective_result,
+		))
+		.filter(issues::machine_id.eq_any(&machine_ids))
+		.filter(issues::check_name.is_not_null())
+		.filter(issues::effective_result.is_not_null())
+		.filter(issues::active.eq(true))
+		.filter(issues::resolved_at.is_null())
+		.load(conn)
+		.await?;
+
+	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_pairs(conn).await?;
+
+	let group_ids: Vec<Uuid> = group_of.values().filter_map(|g| *g).collect();
+	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
+		scoped_check_policies::table
+			.select((
+				scoped_check_policies::machine_id,
+				scoped_check_policies::server_group_id,
+				scoped_check_policies::source,
+				scoped_check_policies::check_name,
+			))
+			.filter(scoped_check_policies::ceiling.eq("skipped"))
+			.filter(
+				scoped_check_policies::machine_id
+					.eq_any(&machine_ids)
+					.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
+			)
+			.load(conn)
+			.await?;
+	let mut machine_silences: HashSet<(Uuid, String, String)> = HashSet::new();
+	let mut group_silences: HashSet<(Uuid, String, String)> = HashSet::new();
+	for (machine_id, group_id, source, check) in silence_rows {
+		if let Some(mid) = machine_id {
+			machine_silences.insert((mid, source, check));
+		} else if let Some(gid) = group_id {
+			group_silences.insert((gid, source, check));
+		}
+	}
+
+	let mut contributing: HashMap<Uuid, Vec<CheckResult>> = HashMap::new();
+	for (machine_id, source, check_name, effective) in rows {
+		let Some(machine_id) = machine_id else {
+			continue;
+		};
+		let Some(check_name) = check_name else {
+			continue;
+		};
+		let key = (machine_id, source, check_name);
+		if !include_reachability && is_reachability(&key.1, &key.2) {
+			continue;
+		}
+		// A machine's checks are in the machine namespace or a curated source's
+		// flat one; no application type bears on either.
+		if !crate::check_policies::CheckPolicy::live_for(&cataloged, &key.1, &key.2, None) {
+			continue;
+		}
+		if machine_silences.contains(&key) {
+			continue;
+		}
+		if let Some(Some(gid)) = group_of.get(&machine_id)
 			&& group_silences.contains(&(*gid, key.1.clone(), key.2.clone()))
 		{
 			continue;
@@ -1317,16 +1755,16 @@ pub async fn health_from_check_state(
 		else {
 			continue;
 		};
-		contributing.entry(server_id).or_default().push(result);
+		contributing.entry(machine_id).or_default().push(result);
 	}
 
 	Ok(contributing
 		.into_iter()
-		.map(|(server_id, results)| (server_id, HealthState::from_results(results)))
+		.map(|(machine_id, results)| (machine_id, HealthState::from_results(results)))
 		.collect())
 }
 
-/// One fleet check-detail row: `(server_id, source, check_name,
+/// One fleet check-detail row: `(application_id, source, check_name,
 /// observed_result, effective_result, detail)`.
 type FleetCheckRow = (
 	Option<Uuid>,
@@ -1337,7 +1775,7 @@ type FleetCheckRow = (
 	Option<serde_json::Value>,
 );
 
-/// Every named check's current state across the given servers, as one JSON
+/// Every named check's current state across the given applications, as one JSON
 /// object per server keyed by check name.
 ///
 /// Each check's value is the detail its source attached, with `result` and
@@ -1354,70 +1792,162 @@ type FleetCheckRow = (
 // spec: FIG#fleet-spread
 pub async fn check_detail_by_server(
 	conn: &mut AsyncPgConnection,
-	servers: &[(Uuid, Option<Uuid>)],
+	applications: &[(Uuid, Option<Uuid>)],
+) -> Result<std::collections::HashMap<Uuid, serde_json::Map<String, serde_json::Value>>> {
+	check_detail_at_grain(conn, applications, CheckSubject::Application).await
+}
+
+/// The same, for machines: every named check filed against the box itself.
+///
+/// The fleet counts a box once however many workloads it carries, so a
+/// machine-subject check's fields spread over machines and are read from
+/// here rather than from the applications on it.
+// spec: FIG#fleet-spread
+pub async fn check_detail_by_machine(
+	conn: &mut AsyncPgConnection,
+	machines: &[(Uuid, Option<Uuid>)],
+) -> Result<std::collections::HashMap<Uuid, serde_json::Map<String, serde_json::Value>>> {
+	check_detail_at_grain(conn, machines, CheckSubject::Machine).await
+}
+
+/// Both of the above. `targets` is `(target id, its group)`; `grain` decides
+/// which column the filings are keyed by, and so which namespace a check's
+/// identity resolves in — only an application has a type.
+async fn check_detail_at_grain(
+	conn: &mut AsyncPgConnection,
+	targets: &[(Uuid, Option<Uuid>)],
+	grain: CheckSubject,
 ) -> Result<std::collections::HashMap<Uuid, serde_json::Map<String, serde_json::Value>>> {
 	use crate::schema::{issues, scoped_check_policies};
 	use std::collections::{HashMap, HashSet};
 
-	if servers.is_empty() {
+	if targets.is_empty() {
 		return Ok(HashMap::new());
 	}
-	let server_ids: Vec<Uuid> = servers.iter().map(|(id, _)| *id).collect();
-	let group_of: HashMap<Uuid, Option<Uuid>> = servers.iter().copied().collect();
+	let target_ids: Vec<Uuid> = targets.iter().map(|(id, _)| *id).collect();
+	let group_of: HashMap<Uuid, Option<Uuid>> = targets.iter().copied().collect();
 
-	let rows: Vec<FleetCheckRow> = issues::table
-		.select((
-			issues::server_id,
-			issues::source,
-			issues::check_name,
-			issues::observed_result,
-			issues::effective_result,
-			issues::detail,
-		))
-		.filter(issues::server_id.eq_any(&server_ids))
-		.filter(issues::check_name.is_not_null())
-		.filter(issues::effective_result.is_not_null())
-		// Oldest first, so a later source's fields overwrite an earlier
-		// one's when both report the same check name.
-		.order(issues::updated_at.asc())
-		.load(conn)
-		.await?;
+	// Oldest first, so a later source's fields overwrite an earlier one's
+	// when both report the same check name.
+	let rows: Vec<FleetCheckRow> = match grain {
+		CheckSubject::Application => {
+			issues::table
+				.select((
+					issues::application_id,
+					issues::source,
+					issues::check_name,
+					issues::observed_result,
+					issues::effective_result,
+					issues::detail,
+				))
+				.filter(issues::application_id.eq_any(&target_ids))
+				.filter(issues::check_name.is_not_null())
+				.filter(issues::effective_result.is_not_null())
+				.order(issues::updated_at.asc())
+				.load(conn)
+				.await?
+		}
+		CheckSubject::Machine => {
+			issues::table
+				.select((
+					issues::machine_id,
+					issues::source,
+					issues::check_name,
+					issues::observed_result,
+					issues::effective_result,
+					issues::detail,
+				))
+				.filter(issues::machine_id.eq_any(&target_ids))
+				.filter(issues::check_name.is_not_null())
+				.filter(issues::effective_result.is_not_null())
+				.order(issues::updated_at.asc())
+				.load(conn)
+				.await?
+		}
+	};
 
 	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_pairs(conn).await?;
+	// Only an application has a type; a machine's checks live in the machine
+	// namespace or a curated source's flat one.
+	let types = match grain {
+		CheckSubject::Application => Application::types_by_id(conn, &target_ids).await?,
+		CheckSubject::Machine => HashMap::new(),
+	};
 
 	let group_ids: Vec<Uuid> = group_of.values().filter_map(|g| *g).collect();
-	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
-		scoped_check_policies::table
-			.select((
-				scoped_check_policies::server_id,
-				scoped_check_policies::server_group_id,
-				scoped_check_policies::source,
-				scoped_check_policies::check_name,
-			))
-			.filter(scoped_check_policies::ceiling.eq("skipped"))
-			.filter(
-				scoped_check_policies::server_id
-					.eq_any(&server_ids)
-					.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
-			)
-			.load(conn)
-			.await?;
-	let mut server_silences: HashSet<(Uuid, String, String)> = HashSet::new();
-	let mut group_silences: HashSet<(Uuid, String, String)> = HashSet::new();
-	for (server_id, group_id, source, check) in silence_rows {
-		if let Some(sid) = server_id {
-			server_silences.insert((sid, source, check));
+	let silence_rows: Vec<(
+		Option<Uuid>,
+		Option<Uuid>,
+		Option<String>,
+		Option<String>,
+		String,
+		String,
+	)> = match grain {
+		CheckSubject::Application => {
+			scoped_check_policies::table
+				.select((
+					scoped_check_policies::application_id,
+					scoped_check_policies::server_group_id,
+					scoped_check_policies::subject,
+					scoped_check_policies::application_type,
+					scoped_check_policies::source,
+					scoped_check_policies::check_name,
+				))
+				.filter(scoped_check_policies::ceiling.eq("skipped"))
+				.filter(
+					scoped_check_policies::application_id
+						.eq_any(&target_ids)
+						.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
+				)
+				.load(conn)
+				.await?
+		}
+		CheckSubject::Machine => {
+			scoped_check_policies::table
+				.select((
+					scoped_check_policies::machine_id,
+					scoped_check_policies::server_group_id,
+					scoped_check_policies::subject,
+					scoped_check_policies::application_type,
+					scoped_check_policies::source,
+					scoped_check_policies::check_name,
+				))
+				.filter(scoped_check_policies::ceiling.eq("skipped"))
+				.filter(
+					scoped_check_policies::machine_id
+						.eq_any(&target_ids)
+						.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
+				)
+				.load(conn)
+				.await?
+		}
+	};
+	// The namespace is part of the key: a group spans several application
+	// types, so a silence on one type's `version` leaves another type's alone.
+	let mut target_silences: HashSet<(Uuid, Namespace, String, String)> = HashSet::new();
+	let mut group_silences: HashSet<(Uuid, Namespace, String, String)> = HashSet::new();
+	for (target_id, group_id, subject, ty, source, check) in silence_rows {
+		let Ok(ns) = Namespace::from_columns(subject.as_deref(), ty.as_deref()) else {
+			continue;
+		};
+		if let Some(tid) = target_id {
+			target_silences.insert((tid, ns, source, check));
 		} else if let Some(gid) = group_id {
-			group_silences.insert((gid, source, check));
+			group_silences.insert((gid, ns, source, check));
 		}
 	}
 
-	let mut by_server: HashMap<Uuid, serde_json::Map<String, serde_json::Value>> = HashMap::new();
-	for (server_id, source, check_name, observed, effective, detail) in rows {
-		let (Some(server_id), Some(check)) = (server_id, check_name) else {
+	let mut by_target: HashMap<Uuid, serde_json::Map<String, serde_json::Value>> = HashMap::new();
+	for (target_id, source, check_name, observed, effective, detail) in rows {
+		let (Some(target_id), Some(check)) = (target_id, check_name) else {
 			continue;
 		};
-		if !cataloged.contains(&(source.clone(), check.clone())) {
+		if !crate::check_policies::CheckPolicy::live_for(
+			&cataloged,
+			&source,
+			&check,
+			types.get(&target_id),
+		) {
 			continue;
 		}
 		let Some(stored) = effective
@@ -1426,17 +1956,22 @@ pub async fn check_detail_by_server(
 		else {
 			continue;
 		};
-		let silenced = server_silences.contains(&(server_id, source.clone(), check.clone()))
-			|| matches!(group_of.get(&server_id), Some(Some(gid))
-				if group_silences.contains(&(*gid, source.clone(), check.clone())));
+		let silenced = match Namespace::of(&source, &check, types.get(&target_id)) {
+			Some(ns) => {
+				target_silences.contains(&(target_id, ns.clone(), source.clone(), check.clone()))
+					|| matches!(group_of.get(&target_id), Some(Some(gid))
+					if group_silences.contains(&(*gid, ns.clone(), source.clone(), check.clone())))
+			}
+			None => false,
+		};
 		let effective = if silenced {
 			CheckResult::Skipped
 		} else {
 			stored
 		};
 
-		let entry = by_server
-			.entry(server_id)
+		let entry = by_target
+			.entry(target_id)
 			.or_default()
 			.entry(check)
 			.or_insert_with(|| serde_json::Value::Object(Default::default()));
@@ -1455,7 +1990,7 @@ pub async fn check_detail_by_server(
 		}
 	}
 
-	Ok(by_server)
+	Ok(by_target)
 }
 
 /// One consolidated check row:
@@ -1475,125 +2010,99 @@ type ConsolidatedRow = (
 /// whether it's silenced — most urgent first. This is the live side of the
 /// consolidated checks view; the point-in-time side reconstructs the same
 /// shape from status history.
+/// One application's live consolidated checks.
 pub async fn consolidated_checks_latest(
 	conn: &mut AsyncPgConnection,
-	server_id: Uuid,
+	application_id: Uuid,
 	group_id: Option<Uuid>,
 ) -> Result<commons_types::status::ConsolidatedChecks> {
-	use crate::schema::{issues, scoped_check_policies};
-	use commons_types::status::{ConsolidatedCheck, ConsolidatedChecks};
-	use std::collections::HashSet;
+	consolidated_checks_for(conn, Scope::Application(application_id), group_id).await
+}
 
-	let health_state = health_from_check_state(conn, &[(server_id, group_id)])
-		.await?
-		.get(&server_id)
-		.copied()
-		.unwrap_or_default();
+/// One machine's live consolidated checks — the box's own, not those of the
+/// applications on it.
+///
+/// A machine hosting two workloads has one set of these, which is the whole
+/// point of the grain: a full disk is a fact about the box, and reading it
+/// twice would say it twice.
+// spec: CHK#targets
+pub async fn consolidated_checks_latest_for_machine(
+	conn: &mut AsyncPgConnection,
+	machine_id: Uuid,
+	group_id: Option<Uuid>,
+) -> Result<commons_types::status::ConsolidatedChecks> {
+	consolidated_checks_for(conn, Scope::Machine(machine_id), group_id).await
+}
 
-	let rows: Vec<ConsolidatedRow> = issues::table
-		.select((
-			issues::source,
-			issues::check_name,
-			issues::observed_result,
-			issues::effective_result,
-			issues::detail,
-		))
-		.filter(issues::server_id.eq(server_id))
-		.filter(issues::check_name.is_not_null())
-		.filter(issues::effective_result.is_not_null())
-		.load(conn)
-		.await?;
+/// The live consolidated checks filed against one target, at whichever grain
+/// it is.
+///
+/// The two grains differ only in which column identifies the target and which
+/// rollup answers for it; everything after that — the catalog gate, the
+/// silence pass, the reachability fill-in, the ordering — is the same work.
+/// Keeping it one function is what stops the pair drifting apart.
+async fn consolidated_checks_for(
+	conn: &mut AsyncPgConnection,
+	target: Scope,
+	group_id: Option<Uuid>,
+) -> Result<commons_types::status::ConsolidatedChecks> {
+	use commons_types::status::ConsolidatedChecks;
+
+	let target_id = match target {
+		Scope::Application(id) | Scope::Machine(id) => id,
+		// A group or canopy-wide rollup is a different question, answered by
+		// its own reader; nothing calls this with one.
+		Scope::Group(_) | Scope::Global => {
+			return Err(AppError::BadRequest(
+				"consolidated checks are read for an application or a machine".into(),
+			));
+		}
+	};
+
+	let health_state = match target {
+		Scope::Machine(id) => machine_health_from_check_state(conn, &[(id, group_id)])
+			.await?
+			.get(&id)
+			.copied()
+			.unwrap_or_default(),
+		_ => health_from_check_state(conn, &[(target_id, group_id)])
+			.await?
+			.get(&target_id)
+			.copied()
+			.unwrap_or_default(),
+	};
 
 	// A check-state only presents if a live catalog policy backs it: this
 	// excludes decommissioned checks and orphaned check-states (no catalog
 	// row at all — invisible in settings and unmanageable, so never a
-	// phantom failure here). See `live_cataloged_pairs`.
+	// phantom failure here). See `live_cataloged_pairs`. Read once and shared
+	// across both grains, the catalog being fleet-wide.
 	let cataloged = crate::check_policies::CheckPolicy::live_cataloged_pairs(conn).await?;
 
-	let group_ids: Vec<Uuid> = group_id.into_iter().collect();
-	let silence_rows: Vec<(Option<Uuid>, Option<Uuid>, String, String)> =
-		scoped_check_policies::table
-			.select((
-				scoped_check_policies::server_id,
-				scoped_check_policies::server_group_id,
-				scoped_check_policies::source,
-				scoped_check_policies::check_name,
-			))
-			.filter(scoped_check_policies::ceiling.eq("skipped"))
-			.filter(
-				scoped_check_policies::server_id
-					.eq(server_id)
-					.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
-			)
-			.load(conn)
-			.await?;
-	// This is one server, so a matching (source, check) at either scope means
-	// silenced here.
-	let silenced: HashSet<(String, String)> = silence_rows
-		.into_iter()
-		.map(|(_, _, source, check)| (source, check))
-		.collect();
+	let mut checks = checks_at_scope(conn, target, group_id, &cataloged, true).await?;
 
-	let mut checks: Vec<ConsolidatedCheck> = rows
-		.into_iter()
-		.filter_map(|(source, check_name, observed, effective, detail)| {
-			let check = check_name?;
-			if !cataloged.contains(&(source.clone(), check.clone())) {
-				return None;
-			}
-			let stored: CheckResult = effective.as_deref().and_then(|e| e.parse().ok())?;
-			let is_silenced = silenced.contains(&(source.clone(), check.clone()));
-			// A silence is a scoped ceiling of `skipped`: cap the effective
-			// result here so the live view matches both the health rollup
-			// (which excludes silenced checks) and the snapshot path (which
-			// re-grades through `apply_scoped`). The stored effective may
-			// still read failed/warning if the silence post-dates the last
-			// push — the observed result keeps what was reported.
-			let effective = if is_silenced {
-				CheckResult::Skipped
-			} else {
-				stored
-			};
-			Some(ConsolidatedCheck {
-				silenced: is_silenced,
-				observed: observed.as_deref().and_then(|o| o.parse().ok()),
-				source,
-				check,
-				effective,
-				detail: detail.unwrap_or_else(|| serde_json::json!({})),
-			})
-		})
-		.collect();
-	// Reachability presents for every server, whether or not a reporter has
-	// ever gone quiet. The sweep only files this check while it's degraded
-	// (or when it has a degradation to close), so a server that has never
-	// had a problem carries no state row for it — fill that in as passing,
-	// so the check and its silence control are there before anything is
-	// red. Gated on a live catalog row so decommissioning still removes it,
-	// and graded through the same silence pass as everything else.
-	// spec: CHK#reachability
-	let reachability = (
-		crate::statuses::CANOPY_SOURCE.to_string(),
-		crate::statuses::REACHABILITY_REF.to_string(),
-	);
-	if cataloged.contains(&reachability)
-		&& !checks
-			.iter()
-			.any(|c| c.source == reachability.0 && c.check == reachability.1)
-	{
-		let is_silenced = silenced.contains(&reachability);
-		checks.push(ConsolidatedCheck {
-			silenced: is_silenced,
-			observed: Some(CheckResult::Passed),
-			source: reachability.0,
-			check: reachability.1,
-			effective: if is_silenced {
-				CheckResult::Skipped
-			} else {
-				CheckResult::Passed
-			},
-			detail: serde_json::json!({}),
-		});
+	// An operator triaging an application sees every check bearing on it, its
+	// own and its host's, in one list. The box's checks are read from where
+	// they were filed rather than copied per workload, so two applications on
+	// one box present one filing twice rather than two filings.
+	//
+	// Reachability is left behind: each grain determines its own, and the box
+	// going quiet has already made every application on it unreachable in its
+	// own right.
+	// spec: CHK#a-machines-checks-present-on-its-applications
+	if let Scope::Application(id) = target {
+		let machine_id = Application::get_by_id(conn, id).await?.machine_id;
+		let machine = crate::machines::Machine::get_by_id(conn, machine_id).await?;
+		checks.extend(
+			checks_at_scope(
+				conn,
+				Scope::Machine(machine_id),
+				machine.group_id,
+				&cataloged,
+				false,
+			)
+			.await?,
+		);
 	}
 
 	checks.sort_by(|a, b| {
@@ -1610,27 +2119,215 @@ pub async fn consolidated_checks_latest(
 	})
 }
 
+/// The checks filed against one target, graded and ready to present, without
+/// the rollup: what a target contributes to a consolidated view, whether it is
+/// the target being read or the machine under one.
+///
+/// `include_reachability` fills in a passing reachability where the target has
+/// no state row for it. That belongs to the grain being read and not to a
+/// machine seen from an application on it.
+async fn checks_at_scope(
+	conn: &mut AsyncPgConnection,
+	target: Scope,
+	group_id: Option<Uuid>,
+	cataloged: &std::collections::HashSet<(String, Namespace, String)>,
+	include_reachability: bool,
+) -> Result<Vec<commons_types::status::ConsolidatedCheck>> {
+	use crate::schema::{issues, scoped_check_policies};
+	use commons_types::status::ConsolidatedCheck;
+	use commons_types::subject::CheckSubject;
+	use std::collections::HashSet;
+
+	let (target_application, target_machine, _) = target.to_columns();
+	let subject = match target {
+		Scope::Machine(_) => CheckSubject::Machine,
+		_ => CheckSubject::Application,
+	};
+
+	let rows: Vec<ConsolidatedRow> = issues::table
+		.select((
+			issues::source,
+			issues::check_name,
+			issues::observed_result,
+			issues::effective_result,
+			issues::detail,
+		))
+		.filter(issues::application_id.is_not_distinct_from(target_application))
+		.filter(issues::machine_id.is_not_distinct_from(target_machine))
+		.filter(issues::check_name.is_not_null())
+		.filter(issues::effective_result.is_not_null())
+		.load(conn)
+		.await?;
+
+	// Only an application has a type; a machine's checks are in the machine
+	// namespace or a curated source's flat one.
+	let application_type = match target_application {
+		Some(id) => Some(Application::get_by_id(conn, id).await?.r#type),
+		None => None,
+	};
+
+	let group_ids: Vec<Uuid> = group_id.into_iter().collect();
+	let silence_rows: Vec<(Option<String>, Option<String>, String, String)> =
+		scoped_check_policies::table
+			.select((
+				scoped_check_policies::subject,
+				scoped_check_policies::application_type,
+				scoped_check_policies::source,
+				scoped_check_policies::check_name,
+			))
+			.filter(scoped_check_policies::ceiling.eq("skipped"))
+			.filter(
+				scoped_check_policies::application_id
+					.is_not_distinct_from(target_application)
+					.and(scoped_check_policies::machine_id.is_not_distinct_from(target_machine))
+					.or(scoped_check_policies::server_group_id.eq_any(&group_ids)),
+			)
+			.load(conn)
+			.await?;
+	// This is one target, so a matching check at either its own scope or its
+	// group's means silenced here. The namespace has to match too: a group
+	// spans several application types, so a silence on one type's `version` is
+	// not a silence on another type's.
+	let silenced: HashSet<(Namespace, String, String)> = silence_rows
+		.into_iter()
+		.filter_map(|(subject, ty, source, check)| {
+			let ns = Namespace::from_columns(subject.as_deref(), ty.as_deref()).ok()?;
+			Some((ns, source, check))
+		})
+		.collect();
+
+	let mut checks: Vec<ConsolidatedCheck> = rows
+		.into_iter()
+		.filter_map(|(source, check_name, observed, effective, detail)| {
+			let check = check_name?;
+			if !include_reachability && is_reachability(&source, &check) {
+				return None;
+			}
+			let namespace = Namespace::of(&source, &check, application_type.as_ref())?;
+			if !crate::check_policies::CheckPolicy::live_in(cataloged, &source, &namespace, &check)
+			{
+				return None;
+			}
+			let stored: CheckResult = effective.as_deref().and_then(|e| e.parse().ok())?;
+			let is_silenced =
+				silenced.contains(&(namespace.clone(), source.clone(), check.clone()));
+			// A silence is a scoped ceiling of `skipped`: cap the effective
+			// result here so the live view matches both the health rollup
+			// (which excludes silenced checks) and the snapshot path (which
+			// re-grades through `apply_scoped`). The stored effective may
+			// still read failed/warning if the silence post-dates the last
+			// push — the observed result keeps what was reported.
+			let effective = if is_silenced {
+				CheckResult::Skipped
+			} else {
+				stored
+			};
+			Some(ConsolidatedCheck {
+				silenced: is_silenced,
+				observed: observed.as_deref().and_then(|o| o.parse().ok()),
+				qualified_name: namespace.qualified_name(&check),
+				namespace: (&namespace).into(),
+				source,
+				check,
+				effective,
+				detail: detail.unwrap_or_else(|| serde_json::json!({})),
+				subject,
+			})
+		})
+		.collect();
+	// Reachability presents for every target, whether or not a reporter has
+	// ever gone quiet. The sweep only files this check while it's degraded
+	// (or when it has a degradation to close), so a server that has never
+	// had a problem carries no state row for it — fill that in as passing,
+	// so the check and its silence control are there before anything is
+	// red. Gated on a live catalog row so decommissioning still removes it,
+	// and graded through the same silence pass as everything else.
+	// spec: CHK#reachability
+	let reachability = (
+		crate::statuses::CANOPY_SOURCE.to_string(),
+		crate::statuses::REACHABILITY_REF.to_string(),
+	);
+	if include_reachability
+		&& crate::check_policies::CheckPolicy::live_for(
+			cataloged,
+			&reachability.0,
+			&reachability.1,
+			application_type.as_ref(),
+		) && !checks
+		.iter()
+		.any(|c| c.source == reachability.0 && c.check == reachability.1)
+	{
+		// Reachability is canopy's own, so it is flat whatever the target.
+		let is_silenced = silenced.contains(&(
+			Namespace::Flat,
+			reachability.0.clone(),
+			reachability.1.clone(),
+		));
+		checks.push(ConsolidatedCheck {
+			silenced: is_silenced,
+			observed: Some(CheckResult::Passed),
+			namespace: (&Namespace::Flat).into(),
+			qualified_name: reachability.1.clone(),
+			source: reachability.0,
+			check: reachability.1,
+			effective: if is_silenced {
+				CheckResult::Skipped
+			} else {
+				CheckResult::Passed
+			},
+			detail: serde_json::json!({}),
+			subject,
+		});
+	}
+
+	Ok(checks)
+}
+
 impl Issue {
 	/// Check state for one (source, check), across every scope — server,
 	/// group, and canopy-wide. The check detail page's data source: rows
 	/// carry the observed/effective results, the check's detail, and the
 	/// degraded-streak timestamps. A check's identity is the pair — a
 	/// same-named check from another source is a different check.
+	/// Every check-state row for one catalog entry.
+	///
+	/// `namespace` is what makes this one entry rather than a name: an
+	/// application-namespaced check is narrowed to applications of its type,
+	/// and a machine-namespaced one to machines, so two types reporting one
+	/// name do not pool their states onto each other's page. A curated
+	/// source's flat entry is one check filed at whatever grain suits it, so
+	/// it takes every row.
 	pub async fn check_state_for_check(
 		conn: &mut AsyncPgConnection,
 		source: &str,
+		namespace: &Namespace,
 		check_name: &str,
 	) -> Result<Vec<Issue>> {
 		use crate::schema::issues::dsl;
 
-		dsl::issues
+		let mut query = dsl::issues
 			.select(Issue::as_select())
 			.filter(dsl::source.eq(source))
 			.filter(dsl::check_name.eq(check_name))
 			.filter(dsl::observed_result.is_not_null())
-			.load(conn)
-			.await
-			.map_err(AppError::from)
+			.into_boxed();
+
+		match namespace {
+			Namespace::Flat => {}
+			Namespace::Machine => query = query.filter(dsl::machine_id.is_not_null()),
+			Namespace::Application(ty) => {
+				query = query.filter(
+					dsl::application_id.nullable().eq_any(
+						crate::schema::applications::dsl::applications
+							.select(crate::schema::applications::dsl::id)
+							.filter(crate::schema::applications::dsl::type_.eq(ty.to_string()))
+							.nullable(),
+					),
+				)
+			}
+		}
+
+		query.load(conn).await.map_err(AppError::from)
 	}
 }
 
@@ -1641,7 +2338,7 @@ pub async fn get_global_issue(conn: &mut AsyncPgConnection, r#ref: &str) -> Resu
 	dsl::issues
 		.select(Issue::as_select())
 		.filter(
-			dsl::server_id
+			dsl::application_id
 				.is_null()
 				.and(dsl::server_group_id.is_null())
 				.and(dsl::source.eq(crate::statuses::CANOPY_SOURCE))
@@ -1712,22 +2409,35 @@ async fn re_evaluate_incident_membership(
 
 	let was_in = is_issue_in_open_incident(conn, issue.id).await?;
 	let snoozed = issue.snoozed_until.is_some_and(|t| t > Timestamp::now());
-	// A group-scoped issue (server_id = None) can only be silenced at the
-	// group level; pass the nil server so only the group list is consulted.
-	// Canopy-wide issues have no silence scope (yet).
+	// An event is silenced at its own scope or at its group's, and its own
+	// scope is whichever grain it was filed against. Reading the application
+	// id alone left a machine's checks silenceable in the consolidated view and
+	// in what the agent is told, but still able to open an incident.
+	// spec: CHK#silences-follow-the-event
 	let silenced = crate::silenced_refs::is_silenced(
 		conn,
-		issue.server_id.unwrap_or(Uuid::nil()),
+		Scope::from_columns(
+			issue.application_id,
+			issue.machine_id,
+			issue.server_group_id,
+		),
 		target.group_id(),
 		&issue.source,
 		&issue.r#ref,
 	)
 	.await?;
 	// A maintenance window over the target suspends everything on it, so its
-	// issues leave exactly as a silenced one does.
+	// issues leave exactly as a silenced one does. A window is over a machine,
+	// and an application's issues are covered by the window over the box it
+	// runs on, so an application-scoped issue resolves through to its machine.
+	let cover_machine = match (issue.machine_id, issue.application_id) {
+		(Some(mid), _) => Some(mid),
+		(None, Some(aid)) => Some(Application::get_by_id(conn, aid).await?.machine_id),
+		(None, None) => None,
+	};
 	let maintained = crate::maintenance_windows::MaintenanceWindow::suspends(
 		conn,
-		issue.server_id,
+		cover_machine,
 		target.group_id(),
 	)
 	.await?;
@@ -1959,7 +2669,7 @@ async fn re_evaluate_incident_membership(
 /// Resolve the `(target, monitored)` pair an issue should be re-evaluated
 /// against, handling all three scopes.
 ///
-/// - Server-scoped (`server_id = Some`): look the server up; its `group_id`
+/// - Application-scoped (`application_id = Some`): look the server up; its `group_id`
 ///   and `is_monitored` drive the evaluation. `None` group → ungrouped, no
 ///   incident path.
 /// - Group-scoped (`server_group_id = Some`): use the group directly and force
@@ -1970,26 +2680,30 @@ async fn issue_target_and_monitored(
 	conn: &mut AsyncPgConnection,
 	issue: &Issue,
 ) -> Result<Option<(IncidentTarget, bool)>> {
-	Scope::from_columns(issue.server_id, issue.server_group_id)
-		.resolve_incident_target(conn)
-		.await
+	Scope::from_columns(
+		issue.application_id,
+		issue.machine_id,
+		issue.server_group_id,
+	)
+	.resolve_incident_target(conn)
+	.await
 }
 
-/// Re-evaluate every currently-open issue on `server_id` against incident
+/// Re-evaluate every currently-open issue on `application_id` against incident
 /// membership. Used as a catch-up when the operator flips a property of
 /// the server that changes its incident eligibility — currently:
-/// ungrouped→grouped (via [`Server::assign_to_group`]) and monitored
+/// ungrouped→grouped (via [`Application::assign_to_group`]) and monitored
 /// toggles (via the private-server's server update handler). On flips
 /// that should *remove* issues from an incident (e.g. monitored→
 /// unmonitored), `re_evaluate_incident_membership` will leave them and
 /// close the incident if nothing else props it up.
 pub async fn reevaluate_open_issues_for_server(
 	db: &mut AsyncPgConnection,
-	server_id: Uuid,
+	application_id: Uuid,
 ) -> Result<()> {
 	use crate::schema::issues::dsl;
 
-	let server = Server::get_by_id(db, server_id).await?;
+	let server = Application::get_by_id(db, application_id).await?;
 	let Some(gid) = server.group_id else {
 		return Ok(());
 	};
@@ -1997,7 +2711,7 @@ pub async fn reevaluate_open_issues_for_server(
 
 	let open_issues: Vec<Issue> = dsl::issues
 		.select(Issue::as_select())
-		.filter(dsl::server_id.eq(server_id))
+		.filter(dsl::application_id.eq(application_id))
 		.filter(dsl::active.eq(true))
 		.filter(dsl::resolved_at.is_null())
 		.load(db)
@@ -2018,7 +2732,7 @@ pub async fn reevaluate_open_issues_for_server(
 	Ok(())
 }
 
-/// Enqueue `server_id` for deferred incident (re-)evaluation.
+/// Enqueue `application_id` for deferred incident (re-)evaluation.
 ///
 /// The device status-ingest path calls this in place of the inline
 /// `re_evaluate_incident_membership` it used to run: recording the issue
@@ -2030,18 +2744,21 @@ pub async fn reevaluate_open_issues_for_server(
 /// unit. A push arriving while a re-evaluation is already pending is a
 /// no-op — the pending run reads current state when it fires, so it already
 /// covers the later push.
-pub async fn enqueue_incident_reeval(conn: &mut AsyncPgConnection, server_id: Uuid) -> Result<()> {
+pub async fn enqueue_incident_reeval(
+	conn: &mut AsyncPgConnection,
+	application_id: Uuid,
+) -> Result<()> {
 	use crate::schema::incident_reeval_queue::dsl;
 	diesel::insert_into(dsl::incident_reeval_queue)
-		.values(dsl::server_id.eq(server_id))
-		.on_conflict(dsl::server_id)
+		.values(dsl::application_id.eq(application_id))
+		.on_conflict(dsl::application_id)
 		.do_nothing()
 		.execute(conn)
 		.await?;
 	Ok(())
 }
 
-/// Re-evaluate incident membership for every issue on `server_id` that can
+/// Re-evaluate incident membership for every issue on `application_id` that can
 /// currently affect an incident: issues that are active-and-unresolved
 /// (candidates to *join*), plus issues still linked to an open incident
 /// (candidates to *leave* — e.g. a check that just recovered and went
@@ -2056,11 +2773,11 @@ pub async fn enqueue_incident_reeval(conn: &mut AsyncPgConnection, server_id: Uu
 /// order.
 pub async fn reevaluate_incidents_for_server(
 	conn: &mut AsyncPgConnection,
-	server_id: Uuid,
+	application_id: Uuid,
 ) -> Result<()> {
 	use crate::schema::{incident_issues, incidents, issues};
 
-	let server = Server::get_by_id(conn, server_id).await?;
+	let server = Application::get_by_id(conn, application_id).await?;
 	let Some(gid) = server.group_id else {
 		return Ok(());
 	};
@@ -2068,7 +2785,7 @@ pub async fn reevaluate_incidents_for_server(
 
 	let mut candidates: Vec<Issue> = issues::table
 		.select(Issue::as_select())
-		.filter(issues::server_id.eq(server_id))
+		.filter(issues::application_id.eq(application_id))
 		.filter(
 			issues::active
 				.eq(true)
@@ -2105,8 +2822,8 @@ pub async fn reevaluate_incidents_for_server(
 }
 
 /// Drain the incident re-evaluation queue, running
-/// [`reevaluate_incidents_for_server`] for up to `limit` queued servers and
-/// removing each once handled. Returns the number of servers processed.
+/// [`reevaluate_incidents_for_server`] for up to `limit` queued applications and
+/// removing each once handled. Returns the number of applications processed.
 ///
 /// Each server is claimed and processed in its own transaction with
 /// `FOR UPDATE SKIP LOCKED`, so a slow re-evaluation doesn't hold a batch of
@@ -2122,8 +2839,8 @@ pub async fn process_incident_reeval_queue(
 	while (processed as i64) < limit {
 		let claimed: Option<Uuid> = conn
 			.transaction::<_, AppError, _>(async |tx| {
-				let Some(server_id): Option<Uuid> = dsl::incident_reeval_queue
-					.select(dsl::server_id)
+				let Some(application_id): Option<Uuid> = dsl::incident_reeval_queue
+					.select(dsl::application_id)
 					.order(dsl::enqueued_at.asc())
 					.for_update()
 					.skip_locked()
@@ -2133,11 +2850,13 @@ pub async fn process_incident_reeval_queue(
 				else {
 					return Ok(None);
 				};
-				reevaluate_incidents_for_server(tx, server_id).await?;
-				diesel::delete(dsl::incident_reeval_queue.filter(dsl::server_id.eq(server_id)))
-					.execute(tx)
-					.await?;
-				Ok(Some(server_id))
+				reevaluate_incidents_for_server(tx, application_id).await?;
+				diesel::delete(
+					dsl::incident_reeval_queue.filter(dsl::application_id.eq(application_id)),
+				)
+				.execute(tx)
+				.await?;
+				Ok(Some(application_id))
 			})
 			.await?;
 		match claimed {
@@ -2148,19 +2867,19 @@ pub async fn process_incident_reeval_queue(
 	Ok(processed)
 }
 
-/// Re-evaluate every currently-open issue on `server_id` with the given
+/// Re-evaluate every currently-open issue on `application_id` with the given
 /// `(source, ref)`. Narrower variant of [`reevaluate_open_issues_for_server`]
 /// used after a server-scoped silence is added or removed: only the matching
 /// refs need to revisit their incident membership.
 pub async fn reevaluate_open_issues_for_server_ref(
 	db: &mut AsyncPgConnection,
-	server_id: Uuid,
+	application_id: Uuid,
 	source: &str,
 	r#ref: &str,
 ) -> Result<()> {
 	use crate::schema::issues::dsl;
 
-	let server = Server::get_by_id(db, server_id).await?;
+	let server = Application::get_by_id(db, application_id).await?;
 	let Some(gid) = server.group_id else {
 		return Ok(());
 	};
@@ -2168,7 +2887,53 @@ pub async fn reevaluate_open_issues_for_server_ref(
 
 	let open_issues: Vec<Issue> = dsl::issues
 		.select(Issue::as_select())
-		.filter(dsl::server_id.eq(server_id))
+		.filter(dsl::application_id.eq(application_id))
+		.filter(dsl::source.eq(source))
+		.filter(dsl::ref_.eq(r#ref))
+		.filter(dsl::active.eq(true))
+		.filter(dsl::resolved_at.is_null())
+		.load(db)
+		.await?;
+
+	let now = Timestamp::now();
+	for issue in open_issues {
+		re_evaluate_incident_membership(
+			db,
+			&issue,
+			IncidentTarget::Group(gid),
+			monitored,
+			now,
+			None,
+		)
+		.await?;
+	}
+	Ok(())
+}
+
+/// Re-evaluate every currently-open issue filed against this machine with the
+/// given `(source, ref)`. Used after a machine-scoped silence is added or
+/// removed.
+///
+/// Only the box's own issues: the applications on it are silenced against
+/// themselves, so a silence here does not reach them.
+// spec: CHK#silences-follow-the-event
+pub async fn reevaluate_open_issues_for_machine_ref(
+	db: &mut AsyncPgConnection,
+	machine_id: Uuid,
+	source: &str,
+	r#ref: &str,
+) -> Result<()> {
+	use crate::schema::issues::dsl;
+
+	let machine = crate::machines::Machine::get_by_id(db, machine_id).await?;
+	let Some(gid) = machine.group_id else {
+		return Ok(());
+	};
+	let monitored = machine.is_monitored;
+
+	let open_issues: Vec<Issue> = dsl::issues
+		.select(Issue::as_select())
+		.filter(dsl::machine_id.eq(machine_id))
 		.filter(dsl::source.eq(source))
 		.filter(dsl::ref_.eq(r#ref))
 		.filter(dsl::active.eq(true))
@@ -2199,11 +2964,11 @@ pub async fn reevaluate_open_issues_for_group_ref(
 	source: &str,
 	r#ref: &str,
 ) -> Result<()> {
-	use crate::schema::{issues, servers};
+	use crate::schema::{applications, issues};
 
-	let server_ids: Vec<Uuid> = servers::table
-		.select(servers::id)
-		.filter(servers::group_id.eq(server_group_id))
+	let server_ids: Vec<Uuid> = applications::table
+		.select(applications::id)
+		.filter(applications::group_id.eq(server_group_id))
 		.load(db)
 		.await?;
 
@@ -2212,7 +2977,7 @@ pub async fn reevaluate_open_issues_for_group_ref(
 	let open_issues: Vec<Issue> = issues::table
 		.select(Issue::as_select())
 		.filter(
-			issues::server_id
+			issues::application_id
 				.eq_any(&server_ids)
 				.or(issues::server_group_id.eq(server_group_id)),
 		)
@@ -2229,12 +2994,12 @@ pub async fn reevaluate_open_issues_for_group_ref(
 	let mut monitored_by_server: std::collections::HashMap<Uuid, bool> =
 		std::collections::HashMap::new();
 	for sid in &server_ids {
-		let s = Server::get_by_id(db, *sid).await?;
+		let s = Application::get_by_id(db, *sid).await?;
 		monitored_by_server.insert(*sid, s.is_monitored);
 	}
 	for issue in open_issues {
 		// Group-scoped issues bypass the per-server monitored gate.
-		let monitored = match issue.server_id {
+		let monitored = match issue.application_id {
 			Some(sid) => monitored_by_server.get(&sid).copied().unwrap_or(true),
 			None => true,
 		};
@@ -2264,23 +3029,44 @@ pub async fn reevaluate_open_issues_for_scope(
 	scope: Scope,
 	by: Option<&str>,
 ) -> Result<()> {
-	use crate::schema::{issues, servers};
+	use crate::schema::{applications, issues};
 
-	let (gid, server_ids, include_group_scoped) = match scope {
-		Scope::Server(sid) => {
-			let server = Server::get_by_id(db, sid).await?;
-			let Some(gid) = server.group_id else {
+	// The applications whose issues are re-evaluated, and the group they answer
+	// to. A machine's window covers the workloads on it, so re-evaluating a
+	// machine means re-evaluating every application it hosts, not just its own
+	// machine-scoped issues.
+	let (gid, application_ids, machine_ids, include_group_scoped) = match scope {
+		Scope::Application(aid) => {
+			let application = Application::get_by_id(db, aid).await?;
+			let Some(gid) = application.group_id else {
 				return Ok(());
 			};
-			(gid, vec![sid], false)
+			(gid, vec![aid], Vec::new(), false)
 		}
-		Scope::Group(gid) => {
-			let ids: Vec<Uuid> = servers::table
-				.select(servers::id)
-				.filter(servers::group_id.eq(gid))
+		Scope::Machine(mid) => {
+			let machine = crate::machines::Machine::get_by_id(db, mid).await?;
+			let Some(gid) = machine.group_id else {
+				return Ok(());
+			};
+			let ids: Vec<Uuid> = applications::table
+				.select(applications::id)
+				.filter(applications::machine_id.eq(mid))
 				.load(db)
 				.await?;
-			(gid, ids, true)
+			(gid, ids, vec![mid], false)
+		}
+		Scope::Group(gid) => {
+			let ids: Vec<Uuid> = applications::table
+				.select(applications::id)
+				.filter(applications::group_id.eq(gid))
+				.load(db)
+				.await?;
+			let machines: Vec<Uuid> = crate::schema::machines::table
+				.select(crate::schema::machines::id)
+				.filter(crate::schema::machines::group_id.eq(gid))
+				.load(db)
+				.await?;
+			(gid, ids, machines, true)
 		}
 		Scope::Global => return Ok(()),
 	};
@@ -2290,30 +3076,33 @@ pub async fn reevaluate_open_issues_for_scope(
 		.filter(issues::active.eq(true))
 		.filter(issues::resolved_at.is_null())
 		.into_boxed();
+	let on_target = issues::application_id
+		.eq_any(application_ids.clone())
+		.or(issues::machine_id.eq_any(machine_ids.clone()));
 	query = if include_group_scoped {
-		query.filter(
-			issues::server_id
-				.eq_any(server_ids.clone())
-				.or(issues::server_group_id.eq(gid)),
-		)
+		query.filter(on_target.or(issues::server_group_id.eq(gid)))
 	} else {
-		query.filter(issues::server_id.eq_any(server_ids.clone()))
+		query.filter(on_target)
 	};
 	let open_issues: Vec<Issue> = query.load(db).await?;
 
-	let mut monitored_by_server: std::collections::HashMap<Uuid, bool> =
-		std::collections::HashMap::new();
-	for sid in &server_ids {
-		let server = Server::get_by_id(db, *sid).await?;
-		monitored_by_server.insert(*sid, server.is_monitored);
+	let mut monitored: std::collections::HashMap<Uuid, bool> = std::collections::HashMap::new();
+	for aid in &application_ids {
+		let application = Application::get_by_id(db, *aid).await?;
+		monitored.insert(*aid, application.is_monitored);
+	}
+	for mid in &machine_ids {
+		let machine = crate::machines::Machine::get_by_id(db, *mid).await?;
+		monitored.insert(*mid, machine.is_monitored);
 	}
 
 	let now = Timestamp::now();
 	for issue in open_issues {
-		// A group-scoped issue answers to no server's monitoring gate.
-		let monitored = match issue.server_id {
-			Some(sid) => monitored_by_server.get(&sid).copied().unwrap_or(true),
-			None => true,
+		// A group-scoped issue answers to no target's monitoring gate.
+		let monitored = match (issue.application_id, issue.machine_id) {
+			(Some(aid), _) => monitored.get(&aid).copied().unwrap_or(true),
+			(None, Some(mid)) => monitored.get(&mid).copied().unwrap_or(true),
+			(None, None) => true,
 		};
 		re_evaluate_incident_membership(db, &issue, IncidentTarget::Group(gid), monitored, now, by)
 			.await?;
@@ -2355,13 +3144,27 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 		}
 
 		let server_ids: Vec<Uuid> = {
-			let mut s: std::collections::HashSet<Uuid> =
-				open_issues.iter().filter_map(|i| i.server_id).collect();
+			let mut s: std::collections::HashSet<Uuid> = open_issues
+				.iter()
+				.filter_map(|i| i.application_id)
+				.collect();
 			s.drain().collect()
 		};
-		let servers = Server::get_by_ids(conn, &server_ids).await?;
-		let by_id: std::collections::HashMap<Uuid, Server> =
-			servers.into_iter().map(|s| (s.id, s)).collect();
+		let applications = Application::get_by_ids(conn, &server_ids).await?;
+		let by_id: std::collections::HashMap<Uuid, Application> =
+			applications.into_iter().map(|s| (s.id, s)).collect();
+
+		let machine_ids: Vec<Uuid> = {
+			let mut s: std::collections::HashSet<Uuid> =
+				open_issues.iter().filter_map(|i| i.machine_id).collect();
+			s.drain().collect()
+		};
+		let machines_by_id: std::collections::HashMap<Uuid, crate::machines::Machine> =
+			crate::machines::Machine::get_by_ids(conn, &machine_ids)
+				.await?
+				.into_iter()
+				.map(|m| (m.id, m))
+				.collect();
 
 		let now = Timestamp::now();
 		let mut evaluated = 0usize;
@@ -2370,7 +3173,11 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 			// server case from the batched `by_id` map (rather than
 			// `Scope::resolve_incident_target`, which queries per issue) to
 			// keep this startup sweep to a single server fetch.
-			match Scope::from_columns(issue.server_id, issue.server_group_id) {
+			match Scope::from_columns(
+				issue.application_id,
+				issue.machine_id,
+				issue.server_group_id,
+			) {
 				// Group-scoped issue: resolve its group directly, bypass the
 				// per-server is_monitored gate (monitored = true).
 				Scope::Group(gid) => {
@@ -2385,13 +3192,13 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 					.await?;
 					evaluated += 1;
 				}
-				// Server-scoped issue: look up the server and its group.
-				Scope::Server(sid) => {
+				// Application-scoped issue: look up the server and its group.
+				Scope::Application(sid) => {
 					let Some(server) = by_id.get(&sid) else {
 						continue;
 					};
 					let Some(gid) = server.group_id else {
-						// Ungrouped servers can't have incidents; nothing to reconcile.
+						// Ungrouped applications can't have incidents; nothing to reconcile.
 						continue;
 					};
 					re_evaluate_incident_membership(
@@ -2399,6 +3206,27 @@ pub async fn reconcile_open_incidents(db: &mut AsyncPgConnection) -> Result<(usi
 						&issue,
 						IncidentTarget::Group(gid),
 						server.is_monitored,
+						now,
+						None,
+					)
+					.await?;
+					evaluated += 1;
+				}
+				// Machine-scoped issue: look up the machine and its group,
+				// carrying the machine's own monitoring switch.
+				Scope::Machine(mid) => {
+					let Some(machine) = machines_by_id.get(&mid) else {
+						continue;
+					};
+					let Some(gid) = machine.group_id else {
+						// Ungrouped machines can't have incidents either.
+						continue;
+					};
+					re_evaluate_incident_membership(
+						conn,
+						&issue,
+						IncidentTarget::Group(gid),
+						machine.is_monitored,
 						now,
 						None,
 					)
@@ -2577,7 +3405,7 @@ async fn is_issue_in_open_incident(db: &mut AsyncPgConnection, issue_id: Uuid) -
 
 /// What an issue's incident contribution attaches to: its server's group,
 /// or canopy as a whole for canopy-wide issues (self-alerts). Issues on
-/// ungrouped servers have no target and no incident path.
+/// ungrouped applications have no target and no incident path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IncidentTarget {
 	Group(Uuid),
@@ -2728,8 +3556,8 @@ async fn enqueue_slack_open(
 	let (label, open_delay) = match target {
 		IncidentTarget::Group(gid) => {
 			let group = ServerGroup::get_by_id(conn, gid).await?;
-			let server = match issue.server_id {
-				Some(sid) => Some(Server::get_by_id(conn, sid).await?),
+			let server = match issue.application_id {
+				Some(sid) => Some(Application::get_by_id(conn, sid).await?),
 				None => None,
 			};
 			(
@@ -2866,7 +3694,7 @@ async fn enqueue_slack_resolve_inner(
 	Ok(())
 }
 
-pub(crate) fn format_group_label(group: &ServerGroup, server: Option<&Server>) -> String {
+pub(crate) fn format_group_label(group: &ServerGroup, server: Option<&Application>) -> String {
 	if let Some(server) = server {
 		let host = server.host.as_ref().map(|h| h.0.to_string());
 		let server_part = match (&server.name, host) {
@@ -2911,7 +3739,7 @@ impl Issue {
 
 	pub async fn list_for_server(
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		application_id: Uuid,
 		filter: IssueFilter,
 		limit: i64,
 	) -> Result<Vec<Self>> {
@@ -2919,7 +3747,7 @@ impl Issue {
 
 		let mut q = dsl::issues
 			.select(Self::as_select())
-			.filter(dsl::server_id.eq(server_id))
+			.filter(dsl::application_id.eq(application_id))
 			// Healthy check state (rows that never degraded) isn't an
 			// issue; it has its own read surfaces.
 			.filter(dsl::active.eq(true).or(dsl::last_degraded_at.is_not_null()))
@@ -2944,8 +3772,8 @@ impl Issue {
 	/// - `results`: when `Some` and non-empty, restrict to issues whose
 	///   latest effective result is one of those.
 	/// - `server_group_id`: when `Some`, restrict to issues whose server is
-	///   in that group. A direct `IN (SELECT id FROM servers WHERE group_id = $)`.
-	/// - `server_id`: when `Some`, restrict to issues on that server.
+	///   in that group. A direct `IN (SELECT id FROM applications WHERE group_id = $)`.
+	/// - `application_id`: when `Some`, restrict to issues on that server.
 	///
 	/// Every filter is applied in SQL, so `limit` bounds the *filtered* set.
 	/// Narrowing a page after the fact would let a busy fleet push a quiet
@@ -2955,17 +3783,19 @@ impl Issue {
 		filters: IssueListFilters,
 		limit: i64,
 	) -> Result<Vec<Self>> {
+		use crate::schema::applications;
 		use crate::schema::issues::dsl;
-		use crate::schema::servers;
 
 		let mut q = dsl::issues
 			.select(Self::as_select())
-			// Canopy-wide issues (self-alerts: neither server- nor
-			// group-scoped) have their own surface (`crate::self_alerts`);
-			// they are not fleet issues.
+			// Canopy-wide issues (self-alerts: scoped to no target at all)
+			// have their own surface (`crate::self_alerts`); they are not
+			// fleet issues. A machine-scoped issue is one, and reading only
+			// the application and group columns hid every machine check.
 			.filter(
-				dsl::server_id
+				dsl::application_id
 					.is_not_null()
+					.or(dsl::machine_id.is_not_null())
 					.or(dsl::server_group_id.is_not_null()),
 			)
 			// Healthy check state (rows that never degraded) isn't an
@@ -2982,15 +3812,44 @@ impl Issue {
 			q = q.filter(dsl::effective_result.eq_any(strs));
 		}
 		if let Some(gid) = filters.server_group_id {
-			let server_ids: Vec<Uuid> = servers::table
-				.select(servers::id)
-				.filter(servers::group_id.eq(gid))
+			// A group's issues are its applications', its machines', and its
+			// own. Collecting only applications dropped every machine check
+			// from a group's view.
+			let server_ids: Vec<Uuid> = applications::table
+				.select(applications::id)
+				.filter(applications::group_id.eq(gid))
 				.load(db)
 				.await?;
-			q = q.filter(dsl::server_id.eq_any(server_ids));
+			let machine_ids: Vec<Uuid> = crate::schema::machines::table
+				.select(crate::schema::machines::id)
+				.filter(crate::schema::machines::group_id.eq(gid))
+				.load(db)
+				.await?;
+			q = q.filter(
+				dsl::application_id
+					.eq_any(server_ids)
+					.or(dsl::machine_id.eq_any(machine_ids))
+					.or(dsl::server_group_id.eq(gid)),
+			);
 		}
-		if let Some(sid) = filters.server_id {
-			q = q.filter(dsl::server_id.eq(sid));
+		if let Some(sid) = filters.application_id {
+			// The machine's issues come with the application's, which is what
+			// the application's own detail page presents.
+			// spec: MCP#incidents-and-issues
+			let machine_id: Option<Uuid> = applications::table
+				.select(applications::machine_id)
+				.filter(applications::id.eq(sid))
+				.first(db)
+				.await
+				.optional()?;
+			q = q.filter(
+				dsl::application_id.eq(sid).or(dsl::machine_id
+					.is_not_distinct_from(machine_id)
+					.and(dsl::machine_id.is_not_null())),
+			);
+		}
+		if let Some(mid) = filters.machine_id {
+			q = q.filter(dsl::machine_id.eq(mid));
 		}
 		if let Some(since) = filters.since {
 			q = q.filter(dsl::last_seen.ge(jiff_diesel::Timestamp::from(since)));
@@ -3021,9 +3880,15 @@ impl Issue {
 	/// re-filing it — e.g. failed → broken → passed, where the failure
 	/// issue must close on the `passed` push even though the previous
 	/// push didn't report a failure.
-	pub async fn active_refs_with_prefix(
+	/// The machine-grain counterpart of [`Self::active_refs_with_prefix`].
+	///
+	/// The two grains need separate previously-active sets. Sharing one would
+	/// make a check that moves grain read as unmentioned on the grain it left,
+	/// closing and reopening it as a new issue on every push.
+	// spec: STA
+	pub async fn active_refs_with_prefix_for_machine(
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		machine_id: Uuid,
 		source: &str,
 		prefix: &str,
 	) -> Result<Vec<String>> {
@@ -3035,8 +3900,33 @@ impl Issue {
 		dsl::issues
 			.select(dsl::ref_)
 			.filter(
-				dsl::server_id
-					.eq(server_id)
+				dsl::machine_id
+					.eq(machine_id)
+					.and(dsl::source.eq(source))
+					.and(dsl::ref_.like(format!("{prefix}%")))
+					.and(dsl::active.eq(true)),
+			)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	pub async fn active_refs_with_prefix(
+		db: &mut AsyncPgConnection,
+		application_id: Uuid,
+		source: &str,
+		prefix: &str,
+	) -> Result<Vec<String>> {
+		use crate::schema::issues::dsl;
+		debug_assert!(
+			!prefix.contains(['%', '_', '\\']),
+			"prefix is used in a LIKE pattern and must not contain wildcards"
+		);
+		dsl::issues
+			.select(dsl::ref_)
+			.filter(
+				dsl::application_id
+					.eq(application_id)
 					.and(dsl::source.eq(source))
 					.and(dsl::ref_.like(format!("{prefix}%")))
 					.and(dsl::active.eq(true)),
@@ -3047,7 +3937,7 @@ impl Issue {
 	}
 
 	/// Bulk lookup of issues that share the same `(source, ref)` across many
-	/// servers. Each `(server_id, source, ref)` is unique, so at most one row
+	/// applications. Each `(application_id, source, ref)` is unique, so at most one row
 	/// per server is returned. Used by the canopy reachability sweep.
 	/// Group ids carrying an active group-scoped issue with this
 	/// `(source, ref)`. Used by sweeps to recover only where an alert is
@@ -3069,7 +3959,7 @@ impl Issue {
 			.map_err(AppError::from)
 	}
 
-	/// Server ids carrying an active server-scoped issue with this
+	/// Application ids carrying an active server-scoped issue with this
 	/// `(source, ref)`. The counterpart to
 	/// [`Self::active_group_ids_by_source_ref`], for the sweeps whose work list is
 	/// "what is wrong now" and which need "what was wrong last time" to know what
@@ -3084,8 +3974,8 @@ impl Issue {
 			.filter(dsl::source.eq(source))
 			.filter(dsl::ref_.eq(ref_))
 			.filter(dsl::active.eq(true))
-			.filter(dsl::server_id.is_not_null())
-			.select(dsl::server_id.assume_not_null())
+			.filter(dsl::application_id.is_not_null())
+			.select(dsl::application_id.assume_not_null())
 			.load(db)
 			.await
 			.map_err(AppError::from)
@@ -3107,7 +3997,32 @@ impl Issue {
 				dsl::source
 					.eq(source)
 					.and(dsl::ref_.eq(ref_))
-					.and(dsl::server_id.eq_any(server_ids)),
+					.and(dsl::application_id.eq_any(server_ids)),
+			)
+			.load(db)
+			.await
+			.map_err(AppError::from)
+	}
+
+	/// Like [`Self::list_by_source_ref`], but keyed by machine rather than by
+	/// application. Drives sweeps whose subject is the box.
+	pub async fn list_by_source_ref_for_machines(
+		db: &mut AsyncPgConnection,
+		source: &str,
+		ref_: &str,
+		machine_ids: &[Uuid],
+	) -> Result<Vec<Self>> {
+		use crate::schema::issues::dsl;
+		if machine_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+		dsl::issues
+			.select(Self::as_select())
+			.filter(
+				dsl::source
+					.eq(source)
+					.and(dsl::ref_.eq(ref_))
+					.and(dsl::machine_id.eq_any(machine_ids)),
 			)
 			.load(db)
 			.await
@@ -3133,7 +4048,7 @@ impl Issue {
 				dsl::source
 					.eq(source)
 					.and(dsl::ref_.eq_any(refs))
-					.and(dsl::server_id.eq_any(server_ids)),
+					.and(dsl::application_id.eq_any(server_ids)),
 			)
 			.load(db)
 			.await
@@ -3162,14 +4077,15 @@ impl Issue {
 		// catalog row: this drops sources whose every check is decommissioned,
 		// and orphaned sources whose check-states have no catalog row at all
 		// (e.g. a superseded reporter like bestool-alertd) — otherwise a dead
-		// source would hold servers into a reachability warning forever, with
+		// source would hold applications into a reachability warning forever, with
 		// no catalog entry to silence or decommission. Mirrors the health
 		// rollup (see [`health_from_check_state`]).
 		let cataloged = CheckPolicy::live_cataloged_pairs(db).await?;
+		let types = crate::applications::Application::types_by_id(db, server_ids).await?;
 
 		let rows: Vec<(Uuid, String, String, jiff_diesel::Timestamp)> = dsl::issues
 			.filter(
-				dsl::server_id
+				dsl::application_id
 					.eq_any(server_ids)
 					.and(
 						dsl::source
@@ -3178,7 +4094,7 @@ impl Issue {
 					.and(dsl::check_name.is_not_null()),
 			)
 			.select((
-				dsl::server_id.assume_not_null(),
+				dsl::application_id.assume_not_null(),
 				dsl::source,
 				dsl::check_name.assume_not_null(),
 				dsl::last_seen,
@@ -3189,7 +4105,7 @@ impl Issue {
 
 		let mut latest: HashMap<(Uuid, String), Timestamp> = HashMap::new();
 		for (server, source, check, seen) in rows {
-			if !cataloged.contains(&(source.clone(), check)) {
+			if !CheckPolicy::live_for(&cataloged, &source, &check, types.get(&server)) {
 				continue;
 			}
 			let seen: Timestamp = seen.into();
@@ -3205,6 +4121,70 @@ impl Issue {
 		Ok(latest
 			.into_iter()
 			.map(|((server, source), seen)| (server, source, seen))
+			.collect())
+	}
+
+	/// As [`Self::source_freshness`], at the machine grain.
+	///
+	/// A machine's expected sources are its own: the agent reporting about the
+	/// box files at machine scope, and a source that only ever reports about
+	/// the workloads on it says nothing about whether the box is reachable.
+	/// Every check filed at machine scope sits in the machine namespace, so
+	/// there is no type to qualify the catalog lookup by.
+	// spec: CHK#reachability
+	pub async fn source_freshness_for_machines(
+		db: &mut AsyncPgConnection,
+		machine_ids: &[Uuid],
+	) -> Result<Vec<(Uuid, String, Timestamp)>> {
+		use crate::check_policies::CheckPolicy;
+		use crate::schema::issues::dsl;
+		use commons_types::namespace::Namespace;
+		use std::collections::HashMap;
+		if machine_ids.is_empty() {
+			return Ok(Vec::new());
+		}
+
+		let cataloged = CheckPolicy::live_cataloged_pairs(db).await?;
+
+		let rows: Vec<(Uuid, String, String, jiff_diesel::Timestamp)> = dsl::issues
+			.filter(
+				dsl::machine_id
+					.eq_any(machine_ids)
+					.and(
+						dsl::source
+							.ne_all([crate::statuses::CANOPY_SOURCE, crate::issues::MANUAL_SOURCE]),
+					)
+					.and(dsl::check_name.is_not_null()),
+			)
+			.select((
+				dsl::machine_id.assume_not_null(),
+				dsl::source,
+				dsl::check_name.assume_not_null(),
+				dsl::last_seen,
+			))
+			.load(db)
+			.await
+			.map_err(AppError::from)?;
+
+		let mut latest: HashMap<(Uuid, String), Timestamp> = HashMap::new();
+		for (machine, source, check, seen) in rows {
+			let namespace = Namespace::for_machine(&source, &check);
+			if !CheckPolicy::live_in(&cataloged, &source, &namespace, &check) {
+				continue;
+			}
+			let seen: Timestamp = seen.into();
+			latest
+				.entry((machine, source))
+				.and_modify(|t| {
+					if seen > *t {
+						*t = seen;
+					}
+				})
+				.or_insert(seen);
+		}
+		Ok(latest
+			.into_iter()
+			.map(|((machine, source), seen)| (machine, source, seen))
 			.collect())
 	}
 
@@ -3431,16 +4411,16 @@ impl Incident {
 	/// Incidents are owned by the server's group, so a caller asking for a
 	/// specific server's incidents really wants the group's. Look up the
 	/// server's `group_id` and list incidents on that group; ungrouped
-	/// servers return an empty Vec.
+	/// applications return an empty Vec.
 	pub async fn list_for_server(
 		db: &mut AsyncPgConnection,
-		server_id: Uuid,
+		application_id: Uuid,
 		include_closed: bool,
 		limit: i64,
 	) -> Result<Vec<Self>> {
 		use crate::schema::incidents::dsl;
 
-		let Some(gid) = Server::get_by_id(db, server_id).await?.group_id else {
+		let Some(gid) = Application::get_by_id(db, application_id).await?.group_id else {
 			return Ok(Vec::new());
 		};
 		let mut q = dsl::incidents
@@ -3678,9 +4658,9 @@ impl Incident {
 				// The issue is now resolved so the leave path fires
 				// regardless of `monitored`; pass the live value
 				// anyway so the function never sees stale state. Group-scoped
-				// issues (server_id = None) bypass the per-server gate.
-				let monitored = match issue.server_id {
-					Some(sid) => Server::get_by_id(conn, sid).await?.is_monitored,
+				// issues (application_id = None) bypass the per-server gate.
+				let monitored = match issue.application_id {
+					Some(sid) => Application::get_by_id(conn, sid).await?.is_monitored,
 					None => true,
 				};
 				re_evaluate_incident_membership(conn, &issue, target, monitored, now, Some(by))

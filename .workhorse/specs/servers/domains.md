@@ -6,7 +6,7 @@ id: DOM
 
 Canopy manages DNS names on its fleet's behalf.
 A *managed zone* is a DNS zone Canopy can create and change records in; a *group domain* is a name inside such a zone that a server group controls.
-Together they answer which names Canopy will act on for which deployment — the association a server's own DNS records and TLS certificates are authorised against.
+Together they answer which names Canopy will act on for which group — the association an application's own DNS records and TLS certificates are authorised against.
 
 ## Managed zones
 
@@ -81,27 +81,28 @@ An archived group's uncovered claims raise nothing either, a deployment that has
 The alert recovers on its own once every live group's claims sit within a configured zone again, whether that came about by restoring the zone or by releasing the claims.
 A group's own page flags each of its uncovered claims besides, so an operator arriving from the alert sees which of that group's domains are the problem.
 
-## Permission for a server to manage its own names
+## Permission for an application to manage its own names
 
-A server manages names under its group's domains only where an operator has explicitly permitted it to.
-The permission is two separate grants, held per server and both withheld by default: one to manage the server's own DNS records, and one to obtain TLS certificates for the server's own names.
+An application manages names under its group's domains only where an operator has explicitly permitted it to.
+The permission is two separate grants, held per application and both withheld by default: one to manage the application's own DNS records, and one to obtain TLS certificates for the application's own names.
 They are separate because a deployment whose records are managed elsewhere may still want its certificates from Canopy, and a deployment may be given a name before it is trusted to hold a certificate for it.
 
-Both grants are per server rather than per group, so one member of a group may manage its names while its neighbours may not.
+Both grants are per application rather than per group, so one member of a group may manage its names while its neighbours may not.
 
-A server that has not been granted the permission it needs is refused, and told that it is: the request is authenticated as the server it claims to be, and denied on the permission rather than ignored, so an operator reading the server's logs sees a permission to grant rather than a silence to explain.
-A server whose group controls no domain is likewise refused, but for want of a domain rather than for want of permission, so the two misconfigurations are told apart.
+An application that has not been granted the permission it needs is refused, and told that it is: the request is authenticated as the application it claims to be, and denied on the permission rather than ignored, so an operator reading the application's logs sees a permission to grant rather than a silence to explain.
+An application whose group controls no domain is likewise refused, but for want of a domain rather than for want of permission, so the two misconfigurations are told apart.
 
-Revoking a grant takes effect on the server's next request.
-It stops the server making further changes and leaves the records and certificates already in place, since withdrawing a live deployment's address records on a change of permission would take that deployment off the air.
+Revoking a grant takes effect on the application's next request.
+It stops the application making further changes and leaves the records and certificates already in place, since withdrawing a live application's address records on a change of permission would take it off the air.
 
-## What a server may reach
+## What an application may reach
 
-A group's domains bound what its servers can act on: a server manages names at or beneath one of its own group's domains, and nothing else.
-A name within another group's domain, or within no group's domain, is refused, and refused the same way in both cases — a server learns that its group does not control the name, never that another group does.
+A group's domains bound what its applications can act on: an application manages names at or beneath one of its own group's domains, and nothing else.
+A name within another group's domain, or within no group's domain, is refused, and refused the same way in both cases — an application learns that its group does not control the name, never that another group does.
 
-The group domain is therefore the whole of the authorisation: the grants say whether a server may act, and the group's domains say where.
-What a server does with that — publishing the addresses its name resolves to, obtaining a certificate for it — is [CRT](../public-server/certificates.md).
+The group domain is therefore the whole of the authorisation: the grants say whether an application may act, and the group's domains say where.
+Which application a request is about is a separate question, answered by the declared name it asks about rather than by the credential it presents (see [CRT](../public-server/certificates.md), "Declared names").
+What an application does with that — publishing the addresses its name resolves to, obtaining a certificate for it — is [CRT](../public-server/certificates.md).
 
 ## Presentation
 
@@ -109,4 +110,4 @@ A group presents the domains it controls, each with the managed zone it resolves
 The configured managed zones are shown to operators, so an operator claiming a domain can see which names are available to be claimed.
 A group with no domains in a Canopy configured with no zones presents nothing at all, so a deployment that has not been given zones carries no standing notice about a feature it is not using.
 
-A server presents whether it may manage its own DNS and whether it may obtain its own certificates, alongside the other permissions an operator holds over it, and an operator grants and revokes each there.
+An application presents whether it may manage its own DNS and whether it may obtain its own certificates, alongside the other permissions an operator holds over it, and an operator grants and revokes each there.

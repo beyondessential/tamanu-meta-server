@@ -332,7 +332,7 @@ export interface paths {
         put?: never;
         /**
          * List the effective schedule and retention for every backup type a group's
-         *     servers have declared support for (not just the ones currently enabled).
+         *     applications have declared support for (not just the ones currently enabled).
          * @description A type with no scheduled interval still appears, with a null
          *     `effective_interval`, since a manually run backup of that type is still
          *     retained under its own policy.
@@ -628,7 +628,7 @@ export interface paths {
         /**
          * Get backup statistics for a group.
          * @description Returns the group's cached repository stats, recent backup and
-         *     maintenance runs, pending one-off requests, and each member server's
+         *     maintenance runs, pending one-off requests, and each member machine's
          *     declared backup capabilities.
          */
         post: operations["backups_stats"];
@@ -842,6 +842,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/certificates/declare": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Declare that an application serves a name.
+         * @description A declaration is what an address registration or a certificate request from
+         *     the machine is resolved against, so it is how a box running several workloads
+         *     gets its requests routed to the right one. It carries no addresses; the
+         *     application registers those itself.
+         *
+         *     Declaring a name the same application already holds changes nothing. A name
+         *     another application holds is refused, and the refusal names the holder so an
+         *     operator can see what to release first.
+         */
+        post: operations["certificates_declare"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/certificates/for_group": {
         parameters: {
             query?: never;
@@ -855,7 +882,7 @@ export interface paths {
          * The names in use under each domain a group controls, and which of them hold a
          *     current certificate.
          * @description So that whether a deployment's names are healthy is answerable from the
-         *     group's page, without visiting each of its servers.
+         *     group's page, without visiting each of its applications.
          */
         post: operations["certificates_for_group"];
         delete?: never;
@@ -905,6 +932,29 @@ export interface paths {
          *     not overwritten by a later one.
          */
         post: operations["certificates_pause"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/certificates/release": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * End an application's hold on a name.
+         * @description What is already in place stands, as revoking a grant leaves it: the records
+         *     published stay published and the certificates held stay held until they
+         *     expire. What ends is Canopy treating the name as this application's, which
+         *     frees it to be declared elsewhere.
+         */
+        post: operations["certificates_release"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1051,11 +1101,12 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Describe every product canopy monitors.
-         * @description The operator UI reads this to decide what to present for a server — which
-         *     roles to offer, whether a version applies and whether it can be graded,
-         *     whether the public-name field is meaningful — rather than restating the
-         *     mapping client-side, where it would drift as products are added.
+         * Describe every application type Canopy monitors.
+         * @description The operator UI reads this to decide what to present for an application —
+         *     whether a version applies and whether it can be graded, whether the
+         *     public-name field is meaningful — rather than restating the mapping
+         *     client-side, where it would drift as types are added. It offers no roles to
+         *     choose from: a type is reported, never entered.
          */
         post: operations["products"];
         delete?: never;
@@ -1283,27 +1334,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/devices/get_past_server_associations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * List servers a device was previously associated with, but no longer is.
-         * @description Useful for tracing a device's history when it has since been reassigned
-         *     or replaced on a different server.
-         */
-        post: operations["get_past_server_associations"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/devices/get_servers_for_device": {
         parameters: {
             query?: never;
@@ -1314,8 +1344,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List the servers a device is currently associated with.
-         * @description Returns the servers this device is currently bound to (usually zero or
+         * List the applications a device is currently associated with.
+         * @description Returns the applications this device is currently bound to (usually zero or
          *     one), including reachability status and a best-effort display address
          *     for each.
          */
@@ -1721,7 +1751,7 @@ export interface paths {
         put?: never;
         /**
          * Set a source's reachability mode.
-         * @description Governs how the source's silence bears on its servers' reachability:
+         * @description Governs how the source's silence bears on its applications' reachability:
          *     `on` warns, `quiet` never warns but still counts toward unreachable,
          *     `off` is excluded. The reserved `canopy`/`manual` names are rejected.
          */
@@ -2094,7 +2124,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List issues across all servers, with optional filtering.
+         * List issues across all applications, with optional filtering.
          * @description Returns the most relevant issues fleet-wide, matching the given filters.
          *     By default only currently active issues are returned; pass
          *     `activeOnly: false` to also see resolved and inactive ones.
@@ -2278,6 +2308,231 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/machines/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive a machine, and with it the applications on it.
+         * @description A box going away takes its workloads with it. Archival is not deletion:
+         *     the records and their history remain.
+         */
+        post: operations["machines_archive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/machines/attach_tailscale_device": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Attach an identity to a machine via a Tailscale identifier.
+         * @description Resolves the identifier to a tailnet node, finds the identity already on
+         *     that node or mints one for it, and binds it to the machine. Useful when an
+         *     operator can already see the box on the tailnet and wants to name it now
+         *     rather than wait for enrolment. `registered_at` stays unset: naming a box is
+         *     not the box arriving.
+         *
+         *     Returns 409 if the resolved identity already speaks for another live
+         *     machine; detach it there first.
+         */
+        post: operations["machines_attach_tailscale_device"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/machines/create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a machine to the fleet.
+         * @description The machine starts with no applications and no identity; enrolment binds an
+         *     identity, and the applications on it arrive by report.
+         */
+        post: operations["machines_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/machines/enrollment_status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get the enrollment state of a machine.
+         * @description Reports whether the machine has completed enrollment, and whether an
+         *     enrollment token is currently outstanding (issue and expiry times only —
+         *     the token itself is never revealed).
+         */
+        post: operations["enrollment_status"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/machines/get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get one machine and the applications running on it.
+         * @description Returns the machine's own facts — its group, where it is, how long it may
+         *     be silent — together with the applications it hosts. Returns 404 if the
+         *     machine doesn't exist.
+         */
+        post: operations["machines_get"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/machines/get_detail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get full detail for one machine.
+         * @description Returns the box's record, what it reports about itself, its identity, its
+         *     own health and checks, and the applications running on it. Returns 404 if
+         *     the machine doesn't exist.
+         */
+        post: operations["machines_get_detail"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/machines/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List the live fleet's machines.
+         * @description Every machine that has not been archived, ordered by name. A machine with
+         *     no applications on it is included: one created but not yet reporting is
+         *     awaiting check-in, not an error. The request body is ignored; send an empty
+         *     JSON object.
+         */
+        post: operations["machines_list"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/machines/mint_enrollment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint (or reissue) an enrollment ticket for a machine.
+         * @description Creates a fresh enrollment token and returns it wrapped in a
+         *     passphrase-encrypted ticket the operator runs through bestool on the
+         *     enrolling machine, plus the 4-word passphrase that decrypts it. The
+         *     plaintext token lives only inside the encrypted ticket; reissuing
+         *     invalidates any prior token. Fails if the server is archived.
+         */
+        post: operations["mint_enrollment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/machines/revoke_enrollment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke any outstanding enrollment ticket for a machine.
+         * @description Use this when a ticket was issued by mistake or is no longer needed.
+         *     Afterwards, the enrollment status endpoint reports no outstanding token,
+         *     and the revoked ticket can no longer be used to enroll.
+         */
+        post: operations["revoke_enrollment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/machines/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Edit a machine.
+         * @description Moving a machine to another group moves the applications on it: an
+         *     application's group is never set independently of its machine's.
+         */
+        post: operations["machines_update"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/maintenance/declare": {
         parameters: {
             query?: never;
@@ -2447,7 +2702,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Where each of a group's servers stands against the version it would take
+         * Where each of a group's applications stands against the version it would take
          *     next.
          * @description One entry per server that has a candidate version, which is the version its
          *     group's open plan names. A group with no plan, and a server running another
@@ -2729,7 +2984,7 @@ export interface paths {
          * Archive a server group.
          * @description Soft-deletes the group: it disappears from live listings but is kept and
          *     can be restored later. Requires the caller to be on the admin allow-list.
-         *     Responds 409 if the group still has live member servers; move or archive
+         *     Responds 409 if the group still has live member applications; move or archive
          *     those first.
          */
         post: operations["server_groups_delete"];
@@ -2750,7 +3005,7 @@ export interface paths {
         put?: never;
         /**
          * Get a server group with its members.
-         * @description Returns the group, its member servers (sorted by name, with current status
+         * @description Returns the group, its member applications (sorted by name, with current status
          *     and display host), and the group's effective billing labels. Responds 404
          *     if no group exists with the given identifier.
          */
@@ -2856,7 +3111,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Count live servers per group.
+         * Count live applications per group.
          * @description Returns one entry per server group that has at least one live
          *     (non-archived) member server. Groups with no live members are omitted, so
          *     treat a missing entry as a count of zero. The request body is ignored;
@@ -2892,52 +3147,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/servers/attach_tailscale_device": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Attach a device to a server via a Tailscale identifier.
-         * @description Resolves the identifier to a tailnet node, finds the device already
-         *     attached to that node or creates a new one for it, and binds that device
-         *     to the server. Useful when a server has no device yet (e.g. an
-         *     operator-imported server that hasn't reported in) and should be bound to
-         *     a tailnet node directly. Returns 409 if the resolved device is already
-         *     attached to another live server — detach it there first.
-         */
-        post: operations["attach_tailscale_device"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/servers/create": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Create a new server.
-         * @description Creates the server record, optionally pre-bound to a Tailscale device
-         *     via `tailscale_identifier`, either ungrouped or in the given group.
-         */
-        post: operations["create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/servers/delete": {
         parameters: {
             query?: never;
@@ -2949,32 +3158,10 @@ export interface paths {
         put?: never;
         /**
          * Archive (soft-delete) a server.
-         * @description Releases and demotes its device. Archived servers no longer appear in
+         * @description Releases and demotes its device. Archived applications no longer appear in
          *     regular listings but can be restored later.
          */
         post: operations["delete"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/servers/enrollment_status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Get the enrollment state of a server.
-         * @description Reports whether the server has completed enrollment, and whether an
-         *     enrollment token is currently outstanding (issue and expiry times only —
-         *     the token itself is never revealed).
-         */
-        post: operations["enrollment_status"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2994,7 +3181,8 @@ export interface paths {
          * Get full detail for a server.
          * @description Returns the server's record, its bound device (if any), its most recent
          *     status report, current reachability/health, its group (if any) together
-         *     with sibling servers in the same group, and the group's billing labels.
+         *     with the group's whole membership for the tree the page ends with, and the
+         *     group's billing labels.
          *     Returns 404 if no server exists with that id.
          */
         post: operations["get_detail"];
@@ -3059,9 +3247,9 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List archived (soft-deleted) servers.
+         * List archived (soft-deleted) applications.
          * @description Each entry has `archived: true` and includes current reachability/health.
-         *     Archived servers can be brought back with the restore endpoint.
+         *     Archived applications can be brought back with the restore endpoint.
          */
         post: operations["list_archived"];
         delete?: never;
@@ -3080,57 +3268,12 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List servers, optionally filtered by kind, paginated.
-         * @description Returns a page of servers plus the total matching count. Entries include
+         * List applications, optionally filtered by kind, paginated.
+         * @description Returns a page of applications plus the total matching count. Entries include
          *     their group name where applicable, but not current reachability/health —
          *     use the detail endpoint for that.
          */
         post: operations["list_some"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/servers/list_ungrouped": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * List servers that don't belong to any group.
-         * @description Returns a page of ungrouped servers, each with current
-         *     reachability/health, plus the total count of ungrouped servers.
-         */
-        post: operations["list_ungrouped"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/servers/mint_enrollment": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Mint (or reissue) an enrollment ticket for a server.
-         * @description Creates a fresh enrollment token and returns it wrapped in a
-         *     passphrase-encrypted ticket the operator runs through bestool on the
-         *     enrolling machine, plus the 4-word passphrase that decrypts it. The
-         *     plaintext token lives only inside the encrypted ticket; reissuing
-         *     invalidates any prior token. Fails if the server is archived.
-         */
-        post: operations["mint_enrollment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3153,28 +3296,6 @@ export interface paths {
          *     isn't archived has no effect.
          */
         post: operations["restore"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/servers/revoke_enrollment": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Revoke any outstanding enrollment ticket for a server.
-         * @description Use this when a ticket was issued by mistake or is no longer needed.
-         *     Afterwards, the enrollment status endpoint reports no outstanding token,
-         *     and the revoked ticket can no longer be used to enroll.
-         */
-        post: operations["revoke_enrollment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3221,6 +3342,29 @@ export interface paths {
          *     first.
          */
         post: operations["list_for_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/silenced_refs/list_for_machine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List machine-scoped silences for a machine.
+         * @description Returns every (source, ref) pair currently silenced specifically for this
+         *     box, most recently created first. Doesn't include silences applied at the
+         *     machine's group level, nor those on the applications running on it: an
+         *     application's checks are silenced against the application.
+         */
+        post: operations["list_for_machine"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3275,6 +3419,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/silenced_refs/silence_machine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Silence an issue on a machine.
+         * @description Suppresses alerting for the given (source, ref) pair on this box: matching
+         *     issues keep being recorded, but stop counting toward opening or extending
+         *     an incident. Idempotent. Requires admin access.
+         */
+        post: operations["silence_machine"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/silenced_refs/silence_server": {
         parameters: {
             query?: never;
@@ -3316,6 +3482,28 @@ export interface paths {
          *     Requires admin access.
          */
         post: operations["unsilence_group"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/silenced_refs/unsilence_machine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unsilence an issue on a machine.
+         * @description Removes a machine-scoped silence for the given (source, ref) pair, if one
+         *     exists. Removing a silence that isn't there is not an error. Requires admin
+         *     access.
+         */
+        post: operations["unsilence_machine"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3448,14 +3636,14 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * List the servers whose check state reports one (source, check).
+         * List the applications whose check state reports one (source, check).
          * @description Everything the per-healthcheck page needs: the catalog's configured
          *     policy for the (source, check) (if any) plus every live server's
          *     current state for it — the real-time picture, with each degraded row
          *     carrying `failing_since` (the start of its current degradation
          *     streak). This is the data behind the `/healthchecks/:source/:check`
          *     "who's affected" page, which doubles as an operator TODO list and as
-         *     a way to correlate servers sharing the same issue during a
+         *     a way to correlate applications sharing the same issue during a
          *     fleet-wide incident.
          */
         post: operations["status_check_detail"];
@@ -3475,17 +3663,24 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Get every live server's currently reported detail.
-         * @description One row per server, carrying the derived figures, the full resolved
-         *     payload its sources report, and its current healthcheck state. This is
-         *     the data behind the fleet view, which groups it to show how each figure —
-         *     or any field a source reports, whether server-wide or on one check — is
-         *     spread across the fleet, and can cross two fields against each other.
+         * Get every live machine's and application's currently reported detail.
+         * @description One row per machine and one per application, each carrying its derived
+         *     figures, the full resolved payload its sources report, and its current
+         *     healthcheck state. This is the data behind the fleet view, which groups it
+         *     to show how each figure — or any field a source reports, whether against
+         *     the target itself or on one of its checks — is spread across the fleet,
+         *     and can cross two fields against each other.
+         *
+         *     The two populations are returned separately because a figure spreads at
+         *     the grain it belongs to: a box running two applications is one machine in
+         *     a platform spread and two applications in a version spread. An application
+         *     names the box it runs on so a crossing can put an application figure on a
+         *     machine axis.
          *
          *     Reads each source's current report rather than status history, so it
-         *     covers servers that have been quiet for any length of time. Archived
-         *     servers and canopy's own row are excluded; a live server that has never
-         *     reported appears with everything absent.
+         *     covers targets that have been quiet for any length of time. Archived
+         *     machines and applications, and canopy's own rows, are excluded; a live one
+         *     that has never reported appears with everything absent.
          */
         post: operations["status_fleet_detail"];
         delete?: never;
@@ -3529,7 +3724,7 @@ export interface paths {
         /**
          * List server group ids, bucketed by rank.
          * @description Each group is bucketed under the highest rank held by any of its member
-         *     servers (production outranks clone, which outranks demo, then test,
+         *     applications (production outranks clone, which outranks demo, then test,
          *     then dev). Groups whose members are all unranked are omitted entirely.
          *     Within each rank bucket, groups are ordered alphabetically by name.
          */
@@ -4041,6 +4236,197 @@ export interface components {
             planned_zone?: string | null;
         };
         /**
+         * @description A single application in the fleet: the unit that reports status, files
+         *     issues, and is monitored for reachability. An application runs on a
+         *     machine and may belong to a server group. The identity that reports for
+         *     it belongs to the machine, not to the application.
+         */
+        Application: {
+            /**
+             * Format: int64
+             * @description How long, in seconds, a server's status may go without an update
+             *     before it's considered unreachable and an issue is filed. Increase
+             *     it for applications with flaky connectivity; decrease it for critical
+             *     applications that should alert promptly. Only enforced while
+             *     `is_monitored` is `true`. Must be a positive number of seconds;
+             *     defaults to 600 (10 minutes) for newly-created applications.
+             */
+            alert_when_down_for: number;
+            /**
+             * @description The certificate profile — the authority's name for a lifetime — this
+             *     server's certificates are requested under. `None` means the longest the
+             *     authority offers, which is every server until an operator says otherwise:
+             *     a short lifetime is adopted deliberately rather than inherited.
+             */
+            certificate_profile?: string | null;
+            /** @description Whether this server is hosted in the cloud, if known. */
+            cloud?: boolean | null;
+            /**
+             * Format: date-time
+             * @description When set, the application is archived: hidden from live listings and
+             *     monitoring, but its history is retained. Retiring one workload says
+             *     nothing about the box it ran on, so the machine keeps its identity;
+             *     `Machine::archive` is what releases that.
+             */
+            deleted_at?: string | null;
+            geolocation?: null | components["schemas"]["GeoPoint"];
+            /**
+             * Format: uuid
+             * @description The server group this server belongs to, if any.
+             *
+             *     A denormalisation of the machine's group: an operator sets the group on
+             *     the machine and the applications on it take it. Carried here so a group
+             *     query reads one column rather than joining through the machine.
+             */
+            group_id?: string | null;
+            host?: null | components["schemas"]["UrlField"];
+            /**
+             * Format: uuid
+             * @description Unique identifier for this server.
+             */
+            id: string;
+            /**
+             * @description Whether this server is actively monitored. When `false`, reachability
+             *     checks skip it entirely and its issues no longer contribute to
+             *     incidents — useful for test environments and ad-hoc demos. The
+             *     `alert_when_down_for` threshold is preserved while unmonitored, so
+             *     turning monitoring back on doesn't lose the configured value.
+             */
+            is_monitored: boolean;
+            /**
+             * Format: uuid
+             * @description The machine this application runs on. An application runs on exactly
+             *     one; a machine hosts any number.
+             */
+            machine_id: string;
+            /**
+             * @description Whether this server may manage its own DNS records for names under its
+             *     group's domains. Withheld by default: a server without it is
+             *     authenticated and refused. Unlike the restore window this is a standing
+             *     grant, records needing maintenance for as long as the server lives.
+             */
+            may_manage_dns: boolean;
+            /**
+             * @description Whether this server may obtain TLS certificates for names under its
+             *     group's domains. Separate from `may_manage_dns`: an application whose
+             *     records are managed elsewhere may still want its certificates here.
+             */
+            may_manage_tls: boolean;
+            /**
+             * @description The server's display name, scoped within its group. May not be
+             *     globally unique or meaningful outside the group.
+             */
+            name?: string | null;
+            /** @description Why it was paused. */
+            name_management_pause_reason?: string | null;
+            /**
+             * Format: date-time
+             * @description When this server's name management was paused. While set, Canopy makes no
+             *     new changes on its behalf — nothing ordered, renewed, or republished —
+             *     though nothing already in place is withdrawn.
+             *
+             *     Set automatically when one of the server's certificates is revoked, so
+             *     revocation and re-issuance don't chase each other. Only an operator lifts
+             *     it.
+             */
+            name_management_paused_at?: string | null;
+            /** @description Who paused it. `None` when Canopy paused it itself on a revocation. */
+            name_management_paused_by?: string | null;
+            /** @description Free-form operator notes about this server. */
+            notes?: string;
+            /**
+             * @description If set, the server is listed publicly under this name (used by
+             *     end-user-facing clients). `None` means it is not listed publicly.
+             *     Separate from `name` because that field is only meaningful within
+             *     the server's group.
+             */
+            public_name?: string | null;
+            rank?: null | components["schemas"]["ServerRank"];
+            /**
+             * Format: date-time
+             * @description When this application first reported. Enrolment is the machine's, so
+             *     this is set by the report that brings the application into being, not
+             *     by anything the operator does. While `None`, the application is
+             *     awaiting its first check-in and the UI shows setup instructions.
+             */
+            registered_at?: string | null;
+            /**
+             * @description The key the reporter that found this application named it by.
+             *
+             *     A reporter cannot know what Canopy calls the applications on a machine,
+             *     so it chooses a key of its own and Canopy correlates on it. The key is
+             *     the reporter's, so it is unique within a machine rather than across the
+             *     fleet, and it is never disclosed the other way: Canopy's own identifier
+             *     for an application stays internal.
+             *
+             *     `None` on an application Canopy created from a transitional unified
+             *     push, which has no key to give. The first split-shape push that names
+             *     such an application by type claims it.
+             */
+            reported_key?: string | null;
+            /** @description Key/value tags for this server. */
+            tags?: components["schemas"]["TagMap"];
+            /**
+             * @description What this application is: the software and the role it plays together,
+             *     for example `tamanu-central`. Decides which of Canopy's per-application
+             *     features apply to it at all.
+             */
+            type: components["schemas"]["ApplicationType"];
+        };
+        /** @description What a server's page shows about its names and certificates. */
+        ApplicationNamesView: {
+            /**
+             * @description The profile this server's certificates are requested under. Null means
+             *     the authority's own default, which is its longest-lived.
+             */
+            certificate_profile?: string | null;
+            /**
+             * @description Every certificate Canopy holds or has an order in flight for, newest
+             *     first. A name may appear more than once — a key rotation leaves the
+             *     previous certificate behind until it expires.
+             */
+            certificates: components["schemas"]["CertificateView"][];
+            /**
+             * @description The domains this server's group controls, so the UI can say which names
+             *     are available to it at all.
+             */
+            domains: string[];
+            /** @description Whether an operator has allowed this server to manage its own DNS. */
+            may_manage_dns: boolean;
+            /**
+             * @description Whether an operator has allowed this server to obtain its own
+             *     certificates.
+             */
+            may_manage_tls: boolean;
+            /** @description The public names this server has registered, by name. */
+            names: components["schemas"]["NameView"][];
+            /** @description Why it was set. */
+            pause_reason?: string | null;
+            /** @description Whether Canopy has been told to stop doing anything new for this server. */
+            paused: boolean;
+            /** @description When the pause was set. */
+            paused_at?: string | null;
+            /** @description Who set it. */
+            paused_by?: string | null;
+        };
+        /**
+         * @description What an application is: the software and the role it plays, as a slug. The set is open — a report carrying a type Canopy does not know creates an application of that type, which simply carries no per-type capabilities.
+         * @example tamanu-central
+         */
+        ApplicationType: string;
+        /**
+         * @description One product canopy monitors, with what canopy does for its applications and the
+         *     roles it defines.
+         */
+        ApplicationTypeInfo: {
+            /** @description What Canopy does for applications of this type. */
+            caps: components["schemas"]["Caps"];
+            /** @description How the type reads when nothing has named the application. */
+            label: string;
+            /** @description The type itself. */
+            type: components["schemas"]["ApplicationType"];
+        };
+        /**
          * @description A downloadable artifact (for example an installer) associated with a
          *     version, either tied to that exact version or matched via a version
          *     range pattern.
@@ -4105,15 +4491,15 @@ export interface components {
              */
             identifier: string;
         };
-        /** @description Request to bind a server to a device identified by its Tailscale node. */
+        /** @description Request to bind a machine to the identity of a Tailscale node. */
         AttachTailscaleDeviceArgs: {
             /** @description Any of: a Tailscale CGNAT/ULA IP, a node id, or a DNS name. */
             identifier: string;
             /**
              * Format: uuid
-             * @description The server to attach the device to.
+             * @description The machine to attach the identity to.
              */
-            server_id: string;
+            machine_id: string;
         };
         /**
          * @description Whether a restore attempt is under way for a group, for showing beside a
@@ -4353,7 +4739,7 @@ export interface components {
             snapshot_count?: number | null;
             /**
              * Format: int32
-             * @description Number of distinct backup sources (servers/types) currently in the
+             * @description Number of distinct backup sources (applications/types) currently in the
              *     repository, if known.
              */
             source_count?: number | null;
@@ -4363,22 +4749,22 @@ export interface components {
             /**
              * @description Backup types each member server has advertised it can run (with their
              *     enabled state), so the "back up now" panel can offer the right types per
-             *     server and grey out servers that have declared none.
+             *     server and grey out applications that have declared none.
              */
-            capabilities: components["schemas"]["ServerBackupCapabilityView"][];
+            capabilities: components["schemas"]["MachineBackupCapabilityView"][];
             /** @description One-off backup/restore requests awaiting pickup. */
             pending_requests: components["schemas"]["PendingRequestRow"][];
             /** @description The most recent maintenance runs for the group's backup repository. */
             recent_maintenance: components["schemas"]["BackupMaintenanceRun"][];
             /**
-             * @description The most recent backup and restore runs across the group's member servers,
+             * @description The most recent backup and restore runs across the group's member applications,
              *     including runs still in flight or inferred from credential issuances that
              *     were never reported.
              */
             recent_runs: components["schemas"]["RecentRun"][];
             /**
-             * @description Member servers whose restore window is currently open, so the panel can
-             *     show which servers may restore right now and until when. Servers with no
+             * @description Member applications whose restore window is currently open, so the panel can
+             *     show which applications may restore right now and until when. Servers with no
              *     open window are omitted.
              */
             restore_windows: components["schemas"]["RestoreWindowRow"][];
@@ -4472,20 +4858,20 @@ export interface components {
             value: string;
         };
         /**
-         * @description What canopy does for a product's servers.
+         * @description What Canopy does for an application of a given type.
          *
-         *     Reachability, health checks and backups are deliberately absent: checks
-         *     are graded by the source that reports them, and backup types are
-         *     advertised per-server by the agent, so both already work for any product.
+         *     Reachability, health checks and backups are deliberately absent: checks are
+         *     graded by the source that reports them, and backup types are advertised per
+         *     machine by the agent, so both already work for any type.
          */
         Caps: {
             /**
-             * @description Whether this product's servers can be listed for end-user-facing
+             * @description Whether applications of this type can be listed for end-user-facing
              *     clients.
              */
             public_listing: boolean;
             redaction?: null | components["schemas"]["RedactionManifest"];
-            /** @description How this product's application version is treated. */
+            /** @description How this type's application version is treated. */
             version_tracking: components["schemas"]["VersionTracking"];
         };
         /** @description Which certificate to revoke, and why. */
@@ -4567,6 +4953,13 @@ export interface components {
              */
             check: string;
             /**
+             * @description Which catalog entry is meant, as returned in the entry's `namespace`.
+             *     Two application types reporting this name are two checks with separate
+             *     pages; omitted is the unqualified namespace a curated source's checks
+             *     live in.
+             */
+            namespace?: components["schemas"]["NamespaceRef"];
+            /**
              * @description The source that reports the check. A check's identity is the
              *     (source, check) pair — a same-named check from another source is
              *     a different check.
@@ -4597,6 +4990,14 @@ export interface components {
          *     it, failing or healthy.
          */
         CheckDetailData: {
+            /**
+             * @description Every live server whose latest state from this source reports
+             *     this check, at any result, ordered as a TODO list: failed,
+             *     warning, broken, passed, skipped (most urgent first), then by
+             *     group name then server name. The client filters out the
+             *     passed/skipped tail unless the "show healthy" toggle is on.
+             */
+            applications: components["schemas"]["CheckDetailServerData"][];
             canopy?: null | components["schemas"]["CheckDetailCanopyData"];
             /**
              * @description The configured policy ceiling for this (source, check), or `None`
@@ -4617,14 +5018,6 @@ export interface components {
              *     client files each under its group in the list.
              */
             groups: components["schemas"]["CheckDetailGroupData"][];
-            /**
-             * @description Every live server whose latest state from this source reports
-             *     this check, at any result, ordered as a TODO list: failed,
-             *     warning, broken, passed, skipped (most urgent first), then by
-             *     group name then server name. The client filters out the
-             *     passed/skipped tail unless the "show healthy" toggle is on.
-             */
-            servers: components["schemas"]["CheckDetailServerData"][];
             /**
              * @description The source that was queried, echoed back with `check` so the page
              *     can render its heading without re-decoding the request.
@@ -4674,7 +5067,7 @@ export interface components {
             /**
              * Format: date-time
              * @description When the check's current degradation streak began. `None` for
-             *     servers currently reporting the check healthy.
+             *     applications currently reporting the check healthy.
              */
             failing_since?: string | null;
             /**
@@ -4685,18 +5078,16 @@ export interface components {
             group_id?: string | null;
             /** @description The server's group name, if it belongs to one. */
             group_name?: string | null;
-            /** @description The server's kind, for the standard within-rank ordering. */
-            kind: components["schemas"]["ServerKind"];
             rank?: null | components["schemas"]["ServerRank"];
             /**
              * @description The check's observed result on its latest report. The UI shows
-             *     warning/failed/broken servers by default and puts passed/skipped
+             *     warning/failed/broken applications by default and puts passed/skipped
              *     ones behind a "show healthy" toggle.
              */
             result: components["schemas"]["CheckResult"];
             /**
              * Format: uuid
-             * @description The server's id — the UI links to `/servers/{server_id}`.
+             * @description The server's id — the UI links to `/applications/{server_id}`.
              */
             server_id: string;
             /** @description The server's display name; empty string when the server has none. */
@@ -4707,6 +5098,8 @@ export interface components {
              * @description When the check state last updated (the check's latest report).
              */
             status_created_at: string;
+            /** @description The application's type, for the standard within-rank ordering. */
+            type: components["schemas"]["ApplicationType"];
         };
         /**
          * @description One (source, check)'s policy: the ceiling capping its effective
@@ -4722,7 +5115,11 @@ export interface components {
              *     it may stop running the check).
              */
             ceiling: string;
-            /** @description The healthcheck's name, exactly as reported by monitored servers. */
+            /**
+             * @description The healthcheck's name, exactly as reported by monitored applications.
+             *     Two application types reporting this name are two entries, told apart
+             *     by `namespace`.
+             */
             check_name: string;
             /**
              * Format: date-time
@@ -4757,10 +5154,21 @@ export interface components {
              *     candidate.
              */
             last_seen?: string | null;
+            /**
+             * @description Which catalog entry this is: the box's, one application type's, or a
+             *     curated source's unqualified one. Send it back verbatim to name this
+             *     entry in an edit.
+             */
+            namespace: components["schemas"]["NamespaceRef"];
             /** @description Free-form operator notes about this check. */
             notes?: string | null;
             /** @description `true` if no operator has reviewed this policy yet. */
             pending_review: boolean;
+            /**
+             * @description How the entry reads to an operator: `<type>.<check>` where it is one
+             *     application type's, the bare name otherwise.
+             */
+            qualified_name: string;
             /**
              * Format: date-time
              * @description When an operator last reviewed or updated this policy. `null` if
@@ -4826,6 +5234,11 @@ export interface components {
          * @enum {string}
          */
         CheckResult: "passed" | "warning" | "failed" | "broken" | "skipped";
+        /**
+         * @description The grain a check's result belongs to.
+         * @enum {string}
+         */
+        CheckSubject: "machine" | "application";
         /** @description Identifies a server group's schedule override for a backup type. */
         ClearScheduleArgs: {
             /**
@@ -4851,11 +5264,11 @@ export interface components {
             limit?: number | null;
         };
         /**
-         * @description One check in a server's consolidated state: a single `(source, check)`
-         *     with its results already graded by policy, ready to present. The same
-         *     shape whether taken from current state or reconstructed as of a past
-         *     time, and across every reporting source — the presentation never sees a
-         *     single source's raw report.
+         * @description One check in a server's consolidated state: a single check identity with
+         *     its results already graded by policy, ready to present. The same shape
+         *     whether taken from current state or reconstructed as of a past time, and
+         *     across every reporting source — the presentation never sees a single
+         *     source's raw report.
          */
         ConsolidatedCheck: {
             /** @description The check's name, as reported. */
@@ -4871,14 +5284,34 @@ export interface components {
              */
             effective: string;
             /**
+             * @description Which catalog entry this check resolves to. Two application types
+             *     reporting one name are two checks, so the name alone does not address
+             *     a policy, a silence or a document — this does.
+             */
+            namespace: components["schemas"]["NamespaceRef"];
+            /**
              * @description What the source reported, before policy. `None` if the stored state
              *     carried no observed result.
              */
             observed?: string | null;
+            /**
+             * @description How the check reads to an operator: `<type>.<check>` where it is one
+             *     application type's, the bare name otherwise.
+             */
+            qualified_name: string;
             /** @description Whether this check is silenced at server or group scope. */
             silenced: boolean;
             /** @description The source that reports this check. */
             source: string;
+            /**
+             * @description Which grain this check is filed against.
+             *
+             *     An application presents its machine's checks among its own, and this is
+             *     what marks them: a `machine` entry in an application's list is the
+             *     box's, one filing seen from each workload the box carries rather than a
+             *     copy per workload.
+             */
+            subject: components["schemas"]["CheckSubject"];
         };
         /**
          * @description A server's checks across every source, graded and classified as one —
@@ -4945,55 +5378,6 @@ export interface components {
              */
             target_role_arn: string;
         };
-        /** @description Request to create a new server. */
-        CreateServerArgs: {
-            /**
-             * Format: int64
-             * @description Downtime threshold in seconds before the server is considered
-             *     down. Defaults to 600 (10 minutes).
-             */
-            alert_when_down_for?: number | null;
-            /** @description Whether the server runs in a cloud environment, if known. */
-            cloud?: boolean | null;
-            geolocation?: null | components["schemas"]["GeoPoint"];
-            /**
-             * Format: uuid
-             * @description Group to place the server in. Omit to create it ungrouped.
-             */
-            group_id?: string | null;
-            /** @description URL for the server, if known. Can be added or changed later. */
-            host?: string | null;
-            /**
-             * @description Whether canopy should actively monitor this server. Defaults to
-             *     true.
-             */
-            is_monitored?: boolean | null;
-            /**
-             * @description The server's role within its product's topology. Rejected when the
-             *     product does not define it.
-             */
-            kind: components["schemas"]["ServerKind"];
-            /** @description Name for the server, if any. */
-            name?: string | null;
-            /** @description Free-text operator notes about the server. */
-            notes?: string | null;
-            /** @description The application this server runs. Defaults to tamanu. */
-            product?: components["schemas"]["Product"];
-            /**
-             * @description Name to list the server under in the public mobile-app server list.
-             *     Omit to keep it unlisted.
-             */
-            public_name?: string | null;
-            rank?: null | components["schemas"]["ServerRank"];
-            tags?: null | components["schemas"]["TagMap"];
-            /**
-             * @description Optional Tailscale identity to pre-bind a device to (an IP, node id,
-             *     or DNS name). When given, a device is created for that identity
-             *     immediately, and the key the machine presents when it later
-             *     registers is added to that same device.
-             */
-            tailscale_identifier?: string | null;
-        };
         /**
          * @description Request to onboard a group onto Canopy's shared-account backups. Canopy
          *     fills in the bucket name and IAM roles automatically.
@@ -5010,6 +5394,16 @@ export interface components {
              */
             server_group_id: string;
         };
+        /** @description An application and the name being declared for it, or released from it. */
+        DeclarationArgs: {
+            /**
+             * Format: uuid
+             * @description The application that serves the name.
+             */
+            application_id: string;
+            /** @description The name, in any case and with or without a trailing dot. */
+            name: string;
+        };
         /** @description Declare a window over a target, or amend the one it already has. */
         DeclareArgs: {
             /**
@@ -5017,6 +5411,11 @@ export interface components {
              * @description When the work is expected to finish. The window ends itself then.
              */
             expected_end: string;
+            /**
+             * Format: uuid
+             * @description The machine, for a window over one box. Covers every application on it.
+             */
+            machine_id?: string | null;
             /** @description What is being done. */
             note?: string | null;
             /**
@@ -5024,11 +5423,6 @@ export interface components {
              * @description The group, for a window over a whole group.
              */
             server_group_id?: string | null;
-            /**
-             * Format: uuid
-             * @description The server, for a window over one server.
-             */
-            server_id?: string | null;
         };
         /** @description Request body for decommissioning a check. */
         DecommissionArgs: {
@@ -5037,6 +5431,11 @@ export interface components {
              *     catalog.
              */
             check_name: string;
+            /**
+             * @description Which catalog entry is meant, as returned in the entry's `namespace`.
+             *     Omitted is the unqualified namespace a curated source's checks live in.
+             */
+            namespace?: components["schemas"]["NamespaceRef"];
             /** @description The source whose check to decommission. */
             source: string;
         };
@@ -5153,7 +5552,7 @@ export interface components {
          * @description The role a device is trusted with, which determines what it may do.
          * @enum {string}
          */
-        DeviceRole: "admin" | "releaser" | "server" | "backup-restore";
+        DeviceRole: "admin" | "releaser" | "machine" | "backup-restore";
         /** @description Free-text search query for devices. */
         DeviceSearchArgs: {
             /**
@@ -5235,7 +5634,7 @@ export interface components {
             observations: number;
         };
         /**
-         * @description A server's enrollment state: whether a device has registered, and
+         * @description A machine's enrollment state: whether a device has registered, and
          *     whether an enrollment token is currently outstanding.
          */
         EnrollmentStatus: {
@@ -5304,11 +5703,30 @@ export interface components {
              *     showing a failure that nobody is being paged about.
              */
             is_monitored: boolean;
+            /** @description The box's own health, from the checks filed against it. */
+            machine_health: components["schemas"]["HealthState"];
             /**
-             * @description The server's role within its product's topology (for Tamanu, central
-             *     or facility; standalone for a product with no internal roles).
+             * Format: uuid
+             * @description The box this application runs on. Members sharing one are presented
+             *     together, since a box carrying two workloads is the case the machine
+             *     grain exists for.
              */
-            kind: components["schemas"]["ServerKind"];
+            machine_id: string;
+            /**
+             * @description Whether a maintenance window suspends this box — its own or its
+             *     group's. A window is declared over a machine and never over an
+             *     application, so this is the box's fact and the applications on it are
+             *     suspended by it rather than carrying one of their own.
+             */
+            machine_maintained: boolean;
+            /** @description The box's name, where an operator gave it one. */
+            machine_name?: string | null;
+            /**
+             * @description The box's own reachability, which is not this application's: a machine
+             *     that has gone quiet takes everything on it with it, and one that is fine
+             *     says nothing about whether the software on it is.
+             */
+            machine_up: components["schemas"]["ShortStatus"];
             /** @description Name of the server. */
             name: string;
             /**
@@ -5318,26 +5736,72 @@ export interface components {
              *     connected right now.
              */
             operators: components["schemas"]["OperatorPresence"][];
-            /** @description The application the server runs, presented alongside its role. */
-            product: components["schemas"]["Product"];
             rank?: null | components["schemas"]["ServerRank"];
+            /** @description The application the server runs, presented alongside its role. */
+            type: components["schemas"]["ApplicationType"];
             /**
              * @description Reachability of the server, based on how recently it last reported a
              *     status update.
              */
             up: components["schemas"]["ShortStatus"];
         };
+        /** @description Both populations the fleet view spreads its figures over. */
+        FleetDetailData: {
+            /** @description Every live application, canopy's own excluded. */
+            applications: components["schemas"]["FleetServerDetailData"][];
+            /** @description Every live machine, canopy's own excluded. */
+            machines: components["schemas"]["FleetMachineDetailData"][];
+        };
         /**
-         * @description One server's identity and its currently reported detail, as a row of the
+         * @description One machine's identity and its currently reported detail, as a row of the
          *     fleet view.
          */
-        FleetServerDetailData: {
-            /** @description Version of bestool, the agent reporting on the server. */
+        FleetMachineDetailData: {
+            /** @description Version of bestool, the agent reporting on the box. */
             bestool?: string | null;
             /**
-             * @description The server's current healthcheck state, keyed by check name: each
+             * @description The machine's current healthcheck state, keyed by check name, in the
+             *     same shape as an application's.
+             */
+            checks: Record<string, never>;
+            /**
+             * @description Every field the machine's sources currently report, resolved across
+             *     them.
+             */
+            detail: Record<string, never>;
+            /**
+             * Format: uuid
+             * @description The group the machine belongs to, if any.
+             */
+            group_id?: string | null;
+            /** @description Display name of that group, if any. */
+            group_name?: string | null;
+            /**
+             * Format: uuid
+             * @description Unique identifier for the machine.
+             */
+            machine_id: string;
+            /** @description The name its operator gave it, if any. */
+            machine_name?: string | null;
+            /**
+             * @description The operating system the box runs, qualified by its version where one
+             *     is reported. A box reporting no operating system falls back to the
+             *     family the database engine of an application on it gives away.
+             */
+            platform?: string | null;
+        };
+        /**
+         * @description One application's identity and its currently reported detail, as a row of
+         *     the fleet view.
+         */
+        FleetServerDetailData: {
+            /**
+             * @description The application's current healthcheck state, keyed by check name: each
              *     check's reported fields plus its graded `result` and the `observed`
              *     result behind it. This is what a `check.field` lookup reads.
+             *
+             *     Only the checks filed against the application itself. A check that
+             *     asserts something about the box is the machine's row.
              */
             checks: Record<string, never>;
             /**
@@ -5353,19 +5817,17 @@ export interface components {
             group_id?: string | null;
             /** @description Display name of that group, if any. */
             group_name?: string | null;
-            /** @description The server's role within its product's topology. */
-            kind: components["schemas"]["ServerKind"];
+            /**
+             * Format: uuid
+             * @description The machine this application runs on. A machine figure is the box's
+             *     rather than the workload's, so a row reaches its machine's figures
+             *     through this rather than carrying a copy of them.
+             */
+            machine_id: string;
             /** @description Reported runtime version. */
             nodejs?: string | null;
-            /** @description Operating system family, derived from the reported database engine. */
-            platform?: string | null;
             /** @description Reported database engine version. */
             postgres?: string | null;
-            /**
-             * @description The application the server runs. The fleet view reads it to keep the
-             *     application-version spread to servers that have one to report.
-             */
-            product: components["schemas"]["Product"];
             rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: uuid
@@ -5374,8 +5836,16 @@ export interface components {
             server_id: string;
             /** @description Operator-assigned name for the server, empty when it has none. */
             server_name: string;
-            /** @description Reported system timezone. */
+            /**
+             * @description The application's own configured timezone, as reported. The box's
+             *     operating system timezone is a machine figure and is not this.
+             */
             timezone?: string | null;
+            /**
+             * @description The application the server runs. The fleet view reads it to keep the
+             *     application-version spread to applications that have one to report.
+             */
+            type: components["schemas"]["ApplicationType"];
             version?: null | components["schemas"]["VersionStr"];
         };
         /** @description Request body for reading a group's migration-test verdicts. */
@@ -5416,7 +5886,7 @@ export interface components {
              */
             incident_id: string;
         };
-        /** @description Where a group stands with respect to granting its servers name management. */
+        /** @description Where a group stands with respect to granting its applications name management. */
         GrantAvailabilityView: {
             /**
              * @description The domains this group controls, so the UI can name what a grant would
@@ -5439,12 +5909,23 @@ export interface components {
              */
             state: string;
         };
-        /** @description A server group together with its member servers and billing labels. */
+        /** @description A server group together with its member applications and billing labels. */
         GroupDetail: {
+            /**
+             * @description The group's member applications, sorted by name, with current status and
+             *     display host included.
+             */
+            applications: components["schemas"]["ServerInfo"][];
             /** @description The group's effective `billing.*` labels (product/deployment/stage). */
             billing_labels: components["schemas"]["BillingTag"][];
             /** @description The group itself. */
             group: components["schemas"]["ServerGroup"];
+            /**
+             * @description The group's member machines, sorted by name. A restore replica and a
+             *     maintenance window are both declared over a machine, so an operator
+             *     surface offering either needs the boxes rather than the workloads.
+             */
+            machines: components["schemas"]["GroupMachine"][];
             /** @description Whether a maintenance window (or its settle period) suspends the group. */
             maintained: boolean;
             /**
@@ -5452,11 +5933,6 @@ export interface components {
              *     ended and watching resumes when it elapses.
              */
             maintenance_settling: boolean;
-            /**
-             * @description The group's member servers, sorted by name, with current status and
-             *     display host included.
-             */
-            servers: components["schemas"]["ServerInfo"][];
         };
         /** @description Identifies the server group whose status details to fetch. */
         GroupDetailsArgs: {
@@ -5501,6 +5977,16 @@ export interface components {
              */
             server_group_id: string;
         };
+        /** @description One of a group's machines, as an operator picks it out of a list. */
+        GroupMachine: {
+            /**
+             * Format: uuid
+             * @description Unique identifier of the machine.
+             */
+            id: string;
+            /** @description The operator-assigned name, where it has one. */
+            name?: string | null;
+        };
         /** @description Request body identifying a server group to look up silences for. */
         GroupScopeArgs: {
             /**
@@ -5509,11 +5995,11 @@ export interface components {
              */
             server_group_id: string;
         };
-        /** @description The number of live servers in one server group. */
+        /** @description The number of live applications in one server group. */
         GroupServerCount: {
             /**
              * Format: int64
-             * @description Number of live (non-archived) servers currently in the group.
+             * @description Number of live (non-archived) applications currently in the group.
              */
             server_count: number;
             /**
@@ -5559,7 +6045,7 @@ export interface components {
             type: string;
         };
         /**
-         * @description Where one of a group's servers stands against the version it would take
+         * @description Where one of a group's applications stands against the version it would take
          *     next.
          */
         GroupVerdict: {
@@ -5592,7 +6078,7 @@ export interface components {
         /**
          * @description A real-world sample of the data a conditional rule can reference for a
          *     given healthcheck, taken from the most recent status report (across
-         *     all servers) from the check's own source that included it.
+         *     all applications) from the check's own source that included it.
          */
         HealthcheckSample: {
             /**
@@ -5655,6 +6141,11 @@ export interface components {
              *     immediately, bypassing the incident grace period.
              */
             escalates?: boolean;
+            /**
+             * @description Which catalog entry is meant, as returned in the entry's `namespace`.
+             *     Omitted is the unqualified namespace a curated source's checks live in.
+             */
+            namespace?: components["schemas"]["NamespaceRef"];
             /**
              * @description Operator notes to store alongside the new policy. Omitting this
              *     or sending `null` clears any existing notes — there's no way to
@@ -5957,7 +6448,7 @@ export interface components {
             issue_id: string;
         };
         /**
-         * @description A problem raised against a server (or a group of servers), tracking its
+         * @description A problem raised against a server (or a group of applications), tracking its
          *     current severity, whether it's still ongoing, and how it's been handled
          *     by an operator.
          */
@@ -5967,6 +6458,12 @@ export interface components {
              *     condition has stopped recurring.
              */
             active: boolean;
+            /**
+             * Format: uuid
+             * @description The application this issue was raised against. Absent for an issue
+             *     filed at any other grain — a machine's, a group's, or Canopy's own.
+             */
+            application_id?: string | null;
             /**
              * @description The check this issue tracks, when it is check state (health-check
              *     issues). Absent for issues that aren't check results yet.
@@ -6017,10 +6514,29 @@ export interface components {
              * @description When the most recent event for this issue was recorded.
              */
             last_seen: string;
+            /**
+             * Format: uuid
+             * @description The machine this issue was raised against, for one filed at machine
+             *     scope. Exactly one of this and `application_id` is set on a
+             *     target-scoped issue; both are absent on a group or Canopy-wide one.
+             */
+            machine_id?: string | null;
+            /**
+             * @description Display name of the affected machine, when one is set and the issue is
+             *     the machine's.
+             */
+            machine_name?: string | null;
             /** @description Latest human-readable message describing the issue's state. */
             message: string;
+            namespace?: null | components["schemas"]["NamespaceRef"];
             /** @description The result the source reported on the latest filing, before policy. */
             observed_result?: string | null;
+            /**
+             * @description How the check behind this issue reads to an operator: `<type>.<check>`
+             *     where it is one application type's, the bare name otherwise. Absent
+             *     alongside `namespace`.
+             */
+            qualified_name?: string | null;
             /**
              * @description Identifier used to match new incoming events to this issue; unique
              *     within its source and server.
@@ -6060,12 +6576,6 @@ export interface components {
             server_group_name?: string | null;
             /** @description Hostname or address of the affected server. */
             server_host: string;
-            /**
-             * Format: uuid
-             * @description The server this issue was raised against. Absent for issues that
-             *     apply to a whole group of servers rather than a single one.
-             */
-            server_id?: string | null;
             /**
              * @description Display name of the affected server, when one is set. Falls back to
              *     `server_host` when absent.
@@ -6125,7 +6635,7 @@ export interface components {
              */
             opened_at: string;
         };
-        /** @description Filters for listing issues across all servers. */
+        /** @description Filters for listing issues across all applications. */
         IssueListArgs: {
             /**
              * @description When `false`, include resolved and inactive issues as well as active
@@ -6156,15 +6666,15 @@ export interface components {
              */
             active_only?: boolean | null;
             /**
+             * Format: uuid
+             * @description Id of the server whose issues to list.
+             */
+            application_id: string;
+            /**
              * Format: int64
              * @description Maximum number of issues to return. Defaults to 100 when omitted.
              */
             limit?: number | null;
-            /**
-             * Format: uuid
-             * @description Id of the server whose issues to list.
-             */
-            server_id: string;
         };
         /** @description Identifies the issue whose notes to list. */
         IssueListNotesArgs: {
@@ -6476,12 +6986,371 @@ export interface components {
             min: components["schemas"]["VersionStr"];
         };
         /**
+         * @description A host in the fleet: a box, physical or virtual, that canopy monitors.
+         *
+         *     Distinct from the application server running on it. A machine carries the
+         *     facts that belong to the box — where it is, what identity speaks for it,
+         *     how long it may be silent — so a host running two workloads reports its
+         *     platform, memory and filesystems once rather than once per workload.
+         *
+         *     A machine hosts any number of applications, including none: one created but
+         *     not yet reporting presents as awaiting check-in rather than as an error.
+         */
+        Machine: {
+            /**
+             * Format: int64
+             * @description How long this machine may go without reporting before it is considered
+             *     unreachable. Only enforced while `is_monitored`; the value is kept
+             *     while unmonitored so turning monitoring back on does not lose it.
+             */
+            alert_when_down_for: number;
+            /** @description Whether this machine is hosted in the cloud, if known. */
+            cloud?: boolean | null;
+            /**
+             * Format: date-time
+             * @description When set, the machine is archived: out of the live fleet, with its
+             *     record and history retained. Archiving a machine archives the
+             *     applications on it.
+             */
+            deleted_at?: string | null;
+            /**
+             * Format: uuid
+             * @description The identity that authenticates this machine, if one is enrolled. A
+             *     machine has at most one, and an identity belongs to at most one
+             *     machine, so resolving either from the other is unambiguous.
+             */
+            device_id?: string | null;
+            geolocation?: null | components["schemas"]["GeoPoint"];
+            /**
+             * Format: uuid
+             * @description The group this machine belongs to. The one thing an operator supplies
+             *     when creating a machine: which group a box belongs to is the one
+             *     fact the box has no way of knowing. The applications on it take it.
+             */
+            group_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Unique identifier for this machine.
+             */
+            id: string;
+            /**
+             * @description Whether this machine is actively monitored. Switching it off quiets
+             *     the machine's own checks and does not touch the applications on it —
+             *     a box excused from monitoring says nothing about its workloads.
+             */
+            is_monitored: boolean;
+            /**
+             * @description The name its operator gave it. Distinct from the hostname the
+             *     operating system reports, which is a reported figure rather than a
+             *     field an operator sets.
+             */
+            name?: string | null;
+            /** @description Free-form operator notes about this machine. */
+            notes?: string;
+            /**
+             * Format: date-time
+             * @description When an identity completed enrolment for this machine. While `None`,
+             *     the machine is awaiting its first check-in.
+             *
+             *     Also the anchor a backup deadline counts from, which is why it belongs
+             *     to the machine: anchoring on an application's registration would
+             *     restart a box's backup clock every time a workload was added to it.
+             */
+            registered_at?: string | null;
+            /** @description Who opened the current restore window (Tailscale login), if any. */
+            restore_allowed_by?: string | null;
+            /**
+             * Format: date-time
+             * @description Until when this machine is allowed to mint restore credentials for
+             *     itself (ad-hoc `bestool canopy restore`). An operator opens this window
+             *     and it auto-expires; `None` (or a past instant) means restores are not
+             *     currently allowed. Restores read the group's backup repo, so they are
+             *     gated behind this deliberate, time-boxed opt-in rather than always
+             *     available.
+             *
+             *     A restore rewrites the box, so the window belongs to the box: a machine
+             *     carrying two workloads is opened once and restored once.
+             */
+            restore_allowed_until?: string | null;
+            /**
+             * @description Key/value tags for this machine. A check filed against a machine is
+             *     graded by policy against these rather than against any application's.
+             *     An application's type is not among them, not being a property of a box.
+             */
+            tags?: components["schemas"]["TagMap"];
+        };
+        /** @description Identifies a server. */
+        MachineArgs: {
+            /**
+             * Format: uuid
+             * @description The box to operate on. Backups are a machine's, so this names the box
+             *     rather than a workload on it.
+             */
+            machine_id: string;
+        };
+        /**
+         * @description One backup type a server has advertised support for, whether the operator
+         *     has enabled it, and its most recent activity. Enabling a capability is
+         *     what makes the server eligible for issued backup credentials and
+         *     scheduled runs of that type.
+         */
+        MachineBackupCapabilityView: {
+            /**
+             * @description Whether the operator has enabled scheduled backups of this type for
+             *     this server.
+             */
+            enabled: boolean;
+            /**
+             * Format: date-time
+             * @description When that snapshot was reported.
+             */
+            latest_snapshot_at?: string | null;
+            /**
+             * Format: int64
+             * @description Bytes uploaded by that run, if reported.
+             */
+            latest_snapshot_bytes?: number | null;
+            /**
+             * @description Identifier of this server and type's most recent successful backup,
+             *     if any.
+             */
+            latest_snapshot_id?: string | null;
+            /**
+             * Format: uuid
+             * @description The server this capability belongs to.
+             */
+            machine_id: string;
+            /**
+             * Format: date-time
+             * @description When this server's next backup of this type is expected: the server's own
+             *     last success plus the effective interval, or "now" (overdue) if it's
+             *     scheduled but has never succeeded. `None` for disabled or manual-only
+             *     (no-interval) types. Per-server, so a lagging member isn't masked by a
+             *     freshly-backed-up sibling.
+             */
+            next_backup_at?: string | null;
+            /**
+             * Format: date-time
+             * @description `Some(issued_at)` when a backup of this type appears to be in flight:
+             *     backup credentials were issued and are still valid, and no run has
+             *     been reported since they were issued. `None` otherwise. Lets the UI
+             *     show a "backing up…" state.
+             */
+            processing_since?: string | null;
+            progress?: null | components["schemas"]["LiveProgress"];
+            /** @description Backup type this capability describes. */
+            type: string;
+        };
+        /**
+         * @description What an operator supplies when adding a machine.
+         *
+         *     The group is the only field that matters to get right up front: which
+         *     group a box belongs to is the one thing the box has no way of knowing.
+         */
+        MachineCreateArgs: {
+            /**
+             * Format: int64
+             * @description How long the box may be silent before it is unreachable, in seconds.
+             *     Defaults to the column's own default.
+             */
+            alert_when_down_for?: number | null;
+            /** @description Whether the box is cloud-hosted, if known. */
+            cloud?: boolean | null;
+            geolocation?: null | components["schemas"]["GeoPoint"];
+            /**
+             * Format: uuid
+             * @description The group this machine belongs to. The applications on it take it.
+             */
+            group_id?: string | null;
+            /** @description Whether the machine's own checks alert. Defaults to on. */
+            is_monitored?: boolean | null;
+            /**
+             * @description What to call the box. Distinct from the hostname its operating system
+             *     reports, which arrives as a reported figure.
+             */
+            name?: string | null;
+            /** @description Operator notes shown on the machine's page. */
+            notes?: string | null;
+            tags?: null | components["schemas"]["TagMap"];
+            /**
+             * @description A tailnet node to bind this machine to up front, by address, node key,
+             *     or DNS name. Omit to enrol the machine later.
+             *
+             *     The operator is describing a box they can already see on the tailnet,
+             *     so binding it here saves an enrolment round trip. The identity is a
+             *     machine's, not an application's: the applications on the box are
+             *     reported and carry no identity of their own.
+             */
+            tailscale_identifier?: string | null;
+        };
+        /** @description A machine together with the applications running on it. */
+        MachineDetail: components["schemas"]["Machine"] & {
+            /**
+             * @description The applications on this machine. Empty for a machine that has been
+             *     created but has not yet reported: that is awaiting check-in, not an
+             *     error.
+             */
+            applications: components["schemas"]["Application"][];
+        };
+        /**
+         * @description Everything a machine's own page presents.
+         *
+         *     The machine's record, what the box reports about itself, its own health and
+         *     checks, the identity it authenticates with, and the applications running on
+         *     it. An application's version and database engine are not here: those are the
+         *     workload's, and each application carries its own (see [APP]).
+         */
+        MachineDetailData: {
+            /**
+             * @description The applications running on this box, each carrying its own
+             *     reachability and health so the page renders a dot per workload.
+             */
+            applications: components["schemas"]["ServerInfo"][];
+            /**
+             * @description The machine's effective `billing.*` labels — the ones Canopy hands its
+             *     device. A machine carries no product, a box not being a piece of
+             *     software.
+             */
+            billing_labels: components["schemas"]["BillingTag"][];
+            /** @description The machine's own checks across every source, graded and classified. */
+            checks: components["schemas"]["ConsolidatedChecks"];
+            device_info?: null | components["schemas"]["DeviceInfo"];
+            /**
+             * @description What the box reports about itself, resolved across every source
+             *     reporting on it: platform, hardware, addresses, uptime.
+             */
+            figures: Record<string, never>;
+            group?: null | components["schemas"]["ServerGroup"];
+            /**
+             * @description Every application in this box's group, for the tree the page ends with.
+             *     Empty when the machine is ungrouped. The applications on this box are
+             *     among them, the tree being a map of the group rather than of elsewhere.
+             */
+            group_applications: components["schemas"]["ServerInfo"][];
+            /**
+             * @description Every machine in this box's group, for the same tree. Empty when the
+             *     machine is ungrouped.
+             */
+            group_machines: components["schemas"]["GroupMachine"][];
+            /**
+             * @description The machine's own health, from the checks filed against it. What the
+             *     applications on it make of their own checks is each application's.
+             */
+            health: components["schemas"]["HealthState"];
+            /**
+             * Format: date-time
+             * @description When the box last reported anything, across every source.
+             */
+            last_reported_at?: string | null;
+            /** @description The machine's own record. */
+            machine: components["schemas"]["Machine"];
+            /**
+             * @description Whether a maintenance window suspends this machine, its own or its
+             *     group's.
+             */
+            maintained: boolean;
+            /** @description Whether the suspension is only the settle period. */
+            maintenance_settling: boolean;
+            /**
+             * @description Whether the box is known to run Munin, from the most recent source to
+             *     report the flag. Munin watches the box rather than anything running on
+             *     it, so the flag and the link it drives are the machine's.
+             */
+            munin: boolean;
+            /**
+             * @description The people logged in to this box right now, from its `external_users`
+             *     check. Empty unless the box is currently reporting: a stale report
+             *     cannot say who is on it now.
+             */
+            operators: components["schemas"]["OperatorPresence"][];
+            /** @description Whether the box is currently reporting, on its own threshold. */
+            up: components["schemas"]["ShortStatus"];
+        };
+        /** @description Identifies one machine. */
+        MachineIdArgs: {
+            /**
+             * Format: uuid
+             * @description The machine to operate on.
+             */
+            machine_id: string;
+        };
+        /** @description Request body identifying a machine to look up silences for. */
+        MachineScopeArgs: {
+            /**
+             * Format: uuid
+             * @description The machine to look up silences for.
+             */
+            machine_id: string;
+        };
+        /**
+         * @description A silenced issue reference scoped to a single machine: issues matching this
+         *     `(source, ref)` on this box are still recorded, but are excluded from
+         *     incidents and notifications.
+         *
+         *     A box's own checks are the subject here — a full disk, a drifting clock —
+         *     not those of the applications running on it, which are silenced against
+         *     each application.
+         */
+        MachineSilencedRef: {
+            /**
+             * Format: date-time
+             * @description When this silence was created.
+             */
+            created_at: string;
+            /** @description The operator who created this silence. `None` if not recorded. */
+            created_by?: string | null;
+            /**
+             * Format: uuid
+             * @description The machine this silence applies to.
+             */
+            machine_id: string;
+            /** @description The issue reference this silence matches. */
+            ref: string;
+            /** @description The issue source this silence matches. */
+            source: string;
+        };
+        /**
+         * @description Fields to change on a machine. Omitted fields are left alone; for the
+         *     nullable ones an explicit `null` clears the value.
+         */
+        MachineUpdateArgs: {
+            /**
+             * Format: int64
+             * @description How long the machine may be silent before it is unreachable, in seconds.
+             */
+            alert_when_down_for?: number | null;
+            /** @description New value for whether the box is cloud-hosted, or `null` to clear it. */
+            cloud?: boolean | null;
+            geolocation?: null | components["schemas"]["GeoPoint"];
+            /**
+             * Format: uuid
+             * @description New group, or `null` to remove it from its current one. The
+             *     applications on this machine move with it.
+             */
+            group_id?: string | null;
+            /**
+             * @description New monitored state. Switching it off quiets the machine's own checks
+             *     and leaves the applications on it alone.
+             */
+            is_monitored?: boolean | null;
+            /**
+             * Format: uuid
+             * @description The machine to edit.
+             */
+            machine_id: string;
+            /** @description New name for the box, or `null` to clear it. */
+            name?: string | null;
+            /** @description New free-form operator notes for the box. */
+            notes?: string | null;
+            tags?: null | components["schemas"]["TagMap"];
+        };
+        /**
          * @description Which maintenance cycle a reported backup-repository maintenance run
          *     performed.
          * @enum {string}
          */
         MaintenanceKind: "quick" | "full";
-        /** @description A declaration that a server or a group is being worked on. */
+        /** @description A declaration that a machine or a group is being worked on. */
         MaintenanceWindow: {
             /**
              * Format: date-time
@@ -6523,19 +7392,20 @@ export interface components {
              * @description Unique identifier of this window.
              */
             id: string;
+            /**
+             * Format: uuid
+             * @description Set for a window over one machine, covering the machine's own checks
+             *     and those of every application running on it.
+             */
+            machine_id?: string | null;
             /** @description What is being done, where the operator said. */
             note?: string | null;
             /**
              * Format: uuid
              * @description Set for a window over a group, covering the group's own checks and
-             *     those of every server in it.
+             *     those of every machine in it.
              */
             server_group_id?: string | null;
-            /**
-             * Format: uuid
-             * @description Set for a window over one server.
-             */
-            server_id?: string | null;
             /**
              * Format: date-time
              * @description Stamped once the settle period has elapsed and the target's issues
@@ -6718,6 +7588,27 @@ export interface components {
             zone?: string | null;
         };
         /**
+         * @description A namespace on the wire, as the pair of fields it is stored as.
+         *
+         *     The private API names a check by source, namespace and name, so this is
+         *     what a request carries and what a listing returns alongside the
+         *     presentational qualified form. It mirrors the storage columns rather than
+         *     inventing a third encoding, so a row read out of a listing goes straight
+         *     back into a mutation.
+         */
+        NamespaceRef: {
+            /**
+             * @description The application type, set when and only when `subject` is
+             *     `application`.
+             */
+            application_type?: string | null;
+            /**
+             * @description `machine`, `application`, or `null` for a curated source, whose names
+             *     are unqualified.
+             */
+            subject?: string | null;
+        };
+        /**
          * @description An open window with the target it covers, named so a fleet-wide view
          *     reads without a lookup per row.
          */
@@ -6808,14 +7699,9 @@ export interface components {
                 /** @description Whether this server runs in a cloud environment, if known. */
                 cloud?: boolean | null;
                 /**
-                 * Format: uuid
-                 * @description The device currently bound to this server, if any.
-                 */
-                device_id?: string | null;
-                /**
                  * @description Effective URL for display: the stored `host`, or `https://{tailnet
-                 *     hostname}` when the server has no URL but is bound to a Tailscale
-                 *     device, else an empty string.
+                 *     hostname}` when the server has no URL but runs on a machine bound to a
+                 *     Tailscale device, else an empty string.
                  */
                 display_host: string;
                 geolocation?: null | components["schemas"]["GeoPoint"];
@@ -6830,7 +7716,7 @@ export interface components {
                  */
                 group_name?: string | null;
                 health?: null | components["schemas"]["HealthState"];
-                /** @description The server's stored URL, if any. May be absent for device-only servers. */
+                /** @description The server's stored URL, if any. May be absent for device-only applications. */
                 host?: string | null;
                 /**
                  * Format: uuid
@@ -6843,8 +7729,12 @@ export interface components {
                  *     incidents.
                  */
                 is_monitored: boolean;
-                /** @description The server's role within its product's topology. */
-                kind: components["schemas"]["ServerKind"];
+                /**
+                 * Format: uuid
+                 * @description The machine this application runs on. Maintenance is declared over the
+                 *     machine, so a surface offering to declare one needs it (see MNT).
+                 */
+                machine_id: string;
                 /**
                  * @description Whether a maintenance window suspends this server, its own or its
                  *     group's. Set alongside `up` and `health` by the endpoints that
@@ -6866,11 +7756,6 @@ export interface components {
                 /** @description Free-text operator notes about the server. */
                 notes: string;
                 /**
-                 * @description The application this server runs. Decides which of canopy's
-                 *     per-server features apply to it.
-                 */
-                product: components["schemas"]["Product"];
-                /**
                  * @description Name this server appears under in the public mobile-app server list.
                  *     `None` means the server is not listed publicly.
                  */
@@ -6884,6 +7769,11 @@ export interface components {
                 registered_at?: string | null;
                 /** @description Arbitrary operator-defined key/value labels attached to the server. */
                 tags: components["schemas"]["TagMap"];
+                /**
+                 * @description What this application is: the software and the role it plays together.
+                 *     Decides which of Canopy's per-application features apply to it.
+                 */
+                type: components["schemas"]["ApplicationType"];
                 up?: null | components["schemas"]["ShortStatus"];
             }[];
             /**
@@ -6994,6 +7884,11 @@ export interface components {
         /** @description A pending one-off backup or restore request. */
         PendingRequestRow: {
             /**
+             * Format: uuid
+             * @description The box the request is for.
+             */
+            machine_id: string;
+            /**
              * @description Why this run was requested: `backup` to write new data, or `restore`
              *     to read existing data.
              */
@@ -7008,11 +7903,6 @@ export interface components {
              *     known.
              */
             requested_by?: string | null;
-            /**
-             * Format: uuid
-             * @description The server the request is for.
-             */
-            server_id: string;
             /** @description Backup type requested. */
             type: string;
         };
@@ -7066,7 +7956,7 @@ export interface components {
             testable?: boolean | null;
             /**
              * @description Where the group's data stands against the planned version, rolled up from
-             *     its servers: any failure makes the group a failure, since one server
+             *     its applications: any failure makes the group a failure, since one server
              *     whose data breaks is enough to stop the upgrade. `null` without a plan.
              */
             verdict?: string | null;
@@ -7162,32 +8052,6 @@ export interface components {
              */
             type: string;
         };
-        /**
-         * @description Which application a server runs.
-         *
-         *     The set is closed and defined here rather than configured, because each
-         *     product's handling — what canopy tracks for it, what it presents — is
-         *     built in. See [`Product::caps`].
-         * @enum {string}
-         */
-        Product: "tamanu" | "senaite" | "canopy";
-        /**
-         * @description One product canopy monitors, with what canopy does for its servers and the
-         *     roles it defines.
-         */
-        ProductInfo: {
-            /** @description What canopy does for this product's servers. */
-            caps: components["schemas"]["Caps"];
-            /** @description The role a server of this product takes when none is chosen. */
-            default_kind: components["schemas"]["ServerKind"];
-            /**
-             * @description The roles this product defines, in the order they rank when choosing a
-             *     group's canonical member.
-             */
-            kinds: components["schemas"]["ServerKind"][];
-            /** @description The product itself. */
-            product: components["schemas"]["Product"];
-        };
         /** @description Request to mint a new device credential. */
         ProvisionArgs: {
             /**
@@ -7275,6 +8139,11 @@ export interface components {
              *     `issuance-<id>` for an inferred attempt.
              */
             key: string;
+            /**
+             * Format: uuid
+             * @description The server this run was for, if known.
+             */
+            machine_id?: string | null;
             outcome?: null | components["schemas"]["RunOutcome"];
             progress?: null | components["schemas"]["LiveProgress"];
             /** @description Whether the run was a backup or a restore. */
@@ -7312,11 +8181,6 @@ export interface components {
              * @description Raw bytes sent to S3 during the run, if tallied (reported runs only).
              */
             s3_sent_raw_bytes?: number | null;
-            /**
-             * Format: uuid
-             * @description The server this run was for, if known.
-             */
-            server_id?: string | null;
             /**
              * @description Snapshot the run produced (backup) or used (restore), if any (reported
              *     runs only).
@@ -7471,35 +8335,33 @@ export interface components {
          */
         RedactionGapReason: "product_has_no_manifest" | "version_has_no_manifest";
         /**
-         * @description Where a product publishes the masking manifests that say how to
-         *     de-identify a restored copy of one of its databases.
+         * @description Where a type publishes the masking manifests that say how to de-identify a
+         *     restored copy of one of its databases.
          *
-         *     Canopy holds this rather than the operator: what to mask is a property
-         *     of the product, so an operator declaring a redacting replica says only
-         *     that it redacts, never where its masking comes from.
+         *     Canopy holds this rather than the operator: what to mask is a property of
+         *     the software, so an operator declaring a redacting replica says only that it
+         *     redacts, never where its masking comes from.
          */
         RedactionManifest: {
             /**
              * @description The artefact type under which a version's manifest is registered, so
-             *     canopy can tell whether the URL it would hand out has actually been
+             *     Canopy can tell whether the URL it would hand out has actually been
              *     published for that version.
              */
             artifact_type: string;
             /**
-             * @description Whether to retry at the `major.minor.0` base version when the
-             *     versioned URL 404s, for a product publishing per minor rather than
-             *     per patch.
+             * @description Whether to retry at the `major.minor.0` base version when the versioned
+             *     URL 404s, for software publishing per minor rather than per patch.
              */
             fallback_to_base: boolean;
             /**
-             * @description Where the manifest for a given version lives. `{version}` is
-             *     substituted by the consumer with the version it reads out of the
-             *     data it restored.
+             * @description Where the manifest for a given version lives. `{version}` is substituted
+             *     by the consumer with the version it reads out of the data it restored.
              */
             url_template: string;
             /**
-             * @description Single-row, single-column SQL reading the deployment's own version
-             *     out of the restored database, to substitute into `url_template`.
+             * @description Single-row, single-column SQL reading the group's own version out of the
+             *     restored database, to substitute into `url_template`.
              */
             version_query: string;
         };
@@ -7529,15 +8391,15 @@ export interface components {
         /** @description Identifies a one-off backup or restore request for a server. */
         RequestArgs: {
             /**
+             * Format: uuid
+             * @description The box to back up or restore.
+             */
+            machine_id: string;
+            /**
              * @description Why this run is requested: `backup` to write new data, or `restore` to
              *     read existing data.
              */
             purpose: string;
-            /**
-             * Format: uuid
-             * @description The server to back up or restore.
-             */
-            server_id: string;
             /** @description Backup type to run. */
             type: string;
         };
@@ -7628,6 +8490,12 @@ export interface components {
              */
             key: string;
             /**
+             * Format: uuid
+             * @description The machine the restore is for, when reported. Absent for inferred rows
+             *     (the issuance is minted per group+type, not per machine).
+             */
+            machine_id?: string | null;
+            /**
              * Format: date-time
              * @description When the consumer observed the restore result (client-reported); reported
              *     checks only.
@@ -7683,12 +8551,6 @@ export interface components {
              * @description Raw bytes sent to S3 during the restore, if reported.
              */
             s3_sent_raw_bytes?: number | null;
-            /**
-             * Format: uuid
-             * @description The server the restore is for, when reported. Absent for inferred rows
-             *     (the issuance is minted per group+type, not per server).
-             */
-            server_id?: string | null;
             /** @description The snapshot that was restored, if reported. */
             snapshot_id?: string | null;
             /**
@@ -7771,6 +8633,12 @@ export interface components {
              *     identifier from the consumer's advertised intents, e.g. `verify`.
              */
             intent: string;
+            /**
+             * Format: uuid
+             * @description Specific machine within the group, or null to cover all current machines
+             *     in the group.
+             */
+            machine_id?: string | null;
             /** @description Operator-chosen display name for the declaration. */
             name: string;
             /**
@@ -7797,12 +8665,6 @@ export interface components {
             redaction_gaps: components["schemas"]["RedactionGap"][];
             /** @description Whether the replica is served de-identified. */
             redacts: boolean;
-            /**
-             * Format: uuid
-             * @description Specific server within the group, or null to cover all current servers
-             *     in the group.
-             */
-            server_id?: string | null;
             /** @description The backup type to restore, for example `tamanu-postgres`. */
             type: string;
             /** @description When the declaration was last modified. */
@@ -7831,6 +8693,12 @@ export interface components {
              */
             intent: string;
             /**
+             * Format: uuid
+             * @description Specific machine within the group; omit or null to cover all current
+             *     machines in the group.
+             */
+            machine_id?: string | null;
+            /**
              * @description Display name for the declaration, unique among the consumer's
              *     declarations.
              */
@@ -7854,12 +8722,6 @@ export interface components {
              *     to set. Defaults to false.
              */
             redacts?: boolean;
-            /**
-             * Format: uuid
-             * @description Specific server within the group; omit or null to cover all current
-             *     servers in the group.
-             */
-            server_id?: string | null;
             /** @description The backup type to restore, for example `tamanu-postgres`. */
             type: string;
         };
@@ -7904,6 +8766,12 @@ export interface components {
              */
             intent: string;
             /**
+             * Format: uuid
+             * @description Specific machine within the group; omit or null to cover all current
+             *     machines in the group.
+             */
+            machine_id?: string | null;
+            /**
              * @description New display name for the declaration, unique among the consumer's
              *     declarations.
              */
@@ -7926,39 +8794,33 @@ export interface components {
              *     intent carrying the `redact` semantic. Defaults to false.
              */
             redacts?: boolean;
-            /**
-             * Format: uuid
-             * @description Specific server within the group; omit or null to cover all current
-             *     servers in the group.
-             */
-            server_id?: string | null;
             /** @description The backup type to restore, for example `tamanu-postgres`. */
             type: string;
         };
-        /** @description A server's currently-open restore window, as shown in the group stats. */
+        /** @description A machine's currently-open restore window, as shown in the group stats. */
         RestoreWindowRow: {
             /** @description Who opened the window (Tailscale login), if known. */
             allowed_by?: string | null;
             /**
              * Format: date-time
-             * @description When the window closes; the server may mint restore credentials until
+             * @description When the window closes; the machine may mint restore credentials until
              *     then.
              */
             allowed_until: string;
             /**
              * Format: uuid
-             * @description The server the window applies to.
+             * @description The machine the window applies to.
              */
-            server_id: string;
+            machine_id: string;
         };
-        /** @description A single server's restore-window state, for the server detail page. */
+        /** @description A single machine's restore-window state, for the machine detail page. */
         RestoreWindowView: {
             /** @description Who opened the current window (Tailscale login), if known. */
             allowed_by?: string | null;
             /**
              * Format: date-time
              * @description When the restore window closes, or `null` if restores are not currently
-             *     allowed for this server.
+             *     allowed for this machine.
              */
             allowed_until?: string | null;
         };
@@ -8099,6 +8961,11 @@ export interface components {
             /** @description The healthcheck name to sample. */
             check_name: string;
             /**
+             * @description Which catalog entry is meant, as returned in the entry's `namespace`.
+             *     Omitted is the unqualified namespace a curated source's checks live in.
+             */
+            namespace?: components["schemas"]["NamespaceRef"];
+            /**
              * @description The source that reports the check. A check's identity is the
              *     (source, check) pair; another source's same-named check may carry
              *     entirely different fields.
@@ -8144,7 +9011,7 @@ export interface components {
         /**
          * @description A self-alert: a problem with canopy's own operation, such as an
          *     expiring credential or a failed notification delivery — distinct from
-         *     issues raised against monitored servers.
+         *     issues raised against monitored applications.
          */
         SelfAlertView: {
             /**
@@ -8207,72 +9074,11 @@ export interface components {
              */
             id: string;
         };
-        /** @description Identifies a server. */
-        ServerArgs: {
-            /**
-             * Format: uuid
-             * @description The server to operate on.
-             */
-            server_id: string;
-        };
-        /**
-         * @description One backup type a server has advertised support for, whether the operator
-         *     has enabled it, and its most recent activity. Enabling a capability is
-         *     what makes the server eligible for issued backup credentials and
-         *     scheduled runs of that type.
-         */
-        ServerBackupCapabilityView: {
-            /**
-             * @description Whether the operator has enabled scheduled backups of this type for
-             *     this server.
-             */
-            enabled: boolean;
-            /**
-             * Format: date-time
-             * @description When that snapshot was reported.
-             */
-            latest_snapshot_at?: string | null;
-            /**
-             * Format: int64
-             * @description Bytes uploaded by that run, if reported.
-             */
-            latest_snapshot_bytes?: number | null;
-            /**
-             * @description Identifier of this server and type's most recent successful backup,
-             *     if any.
-             */
-            latest_snapshot_id?: string | null;
-            /**
-             * Format: date-time
-             * @description When this server's next backup of this type is expected: the server's own
-             *     last success plus the effective interval, or "now" (overdue) if it's
-             *     scheduled but has never succeeded. `None` for disabled or manual-only
-             *     (no-interval) types. Per-server, so a lagging member isn't masked by a
-             *     freshly-backed-up sibling.
-             */
-            next_backup_at?: string | null;
-            /**
-             * Format: date-time
-             * @description `Some(issued_at)` when a backup of this type appears to be in flight:
-             *     backup credentials were issued and are still valid, and no run has
-             *     been reported since they were issued. `None` otherwise. Lets the UI
-             *     show a "backing up…" state.
-             */
-            processing_since?: string | null;
-            progress?: null | components["schemas"]["LiveProgress"];
-            /**
-             * Format: uuid
-             * @description The server this capability belongs to.
-             */
-            server_id: string;
-            /** @description Backup type this capability describes. */
-            type: string;
-        };
         /**
          * @description Partial update to a server's fields. Only fields present in the request
-         *     are changed. For `device_id`, `group_id`, `public_name`, `cloud`, and
-         *     `geolocation`, sending an explicit `null` clears the field, while
-         *     omitting it leaves the current value unchanged.
+         *     are changed. For `group_id`, `public_name`, `cloud`, and `geolocation`,
+         *     sending an explicit `null` clears the field, while omitting it leaves the
+         *     current value unchanged.
          */
         ServerDataUpdate: {
             /**
@@ -8286,12 +9092,6 @@ export interface components {
              *     Omit to leave unchanged.
              */
             cloud?: boolean | null;
-            /**
-             * Format: uuid
-             * @description New device to bind to the server, or `null` to unbind. Omit to leave
-             *     unchanged.
-             */
-            device_id?: string | null;
             geolocation?: null | components["schemas"]["GeoPoint"];
             /**
              * Format: uuid
@@ -8309,7 +9109,6 @@ export interface components {
              *     unchanged.
              */
             is_monitored?: boolean | null;
-            kind?: null | components["schemas"]["ServerKind"];
             /**
              * @description Whether this server may manage its own DNS records for names under its
              *     group's domains. Omit to leave unchanged.
@@ -8324,7 +9123,6 @@ export interface components {
             name?: string | null;
             /** @description New free-text notes for the server. Omit to leave unchanged. */
             notes?: string | null;
-            product?: null | components["schemas"]["Product"];
             /**
              * @description New public-facing name for the server, or `null` to unlist it. Omit
              *     to leave unchanged.
@@ -8352,6 +9150,18 @@ export interface components {
             checks: components["schemas"]["ConsolidatedChecks"];
             device_info?: null | components["schemas"]["DeviceInfo"];
             group?: null | components["schemas"]["ServerGroup"];
+            /**
+             * @description Every application in the group, this one included, for the tree the page
+             *     ends with. Empty when the application is ungrouped. Each entry carries
+             *     its own `up` / `health` so the tree renders a status dot per workload.
+             */
+            group_applications: components["schemas"]["ServerInfo"][];
+            /**
+             * @description Every machine in the group, for the same tree: the boxes the
+             *     applications above are arranged under. Empty when the application is
+             *     ungrouped.
+             */
+            group_machines: components["schemas"]["GroupMachine"][];
             /** @description Current self-reported health, derived from the most recent status report. */
             health: components["schemas"]["HealthState"];
             last_status?: null | components["schemas"]["ServerLastStatusData"];
@@ -8365,24 +9175,13 @@ export interface components {
              *     ended and watching resumes when it elapses.
              */
             maintenance_settling: boolean;
-            /**
-             * @description Whether the server is known to run Munin, from the most recent source
-             *     to report the flag. The UI offers a Munin link only when this is true.
-             */
-            munin: boolean;
             /** @description The server's own record. */
             server: components["schemas"]["ServerInfo"];
-            /**
-             * @description Other servers in the same group (excluding `server`). Empty when the
-             *     server is ungrouped or alone in its group. Each entry carries its
-             *     own `up` / `health` so the UI can render a status dot per sibling.
-             */
-            siblings: components["schemas"]["ServerInfo"][];
             /** @description Current reachability, derived from the most recent status report. */
             up: components["schemas"]["ShortStatus"];
         };
         /**
-         * @description A group of servers managed together: incidents roll up across the group,
+         * @description A group of applications managed together: incidents roll up across the group,
          *     members share tags, and the group carries its own notes and
          *     notification settings.
          */
@@ -8440,7 +9239,7 @@ export interface components {
              *     is reflected in `effective_version`), chosen by highest rank then
              *     highest kind. `None` when the group has no members.
              */
-            version_server_id?: string | null;
+            version_application_id?: string | null;
         };
         /**
          * @description A status-dashboard card summarising one group of equivalent servers, with
@@ -8448,6 +9247,17 @@ export interface components {
          *     member reported most recently.
          */
         ServerGroupCard: {
+            /**
+             * @description Whether every member of the group has been quiet for long enough that
+             *     archiving the group cascades to them.
+             *
+             *     This is the archive rule, not a reachability reading: a member that
+             *     last reported months ago is thoroughly unreachable but has still
+             *     reported, so `up` alone cannot answer it. Both this and the rule the
+             *     archive itself enforces ask the same question of the same window, so
+             *     the button offered and the outcome cannot disagree.
+             */
+            all_members_quiet: boolean;
             /**
              * Format: uuid
              * @description Unique identifier of the group.
@@ -8484,6 +9294,12 @@ export interface components {
             created_at: string;
             /** @description The operator who created this silence. `None` if not recorded. */
             created_by?: string | null;
+            /**
+             * @description Which catalog entry this silence quiets. A group covers several
+             *     application types, so two of them reporting one check name are two
+             *     silences here, and the ref alone does not tell them apart.
+             */
+            namespace: components["schemas"]["NamespaceRef"];
             /** @description The issue reference this silence matches. */
             ref: string;
             /**
@@ -8571,14 +9387,9 @@ export interface components {
             /** @description Whether this server runs in a cloud environment, if known. */
             cloud?: boolean | null;
             /**
-             * Format: uuid
-             * @description The device currently bound to this server, if any.
-             */
-            device_id?: string | null;
-            /**
              * @description Effective URL for display: the stored `host`, or `https://{tailnet
-             *     hostname}` when the server has no URL but is bound to a Tailscale
-             *     device, else an empty string.
+             *     hostname}` when the server has no URL but runs on a machine bound to a
+             *     Tailscale device, else an empty string.
              */
             display_host: string;
             geolocation?: null | components["schemas"]["GeoPoint"];
@@ -8593,7 +9404,7 @@ export interface components {
              */
             group_name?: string | null;
             health?: null | components["schemas"]["HealthState"];
-            /** @description The server's stored URL, if any. May be absent for device-only servers. */
+            /** @description The server's stored URL, if any. May be absent for device-only applications. */
             host?: string | null;
             /**
              * Format: uuid
@@ -8606,8 +9417,12 @@ export interface components {
              *     incidents.
              */
             is_monitored: boolean;
-            /** @description The server's role within its product's topology. */
-            kind: components["schemas"]["ServerKind"];
+            /**
+             * Format: uuid
+             * @description The machine this application runs on. Maintenance is declared over the
+             *     machine, so a surface offering to declare one needs it (see MNT).
+             */
+            machine_id: string;
             /**
              * @description Whether a maintenance window suspends this server, its own or its
              *     group's. Set alongside `up` and `health` by the endpoints that
@@ -8629,11 +9444,6 @@ export interface components {
             /** @description Free-text operator notes about the server. */
             notes: string;
             /**
-             * @description The application this server runs. Decides which of canopy's
-             *     per-server features apply to it.
-             */
-            product: components["schemas"]["Product"];
-            /**
              * @description Name this server appears under in the public mobile-app server list.
              *     `None` means the server is not listed publicly.
              */
@@ -8647,16 +9457,13 @@ export interface components {
             registered_at?: string | null;
             /** @description Arbitrary operator-defined key/value labels attached to the server. */
             tags: components["schemas"]["TagMap"];
+            /**
+             * @description What this application is: the software and the role it plays together.
+             *     Decides which of Canopy's per-application features apply to it.
+             */
+            type: components["schemas"]["ApplicationType"];
             up?: null | components["schemas"]["ShortStatus"];
         };
-        /**
-         * @description A server's role relative to the other servers of its product.
-         *
-         *     Which kinds are available depends on the server's product; see
-         *     [`Product::kinds`](super::product::Product::kinds).
-         * @enum {string}
-         */
-        ServerKind: "central" | "facility" | "standalone";
         /**
          * @description The server's most recently reported status push: version/host info plus
          *     health.
@@ -8697,16 +9504,15 @@ export interface components {
             platform?: string | null;
             /** @description PostgreSQL version the server reported, if any. */
             postgres?: string | null;
-            /**
-             * @description The application the server runs. Travels with the version so a
-             *     consumer can tell a product with no version from one that has yet to
-             *     report one.
-             */
-            product: components["schemas"]["Product"];
             /** @description The source that pushed this status (e.g. `alertd`). */
             source: string;
             /** @description Timezone the server reported, if any. */
             timezone?: string | null;
+            /**
+             * @description What the application is. Travels with the version so a consumer can
+             *     tell a type with no version from one that has yet to report one.
+             */
+            type: components["schemas"]["ApplicationType"];
             version?: null | components["schemas"]["VersionStr"];
             /**
              * Format: int64
@@ -8715,9 +9521,8 @@ export interface components {
              */
             version_distance?: number | null;
         };
-        /** @description Filter and pagination parameters for listing servers. */
+        /** @description Filter and pagination parameters for listing applications. */
         ServerListArgs: {
-            kind?: null | components["schemas"]["ServerKind"];
             /**
              * Format: int64
              * @description Maximum number of items to return.
@@ -8728,42 +9533,7 @@ export interface components {
              * @description Number of items to skip from the start of the result set.
              */
             offset: number;
-        };
-        /** @description What a server's page shows about its names and certificates. */
-        ServerNamesView: {
-            /**
-             * @description The profile this server's certificates are requested under. Null means
-             *     the authority's own default, which is its longest-lived.
-             */
-            certificate_profile?: string | null;
-            /**
-             * @description Every certificate Canopy holds or has an order in flight for, newest
-             *     first. A name may appear more than once — a key rotation leaves the
-             *     previous certificate behind until it expires.
-             */
-            certificates: components["schemas"]["CertificateView"][];
-            /**
-             * @description The domains this server's group controls, so the UI can say which names
-             *     are available to it at all.
-             */
-            domains: string[];
-            /** @description Whether an operator has allowed this server to manage its own DNS. */
-            may_manage_dns: boolean;
-            /**
-             * @description Whether an operator has allowed this server to obtain its own
-             *     certificates.
-             */
-            may_manage_tls: boolean;
-            /** @description The public names this server has registered, by name. */
-            names: components["schemas"]["NameView"][];
-            /** @description Why it was set. */
-            pause_reason?: string | null;
-            /** @description Whether Canopy has been told to stop doing anything new for this server. */
-            paused: boolean;
-            /** @description When the pause was set. */
-            paused_at?: string | null;
-            /** @description Who set it. */
-            paused_by?: string | null;
+            type?: null | components["schemas"]["ApplicationType"];
         };
         /**
          * @description The environment tier of a server, from `production` down to `dev`.
@@ -8785,6 +9555,11 @@ export interface components {
          */
         ServerSilencedRef: {
             /**
+             * Format: uuid
+             * @description The server this silence applies to.
+             */
+            application_id: string;
+            /**
              * Format: date-time
              * @description When this silence was created.
              */
@@ -8793,11 +9568,6 @@ export interface components {
             created_by?: string | null;
             /** @description The issue reference this silence matches. */
             ref: string;
-            /**
-             * Format: uuid
-             * @description The server this silence applies to.
-             */
-            server_id: string;
             /** @description The issue source this silence matches. */
             source: string;
         };
@@ -8822,7 +9592,7 @@ export interface components {
              * Format: uuid
              * @description The server to update.
              */
-            server_id: string;
+            machine_id: string;
             /** @description Backup type to enable or disable. */
             type: string;
         };
@@ -8911,15 +9681,28 @@ export interface components {
             type: string;
         };
         /**
-         * @description Reachability of a server, based on how recently it last reported a status update.
+         * @description Reachability of a target, from how recently it last reported.
+         *
+         *     Three states and no degrees between them: a target is reachable,
+         *     unreachable, or has never reported. How long it has been quiet is measured
+         *     against that target's own configured threshold rather than any fixed one, so
+         *     a target that reports every few minutes and one that reports hourly are
+         *     each judged on what is normal for them.
          * @enum {string}
          */
-        ShortStatus: "up" | "down" | "away" | "blip" | "gone";
+        ShortStatus: "up" | "down" | "gone";
         /**
          * @description Request body identifying an issue to silence (or unsilence) across a
          *     whole server group.
          */
         SilenceGroupArgs: {
+            /**
+             * @description Which application type's check is meant, for a check named by an
+             *     application rather than by a box. A group covers several types, so the
+             *     caller names the one it is silencing from; `null` is a machine's check
+             *     or a curated source's.
+             */
+            application_type?: string | null;
             /** @description The specific issue identifier within `source` to silence. */
             ref: string;
             /**
@@ -8930,6 +9713,24 @@ export interface components {
             /**
              * @description Identifies what raises the issue being silenced — for example a
              *     specific healthcheck or backup pipeline.
+             */
+            source: string;
+        };
+        /**
+         * @description Request body identifying an issue to silence (or unsilence) on a single
+         *     machine.
+         */
+        SilenceMachineArgs: {
+            /**
+             * Format: uuid
+             * @description The machine to silence the issue on.
+             */
+            machine_id: string;
+            /** @description The specific issue identifier within `source` to silence. */
+            ref: string;
+            /**
+             * @description Identifies what raises the issue being silenced — for example a
+             *     specific healthcheck.
              */
             source: string;
         };
@@ -8997,7 +9798,7 @@ export interface components {
              */
             last_seen?: string | null;
             /**
-             * @description How this source's silence bears on its servers' reachability: `on`
+             * @description How this source's silence bears on its applications' reachability: `on`
              *     (a stale source warns, all-stale is unreachable), `quiet` (never
              *     warns, still counts toward unreachable), or `off` (excluded).
              */
@@ -9187,12 +9988,6 @@ export interface components {
             /** @description Reported database engine version. */
             postgres?: string | null;
             /**
-             * @description The application the server runs. Travels with the version so a
-             *     consumer can tell a product with no version from one that has yet to
-             *     report one.
-             */
-            product: components["schemas"]["Product"];
-            /**
              * @description Version the server's reporting schema was built for. Absent until a
              *     server runs a schema that stamps one (spec: RPT#currency).
              */
@@ -9204,6 +9999,12 @@ export interface components {
             server_id: string;
             /** @description Reported system timezone. */
             timezone?: string | null;
+            /**
+             * @description The application the server runs. Travels with the version so a
+             *     consumer can tell a product with no version from one that has yet to
+             *     report one.
+             */
+            type: components["schemas"]["ApplicationType"];
             version?: null | components["schemas"]["VersionStr"];
             /**
              * Format: int64
@@ -9221,6 +10022,11 @@ export interface components {
              *     `result`.
              */
             active?: boolean | null;
+            /**
+             * Format: uuid
+             * @description Id of the server the condition applies to.
+             */
+            applicationId: string;
             /**
              * @description Short, single-line headline for the condition. Must not contain
              *     newlines — use `message` for multi-line detail.
@@ -9243,11 +10049,6 @@ export interface components {
              */
             ref: string;
             result?: null | components["schemas"]["CheckResult"];
-            /**
-             * Format: uuid
-             * @description Id of the server the condition applies to.
-             */
-            serverId: string;
         };
         /** @description Fleet-wide summary of software versions currently running in production. */
         SummaryData: {
@@ -9307,14 +10108,14 @@ export interface components {
         TargetArgs: {
             /**
              * Format: uuid
+             * @description The machine, for a window over one box. Covers every application on it.
+             */
+            machine_id?: string | null;
+            /**
+             * Format: uuid
              * @description The group, for a window over a whole group.
              */
             server_group_id?: string | null;
-            /**
-             * Format: uuid
-             * @description The server, for a window over one server.
-             */
-            server_id?: string | null;
         };
         /**
          * @description One healthy↔degraded transition: the state became (or was first
@@ -9402,6 +10203,11 @@ export interface components {
             check_name: string;
             /** @description The new markdown document, or `null` (or blank) to clear it. */
             documentation?: string | null;
+            /**
+             * @description Which catalog entry is meant, as returned in the entry's `namespace`.
+             *     Omitted is the unqualified namespace a curated source's checks live in.
+             */
+            namespace?: components["schemas"]["NamespaceRef"];
             /** @description The source whose check to document. */
             source: string;
         };
@@ -9422,6 +10228,11 @@ export interface components {
              *     in the catalog.
              */
             check_name: string;
+            /**
+             * @description Which catalog entry is meant, as returned in the entry's `namespace`.
+             *     Omitted is the unqualified namespace a curated source's checks live in.
+             */
+            namespace?: components["schemas"]["NamespaceRef"];
             /**
              * @description The new conditional rules to store, or `null` to remove all
              *     conditional rules and rely solely on the ceiling. Same shape as
@@ -9531,6 +10342,12 @@ export interface components {
              */
             target_role_arn: string;
         };
+        /**
+         * Format: uri
+         * @description A URL, given as a plain string. Any trailing slash is stripped when the
+         *     value is returned.
+         */
+        UrlField: string;
         Value: unknown;
         /**
          * @description Where a (server, version) pair stands.
@@ -9651,7 +10468,7 @@ export interface components {
             version: string;
         };
         /**
-         * @description How canopy treats a product's application version.
+         * @description How Canopy treats an application's version.
          * @enum {string}
          */
         VersionTracking: "tracked" | "reported" | "absent";
@@ -9793,7 +10610,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ServerArgs"];
+                "application/json": components["schemas"]["MachineArgs"];
             };
         };
         responses: {
@@ -9876,7 +10693,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ServerArgs"];
+                "application/json": components["schemas"]["MachineArgs"];
             };
         };
         responses: {
@@ -9885,7 +10702,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ServerBackupCapabilityView"][];
+                    "application/json": components["schemas"]["MachineBackupCapabilityView"][];
                 };
             };
         };
@@ -10092,7 +10909,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ServerArgs"];
+                "application/json": components["schemas"]["MachineArgs"];
             };
         };
         responses: {
@@ -10374,7 +11191,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ServerArgs"];
+                "application/json": components["schemas"]["MachineArgs"];
             };
         };
         responses: {
@@ -10838,6 +11655,46 @@ export interface operations {
             };
         };
     };
+    certificates_declare: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeclarationArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NameView"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description Another application already declares this name. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     certificates_for_group: {
         parameters: {
             query?: never;
@@ -10879,7 +11736,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ServerNamesView"];
+                    "application/json": components["schemas"]["ApplicationNamesView"];
                 };
             };
             404: {
@@ -10902,6 +11759,35 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["PauseArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    certificates_release: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeclarationArgs"];
             };
         };
         responses: {
@@ -11101,13 +11987,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Every product, its capabilities, and the roles it defines. */
+            /** @description Every application type and its capabilities. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ProductInfo"][];
+                    "application/json": components["schemas"]["ApplicationTypeInfo"][];
                 };
             };
             500: {
@@ -11157,7 +12043,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Server-versions URL with embedded auth secret, if configured. */
+            /** @description Application-versions URL with embedded auth secret, if configured. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -11411,29 +12297,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    get_past_server_associations: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DeviceIdArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ServerInfo"][];
                 };
             };
         };
@@ -12709,6 +13572,370 @@ export interface operations {
             };
         };
     };
+    machines_archive: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    machines_attach_tailscale_device: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttachTailscaleDeviceArgs"];
+            };
+        };
+        responses: {
+            /** @description Identity now bound to the machine. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string;
+                };
+            };
+            /** @description Identifier does not resolve to a known tailnet node. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description The resolved identity already speaks for another machine. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            /** @description Tailnet directory not configured or unreachable. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    machines_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineCreateArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": string;
+                };
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    enrollment_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollmentStatus"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    machines_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineDetail"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    machines_get_detail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineDetailData"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    machines_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Machine"][];
+                };
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    mint_enrollment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollmentTicket"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    revoke_enrollment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineIdArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    machines_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineUpdateArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Machine"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
     declare: {
         parameters: {
             query?: never;
@@ -13514,97 +14741,6 @@ export interface operations {
             };
         };
     };
-    attach_tailscale_device: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AttachTailscaleDeviceArgs"];
-            };
-        };
-        responses: {
-            /** @description Device id newly attached to the server. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": string;
-                };
-            };
-            /** @description Identifier does not resolve to a known tailnet node. */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-            /** @description The resolved device is already attached to another server. */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-            /** @description Tailnet directory not configured or unreachable. */
-            503: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateServerArgs"];
-            };
-        };
-        responses: {
-            /** @description New server id. */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": string;
-                };
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
     delete: {
         parameters: {
             query?: never;
@@ -13623,37 +14759,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    enrollment_status: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ServerIdOnlyArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnrollmentStatus"];
-                };
             };
             400: {
                 headers: {
@@ -13804,60 +14909,6 @@ export interface operations {
             };
         };
     };
-    list_ungrouped: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": unknown;
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Page_ServerInfo"];
-                };
-            };
-        };
-    };
-    mint_enrollment: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ServerIdOnlyArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["EnrollmentTicket"];
-                };
-            };
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
     restore: {
         parameters: {
             query?: never;
@@ -13878,35 +14929,6 @@ export interface operations {
                 content?: never;
             };
             409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
-        };
-    };
-    revoke_enrollment: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ServerIdOnlyArgs"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -13968,6 +14990,29 @@ export interface operations {
             };
         };
     };
+    list_for_machine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MachineScopeArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineSilencedRef"][];
+                };
+            };
+        };
+    };
     list_for_server: {
         parameters: {
             query?: never;
@@ -14010,6 +15055,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ServerGroupSilencedRef"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
+            };
+        };
+    };
+    silence_machine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SilenceMachineArgs"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MachineSilencedRef"];
                 };
             };
             400: {
@@ -14071,6 +15147,36 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    unsilence_machine: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SilenceMachineArgs"];
+            };
+        };
+        responses: {
+            /** @description Silence removed, or there was none. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProblemDetailsSchema"];
+                };
             };
         };
     };
@@ -14218,7 +15324,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description The check's catalog policy and the servers currently reporting it. */
+            /** @description The check's catalog policy and the applications currently reporting it. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -14246,13 +15352,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Every live server's currently reported detail. */
+            /** @description Every live machine's and application's currently reported detail. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FleetServerDetailData"][];
+                    "application/json": components["schemas"]["FleetDetailData"];
                 };
             };
             500: {
@@ -14313,7 +15419,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Server group IDs grouped by highest-ranked member's rank. */
+            /** @description Application group IDs grouped by highest-ranked member's rank. */
             200: {
                 headers: {
                     [name: string]: unknown;

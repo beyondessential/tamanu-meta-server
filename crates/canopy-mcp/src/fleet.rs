@@ -8,13 +8,14 @@ use commons_types::{
 	status::{HealthState, ShortStatus},
 };
 use database::{
+	applications::Application,
 	backup::staleness::{StalenessVerdict, scan_rows},
 	backups::{
 		BackupMaintenanceRun, BackupMaintenanceRunFilters, BackupRun, BackupRunFilters,
 		MaintenanceOutcomeFilter, ServerGroupBackupConfig,
 	},
+	reported_detail::ReportedDetail,
 	server_groups::ServerGroup,
-	servers::Server,
 	statuses::Status,
 };
 use jiff::{SignedDuration, Timestamp};
@@ -49,8 +50,12 @@ pub struct FindBackupProblemsArgs {
 
 #[derive(Serialize, Default)]
 struct Counts {
-	by_product: HashMap<String, usize>,
-	by_kind: HashMap<String, usize>,
+	/// Applications by type, the axis Canopy grades and presents on.
+	by_type: HashMap<String, usize>,
+	/// Applications by the software alone, with the role folded away, for a
+	/// client asking how much Tamanu the fleet runs rather than how much of
+	/// each role.
+	by_software: HashMap<String, usize>,
 	by_rank: HashMap<String, usize>,
 }
 
@@ -85,8 +90,11 @@ struct BackupProblem {
 	kind: &'static str,
 	severity: &'static str,
 	group_id: Uuid,
+	/// The box the problem is about. A backup is a machine's, so a box shared
+	/// by two workloads reports one problem rather than one per workload.
+	// spec: BAK
 	#[serde(skip_serializing_if = "Option::is_none")]
-	server_id: Option<Uuid>,
+	machine_id: Option<Uuid>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	r#type: Option<String>,
 	detail: String,
@@ -111,14 +119,22 @@ impl CanopyMcp {
 		Parameters(_): Parameters<EmptyArgs>,
 	) -> Result<CallToolResult, McpError> {
 		let mut conn = self.conn().await?;
-		let servers = Server::get_all(&mut conn, 0, None).await.map_err(mcp_err)?;
-		let ids: Vec<Uuid> = servers.iter().map(|s| s.id).collect();
+		let applications = Application::get_all(&mut conn, 0, None)
+			.await
+			.map_err(mcp_err)?;
+		let ids: Vec<Uuid> = applications.iter().map(|s| s.id).collect();
 		let statuses = Status::latest_for_servers(&mut conn, &ids)
 			.await
 			.map_err(mcp_err)?;
-		let st_by: HashMap<Uuid, &Status> = statuses.iter().map(|s| (s.server_id, s)).collect();
+		let st_by: HashMap<Uuid, &Status> = statuses
+			.iter()
+			.filter_map(|s| Some((s.server_id?, s)))
+			.collect();
+		let last_reported = ReportedDetail::last_reported_ats(&mut conn, &ids)
+			.await
+			.map_err(mcp_err)?;
 		let server_groups: Vec<(Uuid, Option<Uuid>)> =
-			servers.iter().map(|s| (s.id, s.group_id)).collect();
+			applications.iter().map(|s| (s.id, s.group_id)).collect();
 		let state_health = database::issues::health_from_check_state(&mut conn, &server_groups)
 			.await
 			.map_err(mcp_err)?;
@@ -126,16 +142,23 @@ impl CanopyMcp {
 		let mut counts = Counts::default();
 		let mut health = HealthRollup::default();
 		let mut version_distribution: HashMap<String, usize> = HashMap::new();
-		for s in &servers {
-			*counts.by_product.entry(s.product.to_string()).or_default() += 1;
-			*counts.by_kind.entry(s.kind.to_string()).or_default() += 1;
+		for s in &applications {
+			*counts.by_type.entry(s.r#type.to_string()).or_default() += 1;
+			*counts
+				.by_software
+				.entry(s.r#type.software().to_string())
+				.or_default() += 1;
 			if let Some(r) = &s.rank {
 				*counts.by_rank.entry(r.to_string()).or_default() += 1;
 			}
 			let st = st_by.get(&s.id).copied();
-			match st.map_or(ShortStatus::Gone, |s| s.short_status()) {
+			let last_reported_at = last_reported
+				.get(&s.id)
+				.copied()
+				.max(st.map(|s| s.created_at));
+			match s.reachability(last_reported_at) {
 				ShortStatus::Down | ShortStatus::Gone => health.unreachable += 1,
-				_ => match state_health.get(&s.id).copied().unwrap_or_default() {
+				ShortStatus::Up => match state_health.get(&s.id).copied().unwrap_or_default() {
 					HealthState::Healthy => health.healthy += 1,
 					HealthState::Warning => health.warning += 1,
 					HealthState::Unhealthy => health.unhealthy += 1,
@@ -168,7 +191,7 @@ impl CanopyMcp {
 		}
 
 		ok_json(&FleetSummary {
-			total_servers: servers.len(),
+			total_servers: applications.len(),
 			groups: groups.len(),
 			counts,
 			health,
@@ -201,7 +224,7 @@ impl CanopyMcp {
 					kind: "overdue_backup",
 					severity: "error",
 					group_id: row.group_id,
-					server_id: Some(row.server_id),
+					machine_id: Some(row.machine_id),
 					r#type: Some(row.r#type.to_string()),
 					detail: format!(
 						"no successful {} backup within its grace window",
@@ -213,7 +236,7 @@ impl CanopyMcp {
 					kind: "never_backed_up",
 					severity: "warning",
 					group_id: row.group_id,
-					server_id: Some(row.server_id),
+					machine_id: Some(row.machine_id),
 					r#type: Some(row.r#type.to_string()),
 					detail: format!("never reported a successful {} backup", row.r#type),
 					since: None,
@@ -235,7 +258,7 @@ impl CanopyMcp {
 					kind: "provisioning_error",
 					severity: "error",
 					group_id: c.group_id,
-					server_id: None,
+					machine_id: None,
 					r#type: None,
 					detail: err.clone(),
 					since: None,
@@ -263,7 +286,7 @@ impl CanopyMcp {
 					kind: "failed_run",
 					severity: "warning",
 					group_id: c.group_id,
-					server_id: run.server_id,
+					machine_id: run.machine_id,
 					r#type: Some(run.r#type.to_string()),
 					detail: run
 						.error
@@ -292,7 +315,7 @@ impl CanopyMcp {
 						kind: "stuck_maintenance",
 						severity: "warning",
 						group_id: c.group_id,
-						server_id: None,
+						machine_id: None,
 						r#type: None,
 						detail: format!(
 							"{} maintenance still running since {}",

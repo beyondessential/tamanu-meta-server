@@ -16,17 +16,12 @@ import { useNavigate, useParams } from "react-router-dom";
 import { callApi, useApi, useApiAction } from "../api";
 import TagsEditor from "../components/TagsEditor";
 import { usePageTitle } from "../hooks/usePageTitle";
-import {
-	useProductCaps,
-	useProductKinds,
-	useProducts,
-} from "../hooks/useProducts";
-import { PRODUCT_LABELS, REACHABILITY_CHECK } from "../types";
+import ApplicationTypeChip from "../components/ApplicationTypeChip";
+import { useApplicationTypeCaps } from "../hooks/useApplicationTypes";
+import { REACHABILITY_CHECK } from "../types";
 import type {
-	Product,
 	ServerGroup,
 	ServerInfo,
-	ServerKind,
 	ServerRank,
 	TagMap,
 } from "../types";
@@ -71,9 +66,45 @@ export default function ServerEdit() {
 	if (silences.status === "error")
 		return <Alert severity="error">{silences.error.message}</Alert>;
 	return (
-		<EditForm
+		<MachineSilenceGate
 			info={info.data}
 			reachabilitySilenced={silences.data.some(
+				(s) =>
+					s.source === REACHABILITY_CHECK.source &&
+					s.ref === REACHABILITY_CHECK.ref,
+			)}
+		/>
+	);
+}
+
+/// The box's reachability silence is offered here as well as on the box, so an
+/// operator quiets a host expected to be down from whichever record they are
+/// looking at. It can only be read once the application names its machine, so
+/// it waits behind the info load.
+// spec: CHK#operator-controls
+function MachineSilenceGate({
+	info,
+	reachabilitySilenced,
+}: {
+	info: ServerInfo;
+	reachabilitySilenced: boolean;
+}) {
+	const machineSilences = useApi(
+		"silenced_refs",
+		"list_for_machine",
+		{ machine_id: info.machine_id },
+		[info.machine_id],
+	);
+
+	if (machineSilences.status === "loading" || machineSilences.status === "idle")
+		return <LinearProgress />;
+	if (machineSilences.status === "error")
+		return <Alert severity="error">{machineSilences.error.message}</Alert>;
+	return (
+		<EditForm
+			info={info}
+			reachabilitySilenced={reachabilitySilenced}
+			machineReachabilitySilenced={machineSilences.data.some(
 				(s) =>
 					s.source === REACHABILITY_CHECK.source &&
 					s.ref === REACHABILITY_CHECK.ref,
@@ -85,23 +116,25 @@ export default function ServerEdit() {
 function EditForm({
 	info,
 	reachabilitySilenced,
+	machineReachabilitySilenced,
 }: {
 	info: ServerInfo;
 	reachabilitySilenced: boolean;
+	machineReachabilitySilenced: boolean;
 }) {
 	const navigate = useNavigate();
 	const action = useApiAction("servers", "update");
 	const silence = useApiAction("silenced_refs", "silence_server");
 	const unsilence = useApiAction("silenced_refs", "unsilence_server");
+	const silenceMachine = useApiAction("silenced_refs", "silence_machine");
+	const unsilenceMachine = useApiAction("silenced_refs", "unsilence_machine");
 
 	const [name, setName] = useState(info.name ?? "");
 	const [host, setHost] = useState(info.host ?? "");
-	const [product, setProduct] = useState<Product>(info.product);
-	const [kind, setKind] = useState<ServerKind>(info.kind);
-	const products = useProducts();
-	const kinds = useProductKinds(product);
-	const caps = useProductCaps(product);
-	const canListPublicly = caps?.public_listing === true && kind === "central";
+	// The type is reported rather than entered, so it is shown and not offered.
+	// spec: APP#where-a-type-comes-from
+	const caps = useApplicationTypeCaps(info.type);
+	const canListPublicly = caps?.public_listing === true;
 	const [rank, setRank] = useState<ServerRank | "">(info.rank ?? "");
 	const [publicName, setPublicName] = useState<string>(info.public_name ?? "");
 	// `is_monitored` carries the on/off toggle; `alert_when_down_for` is the
@@ -116,11 +149,18 @@ function EditForm({
 	const [alertWhenUnreachable, setAlertWhenUnreachable] = useState(
 		alertsWhenUnreachableInitially,
 	);
+	// The box's own switch, shared with every application on it and with the
+	// machine's page. Offered here so quieting a host expected to be down
+	// doesn't mean working out which record owns the switch.
+	// spec: CHK#operator-controls
+	const machineAlertsWhenUnreachableInitially = !machineReachabilitySilenced;
+	const [alertWhenMachineUnreachable, setAlertWhenMachineUnreachable] = useState(
+		machineAlertsWhenUnreachableInitially,
+	);
 	const [alertWhenDownMinutes, setAlertWhenDownMinutes] = useState<string>(
 		Math.max(1, Math.round(info.alert_when_down_for / 60)).toString(),
 	);
 	const [groupId, setGroupId] = useState<string | null>(info.group_id);
-	const [deviceId, setDeviceId] = useState<string>(info.device_id ?? "");
 	const [cloud, setCloud] = useState<"" | "true" | "false">(
 		info.cloud == null ? "" : info.cloud ? "true" : "false",
 	);
@@ -131,18 +171,26 @@ function EditForm({
 	const [mayManageDns, setMayManageDns] = useState(info.may_manage_dns);
 	const [mayManageTls, setMayManageTls] = useState(info.may_manage_tls);
 
-	const pending = action.pending || silence.pending || unsilence.pending;
-	const error = action.error ?? silence.error ?? unsilence.error;
+	const pending =
+		action.pending ||
+		silence.pending ||
+		unsilence.pending ||
+		silenceMachine.pending ||
+		unsilenceMachine.pending;
+	const error =
+		action.error ??
+		silence.error ??
+		unsilence.error ??
+		silenceMachine.error ??
+		unsilenceMachine.error;
 
 	const onSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
 		if (!groupId || !name.trim()) return; // name and group are required
 		const data: Record<string, unknown> = {
 			name: name.trim(),
-			// Empty string clears the URL (server identified by its device only).
+			// Empty string clears the URL (the box's tailnet name stands in).
 			host: host.trim(),
-			product,
-			kind,
 			rank: rank === "" ? null : rank,
 			// Sent whether or not the field is currently offered: a public name
 			// already set survives the server losing eligibility, and takes effect
@@ -150,7 +198,6 @@ function EditForm({
 			// spec: APP#public-listing
 			public_name: publicName.trim() === "" ? null : publicName.trim(),
 			group_id: groupId,
-			device_id: deviceId.trim() === "" ? null : deviceId.trim(),
 			cloud: cloud === "" ? null : cloud === "true",
 			geolocation:
 				lat && lon
@@ -178,6 +225,18 @@ function EditForm({
 					? unsilence.call(ref)
 					: silence.call(ref));
 			}
+			if (
+				alertWhenMachineUnreachable !== machineAlertsWhenUnreachableInitially
+			) {
+				const ref = {
+					machine_id: info.machine_id,
+					source: REACHABILITY_CHECK.source,
+					ref: REACHABILITY_CHECK.ref,
+				};
+				await (alertWhenMachineUnreachable
+					? unsilenceMachine.call(ref)
+					: silenceMachine.call(ref));
+			}
 			navigate(`/servers/${info.id}`);
 		} catch {
 			/* surfaced via the actions' errors */
@@ -204,48 +263,12 @@ function EditForm({
 					onChange={(e) => setHost(e.target.value)}
 					disabled={pending}
 				/>
-				<TextField
-					select
-					label="Product"
-					value={product}
-					onChange={(e) => {
-						const next = e.target.value as Product;
-						setProduct(next);
-						// A role its new product doesn't define would leave the
-						// server misclassified, so follow the product. The
-						// endpoint applies the same rule if we don't.
-						// spec: APP#product-and-kind
-						const info = products.find((p) => p.product === next);
-						if (info && !info.kinds.includes(kind)) {
-							setKind(info.default_kind);
-						}
-					}}
-					disabled={pending}
-				>
-					{products.map((p) => (
-						<MenuItem key={p.product} value={p.product}>
-							{PRODUCT_LABELS[p.product]}
-						</MenuItem>
-					))}
-				</TextField>
-				<TextField
-					select
-					label="Kind"
-					value={kind}
-					onChange={(e) => setKind(e.target.value as ServerKind)}
-					disabled={pending || kinds.length < 2}
-					helperText={
-						kinds.length < 2
-							? `${PRODUCT_LABELS[product]} servers have one role`
-							: undefined
-					}
-				>
-					{kinds.map((k) => (
-						<MenuItem key={k} value={k}>
-							{k}
-						</MenuItem>
-					))}
-				</TextField>
+				<Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+					<Typography variant="body2" color="text.secondary">
+						Type
+					</Typography>
+					<ApplicationTypeChip type={info.type} />
+				</Stack>
 				<TextField
 					select
 					label="Rank"
@@ -259,14 +282,6 @@ function EditForm({
 						</MenuItem>
 					))}
 				</TextField>
-				<TextField
-					label="Device ID"
-					placeholder="UUID"
-					value={deviceId}
-					onChange={(e) => setDeviceId(e.target.value)}
-					disabled={pending}
-				/>
-
 				<GroupControl
 					currentGroupId={groupId}
 					onChange={setGroupId}
@@ -346,6 +361,24 @@ function EditForm({
 					going away is quiet. This is the same as silencing the
 					reachability check on this server, and either place reflects the
 					other.
+				</Typography>
+
+				<FormControlLabel
+					control={
+						<Checkbox
+							checked={alertWhenMachineUnreachable}
+							onChange={(e) =>
+								setAlertWhenMachineUnreachable(e.target.checked)
+							}
+							disabled={pending}
+						/>
+					}
+					label="Alert when the machine this runs on is unreachable"
+				/>
+				<Typography variant="caption" color="text.secondary">
+					The box's own switch, offered here so you don't have to go
+					looking for it. Turning it off quiets the box going away for
+					every application on it, and shows as off on the machine too.
 				</Typography>
 
 				<Stack

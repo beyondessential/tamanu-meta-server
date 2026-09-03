@@ -21,7 +21,7 @@ test.describe("lingering incidents", () => {
 		const group = await seedServerGroup(sql, { name: "linger-group" });
 		const server = await seedServer(sql, {
 			name: "linger-server",
-			kind: "central",
+			type: "tamanu-central",
 			rank: "production",
 			groupId: group.id,
 		});

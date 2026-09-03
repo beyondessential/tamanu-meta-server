@@ -25,10 +25,17 @@ async fn insert_grouped_server(conn: &mut diesel_async::AsyncPgConnection) -> Uu
 			.get_result(conn)
 			.await
 			.expect("group");
+	let machine: RowId = sql_query("INSERT INTO machines (group_id) VALUES ($1) RETURNING id")
+		.bind::<sql_types::Uuid, _>(group.id)
+		.get_result(conn)
+		.await
+		.expect("machine");
 	let row: RowId = sql_query(
-		"INSERT INTO servers (host, group_id) VALUES ('http://stability.invalid/', $1) RETURNING id",
+		"INSERT INTO applications (type, host, group_id, machine_id) \
+		 VALUES ('tamanu-central', 'http://stability.invalid/', $1, $2) RETURNING id",
 	)
 	.bind::<sql_types::Uuid, _>(group.id)
+	.bind::<sql_types::Uuid, _>(machine.id)
 	.get_result(conn)
 	.await
 	.expect("server");
@@ -342,7 +349,7 @@ async fn backfill_replays_status_history() {
 		}
 		// The check-state row the backfill attaches to.
 		let issue: RowId = sql_query(
-			"INSERT INTO issues (server_id, source, ref, check_name, observed_result, effective_result, message, active, first_seen, last_seen) \
+			"INSERT INTO issues (application_id, source, ref, check_name, observed_result, effective_result, message, active, first_seen, last_seen) \
 			 VALUES ($1, 'alertd', 'health/db', 'db', 'passed', 'passed', 'm', false, NOW(), NOW()) RETURNING id",
 		)
 		.bind::<sql_types::Uuid, _>(server_id)

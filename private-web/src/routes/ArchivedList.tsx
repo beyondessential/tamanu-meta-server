@@ -14,7 +14,7 @@ import ServerShorty, { type ServerInfo } from "../components/ServerShorty";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
-import { compareServersByRankThenKind } from "../types";
+import { compareServersByRankThenType } from "../types";
 
 /// Archived (soft-deleted) servers and groups, with Restore. The only place to
 /// find them — every other listing filters archived rows out.
@@ -38,7 +38,7 @@ export default function ArchivedList() {
 		return <Alert severity="error">{servers.error.message}</Alert>;
 
 	const archivedGroups = groups.data;
-	const archivedServers = [...servers.data].sort(compareServersByRankThenKind);
+	const archivedServers = [...servers.data].sort(compareServersByRankThenType);
 
 	if (archivedGroups.length === 0 && archivedServers.length === 0) {
 		return <Alert severity="success">Nothing archived.</Alert>;

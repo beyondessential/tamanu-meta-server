@@ -13,7 +13,7 @@ test.describe("device key management", () => {
 	});
 
 	test("disable then re-enable a key", async ({ page, sql }) => {
-		const device = await seedDevice(sql, { role: "server" });
+		const device = await seedDevice(sql, { role: "machine" });
 		await seedDeviceKey(sql, {
 			deviceId: device.id,
 			name: "rotating-key",
@@ -37,7 +37,7 @@ test.describe("device key management", () => {
 	});
 
 	test("add a key from a pasted public key", async ({ page, sql }) => {
-		const device = await seedDevice(sql, { role: "server" });
+		const device = await seedDevice(sql, { role: "machine" });
 		await seedDeviceKey(sql, {
 			deviceId: device.id,
 			name: "existing-key",
