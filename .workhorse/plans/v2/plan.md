@@ -832,4 +832,17 @@ An audit of every unticked case in the test-cases document, since "unticked" was
 
 *Migration replay coverage.* `add_machines` and its followers ran without the replay tests `maintenance_windows_take_the_machine` has: that every server became one application and one machine, that `alert_when_down_for`, the group and the identity landed on the machine, and that silences, incidents and check states survived the rename.
 
-The default application name is its own small item: FLT says an application with no name presents as the sentence case of its type, and the UI still reads "Unnamed server".
+**Done since the audit: the three built-but-uncovered cases, and a fourth found already built.**
+The maintenance page's machine target links to the box, covered in `maintenance.spec.ts`.
+The application page carries neither backups nor an identity, and the box one page away carries both, covered in `machines.spec.ts`.
+MCP and the operator UI read the same two rollups, one per grain, covered in `mcp.rs` by giving the two grains different answers and asserting both surfaces report each one the same way; the same test's `tools/list` assertion now names the machine tools.
+A reporter changing an application's type under an unchanged key turned out to be built already: `from_report_key` clears the held row's key and stands the new type beside it, and `statuses_split.rs` now covers that.
+
+**Done since the audit: the default application name.**
+FLT says an application with no name presents as the sentence case of its type.
+`ApplicationType::label()` already derived that string for the type catalogue, but nothing used it as the name fallback, so the UI read "Unnamed server" and the wire sent an empty string.
+`Application::display_name()` is now the one place the backend flattens a name to a string, and every private-server field that carries a name as a `String` goes through it; the surfaces where the wire deliberately keeps the name nullable, because they feed the edit form, go through a matching `applicationName()` in `types.ts`.
+Where the backend now guarantees a name, the `|| "(unnamed)"` guards beside it were removed rather than left as branches that can no longer be taken.
+A name stays the operator's: a push describes the workload it found and never renames what an operator has named, nor invents a name for what they have not.
+
+Coverage: `application_types.rs` covers the fallback and an operator's name overriding it, `statuses_split.rs` covers a push leaving a set name alone and creating unnamed, and `application-types.spec.ts` covers both readings on the application page and in the group listing.

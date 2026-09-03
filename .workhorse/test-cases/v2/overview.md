@@ -14,8 +14,8 @@ plan's "Specced and not built" section says which is which.
 - [x] A report that omits a previously-reported application does not remove it (verifies spec: FLT)
 - [x] Only an operator archives an application; an archived one leaves the live fleet with its history intact (verifies spec: FLT)
 - [x] Archiving a machine archives the applications on it (verifies spec: FLT)
-- [ ] An application with no operator-set name presents as the sentence case of its type (verifies spec: FLT)
-- [ ] An operator-set name overrides the default and survives further reports (verifies spec: FLT)
+- [x] An application with no operator-set name presents as the sentence case of its type (verifies spec: FLT)
+- [x] An operator-set name overrides the default and survives further reports (verifies spec: FLT)
 - [x] A machine with two applications reports its platform, memory and filesystems once, not once per application (verifies spec: FLT)
 
 ## Groups
@@ -29,7 +29,7 @@ plan's "Specced and not built" section says which is which.
 
 - [x] A server with product `tamanu` and kind `central` migrates to an application of type `tamanu-central` (verifies spec: APP)
 - [x] A reported type is adopted without an operator step (verifies spec: APP)
-- [ ] A reporter sending a different type under an unchanged key produces an unreachable application and a new one beside it (verifies spec: APP, STA)
+- [x] A reporter sending a different type under an unchanged key produces an unreachable application and a new one beside it (verifies spec: APP, STA)
 - [x] A type appears among an application's reserved read-only tags and on no machine (verifies spec: APP, FLT)
 - [x] A `tamanu-central` is eligible for public listing; other types are not (verifies spec: APP)
 - [x] A group's headline version comes from its highest-ranked version-tracked application (verifies spec: APP)
@@ -144,7 +144,7 @@ plan's "Specced and not built" section says which is which.
 - [x] Declaring from an application's page opens the window over its machine (verifies spec: MNT)
 - [x] Windows predating the split are backfilled onto the machine their application ran on, leaving group windows alone (verifies spec: MNT)
 - [x] A machine-scoped silence still applies only to the machine's own checks, not to the applications on it (verifies spec: CHK)
-- [ ] The fleet maintenance view links a machine target to its detail page (verifies spec: MNT)
+- [x] The fleet maintenance view links a machine target to its detail page (verifies spec: MNT)
 
 ## Names and certificates
 
@@ -162,7 +162,7 @@ plan's "Specced and not built" section says which is which.
 - [x] `Find issues` filtered by application returns the machine's issues among the application's own (verifies spec: MCP)
 - [x] `Get incident` reports each issue's scope (verifies spec: MCP)
 - [x] A machine's issue names its machine rather than reading as group-wide (verifies spec: MCP)
-- [ ] MCP health classifications match what the operator UI presents for the same machine or application (verifies spec: MCP)
+- [x] MCP health classifications match what the operator UI presents for the same machine or application (verifies spec: MCP)
 
 ## Wire compatibility
 
@@ -208,7 +208,7 @@ cover the runtime half of that, which the spec diff cannot see.
 - [x] The group page lists rank, then machine, then applications
 - [ ] Both detail pages end with the group's tree, with the current page highlighted
 - [x] The application page presents its own and its machine's checks in one list
-- [ ] The application page carries no backups and no identity
+- [x] The application page carries no backups and no identity
 - [x] The machine page carries no URL
 - [x] A machine's page presents what the box reports: platform, processors, memory, bestool
 - [x] A box carrying two workloads lists both, each linking to its own page

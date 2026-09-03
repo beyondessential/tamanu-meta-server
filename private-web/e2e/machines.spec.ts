@@ -171,6 +171,39 @@ test.describe("machine detail", () => {
 		await expect(page).toHaveURL(new RegExp(`/servers/${server.id}$`));
 	});
 
+	/// Backups are taken of a box and an identity speaks for a box, so both are
+	/// the machine's. An application's page is about the software, and offering
+	/// either there would give a two-workload box two places to change one
+	/// setting.
+	/// spec: FLT, BAK, DID
+	test("backups and identity are the box's, not the application's", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "grain-group" });
+		const device = await seedDevice(sql, {
+			tailscaleNodeName: "grain-box.tailnet.ts.net",
+		});
+		const server = await seedServer(sql, {
+			name: "grain-app",
+			groupId: group.id,
+			deviceId: device.id,
+		});
+
+		await page.goto(`/servers/${server.id}`);
+		await expect(page.getByRole("heading", { name: "grain-app" })).toBeVisible();
+		await expect(
+			page.getByRole("heading", { name: "Backups" }),
+		).toHaveCount(0);
+		await expect(page.getByRole("heading", { name: "Identity" })).toHaveCount(0);
+		await expect(page.getByRole("button", { name: "Identity" })).toHaveCount(0);
+
+		// Both are on the box, one page away.
+		await page.goto(`/machines/${server.machineId}`);
+		await expect(page.getByRole("heading", { name: "Backups" })).toBeVisible();
+		await expect(page.getByRole("button", { name: "Identity" })).toBeVisible();
+	});
+
 	test("the group lists its boxes, including one with nothing on it", async ({
 		page,
 		sql,

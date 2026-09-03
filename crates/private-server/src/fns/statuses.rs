@@ -313,7 +313,7 @@ pub async fn group_details(
 			};
 			FacilityServerStatus {
 				id: s.id,
-				name: s.name.clone().unwrap_or_default(),
+				name: s.display_name(),
 				up,
 				health: member_health.get(&s.id).copied().unwrap_or_default(),
 				is_monitored: s.is_monitored,
@@ -591,7 +591,7 @@ pub async fn check_detail(
 				applications.push(CheckDetailServerData {
 					r#type: server.r#type.clone(),
 					server_id: server.id,
-					server_name: server.name.clone().unwrap_or_default(),
+					server_name: server.display_name(),
 					group_id: server.group_id,
 					group_name: server.group_id.and_then(|g| group_names.get(&g).cloned()),
 					rank: server.rank,
@@ -1193,7 +1193,7 @@ pub async fn fleet_detail(
 			let checks = checks.remove(&server.id).unwrap_or_default();
 			FleetServerDetailData {
 				server_id: server.id,
-				server_name: server.name.unwrap_or_default(),
+				server_name: server.display_name(),
 				group_id: server.group_id,
 				group_name: server.group_id.and_then(|g| group_names.get(&g).cloned()),
 				rank: server.rank,

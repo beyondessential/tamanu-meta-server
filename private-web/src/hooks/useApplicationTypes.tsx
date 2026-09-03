@@ -1,10 +1,11 @@
 import { type ReactNode, createContext, useContext, useMemo } from "react";
 import { useApi } from "../api";
-import type {
-	ApplicationType,
-	ApplicationTypeInfo,
-	Caps,
-	VersionTracking,
+import {
+	applicationTypeLabel,
+	type ApplicationType,
+	type ApplicationTypeInfo,
+	type Caps,
+	type VersionTracking,
 } from "../types";
 
 // `null` (not `undefined`) so consumers can tell "no provider mounted" apart
@@ -51,12 +52,15 @@ export function useApplicationTypes(): ApplicationTypeInfo[] {
 	return useCatalogue() ?? [];
 }
 
-/** How a type is written in the UI. Falls back to the wire value until the
- * catalogue loads, so a chip carries the type rather than an empty space. */
+/** How a type is written in the UI. Falls back to deriving the label the same
+ * way the backend does until the catalogue loads, so a chip carries the type
+ * rather than an empty space and doesn't change wording once it arrives. */
 export function useApplicationTypeLabel(type: ApplicationType): string {
 	const catalogue = useCatalogue();
 	return useMemo(
-		() => catalogue?.find((t) => t.type === type)?.label ?? type,
+		() =>
+			catalogue?.find((t) => t.type === type)?.label ??
+			applicationTypeLabel(type),
 		[catalogue, type],
 	);
 }

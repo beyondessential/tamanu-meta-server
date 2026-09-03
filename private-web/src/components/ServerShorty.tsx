@@ -1,10 +1,11 @@
 import { Box, Chip, Link as MuiLink, Stack, Tooltip, Typography } from "@mui/material";
 import { Link as RouterLink } from "react-router-dom";
-import type {
-	ApplicationType,
-	HealthState,
-	ServerRank,
-	ShortStatus,
+import {
+	applicationName,
+	type ApplicationType,
+	type HealthState,
+	type ServerRank,
+	type ShortStatus,
 } from "../types";
 import ApplicationTypeChip from "./ApplicationTypeChip";
 import ServerNameWithGroup from "./ServerNameWithGroup";
@@ -25,7 +26,7 @@ export interface ServerInfo {
 }
 
 export default function ServerShorty({ server }: { server: ServerInfo }) {
-	const name = server.name || "Unnamed server";
+	const name = applicationName(server);
 	const unmonitored = server.is_monitored === false;
 	return (
 		<Stack

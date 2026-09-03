@@ -560,3 +560,129 @@ async fn a_malformed_target_is_rejected_by_name() {
 	)
 	.await
 }
+
+/// A name belongs to the operator and a report to the reporter: a push
+/// describes the workload it found, and never renames what an operator has
+/// named or invents a name for what they have not.
+/// spec: FLT#naming, STA
+#[tokio::test(flavor = "multi_thread")]
+async fn a_push_leaves_an_operator_set_name_alone() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let machine_id = machine_for(&mut conn, device_id).await;
+			// The central is already there under the key the reporter uses,
+			// and an operator has named it.
+			let central_id = Uuid::new_v4();
+			sql_query(
+				"INSERT INTO applications (id, machine_id, name, type, reported_key) \
+				 VALUES ($1, $2, 'Fiji central', 'tamanu-central', 'central')",
+			)
+			.bind::<sql_types::Uuid, _>(central_id)
+			.bind::<sql_types::Uuid, _>(machine_id)
+			.execute(&mut conn)
+			.await
+			.expect("insert application");
+
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&two_workload_push())
+				.await
+				.assert_status_ok();
+
+			#[derive(QueryableByName)]
+			struct Name {
+				#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+				name: Option<String>,
+			}
+
+			let named: Name = sql_query("SELECT name FROM applications WHERE id = $1")
+				.bind::<sql_types::Uuid, _>(central_id)
+				.get_result(&mut conn)
+				.await
+				.expect("the named application");
+			assert_eq!(named.name.as_deref(), Some("Fiji central"));
+
+			// And the facility the push stood up is left for an operator to
+			// name: nothing in the payload says what to call it.
+			let facility = application_id(&mut conn, machine_id, "facility").await;
+			let fresh: Name = sql_query("SELECT name FROM applications WHERE id = $1")
+				.bind::<sql_types::Uuid, _>(facility)
+				.get_result(&mut conn)
+				.await
+				.expect("the created application");
+			assert_eq!(fresh.name, None);
+		},
+	)
+	.await
+}
+
+/// A key names a workload, not a slot: a reporter sending a different type
+/// under a key it was already using has stopped reporting one application and
+/// started reporting another. The record the key used to name gives the key up
+/// and stays as the application it is, with its history, while the new type
+/// stands up beside it. Nothing is renamed and nothing is deleted.
+/// spec: APP, STA#identifying-an-application
+#[tokio::test(flavor = "multi_thread")]
+async fn a_type_change_under_one_key_stands_a_new_application_beside_the_old() {
+	commons_tests::server::run_with_device_auth(
+		"server",
+		async |mut conn, cert, device_id, public, _| {
+			let machine_id = machine_for(&mut conn, device_id).await;
+
+			let push = |r#type: &str| {
+				serde_json::json!({
+					"source": "alertd",
+					"machine": { "health": [] },
+					"applications": {
+						"app": {
+							"type": r#type,
+							"health": [{ "check": "db", "result": "passed" }],
+						},
+					},
+				})
+			};
+
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&push("tamanu-facility"))
+				.await
+				.assert_status_ok();
+			let first = application_id(&mut conn, machine_id, "app").await;
+
+			public
+				.post(&format!("/status/{machine_id}"))
+				.add_header("x-forwarded-client-cert", &format!("Cert={}", cert))
+				.json(&push("senaite"))
+				.await
+				.assert_status_ok();
+
+			let second = application_id(&mut conn, machine_id, "app").await;
+			assert_ne!(second, first, "the key names the new workload");
+
+			#[derive(QueryableByName)]
+			struct Row {
+				#[diesel(sql_type = sql_types::Text)]
+				r#type: String,
+				#[diesel(sql_type = sql_types::Nullable<sql_types::Text>)]
+				reported_key: Option<String>,
+			}
+			let rows: Vec<Row> = sql_query(
+				"SELECT type, reported_key FROM applications \
+				 WHERE machine_id = $1 AND deleted_at IS NULL ORDER BY created_at",
+			)
+			.bind::<sql_types::Uuid, _>(machine_id)
+			.get_results(&mut conn)
+			.await
+			.unwrap();
+			assert_eq!(rows.len(), 2, "the old one is still there");
+			assert_eq!(rows[0].r#type, "tamanu-facility");
+			assert_eq!(rows[0].reported_key, None, "it gave the key up");
+			assert_eq!(rows[1].r#type, "senaite");
+			assert_eq!(rows[1].reported_key.as_deref(), Some("app"));
+		},
+	)
+	.await
+}

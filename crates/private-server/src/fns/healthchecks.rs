@@ -760,7 +760,7 @@ pub async fn sample(
 				.map(|h| h.0.to_string())
 				.unwrap_or_default(),
 			server_name: server
-				.and_then(|s| s.name)
+				.map(|s| s.display_name())
 				.or_else(|| machine.and_then(|m| m.name)),
 			seen_at: status.created_at,
 		}),

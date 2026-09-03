@@ -199,7 +199,9 @@ export type ApplicationType =
 
 export interface SeededServer {
 	id: string;
-	name: string;
+	/** `null` when the application was seeded unnamed, which is how one Canopy
+	 * learned about from a report arrives: a name is the operator's to set. */
+	name: string | null;
 	host: string;
 	type: ApplicationType;
 	rank: ServerRank | null;
@@ -285,7 +287,8 @@ export async function seedApplicationReport(
 export async function seedServer(
 	sql: Sql,
 	opts: {
-		name?: string;
+		/** Pass `null` for an application nobody has named. */
+		name?: string | null;
 		host?: string;
 		/** What the application is. Defaults to a Tamanu central. */
 		type?: ApplicationType;
@@ -307,7 +310,7 @@ export async function seedServer(
 	} = {},
 ): Promise<SeededServer> {
 	const id = randomUUID();
-	const name = opts.name ?? randomLabel("srv");
+	const name = opts.name === null ? null : (opts.name ?? randomLabel("srv"));
 	const host = opts.host ?? `https://${randomLabel("host")}.e2e.invalid`;
 	const type = opts.type ?? "tamanu-central";
 	const rank = opts.rank ?? "production";
@@ -322,7 +325,13 @@ export async function seedServer(
 	const machineId = randomUUID();
 	await sql.query(
 		`INSERT INTO machines (id, name, group_id, device_id) VALUES ($1, $2, $3, $4)`,
-		[machineId, name, opts.groupId ?? null, opts.deviceId ?? null],
+		// A machine is always named, whether or not the workload on it is.
+		[
+			machineId,
+			name ?? randomLabel("box"),
+			opts.groupId ?? null,
+			opts.deviceId ?? null,
+		],
 	);
 	await sql.query(
 		`INSERT INTO applications (id, name, host, type, rank, group_id, is_monitored, alert_when_down_for, notes, tags, may_manage_dns, may_manage_tls, machine_id)

@@ -113,6 +113,8 @@ async fn initialize_and_list_tools() {
 		for tool in [
 			"find_servers",
 			"get_server",
+			"find_machines",
+			"get_machine",
 			"find_groups",
 			"get_group",
 			"list_versions",
@@ -1358,6 +1360,94 @@ async fn find_issues_by_application_includes_its_machines_issues() {
 				.iter()
 				.any(|i| i["ref"] == "disk")
 		);
+	})
+	.await
+}
+
+/// An agent reading the fleet through MCP and an operator reading it in the UI
+/// must not be told different things about the same box. Both go through the
+/// same two rollups, one per grain, and this pins that they stay the same two.
+/// The grains are given different answers to tell apart: the box only warns,
+/// while the workload on it has failed a check of its own.
+/// spec: MCP, FLT
+#[tokio::test(flavor = "multi_thread")]
+async fn mcp_health_matches_what_the_ui_presents() {
+	use commons_types::status::CheckResult;
+	use database::issues::{CheckFiling, Scope, file_check};
+
+	commons_tests::server::run(async |mut conn, _public, private| {
+		seed(&mut conn).await;
+		let machine_id: uuid::Uuid = SRV_GROUPED.parse().unwrap();
+		let application_id: uuid::Uuid = SRV_GROUPED.parse().unwrap();
+
+		let filing = |scope, check, observed| CheckFiling {
+			source: "alertd",
+			scope,
+			device_id: None,
+			check,
+			observed,
+			title: Some("parity"),
+			message: "parity filing",
+			detail: None,
+			default_ceiling: CheckResult::Failed,
+			default_escalates: false,
+			documentation: None,
+		};
+		file_check(
+			&mut conn,
+			filing(
+				Scope::Machine(machine_id),
+				"disk_free",
+				CheckResult::Warning,
+			),
+		)
+		.await
+		.expect("machine filing");
+		file_check(
+			&mut conn,
+			filing(Scope::Application(application_id), "db", CheckResult::Failed),
+		)
+		.await
+		.expect("application filing");
+
+		let card = private
+			.post("/api/statuses/group_details")
+			.json(&serde_json::json!({ "server_group_id": GROUP }))
+			.await;
+		assert_eq!(card.status_code().as_u16(), 200);
+		let card: serde_json::Value = card.json();
+		let member = card["members"]
+			.as_array()
+			.expect("members")
+			.iter()
+			.find(|m| m["id"] == SRV_GROUPED)
+			.expect("the grouped member")
+			.clone();
+
+		let machine = call_tool!(
+			private,
+			"get_machine",
+			serde_json::json!({ "machine_id": SRV_GROUPED })
+		);
+		let application = call_tool!(
+			private,
+			"get_server",
+			serde_json::json!({ "server_id": SRV_GROUPED })
+		);
+
+		assert_eq!(member["machine_health"], "warning");
+		assert_eq!(member["health"], "unhealthy");
+		assert_eq!(machine["health"], member["machine_health"]);
+		assert_eq!(application["health"], member["health"]);
+
+		// And the box's own listing of what runs on it agrees with both.
+		let on_box = machine["applications"]
+			.as_array()
+			.expect("applications")
+			.iter()
+			.find(|a| a["id"] == SRV_GROUPED)
+			.expect("the workload");
+		assert_eq!(on_box["health"], member["health"]);
 	})
 	.await
 }

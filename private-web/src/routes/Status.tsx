@@ -565,7 +565,7 @@ export function RankedDotStrip({ members }: { members: FacilityServerStatus[] })
 										up={m.up}
 										health={m.health}
 										monitored={m.is_monitored}
-										title={`${m.name || "(unnamed)"}${
+										title={`${m.name}${
 											m.rank ? ` · ${m.rank}` : ""
 										} · ${m.type}`}
 									/>

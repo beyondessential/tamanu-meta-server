@@ -161,6 +161,32 @@ test.describe("maintenance windows", () => {
 		).toHaveAttribute("href", `/groups/${group.id}`);
 	});
 
+	/// A window over a box names the box, and the name is the way to it: the
+	/// fleet view is where an operator finds work in progress they did not
+	/// declare, so every target it lists reaches its own page.
+	/// spec: MNT#presentation
+	test("the maintenance page links a machine target to its detail page", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "island-deployment" });
+		const server = await seedServer(sql, {
+			name: "island-box",
+			groupId: group.id,
+		});
+		await seedMaintenanceWindow(sql, {
+			machineId: server.machineId,
+			note: "Replacing the disk",
+		});
+
+		await page.goto("/maintenance");
+		const row = page.getByRole("row", { name: /island-box/ });
+		await expect(row).toContainText("Replacing the disk");
+		await expect(
+			row.getByRole("link", { name: /island-box/ }),
+		).toHaveAttribute("href", `/machines/${server.machineId}`);
+	});
+
 	test("nothing under maintenance says so", async ({ page }) => {
 		await page.goto("/maintenance");
 		await expect(

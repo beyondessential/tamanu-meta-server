@@ -189,6 +189,17 @@ pub struct Application {
 }
 
 impl Application {
+	/// What this application is called.
+	///
+	/// A name is optional and an operator's alone to set, so an application
+	/// nobody has named reads as its type. Every surface that has to flatten
+	/// the name to a string goes through here, so an unnamed application reads
+	/// the same wherever it appears.
+	// spec: FLT#naming
+	pub fn display_name(&self) -> String {
+		self.name.clone().unwrap_or_else(|| self.r#type.label())
+	}
+
 	pub async fn get_all(
 		db: &mut AsyncPgConnection,
 		offset: u64,

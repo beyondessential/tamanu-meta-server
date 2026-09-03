@@ -308,7 +308,7 @@ pub async fn for_group(
 				.or_insert_with(|| DomainNameView {
 					name: row.name.clone(),
 					server_id: server.id,
-					server_name: server.name.clone(),
+					server_name: Some(server.display_name()),
 					published: None,
 					certificate: false,
 					risk: None,
@@ -322,7 +322,7 @@ pub async fn for_group(
 				.or_insert_with(|| DomainNameView {
 					name: cert.name.clone(),
 					server_id: server.id,
-					server_name: server.name.clone(),
+					server_name: Some(server.display_name()),
 					published: None,
 					certificate: false,
 					risk: None,

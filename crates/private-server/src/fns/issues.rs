@@ -259,6 +259,14 @@ pub(crate) async fn enrich_issues(
 				.application_id
 				.and_then(|sid| names.get(&sid).cloned())
 				.unwrap_or((None, None));
+			// An application nobody has named reads as its type, the same as
+			// it does everywhere else it is presented.
+			// spec: FLT#naming
+			let name = name.or_else(|| {
+				i.application_id
+					.and_then(|sid| application_types.get(&sid))
+					.map(|t| t.label())
+			});
 			// A machine's issue answers to its machine's group, so the
 			// group is named either way.
 			let (group_id, group_name) = match (i.application_id, i.machine_id) {

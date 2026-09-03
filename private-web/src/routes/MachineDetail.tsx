@@ -25,7 +25,11 @@ import TimezoneTooltip from "../components/TimezoneTooltip";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { humanSeconds } from "../lib/humanDuration";
-import type { MachineDetailData, ServerInfo } from "../types";
+import {
+	applicationName,
+	type MachineDetailData,
+	type ServerInfo,
+} from "../types";
 
 /// A machine's own page: the box, what it reports about itself, its health,
 /// and the workloads on it.
@@ -345,7 +349,7 @@ function ApplicationsOnThisBox({
 								to={`/servers/${application.id}`}
 								sx={{ fontWeight: 500 }}
 							>
-								{application.name ?? "Unnamed"}
+								{applicationName(application)}
 							</MuiLink>
 							{application.rank && <ServerRankChip rank={application.rank} />}
 							<ApplicationTypeChip type={application.type} />

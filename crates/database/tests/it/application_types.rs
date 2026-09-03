@@ -489,3 +489,44 @@ async fn sole_member_software_is_absent_for_a_group_spanning_two() {
 	})
 	.await
 }
+
+/// A name is optional and an operator's alone to set, so an application nobody
+/// has named reads as the sentence case of its type rather than as a blank.
+/// spec: FLT#naming
+#[test]
+fn an_unnamed_application_reads_as_its_type() {
+	let unnamed = Application {
+		name: None,
+		..server(ApplicationType::TamanuCentral, None, Uuid::new_v4())
+	};
+	assert_eq!(unnamed.display_name(), "Tamanu central");
+
+	let facility = Application {
+		name: None,
+		..server(ApplicationType::TamanuFacility, None, Uuid::new_v4())
+	};
+	assert_eq!(facility.display_name(), "Tamanu facility");
+
+	// A type Canopy has no handling for reads the same way: the rule is the
+	// slug's, not the catalog's.
+	let unknown = Application {
+		name: None,
+		..server(
+			ApplicationType::Other("weather-station".into()),
+			None,
+			Uuid::new_v4(),
+		)
+	};
+	assert_eq!(unknown.display_name(), "Weather station");
+}
+
+/// An operator's name is what the application is called, whatever its type.
+/// spec: FLT#naming
+#[test]
+fn an_operator_set_name_is_what_an_application_reads_as() {
+	let named = Application {
+		name: Some("Fiji central".into()),
+		..server(ApplicationType::TamanuCentral, None, Uuid::new_v4())
+	};
+	assert_eq!(named.display_name(), "Fiji central");
+}

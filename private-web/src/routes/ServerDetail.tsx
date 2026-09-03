@@ -47,6 +47,7 @@ import { usePageTitle } from "../hooks/usePageTitle";
 import { humanSeconds } from "../lib/humanDuration";
 import ServerNameWithGroup from "../components/ServerNameWithGroup";
 import {
+	applicationName,
 	compareServersByRankThenType,
 	groupServersByRank,
 	type ConsolidatedChecks,
@@ -88,7 +89,7 @@ export default function ServerDetail() {
 		openIncidents.status === "ok" && openIncidents.data.length > 0;
 	usePageTitle(
 		detail.status === "ok"
-			? (detail.data.server.name ?? "Unnamed server")
+			? applicationName(detail.data.server)
 			: "Server",
 	);
 
@@ -180,7 +181,7 @@ export default function ServerDetail() {
 				scope="machine"
 				anchor="maintenance"
 				id={data.server.machine_id}
-				targetLabel={data.server.name ?? data.server.display_host}
+				targetLabel={applicationName(data.server)}
 				groupId={data.group?.id ?? null}
 				groupName={data.group?.name ?? null}
 				onChanged={() => detail.reload()}
@@ -251,7 +252,7 @@ function Header({
 					<ServerNameWithGroup
 						groupName={data.server.group_name}
 						groupId={data.server.group_id}
-						serverName={data.server.name ?? "Unnamed"}
+						serverName={applicationName(data.server)}
 					/>
 				</Typography>
 			</Stack>
@@ -294,7 +295,7 @@ function Header({
 						{!archived && (
 							<DeleteServerButton
 								serverId={data.server.id}
-								serverName={data.server.name ?? "this server"}
+								serverName={applicationName(data.server)}
 								groupId={data.server.group_id ?? null}
 								onArchived={onArchived}
 							/>
@@ -712,7 +713,7 @@ function SiblingServers({
 												target="_blank"
 												rel="noopener noreferrer"
 												size="small"
-												aria-label={`Open ${sib.name ?? "server"} (${sib.display_host})`}
+												aria-label={`Open ${applicationName(sib)} (${sib.display_host})`}
 											>
 												<LanguageIcon fontSize="small" />
 											</IconButton>
@@ -731,7 +732,7 @@ function SiblingServers({
 										color="text.primary"
 										sx={{ fontWeight: 500 }}
 									>
-										{sib.name ?? "Unnamed"}
+										{applicationName(sib)}
 									</MuiLink>
 									{sib.rank && <ServerRankChip rank={sib.rank} />}
 									<ApplicationTypeChip type={sib.type} />
@@ -939,7 +940,7 @@ function SiblingDotStrip({
 							health={(m.entry.health as HealthState | undefined) ?? undefined}
 							monitored={m.entry.is_monitored !== false}
 							maintained={m.entry.maintained === true}
-							title={m.entry.name ?? ""}
+							title={applicationName(m.entry)}
 							dim={!m.focused}
 							size="0.8em"
 						/>

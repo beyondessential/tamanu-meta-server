@@ -332,7 +332,7 @@ async fn redaction_gaps_for(
 		if let Some((reason, version)) = restore::redaction_gap_for(conn, &server).await? {
 			gaps.push(RedactionGap {
 				server_id: server.id,
-				server_name: server.name.clone(),
+				server_name: Some(server.display_name()),
 				reason,
 				version,
 			});

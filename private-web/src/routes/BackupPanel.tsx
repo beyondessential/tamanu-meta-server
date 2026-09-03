@@ -55,6 +55,7 @@ import {
 	BACKUP_STATUS_HELP,
 	BACKUP_STATUS_INTENT,
 	BACKUP_STATUS_LABEL,
+	applicationName,
 	type BackupConfigStatus,
 	type BackupConfigView,
 	type BackupMaintenanceRun,
@@ -1773,7 +1774,7 @@ function ServersPanel({
 			underline="hover"
 		>
 			{box.machine.name ??
-				box.applications[0]?.name ??
+				(box.applications[0] && applicationName(box.applications[0])) ??
 				box.machine.id.slice(0, 8)}
 		</MuiLink>
 	);

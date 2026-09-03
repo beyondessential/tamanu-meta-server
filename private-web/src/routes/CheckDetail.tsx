@@ -377,7 +377,7 @@ function AttentionList({
 														to={`/servers/${server.server_id}`}
 														underline="hover"
 													>
-														{server.server_name || "(unnamed)"}
+														{server.server_name}
 													</MuiLink>
 												}
 												state={server}

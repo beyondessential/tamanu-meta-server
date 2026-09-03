@@ -254,6 +254,27 @@ export function serverSortKey(s: { rank?: ServerRank | null }): number {
 	return rankIndex === -1 ? SERVER_RANK_ORDER.length : rankIndex;
 }
 
+/// How a type reads when nothing has named the application: the sentence case
+/// of the type, so `tamanu-central` reads as "Tamanu central".
+///
+/// The backend derives the catalogue's label by the same rule, so the two
+/// agree and a name is never blank while the catalogue is still loading.
+/// spec: FLT#naming
+export function applicationTypeLabel(type: ApplicationType): string {
+	const words = type.replace(/-/g, " ");
+	return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/// What an application is called. An application's name is optional and an
+/// operator's alone to set; one with no name presents as its type.
+/// spec: FLT#naming
+export function applicationName(application: {
+	name?: string | null;
+	type: ApplicationType;
+}): string {
+	return application.name || applicationTypeLabel(application.type);
+}
+
 /// Rank first, then type alphabetically, then name.
 ///
 /// Application types are a flat, open set: a deployment can report a type
@@ -568,7 +589,7 @@ export function aggregateOperators(
 	const byLogin = new Map<string, AggregatedOperator>();
 	for (const m of members) {
 		for (const op of m.operators) {
-			const serverName = m.name || "(unnamed)";
+			const serverName = m.name;
 			const existing = byLogin.get(op.login);
 			if (!existing) {
 				byLogin.set(op.login, { op, servers: [serverName] });

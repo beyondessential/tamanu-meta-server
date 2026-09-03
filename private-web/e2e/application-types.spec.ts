@@ -304,4 +304,57 @@ test.describe("application types", () => {
 			crossTab.getByRole("columnheader", { name: "not reported" }),
 		).toHaveCount(0);
 	});
+
+	/// A name is optional and an operator's alone to set. An application Canopy
+	/// learned about from a report has none, and reads as its type rather than
+	/// as a blank or a placeholder.
+	///
+	/// spec: FLT#naming
+	test("an application nobody has named reads as its type", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "unnamed-group" });
+		const server = await seedServer(sql, {
+			name: null,
+			type: "tamanu-central",
+			groupId: group.id,
+		});
+
+		await page.goto(`/servers/${server.id}`);
+		await expect(
+			page.getByRole("heading", { name: /Tamanu central/ }),
+		).toBeVisible();
+
+		// And in the listing its group presents, under the box it runs on.
+		await page.goto(`/groups/${group.id}`);
+		await expect(
+			page.getByRole("link", { name: /Tamanu central/ }).first(),
+		).toBeVisible();
+	});
+
+	/// A name the operator set is what the application is called, and a report
+	/// arriving against it does not put the type back in its place.
+	///
+	/// spec: FLT#naming
+	test("an operator's name is what the application reads as instead", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "named-group" });
+		const server = await seedServer(sql, {
+			name: "Fiji central",
+			type: "tamanu-central",
+			groupId: group.id,
+		});
+		await seedStatus(sql, { serverId: server.id, version: "2.34.1" });
+
+		await page.goto(`/servers/${server.id}`);
+		await expect(
+			page.getByRole("heading", { name: /Fiji central/ }),
+		).toBeVisible();
+		await expect(
+			page.getByRole("heading", { name: /Tamanu central/ }),
+		).toHaveCount(0);
+	});
 });
