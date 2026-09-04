@@ -19,15 +19,9 @@
 # accident — it just is not part of either track until someone says so.
 release = false
 
-# TEMPORARY, revert once canopy 1.0.0 is out. The canopy crates are unreleased but
-# already sit at their target version, so release-plz has nothing to propose and
-# opens no release PR — with the setting below at its usual `false`, nothing would
-# ever trigger their release. Forcing it on for one push to main tags them and runs
-# the deploy.
-#
 # Release only when a release PR is merged. This is what stops an ordinary merge to
 # main from deploying.
-release_always = true
+release_always = false
 
 # Two tracks means two version series, so tags carry the package they belong to
 # rather than a bare version that would collide between them.
