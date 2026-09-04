@@ -143,6 +143,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
 
+      - name: Reset claude skills symlink
+        run: git restore .claude
+
       # release-plz writes the API client's new version into its manifest, but the
       # OpenAPI document is where that version is declared and the manifest is an
       # output of generation (see release-plz.toml). So the number is written back
