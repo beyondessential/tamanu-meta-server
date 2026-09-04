@@ -128,33 +128,18 @@ jobs:
           cache: npm
           cache-dependency-path: private-web/package-lock.json
 
-      - name: Sanitize working tree
+      - name: Permit Workhorse's ignored tracked symlink
         run: |
-          echo "Before cleanup:"
-          git status --short --untracked-files=all
-          git ls-files -ci --exclude-standard || true
-          ls -la .claude || true
-
-          # Restore tracked files exactly to the checkout state.
-          git reset --hard HEAD
-
-          # Remove untracked files and ignored generated files.
-          git clean -ffdx
-
-          echo "After cleanup:"
-          git status --short --untracked-files=all
-          git ls-files -ci --exclude-standard || true
-          ls -la .claude || true
-
-          git status --porcelain=v1
-          git diff --name-only
-          git ls-files -s .claude/skills || true
+          cp release-plz.toml "$RUNNER_TEMP/release-plz.toml"
+          sed -i '/^\[workspace\]$/a allow_dirty = true' \
+            "$RUNNER_TEMP/release-plz.toml"
 
       - name: Run release-plz
         id: release-plz
         uses: release-plz/action@v0.5.132
         with:
           command: release-pr
+          config: ${{ runner.temp }}/release-plz.toml
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
 
