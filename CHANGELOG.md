@@ -1,0 +1,353 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [1.0.0](https://github.com/beyondessential/canopy/releases/tag/public-server-v1.0.0) - 2026-09-04
+
+### Added
+
+- *(restore)* un-parameterise the restore check names
+- *(private-web)* redaction switch, state column, and reported outcome
+- *(restore)* resolve the masking manifest into the worklist
+- *(restore)* carry the redaction outcome on restore-health reports
+- *(device-auth)* one setting naming the client-cert header to trust
+- current reported detail per (server, source), and the fleet view behind it
+- *(servers)* device self-identity endpoint (GET /servers/self)
+- *(sources)* enforce ingest gating + ingest toggle UI
+- *(monitoring)* defer incident evaluation off the status-ingest path
+- *(incidents)* linger before closing — close-side flap grace
+- *(statuses)* backup_now rides only alertd pushes
+- feat!(monitoring): drop the severity vocabulary entirely
+- *(incidents)* key incident semantics on results, not severities
+- *(policy)* silences become scoped check policies
+- feat!(public): remove POST /events; retire the self-alert Slack path
+- *(monitoring)* per-source staleness checks
+- feat!(statuses): legacy pushes become the tamanu tasks heartbeat
+- *(issues)* passing checks record state; degraded-streak timestamps
+- feat!(statuses): brokenness folds onto the check's own issue, sticky
+- *(issues)* stamp check-state columns on health filings
+- feat!(policy): check catalog becomes result-transform policies
+- feat!(issues): delete the events table
+- *(statuses)* per-source status pushes
+- *(public)* include effective tags in the status-push response
+- *(public)* [**breaking**] strip status-push response to return-path fields only
+- *(public)* send effective healthcheck severity mapping to devices
+- *(backup)* per-server restore window for ad-hoc restores
+- *(restore)* descriptor-based capabilities, typed params, semantic-driven worklist & overdue
+- *(mcp)* bearer-token-gated MCP mount on the public server
+- *(restore)* accept + display arbitrary health data on restore checks
+- *(devices)* retire the untrusted role; trust comes from role, not binding
+- *(restore)* restore-health ingest, alerting & overdue sweep (PR2)
+- *(restore)* worklist, restore-credentials, capability + admin endpoints
+- *(restore)* backup-restore role, restore-replica + capability schema & models
+- *(backups)* record S3 traffic tallies on backup runs
+- *(backups)* always bucket-scope device backup creds (shared-account isolation)
+- *(backups)* deliver "back up now" to devices via the status heartbeat
+- *(backups)* BackupSecrets read_keys/put_keys for dual-key rotation
+- *(backups)* drop the escrow flow (Canopy owns + rotates the passphrase)
+- *(backups)* create the repo passphrase Secret on onboarding
+- *(backups)* injectable secret store (kube + in-memory) with create_password
+- *(backups)* add maintenance_role_arn column, threaded through model + create endpoint
+- *(operator-ui)* backup-credentials onboarding, escrow, scheduling & stats (component 5)
+- *(public-server)* backup-credentials device endpoints + AWS/kube on AppState (component 2)
+- *(public)* per-check result enum on status ingestion
+- *(enrollment)* accept registration over the tailnet transport
+- re-enroll a device from the Identity section
+- make server URLs optional and non-unique; display fallback to tailnet hostname
+- rate-limit + alert the enrollment endpoints
+- *(api)* operator-first enrollment endpoints; remove device-driven server surface
+- *(servers)* configurable alert_when_down_for duration
+- status snapshot endpoint + HealthState wire type
+- file status/health events on healthy transitions
+- parse healthy/health from /status payload
+- add healthy/health columns to statuses
+- prefer x-forwarded-client-cert (Envoy XFCC) header for client cert auth ([#105](https://github.com/beyondessential/canopy/pull/105))
+- *(snippets)* add public endpoint
+- *(artifacts)* show hidden artifacts in the admin ui
+- *(artifacts)* allow creating artifacts that apply to version ranges
+- *(public)* add /download route that we can download artifacts through
+- *(public)* add mobile link for RCs
+- show full changelog for the entire release series
+- *(public)* display required chrome version
+- *(public)* add chrome version info to the public server
+- *(public)* add link to mobile install page
+- add favicon
+- *(public)* add RC server sections
+- *(servers)* let us hide servers from the public list
+- *(versions)* keep track of which device submitted a version or
+- *(versions)* KAM-432: allow submitting artifacts for non-existent
+- *(versions)* link versions to a private page
+- *(versions)* revise the public artifacts page
+- *(versions)* add grouping behaviour to the public view too
+- *(versions)* add status enum and allow yanking
+- *(status)* show legend
+- *(public)* add production server versions page
+- *(status)* add deployment page stub ([#72](https://github.com/beyondessential/canopy/pull/72))
+- *(KAM-415)* admins for the private server ([#66](https://github.com/beyondessential/canopy/pull/66))
+
+### Fixed
+
+- *(mcp)* check the failed-auth budget before the lookup it bounds (audit L9)
+- *(restore)* file restore-verification server-scoped with stable names
+- *(checks)* pending-review policies hard-cap at warning
+- *(sources)* grade rules against the effective tag set
+- *(sources)* ignore still returns backflow
+- *(checks)* purge the remaining check-name-only keying
+- *(tags)* honour stored billing.* tags over computed defaults
+- *(tags)* derive billing.stage from the requesting server's own rank
+- *(openapi)* give colliding request/response schemas unique names
+- *(openapi)* give colliding handlers unique operationIds + guard in CI
+- *(backups)* allow on-demand creds for not-scheduled types
+- *(backups)* grant kopia DeleteObject; reap delete-markers; reconcile shared buckets
+- *(backups)* wire backup-credential clients into the private /public mount
+- *(deps)* pin base64 and sha2 to full versions
+- *(deps)* pin ring to 0.17.14
+- *(enrollment)* row-lock the server at register, live-only attach check
+- scope public-server server edit to the calling device
+- *(public-server)* don't panic when reqwest client build fails
+- fix build
+- don't clear device_id when saving server
+- *(public)* tests
+
+### Other
+
+- Merge remote-tracking branch 'origin/main' into workhorse/c3
+- update release.yml, openapi.json, openapi.json
+- test the version stamping, and record the card's test cases
+- release pipeline, with canopy and the API client on separate tracks
+- stamp the crate version from the document, and record its provenance
+- update 8 files
+- Pre-PR commit
+- replay the core-model split migration
+- cover the split push shape's reserved names and key uniqueness
+- the default application name, and cover four built behaviours
+- cover the split push shape, and correct the bare-box test case
+- Update plan
+- Update plan
+- a bare box's push is the machine's in full
+- update 40 files
+- the backup instruction is read off the machine, on unequal ids
+- cover which application a unified push is about
+- enrolment admits a machine, not an application
+- update applications.rs, machines.rs, statuses.rs
+- the heartbeat's backup instruction reads the machine, not the application
+- collapse the nested enrolment key guard
+- cover the entitlements answer, the unified push, and identity resolution
+- an empty health set is not the legacy push shape
+- cover machine-grained backup participation and migration attribution
+- separate "never reported" from "reported long ago"
+- the check namespace in CHK, and its tests
+- the check namespace, and one definition of a reserved source
+- the application type is an open set
+- update checks spec, update 19 files
+- update checks spec, update 19 files
+- backups are the box's, so nothing about them sits on an application
+- backups take the machine grain
+- the machine gets its own identity endpoint, and the role its own name
+- make the wire-compatibility bar a standing rule
+- keep the agent-facing wire compatible across the split
+- update 7 files
+- WIP — one application type replaces product and kind (source)
+- grade reachability on the target's own threshold
+- declare restore replicas over the machine
+- carry maintenance windows onto the machine grain
+- Update plan
+- split reported detail by grain
+- file machine-subject checks against the machine
+- an application takes its machine's group
+- finish the machine as operator and enrolment surface
+- update 36 files
+- make the machine a thing that gets written
+- update 10 files
+- update 10 files
+- Update plan
+- satisfy rustfmt
+- Remove unnecessary target_version_id from PGRO
+- reuse the versions secret
+- static calendar secret
+- plan end time
+- alert on unread calendar feeds
+- skip blank plan notes
+- upgrade calendar feed
+- update restore-replicas spec, update 5 files
+- update 17 files
+- *(restore)* sweep_overdue is sweep_restore_checks
+- gate testing on plans
+- Merge pull request #473 from beyondessential/dependabot/cargo/base64-0.23.0
+- Merge pull request #469 from beyondessential/replica-redaction
+- use the current device-auth header in the redaction tests
+- redaction corroboration and test-case checklist
+- Merge main into l11 (both PRs appended to versions.rs tests)
+- Merge pull request #461 from beyondessential/claude/pr-370-fix-l10-duplicate-check-names
+- Merge pull request #460 from beyondessential/claude/pr-370-fix-l9-mcp-ratelimit-order
+- stack onto the rotation-interlock branch
+- Merge remote-tracking branch 'origin/claude/pr-370-fix-h5-rotation-slot' into claude/pr-370-fix-h7-xfcc-last
+- convert the cert headers main added since this branch forked
+- Merge remote-tracking branch 'origin/main' into claude/pr-370-fix-h7-xfcc-last
+- *(clippy)* use the entry API for cache fills in restore paths
+- Merge pull request #379 from beyondessential/claude/defer-incident-eval
+- rustfmt mod ordering in tests/it main.rs
+- *(tests)* stop the test suite freezing the machine
+- *(public)* cover effective check-severity mapping; regen openapi spec
+- Merge pull request #345 from beyondessential/backup-run-duration
+- Merge pull request #338 from beyondessential/feat/per-server-restore-window
+- Merge pull request #327 from beyondessential/docs/openapi-descriptions
+- Merge pull request #317 from beyondessential/guard/utoipa-axum-schema-collisions
+- share one pool per test AppState between db and db_read
+- route read-only db_read pool for private/public state, canopy-mcp, and read-only handlers
+- Merge pull request #315 from beyondessential/fix/openapi-unique-operation-ids
+- *(restore)* once-suppression, snapshot-driven overdue, param resolution & validation
+- *(openapi)* regenerate specs and api-types for restore descriptors
+- Merge pull request #306 from beyondessential/restore-check-health-details
+- drop references to plan docs from code comments
+- drop stale narration of the retired status roll-up issue
+- *(restore)* clarify freshness is restore-cadence, not backup interval
+- *(restore)* db model + public-server endpoint coverage
+- fmt
+- *(backups)* lift BackupSecrets into commons-servers; jobs worker uses it
+- lockfile
+- Backup credentials: database layer ([#223](https://github.com/beyondessential/canopy/pull/223))
+- Add allow_legacy_status to Server literals in tag_reserved_prefix test
+- Add a per-server opt-in for the legacy /status format
+- Regenerate public-server openapi spec for /tags description
+- Add synthetic canopy: tags to the /tags endpoint
+- Reject /status pushes without a healthcheck array
+- *(enrollment)* channel-binding logic (begin/complete/tailnet)
+- cover precreated-device + key-theft guards; drop removed-endpoint tests
+- enrollment handshake + archival/token lifecycle
+- cache the status-card headline version on server_groups
+- Merge pull request #204 from beyondessential/dependabot/cargo/deps-patches-9168495071
+- restrict to 5 levels with explicit incident semantics
+- cover the v2 rules engine (database + public + private)
+- *(statuses)* pass EvaluationContext into severity_for
+- *(incidents)* elevate db check to error severity in reachability handoff test
+- *(statuses)* source per-check severity from the catalog
+- *(openapi)* regenerate after rephrasing StatusPayload doc-comments
+- *(statuses tests)* adjust assertions for retired rollup
+- *(statuses)* drop bestool overall-health rollup issue filing
+- *(migration)* per-group slack open cooldown
+- silence healthcheck refs from the ChecksTable, correct overall healthy when all failures silenced
+- split monitoring on/off into its own bool, gate incident workflow
+- replace listed bool with public_name text
+- tests(public-tags) + fix(e2e): cover merged-tags endpoint, fix MUI icon path
+- *(server-groups)* update seeds + assertions for the rekey
+- wire private + public handlers to server groups
+- render healthcheck names and detail values as code in markdown messages
+- drop now-meaningless info.version
+- bump to 6.6.6, drop autogenerated changelog
+- drop manual semver release flow
+- release
+- *(known-issues)* filter the HTML root listing too
+- release
+- *(known-issues)* range, minor-ready, public filter cases
+- *(known-issues)* filter to ready versions on all endpoints
+- release
+- Merge pull request #151 from beyondessential/pr/remove-ack
+- Merge pull request #146 from beyondessential/pr/alert-when-down-for
+- release
+- release
+- release
+- release
+- release
+- release
+- release
+- release
+- tailnet_guard layer, dual-auth on /public, and integration tests
+- dual-path device auth (mTLS + tailnet) with FromRef-gated tailnet directory
+- release
+- update openapi.json
+- file reachability issues per server status; add alert_when_down opt-in (default true)
+- drop edge-proxy implementation detail from public-server description; switch security schemes to mutualTLS
+- release
+- rename dump bins to private-/public-openapi-dump to avoid cargo collision
+- drift-check tests against committed openapi.json files
+- spec test for public-server
+- openapi-dump bin for public-server and just gen-openapi covers both
+- annotate public-server JSON handlers
+- scaffold OpenApiRouter and ApiDoc in public-server
+- add migration for issue_notes and incident_notes
+- public-server events + private-server issues/incidents
+- POST /events for device-pushed events
+- enforce unique device_id (strict 1:1)
+- release
+- release
+- release
+- Rename to Canopy, move the UI to React ([#111](https://github.com/beyondessential/canopy/pull/111))
+- release
+- release
+- release
+- release
+- release
+- release
+- *(snippets)* ensure version history is linear
+- release
+- release
+- release
+- release
+- support META_LOG for logging instead of RUST_LOG
+- release
+- release
+- release
+- release
+- release
+- *(public)* restyle password generator
+- *(public)* restyle the mobile install page
+- *(public)* update style for versions
+- release
+- release
+- release
+- release
+- release
+- fmt
+- clippy
+- restyle the server lists
+- excise chrono and folktime in favour of jiff
+- remove ordered_servers view and rank_order function
+- release
+- release
+- release
+- *(ci)* optimise CD workflow
+- *(db)* switch to native diesel-async migrator instead of our hack
+- upgrade all
+- release
+- release
+- Revert "clippy"
+- clippy
+- *(versions)* mobile-friendly pages
+- release
+- release
+- release
+- release
+- release
+- release
+- *(servers)* tests
+- unstring all the shit
+- release
+- release
+- release
+- release
+- release
+- release
+- release
+- release
+- release
+- release
+- release
+- release
+- release
+- release
+- release
+- release
+- release
+- release
+- release
+- {{version}}
+- fix cargo-release usage
+- fix last failing test
+- replace react with leptos
+- break into crates
