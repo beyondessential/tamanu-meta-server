@@ -5,7 +5,7 @@ id: ART
 # Version artifacts
 
 An artifact is a file published for a version: an installer, a package, a set of migrations, a manifest.
-Canopy is the index of them: it holds where each one is, what it is, and whom it is for, and a server or the infrastructure acting on a version's behalf learns from Canopy which files a version has and fetches them from where they rest.
+Canopy holds what each one is and whom it is for, and a server or the infrastructure acting on a version's behalf learns from Canopy which files a version has and fetches each from where it rests.
 An artifact may be for one group alone, and Canopy offers it only to a caller whose group it is.
 
 ## What an artifact belongs to
@@ -22,14 +22,15 @@ A group scope exists because some artifacts are derived from a group's own data 
 
 ## Where an artifact rests
 
-An artifact belonging to no group rests at a URL, which whoever is offered the artifact fetches directly.
+An artifact belonging to no group rests at a location Canopy records and does not hold, which whoever is offered the artifact reads for itself.
 
-A group-scoped artifact rests as an object in its own group's storage, under a prefix of its own apart from the group's backup repo, and a registration placing one anywhere else is refused.
-Canopy reads it on a caller's behalf by assuming the group's storage role confined to reading that prefix (see [BAK](../public-server/backup.md)), and streams the bytes to the caller, so the file rests only in the group's storage and is readable only through Canopy.
+A group-scoped artifact is carried to Canopy by the registration that publishes it, and Canopy holds it.
+A publisher sends the bytes on the connection it registers over and is issued no credential to any store, so being authorised to register for a group is the whole of what publishing into it takes.
+Canopy holds such an artifact in storage of its own, apart from any group's backup repo, so an artifact carries the retention, access, and cost basis of an artifact rather than those a backup repo is kept under (see [BAK](../public-server/backup.md)).
+Where Canopy puts them is its own, and no caller addresses them there.
+
+Canopy serves the bytes only to a caller the artifact is offered to.
 The boundary is therefore enforced on the read rather than resting on a location being hard to guess.
-
-Canopy issues a publisher short-lived credentials for writing into a group's artifact prefix the way it issues backup credentials: by assuming the group's storage role under a session policy confined to that prefix, recorded before they are returned, and only to a caller authorised to register artifacts for that group (see [Registration](#registration)).
-The prefix is apart from the backup repo so that a credential which writes artifacts reaches no backup.
 
 ## What a version offers
 
@@ -54,14 +55,13 @@ Canopy passes a group-scoped artifact's bytes only to a caller it is offered to.
 
 ## Registration
 
-A registration names the version or range, the type, the platform, the location, and the group where the artifact has one.
+A registration names the version or range, the type, the platform, and the group where the artifact has one, and carries either the location of an unscoped artifact or the bytes of a group-scoped one.
 The group is named on the registration rather than inferred from the caller.
 
 A releaser device registers unscoped artifacts, and carries no authorisation for any group.
 An operator registers either.
 A component that produces a group-scoped artifact registers it for that group under an authorisation defined with that artifact, and is authorised for no other.
-A registration naming a group the caller is not authorised for is refused.
-Credentials for writing into a group's storage are issued on the same authorisation, so a caller that may not register for a group cannot publish into it either.
+A registration naming a group the caller is not authorised for is refused, which is the only gate publishing into a group has to pass.
 
 Canopy records which device registered an artifact and, where the registration names one, the run that produced it, so an artifact that arrived by automation is distinguishable from one entered by hand and traceable to what made it.
 
