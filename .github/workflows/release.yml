@@ -128,7 +128,12 @@ jobs:
           cache: npm
           cache-dependency-path: private-web/package-lock.json
 
-      - run: rm -rf .claude/skills # workaround dirty workdir issue
+      # workaround dirty workdir issue??
+      - run: |
+          git ls-files -ci --exclude-standard
+          git restore .
+          git ls-files -ci --exclude-standard
+
       - name: Run release-plz
         id: release-plz
         uses: release-plz/action@v0.5.132
