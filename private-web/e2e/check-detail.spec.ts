@@ -87,13 +87,13 @@ test.describe("check detail page", () => {
 		// group page; server rows link to their server pages.
 		await expect(failingLink).toHaveAttribute(
 			"href",
-			`/servers/${failing.id}`,
+			`/fleet/applications/${failing.id}`,
 		);
-		await expect(page.locator(`a[href="/groups/${group.id}"]`)).toHaveCount(
+		await expect(page.locator(`a[href="/fleet/groups/${group.id}"]`)).toHaveCount(
 			1,
 		);
 		await expect(
-			page.locator(`a[href="/groups/${group.id}"]`),
+			page.locator(`a[href="/fleet/groups/${group.id}"]`),
 		).toHaveText("Coral Coast");
 
 		// Standard list ordering within the group: kind then name
@@ -103,7 +103,7 @@ test.describe("check detail page", () => {
 		expect(failingY).toBeLessThan(warningY);
 
 		await failingLink.click();
-		await expect(page).toHaveURL(new RegExp(`/servers/${failing.id}$`));
+		await expect(page).toHaveURL(new RegExp(`/fleet/applications/${failing.id}$`));
 	});
 
 	test("the healthy-servers toggle reveals servers reporting the check passed", async ({
@@ -237,7 +237,7 @@ test.describe("check detail page", () => {
 		// group's section, labelled as the whole group.
 		await expect(page.getByText("production", { exact: true })).toBeVisible();
 		await expect(
-			page.locator(`a[href="/groups/${group.id}"]`),
+			page.locator(`a[href="/fleet/groups/${group.id}"]`),
 		).toHaveText("Backup Coast");
 		await expect(page.getByText("whole group", { exact: true })).toBeVisible();
 
@@ -406,7 +406,7 @@ test.describe("check detail page", () => {
 			],
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 		const checkLink = page.getByRole("link", { name: "postgres" });
 		await expect(checkLink).toBeVisible();
 		await checkLink.click();

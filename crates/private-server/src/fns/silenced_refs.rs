@@ -14,6 +14,7 @@ use crate::state::AppState;
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(list_for_server))
+		.routes(routes!(list_for_servers))
 		.routes(routes!(list_for_machine))
 		.routes(routes!(list_for_group))
 		.routes(routes!(silence_server))
@@ -116,6 +117,38 @@ pub async fn list_for_server(
 ) -> Result<Json<Vec<ServerSilencedRef>>> {
 	let mut conn = state.db.get().await?;
 	let rows = ServerSilencedRef::list_for_server(&mut conn, args.server_id).await?;
+	Ok(Json(rows))
+}
+
+/// Identifies several applications whose silences to list.
+#[derive(Deserialize, ToSchema)]
+pub struct ApplicationsScopeArgs {
+	/// The applications to read. An empty list reads nothing.
+	pub application_ids: Vec<Uuid>,
+}
+
+/// List application-scoped silences across several applications.
+///
+/// The plural of `list_for_server`, for a surface holding a section per
+/// application on one machine. Doesn't include silences applied at the group
+/// or machine level.
+#[utoipa::path(
+	post,
+	path = "/list_for_servers",
+	tag = "silenced_refs",
+	security(("tailscale-user" = [])),
+	request_body = ApplicationsScopeArgs,
+	responses(
+		(status = 200, body = Vec<ServerSilencedRef>),
+	),
+)]
+pub async fn list_for_servers(
+	State(state): State<AppState>,
+	_user: TailscaleUser,
+	Json(args): Json<ApplicationsScopeArgs>,
+) -> Result<Json<Vec<ServerSilencedRef>>> {
+	let mut conn = state.db.get().await?;
+	let rows = ServerSilencedRef::list_for_servers(&mut conn, &args.application_ids).await?;
 	Ok(Json(rows))
 }
 

@@ -164,7 +164,7 @@ pub struct ServerGroupBackupConfig {
 	/// regeneration.
 	pub maintenance_role_arn: String,
 	/// Where the backup bucket lives and who provisioned it: an externally
-	/// provisioned account the deployment brought itself, or an
+	/// provisioned account the group brought itself, or an
 	/// automatically provisioned bucket in a shared account.
 	#[schema(value_type = String)]
 	pub placement: BackupPlacement,

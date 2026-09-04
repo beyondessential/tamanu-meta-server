@@ -64,34 +64,93 @@ pub(crate) fn generate_passphrase() -> String {
 		.join("-")
 }
 
+/// Where the fleet's endpoints used to be, redirecting to where they are.
+///
+/// `servers` named the box and the workload at once, and the fleet's records
+/// were spread across three top-level prefixes. Each has its own word now, all
+/// three under `/api/fleet`.
+///
+/// The SPA ships with this server and calls the new prefixes, so this is not
+/// compatibility for a client we do not control — it is for a tab left open
+/// across a deploy, and for a bookmarked or scripted call.
+///
+/// 308 rather than 302: these are all POSTs, and only the permanent form
+/// obliges the caller to repeat the method and body rather than turning the
+/// retry into a GET. Not documented in the schema — the schema says where an
+/// endpoint is, and one path per endpoint is the point of moving them.
+fn moved_paths() -> axum::Router<crate::state::AppState> {
+	use axum::{
+		extract::{OriginalUri, Path},
+		response::Redirect,
+		routing::any,
+	};
+
+	/// The query string is carried through: nothing here uses one today, but
+	/// dropping half a URL on the way to a redirect is the kind of thing that
+	/// is found much later.
+	fn moved_to(prefix: &str, rest: &str, uri: &axum::http::Uri) -> Redirect {
+		let query = uri.query().map(|q| format!("?{q}")).unwrap_or_default();
+		Redirect::permanent(&format!("/api/fleet/{prefix}/{rest}{query}"))
+	}
+
+	async fn applications(Path(rest): Path<String>, OriginalUri(uri): OriginalUri) -> Redirect {
+		moved_to("applications", &rest, &uri)
+	}
+	async fn machines(Path(rest): Path<String>, OriginalUri(uri): OriginalUri) -> Redirect {
+		moved_to("machines", &rest, &uri)
+	}
+	async fn groups(Path(rest): Path<String>, OriginalUri(uri): OriginalUri) -> Redirect {
+		moved_to("groups", &rest, &uri)
+	}
+
+	axum::Router::new()
+		// `servers` was the applications' prefix before the split gave the
+		// workload its own word.
+		.route("/api/servers/{*rest}", any(applications))
+		.route("/api/applications/{*rest}", any(applications))
+		.route("/api/machines/{*rest}", any(machines))
+		.route("/api/server_groups/{*rest}", any(groups))
+}
+
 pub fn routes() -> OpenApiRouter<crate::state::AppState> {
-	OpenApiRouter::new().nest(
-		"/api",
-		OpenApiRouter::new()
-			.nest("/admins", admins::routes())
-			.nest("/backups", backups::routes())
-			.nest("/bestool", bestool::routes())
-			.nest("/certificates", certificates::routes())
-			.nest("/commons", commons::routes())
-			.nest("/devices", devices::routes())
-			.nest("/domains", domains::routes())
-			.nest("/healthchecks", healthchecks::routes())
-			.nest("/incidents", incidents::routes())
-			.nest("/issues", issues::routes())
-			.nest("/machines", machines::routes())
-			.nest("/mcp_tokens", mcp_tokens::routes())
-			.nest("/migration_tests", migration_tests::routes())
-			.nest("/restore_replicas", restore_replicas::routes())
-			.nest("/self_alerts", self_alerts::routes())
-			.nest("/server_groups", server_groups::routes())
-			.nest("/servers", applications::routes())
-			.nest("/maintenance", maintenance::routes())
-			.nest("/silenced_refs", silenced_refs::routes())
-			.nest("/sql", sql::routes())
-			.nest("/statuses", statuses::routes())
-			.nest("/upgrade_plans", upgrade_plans::routes())
-			.nest("/versions", versions::routes()),
-	)
+	OpenApiRouter::new()
+		.nest(
+			"/api",
+			OpenApiRouter::new()
+				.nest("/admins", admins::routes())
+				// The fleet's own records, under one prefix — the same shape the
+				// SPA browses them at. `servers` used to name the box and the
+				// workload at once, and the listings sat beside the records.
+				.nest(
+					"/fleet",
+					OpenApiRouter::new()
+						.nest("/applications", applications::routes())
+						.nest("/machines", machines::routes())
+						.nest("/groups", server_groups::routes()),
+				)
+				.nest("/backups", backups::routes())
+				.nest("/bestool", bestool::routes())
+				.nest("/certificates", certificates::routes())
+				.nest("/commons", commons::routes())
+				.nest("/devices", devices::routes())
+				.nest("/domains", domains::routes())
+				.nest("/healthchecks", healthchecks::routes())
+				.nest("/incidents", incidents::routes())
+				.nest("/issues", issues::routes())
+				.nest("/mcp_tokens", mcp_tokens::routes())
+				.nest("/migration_tests", migration_tests::routes())
+				.nest("/restore_replicas", restore_replicas::routes())
+				.nest("/self_alerts", self_alerts::routes())
+				.nest("/maintenance", maintenance::routes())
+				.nest("/silenced_refs", silenced_refs::routes())
+				.nest("/sql", sql::routes())
+				.nest("/statuses", statuses::routes())
+				.nest("/upgrade_plans", upgrade_plans::routes())
+				.nest("/versions", versions::routes()),
+		)
+		// Merged outside the `/api` nest: these routes carry the prefix
+		// themselves, so nesting them would put it on twice.
+		.merge(OpenApiRouter::from(moved_paths()))
 }
 
 #[cfg(test)]

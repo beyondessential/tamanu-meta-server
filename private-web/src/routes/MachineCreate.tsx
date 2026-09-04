@@ -1,6 +1,5 @@
 import {
 	Alert,
-	Autocomplete,
 	Button,
 	Checkbox,
 	FormControlLabel,
@@ -10,15 +9,16 @@ import {
 	TextField,
 	Typography,
 } from "@mui/material";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { callApi, useApi, useApiAction } from "../api";
+import { callApi, useApiAction } from "../api";
+import GroupControl from "../components/GroupControl";
 import TagsEditor from "../components/TagsEditor";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { REACHABILITY_CHECK } from "../types";
-import type { ServerGroup, TagMap, TailnetLiveInfo } from "../types";
+import type { TagMap, TailnetLiveInfo } from "../types";
 
-/// Operator-first machine creation, reachable at `/groups/:id/machines/new`
+/// Operator-first machine creation, reachable at `/fleet/groups/:id/machines/new`
 /// with the group preselected. A group is required — machines are always
 /// grouped.
 ///
@@ -29,10 +29,10 @@ import type { ServerGroup, TagMap, TailnetLiveInfo } from "../types";
 export default function MachineCreate() {
 	usePageTitle("Add machine");
 	const navigate = useNavigate();
-	// When mounted under `/groups/:id/machines/new`, the route param is the
+	// When mounted under `/fleet/groups/:id/machines/new`, the route param is the
 	// group to default-select.
 	const { id: presetGroupId } = useParams<{ id?: string }>();
-	const action = useApiAction("machines", "create");
+	const action = useApiAction("fleet/machines", "create");
 	const silence = useApiAction("silenced_refs", "silence_machine");
 
 	const [name, setName] = useState("");
@@ -82,7 +82,7 @@ export default function MachineCreate() {
 					ref: REACHABILITY_CHECK.ref,
 				});
 			}
-			navigate(`/machines/${machineId}`);
+			navigate(`/fleet/machines/${machineId}`);
 		} catch {
 			/* surfaced via the actions' errors */
 		}
@@ -329,107 +329,3 @@ function TailscaleIdentityField({
 	);
 }
 
-function GroupControl({
-	currentGroupId,
-	onChange,
-	disabled,
-	required = false,
-}: {
-	currentGroupId: string | null;
-	onChange: (groupId: string | null) => void;
-	disabled: boolean;
-	required?: boolean;
-}) {
-	const [query, setQuery] = useState("");
-	const [results, setResults] = useState<ServerGroup[]>([]);
-	const [loading, setLoading] = useState(false);
-
-	const allGroups = useApi("server_groups", "list", {}, []);
-
-	useEffect(() => {
-		if (!query) {
-			setResults([]);
-			return;
-		}
-		let cancelled = false;
-		setLoading(true);
-		(async () => {
-			try {
-				const found = await callApi("server_groups", "search", { query });
-				if (!cancelled) setResults(found);
-			} catch {
-				if (!cancelled) setResults([]);
-			} finally {
-				if (!cancelled) setLoading(false);
-			}
-		})();
-		return () => {
-			cancelled = true;
-		};
-	}, [query]);
-
-	const currentValue = useMemo<ServerGroup | null>(() => {
-		if (!currentGroupId) return null;
-		if (allGroups.status === "ok") {
-			return allGroups.data.find((g) => g.id === currentGroupId) ?? null;
-		}
-		return null;
-	}, [currentGroupId, allGroups]);
-
-	const options = useMemo<ServerGroup[]>(() => {
-		if (query) return results;
-		return allGroups.status === "ok" ? allGroups.data : [];
-	}, [query, results, allGroups]);
-
-	return (
-		<Autocomplete<ServerGroup, false, false, false>
-			disabled={disabled}
-			options={options}
-			value={currentValue}
-			onChange={(_, v) => onChange(v?.id ?? null)}
-			onInputChange={(_, v) => setQuery(v)}
-			loading={loading}
-			getOptionLabel={(g) => g.name}
-			isOptionEqualToValue={(a, b) => a.id === b.id}
-			filterOptions={(x) => x}
-			renderInput={(params) => {
-				const missing = required && !currentValue;
-				return (
-					<TextField
-						{...params}
-						label="Group"
-						required={required}
-						error={missing}
-						placeholder="Search by name, or pick from the list"
-						helperText={
-							missing
-								? "Required — every machine belongs to a group."
-								: "The group this machine belongs to."
-						}
-					/>
-				);
-			}}
-			renderOption={(props, group) => (
-				<li {...props} key={group.id}>
-					<Stack>
-						<Typography variant="body2">{group.name}</Typography>
-						{group.notes && (
-							<Typography
-								variant="caption"
-								color="text.secondary"
-								sx={{
-									overflow: "hidden",
-									textOverflow: "ellipsis",
-									whiteSpace: "nowrap",
-									maxWidth: "60ch",
-								}}
-							>
-								{group.notes.split("\n")[0]}
-							</Typography>
-						)}
-					</Stack>
-				</li>
-			)}
-		/>
-	);
-}

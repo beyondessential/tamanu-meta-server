@@ -8,7 +8,7 @@ import {
 import { expect, test } from "./test-fixtures";
 
 // Group-scoped issues (server_id NULL, server_group_id set) must not render a
-// per-server link (`/servers/null`) or a per-server silence action — both only
+// per-server link (`/fleet/applications/null`) or a per-server silence action — both only
 // make sense for server-scoped issues.
 test.describe("issue check documentation", () => {
 	test.beforeEach(async ({ sql }) => {
@@ -114,7 +114,7 @@ test.describe("group-scoped issue rendering", () => {
 		await resetSeededTables(sql);
 	});
 
-	test("a group-scoped issue has no /servers/null link", async ({
+	test("a group-scoped issue has no /fleet/applications/null link", async ({
 		page,
 		sql,
 	}) => {
@@ -130,7 +130,7 @@ test.describe("group-scoped issue rendering", () => {
 		await expect(page.getByText("group-wide backup issue")).toBeVisible();
 
 		// No broken server link is rendered for the group-scoped issue.
-		await expect(page.locator('a[href="/servers/null"]')).toHaveCount(0);
+		await expect(page.locator('a[href="/fleet/applications/null"]')).toHaveCount(0);
 	});
 
 	test("a group-scoped issue offers no per-server silence button", async ({
@@ -180,7 +180,7 @@ test.describe("manual conditions", () => {
 			groupId: group.id,
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 		await page.getByRole("button", { name: /new incident/i }).click();
 
 		const dialog = page.getByRole("dialog");

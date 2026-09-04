@@ -74,7 +74,7 @@ A machine with no applications is answered the same way, with nothing in it.
 An application can be paused, and while it is, Canopy makes no new changes on its behalf: no certificate is ordered or renewed for it, and no address record of its is changed.
 
 Pausing withdraws nothing already in place.
-The records published stand, the certificates held stay held and collectable until they expire, and the deployment keeps working exactly as it did — a pause being for looking into something, and taking a deployment off the air not being a neutral act to perform while looking.
+The records published stand, the certificates held stay held and collectable until they expire, and the group keeps working exactly as it did — a pause being for looking into something, and taking a group off the air not being a neutral act to perform while looking.
 What stops is Canopy doing anything *new* on that application's behalf.
 
 Revoking one of an application's certificates pauses that application, without being asked.
@@ -113,7 +113,7 @@ The private key never leaves the application and Canopy never asks for it: Canop
 
 The signing request is honoured only for exactly the name requested.
 Canopy certifies that one name and no other: a request whose subject or alternative names carry anything beyond the requested name is refused rather than trimmed, because silently issuing something narrower than asked would leave an application serving a certificate it does not expect, and issuing something wider would let one application smuggle another group's name past the authorisation check.
-Wildcards are refused: a certificate valid for every name in a deployment is not something one member should be able to mint.
+Wildcards are refused: a certificate valid for every name in a group is not something one member should be able to mint.
 
 The key the request certifies must be strong enough to be worth certifying, and Canopy states what it accepts rather than deferring to whatever the authority happens to allow that year.
 
@@ -173,7 +173,7 @@ Everything else can be re-requested with the key the application already holds.
 Where the reason given is that the key is compromised, that key is not certified again — for any name, by any application, since a leaked key is leaked whoever asks next.
 A request naming it is refused distinguishably from every other refusal, so an agent can generate a fresh key and ask again on the strength of the refusal alone, without a human reading it and without waiting for an operator to intervene on the application.
 Recovering from a leaked key is exactly the moment when nobody has attention to spare, so it is the moment the machinery has to work unattended.
-Any other reason leaves the key usable, since a certificate superseded or a deployment retired says nothing about the key itself.
+Any other reason leaves the key usable, since a certificate superseded or a group retired says nothing about the key itself.
 
 ### When issuance fails
 
@@ -190,7 +190,7 @@ Its group may have released the domain it sat under, its application may have re
 Alerting on it would mean every deliberate withdrawal left an alert behind that no action could clear, which teaches an operator to ignore the alert that matters.
 Whether the name is still entitled is asked when the alert is evaluated rather than remembered from when renewal stopped, so a domain reclaimed by its group brings its certificates back into scope.
 
-An order that has never produced a certificate is distinguished from one extending a certificate that already exists, so an operator can tell a deployment that never came up from one about to go dark.
+An order that has never produced a certificate is distinguished from one extending a certificate that already exists, so an operator can tell a group that never came up from one about to go dark.
 
 Canopy's own inability to issue is not any one application's fault and is reported against Canopy instead (see [SELF](../private-server/self-alerts.md)): an authority that cannot be reached, an account Canopy cannot use, and the authority's rate limits being exhausted.
 Those limits are shared across every group whose domain sits in the same zone, so running them down is a fleet-wide fault rather than one group's: Canopy reports being throttled, and does not consume what remains retrying a name that has just failed.

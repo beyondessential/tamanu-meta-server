@@ -13,11 +13,11 @@ Together they answer which names Canopy will act on for which group — the asso
 A managed zone is named by its apex domain and identified by the identifier its DNS provider knows the zone by.
 Canopy holds write access to every managed zone, and can create, change, and delete records anywhere within it.
 
-Managed zones come from Canopy's own deployment configuration, set by the infrastructure that provisions Canopy, rather than from operator-editable state.
+Managed zones come from the Canopy instance's own configuration, set by the infrastructure that provisions Canopy, rather than from operator-editable state.
 An operator cannot add, change, or remove a managed zone through Canopy: a zone Canopy has not actually been granted write access to would be authority Canopy could not honour, and granting that access is the provisioning infrastructure's job.
 Canopy reads the configured zones when it starts, so a change to the configuration takes effect once Canopy restarts.
 
-A managed zone is not dedicated to a single deployment.
+A managed zone is not dedicated to a single group.
 Zones are shared: the domains of several groups live in one zone, and names Canopy does not manage at all may live in it beside them.
 So Canopy never treats a zone as belonging to a group, and never assumes it is the only writer of records in a zone.
 
@@ -28,7 +28,7 @@ A group may control more than one domain, and controls everything beneath each o
 
 A group domain lies within a managed zone: it is either a zone's apex or a name beneath one.
 A name outside every managed zone cannot be claimed, because Canopy could create no records for it.
-Claiming an apex gives the group the whole zone, which is how infrastructure that means to dedicate a zone to one deployment configures it.
+Claiming an apex gives the group the whole zone, which is how infrastructure that means to dedicate a zone to one group configures it.
 
 A group domain resolves to exactly one managed zone: the longest configured apex the domain lies within, so a zone configured beneath another zone takes the names beneath itself.
 
@@ -64,7 +64,7 @@ Archiving a group keeps its domains, so restoring the group restores its control
 A claim outlives the zone that admitted it.
 Removing a zone from Canopy's configuration — or breaking the configuration outright — leaves every claim inside it standing, still excluding other groups from overlapping it, and still the group's to release.
 What stops is Canopy acting: no name beneath an uncovered claim resolves to a zone, so Canopy publishes and renews nothing there.
-Canopy holds the claim rather than dropping it because a claim is an operator's decision about a deployment, and a configuration Canopy cannot read is no evidence that the decision was withdrawn — inferring release from it would silently hand a live deployment's names to whoever asked next.
+Canopy holds the claim rather than dropping it because a claim is an operator's decision about a group, and a configuration Canopy cannot read is no evidence that the decision was withdrawn — inferring release from it would silently hand a live group's names to whoever asked next.
 
 Because the configuration is the only thing that changed, and it is a Canopy-level fault rather than any one group's, Canopy reports the shortfall as a self-alert against itself rather than as an issue on the affected groups (see [SELF](../private-server/self-alerts.md)).
 One alert covers every uncovered claim at once and names each domain with the group holding it, so an operator sees the whole blast radius in one place instead of visiting each group.
@@ -76,7 +76,7 @@ The alert distinguishes what happened, because the two cases are fixed different
   This is a failure: Canopy can act on no group's names, so it reports the parse error where there is one, and says it is treating itself as having no zones.
 
 A configuration that names no zones while nothing is claimed raises nothing, that being the feature simply not in use rather than a fault.
-An archived group's uncovered claims raise nothing either, a deployment that has been put away not being something to call an operator about.
+An archived group's uncovered claims raise nothing either, a group that has been put away not being something to call an operator about.
 
 The alert recovers on its own once every live group's claims sit within a configured zone again, whether that came about by restoring the zone or by releasing the claims.
 A group's own page flags each of its uncovered claims besides, so an operator arriving from the alert sees which of that group's domains are the problem.
@@ -85,7 +85,7 @@ A group's own page flags each of its uncovered claims besides, so an operator ar
 
 An application manages names under its group's domains only where an operator has explicitly permitted it to.
 The permission is two separate grants, held per application and both withheld by default: one to manage the application's own DNS records, and one to obtain TLS certificates for the application's own names.
-They are separate because a deployment whose records are managed elsewhere may still want its certificates from Canopy, and a deployment may be given a name before it is trusted to hold a certificate for it.
+They are separate because a group whose records are managed elsewhere may still want its certificates from Canopy, and a group may be given a name before it is trusted to hold a certificate for it.
 
 Both grants are per application rather than per group, so one member of a group may manage its names while its neighbours may not.
 
@@ -108,6 +108,6 @@ What an application does with that — publishing the addresses its name resolve
 
 A group presents the domains it controls, each with the managed zone it resolves to, and flags a claim no configured zone covers.
 The configured managed zones are shown to operators, so an operator claiming a domain can see which names are available to be claimed.
-A group with no domains in a Canopy configured with no zones presents nothing at all, so a deployment that has not been given zones carries no standing notice about a feature it is not using.
+A group with no domains in a Canopy configured with no zones presents nothing at all, so a group that has not been given zones carries no standing notice about a feature it is not using.
 
 An application presents whether it may manage its own DNS and whether it may obtain its own certificates, alongside the other permissions an operator holds over it, and an operator grants and revokes each there.

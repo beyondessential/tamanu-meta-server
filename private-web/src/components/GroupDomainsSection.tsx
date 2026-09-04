@@ -36,7 +36,7 @@ export default function GroupDomainsSection({ groupId }: { groupId: string }) {
 		[groupId, tick],
 	);
 	const zones = useApi("domains", "zones", {}, []);
-	// The names in use beneath each claim, so whether the group's deployments are
+	// The names in use beneath each claim, so whether the group's names are
 	// covered is answerable here rather than server by server.
 	// spec: CRT#presentation
 	const health = useApi(
@@ -72,7 +72,7 @@ export default function GroupDomainsSection({ groupId }: { groupId: string }) {
 
 	// Nothing claimed and no zone to claim into: the feature isn't in use here,
 	// so say nothing at all rather than sitting a standing warning on every
-	// group page of a deployment that hasn't been given zones yet.
+	// group page of a Canopy instance that hasn't been given zones yet.
 	// spec: DOM#when-the-zone-configuration-changes
 	if (rows.length === 0 && zones.status === "ok" && zoneList.length === 0)
 		return null;

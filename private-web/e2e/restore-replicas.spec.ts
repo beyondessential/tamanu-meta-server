@@ -16,7 +16,7 @@ import {
 // auth bypass treats every caller as `admin@localhost` (an admin).
 //
 // The restore-replica UI lives inside each group's backup page
-// (`/groups/:id/backups`, shown once the group has a ready backup config); the
+// (`/fleet/groups/:id/backups`, shown once the group has a ready backup config); the
 // fleet-wide consumer roster lives in Settings.
 
 test.describe("restore replicas", () => {
@@ -37,7 +37,7 @@ test.describe("restore replicas", () => {
 
 	test("empty state shows the no-declarations banner", async ({ page, sql }) => {
 		const groupId = await groupWithBackups(sql, "empty-group");
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 		await expect(
 			page.getByText(/no restore replicas declared for this group/i),
 		).toBeVisible();
@@ -81,7 +81,7 @@ test.describe("restore replicas", () => {
 			runId: inflightRun,
 		});
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 		await expect(page.getByText(/recent restore checks/i)).toBeVisible();
 		// The reported check's row shows its Canopy-measured duration.
 		await expect(page.getByRole("row", { name: /verify/ })).toContainText("5m");
@@ -113,7 +113,7 @@ test.describe("restore replicas", () => {
 			name: "analytics-all",
 		});
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 
 		const verifyRow = page.getByRole("row", { name: /verify-all/ });
 		const analyticsRow = page.getByRole("row", { name: /analytics-all/ });
@@ -156,7 +156,7 @@ test.describe("restore replicas", () => {
 		const groupId = await groupWithBackups(sql, "redact-declare");
 		await seedServer(sql, { groupId, name: "redact-srv" });
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 		await page.getByRole("button", { name: /declare replica/i }).click();
 
 		const dialog = page.getByRole("dialog");
@@ -211,7 +211,7 @@ test.describe("restore replicas", () => {
 			},
 		});
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 
 		// The declaration asked for masking; what it got is what the list has
 		// to show, so a partial redaction reads as partial from the row.
@@ -249,7 +249,7 @@ test.describe("restore replicas", () => {
 			redacts: true,
 		});
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 		await expect(
 			page.getByRole("row", { name: /group-wide-redacted/ }),
 		).toContainText("1 unmaskable");
@@ -294,7 +294,7 @@ test.describe("restore replicas", () => {
 			snapshotId: "snap-1",
 		});
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 		await expect(page.getByRole("row", { name: /doomed/ })).toBeVisible();
 		await page.getByRole("button", { name: "delete doomed" }).click();
 		await expect(page.getByRole("row", { name: /doomed/ })).toHaveCount(0);
@@ -329,7 +329,7 @@ test.describe("restore replicas", () => {
 			enabled: true,
 		});
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 		await page
 			.getByRole("row", { name: /togglable/ })
 			.locator('input[type="checkbox"]')
@@ -362,7 +362,7 @@ test.describe("restore replicas", () => {
 			error: "restore blew up",
 		});
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 		await expect(page.getByText(/recent restore checks/i)).toBeVisible();
 		await expect(page.getByText("failed")).toBeVisible();
 	});
@@ -384,7 +384,7 @@ test.describe("restore replicas", () => {
 			healthDetails: { indexes_fixed: true, live_tuples: 4242 },
 		});
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 		// The checks table shows the server as a truncated id, not its name, so
 		// locate the check row by its own expand button rather than the server.
 		const detailsButton = page.getByRole("button", {
@@ -413,7 +413,7 @@ test.describe("restore replicas", () => {
 		const groupId = await groupWithBackups(sql, "create-group");
 		await seedServer(sql, { groupId, name: "srv-a" });
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 		await page.getByRole("button", { name: /declare replica/i }).click();
 
 		const dialog = page.getByRole("dialog");
@@ -441,7 +441,7 @@ test.describe("restore replicas", () => {
 		const groupId = await groupWithBackups(sql, "solo-group");
 		await seedServer(sql, { groupId, name: "srv-a" });
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 		await page.getByRole("button", { name: /declare replica/i }).click();
 		const dialog = page.getByRole("dialog");
 
@@ -480,7 +480,7 @@ test.describe("restore replicas", () => {
 			name: "taken",
 		});
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 		await page.getByRole("button", { name: /declare replica/i }).click();
 
 		// A different intent is a different scope, but the name is the consumer's
@@ -515,7 +515,7 @@ test.describe("restore replicas", () => {
 			name: "twice-group-verify",
 		});
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 		await page.getByRole("button", { name: /declare replica/i }).click();
 		const dialog = page.getByRole("dialog");
 
@@ -549,7 +549,7 @@ test.describe("restore replicas", () => {
 		});
 		const groupId = await groupWithBackups(sql, "intent-group");
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 		await page.getByRole("button", { name: /declare replica/i }).click();
 		const dialog = page.getByRole("dialog");
 
@@ -583,7 +583,7 @@ test.describe("restore replicas", () => {
 		});
 		const groupId = await groupWithBackups(sql, "param-group");
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 		await page.getByRole("button", { name: /declare replica/i }).click();
 		const dialog = page.getByRole("dialog");
 
@@ -626,7 +626,7 @@ test.describe("restore replicas", () => {
 			enabled: true,
 		});
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 		await page.getByRole("button", { name: "edit before-edit" }).click();
 
 		const dialog = page.getByRole("dialog");
@@ -685,7 +685,7 @@ test.describe("restore replicas", () => {
 			params: { minimum_uptime: 3600, anonymisation: true },
 		});
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 		await page.getByRole("button", { name: "edit param-edit" }).click();
 
 		const dialog = page.getByRole("dialog");
@@ -724,7 +724,7 @@ test.describe("restore replicas", () => {
 		});
 		const groupId = await groupWithBackups(sql, "size-group");
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 		await page.getByRole("button", { name: /declare replica/i }).click();
 		const dialog = page.getByRole("dialog");
 
@@ -767,7 +767,7 @@ test.describe("restore replicas", () => {
 		});
 		const groupId = await groupWithBackups(sql, "badunit-group");
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 		await page.getByRole("button", { name: /declare replica/i }).click();
 		const dialog = page.getByRole("dialog");
 
@@ -809,7 +809,7 @@ test.describe("restore replicas", () => {
 			name: "retarget-me",
 		});
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 		await page.getByRole("button", { name: "edit retarget-me" }).click();
 
 		const dialog = page.getByRole("dialog");
@@ -860,7 +860,7 @@ test.describe("restore replicas", () => {
 			name: "movable",
 		});
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 		await page.getByRole("button", { name: "edit movable" }).click();
 
 		// Retargeting onto the other declaration's scope leaves two replicas of
@@ -907,7 +907,7 @@ test.describe("restore replicas", () => {
 			healthDetails: { url: "https://replica.example.test/db" },
 		});
 
-		await page.goto(`/groups/${groupId}/backups`);
+		await page.goto(`/fleet/groups/${groupId}/backups`);
 		const link = page.getByRole("link", { name: /open/i });
 		await expect(link).toBeVisible();
 		await expect(link).toHaveAttribute("href", "https://replica.example.test/db");

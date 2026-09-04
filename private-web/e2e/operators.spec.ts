@@ -66,7 +66,7 @@ test.describe("operator presence", () => {
 			health: EXTERNAL_USERS_HEALTH,
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 
 		// Deduped headline: alice's two sessions count once.
 		await expect(
@@ -96,7 +96,7 @@ test.describe("operator presence", () => {
 			createdAt: "NOW() - INTERVAL '45 minutes'",
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 
 		// The sessions still show in the checks table (last known data)…
 		await expect(page.getByText("bob@example.com")).toBeVisible();
@@ -125,7 +125,7 @@ test.describe("operator presence", () => {
 		await page.goto("/status");
 
 		const card = page
-			.locator(`a[href="/groups/${group.id}"]`)
+			.locator(`a[href="/fleet/groups/${group.id}"]`)
 			.locator(".MuiCard-root");
 		await expect(card.getByText("2", { exact: true })).toBeVisible();
 
@@ -176,7 +176,7 @@ test.describe("operator presence", () => {
 			],
 		});
 
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 
 		await expect(
 			page.getByRole("heading", {
@@ -229,7 +229,7 @@ test.describe("operator presence", () => {
 		await page.goto("/status");
 
 		const card = page
-			.locator(`a[href="/groups/${group.id}"]`)
+			.locator(`a[href="/fleet/groups/${group.id}"]`)
 			.locator(".MuiCard-root");
 		// Two people on one box, not four sessions and not two boxes' worth.
 		await expect(card.getByText("2", { exact: true })).toBeVisible();
@@ -285,7 +285,7 @@ test.describe("operator presence", () => {
 		await page.goto("/status");
 
 		const card = page
-			.locator(`a[href="/groups/${group.id}"]`)
+			.locator(`a[href="/fleet/groups/${group.id}"]`)
 			.locator(".MuiCard-root");
 		await expect(card.getByText("2", { exact: true })).toBeVisible();
 
@@ -320,7 +320,7 @@ test.describe("operator presence", () => {
 			health: EXTERNAL_USERS_HEALTH,
 		});
 
-		await page.goto(`/machines/${server.machineId}`);
+		await page.goto(`/fleet/machines/${server.machineId}`);
 
 		await expect(
 			page.getByText("2 operators in the machine right now"),
@@ -339,7 +339,7 @@ test.describe("operator presence", () => {
 			groupId: group.id,
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 
 		// The Group section below also links to the group; the new link
 		// lives in the page's h1.
@@ -347,6 +347,6 @@ test.describe("operator presence", () => {
 			.getByRole("heading", { level: 1 })
 			.getByRole("link", { name: "linked-cluster" })
 			.click();
-		await expect(page).toHaveURL(new RegExp(`/groups/${group.id}$`));
+		await expect(page).toHaveURL(new RegExp(`/fleet/groups/${group.id}$`));
 	});
 });

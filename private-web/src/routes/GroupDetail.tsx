@@ -14,35 +14,31 @@ import ArchiveIcon from "@mui/icons-material/ArchiveOutlined";
 import BackupIcon from "@mui/icons-material/Backup";
 import EditIcon from "@mui/icons-material/Edit";
 import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
-import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import GroupDomainsSection from "../components/GroupDomainsSection";
 import MigrationTestsSection from "../components/MigrationTestsSection";
 import { OperatorAvatar, connectedFor } from "../components/OperatorAvatars";
+import ActiveIncidentCard from "../components/ActiveIncidentCard";
 import GroupTree from "../components/GroupTree";
 import MaintenanceSection from "../components/MaintenanceSection";
 import SilencedRefsSection from "../components/SilencedRefsSection";
-import TimeAgo from "../components/TimeAgo";
 import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
-import { useIsNotificationHeld } from "../hooks/useIsNotificationHeld";
 import { usePageTitle } from "../hooks/usePageTitle";
 import {
 	BACKUP_STATUS_INTENT,
 	BACKUP_STATUS_LABEL,
 	type BackupConfigStatus,
 	aggregateOperators,
-	isIncidentLingering,
 	type AggregatedOperator,
-	type IncidentData,
 } from "../types";
 
 export default function GroupDetail() {
 	const { id = "" } = useParams<{ id: string }>();
 	const navigate = useNavigate();
-	const detail = useApi("server_groups", "get", { server_group_id: id }, [id]);
+	const detail = useApi("fleet/groups", "get", { server_group_id: id }, [id]);
 	const admin = useIsAdmin() === true;
-	const archive = useApiAction("server_groups", "delete");
+	const archive = useApiAction("fleet/groups", "delete");
 	// Only the currently-open incident matters for the active-incident
 	// section; closed ones live behind the /incidents filter route.
 	const activeIncidents = useApi(
@@ -99,7 +95,7 @@ export default function GroupDetail() {
 			return;
 		try {
 			await archive.call({ server_group_id: group.id });
-			navigate("/servers");
+			navigate("/fleet");
 		} catch {
 			/* surfaced via archive.error */
 		}
@@ -138,7 +134,7 @@ export default function GroupDetail() {
 					<Stack direction="row" spacing={1}>
 						<Button
 							component={RouterLink}
-							to={`/groups/${group.id}/machines/new`}
+							to={`/fleet/groups/${group.id}/machines/new`}
 							variant="contained"
 							startIcon={<AddIcon />}
 						>
@@ -146,7 +142,7 @@ export default function GroupDetail() {
 						</Button>
 						<Button
 							component={RouterLink}
-							to={`/groups/${group.id}/edit`}
+							to={`/fleet/groups/${group.id}/edit`}
 							variant="outlined"
 							startIcon={<EditIcon />}
 						>
@@ -307,7 +303,7 @@ function BackupsCard({
 					isAdmin ? (
 						<Button
 							component={RouterLink}
-							to={`/groups/${groupId}/backups/config`}
+							to={`/fleet/groups/${groupId}/backups/config`}
 							variant="outlined"
 							startIcon={<BackupIcon />}
 						>
@@ -321,7 +317,7 @@ function BackupsCard({
 				) : (
 					<Button
 						component={RouterLink}
-						to={`/groups/${groupId}/backups`}
+						to={`/fleet/groups/${groupId}/backups`}
 						variant="outlined"
 					>
 						View backups
@@ -376,71 +372,6 @@ function OperatorsSection({
 	);
 }
 
-function ActiveIncidentCard({ incident }: { incident: IncidentData }) {
-	const held = useIsNotificationHeld(incident.notification_held_until);
-	const lingering = isIncidentLingering(incident);
-	const tone = lingering ? "info" : held ? "warning" : "error";
-	return (
-		<Paper
-			variant="outlined"
-			sx={{
-				p: 2,
-				borderColor: `${tone}.main`,
-				borderWidth: 2,
-			}}
-		>
-			<Stack
-				direction="row"
-				spacing={2}
-				sx={{ alignItems: "center", justifyContent: "space-between" }}
-			>
-				<Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
-					<WarningAmberIcon color={tone} />
-					<Box>
-						<Typography variant="h6" component="h2">
-							Active incident
-							<Box
-								component="span"
-								sx={{
-									ml: 1,
-									fontFamily: "monospace",
-									color: "text.secondary",
-									fontWeight: "normal",
-									fontSize: "0.85em",
-								}}
-							>
-								{incident.id.slice(0, 8)}
-							</Box>
-						</Typography>
-						<Typography variant="body2" color="text.secondary">
-							opened <TimeAgo timestamp={incident.opened_at} />
-						</Typography>
-						{lingering && incident.lingering_since && (
-							<Typography variant="body2" sx={{ color: "info.main" }}>
-								Recovering; last failure cleared{" "}
-								<TimeAgo timestamp={incident.lingering_since} />
-							</Typography>
-						)}
-						{!lingering && held && incident.notification_held_until && (
-							<Typography variant="body2" sx={{ color: "warning.main" }}>
-								Holding; posting{" "}
-								<TimeAgo timestamp={incident.notification_held_until} />
-							</Typography>
-						)}
-					</Box>
-				</Stack>
-				<Button
-					component={RouterLink}
-					to={`/incidents/${incident.id}`}
-					variant="outlined"
-					color={tone}
-				>
-					Open
-				</Button>
-			</Stack>
-		</Paper>
-	);
-}
 
 function ArchivedGroupBanner({
 	groupId,
@@ -451,7 +382,7 @@ function ArchivedGroupBanner({
 	isAdmin: boolean;
 	onRestored: () => void;
 }) {
-	const action = useApiAction("server_groups", "restore");
+	const action = useApiAction("fleet/groups", "restore");
 	const onRestore = async () => {
 		try {
 			await action.call({ server_group_id: groupId });

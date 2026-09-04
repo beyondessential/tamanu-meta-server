@@ -31,7 +31,12 @@ test.describe("status page", () => {
 		await expect(page.getByText(/no server groups configured/i)).toBeVisible();
 	});
 
-	test("groups by rank bucket and links to each group's detail page", async ({
+	/// One grid, alphabetical. Each card carries its own ranks in its dot strip,
+	/// so ordering the page by rank as well sorts it by something already
+	/// written on every card.
+	///
+	/// spec: CHK#presentation
+	test("orders cards by name rather than by rank, and links each to its group", async ({
 		page,
 		sql,
 	}) => {
@@ -55,13 +60,13 @@ test.describe("status page", () => {
 
 		await page.goto("/status");
 
-		// Rank section headings.
+		// No rank sections: the rank reads off each card's own rows.
 		await expect(
 			page.getByRole("heading", { name: "production", exact: true }),
-		).toBeVisible();
+		).toHaveCount(0);
 		await expect(
 			page.getByRole("heading", { name: "demo", exact: true }),
-		).toBeVisible();
+		).toHaveCount(0);
 
 		// Group names render as h3 inside each card.
 		await expect(
@@ -71,10 +76,22 @@ test.describe("status page", () => {
 			page.getByRole("heading", { name: demoGroup.name }),
 		).toBeVisible();
 
-		// Each card is wrapped in a router link to /groups/<id>.
+		// Each card is wrapped in a router link to /fleet/groups/<id>.
 		await expect(
-			page.locator(`a[href="/groups/${prodGroup.id}"]`),
+			page.locator(`a[href="/fleet/groups/${prodGroup.id}"]`),
 		).toBeVisible();
+
+		// Alphabetical, so demo-cluster leads prod-cluster despite ranking
+		// below it.
+		const cards = page.locator('a[href^="/fleet/groups/"]');
+		await expect(cards.first()).toHaveAttribute(
+			"href",
+			`/fleet/groups/${demoGroup.id}`,
+		);
+		await expect(cards.last()).toHaveAttribute(
+			"href",
+			`/fleet/groups/${prodGroup.id}`,
+		);
 	});
 
 	test("dot strips wrap and align across a spread of group sizes", async ({
@@ -133,7 +150,7 @@ test.describe("status page", () => {
 		for (const { id, size } of groups) {
 			// A group may surface under more than one rank bucket; every card
 			// shows the full strip, so scope to the first.
-			const card = page.locator(`a[href="/groups/${id}"]`).first();
+			const card = page.locator(`a[href="/fleet/groups/${id}"]`).first();
 			const strip = card.getByTestId("dot-strip");
 			await expect(strip).toBeVisible();
 			// Three rank rows (production, clone, dev), each a row of machine
@@ -179,7 +196,7 @@ test.describe("status page", () => {
 		await page.goto("/status");
 
 		const strip = page
-			.locator(`a[href="/groups/${group.id}"]`)
+			.locator(`a[href="/fleet/groups/${group.id}"]`)
 			.first()
 			.getByTestId("dot-strip");
 		await expect(strip).toBeVisible();
@@ -223,7 +240,7 @@ test.describe("status page", () => {
 		await page.goto("/status");
 
 		const strip = page
-			.locator(`a[href="/groups/${group.id}"]`)
+			.locator(`a[href="/fleet/groups/${group.id}"]`)
 			.first()
 			.getByTestId("dot-strip");
 		await expect(strip).toBeVisible();
@@ -268,7 +285,7 @@ test.describe("status page", () => {
 		await page.goto("/status");
 
 		const strip = page
-			.locator(`a[href="/groups/${group.id}"]`)
+			.locator(`a[href="/fleet/groups/${group.id}"]`)
 			.first()
 			.getByTestId("dot-strip");
 		await expect(strip).toBeVisible();
@@ -307,13 +324,13 @@ test.describe("status page", () => {
 		await page.goto("/status");
 
 		// The quiet card has no incident mark at all.
-		const quietCard = page.locator(`a[href="/groups/${quiet.id}"]`).first();
+		const quietCard = page.locator(`a[href="/fleet/groups/${quiet.id}"]`).first();
 		await expect(quietCard.getByText("incident", { exact: false })).toHaveCount(
 			0,
 		);
 
 		// The noisy one carries its incident in a band of its own.
-		const noisyCard = page.locator(`a[href="/groups/${noisy.id}"]`).first();
+		const noisyCard = page.locator(`a[href="/fleet/groups/${noisy.id}"]`).first();
 		await expect(
 			noisyCard.getByText("incident", { exact: false }).first(),
 		).toBeVisible();
@@ -323,6 +340,27 @@ test.describe("status page", () => {
 		await expect(
 			quietCard.locator("[data-testid='rank-row'][data-rank='production']"),
 		).toHaveCount(1);
+	});
+
+	/// Two dots in one pill is the case the machine grain exists for, and an
+	/// operator who has never seen a shared box has no way to know it means one
+	/// host rather than two dots that happen to be adjacent. So the legend
+	/// shows one.
+	///
+	/// spec: CHK#presentation
+	test("the legend shows a machine carrying two applications", async ({
+		page,
+		sql,
+	}) => {
+		await seedServer(sql, { name: "legend-one", rank: "production" });
+
+		await page.goto("/status");
+
+		const entry = page
+			.getByText("Two applications on one machine")
+			.locator("xpath=..");
+		await expect(entry).toBeVisible();
+		await expect(entry.getByTestId("status-dot")).toHaveCount(2);
 	});
 
 	// spec: FIG#active-versions
@@ -368,7 +406,7 @@ test.describe("status page", () => {
 		// The card answers "which branches"; the figures page answers "which
 		// servers, and what else are they running".
 		await page.getByRole("link", { name: "Fleet figures" }).click();
-		await expect(page).toHaveURL(/\/servers\/figures$/);
+		await expect(page).toHaveURL(/\/fleet\/figures$/);
 		await expect(page.getByRole("group", { name: "Tamanu" })).toBeVisible();
 	});
 });

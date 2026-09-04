@@ -54,7 +54,7 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 			dataBytesAfter: 260_000_000_000,
 		});
 
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 
 		const section = page.getByTestId("migration-tests");
 		await expect(section).toBeVisible();
@@ -78,7 +78,7 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 		await expect(untestedRow).toContainText("not yet tested");
 	});
 
-	test("says so when the deployment has no open plan", async ({
+	test("says so when the group has no open plan", async ({
 		page,
 		sql,
 	}) => {
@@ -90,7 +90,7 @@ test.describe("pre-upgrade migration tests on the group page", () => {
 		});
 		await seedStatus(sql, { serverId: server.id, version: "2.62.0" });
 
-		await page.goto(`/groups/${group.id}`);
+		await page.goto(`/fleet/groups/${group.id}`);
 
 		await expect(page.getByTestId("migration-tests")).toContainText(
 			"nothing to test against",

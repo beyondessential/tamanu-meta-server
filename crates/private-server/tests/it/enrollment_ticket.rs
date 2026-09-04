@@ -33,7 +33,7 @@ async fn mint_enrollment_ticket_round_trips_to_active_token() {
 
 		// Mint an encrypted enrollment ticket.
 		let response = private
-			.post("/api/machines/mint_enrollment")
+			.post("/api/fleet/machines/mint_enrollment")
 			.json(&json!({ "machine_id": machine_id }))
 			.await;
 		response.assert_status_ok();
@@ -91,7 +91,7 @@ async fn enrollment_token_never_leaks_in_the_clear() {
 		let machine_id = seed_machine(&mut conn).await;
 
 		let mint = private
-			.post("/api/machines/mint_enrollment")
+			.post("/api/fleet/machines/mint_enrollment")
 			.json(&json!({ "machine_id": machine_id }))
 			.await;
 		mint.assert_status_ok();
@@ -127,7 +127,7 @@ async fn enrollment_token_never_leaks_in_the_clear() {
 
 		// (b) enrollment_status returns only timestamps — never the token.
 		let status = private
-			.post("/api/machines/enrollment_status")
+			.post("/api/fleet/machines/enrollment_status")
 			.json(&json!({ "machine_id": machine_id }))
 			.await;
 		status.assert_status_ok();

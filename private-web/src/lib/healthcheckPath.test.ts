@@ -71,7 +71,7 @@ describe("namespace segments", () => {
 		expect(namespaceFromSegment(segment)).toEqual(namespace);
 	});
 
-	// The application type set is open, so a deployment can report a type
+	// The application type set is open, so a group can report a type
 	// called `machine`. The subject leads the segment precisely so that type
 	// is not read as the box.
 	it("tells an application type called machine from the box", () => {

@@ -157,7 +157,7 @@ within any domain its own group controls.
 
 Reported identically whether the name is unclaimed or controlled by
 a different group, so the endpoint cannot be used to discover other
-deployments' names. Distinct from a withheld grant so a client can
+groups' names. Distinct from a withheld grant so a client can
 tell "this name is not yours" from "you may not manage names at
 all".
 
@@ -221,11 +221,11 @@ Returned (HTTP 502) when a dependency Canopy proxies to on the caller's behalf
 failed or is not configured. This covers the backup-credentials path: the
 cross-account STS `AssumeRole` used to mint short-lived S3 credentials
 (`POST /backup-credentials`) failed or the STS client is not configured on this
-deployment, or reading a group's repo-password k8s Secret for `GET
+Canopy instance, or reading a group's repo-password k8s Secret for `GET
 /backup-target` failed or the kube client is not configured. The response body
 is a generic, caller-safe summary — the underlying detail (which can name IAM
 roles, buckets, or secret names) is logged server-side only. Retry after a short
-delay; if it persists, the deployment's AWS/IRSA or kube wiring (or the group's
+delay; if it persists, the Canopy instance's AWS/IRSA or kube wiring (or the group's
 provisioning) likely needs attention.
 
 ## Backup Rotation In Progress

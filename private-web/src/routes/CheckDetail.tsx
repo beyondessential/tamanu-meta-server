@@ -374,7 +374,7 @@ function AttentionList({
 												label={
 													<MuiLink
 														component={RouterLink}
-														to={`/servers/${server.server_id}`}
+														to={`/fleet/applications/${server.server_id}`}
 														underline="hover"
 													>
 														{server.server_name}
@@ -449,7 +449,7 @@ function GroupHeaderRow({
 	const name = section.groupId ? (
 		<MuiLink
 			component={RouterLink}
-			to={`/groups/${section.groupId}`}
+			to={`/fleet/groups/${section.groupId}`}
 			underline="hover"
 			variant="subtitle2"
 		>

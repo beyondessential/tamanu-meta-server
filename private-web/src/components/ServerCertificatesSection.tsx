@@ -286,7 +286,7 @@ function PauseButton({
 					<DialogContentText sx={{ mb: 2 }}>
 						Canopy will stop ordering and renewing certificates for this server,
 						and stop changing its address records. Nothing already in place is
-						withdrawn — the deployment keeps working exactly as it does now.
+						withdrawn — the group keeps working exactly as it does now.
 						Canopy never lifts a pause itself.
 					</DialogContentText>
 					<TextField

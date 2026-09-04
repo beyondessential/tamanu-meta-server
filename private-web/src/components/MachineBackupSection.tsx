@@ -146,7 +146,7 @@ export default function BackupCapabilitiesSection({
 				{groupId && (
 					<MuiLink
 						component={RouterLink}
-						to={`/groups/${groupId}/backups`}
+						to={`/fleet/groups/${groupId}/backups`}
 						variant="body2"
 						underline="hover"
 					>
@@ -204,7 +204,7 @@ export default function BackupCapabilitiesSection({
 						groupId && isAdmin ? (
 							<Button
 								component={RouterLink}
-								to={`/groups/${groupId}/backups`}
+								to={`/fleet/groups/${groupId}/backups`}
 								color="inherit"
 								size="small"
 							>

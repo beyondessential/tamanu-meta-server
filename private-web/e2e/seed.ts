@@ -370,7 +370,7 @@ export async function seedServer(
 	const alertWhenDownFor = opts.alertWhenDownFor ?? 600;
 	// A box of its own for each seeded workload unless the caller names one,
 	// carrying the same group so the machine and the application agree on
-	// which deployment they're in.
+	// which group they're in.
 	//
 	// An identity belongs to the box, so a seeded device binds to the machine.
 	// Anything that resolves a device to what it speaks for — backups, reports —
@@ -841,6 +841,9 @@ export async function seedIssue(
 		 * the past to test "since when" displays (e.g. the per-healthcheck
 		 * page's failing-since column). */
 		firstSeen?: string;
+		/** Structured detail the condition attached, as the filing path stores
+		 * it. The self-alert surface links from this. */
+		detail?: unknown;
 	},
 ): Promise<SeededIssue> {
 	const id = randomUUID();
@@ -882,8 +885,8 @@ export async function seedIssue(
 	// an issue rather than healthy check state, which the listings exclude.
 	await sql.query(
 		`INSERT INTO issues
-		 (id, application_id, machine_id, server_group_id, device_id, source, ref, check_name, observed_result, effective_result, escalates, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason, degraded_since, last_degraded_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11, $12, $13, COALESCE($14::timestamptz, NOW()), NOW(), $15, $16, $17, $18, NOW())`,
+		 (id, application_id, machine_id, server_group_id, device_id, source, ref, check_name, observed_result, effective_result, escalates, message, description, active, first_seen, last_seen, resolved_at, resolved_by, resolved_reason, degraded_since, last_degraded_at, detail)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11, $12, $13, COALESCE($14::timestamptz, NOW()), NOW(), $15, $16, $17, $18, NOW(), $19)`,
 		[
 			id,
 			opts.serverId ?? null,
@@ -903,6 +906,7 @@ export async function seedIssue(
 			resolved ? (opts.resolvedBy ?? null) : null,
 			resolved ? (opts.resolvedReason ?? null) : null,
 			active ? (opts.firstSeen ?? new Date().toISOString()) : null,
+			opts.detail === undefined ? null : JSON.stringify(opts.detail),
 		],
 	);
 	return { id };

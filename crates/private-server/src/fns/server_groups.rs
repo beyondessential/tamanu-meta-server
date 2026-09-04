@@ -3,7 +3,11 @@ use axum::extract::State;
 use canopy_utoipa_axum::{router::OpenApiRouter, routes};
 use commons_errors::{ProblemDetailsSchema, Result};
 use commons_servers::{backup_jobs::BillingLabels, tailscale_auth::TailscaleAdmin};
-use commons_types::{Uuid, server::TagMap};
+use commons_types::{
+	Uuid,
+	server::TagMap,
+	status::{HealthState, ShortStatus},
+};
 use database::server_groups::{NewServerGroup, PartialServerGroup, ServerGroup};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -104,7 +108,7 @@ pub struct GroupIdArgs {
 ///
 /// Labels are computed from the group's configuration: explicit `billing.*`
 /// tags on the group are honoured verbatim; otherwise the product comes from
-/// the one its live members agree on, the deployment from the group name in
+/// the one its live members agree on, the deployment label from the group name in
 /// lower-kebab-case, and the stage from the group's highest-ranked live member
 /// (for example `prod`). A label with nothing to attribute to is omitted
 /// entirely: the stage when the group has no ranked members, and the product
@@ -166,12 +170,30 @@ pub struct GroupDetail {
 }
 
 /// One of a group's machines, as an operator picks it out of a list.
+///
+/// Carries the box's own state as well as its name, because the group tree
+/// draws each machine as an enclosure around the applications on it and an
+/// enclosure with nothing to say is a decoration. A box whose own checks are
+/// failing while its workloads are fine is a state only this can show.
+// spec: FLT#navigating-the-two-grains
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct GroupMachine {
 	/// Unique identifier of the machine.
 	pub id: Uuid,
 	/// The operator-assigned name, where it has one.
 	pub name: Option<String>,
+	/// Whether the box is reachable, judged against its own threshold.
+	pub up: ShortStatus,
+	/// The box's own health, from the checks filed against it. What the
+	/// applications on it make of their own checks is each application's.
+	pub health: HealthState,
+	/// Whether a maintenance window suspends this box, its own or its group's.
+	pub maintained: bool,
+	/// The platform the box reports, where it reports one. The one machine
+	/// figure the tree shows: it is what distinguishes two otherwise
+	/// identical rows.
+	// spec: FIG#machine-figures
+	pub platform: Option<String>,
 }
 
 /// Get a server group with its members.
@@ -254,10 +276,40 @@ pub async fn tree_members(
 	super::applications::decorate_with_status(conn, &mut applications).await?;
 	super::applications::fill_display_hosts(conn, &mut applications).await?;
 
-	let machines = database::machines::Machine::list_for_group(conn, group.id)
-		.await?
+	// The boxes, with the state the tree draws on each enclosure. Read in
+	// batch: a group has as many machines as workloads, and asking per box
+	// would put four round trips on every one of them.
+	// spec: FLT#navigating-the-two-grains
+	let boxes = database::machines::Machine::list_for_group(conn, group.id).await?;
+	let machine_ids: Vec<Uuid> = boxes.iter().map(|m| m.id).collect();
+	let machine_health = database::issues::machine_health_from_check_state(
+		conn,
+		&boxes.iter().map(|m| (m.id, m.group_id)).collect::<Vec<_>>(),
+	)
+	.await?;
+	let machine_reports =
+		database::reported_detail::MachineReportedDetail::latest_for_machines(conn, &machine_ids)
+			.await?;
+	let machine_detail = database::reported_detail::MachineReportedDetail::merge_by_machine(
+		database::reported_detail::MachineReportedDetail::for_machines(conn, &machine_ids).await?,
+	);
+	// A window is declared over a machine or a group, and a box is suspended
+	// by either.
+	// spec: MNT#presentation
+	let (maintained_machines, maintained_groups) =
+		database::maintenance_windows::MaintenanceWindow::suspended_targets(conn).await?;
+	let machines: Vec<GroupMachine> = boxes
 		.into_iter()
 		.map(|m| GroupMachine {
+			up: m.reachability(machine_reports.get(&m.id).copied()),
+			health: machine_health.get(&m.id).copied().unwrap_or_default(),
+			maintained: maintained_machines.contains(&m.id)
+				|| m.group_id
+					.is_some_and(|gid| maintained_groups.contains(&gid)),
+			// A box's platform is its own reports' or nothing: the fallback
+			// through an application's Postgres banner belongs to the
+			// application grain, not here.
+			platform: machine_detail.get(&m.id).and_then(|d| d.os_platform()),
 			id: m.id,
 			name: m.name,
 		})

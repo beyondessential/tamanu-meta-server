@@ -11,10 +11,69 @@ use uuid::Uuid;
 
 use crate::state::AppState;
 
+/// The application routes as fielded agents call them, under `/servers`.
+///
+/// Kept because a device API client cannot follow a redirect: a fielded
+/// bestool asks for the path it was built against and takes the answer, so the
+/// old prefix has to keep answering rather than pointing elsewhere.
+// spec: PAC
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new()
 		.routes(routes!(list))
 		.routes(routes!(self_identity))
+}
+
+/// The same two routes under `/applications`, which is what they are about.
+///
+/// Aliases, not a move. Both prefixes answer identically and are documented
+/// separately, because withdrawing either from the schema would break the
+/// generated client — a consumer cannot tell a withdrawn path from an
+/// unreachable one.
+// spec: PAC
+pub fn alias_routes() -> OpenApiRouter<AppState> {
+	OpenApiRouter::new()
+		.routes(routes!(list_applications))
+		.routes(routes!(application_self))
+}
+
+/// List publicly-listed central applications.
+///
+/// The `/applications` name for [`list`], answering identically.
+#[utoipa::path(
+	get,
+	path = "/",
+	operation_id = "list_applications",
+	tag = "applications",
+	responses(
+		(status = 200, description = "Publicly-listed central applications, ordered by rank then name.", body = Vec<PublicServer>),
+		(status = 500, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn list_applications(state: State<Db>) -> Result<Json<Vec<PublicServer>>> {
+	list(state).await
+}
+
+/// Get the calling identity and the box it is enrolled as.
+///
+/// The `/applications` name for [`self_identity`], answering identically.
+#[utoipa::path(
+	get,
+	path = "/self",
+	operation_id = "application_self",
+	tag = "applications",
+	security(("server-device" = [])),
+	responses(
+		(status = 200, body = SelfResponse),
+		(status = 401, body = ProblemDetailsSchema),
+		(status = 409, body = ProblemDetailsSchema),
+		(status = 412, body = ProblemDetailsSchema),
+	),
+)]
+pub async fn application_self(
+	device: ServerDevice,
+	state: State<Db>,
+) -> Result<Json<SelfResponse>> {
+	self_identity(device, state).await
 }
 
 /// A publicly-listed central server that a client can connect to.

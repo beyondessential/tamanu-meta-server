@@ -363,7 +363,7 @@ impl ServerGroup {
 	/// agree on one. A group whose members span two is absent from the map.
 	///
 	/// Attribution is by software rather than by type: a central and a facility
-	/// of one deployment are both Tamanu, so a group holding the pair still has
+	/// of one group are both Tamanu, so a group holding the pair still has
 	/// one product to attribute its shared cost to.
 	// spec: APP#billing-attribution
 	pub async fn sole_member_software(
@@ -485,7 +485,7 @@ impl ServerGroup {
 				.await?
 		};
 
-		// A deployment's version is its central's version, so the headline
+		// A group's version is its central's version, so the headline
 		// names that outright: the `tamanu-central` on the group's
 		// highest-ranked machine. Saying it directly is clearer than a
 		// precedence order over types that happens to put centrals first, and
@@ -493,7 +493,7 @@ impl ServerGroup {
 		// appear.
 		//
 		// There is no fallback. A group with no central has no headline
-		// version, because a deployment's version is a thing its central has
+		// version, because a group's version is a thing its central has
 		// and nothing else stands in for it.
 		// spec: APP#capabilities
 		let canonical = members

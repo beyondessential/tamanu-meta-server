@@ -16,7 +16,7 @@ use x509_parser::prelude::*;
 /// [`ClientCertHeader`].
 const CERT_HEADER_ENV: &str = "CANOPY_DEVICE_AUTH_CERT_HEADER";
 
-/// Which client-certificate header this deployment's ingress sets — and
+/// Which client-certificate header this Canopy instance's ingress sets — and
 /// therefore the only one that may be believed.
 ///
 /// A header naming a client certificate is meaningful only if it can *only*

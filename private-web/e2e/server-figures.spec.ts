@@ -37,7 +37,7 @@ test.describe("reported server figures", () => {
 			extra: { uptimeSecs: 6038594 },
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 
 		await expect(page.getByText("bestool", { exact: true })).toBeVisible();
 		await expect(page.getByText("2.10.5", { exact: true })).toBeVisible();
@@ -56,7 +56,7 @@ test.describe("reported server figures", () => {
 			extra: { uptimeSecs: 42 },
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 
 		await expect(
 			page.getByRole("heading", { level: 1, name: /no-bestool/ }),
@@ -131,7 +131,7 @@ test.describe("reported server figures", () => {
 			extra: { bestoolVersion: "2.10.5" },
 		});
 
-		await page.goto(`/servers/${server.id}`);
+		await page.goto(`/fleet/applications/${server.id}`);
 
 		await expect(page.getByText("Node.js", { exact: true })).toBeVisible();
 		await expect(page.getByText("22.3.0", { exact: true })).toBeVisible();

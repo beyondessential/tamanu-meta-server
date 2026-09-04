@@ -264,7 +264,7 @@ Canopy's own AWS identity (`sts:GetCallerIdentity` under the shared IRSA role) f
 
 ## Solve
 
-Check the canopy deployment's IRSA annotation and the AWS-side trust policy; recent cluster or account changes are the usual cause.";
+Check the Canopy instance's IRSA annotation and the AWS-side trust policy; recent cluster or account changes are the usual cause.";
 
 pub const PREFLIGHT_ASSUME_DOC: &str = "## Description
 
@@ -308,15 +308,15 @@ A candidate version's schema migrations were applied to a restore replica of thi
 
 ## Results
 
-- **warn**: the migrations did not complete against this deployment's data, or have not been tried against it in time. A failure carries a known issue against the version and holds it back from rollout.
+- **warn**: the migrations did not complete against this group's data, or have not been tried against it in time. A failure carries a known issue against the version and holds it back from rollout.
 
 ## Solve
 
-Read the failing migration named in the report detail. The fix belongs to the migration or to the deployment's data, and the version stays unready until someone resolves the known issue against it.";
+Read the failing migration named in the report detail. The fix belongs to the migration or to the group's data, and the version stays unready until someone resolves the known issue against it.";
 
 pub const REDACTION_DOC: &str = "## Description
 
-A replica of this server's data was declared to be served de-identified, and its masking manifest did not fully apply. The server itself is unaffected — this is about the copy, not the deployment. The server has one of these checks however many redacting replicas it has, each an instance named in the detail by its type, its intent, and the declaration's own name.
+A replica of this server's data was declared to be served de-identified, and its masking manifest did not fully apply. The server itself is unaffected — this is about the copy rather than the live database. The server has one of these checks however many redacting replicas it has, each an instance named in the detail by its type, its intent, and the declaration's own name.
 
 ## Results
 

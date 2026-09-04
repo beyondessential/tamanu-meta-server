@@ -11,7 +11,7 @@ A type names the software and the role it plays together, so a Tamanu central an
 They are different types because they are different things: a large set of checks exists only on centrals and another only on facilities, which is not how two instances of one thing behave.
 
 The set of types is open.
-A report is the only thing that creates an application and it carries the type, so a deployment brings a new kind of application to Canopy without Canopy being changed and released.
+A report is the only thing that creates an application and it carries the type, so a group brings a new kind of application to Canopy without Canopy being changed and released.
 Software whose instances hold no role relative to each other has a single type named for the software alone.
 
 Canopy holds built-in handling for the types it knows — `tamanu-central`, `tamanu-facility`, `senaite` and `canopy` — and a type it does not know carries none of that handling.
@@ -93,7 +93,7 @@ A public name already set is kept when an application stops being eligible, and 
 Each grain's billing labels carry what that grain knows, and nothing inferred from what sits inside it.
 
 An application's labels name the software its type is an instance of, its stage from its own rank, and `billing.deployment` from its group's name.
-Cost allocation groups by software rather than by software-in-a-role, so a central and a facility of one deployment attribute to the same product.
+Cost allocation groups by software rather than by software-in-a-role, so a central and a facility of one group attribute to the same product.
 That label keeps its spelling because cloud cost allocation reads it, and every device reads its own effective tags.
 
 A machine's labels carry a stage and a group and no type, a box not being a piece of software.

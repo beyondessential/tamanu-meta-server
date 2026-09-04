@@ -225,8 +225,8 @@ impl std::fmt::Debug for Acme {
 }
 
 impl Acme {
-	/// Build from the deployment's configuration, or `None` where no account key
-	/// is set — a deployment that has not been given one is not expected to issue,
+	/// Build from the Canopy instance's configuration, or `None` where no account
+	/// key is set — an instance that has not been given one is not expected to issue,
 	/// and the worker says so once rather than failing every order.
 	///
 	/// - `CANOPY_ACME_ACCOUNT_KEY`: PKCS#8 PEM private key for Canopy's account at

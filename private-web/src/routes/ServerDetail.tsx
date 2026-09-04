@@ -21,6 +21,7 @@ import RestoreIcon from "@mui/icons-material/RestoreFromTrash";
 import { useState } from "react";
 import { Link as RouterLink, useNavigate, useParams } from "react-router-dom";
 import ActionButton from "../components/ActionButton";
+import ActiveIncidentCard from "../components/ActiveIncidentCard";
 import { ChecksTable, HealthIndicator } from "../components/ChecksTable";
 import IncidentsLink from "../components/IncidentsLink";
 import ManualEventButton from "../components/ManualEventButton";
@@ -42,7 +43,7 @@ import { useApi, useApiAction } from "../api";
 import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { humanSeconds } from "../lib/humanDuration";
-import ServerNameWithGroup from "../components/ServerNameWithGroup";
+import TargetName from "../components/TargetName";
 import {
 	applicationName,
 	type ConsolidatedChecks,
@@ -57,7 +58,7 @@ import {
 export default function ServerDetail() {
 	const { id = "" } = useParams<{ id: string }>();
 	const detail = useApi(
-		"servers",
+		"fleet/applications",
 		"get_detail",
 		{ server_id: id },
 		[id],
@@ -82,6 +83,12 @@ export default function ServerDetail() {
 	);
 	const hasOpenIncident =
 		openIncidents.status === "ok" && openIncidents.data.length > 0;
+	// The group's open incident, called out above the page rather than left to
+	// a coloured button in the action row.
+	const openIncident =
+		openIncidents.status === "ok" && openIncidents.data.length > 0
+			? openIncidents.data[0]
+			: null;
 	usePageTitle(
 		detail.status === "ok"
 			? applicationName(detail.data.server)
@@ -109,6 +116,12 @@ export default function ServerDetail() {
 				onEventSubmitted={bumpRefresh}
 				onArchived={() => detail.reload()}
 			/>
+			{openIncident && (
+				<ActiveIncidentCard
+					incident={openIncident}
+					groupName={data.group?.name ?? null}
+				/>
+			)}
 			{archived ? (
 				<ArchivedBanner
 					serverId={data.server.id}
@@ -121,7 +134,7 @@ export default function ServerDetail() {
 						This server hasn't checked in yet.{" "}
 						<MuiLink
 							component={RouterLink}
-							to={`/machines/${data.server.machine_id}`}
+							to={`/fleet/machines/${data.server.machine_id}`}
 						>
 							Enrol its machine
 						</MuiLink>{" "}
@@ -230,11 +243,25 @@ function Header({
 			>
 				{data.server.rank && <ServerRankChip rank={data.server.rank} />}
 				<ApplicationTypeChip type={data.server.type} />
+				{/* Group, then box, then workload: the trail an operator
+				    would walk to get here, and the box is a link because it
+				    is the hop the split made necessary. */}
+				{/* spec: FLT#navigating-the-two-grains */}
 				<Typography variant="h4" component="h1" sx={{ ml: 1 }}>
-					<ServerNameWithGroup
-						groupName={data.server.group_name}
-						groupId={data.server.group_id}
-						serverName={applicationName(data.server)}
+					<TargetName
+						parts={[
+							{
+								label: data.server.group_name ?? "",
+								to: data.server.group_id
+									? `/fleet/groups/${data.server.group_id}`
+									: null,
+							},
+							{
+								label: data.machine_name ?? "",
+								to: `/fleet/machines/${data.server.machine_id}`,
+							},
+							{ label: applicationName(data.server) },
+						]}
 					/>
 				</Typography>
 			</Stack>
@@ -253,7 +280,7 @@ function Header({
 					/>
 				)}
 				<IncidentsLink
-					serverId={data.server.id}
+					applicationId={data.server.id}
 					groupId={data.group?.id ?? null}
 					refreshKey={refreshTick}
 				/>
@@ -265,8 +292,13 @@ function Header({
 							onSubmitted={onEventSubmitted}
 							action
 						/>
+						{/* One form per machine, holding this application's own
+						    section — so Edit goes to the box rather than to a
+						    second form that would answer "where do I edit
+						    this" differently. */}
+						{/* spec: FLT#groups */}
 						<ActionButton
-							to={`/servers/${data.server.id}/edit`}
+							to={`/fleet/machines/${data.server.machine_id}/edit`}
 							icon={<EditIcon />}
 							label="Edit"
 							color="primary"
@@ -300,7 +332,7 @@ function DeleteServerButton({
 	onArchived: () => void;
 }) {
 	const navigate = useNavigate();
-	const action = useApiAction("servers", "delete");
+	const action = useApiAction("fleet/applications", "delete");
 	const [open, setOpen] = useState(false);
 
 	const onConfirm = async () => {
@@ -308,7 +340,7 @@ function DeleteServerButton({
 			await action.call({ server_id: serverId });
 			setOpen(false);
 			onArchived();
-			navigate(groupId ? `/groups/${groupId}` : "/servers");
+			navigate(groupId ? `/fleet/groups/${groupId}` : "/fleet");
 		} catch {
 			/* surfaced via action.error */
 		}
@@ -365,7 +397,7 @@ function ArchivedBanner({
 	isAdmin: boolean;
 	onRestored: () => void;
 }) {
-	const action = useApiAction("servers", "restore");
+	const action = useApiAction("fleet/applications", "restore");
 	const onRestore = async () => {
 		try {
 			await action.call({ server_id: serverId });
@@ -456,7 +488,7 @@ function InfoSection({
 				<InfoItem label="Machine">
 					<MuiLink
 						component={RouterLink}
-						to={`/machines/${server.machine_id}`}
+						to={`/fleet/machines/${server.machine_id}`}
 						variant="body2"
 					>
 						This box
@@ -477,7 +509,7 @@ function InfoSection({
 					/>
 				)}
 				{/* Only where something has been granted. "Not permitted" on every
-				    server in the fleet advertises a feature that a deployment
+				    server in the fleet advertises a feature that a Canopy instance
 				    without DNS zones does not have.
 				    spec: DOM#permission-for-a-server-to-manage-its-own-names */}
 				{(server.may_manage_dns || server.may_manage_tls) && (
@@ -655,7 +687,7 @@ function GroupSection({
 				</Typography>
 				<MuiLink
 					component={RouterLink}
-					to={`/groups/${group.id}`}
+					to={`/fleet/groups/${group.id}`}
 					underline="hover"
 				>
 					{group.name}

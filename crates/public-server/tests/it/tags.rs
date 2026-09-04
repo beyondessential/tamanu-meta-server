@@ -453,7 +453,7 @@ async fn tags_endpoint_412_when_device_has_no_server() {
 
 /// A server's billing product is its own, not its group's: a SENAITE server
 /// sharing a group with Tamanu ones attributes its cloud cost to SENAITE, since
-/// charging it to the deployment's application would put the spend in the wrong
+/// charging it to the group's application would put the spend in the wrong
 /// place.
 // spec: APP#billing-attribution
 #[tokio::test(flavor = "multi_thread")]
@@ -496,7 +496,7 @@ async fn tags_endpoint_billing_product_is_the_servers_own() {
 			response.assert_status_ok();
 			let tags: HashMap<String, String> = response.json();
 			assert_eq!(tags.get("billing.product"), Some(&"senaite".to_string()));
-			// The deployment still comes from the group it belongs to...
+			// The deployment label still comes from the group it belongs to...
 			assert_eq!(tags.get("billing.deployment"), Some(&"pacific".to_string()));
 			// ...and the stage from its own rank, not the group's highest.
 			assert_eq!(tags.get("billing.stage"), Some(&"clone".to_string()));
@@ -505,7 +505,7 @@ async fn tags_endpoint_billing_product_is_the_servers_own() {
 	.await
 }
 
-/// Billing attribution needs a deployment to attribute to, so an ungrouped
+/// Billing attribution needs a group to attribute to, so an ungrouped
 /// server carries no `billing.*` labels at all — not even the product it could
 /// name on its own.
 // spec: APP#billing-attribution

@@ -34,7 +34,7 @@ test.describe("upgrades dashboard", () => {
 		await resetSeededTables(sql);
 	});
 
-	test("separates planned deployments from ones with nothing recorded", async ({
+	test("separates planned groups from ones with nothing recorded", async ({
 		page,
 		sql,
 	}) => {
@@ -74,10 +74,10 @@ test.describe("upgrades dashboard", () => {
 		// survives getting there. Untested until a consumer reports.
 		await expect(plannedRow).toContainText("not yet tested");
 
-		// The deployment with nothing recorded is the one this view exists to
+		// The group with nothing recorded is the one this view exists to
 		// surface, so it is listed rather than omitted, behind a disclosure.
 		await page
-			.getByRole("button", { name: "Show deployments with no plan" })
+			.getByRole("button", { name: "Show groups with no plan" })
 			.click();
 		await expect(
 			page
@@ -119,11 +119,11 @@ test.describe("upgrades dashboard", () => {
 		await page.goto("/upgrades");
 
 		await expect(page.getByTestId("planned-upgrades")).toContainText(
-			"No deployment has a recorded plan",
+			"No group has a recorded plan",
 		);
 	});
 
-	test("withdrawing a plan puts the deployment back to unplanned", async ({
+	test("withdrawing a plan puts the group back to unplanned", async ({
 		page,
 		sql,
 	}) => {
@@ -156,10 +156,10 @@ test.describe("upgrades dashboard", () => {
 
 		// Withdrawn, so it moves to the unplanned list and stops being tested.
 		await expect(page.getByTestId("planned-upgrades")).toContainText(
-			"No deployment has a recorded plan",
+			"No group has a recorded plan",
 		);
 		await page
-			.getByRole("button", { name: "Show deployments with no plan" })
+			.getByRole("button", { name: "Show groups with no plan" })
 			.click();
 		await expect(
 			page
@@ -208,7 +208,7 @@ test.describe("upgrades dashboard", () => {
 		await expect(page.getByTestId("past-plan-note")).toContainText(
 			"site can absorb 2.61 only",
 		);
-		// The plan that replaced it is where the deployment is going, so it stays
+		// The plan that replaced it is where the group is going, so it stays
 		// out of the history.
 		await expect(
 			page.getByTestId("planned-upgrade-row").filter({ hasText: "kamaka" }),
@@ -310,7 +310,7 @@ test.describe("upgrades dashboard", () => {
 			"UPDATE server_groups SET effective_version = '2.53.0' WHERE id = $1",
 			[group.id],
 		);
-		// Ten minors of patch releases sit between the deployment and the newest, so the
+		// Ten minors of patch releases sit between the group and the newest, so the
 		// version it is going to is a long way down the list.
 		await seedVersion(sql, { major: 2, minor: 54, patch: 0 });
 		for (let minor = 56; minor <= 65; minor++) {
@@ -322,7 +322,7 @@ test.describe("upgrades dashboard", () => {
 		await page.goto("/upgrades");
 		await page.getByRole("button", { name: "Record a plan" }).click();
 		const form = page.getByTestId("record-plan");
-		await form.getByLabel("Deployment").click();
+		await form.getByLabel("Group").click();
 		await page.getByRole("option", { name: "kamaka" }).click();
 
 		// Unfiltered, the list is the newest patch of each of the last ten minors:
@@ -359,7 +359,7 @@ test.describe("upgrades dashboard", () => {
 		await page.goto("/upgrades");
 		await page.getByRole("button", { name: "Record a plan" }).click();
 		const form = page.getByTestId("record-plan");
-		await form.getByLabel("Deployment").click();
+		await form.getByLabel("Group").click();
 		await page.getByRole("option", { name: "kamaka" }).click();
 		await form.getByLabel("Going to").click();
 
@@ -401,7 +401,7 @@ test.describe("upgrades dashboard", () => {
 		const row = page
 			.getByTestId("planned-upgrade-row")
 			.filter({ hasText: "kamaka" });
-		// Whose midnight it is, without the reader having to know the deployment.
+		// Whose midnight it is, without the reader having to know the group.
 		await expect(row).toContainText("12am FJT");
 
 		await page.getByRole("button", { name: "Edit kamaka's plan" }).click();
@@ -431,11 +431,11 @@ test.describe("upgrades dashboard", () => {
 		await page.goto("/upgrades");
 		await page.getByRole("button", { name: "Record a plan" }).click();
 		const form = page.getByTestId("record-plan");
-		// Nothing to say about a deployment until one is named.
+		// Nothing to say about a group until one is named.
 		await expect(form.getByLabel("Planned for")).toBeDisabled();
 		await expect(form.getByLabel("Note")).toBeDisabled();
 
-		await form.getByLabel("Deployment").click();
+		await form.getByLabel("Group").click();
 		await page.getByRole("option", { name: "kamaka" }).click();
 		await form.getByLabel("Going to").click();
 		await page.getByRole("option", { name: "2.61.0" }).click();
@@ -610,7 +610,7 @@ test.describe("upgrade windows", () => {
 		await page.goto("/upgrades");
 		await page.getByRole("button", { name: "Record a plan" }).click();
 		const form = page.getByTestId("record-plan");
-		await form.getByLabel("Deployment").click();
+		await form.getByLabel("Group").click();
 		await page.getByRole("option", { name: "kamaka" }).click();
 		await form.getByLabel("Going to").click();
 		await page.getByRole("option", { name: "2.61.0" }).click();

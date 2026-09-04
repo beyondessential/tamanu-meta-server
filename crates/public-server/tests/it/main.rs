@@ -3,6 +3,7 @@
 // file, which keeps rebuilds from swamping the machine with I/O.
 // Nextest still runs every #[tokio::test] in parallel as usual.
 
+mod application_aliases;
 mod auth_requirements;
 mod backup;
 mod backup_secrets;

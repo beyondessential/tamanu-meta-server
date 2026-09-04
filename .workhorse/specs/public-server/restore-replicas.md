@@ -6,7 +6,7 @@ id: RST
 
 Canopy is the control plane for a fleet's *managed restore replicas*: standing replicas that Canopy decides should exist and keeps restored from the latest backups, driven through a restore consumer.
 An external restore consumer — first-party infrastructure that restores backups into working Postgres replicas — is driven entirely by Canopy: Canopy declares which replicas should exist, hands out the snapshot to restore and short-lived read-only credentials for each, and records the restorability of every replica as the strongest backup-health signal.
-A replica restored from real data is also the substrate for testing a Tamanu version's schema migrations before that version reaches the deployment, so the same machinery carries both a backup-health signal and a version-readiness one.
+A replica restored from real data is also the substrate for testing a Tamanu version's schema migrations before that version reaches the group, so the same machinery carries both a backup-health signal and a version-readiness one.
 
 ## Scope
 
@@ -220,10 +220,10 @@ The derivation covers consumers only: a device belonging to one of the group's m
 
 ## Pre-upgrade migration testing
 
-An intent carrying the `migrate` semantic applies a Tamanu version's schema migrations to the replica it restores, so a version's effect on a deployment's real data is known ahead of an upgrade window rather than discovered inside one.
+An intent carrying the `migrate` semantic applies a Tamanu version's schema migrations to the replica it restores, so a version's effect on a group's real data is known ahead of an upgrade window rather than discovered inside one.
 
-An upgrade applies schema migrations to the live database with the deployment down for the duration.
-A migration that fails against real data, and one that succeeds but runs far longer than the window allowed for, are both properties of that deployment's data rather than of the migration alone, so neither shows against a small or synthetic database.
+An upgrade applies schema migrations to the live database with the application down for the duration.
+A migration that fails against real data, and one that succeeds but runs far longer than the window allowed for, are both properties of that group's data rather than of the migration alone, so neither shows against a small or synthetic database.
 Canopy knows the version each application reports running and the upgrade path it would be served, and already holds the authority over replicas made from real backups, so it is where the question can be posed ahead of the window.
 
 ### Candidate versions
@@ -239,7 +239,7 @@ A group with no open plan has no candidate, so none of its applications are test
 
 Recording a plan is what asks for the testing.
 A run costs hours of a consumer's capacity per replica, and which minor a group moves to is not something Canopy can derive, so aiming at whatever is newest would spend that capacity on versions nobody has decided to take.
-A deployment that wants its data tested says where it is going, and gets an answer about the version it will actually apply.
+A group that wants its data tested says where it is going, and gets an answer about the version it will actually apply.
 
 One candidate, not one per version along the path.
 Migrations are applied to the restored snapshot in sequence, so a run targeting the planned version applies every migration between the snapshot's version and that one, and exercises the whole chain an upgrade would.
@@ -251,8 +251,8 @@ Publication is what makes a version testable and what makes it reachable by an a
 Only an application running Tamanu has candidates, because the migrations under test are Tamanu's and no other type has an upgrade path through them.
 An application whose machine has no successful backup of a restorable type has no candidates either, because there is nothing to restore and migrate.
 
-Testing therefore sits between a version being available and a deployment being told to take it.
-That window is where the answer is still cheap: the fleet is not moving yet, and a version found to break a deployment's data can be held back before anyone schedules its upgrade.
+Testing therefore sits between a version being available and a group being told to take it.
+That window is where the answer is still cheap: the fleet is not moving yet, and a version found to break a group's data can be held back before anyone schedules its upgrade.
 
 ### Dispatching a migration test
 
@@ -261,7 +261,7 @@ It carries `check` alongside, so a single restore reports the replica's health a
 
 An intent carrying `migrate` is withheld where no application has a candidate version.
 An intent that verifies backups therefore does not also migrate: it would go undispatched for every machine without a candidate, leaving the backups of any non-Tamanu application, and of every group with no plan open, unverified.
-An intent that keeps a replica queryable does not migrate either: a migrated replica sits at a version its deployment is not running, so a declaration promoted to it would give an operator a schema that does not match production.
+An intent that keeps a replica queryable does not migrate either: a migrated replica sits at a version its group is not running, so a declaration promoted to it would give an operator a schema that does not match production.
 
 A verifying intent and a migrating intent restore the same snapshot separately.
 A verifying intent restores once per snapshot, and a migrating intent's `once` is keyed to the snapshot and target version together, so it restores when a new candidate version appears rather than on every snapshot.
@@ -292,11 +292,11 @@ A restore that succeeded into a healthy replica whose migrations then failed rep
 Keeping the two apart is what lets restore health and version readiness stay separate signals: the backup restored, so the backup is fine, and the finding belongs to the version.
 
 Per-migration timings are a primary result rather than diagnostic detail.
-A version whose migrations all apply but whose slowest migration takes hours against a large deployment is a finding, and a report carries enough detail to name the migration to attend to.
+A version whose migrations all apply but whose slowest migration takes hours against a large database is a finding, and a report carries enough detail to name the migration to attend to.
 
-The size before the run is what lets a duration be read against the volume that produced it, and compared across deployments of different sizes.
-The growth between the two figures is its own finding: a migration that backfills a large table leaves the deployment needing disk it was not provisioned for, and every deployment that has yet to run it will grow the same way in proportion to its own data.
-Growth is also a second reason a window overruns, since the write volume that produces it is time the deployment spends down.
+The size before the run is what lets a duration be read against the volume that produced it, and compared across databases of different sizes.
+The growth between the two figures is its own finding: a migration that backfills a large table leaves the machine needing disk it was not provisioned for, and every group that has yet to run it will grow the same way in proportion to its own data.
+Growth is also a second reason a window overruns, since the write volume that produces it is time the application spends down.
 
 ### Verdicts
 
@@ -321,7 +321,7 @@ Clearing the issue is an operator action, and a later passing test does not clea
 
 ## Redaction
 
-An intent carrying the `redact` semantic can serve a replica with its data de-identified, so a queryable copy of a deployment's database can be given to people who should not see patient data.
+An intent carrying the `redact` semantic can serve a replica with its data de-identified, so a queryable copy of a group's database can be given to people who should not see patient data.
 Redaction is an option on a replica rather than an intent of its own: one intent restores raw and redacted replicas alike, according to what each declaration asks for.
 
 A replica redacts only when an operator declares that it does, and a declaration that says nothing does not redact.
@@ -336,7 +336,7 @@ Whether a replica redacts is therefore answered by its declaration alone, which 
 What to mask is a property of the product being restored (see [APP](../servers/application-types.md)) rather than a choice the operator makes per replica.
 A *masking manifest* names the columns to mask and how each is masked, and a product Canopy can redact publishes one per version.
 
-Canopy holds, for each such product, the location of its manifests as a template naming the version, together with the query that reads a deployment's own version out of the restored data.
+Canopy holds, for each such product, the location of its manifests as a template naming the version, together with the query that reads the application's own version out of the restored data.
 Canopy resolves these settings into the worklist entry as it is dispatched, so a change to where a product publishes its manifests reaches every redacting replica without an operator revisiting a declaration.
 The consumer resolves the version against the data it restored — the version of the snapshot, which is not necessarily the version the application reports running now — and fetches the manifest for it.
 
@@ -392,12 +392,12 @@ A failed migration test raises a migration-test check on the affected applicatio
 It is an application check rather than a machine one because the version under test is the application's, so a box hosting two workloads carries a finding against whichever of them the version was tested for.
 It is one check per application with its replicas as instances, as restore-verification is, and carries the target version in the detail rather than the name.
 An application has one candidate at a time, so there is no second version whose result the first could mask, and a name per version would spawn a catalog policy per release.
-A replica whose candidate has not been tried within its overdue bound degrades the same check: untested and failed are both "this version is not known good against this deployment's data".
-A recorded verdict raises the check whatever declares that replica now, and a later verdict is what supersedes it: what a version's migrations did to a deployment's data is a fact about the version, not something a declaration has to keep asking about for it to remain true.
+A replica whose candidate has not been tried within its overdue bound degrades the same check: untested and failed are both "this version is not known good against this group's data".
+A recorded verdict raises the check whatever declares that replica now, and a later verdict is what supersedes it: what a version's migrations did to a group's data is a fact about the version, not something a declaration has to keep asking about for it to remain true.
 
 The check is a warning rather than a failure, and does not escalate.
 Nothing is wrong with the live application: it is running the version it always was, serving patients, and the finding is about a version it has not taken yet.
-Treating it as a failure would open an incident against a healthy deployment and put a migration problem in front of whoever is on call for outages, when the people who need it are the ones deciding whether that version ships.
+Treating it as a failure would open an incident against a healthy group and put a migration problem in front of whoever is on call for outages, when the people who need it are the ones deciding whether that version ships.
 The version's readiness is where the finding does its work.
 
 A redaction that did not fully apply raises a redaction check on the affected machine, under the same gates.
@@ -406,7 +406,7 @@ A replica is an instance of it only once it has reported a redaction outcome: a 
 An instance recovers when the replica's next report redacts fully, and the check when none of them is left degraded.
 
 The check is a warning rather than a failure, and does not escalate.
-The deployment is healthy and its data is where it should be; the finding is that a replica made from that data is not as safe to hand out as it was declared to be.
+The group is healthy and its data is where it should be; the finding is that a replica made from that data is not as safe to hand out as it was declared to be.
 That is for whoever gave out the replica to act on, not for whoever is on call for outages.
 
 ## Out of scope
@@ -415,6 +415,6 @@ That is for whoever gave out the replica to act on, not for whoever is on call f
 - A consumer's runtime placement, storage sizing, or scheduling.
 - Producing reporting schemas, or any other artefact, from a migrated replica.
 - The contents of a masking manifest, and what each masking it names does to a value.
-- Deciding or scheduling when a deployment upgrades: verdicts inform that decision without making it.
+- Deciding or scheduling when a group upgrades: verdicts inform that decision without making it.
 - Scoping object-storage credentials below the granularity of a group's repo: one repo holds all of a group's machines' snapshots, so credentials are necessarily group-wide while targeting and reporting are per-machine.
 - Longer-lived or non-chained credentials: a consumer refreshes within a restore, so the per-issuance lifetime is not a constraint.
