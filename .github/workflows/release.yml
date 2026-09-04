@@ -132,16 +132,23 @@ jobs:
         run: |
           echo "Before cleanup:"
           git status --short --untracked-files=all
-          git ls-files -s .claude/skills || true
+          git ls-files -ci --exclude-standard || true
           ls -la .claude || true
 
-          git restore .
-          git clean -ffdX
+          # Restore tracked files exactly to the checkout state.
+          git reset --hard HEAD
+
+          # Remove untracked files and ignored generated files.
+          git clean -ffdx
 
           echo "After cleanup:"
           git status --short --untracked-files=all
-          git ls-files -s .claude/skills || true
+          git ls-files -ci --exclude-standard || true
           ls -la .claude || true
+
+          git status --porcelain=v1
+          git diff --name-only
+          git ls-files -s .claude/skills || true
 
       - name: Run release-plz
         id: release-plz
