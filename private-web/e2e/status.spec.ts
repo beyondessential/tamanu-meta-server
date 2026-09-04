@@ -266,6 +266,52 @@ test.describe("status page", () => {
 		).toBeVisible();
 	});
 
+	/// Suspension outlasts the window by the settle period, so a box stays
+	/// marked after its window is lifted. The mark says which of the two it is,
+	/// or a lift that has taken reads as one that has not.
+	///
+	/// spec: MNT#presentation
+	test("a box settling is marked apart from one still being worked on", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "settle-group" });
+		const holding = await seedServer(sql, {
+			name: "aaa-still-working",
+			rank: "production",
+			groupId: group.id,
+		});
+		const settling = await seedServer(sql, {
+			name: "bbb-just-lifted",
+			rank: "production",
+			groupId: group.id,
+		});
+		await seedMaintenanceWindow(sql, {
+			machineId: holding.machineId,
+			endsInHours: 2,
+		});
+		await seedMaintenanceWindow(sql, {
+			machineId: settling.machineId,
+			endedMinutesAgo: 2,
+		});
+
+		await page.goto("/status");
+
+		const pills = page
+			.locator(`a[href="/fleet/groups/${group.id}"]`)
+			.first()
+			.getByTestId("dot-strip")
+			.locator("[data-testid='rank-row'] > span");
+		await expect(pills).toHaveCount(2);
+		await expect(pills.nth(0)).toHaveAttribute("data-maintenance", "holding");
+		await expect(pills.nth(1)).toHaveAttribute("data-maintenance", "settling");
+
+		await pills.nth(1).hover();
+		await expect(
+			page.getByRole("tooltip", { name: /maintenance just ended/ }),
+		).toBeVisible();
+	});
+
 	/// A group's window covers every box in it, so every pill on the card is
 	/// marked rather than the operator having to know the window was group-wide.
 	///

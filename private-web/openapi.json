@@ -10560,7 +10560,8 @@
           "machine_id",
           "machine_up",
           "machine_health",
-          "machine_maintained"
+          "machine_maintained",
+          "machine_maintenance_settling"
         ],
         "properties": {
           "health": {
@@ -10588,6 +10589,10 @@
           "machine_maintained": {
             "type": "boolean",
             "description": "Whether a maintenance window suspends this box — its own or its\ngroup's. A window is declared over a machine and never over an\napplication, so this is the box's fact and the applications on it are\nsuspended by it rather than carrying one of their own."
+          },
+          "machine_maintenance_settling": {
+            "type": "boolean",
+            "description": "Whether every window over the box has ended and it is serving out the\nsettle period, so a lift reads as taken effect rather than as a window\nthat is still holding."
           },
           "machine_name": {
             "type": [
@@ -11023,7 +11028,8 @@
           "id",
           "up",
           "health",
-          "maintained"
+          "maintained",
+          "maintenance_settling"
         ],
         "properties": {
           "health": {
@@ -11038,6 +11044,10 @@
           "maintained": {
             "type": "boolean",
             "description": "Whether a maintenance window suspends this box, its own or its group's."
+          },
+          "maintenance_settling": {
+            "type": "boolean",
+            "description": "Whether every window over the box has ended and it is serving out the\nsettle period."
           },
           "name": {
             "type": [

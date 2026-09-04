@@ -56,7 +56,7 @@ Ended windows are retained as the target's maintenance history, so what was bein
 
 ## Settling
 
-Suspension persists for a settle period after the window ends, unchanged in every respect from the window itself.
+Suspension persists for a settle period after the window ends, suppressing exactly what the window itself did.
 
 A machine is back before the sources on it have reported again, and a machine whose every source is stale is unreachable (see [CHK](checks.md), "Reachability"), so ending suspension the instant the work finishes would report a machine that has just come back as failed for as long as the work took.
 The settle period is the same for every window.
@@ -72,7 +72,8 @@ The ending says whether an operator lifted the window or its expected end passed
 
 A target under a window presents as under maintenance wherever its health or reachability is presented as it currently stands, marked in the manner an unmonitored machine is and distinguishable from one (see [CHK](checks.md), "Monitoring gate").
 Its health is muted and carries the window and when it ends, so a failing machine under maintenance is not read as one nobody has noticed.
-The status legend names the mark.
+A target serving out the settle period carries the mark still, distinguished from one whose window holds, so lifting a window shows on the target rather than only on the window.
+The status legend names both marks.
 
 Canopy presents every open window across the fleet in one view: what each covers, who declared it, when it ends, and its note.
 The view answers "what are we not watching right now" without reading each group.

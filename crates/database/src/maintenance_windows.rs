@@ -35,6 +35,38 @@ use crate::slack_outbox::{KIND_MAINTENANCE_DECLARED, KIND_MAINTENANCE_ENDED, Sla
 /// every window.
 pub const SETTLE: SignedDuration = SignedDuration::from_mins(10);
 
+/// The targets a window covers right now, and which of them it still holds
+/// rather than settling over.
+#[derive(Clone, Debug, Default)]
+pub struct SuspendedTargets {
+	pub machines: HashSet<Uuid>,
+	pub groups: HashSet<Uuid>,
+	pub holding_machines: HashSet<Uuid>,
+	pub holding_groups: HashSet<Uuid>,
+}
+
+/// A window's targets with the two timestamps that say whether it still holds.
+type SuspensionRow = (
+	Option<Uuid>,
+	Option<Uuid>,
+	Option<jiff_diesel::Timestamp>,
+	jiff_diesel::Timestamp,
+);
+
+impl SuspendedTargets {
+	/// Is this box suspended, by its own window or its group's?
+	pub fn suspends(&self, machine: Uuid, group: Option<Uuid>) -> bool {
+		self.machines.contains(&machine) || group.is_some_and(|g| self.groups.contains(&g))
+	}
+
+	/// Is every window over this box ended, leaving it in the settle period?
+	pub fn settling(&self, machine: Uuid, group: Option<Uuid>) -> bool {
+		self.suspends(machine, group)
+			&& !self.holding_machines.contains(&machine)
+			&& !group.is_some_and(|g| self.holding_groups.contains(&g))
+	}
+}
+
 /// A declaration that a machine or a group is being worked on.
 #[derive(Clone, Debug, Serialize, Deserialize, Queryable, Selectable, utoipa::ToSchema)]
 #[diesel(table_name = crate::schema::maintenance_windows)]
@@ -342,13 +374,17 @@ impl MaintenanceWindow {
 	///
 	/// A window is declared over a machine, so an application is suspended by
 	/// its machine's id appearing here rather than its own.
-	pub async fn suspended_targets(
-		db: &mut AsyncPgConnection,
-	) -> Result<(HashSet<Uuid>, HashSet<Uuid>)> {
+	pub async fn suspended_targets(db: &mut AsyncPgConnection) -> Result<SuspendedTargets> {
 		use crate::schema::maintenance_windows::dsl;
-		let cutoff = jiff_diesel::Timestamp::from(Timestamp::now() - SETTLE);
-		let rows: Vec<(Option<Uuid>, Option<Uuid>)> = dsl::maintenance_windows
-			.select((dsl::machine_id, dsl::server_group_id))
+		let now = Timestamp::now();
+		let cutoff = jiff_diesel::Timestamp::from(now - SETTLE);
+		let rows: Vec<SuspensionRow> = dsl::maintenance_windows
+			.select((
+				dsl::machine_id,
+				dsl::server_group_id,
+				dsl::ended_at,
+				dsl::expected_end,
+			))
 			.filter(
 				dsl::ended_at
 					.is_null()
@@ -358,17 +394,23 @@ impl MaintenanceWindow {
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
-		let mut machines = HashSet::new();
-		let mut groups = HashSet::new();
-		for (machine, group) in rows {
+		let mut targets = SuspendedTargets::default();
+		for (machine, group, ended_at, expected_end) in rows {
+			let holds = ended_at.is_none() && now < Timestamp::from(expected_end);
 			if let Some(id) = machine {
-				machines.insert(id);
+				targets.machines.insert(id);
+				if holds {
+					targets.holding_machines.insert(id);
+				}
 			}
 			if let Some(id) = group {
-				groups.insert(id);
+				targets.groups.insert(id);
+				if holds {
+					targets.holding_groups.insert(id);
+				}
 			}
 		}
-		Ok((machines, groups))
+		Ok(targets)
 	}
 
 	/// End every window whose expected end has passed, stamping the end at

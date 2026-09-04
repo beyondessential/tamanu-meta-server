@@ -277,7 +277,7 @@ pub async fn group_details(
 	// One read for the whole card: a window is over a machine or a group, and
 	// a box is suspended by either.
 	// spec: MNT#presentation
-	let (maintained_machines, maintained_groups) =
+	let suspended =
 		database::maintenance_windows::MaintenanceWindow::suspended_targets(&mut conn).await?;
 
 	// The card's headline version is the cached last reported version of the
@@ -325,9 +325,8 @@ pub async fn group_details(
 					.get(&s.machine_id)
 					.copied()
 					.unwrap_or_default(),
-				machine_maintained: maintained_machines.contains(&s.machine_id)
-					|| s.group_id
-						.is_some_and(|gid| maintained_groups.contains(&gid)),
+				machine_maintained: suspended.suspends(s.machine_id, s.group_id),
+				machine_maintenance_settling: suspended.settling(s.machine_id, s.group_id),
 			}
 		})
 		.collect();
