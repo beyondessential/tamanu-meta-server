@@ -166,7 +166,7 @@ gen-openapi:
 # server's OpenAPI document. Run this after `gen-openapi` whenever the public
 # API changes; the generated source is committed alongside the document.
 gen-api:
-    cargo run --quiet -p canopy-api-codegen
+    cargo run --quiet --locked -p canopy-api-codegen
 
 # Check the published API client depends on no HTTP client: how a request
 # reaches canopy is its consumer's to decide, so the crate carries the wire
@@ -188,12 +188,18 @@ check-api-deps:
 check-generated:
     #!/usr/bin/env bash
     set -euo pipefail
-    cargo run --quiet --bin public-openapi-dump > crates/public-server/openapi.json
-    cargo run --quiet --bin private-openapi-dump > private-web/openapi.json
-    cargo run --quiet -p canopy-api-codegen
-    if ! git diff --quiet -- crates/public-server/openapi.json private-web/openapi.json crates/canopy-api/src/generated.rs crates/canopy-api/Cargo.toml; then
+    # --locked so what is generated depends only on committed inputs: an
+    # unlocked resolve could pick a newer codegen dependency than Cargo.lock
+    # records and emit different source here than it does on a dev machine.
+    generated=(crates/public-server/openapi.json private-web/openapi.json crates/canopy-api/src/generated.rs crates/canopy-api/Cargo.toml)
+    cargo run --quiet --locked --bin public-openapi-dump > crates/public-server/openapi.json
+    cargo run --quiet --locked --bin private-openapi-dump > private-web/openapi.json
+    cargo run --quiet --locked -p canopy-api-codegen
+    # Against HEAD rather than the index: a staged-but-uncommitted regeneration
+    # would otherwise make a stale commit look current.
+    if ! git diff --quiet HEAD -- "${generated[@]}"; then
         echo "generated files are out of date; run 'just gen-openapi && just gen-api' and commit the result" >&2
-        git --no-pager diff --stat -- crates/public-server/openapi.json private-web/openapi.json crates/canopy-api/src/generated.rs crates/canopy-api/Cargo.toml >&2
+        git --no-pager diff --stat HEAD -- "${generated[@]}" >&2
         exit 1
     fi
 
