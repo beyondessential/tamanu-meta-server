@@ -1,9 +1,10 @@
 name: Release
 
 # release-plz opens a release PR on every push to main, and releases when one of
-# those PRs is merged (`release_always = false` in release-plz.toml). Merging any
-# other PR opens or updates the release PR and does nothing else, so a merge to
-# main no longer reaches production.
+# those PRs is merged (`release_always = false` in release-plz.toml). It manages
+# only `bes-canopy-api`, which is a cargo project of its own outside the workspace
+# — hence `manifest_path` on both jobs. Canopy itself is not released here; cd.yml
+# deploys every push to main. See release-plz.toml for why.
 on:
   push:
     branches: [main]
@@ -25,10 +26,6 @@ jobs:
       contents: write # push tags and create releases
       pull-requests: read # detect that the merged PR was the release PR
       id-token: write # trusted publishing
-    outputs:
-      # Empty unless canopy's own track released, which is what decides whether
-      # there is anything to deploy.
-      canopy-version: ${{ steps.canopy.outputs.version }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -47,43 +44,9 @@ jobs:
         uses: release-plz/action@v0.5.132
         with:
           command: release
+          manifest_path: crates/canopy-api/Cargo.toml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # The deploy is tagged with canopy's version, not the API client's: the two
-      # are separate series and it is canopy that gets deployed. A release of the
-      # client alone (a codegen change, say) moves nothing that runs in the
-      # cluster, and leaves this empty so the deploy is skipped.
-      - name: Find canopy's released version
-        id: canopy
-        env:
-          RELEASES: ${{ steps.release-plz.outputs.releases }}
-        run: |
-          version="$(jq -r '[.[] | select(.package_name == "public-server") | .version][0] // ""' <<<"${RELEASES:-[]}")"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          if [ -n "$version" ]; then
-            echo "canopy $version released; deploying" >&2
-          else
-            echo "no canopy release in this run; nothing to deploy" >&2
-          fi
-
-  deploy:
-    name: Deploy
-    needs: [release]
-    if: needs.release.outputs.canopy-version != ''
-    # A called workflow's jobs get at most what the calling job holds, so these are
-    # stated here rather than left to whatever this repository's default happens to
-    # be. cd.yml needs the image registry and Tailscale's OIDC.
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
-    uses: ./.github/workflows/cd.yml
-    with:
-      version: ${{ needs.release.outputs.canopy-version }}
-    # cd.yml reaches the ops repo and the cluster with credentials this repository
-    # already holds.
-    secrets: inherit
 
   release-pr:
     name: Release PR
@@ -138,6 +101,7 @@ jobs:
         uses: release-plz/action@v0.5.132
         with:
           command: release-pr
+          manifest_path: crates/canopy-api/Cargo.toml
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
 
