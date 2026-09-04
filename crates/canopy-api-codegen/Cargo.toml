@@ -13,6 +13,7 @@ name = "canopy-api-codegen"
 path = "src/main.rs"
 
 [dependencies]
+blake3 = "1.8.7"
 prettyplease = "0.3.0"
 schemars = "0.8.22"
 serde_json = "1.0.150"
