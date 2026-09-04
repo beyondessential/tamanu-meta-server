@@ -28,6 +28,7 @@ A group-scoped artifact is carried to Canopy by the registration that publishes 
 A publisher sends the bytes on the connection it registers over and is issued no credential to any store, so being authorised to register for a group is the whole of what publishing into it takes.
 Canopy holds such an artifact in storage of its own, apart from any group's backup repo, so an artifact carries the retention, access, and cost basis of an artifact rather than those a backup repo is kept under (see [BAK](../public-server/backup.md)).
 Where Canopy puts them is its own, and no caller addresses them there.
+Canopy holds an artifact's bytes for as long as that artifact is registered, and keeps none of what it has stopped serving.
 
 Canopy serves the bytes only to a caller the artifact is offered to.
 The boundary is therefore enforced on the read rather than resting on a location being hard to guess.
@@ -38,7 +39,7 @@ Canopy offers a caller one artifact per type and platform, chosen from the artif
 Where several match, the most specific is offered.
 An artifact scoped to the caller's group is more specific than one belonging to no group.
 Among artifacts of the same scope, an exact-version artifact is more specific than any range artifact, and between two ranges the narrower is more specific.
-A group-scoped artifact and an unscoped one of the same type and platform are therefore both held, each group is offered the one for it, and no caller is offered both.
+A group-scoped artifact and an unscoped one of the same type and platform are therefore both recorded, each group is offered the one for it, and no caller is offered both.
 A pattern Canopy cannot parse matches nothing rather than everything, so a malformed range withholds a file instead of offering it to the whole fleet.
 
 The full set, including the artifacts specificity passed over, is available to operators.
@@ -62,10 +63,12 @@ A releaser device registers unscoped artifacts, and carries no authorisation for
 An operator registers either.
 A component that produces a group-scoped artifact registers it for that group under an authorisation defined with that artifact, and is authorised for no other.
 A registration naming a group the caller is not authorised for is refused, which is the only gate publishing into a group has to pass.
+A registration replaces whatever is already registered for the same version or range, type, platform, and group, so a rebuilt artifact is published exactly as a first one is and a caller is never offered two of a kind.
 
 Canopy records which device registered an artifact and, where the registration names one, the run that produced it, so an artifact that arrived by automation is distinguishable from one entered by hand and traceable to what made it.
 
 ## Digests
 
-An artifact carries a digest where whoever registers it records one, and a group-scoped artifact carries one always, since its bytes reach a caller through Canopy and are verified on the way.
-Where Canopy passes an artifact through and holds a digest for it, it verifies the bytes against that digest and refuses them on a mismatch, so a file replaced at its published location fails the read rather than reaching a server as the artifact it is not.
+An artifact carries a digest where whoever registers it records one, and a group-scoped artifact carries one always.
+Canopy verifies the bytes it holds against that digest as it serves them and refuses them on a mismatch, so a corrupted artifact fails the read rather than reaching a server as the artifact it is not.
+An unscoped artifact is read from its location by the caller rather than by Canopy, so its digest is what that caller checks what it fetched against, and an artifact registered without one is fetched unchecked.
