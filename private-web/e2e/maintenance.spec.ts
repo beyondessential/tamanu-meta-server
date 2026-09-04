@@ -325,8 +325,11 @@ test.describe("maintenance windows", () => {
 			.toEqual(["site can absorb 2.61 only"]);
 	});
 
+	/// A window stops alerting rather than grading, so an operator working
+	/// through one watches the check they are fixing go green.
+	///
 	// spec: MNT#presentation
-	test("a check the window skipped says so, and the legend names the mark", async ({
+	test("a check under a window keeps its result and says it raises nothing", async ({
 		page,
 		sql,
 	}) => {
@@ -335,6 +338,10 @@ test.describe("maintenance windows", () => {
 			name: "failing-on-purpose",
 			groupId: group.id,
 		});
+		await seedMaintenanceWindow(sql, {
+			machineId: server.machineId,
+			note: "Cutting over the database",
+		});
 		await seedStatus(sql, {
 			serverId: server.id,
 			healthy: false,
@@ -342,23 +349,14 @@ test.describe("maintenance windows", () => {
 				{ check: "database", healthy: false, message: "connection refused" },
 			],
 		});
-		// What ingestion records under a window: the reported result stands,
-		// the grade the window forces is what the fleet acts on.
-		await sql.query(
-			"UPDATE issues SET effective_result = 'skipped' WHERE application_id = $1",
-			[server.id],
-		);
-		await seedMaintenanceWindow(sql, {
-			machineId: server.machineId,
-			note: "Cutting over the database",
-		});
 
 		await page.goto(`/fleet/applications/${server.id}`);
-		await expect(
-			page.getByTestId("check-maintenance-skip"),
-		).toContainText("skipped: under maintenance");
-		await expect(
-			page.getByText("under maintenance (being worked on)"),
-		).toBeVisible();
+		await expect(page.getByTestId("maintenance-marker")).toContainText(
+			"Under maintenance",
+		);
+		// The failure is graded and presented as it stands, so the operator
+		// can see the check they are working on.
+		await expect(page.getByText("connection refused")).toBeVisible();
+		await expect(page.getByText("Unhealthy")).toBeVisible();
 	});
 });

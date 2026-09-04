@@ -1,8 +1,8 @@
 //! Maintenance windows: an operator's declaration that a target is being
-//! worked on. While one suspends a target every check on it grades to
-//! skipped, its issues leave their incident, and suspension outlasts the
-//! window by the settle period so a machine that is back but has not
-//! reported yet is not called unreachable.
+//! worked on. While one suspends a target its checks grade exactly as they
+//! would without it, its issues leave their incident and open none, and
+//! suspension outlasts the window by the settle period so a machine that is
+//! back but has not reported yet is not paged for.
 //!
 //! A window is over a machine, and the checks it suspends are those of the
 //! applications running on it: these tests declare over the machine and assert
@@ -135,9 +135,10 @@ fn in_an_hour() -> Timestamp {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_window_grades_every_check_on_its_target_to_skipped() {
+async fn a_window_grades_a_check_as_it_stands_and_opens_no_incident() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
-		let (machine_id, server_id) = insert_server(&mut conn, None).await;
+		let group_id = insert_group(&mut conn).await;
+		let (machine_id, server_id) = insert_server(&mut conn, Some(group_id)).await;
 		MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Machine(machine_id),
@@ -163,10 +164,14 @@ async fn a_window_grades_every_check_on_its_target_to_skipped() {
 		);
 		assert_eq!(
 			state.effective_result,
-			Some(CheckResult::Skipped),
-			"a window grades the check to skipped, as a silence does"
+			Some(CheckResult::Failed),
+			"and graded as it stands, so an operator watches what they are fixing"
 		);
-		assert!(!state.active);
+		assert_eq!(
+			open_incidents(&mut conn, group_id).await,
+			0,
+			"the window stops it opening an incident, which is all it stops"
+		);
 	})
 	.await
 }
@@ -235,10 +240,8 @@ async fn a_group_window_covers_its_servers_and_the_group_itself() {
 		.await
 		.expect("file server check");
 		assert_eq!(
-			state_for(&mut conn, server_id, "reachability")
-				.await
-				.effective_result,
-			Some(CheckResult::Skipped),
+			open_incidents(&mut conn, group_id).await,
+			0,
 			"a group's window covers the checks of every server in it"
 		);
 
@@ -584,10 +587,14 @@ async fn a_server_joining_a_group_under_a_window_is_covered() {
 			state_for(&mut conn, server_id, "reachability")
 				.await
 				.effective_result,
-			Some(CheckResult::Skipped),
-			"a group's window covers servers that join while it holds"
+			Some(CheckResult::Failed),
+			"the failure grades as it stands"
 		);
-		assert_eq!(open_incidents(&mut conn, group_id).await, 0);
+		assert_eq!(
+			open_incidents(&mut conn, group_id).await,
+			0,
+			"and a group's window covers servers that join while it holds"
+		);
 	})
 	.await
 }
@@ -674,10 +681,9 @@ async fn a_machine_window_covers_every_application_on_the_box() {
 			)
 			.await
 			.expect("file");
-			let state = state_for(&mut conn, application, "reachability").await;
 			assert_eq!(
-				state.effective_result,
-				Some(CheckResult::Skipped),
+				open_incidents(&mut conn, group_id).await,
+				0,
 				"the {label} application on the box is covered by its machine's window"
 			);
 		}
@@ -691,11 +697,14 @@ async fn a_machine_window_covers_every_application_on_the_box() {
 		.await
 		.expect("file");
 		assert_eq!(
-			state_for(&mut conn, other, "reachability")
-				.await
-				.effective_result,
-			Some(CheckResult::Failed),
+			open_incidents(&mut conn, group_id).await,
+			1,
 			"a window covers the box it names and no other"
+		);
+		assert_eq!(
+			live_members(&mut conn, group_id).await,
+			1,
+			"and only the uncovered box's failure is in the incident"
 		);
 	})
 	.await;

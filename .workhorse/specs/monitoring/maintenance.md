@@ -37,10 +37,10 @@ An open incident offers the declaration over its target too, so an operator who 
 
 ## What a window suspends
 
-While a window holds over a target, every check on that target has an effective result of skipped, whatever it was observed as: the transform a silence applies to one check, applied to all of them for as long as the window holds (see [CHK](checks.md), "Policy").
-Observed results are recorded throughout, and sources are expected to report and told to run their checks exactly as they were before, so a window changes how Canopy grades what it sees and nothing else.
+While a window holds over a target, its checks are observed, graded, and presented exactly as they would be without it.
+An operator working through a window watches the check they are fixing come good, and a failure arriving mid-work is visible where it happened rather than held back until the window ends.
 
-A skipped check is not an issue, so a target under a window contributes nothing to incidents and raises no notification.
+What a window suspends is what those results feed: no issue on the target contributes to an incident while it holds, so nothing opens, nothing joins, and nothing notifies.
 An issue in an open incident leaves it when the window is declared, and an incident whose last effective failure leaves this way closes immediately, as it does for any operator action (see [INC](incidents.md), "Membership").
 Where that close is notified, the notice says maintenance was declared, so a reader does not take it as the problem having gone away.
 
@@ -58,9 +58,9 @@ Ended windows are retained as the target's maintenance history, so what was bein
 
 Suspension persists for a settle period after the window ends, suppressing exactly what the window itself did.
 
-A machine is back before the sources on it have reported again, and a machine whose every source is stale is unreachable (see [CHK](checks.md), "Reachability"), so ending suspension the instant the work finishes would report a machine that has just come back as failed for as long as the work took.
+A machine is back before the sources on it have reported again, and a machine whose every source is stale is unreachable (see [CHK](checks.md), "Reachability"), so ending suspension the instant the work finishes would page for a machine that has just come back, for as long as the work took.
 The settle period is the same for every window.
-When it elapses, every check on the target is graded normally again, and anything still degraded contributes from then on.
+When it elapses, anything still degraded on the target contributes to incidents from then on.
 
 ## Notification
 
@@ -70,7 +70,7 @@ The ending says whether an operator lifted the window or its expected end passed
 
 ## Presentation
 
-A target under a window presents as under maintenance wherever its health or reachability is presented as it currently stands, marked in the manner an unmonitored machine is and distinguishable from one (see [CHK](checks.md), "Monitoring gate").
+A target under a window presents its own health and reachability, and is marked as under maintenance wherever they are presented as they currently stand, in the manner an unmonitored machine is marked and distinguishable from one (see [CHK](checks.md), "Monitoring gate").
 Its health is muted and carries the window and when it ends, so a failing machine under maintenance is not read as one nobody has noticed.
 A target serving out the settle period carries the mark still, distinguished from one whose window holds, so lifting a window shows on the target rather than only on the window.
 The status legend names both marks.
@@ -80,7 +80,7 @@ The view answers "what are we not watching right now" without reading each group
 
 A target's own surface presents its open window with the actions to amend or lift it, and its ended windows as history.
 An application presents the window over the machine it runs on, and a machine covered by its group's window presents that window too, naming what holds it and leading there, since a target under maintenance without a window of its own would otherwise read as one nobody had declared.
-A check skipped because a window holds says so where its result is presented.
+The mark sits on the target rather than on each of its checks, a window covering all of them alike, so a check under one is read against the target's mark exactly as a check on an unmonitored target is.
 
 ## Out of scope
 
