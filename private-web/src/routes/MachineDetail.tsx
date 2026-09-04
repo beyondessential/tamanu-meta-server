@@ -238,7 +238,6 @@ export default function MachineDetail() {
 					operators={data.operators}
 					target={{ kind: "machine", id: data.machine.id }}
 					groupId={data.group?.id ?? null}
-					maintained={data.maintained}
 					refreshTick={refreshTick}
 					onSilenced={bumpRefresh}
 				/>

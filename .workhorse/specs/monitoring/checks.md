@@ -124,8 +124,9 @@ Transforms apply in order — fleet catalog, then group, then the target itself 
 The operator interface presents two scoped policies.
 The **silence** is a scoped ceiling of `skipped` on one check, recording who silenced and when.
 A silenced check keeps recording its observed results; its effective result is skipped, so it raises nothing and counts nowhere.
-The **maintenance window** is the same ceiling applied to every check on a target for a bounded time, so that work an operator is doing raises nothing while it runs (see [MNT](maintenance.md)).
-The model admits arbitrary scoped transforms; surfaces beyond these two are deliberately not offered yet.
+The model admits arbitrary scoped transforms; surfaces beyond the silence are deliberately not offered yet.
+
+A maintenance window is not one of these transforms: it holds a target's issues out of incidents for a bounded time and leaves their grading alone, so an operator sees what their work is doing (see [MNT](maintenance.md)).
 
 #### Silences follow the event
 
@@ -267,7 +268,7 @@ Severity reads from colour and subject from shape, so a colour means the same th
 A degraded machine is distinguished from a degraded application, since one affects everything on the box and the other affects one workload.
 
 A maintenance window is declared over a machine or a group and never over an application, so wherever a box is drawn its enclosure carries the window (see [MNT](maintenance.md)).
-Where only applications are drawn, each suspended application carries it instead — that is the window's consequence for that application rather than a window of its own.
+Where only applications are drawn, each covered application carries it instead — that is the window's consequence for that application rather than a window of its own.
 A window's mark is distinguished from the mark for a target nobody is watching, so deliberate, temporary work does not read as neglect.
 
 ## Operator controls

@@ -961,7 +961,6 @@ async fn consolidated_checks_at(
 		database::check_policies::FilingScope {
 			application_id: Some(server.id),
 			group_id: server.group_id,
-			covering_machine: Some(server.machine_id),
 			..Default::default()
 		},
 	)
@@ -971,7 +970,6 @@ async fn consolidated_checks_at(
 		database::check_policies::FilingScope {
 			machine_id: Some(machine.id),
 			group_id: machine.group_id,
-			covering_machine: Some(machine.id),
 			..Default::default()
 		},
 	)

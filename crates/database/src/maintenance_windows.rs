@@ -1,9 +1,10 @@
 //! Operator declarations that a machine or a group is being worked on.
 //!
-//! While a window suspends a target, every check on it grades to skipped
-//! (the transform a silence applies to one check, applied to all of them:
-//! see [`crate::check_policies::ScopedCheckPolicy::chain_for`]), so nothing
-//! on the target opens or joins an incident and nothing notifies.
+//! While a window suspends a target its checks are observed, graded, and
+//! presented exactly as they would be without it. What the window holds back
+//! is what those results feed: no issue on the target opens or joins an
+//! incident, so nothing notifies, and an operator working through a window
+//! watches the check they are fixing come good.
 //!
 //! A window is over the machine rather than over one workload on it. Taking a
 //! box down to patch it stops everything running on it, so a window naming one
@@ -12,9 +13,9 @@
 //!
 //! Suspension outlasts the window itself by [`SETTLE`]. A machine is back
 //! before the sources on it have reported again, and a machine whose every
-//! source is stale is unreachable, so ending suspension the instant the
-//! work finishes would report a server that has just come back as
-//! failed for as long as the work took.
+//! source is stale is unreachable, so ending suspension the instant the work
+//! finishes would page for a server that has just come back, for as long as
+//! the work took.
 
 use std::collections::HashSet;
 
@@ -31,7 +32,7 @@ use crate::server_groups::ServerGroup;
 use crate::slack_outbox::{KIND_MAINTENANCE_DECLARED, KIND_MAINTENANCE_ENDED, SlackOutbox, vars};
 
 /// How long suspension outlasts the window, giving the reporters on a
-/// server time to be heard from before Canopy judges them. The same for
+/// server time to be heard from before Canopy pages for them. The same for
 /// every window.
 pub const SETTLE: SignedDuration = SignedDuration::from_mins(10);
 
