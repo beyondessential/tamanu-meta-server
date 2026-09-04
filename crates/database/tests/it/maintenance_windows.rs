@@ -879,3 +879,66 @@ async fn a_legacy_rank_spelling_falls_under_its_environment_window() {
 	})
 	.await
 }
+
+/// An application with no rank serves no environment, so an environment's
+/// window says nothing about it: only the group's own window covers it.
+// spec: MNT#declaring
+#[tokio::test(flavor = "multi_thread")]
+async fn an_environment_window_does_not_suspend_an_unranked_member() {
+	commons_tests::db::TestDb::run(async |mut conn, _| {
+		let group_id = insert_group(&mut conn).await;
+		let (unranked_box, unranked) = insert_server(&mut conn, Some(group_id)).await;
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			Some(ServerRank::Production),
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare");
+
+		file_check(
+			&mut conn,
+			filing(unranked, "reachability", CheckResult::Failed),
+		)
+		.await
+		.expect("file check");
+		assert_eq!(
+			state_for(&mut conn, unranked, "reachability")
+				.await
+				.effective_result,
+			Some(CheckResult::Failed),
+			"an unranked application is in no environment's window"
+		);
+		assert!(
+			open_incidents(&mut conn, group_id).await >= 1,
+			"and its failure still opens an incident"
+		);
+
+		let (machines, groups) = MaintenanceWindow::suspended_targets(&mut conn)
+			.await
+			.expect("suspended");
+		assert!(!machines.contains(&unranked_box));
+		assert!(!groups.contains(&group_id));
+
+		MaintenanceWindow::declare(
+			&mut conn,
+			Scope::Group(group_id),
+			None,
+			in_an_hour(),
+			None,
+			Some("op"),
+		)
+		.await
+		.expect("declare group-wide");
+		assert!(
+			MaintenanceWindow::suspends(&mut conn, Some(unranked_box), Some(group_id))
+				.await
+				.expect("suspends"),
+			"the group's own window covers every member, ranked or not"
+		);
+	})
+	.await
+}
