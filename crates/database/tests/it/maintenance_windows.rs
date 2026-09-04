@@ -888,6 +888,8 @@ async fn an_environment_window_does_not_suspend_an_unranked_member() {
 	commons_tests::db::TestDb::run(async |mut conn, _| {
 		let group_id = insert_group(&mut conn).await;
 		let (unranked_box, unranked) = insert_server(&mut conn, Some(group_id)).await;
+		let (production_box, production) =
+			insert_ranked_server(&mut conn, group_id, "production").await;
 		MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Group(group_id),
@@ -899,29 +901,37 @@ async fn an_environment_window_does_not_suspend_an_unranked_member() {
 		.await
 		.expect("declare");
 
-		file_check(
-			&mut conn,
-			filing(unranked, "reachability", CheckResult::Failed),
-		)
-		.await
-		.expect("file check");
+		for application in [production, unranked] {
+			file_check(
+				&mut conn,
+				filing(application, "reachability", CheckResult::Failed),
+			)
+			.await
+			.expect("file check");
+		}
 		assert_eq!(
-			state_for(&mut conn, unranked, "reachability")
+			open_incidents(&mut conn, group_id).await,
+			1,
+			"the unranked application's failure opens an incident"
+		);
+		assert_eq!(
+			live_members(&mut conn, group_id).await,
+			1,
+			"and is the only issue in it: production is under the window"
+		);
+
+		assert!(
+			!MaintenanceWindow::suspends(&mut conn, Some(unranked_box), Some(group_id))
 				.await
-				.effective_result,
-			Some(CheckResult::Failed),
+				.expect("suspends"),
 			"an unranked application is in no environment's window"
 		);
 		assert!(
-			open_incidents(&mut conn, group_id).await >= 1,
-			"and its failure still opens an incident"
+			MaintenanceWindow::suspends(&mut conn, Some(production_box), Some(group_id))
+				.await
+				.expect("suspends"),
+			"the environment's own members are"
 		);
-
-		let (machines, groups) = MaintenanceWindow::suspended_targets(&mut conn)
-			.await
-			.expect("suspended");
-		assert!(!machines.contains(&unranked_box));
-		assert!(!groups.contains(&group_id));
 
 		MaintenanceWindow::declare(
 			&mut conn,
