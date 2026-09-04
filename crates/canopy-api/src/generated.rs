@@ -7,7 +7,7 @@ pub const OPENAPI_VERSION: &str = "0.0.0";
 
 /// BLAKE3 digest of that document, so a document that changed without the
 /// version moving with it can be told from one that did not.
-pub const OPENAPI_BLAKE3: &str = "cb0ecab50c317acfb30bfe59179811bb1c908b37b39af89d214fd47aa97d3295";
+pub const OPENAPI_BLAKE3: &str = "671b05ab488c2fab53344aa6c4c0dfd64d88da8b77b10bacc015a49fbd0e9191";
 
 /// Error types.
 pub mod error {
@@ -3943,6 +3943,22 @@ same way a server being upgraded does. `null` for every other intent.*/
 
 /// One method per operation in canopy's OpenAPI document.
 impl<T: crate::CanopyTransport> crate::CanopyClient<T> {
+	/// List publicly-listed central applications.
+	///
+	/// The `/applications` name for [`list`], answering identically.
+	///
+	/// `GET /applications`
+	pub async fn applications(&self) -> crate::Result<::std::vec::Vec<PublicServer>> {
+		self.call_json(::http::Method::GET, "/applications", None::<&()>).await
+	}
+	/// Get the calling identity and the box it is enrolled as.
+	///
+	/// The `/applications` name for [`self_identity`], answering identically.
+	///
+	/// `GET /applications/self`
+	pub async fn applications_self(&self) -> crate::Result<SelfResponse> {
+		self.call_json(::http::Method::GET, "/applications/self", None::<&()>).await
+	}
 	/// Register a downloadable artifact for a version or version range.
 	///
 	/// Requires a device certificate with the releaser role (or admin). The
