@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.0.1](https://github.com/beyondessential/canopy/compare/bes-canopy-api-v0.0.0...bes-canopy-api-v0.0.1) - 2026-09-04
+## [1.0.0](https://github.com/beyondessential/canopy/releases/tag/bes-canopy-api-v1.0.0) - 2026-09-04
 
 ### Fixed
 
