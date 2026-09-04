@@ -43,7 +43,7 @@ A restore consumer authenticates as a single device holding the `backup-restore`
 The role is generic: any future restore consumer uses the same role with its own declared replicas.
 A `backup-restore` device has no implicit server and no implicit group; it is not a member of any group it reads.
 
-The role is read-only against the repo by contract, enforced at the API:
+The role is read-only by contract, enforced at the API:
 
 - A `backup-restore` caller requesting backup (write) credentials is rejected.
   The read-only guarantee is server-enforced, so a compromised consumer cannot pivot to writing or poisoning a repo.
@@ -189,8 +189,7 @@ Canopy verifies the caller has an enabled declaration covering that `(group, typ
 - the repo password.
 
 The credentials permit reading the repo and nothing else; they cannot write, overwrite, or delete.
-A consumer whose intent carries `reporting-schema` additionally obtains, for the same `(group, type)`, a short-lived credential that writes to the group's artefact prefix and reaches nothing in the repo, over which it publishes what it builds (see [RPT](reporting-schemas.md)).
-The repo stays read-only to every consumer: the artefact prefix lies outside it, and a credential for one cannot touch the other.
+A consumer that publishes what it produces does so through Canopy over the connection it already holds, and is issued no storage credential for it (see [RPT](reporting-schemas.md)), so the only object storage a consumer is ever given reach into is a repo it may read.
 Each issuance is audited.
 A consumer may include an optional run correlation identifier with a credential request; Canopy records it on the issuance so the run is tied to its later health report.
 Absence of a covering declaration is a definitive refusal, not a transient error, and a consumer surfaces it as a clear failure for the operator to diagnose by inspecting the declaration in Canopy.

@@ -47,9 +47,9 @@ The entry names the group and the Tamanu version the schema is for, and a centra
 It carries what any replica's entry carries: the snapshot to restore, the repo coordinates, and the intent's parameter values.
 The replica is migrated to the named version before the build reads it, and is not de-identified, since masking alters the configuration a schema follows from.
 
-The builder obtains read credentials for the restore per run as any consumer does, and a short-lived credential that writes to the group's artifact prefix and reaches nothing in the backup repo (see [RST](restore-replicas.md), [ART](../platform/artifacts.md)).
+The builder obtains read credentials for the restore per run as any consumer does, and no storage credential of any kind for what it publishes (see [RST](restore-replicas.md)).
 
-In the run it reports, the builder registers the **reporting schema** as an artifact of the exact version being built for, scoped to the group, of type `reporting-schema` on platform `any`, resting in the group's storage and carrying a digest (see [ART](../platform/artifacts.md)).
+In the run it reports, the builder registers the **reporting schema** as an artifact of the exact version being built for, scoped to the group, of type `reporting-schema` on platform `any`, carrying a digest and the bytes themselves, which Canopy holds and serves (see [ART](../platform/artifacts.md)).
 It may register further artifacts beside the schema for the same version and group, under types of its choosing, which Canopy offers as it offers any artifact.
 The builder is authorised to register artifacts for a group its enabled `reporting-schema` declaration covers and for no other, and is the one device other than a releaser that registers artifacts (see [ART](../platform/artifacts.md)).
 
