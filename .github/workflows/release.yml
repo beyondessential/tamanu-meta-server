@@ -128,23 +128,18 @@ jobs:
           cache: npm
           cache-dependency-path: private-web/package-lock.json
 
-      - name: Permit Workhorse's ignored tracked symlink
-        run: |
-          cp release-plz.toml "$RUNNER_TEMP/release-plz.toml"
-          sed -i '/^\[workspace\]$/a allow_dirty = true' \
-            "$RUNNER_TEMP/release-plz.toml"
-
+      # release-plz reads the tree through a gitignore-aware walk, so a file that
+      # is both tracked and ignored reads to it as deleted: the working copy looks
+      # dirty, and with that waved through the deletion lands in the release
+      # commit. `.gitignore` therefore un-ignores Workhorse's `.claude/skills`
+      # symlink rather than this job papering over it.
       - name: Run release-plz
         id: release-plz
         uses: release-plz/action@v0.5.132
         with:
           command: release-pr
-          config: ${{ runner.temp }}/release-plz.toml
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
-
-      - name: Reset claude skills symlink
-        run: git restore .claude
 
       # release-plz writes the API client's new version into its manifest, but the
       # OpenAPI document is where that version is declared and the manifest is an
