@@ -4,6 +4,7 @@ import {
 	seedIssue,
 	seedServer,
 	seedServerGroup,
+	seedVersion,
 } from "./seed";
 import { expect, test } from "./test-fixtures";
 
@@ -120,6 +121,83 @@ test.describe("an incident names the environment it is on", () => {
 		await expect(
 			cards.filter({ hasText: "Active incident in test" }),
 		).toBeVisible();
+	});
+
+	test("the status card marks the environment in trouble", async ({
+		page,
+		sql,
+	}) => {
+		// group_details computes version-distance against the latest published
+		// version; without one the card 404s.
+		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+		await seedServer(sql, {
+			name: "kamaka-central",
+			type: "tamanu-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		const testBox = await seedServer(sql, {
+			name: "kamaka-test",
+			type: "tamanu-central",
+			groupId: group.id,
+			rank: "test",
+		});
+		const testing = await seedIssue(sql, {
+			serverId: testBox.id,
+			ref: "health/postgres",
+			message: "the test box is down",
+		});
+		await seedIncident(sql, {
+			serverGroupId: group.id,
+			rank: "test",
+			issues: [{ issueId: testing.id }],
+		});
+
+		await page.goto("/status");
+		await expect(page.getByRole("heading", { name: group.name })).toBeVisible();
+		await expect(
+			page.locator('[data-testid="rank-row"][data-rank="test"]'),
+		).toHaveAttribute("data-incident", "loud");
+		await expect(
+			page.locator('[data-testid="rank-row"][data-rank="production"]'),
+		).not.toHaveAttribute("data-incident");
+		// The card still carries the group-wide mark, so it reads as in
+		// trouble from across the grid.
+		await expect(
+			page.getByTestId("incident-segment").filter({ hasText: "incident" }),
+		).toBeVisible();
+	});
+
+	test("a group's own incident marks no environment row", async ({
+		page,
+		sql,
+	}) => {
+		await seedVersion(sql, { major: 1, minor: 0, patch: 0 });
+		const group = await seedServerGroup(sql, { name: "drifting" });
+		await seedServer(sql, {
+			name: "drifting-central",
+			type: "tamanu-central",
+			groupId: group.id,
+			rank: "production",
+		});
+		const backups = await seedIssue(sql, {
+			serverGroupId: group.id,
+			ref: "backup-staleness",
+			message: "the repository is stale",
+		});
+		await seedIncident(sql, {
+			serverGroupId: group.id,
+			issues: [{ issueId: backups.id }],
+		});
+
+		await page.goto("/status");
+		await expect(
+			page.getByTestId("incident-segment").filter({ hasText: "incident" }),
+		).toBeVisible();
+		await expect(
+			page.locator('[data-testid="rank-row"][data-rank="production"]'),
+		).not.toHaveAttribute("data-incident");
 	});
 
 	test("a group's own incident is presented beside its environments'", async ({

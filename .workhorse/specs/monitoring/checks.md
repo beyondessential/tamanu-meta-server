@@ -266,6 +266,11 @@ Reachability was once carried alongside health on the application's mark, from w
 Severity reads from colour and subject from shape, so a colour means the same thing wherever it appears.
 A degraded machine is distinguished from a degraded application, since one affects everything on the box and the other affects one workload.
 
+An incident is on one of a group's environments or on the group itself (see [INC](incidents.md)), so wherever a group's environments are drawn the incident is marked on the one it is on.
+A group's own incident has no environment to mark and is carried by the mark for the group.
+That mark stands for whichever of its environments is in trouble, so a group with an incident anywhere in it reads as such before any environment is read.
+Where several of its environments have an incident at once, the group's mark takes the state of the most serious of them.
+
 A maintenance window is declared over a machine or a group and never over an application, so wherever a box is drawn its enclosure carries the window (see [MNT](maintenance.md)).
 Where only applications are drawn, each suspended application carries it instead — that is the window's consequence for that application rather than a window of its own.
 A window's mark is distinguished from the mark for a target nobody is watching, so deliberate, temporary work does not read as neglect.
