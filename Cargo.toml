@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
 members = [
+	"crates/canopy-api",
+	"crates/canopy-api-codegen",
 	"crates/canopy-mcp",
 	"crates/commons-errors",
 	"crates/commons-servers",
