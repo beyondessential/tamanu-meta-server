@@ -128,11 +128,20 @@ jobs:
           cache: npm
           cache-dependency-path: private-web/package-lock.json
 
-      # workaround dirty workdir issue??
-      - run: |
-          git ls-files -ci --exclude-standard
+      - name: Sanitize working tree
+        run: |
+          echo "Before cleanup:"
+          git status --short --untracked-files=all
+          git ls-files -s .claude/skills || true
+          ls -la .claude || true
+
           git restore .
-          git ls-files -ci --exclude-standard
+          git clean -ffdX
+
+          echo "After cleanup:"
+          git status --short --untracked-files=all
+          git ls-files -s .claude/skills || true
+          ls -la .claude || true
 
       - name: Run release-plz
         id: release-plz
