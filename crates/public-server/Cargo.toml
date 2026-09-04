@@ -1,5 +1,8 @@
 [package]
-publish = false
+# Not published. `bes-internal` is not a configured registry, so cargo refuses to
+# publish this crate, while release-plz still versions and tags it: it takes only
+# `publish = false` or `[]` to mean a package is outside its scope entirely.
+publish = ["bes-internal"]
 name = "public-server"
 version = "1.0.0"
 edition = "2024"

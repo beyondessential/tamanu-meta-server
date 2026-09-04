@@ -159,15 +159,14 @@ jobs:
 
           # Deliberately not keyed on `prs_created`: that reports whether a PR was
           # opened, and a PR release-plz updated rather than opened needs the same
-          # propagation. The PR output being empty is the honest "nothing to do".
-          if [ -z "${PR:-}" ] || [ "$PR" = "null" ]; then
-            echo "no release PR in this run; nothing to propagate"
-            exit 0
-          fi
-
-          version="$(jq -r '[.releases[] | select(.package_name == "bes-canopy-api") | .version][0] // ""' <<<"$PR")"
+          # propagation. An absent PR means there is nothing to propagate — and release-plz
+          # spells that `{}`, not an empty string or null, so `.releases` has to be
+          # defaulted rather than iterated: `jq` errors on a missing key and `-e`
+          # then fails the job. That is what happens on the run after a release,
+          # when there is nothing left to propose.
+          version="$(jq -r '[(.releases // [])[] | select(.package_name == "bes-canopy-api") | .version][0] // ""' <<<"${PR:-null}")"
           if [ -z "$version" ]; then
-            echo "the release PR does not release bes-canopy-api; the document is unaffected"
+            echo "no release PR releasing bes-canopy-api in this run; the document is unaffected"
             exit 0
           fi
 
