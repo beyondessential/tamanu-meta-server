@@ -331,6 +331,21 @@ impl Artifact {
 	) -> Result<()> {
 		use crate::schema::artifacts::dsl::*;
 
+		// An artifact Canopy holds has no location to change. Replacing its
+		// bytes is a registration, which is what carries the digest.
+		// spec: ART#where-an-artifact-rests
+		let scoped: Option<Uuid> = artifacts
+			.filter(id.eq(artifact_id))
+			.select(group_id)
+			.first(db)
+			.await
+			.map_err(AppError::from)?;
+		if scoped.is_some() && new_url.is_some() {
+			return Err(AppError::Conflict(
+				"an artifact Canopy holds has no download URL".into(),
+			));
+		}
+
 		diesel::update(artifacts.filter(id.eq(artifact_id)))
 			.set((
 				artifact_type.eq(new_type),

@@ -568,7 +568,7 @@ function EditArtifactRow({
 				artifact_id: artifact.id,
 				artifact_type: type,
 				platform,
-				download_url: url,
+				download_url: artifact.canopy_holds_bytes ? null : url,
 			});
 			onClose(true);
 		} catch {
@@ -597,14 +597,21 @@ function EditArtifactRow({
 				/>
 			</TableCell>
 			<TableCell>
-				<TextField
-					size="small"
-					fullWidth
-					value={url}
-					onChange={(e) => setUrl(e.target.value)}
-					disabled={action.pending}
-					required
-				/>
+				{artifact.canopy_holds_bytes ? (
+					<Typography variant="body2" color="text.secondary">
+						Held by Canopy for {artifact.group_name ?? "a group"}. Register
+						it again to replace the bytes.
+					</Typography>
+				) : (
+					<TextField
+						size="small"
+						fullWidth
+						value={url ?? ""}
+						onChange={(e) => setUrl(e.target.value)}
+						disabled={action.pending}
+						required
+					/>
+				)}
 			</TableCell>
 			<TableCell align="right">
 				<Stack direction="row" spacing={0.5} sx={{ justifyContent: "flex-end" }}>

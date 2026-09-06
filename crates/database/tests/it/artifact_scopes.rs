@@ -255,3 +255,42 @@ async fn a_range_artifact_replaces_itself() {
 	})
 	.await;
 }
+
+/// An artifact Canopy holds has no location, so an attempt to give it one is
+/// refused rather than reaching the shape constraint as a database error.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_held_artifact_cannot_be_given_a_url() {
+	TestDb::run(|mut conn, _url| async move {
+		let version = seed_version(&mut conn, 2, 60, 0).await;
+		let theirs = seed_group(&mut conn, "kamaka").await;
+
+		let artifact = Artifact::register(
+			&mut conn,
+			held(version, "reporting-schema", theirs, b"schema"),
+		)
+		.await
+		.expect("register");
+
+		let refused = Artifact::update(
+			&mut conn,
+			artifact.id,
+			"reporting-schema".to_owned(),
+			"any".to_owned(),
+			Some("https://example.com/elsewhere.sql".to_owned()),
+		)
+		.await;
+		assert!(refused.is_err(), "a held artifact takes no location");
+
+		// Renaming it without offering a location is still fine.
+		Artifact::update(
+			&mut conn,
+			artifact.id,
+			"reporting-assets".to_owned(),
+			"any".to_owned(),
+			None,
+		)
+		.await
+		.expect("rename is allowed");
+	})
+	.await;
+}
