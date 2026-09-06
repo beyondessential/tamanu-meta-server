@@ -33,6 +33,9 @@ Canopy holds an artifact's bytes for as long as that artifact is registered, and
 Canopy serves the bytes only to a caller the artifact is offered to.
 The boundary is therefore enforced on the read rather than resting on a location being hard to guess.
 
+An artifact Canopy holds and an artifact Canopy records a location for are one thing to whoever is offered it.
+It is offered one artifact per type and platform, and where the bytes rest is not part of what it is offered.
+
 ## What a version offers
 
 Canopy offers a caller one artifact per type and platform, chosen from the artifacts that caller may see: those belonging to no group, and those scoped to the caller's group where that group is known.
@@ -70,5 +73,6 @@ Canopy records which device registered an artifact and, where the registration n
 ## Digests
 
 An artifact carries a digest where whoever registers it records one, and a group-scoped artifact carries one always.
-Canopy verifies the bytes it holds against that digest as it serves them and refuses them on a mismatch, so a corrupted artifact fails the read rather than reaching a server as the artifact it is not.
+Canopy verifies a group-scoped artifact's bytes against its digest as they arrive and refuses the registration on a mismatch, so a corrupted upload is refused while whoever sent it is still there to send it again.
+It verifies them again as it serves them and refuses them on a mismatch, so an artifact corrupted after it was taken in fails the read rather than reaching a server as the artifact it is not.
 An unscoped artifact is read from its location by the caller rather than by Canopy, so its digest is what that caller checks what it fetched against, and an artifact registered without one is fetched unchecked.

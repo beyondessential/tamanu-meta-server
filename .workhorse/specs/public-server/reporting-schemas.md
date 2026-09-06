@@ -13,7 +13,7 @@ Canopy holds zero or one reporting schema per pair of group and Tamanu version, 
 Part of a reporting schema follows from the Tamanu version's database schema and is the same for every group on that version.
 The rest follows from the group's own configuration, which only a database carrying that configuration can supply.
 A schema for a pair is therefore built from a database of that group at that version, and ahead of an upgrade no such database exists, since the group's servers run the version they are leaving.
-Canopy restores a group's backups into replicas and migrates them to a version (see [RST](restore-replicas.md)), so it is where such a database is produced, and it knows the version each group runs and the one it is moving to (see [APP](../servers/products.md), [UPG](../private-server/upgrade-plans.md)), so it is where the pairs are known.
+Canopy restores a group's backups into replicas and migrates them to a version (see [RST](restore-replicas.md)), so it is where such a database is produced, and it knows the version each group runs and the one it is moving to (see [APP](../servers/application-types.md), [UPG](../private-server/upgrade-plans.md)), so it is where the pairs are known.
 
 ## Actors
 
@@ -23,7 +23,7 @@ How the builder produces a schema is the builder's own.
 
 An **operator** declares which groups have a builder, reads which schema each server runs, and asks for the builds the derivation does not produce.
 
-A **Tamanu server's device** fetches the schema Canopy offers its server and applies it (see [DID](device-identity.md)).
+A **Tamanu server's device** fetches the schema Canopy offers its server and applies it (see [DID](machine-identity.md)).
 
 Canopy owns which pairs exist, the replica a build is given, the artifact that results, and offering it to the group's servers.
 
