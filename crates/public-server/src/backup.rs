@@ -286,6 +286,7 @@ pub struct CredentialProcessOutput {
 	pub session_token: String,
 	/// When the credentials expire, as an RFC 3339 / ISO 8601 UTC instant.
 	/// Credentials last at most one hour; request a fresh set per run.
+	#[schema(format = DateTime)]
 	pub expiration: String,
 }
 

@@ -1,0 +1,124 @@
+# release-plz drives two independent release tracks here.
+#
+# `bes-canopy-api` is the published one, and its version is not release-plz's to
+# invent. `.workhorse/specs/platform/api-client-crate.md` has the OpenAPI document
+# declare the version and the crate take it, so `just gen-api` stamps the manifest
+# from the document, and the release workflow propagates release-plz's number back
+# into `crates/public-server/src/openapi.rs` so the document stays the place the
+# version is declared.
+#
+# Canopy itself is the other track: the crates the container runs, versioned
+# together as one number and tagged rather than published. It exists because
+# `bes-canopy-api` depends on no workspace crate, so release-plz does not consider
+# a server-only change to have touched it. Without a track of its own, such a
+# change would produce no release, and with the deploy gated on a release it would
+# never reach production.
+
+[workspace]
+# Opt in per package rather than out, so a crate added later is never released by
+# accident — it just is not part of either track until someone says so.
+release = false
+
+# TEMPORARY, revert once canopy 1.0.0 is out. The canopy crates are unreleased but
+# already sit at their target version, so release-plz has nothing to propose and
+# opens no release PR — with the setting below at its usual `false`, nothing would
+# ever trigger their release. Forcing it on for one push to main tags them and runs
+# the deploy.
+#
+# Release only when a release PR is merged. This is what stops an ordinary merge to
+# main from deploying.
+release_always = true
+
+# Two tracks means two version series, so tags carry the package they belong to
+# rather than a bare version that would collide between them.
+git_tag_name = "{{ package }}-v{{ version }}"
+
+# Defaults off for the whole workspace and on where it is wanted below: one GitHub
+# release and one changelog per crate would be ten of each per canopy release.
+git_release_enable = false
+changelog_update = false
+
+# The published crate. Versioned from the OpenAPI document; the changelog and the
+# GitHub release are what a consumer reads to see what moved.
+[[package]]
+name = "bes-canopy-api"
+release = true
+changelog_update = true
+git_release_enable = true
+
+# Canopy itself. `public-server` carries the track's changelog at the repository
+# root, because it is canopy's changelog rather than one crate's.
+#
+# `git_only` because nothing here is published, so there is no registry to read the
+# current version from: it comes from the tags instead.
+[[package]]
+name = "public-server"
+release = true
+publish = false
+git_only = true
+version_group = "canopy"
+changelog_update = true
+changelog_path = "CHANGELOG.md"
+
+[[package]]
+name = "canopy-mcp"
+release = true
+publish = false
+git_only = true
+version_group = "canopy"
+
+[[package]]
+name = "commons-errors"
+release = true
+publish = false
+git_only = true
+version_group = "canopy"
+
+[[package]]
+name = "commons-servers"
+release = true
+publish = false
+git_only = true
+version_group = "canopy"
+
+[[package]]
+name = "commons-tests"
+release = true
+publish = false
+git_only = true
+version_group = "canopy"
+
+[[package]]
+name = "commons-types"
+release = true
+publish = false
+git_only = true
+version_group = "canopy"
+
+[[package]]
+name = "database"
+release = true
+publish = false
+git_only = true
+version_group = "canopy"
+
+[[package]]
+name = "jobs"
+release = true
+publish = false
+git_only = true
+version_group = "canopy"
+
+[[package]]
+name = "private-server"
+release = true
+publish = false
+git_only = true
+version_group = "canopy"
+
+# Left out of both tracks on purpose:
+#
+# - `canopy-api-codegen` is a build tool. What it emits lands in
+#   `crates/canopy-api`, so a change to it moves the published crate through that
+#   crate's own track and needs no version of its own.
+# - `canopy-utoipa-axum` is a vendored fork carrying upstream's version.

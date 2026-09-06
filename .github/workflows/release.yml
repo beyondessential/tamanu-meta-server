@@ -1,0 +1,194 @@
+name: Release
+
+# release-plz opens a release PR on every push to main, and releases when one of
+# those PRs is merged (`release_always = false` in release-plz.toml). Merging any
+# other PR opens or updates the release PR and does nothing else, so a merge to
+# main no longer reaches production.
+on:
+  push:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_REGISTRIES_CRATES_IO_PROTOCOL: sparse
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-24.04
+    if: ${{ github.repository_owner == 'beyondessential' }}
+    # Publishing to crates.io happens through trusted publishing, which is bound
+    # to this repository, this workflow's filename, and this environment. Renaming
+    # either means editing the trusted publisher on crates.io.
+    environment: release
+    permissions:
+      contents: write # push tags and create releases
+      pull-requests: read # detect that the merged PR was the release PR
+      id-token: write # trusted publishing
+    outputs:
+      # Empty unless canopy's own track released, which is what decides whether
+      # there is anything to deploy.
+      canopy-version: ${{ steps.canopy.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Configure toolchain
+        run: |
+          rustup toolchain install --profile minimal --no-self-update stable
+          rustup default stable
+
+      # No CARGO_REGISTRY_TOKEN: release-plz performs the OIDC exchange with
+      # crates.io itself, so there is no registry credential in this repository.
+      - name: Run release-plz
+        id: release-plz
+        uses: release-plz/action@v0.5.132
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The deploy is tagged with canopy's version, not the API client's: the two
+      # are separate series and it is canopy that gets deployed. A release of the
+      # client alone (a codegen change, say) moves nothing that runs in the
+      # cluster, and leaves this empty so the deploy is skipped.
+      - name: Find canopy's released version
+        id: canopy
+        env:
+          RELEASES: ${{ steps.release-plz.outputs.releases }}
+        run: |
+          version="$(jq -r '[.[] | select(.package_name == "public-server") | .version][0] // ""' <<<"${RELEASES:-[]}")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ -n "$version" ]; then
+            echo "canopy $version released; deploying" >&2
+          else
+            echo "no canopy release in this run; nothing to deploy" >&2
+          fi
+
+  deploy:
+    name: Deploy
+    needs: [release]
+    if: needs.release.outputs.canopy-version != ''
+    # A called workflow's jobs get at most what the calling job holds, so these are
+    # stated here rather than left to whatever this repository's default happens to
+    # be. cd.yml needs the image registry and Tailscale's OIDC.
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    uses: ./.github/workflows/cd.yml
+    with:
+      version: ${{ needs.release.outputs.canopy-version }}
+    # cd.yml reaches the ops repo and the cluster with credentials this repository
+    # already holds.
+    secrets: inherit
+
+  release-pr:
+    name: Release PR
+    runs-on: ubuntu-24.04
+    if: ${{ github.repository_owner == 'beyondessential' }}
+    # After the release job, not beside it: release-plz reads the registry to work
+    # out the current version, so proposing the next one while a publish is still
+    # in flight can compute against a state that is about to change.
+    needs: [release]
+    permissions:
+      contents: write # push to the release PR's branch
+      pull-requests: write # open and update the release PR
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      # The PAT, not GITHUB_TOKEN: a PR opened with the default token starts no
+      # workflow runs, and the release PR is the one place carrying a regenerated
+      # document, client, and manifest that no CI run has yet seen.
+      #
+      # persist-credentials keeps the PAT available to the push below.
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+          token: ${{ secrets.RELEASE_PLZ_TOKEN }}
+
+      - name: Configure toolchain
+        run: |
+          rustup toolchain install --profile minimal --no-self-update stable
+          rustup default stable
+
+      - uses: taiki-e/install-action@v2.86.1
+        with:
+          tool: just
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: private-web/package-lock.json
+
+      # release-plz reads the tree through a gitignore-aware walk, so a file that
+      # is both tracked and ignored reads to it as deleted: the working copy looks
+      # dirty, and with that waved through the deletion lands in the release
+      # commit. `.gitignore` therefore un-ignores Workhorse's `.claude/skills`
+      # symlink rather than this job papering over it.
+      - name: Run release-plz
+        id: release-plz
+        uses: release-plz/action@v0.5.132
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+
+      # release-plz writes the API client's new version into its manifest, but the
+      # OpenAPI document is where that version is declared and the manifest is an
+      # output of generation (see release-plz.toml). So the number is written back
+      # into the document and everything downstream regenerated from it, in the
+      # same PR: without this the release PR would leave the document stale and
+      # `just check-generated` red.
+      #
+      # release-plz has no hook at this point in its run, which is why this is
+      # steps of this job rather than configuration.
+      - name: Propagate the version into the OpenAPI document
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+          PR: ${{ steps.release-plz.outputs.pr }}
+        run: |
+          set -euo pipefail
+
+          # Deliberately not keyed on `prs_created`: that reports whether a PR was
+          # opened, and a PR release-plz updated rather than opened needs the same
+          # propagation. An absent PR means there is nothing to propagate — and release-plz
+          # spells that `{}`, not an empty string or null, so `.releases` has to be
+          # defaulted rather than iterated: `jq` errors on a missing key and `-e`
+          # then fails the job. That is what happens on the run after a release,
+          # when there is nothing left to propose.
+          version="$(jq -r '[(.releases // [])[] | select(.package_name == "bes-canopy-api") | .version][0] // ""' <<<"${PR:-null}")"
+          if [ -z "$version" ]; then
+            echo "no release PR releasing bes-canopy-api in this run; the document is unaffected"
+            exit 0
+          fi
+
+          number="$(jq -r '.number' <<<"$PR")"
+          gh pr checkout "$number"
+
+          # The document declares the version; openapi.json and the client's
+          # manifest follow from regenerating.
+          sed -i "s|^\t\tversion = \".*\",$|\t\tversion = \"$version\",|" \
+            crates/public-server/src/openapi.rs
+          grep -q "version = \"$version\"," crates/public-server/src/openapi.rs
+
+          (cd private-web && npm ci)
+          just gen-openapi
+          just gen-api
+
+          if git diff --quiet; then
+            echo "regenerating changed nothing; the document already declared $version"
+            exit 0
+          fi
+
+          git config user.name "$(git log -1 --format='%an' HEAD)"
+          git config user.email "$(git log -1 --format='%ae' HEAD)"
+          git commit -am "release: declare $version in the OpenAPI document"
+          git push

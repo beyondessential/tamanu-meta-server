@@ -6,6 +6,8 @@
 # See the `// CANOPY FORK:` comments in router.rs. Keep this in sync with
 # upstream when bumping the version.
 [package]
+# A vendored fork: never ours to publish under this name.
+publish = false
 name = "canopy-utoipa-axum"
 description = "Utoipa's axum bindings (canopy fork: panics on schema-name collisions)"
 version = "0.2.0"
