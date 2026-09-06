@@ -92,12 +92,18 @@ async fn each_group_is_offered_its_own_and_never_both() {
 		let theirs = seed_group(&mut conn, "kamaka").await;
 		let other = seed_group(&mut conn, "drifting").await;
 
-		Artifact::register(&mut conn, unscoped(version, "reporting-schema", "https://x/y"))
-			.await
-			.expect("register unscoped");
-		Artifact::register(&mut conn, held(version, "reporting-schema", theirs, b"theirs"))
-			.await
-			.expect("register held");
+		Artifact::register(
+			&mut conn,
+			unscoped(version, "reporting-schema", "https://x/y"),
+		)
+		.await
+		.expect("register unscoped");
+		Artifact::register(
+			&mut conn,
+			held(version, "reporting-schema", theirs, b"theirs"),
+		)
+		.await
+		.expect("register held");
 
 		let offered = Artifact::get_for_version(&mut conn, version, Scope::Group(theirs))
 			.await
