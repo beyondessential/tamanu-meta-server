@@ -321,6 +321,7 @@ async fn a_group_window_suspends_an_unranked_members_incident() {
 		database::maintenance_windows::MaintenanceWindow::declare(
 			&mut conn,
 			Scope::Group(group),
+			None,
 			Timestamp::now() + SignedDuration::from_hours(1),
 			Some("upgrading"),
 			Some("op"),
