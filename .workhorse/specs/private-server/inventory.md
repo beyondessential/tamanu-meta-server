@@ -51,6 +51,7 @@ Nor is a machine: a box is not a thing a run configures, and two workloads shari
 An administrator sets, replaces, and removes a secret variable, and Canopy does not serve one back to a reader of the group or the application.
 It is served only as part of an inventory, which marks which of a member's variables are secret so a caller can keep them out of anything it writes down.
 A copy kept against Canopy being unreachable therefore carries the plain variables alone, and a run needing a secret one offline fails for want of it rather than proceeding on a stale value.
+Canopy's copy is the only one, so a secret variable is escrowed with the backup passphrases (see [BKJ](../jobs/backup.md)) and survives the loss of the secret store.
 
 A credential Canopy issues to a device is provisioned rather than set as a variable (see [DPK](provisioned-credentials.md)).
 
