@@ -368,35 +368,6 @@ impl Artifact {
 		Ok(())
 	}
 
-	/// Get artifacts enriched with metadata about whether they're exact or ranged,
-	/// and whether an exact artifact overrides a ranged one.
-	/// Note: this returns only deduplicated artifacts (as shown in public API)
-	pub async fn get_for_version_with_metadata(
-		db: &mut AsyncPgConnection,
-		target_version_id: Uuid,
-		scope: Scope,
-	) -> Result<Vec<(Self, bool, bool, bool)>> {
-		let version = crate::versions::Version::get_by_id(db, target_version_id).await?;
-		let matching_artifacts = Self::get_for_version(db, target_version_id, scope).await?;
-
-		use crate::schema::artifacts::*;
-		let all_artifacts: Vec<Self> = table.select(Self::as_select()).load(db).await?;
-
-		let semver = version.as_semver();
-
-		let result = matching_artifacts
-			.into_iter()
-			.map(|a| {
-				let is_exact = a.version_id == Some(target_version_id);
-				let has_range_override = Self::overridden_range(&all_artifacts, &a, &semver);
-
-				(a, is_exact, has_range_override, true) // true = used in public API
-			})
-			.collect();
-
-		Ok(result)
-	}
-
 	/// Get artifacts with metadata for a version, including all matches (not deduplicated).
 	/// Also indicates which artifact is actually used in the public API.
 	/// This is for private/admin views where you want to see all configured artifacts
