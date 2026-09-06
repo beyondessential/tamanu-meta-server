@@ -106,10 +106,8 @@ where
 	) -> Result<Option<Self>, Self::Rejection> {
 		match <Self as axum::extract::FromRequestParts<S>>::from_request_parts(parts, state).await {
 			Ok(device) => Ok(Some(device)),
-			// A caller that presented nothing is anonymous. One that presented
-			// something Canopy could not place is anonymous too: refusing here
-			// would turn a stale certificate into a hard failure on a path that
-			// serves everyone.
+			// A credential Canopy cannot place is anonymous, not refused: a
+			// stale certificate must not fail a path that serves everyone.
 			Err(_) => Ok(None),
 		}
 	}
