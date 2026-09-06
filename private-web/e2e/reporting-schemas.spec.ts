@@ -84,7 +84,7 @@ test.describe("reporting schemas", () => {
 
 		await expect(section.getByText("Build asked for")).toBeVisible();
 
-		const rows = await sql.query("SELECT requested_by FROM reporting_schema_requests");
-		expect(rows.rows).toHaveLength(1);
+		const asks = await sql.query("SELECT requested_by FROM reporting_schema_requests");
+		expect(asks).toHaveLength(1);
 	});
 });
