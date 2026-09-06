@@ -290,3 +290,146 @@ pub async fn versions_for_group(db: &mut AsyncPgConnection, group: Uuid) -> Resu
 
 	Ok(versions)
 }
+
+/// File the reporting-schema check for every group that has a builder.
+///
+/// One check per group, on its central application, with each of the group's
+/// pairs as an instance. The version is in the instance detail rather than the
+/// check name, so a release does not spawn a catalog entry of its own.
+// spec: RPT#alerting
+pub async fn sweep(db: &mut AsyncPgConnection) -> Result<()> {
+	use crate::{
+		applications::Application,
+		backup::refs,
+		issues::{
+			CheckInstance, GradedInstance, InstancedCheckFiling, Scope, file_check_instances,
+		},
+		server_groups::ServerGroup,
+	};
+	use commons_types::status::CheckResult;
+
+	for group in ServerGroup::list_all(db).await? {
+		if !group_builds_schemas(db, group.id).await? {
+			continue;
+		}
+
+		let members = Application::list_live_in_group(db, group.id).await?;
+		let Some(central) = ServerGroup::canonical_central(&members).map(|a| a.id) else {
+			continue;
+		};
+
+		let pairs = pairs_for_group(db, group.id).await?;
+		let instances: Vec<CheckInstance> = pairs
+			.iter()
+			.filter(|p| p.state != PairState::Awaiting)
+			.map(|pair| CheckInstance {
+				label: pair.version.clone(),
+				observed: match pair.state {
+					PairState::Built => CheckResult::Passed,
+					_ => CheckResult::Warning,
+				},
+				detail: Some(serde_json::json!({
+					"version": pair.version,
+					"why": pair.error.clone().unwrap_or_else(|| {
+						format!("no schema could be built for {}", pair.version)
+					}),
+				})),
+			})
+			.collect();
+
+		// An empty set is not nothing to do: a check already open has to be
+		// closed, or it stays open forever once its last pair goes away.
+		if instances.is_empty() {
+			let open = crate::backup::staleness::open_server_issue_active(
+				db,
+				central,
+				refs::REPORTING_SCHEMA,
+			)
+			.await?;
+			if open {
+				crate::issues::file_check(
+					db,
+					crate::issues::CheckFiling {
+						source: crate::statuses::CANOPY_SOURCE,
+						scope: Scope::Application(central),
+						device_id: None,
+						check: refs::REPORTING_SCHEMA,
+						observed: CheckResult::Passed,
+						detail: None,
+						message: &format!("No reporting schema is owed for {}", group.name),
+						title: Some("reporting schema not built"),
+						default_ceiling: CheckResult::Warning,
+						default_escalates: false,
+						documentation: Some(refs::REPORTING_SCHEMA_DOC),
+					},
+				)
+				.await?;
+			}
+			continue;
+		}
+
+		let name = group.name.clone();
+		let total = instances.len();
+		file_check_instances(
+			db,
+			InstancedCheckFiling {
+				source: crate::statuses::CANOPY_SOURCE,
+				scope: Scope::Application(central),
+				device_id: None,
+				check: refs::REPORTING_SCHEMA,
+				title: Some("reporting schema not built"),
+				instances,
+				default_ceiling: CheckResult::Warning,
+				default_escalates: false,
+				documentation: Some(refs::REPORTING_SCHEMA_DOC),
+			},
+			&move |degraded: &[GradedInstance]| match degraded {
+				[] => format!("Reporting schemas are built for every version {name} runs"),
+				[one] => format!(
+					"No reporting schema for {name} on {}: {}",
+					one.label,
+					one.detail
+						.as_ref()
+						.and_then(|d| d.get("why"))
+						.and_then(|v| v.as_str())
+						.unwrap_or("the build failed")
+				),
+				many => format!(
+					"No reporting schema for {} of {total} versions {name} runs: {}",
+					many.len(),
+					many.iter()
+						.map(|i| i.label.as_str())
+						.collect::<Vec<_>>()
+						.join(", ")
+				),
+			},
+		)
+		.await?;
+	}
+
+	Ok(())
+}
+
+/// Whether a group has an enabled declaration whose intent builds schemas.
+async fn group_builds_schemas(db: &mut AsyncPgConnection, group: Uuid) -> Result<bool> {
+	use crate::restore::{RestoreConsumerCapability, RestoreReplica};
+	use commons_types::backup::semantics;
+
+	for declaration in RestoreReplica::list_for_group(db, group).await? {
+		if !declaration.enabled {
+			continue;
+		}
+		let advertises =
+			RestoreConsumerCapability::list_for_consumer(db, declaration.consumer_device_id)
+				.await?
+				.into_iter()
+				.any(|d| {
+					d.intent == declaration.intent && d.has_semantic(semantics::REPORTING_SCHEMA)
+				});
+		if advertises {
+			return Ok(true);
+		}
+	}
+
+	Ok(false)
+}
