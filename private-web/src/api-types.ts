@@ -6505,11 +6505,9 @@ export interface components {
              */
             params?: components["schemas"]["BTreeMap"];
             /**
-             * @description Behaviours this intent opts into. Recognised values are `check` (a
-             *     health report is expected for each replica), `once` (a given snapshot
-             *     is only ever dispatched to a replica once, rather than repeatedly
-             *     until overdue), and `url` (a replica's health report includes a link
-             *     to it). Unrecognised values are stored but have no effect.
+             * @description Behaviours this intent opts into; see [`semantics`] for what each one
+             *     grants. Unrecognised values are stored but have no effect, so a consumer
+             *     may advertise ahead of Canopy support.
              */
             semantics?: string[];
         };

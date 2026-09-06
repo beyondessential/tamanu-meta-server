@@ -11754,7 +11754,7 @@
             "items": {
               "type": "string"
             },
-            "description": "Behaviours this intent opts into. Recognised values are `check` (a\nhealth report is expected for each replica), `once` (a given snapshot\nis only ever dispatched to a replica once, rather than repeatedly\nuntil overdue), and `url` (a replica's health report includes a link\nto it). Unrecognised values are stored but have no effect."
+            "description": "Behaviours this intent opts into; see [`semantics`] for what each one\ngrants. Unrecognised values are stored but have no effect, so a consumer\nmay advertise ahead of Canopy support."
           }
         }
       },
