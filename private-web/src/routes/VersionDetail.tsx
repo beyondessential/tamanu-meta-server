@@ -476,7 +476,22 @@ function ArtifactRow({
 				{artifact.platform}
 			</TableCell>
 			<TableCell sx={{ wordBreak: "break-all" }}>
-				{artifact.download_url.startsWith("https://") ? (
+				{artifact.canopy_holds_bytes ? (
+					<Stack spacing={0.25}>
+						<Typography variant="body2">
+							Held by Canopy for {artifact.group_name ?? "a group"}
+						</Typography>
+						{artifact.digest && (
+							<Typography
+								variant="caption"
+								color="text.secondary"
+								sx={{ fontFamily: "monospace" }}
+							>
+								{artifact.digest}
+							</Typography>
+						)}
+					</Stack>
+				) : artifact.download_url?.startsWith("https://") ? (
 					<a
 						href={artifact.download_url}
 						target="_blank"

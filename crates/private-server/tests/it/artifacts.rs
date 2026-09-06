@@ -32,9 +32,10 @@ async fn artifact_multiple_ranges_pattern_specificity_private_endpoint() {
 		.await
 		.unwrap();
 
-		// The private detail page calls the same deduplicated view that the
-		// public API serves: among multiple ranges that match a version, only
-		// the most specific one wins.
+		// The operator view shows every artifact that matches, including the
+		// ones specificity passed over, and marks which one is actually served.
+		// What resolution hides is a fact about how a version was published.
+		// spec: ART#what-a-version-offers
 		let response = private
 			.post("/api/versions/get_version_artifacts")
 			.json(&serde_json::json!({"version": "2.44.5"}))
@@ -43,19 +44,24 @@ async fn artifact_multiple_ranges_pattern_specificity_private_endpoint() {
 		response.assert_status_ok();
 		let artifacts: Vec<ArtifactData> = response.json();
 
-		assert_eq!(
-			artifacts.len(),
-			1,
-			"deduplicated view should keep only the more specific range"
-		);
-		let chosen = &artifacts[0];
+		assert_eq!(artifacts.len(), 2, "both matching ranges are shown");
+
+		let chosen = artifacts
+			.iter()
+			.find(|a| a.is_used_in_public_api)
+			.expect("one of them is the one served");
 		assert_eq!(chosen.id.to_string(), narrower_range_id.to_lowercase());
 		assert_eq!(
 			chosen.version_range_pattern,
 			Some("^2.44.2".to_string()),
-			"the more specific range should be the one returned"
+			"the more specific range is the one served"
 		);
-		assert!(chosen.is_used_in_public_api);
+
+		let passed_over = artifacts
+			.iter()
+			.find(|a| !a.is_used_in_public_api)
+			.expect("the broader range is shown but not served");
+		assert_eq!(passed_over.id.to_string(), broader_range_id.to_lowercase());
 	})
 	.await
 }
