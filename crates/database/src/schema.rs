@@ -613,6 +613,8 @@ diesel::table! {
 		application_id -> Nullable<Uuid>,
 		built -> Bool,
 		error -> Nullable<Text>,
+		artifact_ids -> Array<Nullable<Uuid>>,
+		built_at -> Timestamptz,
 	}
 }
 

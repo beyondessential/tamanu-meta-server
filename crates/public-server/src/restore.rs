@@ -977,6 +977,7 @@ async fn verification(
 					application_id,
 					built: build.built,
 					error: build.error,
+					artifact_ids: build.artifacts,
 				},
 			)
 			.await?;

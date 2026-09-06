@@ -34,6 +34,12 @@ pub struct ReportingSchemaBuild {
 	pub built: bool,
 	/// What went wrong, where it did not.
 	pub error: Option<String>,
+	/// The artifacts this build registered, of which the schema is one.
+	pub artifact_ids: Vec<Option<Uuid>>,
+	/// When the build was recorded, which is what a later artifact change is
+	/// compared against.
+	#[diesel(deserialize_as = jiff_diesel::Timestamp, serialize_as = jiff_diesel::Timestamp)]
+	pub built_at: Timestamp,
 }
 
 #[derive(Debug, Clone)]
@@ -43,6 +49,7 @@ pub struct NewReportingSchemaBuild {
 	pub application_id: Option<Uuid>,
 	pub built: bool,
 	pub error: Option<String>,
+	pub artifact_ids: Vec<Uuid>,
 }
 
 impl ReportingSchemaBuild {
@@ -74,6 +81,11 @@ impl ReportingSchemaBuild {
 				crate::schema::reporting_schema_builds::application_id.eq(build.application_id),
 				crate::schema::reporting_schema_builds::built.eq(build.built),
 				crate::schema::reporting_schema_builds::error.eq(build.error),
+				crate::schema::reporting_schema_builds::artifact_ids.eq(build
+					.artifact_ids
+					.into_iter()
+					.map(Some)
+					.collect::<Vec<_>>()),
 			))
 			.execute(db)
 			.await?;
@@ -121,7 +133,18 @@ impl ReportingSchemaBuild {
 			return Ok(false);
 		}
 
-		Ok(Self::latest_for_pair(db, group, version).await?.is_some())
+		let Some(build) = Self::latest_for_pair(db, group, version).await? else {
+			return Ok(false);
+		};
+
+		// A schema built from a superseded release of the version is not the
+		// schema that version describes, so an artifact registered since the
+		// build puts the pair back on the worklist.
+		let changed = crate::artifacts::Artifact::newest_change_for_version(db, version).await?;
+		Ok(match changed {
+			Some(at) => at <= build.built_at,
+			None => true,
+		})
 	}
 }
 
