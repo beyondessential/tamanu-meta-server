@@ -30,44 +30,35 @@ pub fn routes() -> OpenApiRouter<AppState> {
 		.routes(routes!(remove))
 }
 
-/// The Secret a scope's values live under.
-pub fn secret_name(scope: SecretScope) -> String {
-	match scope {
-		SecretScope::Environment { group_id, rank } => {
-			format!("inventory-vars-{group_id}-{rank}")
-		}
-		SecretScope::Application { application_id } => {
-			format!("inventory-vars-application-{application_id}")
-		}
-	}
-}
-
 /// Which scope a request addresses: an environment, or one application.
-#[derive(Debug, Clone, Deserialize, ToSchema)]
-pub struct ScopeArgs {
-	/// Identifier of the server group, with `rank`, for an environment-scoped
-	/// variable.
-	#[serde(default)]
-	pub server_group_id: Option<Uuid>,
-	/// Rank of the environment, alongside `server_group_id`.
-	#[serde(default)]
-	pub rank: Option<ServerRank>,
-	/// Identifier of the application, for an application-scoped variable.
-	#[serde(default)]
-	pub application_id: Option<Uuid>,
+#[derive(Debug, Clone, Copy, Deserialize, ToSchema)]
+#[serde(untagged)]
+pub enum ScopeArgs {
+	/// An environment: a server group at one rank.
+	Environment {
+		/// Identifier of the server group.
+		server_group_id: Uuid,
+		/// Rank of the environment within it.
+		rank: ServerRank,
+	},
+	/// One application.
+	Application {
+		/// Identifier of the application.
+		application_id: Uuid,
+	},
 }
 
-impl ScopeArgs {
-	fn scope(&self) -> Result<SecretScope> {
-		match (self.server_group_id, self.rank, self.application_id) {
-			(Some(group_id), Some(rank), None) => Ok(SecretScope::Environment { group_id, rank }),
-			(None, None, Some(application_id)) => Ok(SecretScope::Application { application_id }),
-			(Some(_), None, None) => Err(AppError::BadRequest(
-				"an environment-scoped variable needs the rank as well as the group".into(),
-			)),
-			_ => Err(AppError::BadRequest(
-				"give either server_group_id with rank, or application_id".into(),
-			)),
+impl From<ScopeArgs> for SecretScope {
+	fn from(args: ScopeArgs) -> Self {
+		match args {
+			ScopeArgs::Environment {
+				server_group_id,
+				rank,
+			} => Self::Environment {
+				group_id: server_group_id,
+				rank,
+			},
+			ScopeArgs::Application { application_id } => Self::Application { application_id },
 		}
 	}
 }
@@ -142,7 +133,7 @@ pub async fn for_group(
 	request_body = SetArgs,
 	responses(
 		(status = 200, body = InventorySecretVariable),
-		(status = 400, description = "Bad scope, bad name, or a tag of that name", body = ProblemDetailsSchema),
+		(status = 400, description = "Bad name, or a tag of that name", body = ProblemDetailsSchema),
 		(status = 404, description = "No such server group or application", body = ProblemDetailsSchema),
 		(status = 502, description = "The secret store is unavailable", body = ProblemDetailsSchema),
 	),
@@ -152,14 +143,14 @@ pub async fn set(
 	admin: TailscaleAdmin,
 	Json(args): Json<SetArgs>,
 ) -> Result<Json<InventorySecretVariable>> {
-	let scope = args.scope.scope()?;
+	let scope = SecretScope::from(args.scope);
 	check_name(&args.name)?;
 
 	let mut conn = state.db.get().await?;
 	reject_tag_of_that_name(&mut conn, scope, &args.name).await?;
 
 	let kube = secret_store(&state)?;
-	let name = secret_name(scope);
+	let name = scope.secret_name();
 	let mut keys = kube.try_read_keys(&name).await?.unwrap_or_default();
 	keys.insert(args.name.clone(), args.value);
 	kube.put_keys(&name, &keys).await?;
@@ -183,7 +174,6 @@ pub async fn set(
 	request_body = RemoveArgs,
 	responses(
 		(status = 200, description = "Removed", body = ()),
-		(status = 400, description = "Bad scope", body = ProblemDetailsSchema),
 		(status = 404, description = "No variable of that name in that scope", body = ProblemDetailsSchema),
 		(status = 502, description = "The secret store is unavailable", body = ProblemDetailsSchema),
 	),
@@ -193,7 +183,7 @@ pub async fn remove(
 	_admin: TailscaleAdmin,
 	Json(args): Json<RemoveArgs>,
 ) -> Result<Json<()>> {
-	let scope = args.scope.scope()?;
+	let scope = SecretScope::from(args.scope);
 	let mut conn = state.db.get().await?;
 
 	if !InventorySecretVariable::remove(&mut conn, scope, &args.name).await? {
@@ -204,7 +194,7 @@ pub async fn remove(
 	}
 
 	let kube = secret_store(&state)?;
-	let name = secret_name(scope);
+	let name = scope.secret_name();
 	if let Some(mut keys) = kube.try_read_keys(&name).await? {
 		keys.remove(&args.name);
 		if keys.is_empty() {

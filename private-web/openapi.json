@@ -5493,16 +5493,6 @@
               }
             }
           },
-          "400": {
-            "description": "Bad scope",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetailsSchema"
-                }
-              }
-            }
-          },
           "404": {
             "description": "No variable of that name in that scope",
             "content": {
@@ -5561,7 +5551,7 @@
             }
           },
           "400": {
-            "description": "Bad scope, bad name, or a tag of that name",
+            "description": "Bad name, or a tag of that name",
             "content": {
               "application/json": {
                 "schema": {
@@ -16196,37 +16186,42 @@
         }
       },
       "ScopeArgs": {
-        "type": "object",
-        "description": "Which scope a request addresses: an environment, or one application.",
-        "properties": {
-          "application_id": {
-            "type": [
-              "string",
-              "null"
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "An environment: a server group at one rank.",
+            "required": [
+              "server_group_id",
+              "rank"
             ],
-            "format": "uuid",
-            "description": "Identifier of the application, for an application-scoped variable."
-          },
-          "rank": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
+            "properties": {
+              "rank": {
                 "$ref": "#/components/schemas/ServerRank",
-                "description": "Rank of the environment, alongside `server_group_id`."
+                "description": "Rank of the environment within it."
+              },
+              "server_group_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Identifier of the server group."
               }
-            ]
+            }
           },
-          "server_group_id": {
-            "type": [
-              "string",
-              "null"
+          {
+            "type": "object",
+            "description": "One application.",
+            "required": [
+              "application_id"
             ],
-            "format": "uuid",
-            "description": "Identifier of the server group, with `rank`, for an environment-scoped\nvariable."
+            "properties": {
+              "application_id": {
+                "type": "string",
+                "format": "uuid",
+                "description": "Identifier of the application."
+              }
+            }
           }
-        }
+        ],
+        "description": "Which scope a request addresses: an environment, or one application."
       },
       "SecretsForGroupArgs": {
         "type": "object",

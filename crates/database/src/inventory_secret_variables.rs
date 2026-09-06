@@ -40,13 +40,47 @@ pub struct InventorySecretVariable {
 }
 
 /// Where a secret variable is set: one environment, or one application.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(untagged)]
 pub enum SecretScope {
 	Environment { group_id: Uuid, rank: ServerRank },
 	Application { application_id: Uuid },
 }
 
+impl SecretScope {
+	/// The Secret this scope's values live under.
+	pub fn secret_name(self) -> String {
+		match self {
+			Self::Environment { group_id, rank } => format!("inventory-vars-{group_id}-{rank}"),
+			Self::Application { application_id } => {
+				format!("inventory-vars-application-{application_id}")
+			}
+		}
+	}
+}
+
 impl InventorySecretVariable {
+	/// The scope this declaration is at.
+	pub fn scope(&self) -> SecretScope {
+		match (self.server_group_id, self.rank, self.application_id) {
+			(Some(group_id), Some(rank), None) => SecretScope::Environment { group_id, rank },
+			(_, _, Some(application_id)) => SecretScope::Application { application_id },
+			_ => unreachable!("inventory_secret_variables_one_scope admits no other shape"),
+		}
+	}
+
+	/// Every declaration Canopy holds, sorted by name.
+	pub async fn list_all(conn: &mut AsyncPgConnection) -> Result<Vec<Self>> {
+		use crate::schema::inventory_secret_variables::dsl;
+
+		dsl::inventory_secret_variables
+			.order(dsl::name.asc())
+			.select(Self::as_select())
+			.get_results(conn)
+			.await
+			.map_err(AppError::from)
+	}
+
 	/// The names an environment carries, sorted.
 	pub async fn list_for_environment(
 		conn: &mut AsyncPgConnection,

@@ -530,8 +530,10 @@ async fn read_secrets(
 	}
 
 	let kube = super::inventory_secrets::secret_store(state)?;
-	let secret_name = super::inventory_secrets::secret_name(scope);
-	let held = kube.try_read_keys(&secret_name).await?.unwrap_or_default();
+	let held = kube
+		.try_read_keys(&scope.secret_name())
+		.await?
+		.unwrap_or_default();
 
 	let mut out = BTreeMap::new();
 	for var in declared {

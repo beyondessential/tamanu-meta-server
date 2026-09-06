@@ -9288,18 +9288,19 @@ export interface components {
         };
         /** @description Which scope a request addresses: an environment, or one application. */
         ScopeArgs: {
+            /** @description Rank of the environment within it. */
+            rank: components["schemas"]["ServerRank"];
             /**
              * Format: uuid
-             * @description Identifier of the application, for an application-scoped variable.
+             * @description Identifier of the server group.
              */
-            application_id?: string | null;
-            rank?: null | components["schemas"]["ServerRank"];
+            server_group_id: string;
+        } | {
             /**
              * Format: uuid
-             * @description Identifier of the server group, with `rank`, for an environment-scoped
-             *     variable.
+             * @description Identifier of the application.
              */
-            server_group_id?: string | null;
+            application_id: string;
         };
         /** @description Which group's declarations to list. */
         SecretsForGroupArgs: {
@@ -14590,15 +14591,6 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
-            /** @description Bad scope */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ProblemDetailsSchema"];
-                };
-            };
             /** @description No variable of that name in that scope */
             404: {
                 headers: {
@@ -14640,7 +14632,7 @@ export interface operations {
                     "application/json": components["schemas"]["InventorySecretVariable"];
                 };
             };
-            /** @description Bad scope, bad name, or a tag of that name */
+            /** @description Bad name, or a tag of that name */
             400: {
                 headers: {
                     [name: string]: unknown;
