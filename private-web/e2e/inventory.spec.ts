@@ -1,5 +1,10 @@
 import { expect, test } from "./test-fixtures";
-import { resetSeededTables, seedServer, seedServerGroup } from "./seed";
+import {
+	resetSeededTables,
+	seedMaintenanceWindow,
+	seedServer,
+	seedServerGroup,
+} from "./seed";
 
 // The inventory a configuration run would receive, presented on the group
 // page: one panel per environment, the group's variables once, and each
@@ -144,5 +149,36 @@ test.describe("group inventory", () => {
 
 		await production.getByTestId("remove-salt").click();
 		await expect(production.getByTestId("secret-var")).toHaveCount(0);
+	});
+
+	test("says a run would be refused while someone else's maintenance holds", async ({
+		page,
+		sql,
+	}) => {
+		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
+		await seedServer(sql, {
+			name: "kamaka-prod-central",
+			host: "https://central.kamaka.e2e.invalid",
+			type: "tamanu-central",
+			rank: "production",
+			groupId: group.id,
+			tags: {},
+		});
+		await seedMaintenanceWindow(sql, {
+			serverGroupId: group.id,
+			declaredBy: "someone@else.invalid",
+			note: "upgrading to v2.55",
+		});
+
+		await page.goto(`/groups/${group.id}`);
+		const production = page
+			.getByTestId("group-inventory")
+			.getByTestId("environment-production");
+
+		await expect(
+			production.getByText(/under maintenance declared by someone@else\.invalid/),
+		).toBeVisible();
+		await expect(production.getByText(/upgrading to v2\.55/)).toBeVisible();
+		await expect(production.getByTestId("inventory-application")).toHaveCount(0);
 	});
 });

@@ -26,13 +26,20 @@ use database::{
 	applications::Application,
 	inventory_secret_variables::{InventorySecretVariable, SecretScope},
 	machines::Machine,
+	maintenance_windows::MaintenanceWindow,
 	server_groups::ServerGroup,
+	upgrade_plans::UpgradePlan,
 };
+use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use utoipa::ToSchema;
 
 use crate::state::AppState;
+
+/// How long after someone else sets a secret variable a run on the
+/// environment is held off. The same for every environment.
+const SETTINGS_RECENCY: SignedDuration = SignedDuration::from_mins(10);
 
 pub fn routes() -> OpenApiRouter<AppState> {
 	OpenApiRouter::new().routes(routes!(for_group))
@@ -53,6 +60,19 @@ pub struct InventoryArgs {
 	/// group's live applications span more than one rank.
 	#[serde(default)]
 	pub rank: Option<ServerRank>,
+	/// What the run is doing to the environment. Configuring where not named.
+	#[serde(default)]
+	pub intent: RunIntent,
+}
+
+/// What a run intends to do to the environment it reads. An upgrade of a
+/// production environment needs the group's open upgrade plan behind it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum RunIntent {
+	#[default]
+	Configure,
+	Upgrade,
 }
 
 /// One application in an environment.
@@ -182,9 +202,12 @@ async fn resolve_group(
 ///
 /// Refuses a group Canopy does not have, one that has been archived, one
 /// holding several environments with no rank named, a rank with no live
-/// application to configure, and a secret variable whose value cannot be read,
-/// saying which it was: a refusal is a decision to respect, and a caller has to
-/// be able to tell it from Canopy being unreachable.
+/// application to configure, an environment someone else has work under way on
+/// (a maintenance window they declared, or a secret variable they set moments
+/// ago), an upgrade of production with no plan recorded, and a secret variable
+/// whose value cannot be read, saying which it was: a refusal is a decision to
+/// respect, and a caller has to be able to tell it from Canopy being
+/// unreachable.
 ///
 /// Requires admin access, the inventory carrying the secret variables' values.
 #[utoipa::path(
@@ -198,7 +221,7 @@ async fn resolve_group(
 		(status = 200, body = InventoryView),
 		(status = 400, description = "Neither or both of the group arguments", body = ProblemDetailsSchema),
 		(status = 404, description = "No such server group", body = ProblemDetailsSchema),
-		(status = 409, description = "Archived, empty, ambiguously named, or spanning environments", body = ProblemDetailsSchema),
+		(status = 409, description = "Archived, empty, ambiguously named, spanning environments, under someone else's work, or an unplanned upgrade of production", body = ProblemDetailsSchema),
 		(status = 502, description = "A secret variable could not be read", body = ProblemDetailsSchema),
 	),
 )]
@@ -209,6 +232,7 @@ pub async fn for_group(
 ) -> Result<Json<InventoryView>> {
 	let mut conn = state.db.get().await?;
 	let args_rank = args.rank;
+	let intent = args.intent;
 	let group = resolve_group(&mut conn, args).await?;
 
 	if group.deleted_at.is_some() {
@@ -260,15 +284,27 @@ pub async fn for_group(
 		)));
 	}
 
+	if intent == RunIntent::Upgrade
+		&& rank == ServerRank::Production
+		&& UpgradePlan::open_for_group(&mut conn, group.id)
+			.await?
+			.is_none()
+	{
+		return Err(AppError::Conflict(format!(
+			"server group {:?} has no upgrade plan; record one before upgrading production",
+			group.name
+		)));
+	}
+
 	// The identity speaks for the box, so an application's address comes from
 	// the device bound to the machine it runs on.
 	let machine_ids: Vec<Uuid> = applications
 		.iter()
 		.map(|application| application.machine_id)
 		.collect();
-	let devices_by_machine: BTreeMap<Uuid, Uuid> = Machine::get_many(&mut conn, &machine_ids)
-		.await?
-		.into_iter()
+	let machines = Machine::get_many(&mut conn, &machine_ids).await?;
+	let devices_by_machine: BTreeMap<Uuid, Uuid> = machines
+		.iter()
 		.filter_map(|machine| machine.device_id.map(|device| (machine.id, device)))
 		.collect();
 	let device_ids: Vec<Uuid> = devices_by_machine.values().copied().collect();
@@ -278,19 +314,51 @@ pub async fn for_group(
 		.iter()
 		.map(|application| application.id)
 		.collect();
+	let now = Timestamp::now();
+	let login = admin.0.login.as_str();
+
+	let windows = MaintenanceWindow::open_over(&mut conn, group.id, &machine_ids).await?;
+	if let Some(window) = windows.iter().find(|window| {
+		window.holds_at(now)
+			&& window
+				.declared_by
+				.as_deref()
+				.is_some_and(|who| who != login)
+	}) {
+		return Err(AppError::Conflict(under_maintenance(
+			&group, &machines, window,
+		)));
+	}
+
+	let environment_declared =
+		InventorySecretVariable::list_for_environment(&mut conn, group.id, rank).await?;
+	let application_declared =
+		InventorySecretVariable::list_for_applications(&mut conn, &application_ids).await?;
+	if let Some(variable) = environment_declared
+		.iter()
+		.chain(application_declared.iter())
+		.find(|variable| {
+			variable.set_by.as_deref().is_some_and(|who| who != login)
+				&& variable.updated_at > now - SETTINGS_RECENCY
+		}) {
+		return Err(AppError::Conflict(recently_changed(
+			&group,
+			&applications,
+			variable,
+		)));
+	}
+
 	let environment_secrets = read_secrets(
 		&state,
 		SecretScope::Environment {
 			group_id: group.id,
 			rank,
 		},
-		&InventorySecretVariable::list_for_environment(&mut conn, group.id, rank).await?,
+		&environment_declared,
 	)
 	.await?;
 	let mut application_secrets: BTreeMap<Uuid, VarMap> = BTreeMap::new();
-	for (application_id, declared) in by_application(
-		InventorySecretVariable::list_for_applications(&mut conn, &application_ids).await?,
-	) {
+	for (application_id, declared) in by_application(application_declared) {
 		let read = read_secrets(
 			&state,
 			SecretScope::Application { application_id },
@@ -304,6 +372,7 @@ pub async fn for_group(
 		login = %admin.0.login,
 		group = %group.name,
 		%rank,
+		?intent,
 		secrets = environment_secrets.0.len()
 			+ application_secrets.values().map(|vars| vars.0.len()).sum::<usize>(),
 		"inventory served"
@@ -362,6 +431,76 @@ pub async fn for_group(
 		secret_vars: environment_secret_names,
 		hosts,
 	}))
+}
+
+fn under_maintenance(
+	group: &ServerGroup,
+	machines: &[Machine],
+	window: &MaintenanceWindow,
+) -> String {
+	let who = window.declared_by.as_deref().unwrap_or("an operator");
+	let note = window
+		.note
+		.as_deref()
+		.map(|note| format!("; {note}"))
+		.unwrap_or_default();
+	format!(
+		"{} is under maintenance declared by {who} until {}{note}",
+		machine_target(group, machines, window.machine_id),
+		window.expected_end.strftime("%Y-%m-%d %H:%M UTC"),
+	)
+}
+
+fn recently_changed(
+	group: &ServerGroup,
+	applications: &[Application],
+	variable: &InventorySecretVariable,
+) -> String {
+	let who = variable.set_by.as_deref().unwrap_or("an operator");
+	format!(
+		"secret variable {:?} on {} was set by {who} at {}; their change may still be under way",
+		variable.name,
+		application_target(group, applications, variable.application_id),
+		variable.updated_at.strftime("%Y-%m-%d %H:%M UTC"),
+	)
+}
+
+fn machine_target(group: &ServerGroup, machines: &[Machine], machine_id: Option<Uuid>) -> String {
+	match machine_id.and_then(|id| machines.iter().find(|machine| machine.id == id)) {
+		Some(machine) => format!(
+			"machine {:?} in group {:?}",
+			machine
+				.name
+				.clone()
+				.unwrap_or_else(|| machine.id.to_string()),
+			group.name
+		),
+		None => format!("server group {:?}", group.name),
+	}
+}
+
+fn application_target(
+	group: &ServerGroup,
+	applications: &[Application],
+	application_id: Option<Uuid>,
+) -> String {
+	match application_id.and_then(|id| applications.iter().find(|it| it.id == id)) {
+		Some(application) => format!(
+			"application {:?} in group {:?}",
+			application
+				.name
+				.clone()
+				.or_else(|| {
+					application
+						.host
+						.as_ref()
+						.and_then(|host| host.0.host_str().map(str::to_owned))
+				})
+				.unwrap_or_else(|| application.id.to_string()),
+			group.name
+		),
+		None => format!("server group {:?}", group.name),
+	}
 }
 
 fn by_application(

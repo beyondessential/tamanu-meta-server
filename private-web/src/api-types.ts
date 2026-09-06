@@ -2686,9 +2686,12 @@ export interface paths {
          * Serve one environment's inventory.
          * @description Refuses a group Canopy does not have, one that has been archived, one
          *     holding several environments with no rank named, a rank with no live
-         *     application to configure, and a secret variable whose value cannot be read,
-         *     saying which it was: a refusal is a decision to respect, and a caller has to
-         *     be able to tell it from Canopy being unreachable.
+         *     application to configure, an environment someone else has work under way on
+         *     (a maintenance window they declared, or a secret variable they set moments
+         *     ago), an upgrade of production with no plan recorded, and a secret variable
+         *     whose value cannot be read, saying which it was: a refusal is a decision to
+         *     respect, and a caller has to be able to tell it from Canopy being
+         *     unreachable.
          *
          *     Requires admin access, the inventory carrying the secret variables' values.
          */
@@ -6588,6 +6591,8 @@ export interface components {
         InventoryArgs: {
             /** @description Name of the server group, matched exactly. */
             group?: string | null;
+            /** @description What the run is doing to the environment. Configuring where not named. */
+            intent?: components["schemas"]["RunIntent"];
             rank?: null | components["schemas"]["ServerRank"];
             /**
              * Format: uuid
@@ -9144,6 +9149,12 @@ export interface components {
              */
             id: string;
         };
+        /**
+         * @description What a run intends to do to the environment it reads. An upgrade of a
+         *     production environment needs the group's open upgrade plan behind it.
+         * @enum {string}
+         */
+        RunIntent: "configure" | "upgrade";
         /**
          * @description Outcome of a reported backup or restore run.
          * @enum {string}
@@ -14505,7 +14516,7 @@ export interface operations {
                     "application/json": components["schemas"]["ProblemDetailsSchema"];
                 };
             };
-            /** @description Archived, empty, ambiguously named, or spanning environments */
+            /** @description Archived, empty, ambiguously named, spanning environments, under someone else's work, or an unplanned upgrade of production */
             409: {
                 headers: {
                     [name: string]: unknown;
