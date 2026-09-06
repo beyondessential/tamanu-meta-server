@@ -526,7 +526,6 @@ function InfoSection({
 				target={{ kind: "application", id: server.id }}
 				machineId={server.machine_id}
 				groupId={server.group_id}
-				maintained={maintained}
 				refreshTick={refreshTick}
 				onSilenced={onSilenced}
 			/>

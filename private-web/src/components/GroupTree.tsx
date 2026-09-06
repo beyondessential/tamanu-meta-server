@@ -96,6 +96,7 @@ function MachineBlock({
 					health={machine.health}
 					name={machine.name}
 					maintained={machine.maintained}
+					settling={machine.maintenance_settling}
 				>
 					{applications.map((application) => (
 						<Box key={application.id} component="span" sx={dotCellSx}>

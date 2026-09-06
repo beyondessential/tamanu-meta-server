@@ -5752,6 +5752,12 @@ export interface components {
              *     suspended by it rather than carrying one of their own.
              */
             machine_maintained: boolean;
+            /**
+             * @description Whether every window over the box has ended and it is serving out the
+             *     settle period, so a lift reads as taken effect rather than as a window
+             *     that is still holding.
+             */
+            machine_maintenance_settling: boolean;
             /** @description The box's name, where an operator gave it one. */
             machine_name?: string | null;
             /**
@@ -6031,6 +6037,11 @@ export interface components {
             id: string;
             /** @description Whether a maintenance window suspends this box, its own or its group's. */
             maintained: boolean;
+            /**
+             * @description Whether every window over the box has ended and it is serving out the
+             *     settle period.
+             */
+            maintenance_settling: boolean;
             /** @description The operator-assigned name, where it has one. */
             name?: string | null;
             /**

@@ -34,6 +34,9 @@ const STATES = {
 const MAINTAINED_HATCH =
 	"repeating-linear-gradient(45deg, transparent 0 4px, rgba(0, 0, 0, 0.16) 4px 8px)";
 
+const SETTLING_HATCH =
+	"repeating-linear-gradient(45deg, transparent 0 4px, rgba(0, 0, 0, 0.10) 4px 8px)";
+
 function enclosureState(up: ShortStatus, health: HealthState) {
 	if (up === "gone") return STATES.never;
 	if (up === "down") return STATES.down;
@@ -54,6 +57,7 @@ export default function MachineEnclosure({
 	health,
 	name,
 	maintained = false,
+	settling = false,
 	children,
 }: {
 	up: ShortStatus;
@@ -66,6 +70,10 @@ export default function MachineEnclosure({
 	 * by their box rather than each saying so. */
 	// spec: MNT#presentation
 	maintained?: boolean;
+	/** Whether every window over the box has ended and it is serving out the
+	 * settle period, still suspended but no longer being worked on. */
+	// spec: MNT#settling
+	settling?: boolean;
 	/** The dots for the applications on this machine. */
 	children: ReactNode;
 }) {
@@ -73,7 +81,11 @@ export default function MachineEnclosure({
 	const title = [
 		name,
 		enclosureTitle(up, health),
-		maintained ? "under maintenance" : null,
+		maintained
+			? settling
+				? "maintenance just ended, watching resumes shortly"
+				: "under maintenance"
+			: null,
 	]
 		.filter(Boolean)
 		.join(" — ");
@@ -81,6 +93,9 @@ export default function MachineEnclosure({
 		<Tooltip title={title}>
 			<Box
 				component="span"
+				data-maintenance={
+					maintained ? (settling ? "settling" : "holding") : undefined
+				}
 				sx={{
 					display: "inline-flex",
 					alignItems: "center",
@@ -88,7 +103,11 @@ export default function MachineEnclosure({
 					border: 1,
 					borderColor: state.border,
 					bgcolor: state.fill,
-					backgroundImage: maintained ? MAINTAINED_HATCH : undefined,
+					backgroundImage: maintained
+						? settling
+							? SETTLING_HATCH
+							: MAINTAINED_HATCH
+						: undefined,
 					borderRadius: "999px",
 					// px and py must stay the same. In em rather than px, so
 					// the pill scales with the type around it.

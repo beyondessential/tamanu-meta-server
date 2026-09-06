@@ -1201,7 +1201,6 @@ pub async fn file_check_instances(
 					application_id: Some(application_id),
 					group_id,
 					// An application is covered by the window over its box.
-					covering_machine: Some(server.machine_id),
 					..Default::default()
 				},
 			)
@@ -1223,7 +1222,6 @@ pub async fn file_check_instances(
 				FilingScope {
 					machine_id: Some(machine_id),
 					group_id,
-					covering_machine: Some(machine_id),
 					..Default::default()
 				},
 			)

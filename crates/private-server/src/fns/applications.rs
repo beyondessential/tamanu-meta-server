@@ -345,7 +345,7 @@ pub(super) async fn decorate_with_status(
 	// coincide for anything that predates the split, which is why reading the
 	// wrong one still looked right.
 	// spec: MNT#presentation
-	let (maintained_machines, maintained_groups) =
+	let suspended =
 		database::maintenance_windows::MaintenanceWindow::suspended_targets(conn).await?;
 	for info in infos.iter_mut() {
 		let st = by_server.get(&info.id).copied();
@@ -358,12 +358,7 @@ pub(super) async fn decorate_with_status(
 			.max(st.map(|s| s.created_at));
 		info.up = Some(ShortStatus::grade(last_reported_at, down_after));
 		info.health = Some(health.get(&info.id).copied().unwrap_or_default());
-		info.maintained = Some(
-			maintained_machines.contains(&info.machine_id)
-				|| info
-					.group_id
-					.is_some_and(|gid| maintained_groups.contains(&gid)),
-		);
+		info.maintained = Some(suspended.suspends(info.machine_id, info.group_id));
 	}
 	Ok(())
 }

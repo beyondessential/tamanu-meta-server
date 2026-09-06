@@ -1,10 +1,11 @@
 //! Operator declarations that a machine, a group, or one of a group's
 //! environments is being worked on.
 //!
-//! While a window suspends a target, every check on it grades to skipped
-//! (the transform a silence applies to one check, applied to all of them:
-//! see [`crate::check_policies::ScopedCheckPolicy::chain_for`]), so nothing
-//! on the target opens or joins an incident and nothing notifies.
+//! While a window suspends a target its checks are observed, graded, and
+//! presented exactly as they would be without it. What the window holds back
+//! is what those results feed: no issue on the target opens or joins an
+//! incident, so nothing notifies, and an operator working through a window
+//! watches the check they are fixing come good.
 //!
 //! A window is over the machine rather than over one workload on it. Taking a
 //! box down to patch it stops everything running on it, so a window naming one
@@ -13,9 +14,9 @@
 //!
 //! Suspension outlasts the window itself by [`SETTLE`]. A machine is back
 //! before the sources on it have reported again, and a machine whose every
-//! source is stale is unreachable, so ending suspension the instant the
-//! work finishes would report a server that has just come back as
-//! failed for as long as the work took.
+//! source is stale is unreachable, so ending suspension the instant the work
+//! finishes would page for a server that has just come back, for as long as
+//! the work took.
 
 use std::collections::HashSet;
 
@@ -33,9 +34,42 @@ use crate::server_groups::{ServerGroup, environment_name, rank_priority};
 use crate::slack_outbox::{KIND_MAINTENANCE_DECLARED, KIND_MAINTENANCE_ENDED, SlackOutbox, vars};
 
 /// How long suspension outlasts the window, giving the reporters on a
-/// server time to be heard from before Canopy judges them. The same for
+/// server time to be heard from before Canopy pages for them. The same for
 /// every window.
 pub const SETTLE: SignedDuration = SignedDuration::from_mins(10);
+
+/// The targets a window covers right now, and which of them it still holds
+/// rather than settling over.
+#[derive(Clone, Debug, Default)]
+pub struct SuspendedTargets {
+	pub machines: HashSet<Uuid>,
+	pub groups: HashSet<Uuid>,
+	pub holding_machines: HashSet<Uuid>,
+	pub holding_groups: HashSet<Uuid>,
+}
+
+/// A window's targets with the two timestamps that say whether it still holds.
+type SuspensionRow = (
+	Option<Uuid>,
+	Option<Uuid>,
+	Option<ServerRank>,
+	Option<jiff_diesel::Timestamp>,
+	jiff_diesel::Timestamp,
+);
+
+impl SuspendedTargets {
+	/// Is this box suspended, by its own window or its group's?
+	pub fn suspends(&self, machine: Uuid, group: Option<Uuid>) -> bool {
+		self.machines.contains(&machine) || group.is_some_and(|g| self.groups.contains(&g))
+	}
+
+	/// Is every window over this box ended, leaving it in the settle period?
+	pub fn settling(&self, machine: Uuid, group: Option<Uuid>) -> bool {
+		self.suspends(machine, group)
+			&& !self.holding_machines.contains(&machine)
+			&& !group.is_some_and(|g| self.holding_groups.contains(&g))
+	}
+}
 
 /// A declaration that a machine, a group, or one of a group's environments is
 /// being worked on.
@@ -377,13 +411,18 @@ impl MaintenanceWindow {
 	/// its machine's id appearing here rather than its own. An environment's
 	/// window counts as one over each machine serving it, since it covers
 	/// nothing of the group itself.
-	pub async fn suspended_targets(
-		db: &mut AsyncPgConnection,
-	) -> Result<(HashSet<Uuid>, HashSet<Uuid>)> {
+	pub async fn suspended_targets(db: &mut AsyncPgConnection) -> Result<SuspendedTargets> {
 		use crate::schema::maintenance_windows::dsl;
-		let cutoff = jiff_diesel::Timestamp::from(Timestamp::now() - SETTLE);
-		let rows: Vec<(Option<Uuid>, Option<Uuid>, Option<ServerRank>)> = dsl::maintenance_windows
-			.select((dsl::machine_id, dsl::server_group_id, dsl::rank))
+		let now = Timestamp::now();
+		let cutoff = jiff_diesel::Timestamp::from(now - SETTLE);
+		let rows: Vec<SuspensionRow> = dsl::maintenance_windows
+			.select((
+				dsl::machine_id,
+				dsl::server_group_id,
+				dsl::rank,
+				dsl::ended_at,
+				dsl::expected_end,
+			))
 			.filter(
 				dsl::ended_at
 					.is_null()
@@ -393,25 +432,40 @@ impl MaintenanceWindow {
 			.load(db)
 			.await
 			.map_err(AppError::from)?;
-		let mut machines = HashSet::new();
-		let mut groups = HashSet::new();
+		let mut targets = SuspendedTargets::default();
 		let mut environments = HashSet::new();
-		for (machine, group, rank) in rows {
+		let mut holding_environments = HashSet::new();
+		for (machine, group, rank, ended_at, expected_end) in rows {
+			let holds = ended_at.is_none() && now < Timestamp::from(expected_end);
 			match (machine, group, rank) {
 				(Some(id), _, _) => {
-					machines.insert(id);
+					targets.machines.insert(id);
+					if holds {
+						targets.holding_machines.insert(id);
+					}
 				}
 				(None, Some(id), None) => {
-					groups.insert(id);
+					targets.groups.insert(id);
+					if holds {
+						targets.holding_groups.insert(id);
+					}
 				}
 				(None, Some(id), Some(rank)) => {
 					environments.insert((id, rank));
+					if holds {
+						holding_environments.insert((id, rank));
+					}
 				}
 				(None, None, _) => {}
 			}
 		}
-		machines.extend(machines_in_environments(db, &environments).await?);
-		Ok((machines, groups))
+		targets
+			.machines
+			.extend(machines_in_environments(db, &environments).await?);
+		targets
+			.holding_machines
+			.extend(machines_in_environments(db, &holding_environments).await?);
+		Ok(targets)
 	}
 
 	/// End every window whose expected end has passed, stamping the end at
