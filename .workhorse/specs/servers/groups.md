@@ -4,7 +4,7 @@ id: GRP
 
 # Groups
 
-A group is what Canopy holds shared state against: one backup repository with its passphrase and retention, one incident target with its notification channel and delays, the domain names it claims, and one billing identity.
+A group is what Canopy holds shared state against: one backup repository with its passphrase and retention, one notification channel with the delays before an incident on it opens and closes, the domain names it claims, and one billing identity.
 The fleet is grouped so that what is true of several machines at once is watched, alerted, and paid for in one place.
 
 ## Scope
@@ -20,7 +20,7 @@ What makes a group one group is the state Canopy attaches to it rather than anyt
 Against a group Canopy holds:
 
 - one backup configuration and the repository it names, with the group's passphrase, retention, and placement (see [BKO](../private-server/backup.md));
-- one incident target, with the channel its trouble is announced on and the delays before it opens and closes (see [INC](../monitoring/incidents.md));
+- one channel its trouble is announced on and the delays before an incident opens and closes, carrying the incidents of the group and of every environment in it (see [INC](../monitoring/incidents.md));
 - the domain names it claims, and the name-management grants that work from them (see [DOM](domains.md));
 - one billing identity, which every member's effective labels derive from (see [APP](application-types.md), "Billing attribution").
 
@@ -39,6 +39,7 @@ An operator sets it, and an application may carry none.
 A group's applications at one rank are one of its environments, so a site's production central and the facilities syncing to it are that site's production environment (see [FLT](overview.md), "Environments").
 
 An environment is where a group's applications are going next: it holds at most one open upgrade plan, and the closed plans that preceded it, so a group holds as many open plans as it has environments going somewhere (see [UPG](../private-server/upgrade-plans.md)).
+An environment is also what trouble in it is an incident against, announced on its group's channel and delayed by its group's grace (see [INC](../monitoring/incidents.md)).
 A maintenance window covers one environment where an operator declares it over one (see [MNT](../monitoring/maintenance.md)).
 An environment's version is its own central's, derived the way a group's headline version is (see [APP](application-types.md), "Versions").
 Everything else Canopy attaches belongs to the group, and it presents a group's members under their rank.

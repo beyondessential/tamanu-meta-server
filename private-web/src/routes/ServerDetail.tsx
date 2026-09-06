@@ -47,6 +47,7 @@ import TargetName from "../components/TargetName";
 import {
 	applicationName,
 	type ConsolidatedChecks,
+	incidentTargetName,
 	type HealthState,
 	type ServerDetailData,
 	type ServerGroup,
@@ -119,7 +120,7 @@ export default function ServerDetail() {
 			{openIncident && (
 				<ActiveIncidentCard
 					incident={openIncident}
-					groupName={data.group?.name ?? null}
+					targetName={incidentTargetName(openIncident)}
 				/>
 			)}
 			{archived ? (

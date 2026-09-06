@@ -54,6 +54,7 @@ pub struct Environment {
 
 /// How an environment is named where it is read: the group's name, with the
 /// rank after it unless it is production.
+// spec: INC#notification
 pub fn environment_name(group: &str, rank: ServerRank) -> String {
 	match rank {
 		ServerRank::Production => group.to_owned(),

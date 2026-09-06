@@ -32,6 +32,7 @@ import { useIsAdmin } from "../hooks/useIsAdmin";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { humanSeconds } from "../lib/humanDuration";
 import {
+	incidentTargetName,
 	type MachineDetailData,
 	SERVER_RANK_ORDER,
 	type ServerInfo,
@@ -182,7 +183,7 @@ export default function MachineDetail() {
 			{openIncident && (
 				<ActiveIncidentCard
 					incident={openIncident}
-					groupName={data.group?.name ?? null}
+					targetName={incidentTargetName(openIncident)}
 				/>
 			)}
 

@@ -10,7 +10,7 @@ How device reports arrive is the status contract (see [STA](../public-server/sta
 
 ## Targets
 
-Every check is scoped to exactly one target: an application, a machine, a server group, or Canopy as a whole.
+Every check is scoped to exactly one target: an application, a machine, a group, or Canopy as a whole.
 
 Application checks and machine checks both come from sources reporting on them, and from Canopy's own determinations such as reachability.
 What separates them is what the check asserts something about: whether the software is serving, or whether the box it runs on has room on its disk (see [FLT](../servers/overview.md)).
@@ -266,6 +266,11 @@ Reachability was once carried alongside health on the application's mark, from w
 
 Severity reads from colour and subject from shape, so a colour means the same thing wherever it appears.
 A degraded machine is distinguished from a degraded application, since one affects everything on the box and the other affects one workload.
+
+An incident is on one of a group's environments or on the group itself (see [INC](incidents.md)), so wherever a group's environments are drawn the incident is marked on the one it is on.
+A group's own incident has no environment to mark and is carried by the mark for the group.
+That mark stands for whichever of its environments is in trouble, so a group with an incident anywhere in it reads as such before any environment is read.
+Where several of its environments have an incident at once, the group's mark takes the state of the most serious of them.
 
 A maintenance window is declared over a machine or a group and never over an application, so wherever a box is drawn its enclosure carries the window (see [MNT](maintenance.md)).
 Where only applications are drawn, each covered application carries it instead — that is the window's consequence for that application rather than a window of its own.

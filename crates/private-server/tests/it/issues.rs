@@ -1222,3 +1222,62 @@ async fn empty_validation_input_is_a_400_not_a_500() {
 	})
 	.await
 }
+
+/// An incident targets one of a group's environments, and the wire type says
+/// which: a page reading it can tell a site's test trouble from its
+/// production trouble, and an application's page sees its own environment's
+/// incident rather than any of the group's others.
+// spec: INC#targets
+#[tokio::test(flavor = "multi_thread")]
+async fn an_incident_names_the_environment_it_targets() {
+	commons_tests::server::run(async |mut conn, _public, private| {
+		let group_id = Uuid::new_v4();
+		let production_id = Uuid::new_v4();
+		let test_id = Uuid::new_v4();
+		conn.batch_execute(&format!(
+			"INSERT INTO server_groups (id, name) VALUES ('{group_id}', 'kamaka');
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{production_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES \
+				('{production_id}', 'https://prod.example.com', 'tamanu-central', 'production', '{group_id}', '{production_id}');
+			 WITH m AS (INSERT INTO machines (id, group_id) VALUES ('{test_id}', '{group_id}') RETURNING id) INSERT INTO applications (id, host, type, rank, group_id, machine_id) VALUES \
+				('{test_id}', 'https://test.example.com', 'tamanu-central', 'test', '{group_id}', '{test_id}');"
+		))
+		.await
+		.expect("seed");
+
+		let resp = private
+			.post("/api/issues/submit_manual_event")
+			.json(&serde_json::json!({
+				"applicationId": test_id,
+				"ref": "x",
+				"result": "failed",
+				"message": "trouble on the test box",
+			}))
+			.await;
+		resp.assert_status_ok();
+
+		let resp = private
+			.post("/api/incidents/list_for_server")
+			.json(&serde_json::json!({ "server_id": test_id }))
+			.await;
+		resp.assert_status_ok();
+		let items: Vec<serde_json::Value> = resp.json();
+		assert_eq!(items.len(), 1, "the test environment has the incident");
+		assert_eq!(
+			items[0].get("rank").and_then(|v| v.as_str()),
+			Some("test"),
+			"the incident names the environment it is on"
+		);
+
+		let resp = private
+			.post("/api/incidents/list_for_server")
+			.json(&serde_json::json!({ "server_id": production_id }))
+			.await;
+		resp.assert_status_ok();
+		let items: Vec<serde_json::Value> = resp.json();
+		assert!(
+			items.is_empty(),
+			"production is untouched by the test box going down"
+		);
+	})
+	.await;
+}
