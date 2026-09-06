@@ -56,7 +56,9 @@ pub async fn for_group(
 /// Which pair to build.
 #[derive(Deserialize, ToSchema)]
 pub struct BuildPairArgs {
+	/// The group whose schema to build.
 	pub group_id: Uuid,
+	/// The Tamanu version to build it for.
 	pub version_id: Uuid,
 }
 

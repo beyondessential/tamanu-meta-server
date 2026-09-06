@@ -4950,9 +4950,15 @@ export interface components {
         };
         /** @description Which pair to build. */
         BuildPairArgs: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The group whose schema to build.
+             */
             group_id: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The Tamanu version to build it for.
+             */
             version_id: string;
         };
         /**
@@ -7954,13 +7960,21 @@ export interface components {
         Pair: {
             /** @description What went wrong, where a build failed. */
             error?: string | null;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The group this pair is for.
+             */
             group_id: string;
             /** @description Whether an operator has asked for this pair to be built again. */
             requested: boolean;
+            /** @description Whether the pair has a schema, failed to build one, or is awaiting one. */
             state: components["schemas"]["PairState"];
+            /** @description That version as semver, for display. */
             version: string;
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description The Tamanu version this pair is for.
+             */
             version_id: string;
         };
         /**

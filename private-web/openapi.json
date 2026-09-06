@@ -9407,11 +9407,13 @@
         "properties": {
           "group_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "The group whose schema to build."
           },
           "version_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "The Tamanu version to build it for."
           }
         }
       },
@@ -14123,21 +14125,25 @@
           },
           "group_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "The group this pair is for."
           },
           "requested": {
             "type": "boolean",
             "description": "Whether an operator has asked for this pair to be built again."
           },
           "state": {
-            "$ref": "#/components/schemas/PairState"
+            "$ref": "#/components/schemas/PairState",
+            "description": "Whether the pair has a schema, failed to build one, or is awaiting one."
           },
           "version": {
-            "type": "string"
+            "type": "string",
+            "description": "That version as semver, for display."
           },
           "version_id": {
             "type": "string",
-            "format": "uuid"
+            "format": "uuid",
+            "description": "The Tamanu version this pair is for."
           }
         }
       },
@@ -18415,6 +18421,10 @@
     {
       "name": "migration_tests",
       "description": "Where each server stands against the version it would take next."
+    },
+    {
+      "name": "reporting_schemas",
+      "description": "Which of a group's versions have a reporting schema built for them."
     },
     {
       "name": "restore_replicas",

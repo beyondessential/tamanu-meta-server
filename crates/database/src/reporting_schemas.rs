@@ -212,9 +212,13 @@ pub enum PairState {
 /// One pair of group and Tamanu version, and where it stands.
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
 pub struct Pair {
+	/// The group this pair is for.
 	pub group_id: Uuid,
+	/// The Tamanu version this pair is for.
 	pub version_id: Uuid,
+	/// That version as semver, for display.
 	pub version: String,
+	/// Whether the pair has a schema, failed to build one, or is awaiting one.
 	pub state: PairState,
 	/// What went wrong, where a build failed.
 	pub error: Option<String>,
