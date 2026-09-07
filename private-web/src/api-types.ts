@@ -5763,6 +5763,13 @@ export interface components {
             /** @description The box's name, where an operator gave it one. */
             machine_name?: string | null;
             /**
+             * @description Whether the window covering this box was declared over the box itself,
+             *     as against one it falls under through its environment or its group. A
+             *     reader marks at the grain the operator declared at, so an environment's
+             *     window is not drawn as every box in it having its own.
+             */
+            machine_own_window: boolean;
+            /**
              * @description The box's own reachability, which is not this application's: a machine
              *     that has gone quiet takes everything on it with it, and one that is fine
              *     says nothing about whether the software on it is.
@@ -6046,6 +6053,11 @@ export interface components {
             maintenance_settling: boolean;
             /** @description The operator-assigned name, where it has one. */
             name?: string | null;
+            /**
+             * @description Whether the window covering this box was declared over the box itself,
+             *     as against one reaching it through its environment or its group.
+             */
+            own_window: boolean;
             /**
              * @description The platform the box reports, where it reports one. The one machine
              *     figure the tree shows: it is what distinguishes two otherwise
@@ -9374,12 +9386,29 @@ export interface components {
              * @description Unique identifier of the group.
              */
             id: string;
+            /**
+             * @description Whether a window is declared over the group itself, covering every box
+             *     in it whatever its rank.
+             */
+            maintained: boolean;
+            /**
+             * @description The group's environments under a window of their own, so a reader marks
+             *     the environment's row rather than each box in it.
+             */
+            maintained_ranks: components["schemas"]["ServerRank"][];
+            /**
+             * @description Whether the group's own window has ended and it is serving out the
+             *     settle period.
+             */
+            maintenance_settling: boolean;
             /** @description Status of each server belonging to this group. */
             members: components["schemas"]["FacilityServerStatus"][];
             /** @description Name of the group. */
             name: string;
             /** @description Free-text notes about the group. */
             notes: string;
+            /** @description Of those, the ones serving out the settle period. */
+            settling_ranks: components["schemas"]["ServerRank"][];
             version?: null | components["schemas"]["VersionStr"];
             /**
              * Format: int64

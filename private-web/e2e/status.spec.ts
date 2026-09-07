@@ -245,20 +245,27 @@ test.describe("status page", () => {
 			.getByTestId("dot-strip");
 		await expect(strip).toBeVisible();
 
-		// The wash is the pill's background, so assert on computed style: at
-		// this size nothing else carries the distinction. Both boxes are
-		// production and sort by their applications' names, so the worked-on
-		// box is first.
-		const fills = await strip
+		// A window over the box itself fades and stripes the icon. Both boxes
+		// are production and sort by their applications' names, so the
+		// worked-on box is first.
+		const pills = await strip
 			.locator("[data-testid='rank-row'] > span")
 			.evaluateAll((els) =>
-				els.map((el) => getComputedStyle(el).backgroundColor),
+				els.map((el) => {
+					const style = getComputedStyle(el);
+					return { stripes: style.backgroundImage, opacity: style.opacity };
+				}),
 			);
-		expect(fills).toHaveLength(2);
-		// An unmarked pill is not transparent, it carries its own state's wash,
-		// so the mark is what differs between the two rather than what is
-		// present on one.
-		expect(fills[0]).not.toBe(fills[1]);
+		expect(pills).toHaveLength(2);
+		expect(pills[0]!.stripes).not.toBe("none");
+		expect(Number(pills[0]!.opacity)).toBeLessThan(1);
+		expect(pills[1]!.stripes).toBe("none");
+		expect(pills[1]!.opacity).toBe("1");
+		// The row is not marked: the window is the box's, not its
+		// environment's.
+		await expect(
+			strip.locator("[data-testid='rank-row']"),
+		).not.toHaveAttribute("data-maintenance");
 		void untouched;
 
 		// And the pill says why.
@@ -321,37 +328,27 @@ test.describe("status page", () => {
 			}),
 		).toBeVisible();
 
-		// Both stages share the wash, since both are one state, and settling is
-		// that wash struck through. Identical stripes would leave the attribute
-		// correct and the page unreadable.
+		// Both stages stripe the icon, and the strength says which. Identical
+		// stripes would leave the attribute correct and the page unreadable.
 		const marks = await pills.evaluateAll((els) =>
-			els.map((el) => {
-				const style = getComputedStyle(el);
-				return { wash: style.backgroundColor, stripes: style.backgroundImage };
-			}),
+			els.map((el) => getComputedStyle(el).backgroundImage),
 		);
 		const [holdingMark, settlingMark] = marks;
-		expect(holdingMark!.wash).not.toBe("rgba(0, 0, 0, 0)");
+		expect(holdingMark).not.toBe("none");
+		expect(settlingMark).not.toBe("none");
 		expect(
-			settlingMark!.wash,
-			"one window, one wash, whichever stage it is at",
-		).toBe(holdingMark!.wash);
-		expect(holdingMark!.stripes).toBe("none");
-		expect(
-			settlingMark!.stripes,
-			"settling is the wash struck through",
-		).not.toBe("none");
+			settlingMark,
+			"settling has to differ from being worked on",
+		).not.toBe(holdingMark);
 
 
 		// The legend names both, and its swatches are the same component, so a
 		// reader can match what they are looking at to a name.
 		await expect(
-			page.getByText("Blue: under maintenance (being worked on)"),
+			page.getByText(/Under maintenance, raising nothing/),
 		).toBeVisible();
 		await expect(
-			page.getByText(
-				"Blue striped: maintenance just ended, watching resumes shortly",
-			),
+			page.getByText(/a machine's icon, an environment's row, or a group's card/),
 		).toBeVisible();
 		const swatches = await page
 			.locator("[data-maintenance]")
@@ -363,8 +360,8 @@ test.describe("status page", () => {
 			);
 		const legendHolding = swatches.find(([state]) => state === "holding");
 		const legendSettling = swatches.find(([state]) => state === "settling");
-		expect(legendHolding?.[1]).toBe(holdingMark!.stripes);
-		expect(legendSettling?.[1]).toBe(settlingMark!.stripes);
+		expect(legendHolding?.[1]).toBe(holdingMark);
+		expect(legendSettling?.[1]).toBe(settlingMark);
 	});
 
 	/// A group's window covers every box in it, so every pill on the card is
@@ -391,13 +388,20 @@ test.describe("status page", () => {
 			.getByTestId("dot-strip");
 		await expect(strip).toBeVisible();
 
-		const fills = await strip
+		// The window is the group's, so the card carries it and the boxes stay
+		// plain: marking every pill would say each box was declared over.
+		// spec: MNT#presentation
+		await expect(page.getByTestId("group-card")).toHaveAttribute(
+			"data-maintenance",
+			"holding",
+		);
+		const pills = await strip
 			.locator("[data-testid='rank-row'] > span")
 			.evaluateAll((els) =>
-				els.map((el) => getComputedStyle(el).backgroundColor),
+				els.map((el) => getComputedStyle(el).backgroundImage),
 			);
-		expect(fills).toHaveLength(2);
-		expect(fills.every((f) => f !== "rgba(0, 0, 0, 0)")).toBe(true);
+		expect(pills).toHaveLength(2);
+		expect(pills.every((f) => f === "none")).toBe(true);
 	});
 
 	/// An environment's window covers the machines serving that rank and no
@@ -425,14 +429,17 @@ test.describe("status page", () => {
 		await page.goto("/status");
 
 		const card = page.locator(`a[href="/fleet/groups/${group.id}"]`).first();
+		// The window is the environment's, so its row carries it rather than
+		// each box in it.
+		await expect(
+			card.locator("[data-testid='rank-row'][data-rank='clone']"),
+		).toHaveAttribute("data-maintenance", "settling");
+		await expect(
+			card.locator("[data-testid='rank-row'][data-rank='production']"),
+		).not.toHaveAttribute("data-maintenance");
 		await expect(
 			card
 				.locator("[data-testid='rank-row'][data-rank='clone'] > span")
-				.first(),
-		).toHaveAttribute("data-maintenance", "settling");
-		await expect(
-			card
-				.locator("[data-testid='rank-row'][data-rank='production'] > span")
 				.first(),
 		).not.toHaveAttribute("data-maintenance");
 	});

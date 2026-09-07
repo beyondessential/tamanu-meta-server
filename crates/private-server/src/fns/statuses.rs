@@ -327,6 +327,7 @@ pub async fn group_details(
 					.unwrap_or_default(),
 				machine_maintained: suspended.suspends(s.machine_id, s.group_id),
 				machine_maintenance_settling: suspended.settling(s.machine_id, s.group_id),
+				machine_own_window: suspended.machine_window(s.machine_id),
 			}
 		})
 		.collect();
@@ -336,6 +337,21 @@ pub async fn group_details(
 	)
 	.await?;
 
+	// The environments of this group under a window of their own, so the card
+	// marks the rank's row rather than each box in it.
+	// spec: MNT#presentation
+	let ranks: Vec<ServerRank> = members.iter().filter_map(|m| m.rank).collect();
+	let maintained_ranks: Vec<ServerRank> = ranks
+		.iter()
+		.copied()
+		.filter(|rank| suspended.environment_window(group.id, *rank))
+		.collect();
+	let settling_ranks: Vec<ServerRank> = maintained_ranks
+		.iter()
+		.copied()
+		.filter(|rank| suspended.environment_window_settling(group.id, *rank))
+		.collect();
+
 	Ok(Json(ServerGroupCard {
 		id: group.id,
 		name: group.name,
@@ -344,6 +360,10 @@ pub async fn group_details(
 		version_distance,
 		members,
 		all_members_quiet,
+		maintained_ranks,
+		settling_ranks,
+		maintained: suspended.group_window(group.id),
+		maintenance_settling: suspended.group_window_settling(group.id),
 	}))
 }
 

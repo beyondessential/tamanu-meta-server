@@ -18,7 +18,7 @@
 //! finishes would page for a server that has just come back, for as long as
 //! the work took.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use commons_errors::{AppError, Result};
 use commons_types::server::rank::ServerRank;
@@ -38,14 +38,25 @@ use crate::slack_outbox::{KIND_MAINTENANCE_DECLARED, KIND_MAINTENANCE_ENDED, Sla
 /// every window.
 pub const SETTLE: SignedDuration = SignedDuration::from_mins(10);
 
-/// The targets a window covers right now, and which of them it still holds
-/// rather than settling over.
+/// The targets a window covers right now, which of them it still holds rather
+/// than settling over, and at which grain each window was declared.
+///
+/// The grain is kept rather than flattened to the machines a window reaches: a
+/// reader who cannot tell an environment's window from every box in that
+/// environment having its own has lost the fact the operator declared.
+// spec: MNT#presentation
 #[derive(Clone, Debug, Default)]
 pub struct SuspendedTargets {
 	pub machines: HashSet<Uuid>,
+	pub environments: HashSet<(Uuid, ServerRank)>,
 	pub groups: HashSet<Uuid>,
 	pub holding_machines: HashSet<Uuid>,
+	pub holding_environments: HashSet<(Uuid, ServerRank)>,
 	pub holding_groups: HashSet<Uuid>,
+	/// The environment each machine serves, for the boxes an environment
+	/// window reaches, so a caller holding a machine id can answer without
+	/// going back to the database.
+	covered_by_environment: HashMap<Uuid, (Uuid, ServerRank)>,
 }
 
 /// A window's targets with the two timestamps that say whether it still holds.
@@ -58,16 +69,57 @@ type SuspensionRow = (
 );
 
 impl SuspendedTargets {
-	/// Is this box suspended, by its own window or its group's?
+	/// Is this box suspended at all, by its own window, its environment's or
+	/// its group's?
 	pub fn suspends(&self, machine: Uuid, group: Option<Uuid>) -> bool {
-		self.machines.contains(&machine) || group.is_some_and(|g| self.groups.contains(&g))
+		self.machines.contains(&machine)
+			|| self.in_suspended_environment(machine)
+			|| group.is_some_and(|g| self.groups.contains(&g))
 	}
 
 	/// Is every window over this box ended, leaving it in the settle period?
 	pub fn settling(&self, machine: Uuid, group: Option<Uuid>) -> bool {
 		self.suspends(machine, group)
 			&& !self.holding_machines.contains(&machine)
+			&& !self.in_holding_environment(machine)
 			&& !group.is_some_and(|g| self.holding_groups.contains(&g))
+	}
+
+	/// A window declared over this box in particular, as against one it falls
+	/// under through its environment or its group.
+	pub fn machine_window(&self, machine: Uuid) -> bool {
+		self.machines.contains(&machine)
+	}
+
+	/// A window declared over one of a group's environments.
+	pub fn environment_window(&self, group: Uuid, rank: ServerRank) -> bool {
+		self.environments.contains(&(group, rank))
+	}
+
+	pub fn environment_window_settling(&self, group: Uuid, rank: ServerRank) -> bool {
+		self.environments.contains(&(group, rank))
+			&& !self.holding_environments.contains(&(group, rank))
+	}
+
+	/// A window declared over the group itself.
+	pub fn group_window(&self, group: Uuid) -> bool {
+		self.groups.contains(&group)
+	}
+
+	pub fn group_window_settling(&self, group: Uuid) -> bool {
+		self.groups.contains(&group) && !self.holding_groups.contains(&group)
+	}
+
+	fn in_suspended_environment(&self, machine: Uuid) -> bool {
+		self.covered_by_environment
+			.get(&machine)
+			.is_some_and(|env| self.environments.contains(env))
+	}
+
+	fn in_holding_environment(&self, machine: Uuid) -> bool {
+		self.covered_by_environment
+			.get(&machine)
+			.is_some_and(|env| self.holding_environments.contains(env))
 	}
 }
 
@@ -433,8 +485,6 @@ impl MaintenanceWindow {
 			.await
 			.map_err(AppError::from)?;
 		let mut targets = SuspendedTargets::default();
-		let mut environments = HashSet::new();
-		let mut holding_environments = HashSet::new();
 		for (machine, group, rank, ended_at, expected_end) in rows {
 			let holds = ended_at.is_none() && now < Timestamp::from(expected_end);
 			match (machine, group, rank) {
@@ -451,20 +501,15 @@ impl MaintenanceWindow {
 					}
 				}
 				(None, Some(id), Some(rank)) => {
-					environments.insert((id, rank));
+					targets.environments.insert((id, rank));
 					if holds {
-						holding_environments.insert((id, rank));
+						targets.holding_environments.insert((id, rank));
 					}
 				}
 				(None, None, _) => {}
 			}
 		}
-		targets
-			.machines
-			.extend(machines_in_environments(db, &environments).await?);
-		targets
-			.holding_machines
-			.extend(machines_in_environments(db, &holding_environments).await?);
+		targets.covered_by_environment = environment_of_machines(db, &targets.environments).await?;
 		Ok(targets)
 	}
 
@@ -583,18 +628,18 @@ fn fleet_columns(scope: Scope) -> Option<(Option<Uuid>, Option<Uuid>)> {
 	}
 }
 
-/// The machines serving any of these environments, each machine taking the
-/// rank of the highest-ranked application on it.
+/// The environment each machine serves, for the machines in the groups these
+/// environments belong to. A box serves the environment of the highest-ranked
+/// application on it, the same rule its stage is derived from.
 // spec: MNT#declaring
-async fn machines_in_environments(
+async fn environment_of_machines(
 	db: &mut AsyncPgConnection,
 	environments: &HashSet<(Uuid, ServerRank)>,
-) -> Result<HashSet<Uuid>> {
+) -> Result<HashMap<Uuid, (Uuid, ServerRank)>> {
 	use crate::schema::applications::dsl;
-	use std::collections::HashMap;
 
 	if environments.is_empty() {
-		return Ok(HashSet::new());
+		return Ok(HashMap::new());
 	}
 	let group_ids: Vec<Uuid> = environments.iter().map(|(group, _)| *group).collect();
 	let members: Vec<(Uuid, Option<Uuid>, Option<ServerRank>)> = dsl::applications
@@ -619,9 +664,5 @@ async fn machines_in_environments(
 			})
 			.or_insert((group, rank));
 	}
-	Ok(serving
-		.into_iter()
-		.filter(|(_, pair)| environments.contains(pair))
-		.map(|(machine, _)| machine)
-		.collect())
+	Ok(serving)
 }

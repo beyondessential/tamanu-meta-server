@@ -1,7 +1,7 @@
-import { Chip, Stack, Typography } from "@mui/material";
+import { Box, Chip, Stack, Typography } from "@mui/material";
 import PersonIcon from "@mui/icons-material/Person";
 import type { HealthState, ShortStatus } from "../types";
-import MachineEnclosure from "./MachineEnclosure";
+import MachineEnclosure, { ownWindowStripes } from "./MachineEnclosure";
 import StatusDot from "./StatusDot";
 import VersionSquare from "./VersionSquare";
 
@@ -39,8 +39,6 @@ const DOT_ENTRIES: Array<{
 const MACHINE_ENTRIES: Array<{
 	up: ShortStatus;
 	health: HealthState;
-	maintained?: boolean;
-	settling?: boolean;
 	dots?: number;
 	label: string;
 }> = [
@@ -51,19 +49,6 @@ const MACHINE_ENTRIES: Array<{
 		health: "healthy",
 		dots: 2,
 		label: "Machine down (everything on it with it)",
-	},
-	{
-		up: "up",
-		health: "healthy",
-		maintained: true,
-		label: "Blue: under maintenance (being worked on)",
-	},
-	{
-		up: "up",
-		health: "healthy",
-		maintained: true,
-		settling: true,
-		label: "Blue striped: maintenance just ended, watching resumes shortly",
 	},
 	{
 		up: "up",
@@ -138,30 +123,49 @@ export function OperatorLegend() {
 export function HealthLegend() {
 	return (
 		<Stack direction="row" spacing={2} useFlexGap sx={{ flexWrap: "wrap" }}>
-			{MACHINE_ENTRIES.map(
-				({ up, health, maintained, settling, dots = 1, label }) => (
-					<Stack
-						key={label}
-						direction="row"
-						spacing={0.5}
-						sx={{ alignItems: "center" }}
-					>
-						<MachineEnclosure
-							up={up}
-							health={health}
-							maintained={maintained}
-							settling={settling}
-						>
-							{Array.from({ length: dots }, (_, i) => (
-								<StatusDot key={i} up="up" health="healthy" />
-							))}
-						</MachineEnclosure>
-						<Typography variant="body2" color="text.secondary">
-							{label}
-						</Typography>
-					</Stack>
-				),
-			)}
+			{MACHINE_ENTRIES.map(({ up, health, dots = 1, label }) => (
+				<Stack
+					key={label}
+					direction="row"
+					spacing={0.5}
+					sx={{ alignItems: "center" }}
+				>
+					<MachineEnclosure up={up} health={health}>
+						{Array.from({ length: dots }, (_, i) => (
+							<StatusDot key={i} up="up" health="healthy" />
+						))}
+					</MachineEnclosure>
+					<Typography variant="body2" color="text.secondary">
+						{label}
+					</Typography>
+				</Stack>
+			))}
+		</Stack>
+	);
+}
+
+/// Maintenance is one mark wherever it lands, so it gets one swatch and a
+/// sentence rather than an entry per state and per grain.
+/// spec: MNT#presentation
+export function MaintenanceLegend() {
+	return (
+		<Stack direction="row" spacing={0.75} sx={{ alignItems: "flex-start" }}>
+			<Box
+				sx={{
+					flex: "none",
+					width: "1.25em",
+					height: "1.25em",
+					mt: "0.1em",
+					borderRadius: "2px",
+					border: 1,
+					borderColor: "divider",
+					backgroundImage: (theme) => ownWindowStripes(theme, false),
+				}}
+			/>
+			<Typography variant="body2" color="text.secondary">
+				Under maintenance, raising nothing. Lighter once lifted. On a machine's
+				icon, an environment's row, or a group's card.
+			</Typography>
 		</Stack>
 	);
 }

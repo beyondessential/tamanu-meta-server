@@ -26,38 +26,17 @@ const STATES = {
 	never: { border: "action.disabled", fill: "action.disabledBackground" },
 } as const;
 
-// A window hatches the pill's wash rather than cutting through it the way a
-// dot's does. A mask on the enclosure would clip the dots inside it as well,
-// which would say something about the applications, and a window is the box's.
-// The hatch runs the same way as the dot's maintenance cut, so the two read as
-// one idea at either grain.
-//
-// A window washes the pill in the info hue, which is what marks maintenance
-// everywhere else in the interface and is a colour no machine state uses: the
-// ring's grey, orange and red are spoken for, so a blue wash cannot be read as
-// a health verdict. The border still says how the box is, so a degraded box
-// under a window shows both.
-//
-// A wash rather than a hatch because the ring is a few pixels wide: a pattern
-// needs room to resolve into stripes, while a fill reads at any size. The
-// settling state is the same hue washed back, and two strengths of a solid
-// colour are separable where two strengths of a hatch are not.
+// The mark belongs at the grain the operator declared at, so only a window over
+// the box itself stripes its icon. The ink is the text colour rather than a
+// fixed grey, so the stripes hold on a dark card, and they carry their own
+// phase so no background offset exposes the gradient's tile as a seam.
 // spec: MNT#presentation
-// One wash for both states, since both are the same idea, and light enough
-// that the dot inside stays the loudest thing in the pill: blue and green are
-// adjacent hues, so anything deep enough to separate by hue swallows the dot
-// it is meant to be context for.
-function maintenanceWash(theme: Theme): string {
-	return alpha(theme.palette.info.light, 0.45);
+export function ownWindowStripes(theme: Theme, settling: boolean): string {
+	// The settle period drops much further than the window itself: nobody is in
+	// there any more, and the mark is only saying watching has yet to resume.
+	const ink = alpha(theme.palette.text.primary, settling ? 0.16 : 0.55);
+	return `repeating-linear-gradient(45deg, ${ink} 0 1px, transparent 1px 3px, ${ink} 3px 4px)`;
 }
-
-// Settling is that wash struck through in white, so the pair reads as one
-// state at two stages rather than as two colours. White because it is the one
-// ink that lifts off the wash without borrowing a hue that means something
-// else, and the stripes carry their own phase so no background offset exposes
-// the gradient's tile as a seam.
-const SETTLING_STRIPES =
-	"repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.9) 0 1px, transparent 1px 3px, rgba(255, 255, 255, 0.9) 3px 4px)";
 
 function enclosureState(up: ShortStatus, health: HealthState) {
 	if (up === "gone") return STATES.never;
@@ -80,6 +59,7 @@ export default function MachineEnclosure({
 	name,
 	maintained = false,
 	settling = false,
+	ownWindow = false,
 	describes,
 	children,
 }: {
@@ -97,6 +77,11 @@ export default function MachineEnclosure({
 	 * settle period, still suspended but no longer being worked on. */
 	// spec: MNT#settling
 	settling?: boolean;
+	/** Whether the window covering it was declared over this box in
+	 * particular. One that reaches it through its environment or its group is
+	 * marked at that grain instead, so the icon stays plain. */
+	// spec: MNT#presentation
+	ownWindow?: boolean;
 	/** What the dots inside stand for, one line each. The enclosure names them
 	 * so the dots need no tooltip of their own: two tooltips over the same few
 	 * pixels open together and overlap, and the reader loses both. */
@@ -124,8 +109,12 @@ export default function MachineEnclosure({
 		>
 			<Box
 				component="span"
+				// What the icon draws, which is the box's own window. A window
+				// reaching it through its environment or its group is marked at
+				// that grain, though the tooltip still says the box is suspended.
+				// spec: MNT#presentation
 				data-maintenance={
-					maintained ? (settling ? "settling" : "holding") : undefined
+					ownWindow ? (settling ? "settling" : "holding") : undefined
 				}
 				sx={{
 					display: "inline-flex",
@@ -140,10 +129,16 @@ export default function MachineEnclosure({
 					gap: "0.35em",
 					border: 1,
 					borderColor: state.border,
-					bgcolor: (theme) =>
-						maintained ? maintenanceWash(theme) : state.fill,
-					backgroundImage:
-						maintained && settling ? SETTLING_STRIPES : undefined,
+					bgcolor: state.fill,
+					backgroundImage: (theme) =>
+						ownWindow ? ownWindowStripes(theme, settling) : undefined,
+					// Every suspended box is muted, whether the window is its own
+					// or reaches it through its environment or its group: all of
+					// them are out of play, so a failing one does not read as one
+					// nobody has noticed. The stripes stay at the grain the window
+					// was declared over; the fade says which boxes it caught.
+					// spec: MNT#presentation
+					opacity: maintained ? 0.55 : 1,
 
 					borderRadius: "999px",
 					// The band keeps its old proportion to the dot inside it: both

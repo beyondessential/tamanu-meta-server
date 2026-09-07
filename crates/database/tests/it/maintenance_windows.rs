@@ -823,10 +823,20 @@ async fn an_environment_window_covers_only_its_rank() {
 			.await
 			.expect("suspended");
 		assert!(
-			targets.machines.contains(&clone_box) && !targets.machines.contains(&production_box)
+			targets.suspends(clone_box, Some(group_id))
+				&& !targets.suspends(production_box, Some(group_id)),
+			"the clone's box is suspended and production's is not"
 		);
 		assert!(
-			!targets.groups.contains(&group_id),
+			targets.environment_window(group_id, ServerRank::Clone),
+			"and the window is the environment's, which is the grain a reader marks at"
+		);
+		assert!(
+			!targets.machine_window(clone_box),
+			"the box has no window of its own, so its icon is not the thing marked"
+		);
+		assert!(
+			!targets.group_window(group_id),
 			"an environment's window is not the group's"
 		);
 

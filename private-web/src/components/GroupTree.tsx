@@ -97,6 +97,7 @@ function MachineBlock({
 					name={machine.name}
 					maintained={machine.maintained}
 					settling={machine.maintenance_settling}
+					ownWindow={machine.own_window}
 					describes={applications.map(applicationName)}
 				>
 					{applications.map((application) => (

@@ -192,6 +192,10 @@ pub struct GroupMachine {
 	/// Whether every window over the box has ended and it is serving out the
 	/// settle period.
 	pub maintenance_settling: bool,
+	/// Whether the window covering this box was declared over the box itself,
+	/// as against one reaching it through its environment or its group.
+	// spec: MNT#presentation
+	pub own_window: bool,
 	/// The platform the box reports, where it reports one. The one machine
 	/// figure the tree shows: it is what distinguishes two otherwise
 	/// identical rows.
@@ -309,6 +313,7 @@ pub async fn tree_members(
 			health: machine_health.get(&m.id).copied().unwrap_or_default(),
 			maintained: suspended.suspends(m.id, m.group_id),
 			maintenance_settling: suspended.settling(m.id, m.group_id),
+			own_window: suspended.machine_window(m.id),
 			// A box's platform is its own reports' or nothing: the fallback
 			// through an application's Postgres banner belongs to the
 			// application grain, not here.

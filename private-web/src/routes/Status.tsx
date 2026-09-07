@@ -23,6 +23,7 @@ import VersionIndicator from "../components/VersionIndicator";
 import { useVersionTrackingAcross } from "../hooks/useApplicationTypes";
 import {
 	HealthLegend,
+	MaintenanceLegend,
 	OperatorLegend,
 	StatusLegend,
 	VersionLegend,
@@ -131,6 +132,9 @@ export default function Status() {
 				</Box>
 				<Box sx={{ mt: 1 }}>
 					<HealthLegend />
+				</Box>
+				<Box sx={{ mt: 1 }}>
+					<MaintenanceLegend />
 				</Box>
 				<Box sx={{ mt: 1 }}>
 					<OperatorLegend />
@@ -283,6 +287,13 @@ function GroupCardLoader({
 		result.status === "ok" ? aggregateOperators(result.data.members) : [];
 	const occupied = operators.length > 0;
 
+	// A window over the group itself covers every box in it whatever its rank,
+	// so the card carries it rather than each row or each box.
+	// spec: MNT#presentation
+	const groupWindow = result.status === "ok" && result.data.maintained;
+	const groupWindowSettling =
+		result.status === "ok" && result.data.maintenance_settling;
+
 	return (
 		<MuiLink
 			component={RouterLink}
@@ -292,12 +303,31 @@ function GroupCardLoader({
 		>
 			<Card
 				variant="outlined"
+				data-testid="group-card"
+				data-maintenance={
+					groupWindow
+						? groupWindowSettling
+							? "settling"
+							: "holding"
+						: undefined
+				}
 				sx={{
 					// The bands run edge to edge, so the card clips them to its
 					// own rounded corners.
 					overflow: "hidden",
 					transition: "background-color 150ms",
 					bgcolor: occupied ? "action.hover" : undefined,
+					...(groupWindow
+						? {
+								backgroundImage: (t: Theme) => {
+									const ink = alpha(
+										t.palette.text.primary,
+										groupWindowSettling ? 0.04 : 0.13,
+									);
+									return `repeating-linear-gradient(45deg, ${ink} 0 1px, transparent 1px 7px, ${ink} 7px 8px)`;
+								},
+							}
+						: {}),
 					"&:hover": {
 						bgcolor: occupied ? "action.selected" : "action.hover",
 					},
@@ -365,6 +395,12 @@ function GroupCard({
 					py: "0.5em",
 					borderBottom: 1,
 					borderColor: "divider",
+					// Its own ground, so a group-wide window's stripes stop at the
+					// header rather than running across the group's name and
+					// version. The card is what the window is drawn on; the name of
+					// the thing has to stay readable on it.
+					// spec: MNT#presentation
+					bgcolor: "background.paper",
 				}}
 			>
 				<Typography
@@ -390,7 +426,12 @@ function GroupCard({
 				</Box>
 			</Box>
 
-			<RankedDotStrip members={group.members} incidents={incidents} />
+			<RankedDotStrip
+				members={group.members}
+				incidents={incidents}
+				maintainedRanks={group.maintained_ranks}
+				settlingRanks={group.settling_ranks}
+			/>
 
 			{hasStatusBand && (
 				<Box
@@ -558,6 +599,12 @@ const dividerLight = (theme: Theme) => alpha(theme.palette.text.primary, 0.08);
 const rankLabel = (theme: Theme) =>
 	alpha(theme.palette.text.primary, theme.palette.mode === "dark" ? 0.20 : 0.11);
 
+/// Just enough to hold its own against the stripes of a marked row, and no
+/// more: the name is there to be found when looked for, and a marked row whose
+/// label outweighs every other card's reads as the label being the point.
+const markedRankLabel = (theme: Theme) =>
+	alpha(theme.palette.text.primary, theme.palette.mode === "dark" ? 0.3 : 0.2);
+
 /// The dot is sized to its cell, since a flex item wider than the cell holding
 /// it is squeezed on one axis only and draws as an oval.
 const DOT_SIZE = "0.9em";
@@ -598,25 +645,41 @@ function machineRows(members: FacilityServerStatus[]) {
 export function RankedDotStrip({
 	members,
 	incidents,
+	maintainedRanks,
+	settlingRanks,
 }: {
 	members: FacilityServerStatus[];
 	incidents?: GroupIncidents | null;
+	/// The environments under a window of their own. The row carries it, since
+	/// that is the grain the operator declared at.
+	// spec: MNT#presentation
+	maintainedRanks?: ServerRank[];
+	settlingRanks?: ServerRank[];
 }) {
 	const theme = useTheme();
 	const rows = machineRows(members);
 	return (
-		<Stack data-testid="dot-strip" spacing={0.5} sx={{ minWidth: 0 }}>
+		// No gap between rows: the rule between them already marks the break, and
+		// a gap leaves an unstriped band a row-wide mark cannot reach, so an
+		// environment's window reads as not quite covering its own row.
+		// spec: MNT#presentation
+		<Stack data-testid="dot-strip" spacing={0} sx={{ minWidth: 0 }}>
 			{rows.map(([rank, boxes], index) => {
 				// Only an environment's row takes a mark: a group's own incident
 				// can come from a check with no machine behind it at all.
 				const incident = rank ? (incidents?.get(rank) ?? null) : null;
 				const tone = incident ? theme.palette[TONE[incident]].main : null;
+				const maintained = !!rank && !!maintainedRanks?.includes(rank);
+				const settling = !!rank && !!settlingRanks?.includes(rank);
 				return (
 					<Box
 						key={rank ?? "_unranked"}
 						data-testid="rank-row"
 						data-rank={rank ?? "unranked"}
 						data-incident={incident ?? undefined}
+						data-maintenance={
+							maintained ? (settling ? "settling" : "holding") : undefined
+						}
 						sx={{
 							position: "relative",
 							display: "flex",
@@ -626,6 +689,25 @@ export function RankedDotStrip({
 							px: "0.625em",
 							py: "0.4375em",
 							...(tone ? { bgcolor: alpha(tone, 0.16) } : {}),
+							// The environment's own window, washed across the row it
+							// was declared over. An incident's tint wins the
+							// background, so the window takes the stripes.
+							// spec: MNT#presentation
+							...(maintained
+								? {
+										backgroundImage: (t: Theme) => {
+											// A row is a wide band, so it reaches the same
+											// weight as an icon's stripes at a third of
+											// the ink. Struck harder it takes over the
+											// card.
+											const ink = alpha(
+												t.palette.text.primary,
+												settling ? 0.07 : 0.2,
+											);
+											return `repeating-linear-gradient(45deg, ${ink} 0 1px, transparent 1px 5px, ${ink} 5px 6px)`;
+										},
+									}
+								: {}),
 							// Lighter than the card's own borders, so the rank break
 							// reads as subordinate to the card structure. `divider`
 							// is the card's border, so it cannot also be the rule
@@ -645,9 +727,13 @@ export function RankedDotStrip({
 								fontWeight: 500,
 								letterSpacing: "0.06em",
 								textTransform: "uppercase",
-								color: tone ? alpha(tone, 0.55) : rankLabel,
+								color: tone
+									? alpha(tone, 0.55)
+									: maintained
+										? markedRankLabel
+										: rankLabel,
 								pointerEvents: "none",
-								zIndex: 0,
+								zIndex: 1,
 							},
 						}}
 					>
@@ -659,6 +745,7 @@ export function RankedDotStrip({
 								name={box.lead.machine_name}
 								maintained={box.lead.machine_maintained}
 								settling={box.lead.machine_maintenance_settling}
+								ownWindow={box.lead.machine_own_window}
 								describes={box.applications.map(
 									(m) =>
 										`${m.name}${m.rank ? ` · ${m.rank}` : ""} · ${m.type}`,

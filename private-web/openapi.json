@@ -10572,6 +10572,7 @@
           "machine_up",
           "machine_health",
           "machine_maintained",
+          "machine_own_window",
           "machine_maintenance_settling"
         ],
         "properties": {
@@ -10611,6 +10612,10 @@
               "null"
             ],
             "description": "The box's name, where an operator gave it one."
+          },
+          "machine_own_window": {
+            "type": "boolean",
+            "description": "Whether the window covering this box was declared over the box itself,\nas against one it falls under through its environment or its group. A\nreader marks at the grain the operator declared at, so an environment's\nwindow is not drawn as every box in it having its own."
           },
           "machine_up": {
             "$ref": "#/components/schemas/ShortStatus",
@@ -11040,7 +11045,8 @@
           "up",
           "health",
           "maintained",
-          "maintenance_settling"
+          "maintenance_settling",
+          "own_window"
         ],
         "properties": {
           "health": {
@@ -11066,6 +11072,10 @@
               "null"
             ],
             "description": "The operator-assigned name, where it has one."
+          },
+          "own_window": {
+            "type": "boolean",
+            "description": "Whether the window covering this box was declared over the box itself,\nas against one reaching it through its environment or its group."
           },
           "platform": {
             "type": [
@@ -16170,7 +16180,11 @@
           "name",
           "notes",
           "members",
-          "all_members_quiet"
+          "all_members_quiet",
+          "maintained_ranks",
+          "settling_ranks",
+          "maintained",
+          "maintenance_settling"
         ],
         "properties": {
           "all_members_quiet": {
@@ -16181,6 +16195,21 @@
             "type": "string",
             "format": "uuid",
             "description": "Unique identifier of the group."
+          },
+          "maintained": {
+            "type": "boolean",
+            "description": "Whether a window is declared over the group itself, covering every box\nin it whatever its rank."
+          },
+          "maintained_ranks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServerRank"
+            },
+            "description": "The group's environments under a window of their own, so a reader marks\nthe environment's row rather than each box in it."
+          },
+          "maintenance_settling": {
+            "type": "boolean",
+            "description": "Whether the group's own window has ended and it is serving out the\nsettle period."
           },
           "members": {
             "type": "array",
@@ -16196,6 +16225,13 @@
           "notes": {
             "type": "string",
             "description": "Free-text notes about the group."
+          },
+          "settling_ranks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServerRank"
+            },
+            "description": "Of those, the ones serving out the settle period."
           },
           "version": {
             "oneOf": [
