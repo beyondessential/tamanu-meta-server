@@ -39,9 +39,15 @@ import TimeAgo from "./TimeAgo";
 export default function GroupInventorySection({
 	groupId,
 	applications,
+	maintenanceTick,
+	onMaintenanceChange,
 }: {
 	groupId: string;
 	applications: ReadonlyArray<{ rank?: ServerRank | null }>;
+	/// Bumped when a window over the group is declared or lifted anywhere on
+	/// the page, since that changes what a run here would be served.
+	maintenanceTick: number;
+	onMaintenanceChange: () => void;
 }) {
 	// Rank is an application's, so a group's environments are the ranks its
 	// applications sit at, and one carrying no rank sits at the default.
@@ -63,7 +69,13 @@ export default function GroupInventorySection({
 			) : (
 				<Stack spacing={2}>
 					{ranks.map((rank) => (
-						<EnvironmentInventory key={rank} groupId={groupId} rank={rank} />
+						<EnvironmentInventory
+							key={rank}
+							groupId={groupId}
+							rank={rank}
+							maintenanceTick={maintenanceTick}
+							onMaintenanceChange={onMaintenanceChange}
+						/>
 					))}
 				</Stack>
 			)}
@@ -74,9 +86,13 @@ export default function GroupInventorySection({
 function EnvironmentInventory({
 	groupId,
 	rank,
+	maintenanceTick,
+	onMaintenanceChange,
 }: {
 	groupId: string;
 	rank: ServerRank;
+	maintenanceTick: number;
+	onMaintenanceChange: () => void;
 }) {
 	const isAdmin = useIsAdmin() === true;
 	const [tick, setTick] = useState(0);
@@ -143,7 +159,13 @@ function EnvironmentInventory({
 
 			{isAdmin && inventory.status === "ok" && (
 				<Stack spacing={2} sx={{ mt: 1 }}>
-					<Run groupId={groupId} group={inventory.data.group} rank={rank} />
+					<Run
+						groupId={groupId}
+						group={inventory.data.group}
+						rank={rank}
+						maintenanceTick={maintenanceTick}
+						onDeclared={onMaintenanceChange}
+					/>
 
 					<Box>
 						<Typography variant="body2" color="text.secondary" gutterBottom>
@@ -211,19 +233,22 @@ function Run({
 	groupId,
 	group,
 	rank,
+	maintenanceTick,
+	onDeclared,
 }: {
 	groupId: string;
 	group: string;
 	rank: ServerRank;
+	maintenanceTick: number;
+	onDeclared: () => void;
 }) {
 	const [copied, setCopied] = useState(false);
 	const [dialogOpen, setDialogOpen] = useState(false);
-	const [tick, setTick] = useState(0);
 	const windows = useApi(
 		"maintenance",
 		"for_target",
 		{ server_group_id: groupId },
-		[groupId, tick],
+		[groupId, maintenanceTick],
 	);
 
 	// The inventory is refused while a window someone else declared holds, so
@@ -235,7 +260,7 @@ function Run({
 				) ?? null)
 			: null;
 
-	const command = `CANOPY_URL=${window.location.origin} CANOPY_GROUP=${group} CANOPY_RANK=${rank} ansible-playbook -i inventory/canopy.yml <playbook>`;
+	const command = `CANOPY_URL=${window.location.origin} CANOPY_GROUP=${shellArg(group)} CANOPY_RANK=${rank} ansible-playbook -i inventory/canopy.yml <playbook>`;
 
 	const copy = async () => {
 		try {
@@ -283,7 +308,7 @@ function Run({
 					sx={{ display: "block", mt: 1 }}
 					data-testid="run-declared"
 				>
-					Your work is declared until{" "}
+					Your work is declared, ending{" "}
 					<TimeAgo timestamp={declared.expected_end} />, so this inventory is
 					served to your run and refused to anyone else's.
 				</Typography>
@@ -311,10 +336,16 @@ function Run({
 				id={groupId}
 				targetLabel={group}
 				prefill={{ note: `configuring ${rank}` }}
-				onDone={() => setTick((n) => n + 1)}
+				onDone={onDeclared}
 			/>
 		</Box>
 	);
+}
+
+/// A group name is free text, and the line is copied to be pasted into a shell.
+function shellArg(value: string): string {
+	if (/^[\w.:/@-]+$/.test(value)) return value;
+	return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 /// Variables as chips. Where a set of environment values is passed, a key

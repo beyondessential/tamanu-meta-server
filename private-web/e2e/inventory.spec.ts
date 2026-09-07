@@ -186,7 +186,7 @@ test.describe("group inventory", () => {
 		page,
 		sql,
 	}) => {
-		const group = await seedServerGroup(sql, { name: "kamaka", tags: {} });
+		const group = await seedServerGroup(sql, { name: "kamaka south", tags: {} });
 		await seedServer(sql, {
 			name: "kamaka-prod-central",
 			type: "tamanu-central",
@@ -201,8 +201,9 @@ test.describe("group inventory", () => {
 			.getByTestId("environment-production");
 
 		// Canopy's address and the environment's identity are filled in; the
-		// playbook is the operator's to pick.
-		const line = `CANOPY_URL=${new URL(page.url()).origin} CANOPY_GROUP=kamaka CANOPY_RANK=production ansible-playbook -i inventory/canopy.yml <playbook>`;
+		// playbook is the operator's to pick. A group name a shell would split
+		// is quoted, since the line is copied to be pasted into one.
+		const line = `CANOPY_URL=${new URL(page.url()).origin} CANOPY_GROUP='kamaka south' CANOPY_RANK=production ansible-playbook -i inventory/canopy.yml <playbook>`;
 		await expect(production.getByTestId("run-command")).toHaveText(line);
 
 		// Copying it is the point of the panel, so the clipboard carries the
@@ -231,6 +232,10 @@ test.describe("group inventory", () => {
 			.getByTestId("group-inventory")
 			.getByTestId("environment-production");
 
+		await expect(production.getByTestId("run-command")).toContainText(
+			"CANOPY_GROUP=drifting CANOPY_RANK=production",
+		);
+
 		await production.getByTestId("declare-work").click();
 		await expect(
 			page.getByRole("heading", { name: "Declare maintenance — drifting" }),
@@ -244,5 +249,14 @@ test.describe("group inventory", () => {
 		);
 		await expect(production.getByTestId("declare-work")).toHaveCount(0);
 		await expect(production.getByTestId("inventory-application")).toHaveCount(1);
+
+		// Lifting it in the section below is the same state, so the panel offers
+		// the declaration again rather than waiting for a reload.
+		await page
+			.getByTestId("maintenance-section")
+			.getByRole("button", { name: "Lift" })
+			.click();
+		await expect(production.getByTestId("declare-work")).toHaveCount(1);
+		await expect(production.getByTestId("run-declared")).toHaveCount(0);
 	});
 });
