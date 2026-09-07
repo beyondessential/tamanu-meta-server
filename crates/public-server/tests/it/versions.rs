@@ -509,11 +509,13 @@ async fn artifact_download_proxy() {
 		.await
 		.unwrap();
 
-		// Invalid artifact ID format
+		// An unreadable artifact id is a client mistake, the same as an
+		// unreadable version in the path, so it answers 400 rather than
+		// polluting 5xx monitoring with input a caller controls.
 		let response = public
 			.get("/versions/1.2.3/artifacts/not-a-uuid/download")
 			.await;
-		response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+		response.assert_status(StatusCode::BAD_REQUEST);
 
 		// Nonexistent artifact. 404 rather than an error, because an artifact
 		// scoped to a group the caller is not offered has to be answered the
