@@ -5775,7 +5775,7 @@
           "maintenance"
         ],
         "summary": "Declare that an application, a machine, a group, or one of a group's\nenvironments is being worked on.",
-        "description": "Every check on the target grades to skipped while the window holds and\nfor a settle period after it ends, so nothing on it opens or joins an\nincident. A window over one application leaves the rest of the box\nwatched; one over the machine covers everything on it. Issues already in an open incident leave it, closing the\nincident where nothing else holds it open. A target that already has an\nopen window has that window amended rather than a second opened.\nRequires admin access.",
+        "description": "Every check on the target grades to skipped while the window holds and\nfor a settle period after it ends, so nothing on it opens or joins an\nincident. A window over one application leaves the rest of the box watched;\none over the machine covers everything on it. Issues already in an open\nincident leave it, closing the incident where nothing else holds it open. A\ntarget that already has an open window has that window amended rather than\na second opened.\nRequires admin access.",
         "operationId": "declare",
         "requestBody": {
           "content": {

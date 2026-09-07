@@ -2925,10 +2925,11 @@ export interface paths {
          *     environments is being worked on.
          * @description Every check on the target grades to skipped while the window holds and
          *     for a settle period after it ends, so nothing on it opens or joins an
-         *     incident. A window over one application leaves the rest of the box
-         *     watched; one over the machine covers everything on it. Issues already in an open incident leave it, closing the
-         *     incident where nothing else holds it open. A target that already has an
-         *     open window has that window amended rather than a second opened.
+         *     incident. A window over one application leaves the rest of the box watched;
+         *     one over the machine covers everything on it. Issues already in an open
+         *     incident leave it, closing the incident where nothing else holds it open. A
+         *     target that already has an open window has that window amended rather than
+         *     a second opened.
          *     Requires admin access.
          */
         post: operations["declare"];
