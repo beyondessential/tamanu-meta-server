@@ -187,3 +187,68 @@ async fn a_builder_publishes_only_for_its_own_group() {
 	)
 	.await
 }
+
+/// A declaration an operator has turned off does not authorise anything. It is
+/// the enabled declaration that covers a group, so a builder whose declaration
+/// is disabled is refused its own group's artifacts.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_disabled_declaration_authorises_nothing() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+
+			conn.batch_execute(&format!(
+				"UPDATE restore_replicas SET enabled = false WHERE consumer_device_id = '{device_id}'"
+			))
+			.await
+			.expect("disable the declaration");
+
+			let refused = public
+				.post(&format!(
+					"/artifacts/2.60.0/reporting-schema/any?group={GROUP}"
+				))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.add_header("content-type", "application/sql")
+				.text("CREATE VIEW ...")
+				.await;
+
+			assert_eq!(refused.status_code(), StatusCode::FORBIDDEN);
+		},
+	)
+	.await
+}
+
+/// Restoring for a group is not the same authority as building its schema. A
+/// consumer whose declaration covers the group but whose intent advertises no
+/// `reporting-schema` semantic is refused, so a verify or migrate consumer
+/// cannot publish a schema for the group it already restores.
+#[tokio::test(flavor = "multi_thread")]
+async fn restoring_for_a_group_does_not_authorise_publishing_its_schema() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+
+			conn.batch_execute(&format!(
+				"UPDATE restore_consumer_capabilities
+				 SET semantics = '[\"check\", \"once\", \"migrate\"]'::jsonb
+				 WHERE consumer_device_id = '{device_id}'"
+			))
+			.await
+			.expect("withdraw the semantic");
+
+			let refused = public
+				.post(&format!(
+					"/artifacts/2.60.0/reporting-schema/any?group={GROUP}"
+				))
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.add_header("content-type", "application/sql")
+				.text("CREATE VIEW ...")
+				.await;
+
+			assert_eq!(refused.status_code(), StatusCode::FORBIDDEN);
+		},
+	)
+	.await
+}
