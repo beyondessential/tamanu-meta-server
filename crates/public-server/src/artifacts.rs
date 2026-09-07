@@ -158,6 +158,16 @@ async fn create(
 		});
 	}
 
+	// A blank body is no location at all. The constraint only tests for NULL,
+	// so an empty string would pass it and leave an artifact nothing can be
+	// fetched from.
+	// spec: ART#where-an-artifact-rests
+	if url.trim().is_empty() {
+		return Err(AppError::BadRequest(
+			"an artifact needs a download URL".into(),
+		));
+	}
+
 	let mut db = db.get().await?;
 	let device_id = device.0.0.id;
 
