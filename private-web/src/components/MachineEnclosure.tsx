@@ -43,14 +43,21 @@ const STATES = {
 // settling state is the same hue washed back, and two strengths of a solid
 // colour are separable where two strengths of a hatch are not.
 // spec: MNT#presentation
-function maintenanceWash(theme: Theme, settling: boolean): string {
-	// The deeper blue for the state that matters: blue against the green of a
-	// healthy dot is an adjacent-hue boundary, and `info.main` leaves the two
-	// closer than the mark deserves.
-	return settling
-		? alpha(theme.palette.info.main, 0.28)
-		: alpha(theme.palette.info.dark, 0.85);
+// One wash for both states, since both are the same idea, and light enough
+// that the dot inside stays the loudest thing in the pill: blue and green are
+// adjacent hues, so anything deep enough to separate by hue swallows the dot
+// it is meant to be context for.
+function maintenanceWash(theme: Theme): string {
+	return alpha(theme.palette.info.light, 0.45);
 }
+
+// Settling is that wash struck through in white, so the pair reads as one
+// state at two stages rather than as two colours. White because it is the one
+// ink that lifts off the wash without borrowing a hue that means something
+// else, and the stripes carry their own phase so no background offset exposes
+// the gradient's tile as a seam.
+const SETTLING_STRIPES =
+	"repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.9) 0 1px, transparent 1px 3px, rgba(255, 255, 255, 0.9) 3px 4px)";
 
 function enclosureState(up: ShortStatus, health: HealthState) {
 	if (up === "gone") return STATES.never;
@@ -123,11 +130,20 @@ export default function MachineEnclosure({
 				sx={{
 					display: "inline-flex",
 					alignItems: "center",
+					// Everything inside is sized in em, so without a scale of its
+					// own a pill takes the font-size of whatever surrounds it and
+					// comes out a different size on each surface. One rem here is
+					// what makes a pill on a card, in a tree and in the legend the
+					// same pill.
+					fontSize: "1rem",
+					lineHeight: 1,
 					gap: "0.35em",
 					border: 1,
 					borderColor: state.border,
 					bgcolor: (theme) =>
-						maintained ? maintenanceWash(theme, settling) : state.fill,
+						maintained ? maintenanceWash(theme) : state.fill,
+					backgroundImage:
+						maintained && settling ? SETTLING_STRIPES : undefined,
 
 					borderRadius: "999px",
 					// The band keeps its old proportion to the dot inside it: both

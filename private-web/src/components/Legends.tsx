@@ -63,7 +63,7 @@ const MACHINE_ENTRIES: Array<{
 		health: "healthy",
 		maintained: true,
 		settling: true,
-		label: "Pale blue: maintenance just ended, watching resumes shortly",
+		label: "Blue striped: maintenance just ended, watching resumes shortly",
 	},
 	{
 		up: "up",

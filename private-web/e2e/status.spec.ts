@@ -321,17 +321,26 @@ test.describe("status page", () => {
 			}),
 		).toBeVisible();
 
-		// The state is carried entirely by the wash, so identical washes would
-		// leave the attribute correct and the page unreadable.
-		const [holdingFill, settlingFill] = await pills.evaluateAll((els) =>
-			els.map((el) => getComputedStyle(el).backgroundColor),
+		// Both stages share the wash, since both are one state, and settling is
+		// that wash struck through. Identical stripes would leave the attribute
+		// correct and the page unreadable.
+		const marks = await pills.evaluateAll((els) =>
+			els.map((el) => {
+				const style = getComputedStyle(el);
+				return { wash: style.backgroundColor, stripes: style.backgroundImage };
+			}),
 		);
-		expect(holdingFill).not.toBe("rgba(0, 0, 0, 0)");
-		expect(settlingFill).not.toBe("rgba(0, 0, 0, 0)");
+		const [holdingMark, settlingMark] = marks;
+		expect(holdingMark!.wash).not.toBe("rgba(0, 0, 0, 0)");
 		expect(
-			settlingFill,
-			"the settling wash has to differ from the holding one",
-		).not.toBe(holdingFill);
+			settlingMark!.wash,
+			"one window, one wash, whichever stage it is at",
+		).toBe(holdingMark!.wash);
+		expect(holdingMark!.stripes).toBe("none");
+		expect(
+			settlingMark!.stripes,
+			"settling is the wash struck through",
+		).not.toBe("none");
 
 
 		// The legend names both, and its swatches are the same component, so a
@@ -341,7 +350,7 @@ test.describe("status page", () => {
 		).toBeVisible();
 		await expect(
 			page.getByText(
-				"Pale blue: maintenance just ended, watching resumes shortly",
+				"Blue striped: maintenance just ended, watching resumes shortly",
 			),
 		).toBeVisible();
 		const swatches = await page
@@ -349,13 +358,13 @@ test.describe("status page", () => {
 			.evaluateAll((els) =>
 				els.map((el) => [
 					el.getAttribute("data-maintenance"),
-					getComputedStyle(el).backgroundColor,
+					getComputedStyle(el).backgroundImage,
 				]),
 			);
 		const legendHolding = swatches.find(([state]) => state === "holding");
 		const legendSettling = swatches.find(([state]) => state === "settling");
-		expect(legendHolding?.[1]).toBe(holdingFill);
-		expect(legendSettling?.[1]).toBe(settlingFill);
+		expect(legendHolding?.[1]).toBe(holdingMark!.stripes);
+		expect(legendSettling?.[1]).toBe(settlingMark!.stripes);
 	});
 
 	/// A group's window covers every box in it, so every pill on the card is
