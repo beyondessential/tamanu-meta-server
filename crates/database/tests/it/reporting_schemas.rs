@@ -362,3 +362,211 @@ async fn a_build_records_what_it_registered() {
 	})
 	.await;
 }
+
+/// A declaration whose consumer advertises a schema-building intent, which is
+/// what brings a group into the sweep at all.
+async fn declare_builder(conn: &mut AsyncPgConnection, enabled: bool) {
+	conn.batch_execute(&format!(
+		"INSERT INTO restore_consumer_capabilities
+		 (consumer_device_id, intent, description, semantics, params)
+		 VALUES ('{CONSUMER}', 'reporting-schema', '',
+		         '[\"check\",\"once\",\"migrate\",\"reporting-schema\"]'::jsonb, '[]'::jsonb);
+
+		 INSERT INTO restore_replicas
+		 (consumer_device_id, group_id, type, intent, name, enabled, params)
+		 VALUES ('{CONSUMER}', '{GROUP}', 'tamanu-postgres', 'reporting-schema',
+		         'kamaka-schemas', {enabled}, '{{}}'::jsonb)",
+	))
+	.await
+	.expect("declare builder");
+}
+
+/// The reporting-schema issues standing against the group's central.
+async fn schema_issues(conn: &mut AsyncPgConnection) -> Vec<database::issues::Issue> {
+	database::issues::Issue::list_by_source_ref(
+		conn,
+		database::statuses::CANOPY_SOURCE,
+		database::backup::refs::REPORTING_SCHEMA,
+		&[CENTRAL.parse().unwrap()],
+	)
+	.await
+	.expect("list issues")
+}
+
+/// A failed build files against the group's central application, carrying the
+/// builder's own description, and grades a warning rather than a failure.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_build_warns_on_the_group_central() {
+	TestDb::run(|mut conn, _url| async move {
+		let (older, _newer) = seed(&mut conn).await;
+		declare_builder(&mut conn, true).await;
+		record_build(&mut conn, older, false).await;
+
+		database::reporting_schemas::sweep(&mut conn)
+			.await
+			.expect("sweep");
+
+		let issues = schema_issues(&mut conn).await;
+		assert_eq!(issues.len(), 1, "one check per group, on its central");
+		let issue = &issues[0];
+		assert_eq!(
+			issue.effective_result,
+			Some(commons_types::status::CheckResult::Warning),
+			"a failed build is a warning, not a failure"
+		);
+		assert!(issue.active);
+		assert!(
+			issue.message.contains("2.59.0") && issue.message.contains("views did not compile"),
+			"the builder's own description reaches the operator: {}",
+			issue.message
+		);
+	})
+	.await;
+}
+
+/// The check does not escalate. A warning ceiling is what holds that: an
+/// escalating flag is normalised away for anything below a failure, so pinning
+/// the ceiling is what stops a schema nobody can build waking whoever is on
+/// call for an application that is up and answering.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_reporting_schema_check_cannot_escalate() {
+	TestDb::run(|mut conn, _url| async move {
+		let (older, _newer) = seed(&mut conn).await;
+		declare_builder(&mut conn, true).await;
+		record_build(&mut conn, older, false).await;
+
+		database::reporting_schemas::sweep(&mut conn)
+			.await
+			.expect("sweep");
+
+		let policies = database::check_policies::CheckPolicy::get_across_namespaces(
+			&mut conn,
+			database::statuses::CANOPY_SOURCE,
+			database::backup::refs::REPORTING_SCHEMA,
+		)
+		.await
+		.expect("read the policy");
+
+		assert!(!policies.is_empty(), "the filing seeds a policy");
+		for policy in &policies {
+			assert_eq!(
+				policy.ceiling,
+				commons_types::status::CheckResult::Warning,
+				"a failed build tops out at a warning"
+			);
+			assert!(!policy.escalates, "and so cannot escalate");
+		}
+
+		assert!(
+			!schema_issues(&mut conn).await[0].escalates,
+			"which the issue carries through"
+		);
+	})
+	.await;
+}
+
+/// The check recovers when the pair is built.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_built_pair_grades_the_check_passed() {
+	TestDb::run(|mut conn, _url| async move {
+		let (older, _newer) = seed(&mut conn).await;
+		declare_builder(&mut conn, true).await;
+		record_build(&mut conn, older, true).await;
+
+		database::reporting_schemas::sweep(&mut conn)
+			.await
+			.expect("sweep");
+
+		let issues = schema_issues(&mut conn).await;
+		assert_eq!(issues.len(), 1);
+		assert_eq!(
+			issues[0].effective_result,
+			Some(commons_types::status::CheckResult::Passed),
+			"a built pair is not a finding"
+		);
+	})
+	.await;
+}
+
+/// A pair still awaiting its first build is not a failure: nothing has gone
+/// wrong yet, and the worklist is what moves it along.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_pair_awaiting_its_first_build_files_nothing() {
+	TestDb::run(|mut conn, _url| async move {
+		seed(&mut conn).await;
+		declare_builder(&mut conn, true).await;
+
+		database::reporting_schemas::sweep(&mut conn)
+			.await
+			.expect("sweep");
+
+		assert!(
+			schema_issues(&mut conn).await.is_empty(),
+			"an unbuilt pair is not yet a finding"
+		);
+	})
+	.await;
+}
+
+/// A group nothing builds schemas for owes none, so a disabled declaration
+/// files nothing even where a build once failed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_disabled_declaration_takes_the_group_out_of_the_sweep() {
+	TestDb::run(|mut conn, _url| async move {
+		let (older, _newer) = seed(&mut conn).await;
+		declare_builder(&mut conn, false).await;
+		record_build(&mut conn, older, false).await;
+
+		database::reporting_schemas::sweep(&mut conn)
+			.await
+			.expect("sweep");
+
+		assert!(
+			schema_issues(&mut conn).await.is_empty(),
+			"a group with no enabled builder is not owed a schema"
+		);
+	})
+	.await;
+}
+
+/// An open check has to be closed when the group's last non-awaiting pair goes
+/// away, or it stands forever against a group that owes nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_check_closes_once_the_group_owes_no_schema() {
+	TestDb::run(|mut conn, _url| async move {
+		let (older, _newer) = seed(&mut conn).await;
+		declare_builder(&mut conn, true).await;
+		record_build(&mut conn, older, false).await;
+
+		database::reporting_schemas::sweep(&mut conn)
+			.await
+			.expect("sweep");
+		assert_eq!(
+			schema_issues(&mut conn).await[0].effective_result,
+			Some(commons_types::status::CheckResult::Warning),
+			"the warning stands while the pair is failed"
+		);
+
+		conn.batch_execute("DELETE FROM reporting_schema_builds")
+			.await
+			.expect("drop the build");
+
+		database::reporting_schemas::sweep(&mut conn)
+			.await
+			.expect("sweep again");
+
+		let issues = schema_issues(&mut conn).await;
+		assert_eq!(issues.len(), 1, "the same check, regraded");
+		assert_eq!(
+			issues[0].effective_result,
+			Some(commons_types::status::CheckResult::Passed),
+			"a group owed no schema is not a finding"
+		);
+		assert!(
+			issues[0].message.contains("No reporting schema is owed"),
+			"the closing message says why: {}",
+			issues[0].message
+		);
+	})
+	.await;
+}
