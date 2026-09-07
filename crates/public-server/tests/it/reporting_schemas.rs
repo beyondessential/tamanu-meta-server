@@ -252,3 +252,237 @@ async fn restoring_for_a_group_does_not_authorise_publishing_its_schema() {
 	)
 	.await
 }
+
+/// The declaration `seed` made, which a report has to name.
+async fn declaration_id(conn: &mut database::diesel_async::AsyncPgConnection) -> uuid::Uuid {
+	use diesel::{QueryableByName, sql_query, sql_types};
+	use diesel_async::RunQueryDsl;
+
+	#[derive(QueryableByName)]
+	struct Row {
+		#[diesel(sql_type = sql_types::Uuid)]
+		id: uuid::Uuid,
+	}
+
+	sql_query("SELECT id FROM restore_replicas LIMIT 1")
+		.get_result::<Row>(conn)
+		.await
+		.expect("the seeded declaration")
+		.id
+}
+
+/// A builder's report of one run, with `build` as its reporting-schema block.
+fn build_report(replica: uuid::Uuid, build: serde_json::Value) -> serde_json::Value {
+	serde_json::json!({
+		"replica_id": replica,
+		"group": GROUP,
+		"machine_id": MACHINE,
+		"type": "tamanu-postgres",
+		"intent": "schema-build",
+		"snapshot_id": "snap-1",
+		"outcome": "success",
+		"replica_healthy": true,
+		"observed_at": "2026-09-07T00:00:00Z",
+		"reporting_schema": build,
+	})
+}
+
+/// The build a report carries settles the pair it names, and is held against
+/// the group's central application, whose database the schema followed from.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_build_report_settles_the_pair_it_names() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+			let replica = declaration_id(&mut conn).await;
+
+			let resp = public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.json(&build_report(
+					replica,
+					serde_json::json!({ "target_version": "2.60.0", "built": true }),
+				))
+				.await;
+			resp.assert_status(StatusCode::NO_CONTENT);
+
+			let build = database::reporting_schemas::ReportingSchemaBuild::latest_for_pair(
+				&mut conn,
+				GROUP.parse().unwrap(),
+				VERSION.parse().unwrap(),
+			)
+			.await
+			.expect("read the build")
+			.expect("a build landed");
+
+			assert!(build.built);
+			assert_eq!(
+				build.application_id,
+				Some(CENTRAL.parse().unwrap()),
+				"held against the central, not the reporting device's own machine"
+			);
+		},
+	)
+	.await
+}
+
+/// A consumer may name the version by id rather than by semver, which is what
+/// the worklist entry hands it.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_build_report_may_name_its_version_by_id() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+			let replica = declaration_id(&mut conn).await;
+
+			let resp = public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.json(&build_report(
+					replica,
+					serde_json::json!({ "target_version_id": VERSION, "built": true }),
+				))
+				.await;
+			resp.assert_status(StatusCode::NO_CONTENT);
+
+			assert!(
+				database::reporting_schemas::ReportingSchemaBuild::is_settled(
+					&mut conn,
+					GROUP.parse().unwrap(),
+					VERSION.parse().unwrap(),
+				)
+				.await
+				.expect("settled"),
+			);
+		},
+	)
+	.await
+}
+
+/// A build is for a pair, so a report that names no version cannot be
+/// attributed to one and is refused rather than recorded against a guess.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_build_report_naming_no_version_is_refused() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+			let replica = declaration_id(&mut conn).await;
+
+			let resp = public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.json(&build_report(replica, serde_json::json!({ "built": true })))
+				.await;
+
+			assert_eq!(resp.status_code(), StatusCode::BAD_REQUEST);
+		},
+	)
+	.await
+}
+
+/// A build that produced nothing settles the pair too, carrying the builder's
+/// own description of what went wrong.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_failed_build_report_carries_its_description() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			seed(&mut conn, device_id).await;
+			let replica = declaration_id(&mut conn).await;
+
+			let resp = public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.json(&build_report(
+					replica,
+					serde_json::json!({
+						"target_version": "2.60.0",
+						"built": false,
+						"error": "views did not compile",
+					}),
+				))
+				.await;
+			resp.assert_status(StatusCode::NO_CONTENT);
+
+			let pairs =
+				database::reporting_schemas::pairs_for_group(&mut conn, GROUP.parse().unwrap())
+					.await
+					.expect("pairs");
+			let pair = pairs
+				.iter()
+				.find(|p| p.version == "2.60.0")
+				.expect("the pair");
+
+			assert_eq!(pair.state, database::reporting_schemas::PairState::Failed);
+			assert_eq!(pair.error.as_deref(), Some("views did not compile"));
+		},
+	)
+	.await
+}
+
+/// A build rides the migrate pathway, so one run's report can carry both
+/// blocks. The build is the one that settles the pair, and the migration
+/// payload beside it is deliberately not recorded as a migration test.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_report_carrying_both_records_only_the_build() {
+	commons_tests::server::run_with_device_auth(
+		"backup-restore",
+		async |mut conn, cert, device_id, public, _| {
+			use diesel::{QueryableByName, sql_query, sql_types};
+			use diesel_async::RunQueryDsl;
+
+			#[derive(QueryableByName)]
+			struct Count {
+				#[diesel(sql_type = sql_types::BigInt)]
+				count: i64,
+			}
+
+			seed(&mut conn, device_id).await;
+			let replica = declaration_id(&mut conn).await;
+
+			let mut body = build_report(
+				replica,
+				serde_json::json!({ "target_version": "2.60.0", "built": true }),
+			);
+			body["migration"] = serde_json::json!({
+				"target_version": "2.60.0",
+				"total_elapsed_seconds": 12,
+				"data_bytes_before": 1_000,
+				"data_bytes_after": 1_200,
+				"timings": [],
+			});
+
+			let resp = public
+				.post("/restore-verification")
+				.add_header("x-forwarded-client-cert", &format!("Cert={cert}"))
+				.json(&body)
+				.await;
+			resp.assert_status(StatusCode::NO_CONTENT);
+
+			assert!(
+				database::reporting_schemas::ReportingSchemaBuild::is_settled(
+					&mut conn,
+					GROUP.parse().unwrap(),
+					VERSION.parse().unwrap(),
+				)
+				.await
+				.expect("settled"),
+				"the build is what settles the pair"
+			);
+
+			let migrations = sql_query("SELECT COUNT(*) AS count FROM migration_tests")
+				.get_result::<Count>(&mut conn)
+				.await
+				.expect("count")
+				.count;
+			assert_eq!(
+				migrations, 0,
+				"the migration payload beside a build is not a migration test"
+			);
+		},
+	)
+	.await
+}
