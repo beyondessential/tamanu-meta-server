@@ -79,24 +79,77 @@ test.describe("group-scoped artifacts", () => {
 			status: "published",
 		});
 
+		// `2.60.x` is >=2.60.0 <2.61.0 and `^2.60.0` is >=2.60.0 <3.0.0, so the
+		// wildcard is the narrower of the two and is the one served.
 		await seedArtifact(sql, {
 			versionId: null,
 			rangePattern: "2.60.x",
 			artifactType: "installer",
 			platform: "windows",
-			downloadUrl: "https://example.com/broad.exe",
+			downloadUrl: "https://example.com/narrow.exe",
 		});
 		await seedArtifact(sql, {
 			versionId: null,
 			rangePattern: "^2.60.0",
 			artifactType: "installer",
 			platform: "windows",
-			downloadUrl: "https://example.com/narrow.exe",
+			downloadUrl: "https://example.com/wide.exe",
 		});
 
 		await page.goto(`/versions/2.60.0`);
 
 		await expect(page.locator("table tbody tr")).toHaveCount(2);
 		await expect(page.getByText("[Hidden]")).toHaveCount(1);
+
+		// Counting the markers alone would pass just as well with the marker on
+		// the artifact that is actually served.
+		const wide = page
+			.locator("table tbody tr")
+			.filter({ hasText: "https://example.com/wide.exe" });
+		await expect(wide.getByText("[Hidden]")).toBeVisible();
+
+		const narrow = page
+			.locator("table tbody tr")
+			.filter({ hasText: "https://example.com/narrow.exe" });
+		await expect(narrow.getByText("[Hidden]")).toHaveCount(0);
+	});
+
+	/// A group's artifact displaces the unscoped one for that group alone, so
+	/// the unscoped one is still what every other caller is served and is not
+	/// marked as passed over. Resolving once across the fleet marks it hidden,
+	/// which tells the operator the opposite of the truth.
+	///
+	/// spec: ART#what-a-version-offers
+	test("an artifact a group's own displaces is not marked hidden", async ({
+		page,
+		sql,
+	}) => {
+		const version = await seedVersion(sql, {
+			major: 2,
+			minor: 60,
+			patch: 0,
+			status: "published",
+		});
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+
+		await seedArtifact(sql, {
+			versionId: null,
+			rangePattern: "2.60.x",
+			artifactType: "reporting-schema",
+			platform: "any",
+			downloadUrl: "https://example.com/fleet.sql",
+		});
+		await seedArtifact(sql, {
+			versionId: version.id,
+			artifactType: "reporting-schema",
+			platform: "any",
+			groupId: group.id,
+			content: "kamaka schema",
+		});
+
+		await page.goto(`/versions/2.60.0`);
+
+		await expect(page.locator("table tbody tr")).toHaveCount(2);
+		await expect(page.getByText("[Hidden]")).toHaveCount(0);
 	});
 });

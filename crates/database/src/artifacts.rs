@@ -396,8 +396,10 @@ impl Artifact {
 		// spec: ART#what-a-version-offers
 		let scopes: Vec<Scope> = match scope {
 			Scope::Fleet => {
-				let mut groups: Vec<Uuid> =
-					matching_artifacts.iter().filter_map(|a| a.group_id).collect();
+				let mut groups: Vec<Uuid> = matching_artifacts
+					.iter()
+					.filter_map(|a| a.group_id)
+					.collect();
 				groups.sort_unstable();
 				groups.dedup();
 				std::iter::once(Scope::Unscoped)

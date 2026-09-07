@@ -533,7 +533,7 @@ pub async fn redaction_gap_for(
 	)
 	.await?
 	.into_iter()
-			.any(|a| a.artifact_type == manifest.artifact_type);
+	.any(|a| a.artifact_type == manifest.artifact_type);
 
 	Ok((!published).then_some((RedactionGapReason::VersionHasNoManifest, Some(shown))))
 }
