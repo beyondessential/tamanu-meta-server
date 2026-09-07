@@ -710,3 +710,49 @@ async fn an_open_plan_s_target_is_a_pair_and_a_closed_one_is_not() {
 	})
 	.await;
 }
+
+/// A settled pair stays settled when a newer snapshot arrives. Every other
+/// `once` intent keys its settling to the snapshot and re-dispatches on a fresh
+/// one; a schema follows the version and the group's configuration, so backing
+/// the group up again is no reason to build it a second time. Keying this one
+/// to the snapshot would rebuild every pair of every group on every backup.
+///
+/// spec: RPT#pairs
+#[tokio::test(flavor = "multi_thread")]
+async fn a_newer_snapshot_does_not_unsettle_a_pair() {
+	TestDb::run(|mut conn, _url| async move {
+		let (_older, newer) = seed(&mut conn).await;
+
+		record_build(&mut conn, newer, true).await;
+
+		conn.batch_execute(&format!(
+			"INSERT INTO backup_runs
+			   (id, device_id, machine_id, group_id, type, purpose, outcome, snapshot_id, reported_at)
+			 VALUES (gen_random_uuid(), '{CONSUMER}', '{MACHINE}', '{GROUP}', 'tamanu-postgres',
+			         'backup', 'success', 'snap-later', NOW())"
+		))
+		.await
+		.expect("a newer snapshot");
+
+		assert!(
+			ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+				.await
+				.unwrap(),
+			"the version and the configuration are unchanged, so nothing is owed"
+		);
+
+		// The pair does still come back for the one event that means the schema
+		// is stale, so the answer above is the rule rather than a function that
+		// has stopped moving.
+		ReportingSchemaRequest::enqueue(&mut conn, group(), newer, Some("ops@bes.au"))
+			.await
+			.expect("ask for a build");
+		assert!(
+			!ReportingSchemaBuild::is_settled(&mut conn, group(), newer)
+				.await
+				.unwrap(),
+			"an operator asking still reinstates it"
+		);
+	})
+	.await;
+}
