@@ -410,6 +410,13 @@ function ArtifactsSection({
 	);
 }
 
+// A version can hold several artifacts of one type and platform, one per group,
+// so the type alone does not name a row.
+function artifactLabel(artifact: ArtifactData): string {
+	const scope = artifact.group_name ?? (artifact.group_id ? "a group" : "every group");
+	return `${artifact.artifact_type} ${artifact.platform} for ${scope}`;
+}
+
 function ArtifactRow({
 	artifact,
 	unlocked,
@@ -528,14 +535,14 @@ function ArtifactRow({
 					) : (
 						<Stack direction="row" spacing={0.5} sx={{ justifyContent: "flex-end" }}>
 							<IconButton
-								aria-label={`edit ${artifact.artifact_type}`}
+								aria-label={`edit ${artifactLabel(artifact)}`}
 								size="small"
 								onClick={() => setEditing(true)}
 							>
 								<EditIcon fontSize="small" />
 							</IconButton>
 							<IconButton
-								aria-label={`delete ${artifact.artifact_type}`}
+								aria-label={`delete ${artifactLabel(artifact)}`}
 								size="small"
 								color="error"
 								onClick={() => setConfirmDelete(true)}

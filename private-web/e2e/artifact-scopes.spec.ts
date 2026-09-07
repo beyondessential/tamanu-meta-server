@@ -152,4 +152,145 @@ test.describe("group-scoped artifacts", () => {
 		await expect(page.locator("table tbody tr")).toHaveCount(2);
 		await expect(page.getByText("[Hidden]")).toHaveCount(0);
 	});
+
+
+	/// An operator publishes into a group by carrying the bytes: there is no
+	/// store to be credentialled for, so being able to register for the group is
+	/// the whole of what publishing into it takes.
+	///
+	/// spec: ART#where-an-artifact-rests
+	test("an operator registers a group's artifact by uploading it", async ({
+		page,
+		sql,
+	}) => {
+		const version = await seedVersion(sql, {
+			major: 2,
+			minor: 60,
+			patch: 0,
+			status: "published",
+		});
+		await seedServerGroup(sql, { name: "kamaka" });
+
+		await page.goto(`/versions/2.60.0`);
+		await page.getByRole("button", { name: "Unlock" }).click();
+		await page.getByRole("button", { name: "Create" }).click();
+
+		await page.getByRole("textbox", { name: "Type" }).fill("reporting-schema");
+		await page.getByRole("textbox", { name: "Platform" }).fill("any");
+		await page.getByRole("combobox", { name: "Group" }).click();
+		await page.getByRole("option", { name: "kamaka" }).click();
+		await page.getByLabel("Choose file…").setInputFiles({
+			name: "kamaka.sql",
+			mimeType: "application/sql",
+			buffer: Buffer.from("kamaka schema"),
+		});
+		// The submit shares its label with the button that revealed the form,
+		// so it has to be picked out of the form itself.
+		await page
+			.locator("form")
+			.getByRole("button", { name: "Create" })
+			.click();
+
+		await expect(page.getByText("Held by Canopy for kamaka")).toBeVisible();
+
+		// Canopy holds the bytes and records the digest of what it took in.
+		const rows = await sql.query<{
+			download_url: string | null;
+			digest: string | null;
+			content: string | null;
+		}>(
+			`SELECT download_url, digest, encode(content, 'escape') AS content
+			 FROM artifacts WHERE version_id = $1`,
+			[version.id],
+		);
+		expect(rows).toHaveLength(1);
+		expect(rows[0].download_url).toBeNull();
+		expect(rows[0].content).toBe("kamaka schema");
+		expect(rows[0].digest).toBe(
+			"sha256:214b3ad41c660e2837e03418fe87c70b1e82cc7c3531d78efeff9a3409ea91d9",
+		);
+	});
+
+	/// An artifact Canopy holds has no location to edit. Replacing its bytes is
+	/// a registration, which is what carries the digest.
+	///
+	/// spec: ART#where-an-artifact-rests
+	test("a held artifact offers no location to edit", async ({ page, sql }) => {
+		const version = await seedVersion(sql, {
+			major: 2,
+			minor: 60,
+			patch: 0,
+			status: "published",
+		});
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+
+		await seedArtifact(sql, {
+			versionId: version.id,
+			artifactType: "reporting-schema",
+			platform: "any",
+			groupId: group.id,
+			content: "kamaka schema",
+		});
+
+		await page.goto(`/versions/2.60.0`);
+		await page.getByRole("button", { name: "Unlock" }).click();
+		await page
+			.getByRole("button", { name: "edit reporting-schema any for kamaka" })
+			.click();
+
+		await expect(
+			page.getByText("Register it again to replace the bytes"),
+		).toBeVisible();
+	});
+
+	/// Canopy keeps none of what it has stopped serving, so removing an artifact
+	/// takes the bytes it held with it.
+	///
+	/// spec: ART#where-an-artifact-rests
+	test("deleting a group's artifact takes its bytes", async ({ page, sql }) => {
+		const version = await seedVersion(sql, {
+			major: 2,
+			minor: 60,
+			patch: 0,
+			status: "published",
+		});
+		const group = await seedServerGroup(sql, { name: "kamaka" });
+
+		await seedArtifact(sql, {
+			versionId: version.id,
+			artifactType: "reporting-schema",
+			platform: "any",
+			downloadUrl: "https://example.com/all.sql",
+		});
+		await seedArtifact(sql, {
+			versionId: version.id,
+			artifactType: "reporting-schema",
+			platform: "any",
+			groupId: group.id,
+			content: "kamaka schema",
+		});
+
+		await page.goto(`/versions/2.60.0`);
+		await page.getByRole("button", { name: "Unlock" }).click();
+
+		// The two rows share a type and platform, so the label has to name the
+		// group to pick one out.
+		await page
+			.getByRole("button", { name: "delete reporting-schema any for kamaka" })
+			.click();
+		await page.getByRole("button", { name: "Really delete" }).click();
+
+		await expect(page.getByText("Held by Canopy for kamaka")).toHaveCount(0);
+
+		const [held] = await sql.query<{ n: string }>(
+			"SELECT count(*) AS n FROM artifacts WHERE content IS NOT NULL",
+		);
+		expect(Number(held.n)).toBe(0);
+
+		// The unscoped one is untouched.
+		const [left] = await sql.query<{ n: string }>(
+			"SELECT count(*) AS n FROM artifacts",
+		);
+		expect(Number(left.n)).toBe(1);
+	});
 });
